@@ -613,7 +613,7 @@ export default function WorkspaceChatAssistant({
     if (!item.repairPreview || !item.baseSnapshot) return
     const allPatches = [...item.repairPreview.fieldPatches, ...item.repairPreview.entityPatches]
     if (allPatches.length === 0) {
-      message.info('本次没有可应用的字段修改。')
+      message.info(getUserFacingMessage('workspaceChat.noPatchesToApply'))
       return
     }
     const nextSnapshot = applyAllPatches(item.baseSnapshot, item.repairPreview.patchedSnapshot, allPatches)

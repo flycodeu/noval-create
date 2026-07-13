@@ -11,6 +11,8 @@ import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
 import { getStoryThreadGenerationPreset } from '../../../shared/creation-tools'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import {
   EMPTY_WORKFLOW_STATS,
   getWorkflowBlockers,
@@ -271,6 +273,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { currentNovel } = useNovelStore()
+  const listHeight = useResponsivePanelHeight({ minHeight: 400, maxHeight: 720, fallback: 460 })
   const [editorForm] = Form.useForm<StoryThreadFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
   const [threads, setThreads] = useState<StoryThread[]>([])
@@ -659,11 +662,11 @@ export default function StoryThreadsPage({ novelId }: Props) {
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void openGenerateModal()}>
             AI 生成·批量线程
           </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'resistance'))}>
             去反派与阻力
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
-            去结构页
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>
+            去故事设计
           </Button>
         </Space>
       )}
@@ -792,7 +795,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
                   <span>目标回收</span>
                   <span>操作</span>
                 </div>
-                <VirtualList data={threads} height={460} itemHeight={72} itemKey="id">
+                <VirtualList data={threads} height={listHeight} itemHeight={72} itemKey="id">
                   {(thread: StoryThread) => (
                     <StoryThreadRow
                       key={thread.id}

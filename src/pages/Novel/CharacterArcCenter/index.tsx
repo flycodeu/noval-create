@@ -17,6 +17,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import './index.css'
 
 interface Props { novelId: number }
@@ -255,7 +256,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         eyebrow="角色变化维护"
         title="人物弧线中心"
         description="维护主角弧、关键角色弧和关系弧，并登记章节层面的实际推进。"
-        actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>去章节合同</Button><Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>刷新</Button></Space>}
+        actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>去章节合同</Button><Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>刷新</Button></Space>}
         contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '主角弧', value: dashboard?.protagonistArc ? '已建立' : '待建立' }, { label: '角色弧', value: `${dashboard?.characterArcs.length || 0} 条` }, { label: '关系弧', value: `${dashboard?.relationshipArcs.length || 0} 条` }]} />}
         metrics={<><WorkspaceMetric label="停滞弧线" value={(dashboard?.stalledCharacterCount || 0) + (dashboard?.stalledRelationshipCount || 0)} tone="warm" /><WorkspaceMetric label="关键角色候选" value={keyCharacters.length} /><WorkspaceMetric label="关系候选" value={relations.length} tone="cool" /><WorkspaceMetric label="最近推进" value={selectedArc?.lastProgressChapterLabel || '未记录'} /></>}
         guide={<WorkspaceStepGuide steps={[{ title: '先补主角弧', description: '主角必须有初始状态、误信和改变事件。', status: 'focus' }, { title: '再补关键角色弧', description: '至少补齐一名关键角色的变化轨迹。', status: 'todo' }, { title: '最后绑定关系弧', description: '把重要双人关系拆成阶段，并在章节合同里引用。', status: 'todo' }]} />}
@@ -444,20 +445,20 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
           </WorkspacePanel>
           <WorkspacePanel className="novel-character-graph-panel" title="联动跳转">
             <div className="novel-ui-stack-md">
-              {selectedCharacter ? <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters?characterId=${selectedCharacter.id}`)}>打开当前人物档案</Button> : null}
-              <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>去章节合同绑定弧线目标</Button>
+              {selectedCharacter ? <Button icon={<TeamOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, `characters?characterId=${selectedCharacter.id}`))}>打开当前人物档案</Button> : null}
+              <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>去章节合同绑定弧线目标</Button>
               <Button
                 icon={<ArrowRightOutlined />}
                 onClick={() => {
                   if (tab === 'relationships' && selectedRelation?.id) {
-                    navigate(`/novels/${novelId}/revision?relatedPage=characters&entityType=relation&entityId=${selectedRelation.id}`)
+                    navigate(buildWorkspaceRoute(novelId, `revision?relatedPage=characters&entityType=relation&entityId=${selectedRelation.id}`))
                     return
                   }
                   if (selectedCharacter) {
-                    navigate(`/novels/${novelId}/revision?relatedPage=characters&entityType=character&entityId=${selectedCharacter.id}`)
+                    navigate(buildWorkspaceRoute(novelId, `revision?relatedPage=characters&entityType=character&entityId=${selectedCharacter.id}`))
                     return
                   }
-                  navigate(`/novels/${novelId}/revision?relatedPage=characters`)
+                  navigate(buildWorkspaceRoute(novelId, 'revision?relatedPage=characters'))
                 }}
               >
                 打开相关修订任务

@@ -390,7 +390,8 @@
 .novel-writing-console-page .novel-writing-shell__editor-sheet {
   width: min(1040px, 100%);
   max-width: min(100%, 92ch);
-  min-height: clamp(620px, calc(100dvh - 260px), 920px);
+  min-height: clamp(520px, calc(100vh - 300px), 820px);
+  min-height: clamp(520px, calc(100dvh - 300px), 820px);
   margin-inline: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -398,12 +399,14 @@
 
 .app-layout .novel-writing-console-page .novel-writing-shell__editor-sheet {
   max-width: min(100%, 92ch);
-  min-height: clamp(620px, calc(100dvh - 260px), 920px);
+  min-height: clamp(520px, calc(100vh - 300px), 820px);
+  min-height: clamp(520px, calc(100dvh - 300px), 820px);
 }
 
 .novel-writing-console-page .chapter-console-page__editor-sheet-wrap,
 .app-layout .novel-writing-console-page .chapter-console-page__editor-sheet-wrap {
-  min-height: clamp(640px, calc(100dvh - 240px), 960px);
+  min-height: clamp(560px, calc(100vh - 260px), 860px);
+  min-height: clamp(560px, calc(100dvh - 260px), 860px);
 }
 
 .novel-writing-console-page .chapter-console-page__column--right {
@@ -652,6 +655,14 @@
   .app-layout .novel-writing-console-page .novel-writing-shell__editor-sheet {
     width: 100%;
     max-width: 100%;
+    min-height: clamp(420px, calc(100vh - 220px), 680px);
+    min-height: clamp(420px, calc(100dvh - 220px), 680px);
+  }
+
+  .novel-writing-console-page .chapter-console-page__editor-sheet-wrap,
+  .app-layout .novel-writing-console-page .chapter-console-page__editor-sheet-wrap {
+    min-height: clamp(440px, calc(100vh - 200px), 720px);
+    min-height: clamp(440px, calc(100dvh - 200px), 720px);
   }
 
   .novel-writing-console-page .novel-writing-shell__segment-board-head {

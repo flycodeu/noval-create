@@ -7,6 +7,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildNovelBlurbPayload, parseNovelBlurbDocument, type NovelBlurbDocument } from '../../../shared/blurb'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { buildPremiseSummary, buildStoryDesignSummary, parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -510,7 +511,7 @@ export default function Overview({ novelId }: Props) {
           showIcon
           message="素材增长过快提示"
           action={(
-            <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
+            <Button size="small" onClick={() => navigate(buildWorkspaceRoute(novelId, stats.outlineCount > 0 ? 'writing' : 'outline'))}>
               {stats.outlineCount > 0 ? '进入正文' : '整理成大纲'}
             </Button>
           )}
@@ -536,7 +537,7 @@ export default function Overview({ novelId }: Props) {
                 <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
                   {authorWorkflow.primaryTask.actionLabel}
                 </Button>
-                <Button onClick={() => navigate(`/novels/${novelId}/guide`)}>
+                <Button onClick={() => navigate(buildWorkspaceRoute(novelId, 'guide'))}>
                   打开创作向导
                 </Button>
               </Space>
@@ -913,7 +914,7 @@ export default function Overview({ novelId }: Props) {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => navigate(`/novels/${novelId}/${item.route}`)}
+                  onClick={() => navigate(buildWorkspaceRoute(novelId, item.route))}
                   className="novel-overview-page__entry-card"
                 >
                   <div className="novel-overview-page__entry-card-head">

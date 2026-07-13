@@ -1,4 +1,5 @@
 import type { PlanningDraftPageKey, RevisionTask, Task } from '../../../types'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 
 function parsePositiveInt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value)
@@ -66,7 +67,7 @@ function getFallbackPage(taskType?: string): string {
 
 function buildWorkspacePath(novelId: number, page: string, params?: URLSearchParams): string {
   const query = params && [...params.keys()].length > 0 ? `?${params.toString()}` : ''
-  return `/novels/${novelId}/${page}${query}`
+  return buildWorkspaceRoute(novelId, `${page}${query}`)
 }
 
 export function buildRevisionTaskTargetPath(novelId: number, task: RevisionTask): string {

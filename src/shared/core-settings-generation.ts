@@ -45,7 +45,7 @@ export interface CoreSettingsGenerationProgressEvent {
   novelId: number
   step: CoreSettingsGenerationStepKey
   label: string
-  status: 'running' | 'success' | 'failed'
+  status: 'running' | 'success' | 'failed' | 'skipped'
   completed: number
   total: number
   detail?: string

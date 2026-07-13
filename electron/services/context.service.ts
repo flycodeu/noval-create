@@ -2959,8 +2959,16 @@ function formatWorldTemplateSummary(template?: typeof templates.$inferSelect | n
   return lines.join('\n')
 }
 
-function buildBackgroundText(novel: typeof novels.$inferSelect): string {
-  return novel.expandedBackground || novel.synopsis || novel.userBackground || ''
+export function buildBackgroundText(novel: typeof novels.$inferSelect): string {
+  const original = novel.userBackground?.trim() || ''
+  const expanded = novel.expandedBackground?.trim() || ''
+  const synopsis = novel.synopsis?.trim() || ''
+
+  return [
+    original ? `作者原始描述：\n${original}` : '',
+    expanded && expanded !== original ? `整理后的背景：\n${expanded}` : '',
+    !original && !expanded ? synopsis : '',
+  ].filter(Boolean).join('\n\n')
 }
 
 function formatSourceCanonValue(value: unknown, maxLength = 56): string {

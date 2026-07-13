@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } 
 import { CheckCircleOutlined, FileProtectOutlined, LockOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { RecommendationWorkspaceSnapshot, RecordRecommendationEvaluationInput } from '../../../shared/recommendation-governance'
 import type { AgentToolCallRequest, AgentToolCallResult } from '../../../shared/tool-contracts'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './recommendation-governance.css'
 
 interface Props { novelId: number }
@@ -82,7 +83,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
         input: { novelId },
       }))
       await load()
-      message.success('内部推荐预检已完成，本次不计入外部评估次数。')
+      message.success(getUserFacingMessage('recommendation.preflightCompleted'))
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '推荐预检失败。')
@@ -114,7 +115,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       }
       unwrap(await window.electron.agentTools.call({ ...request, approvalId: approval.approvalId }))
       await load()
-      message.success('推荐候选稿已按内容哈希锁定；锁定本身不计次。')
+      message.success(getUserFacingMessage('recommendation.candidateLocked'))
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '候选稿锁定失败。')
@@ -158,7 +159,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       setRecordIdempotencyKey('')
       form.resetFields()
       await load()
-      message.success('真实外部评估结果已追加记录；系统不会自动发起下一次评估。')
+      message.success(getUserFacingMessage('recommendation.externalResultRecorded'))
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '外部评估结果记录失败。')

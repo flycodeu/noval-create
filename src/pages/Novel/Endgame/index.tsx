@@ -6,6 +6,7 @@ import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { EndgameAssetSummary } from '../../../types'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -366,7 +367,7 @@ export default function EndgamePage({ novelId }: Props) {
           <Button icon={<ImportOutlined />} onClick={handleImportFromStoryDesign}>
             从故事设计导入初始化
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'map'))}>
             去地图结构
           </Button>
         </Space>

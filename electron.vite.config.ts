@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 
 function splitRendererVendorChunk(id: string): string | undefined {
   if (!id.includes('node_modules')) return undefined
+  if (/[\\/]node_modules[\\/](?:react|react-dom|react-router|react-router-dom)[\\/]/.test(id)) {
+    return 'vendor-react'
+  }
   if (/[\\/]node_modules[\\/](?:reactflow|@reactflow)[\\/]/.test(id)) {
     return 'vendor-reactflow'
   }

@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useWorkspaceStore } from '../../../stores/workspace.store'
 import {
@@ -253,7 +254,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
 
   const openProPage = (page: string) => {
     setMode('pro')
-    navigate(`/novels/${novelId}/${page}`)
+    navigate(buildWorkspaceRoute(novelId, page))
   }
 
   const basicsAssistantValues = Form.useWatch([], form) as BasicsAssistantPatch | undefined
@@ -328,7 +329,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<SaveOutlined />} loading={savingBasics} onClick={() => void handleSaveBasics()}>
               保存这一页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/project-brief`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'project-brief'))}>
               去项目立项
             </Button>
           </Space>
@@ -412,7 +413,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('project-brief')}>
               打开项目立项
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-core`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-core'))}>
               去基础设定
             </Button>
           </Space>
@@ -466,7 +467,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<SettingOutlined />} onClick={() => openProPage('core-settings')}>
               打开基础设定
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'theme-voice'))}>
               去主题与文风
             </Button>
           </Space>
@@ -520,7 +521,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<EditOutlined />} onClick={() => openProPage('theme-voice')}>
               打开主题与文风
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/world-foundation`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'world-foundation'))}>
               去世界规则
             </Button>
           </Space>
@@ -574,7 +575,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<GlobalOutlined />} onClick={() => openProPage('world-rules')}>
               打开世界规则
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map-structure`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'map-structure'))}>
               去地图结构
             </Button>
           </Space>
@@ -614,7 +615,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('endgame')}>
               打开终局设计
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map-structure`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'map-structure'))}>
               去地图结构
             </Button>
           </Space>
@@ -668,7 +669,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<EnvironmentOutlined />} onClick={() => openProPage('map')}>
               打开地图页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/character-roster`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'character-roster'))}>
               去角色系统
             </Button>
           </Space>
@@ -701,7 +702,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<TeamOutlined />} onClick={() => openProPage('characters')}>
               打开角色页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/items-equipment`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'items-equipment'))}>
               去物品装备
             </Button>
           </Space>
@@ -734,7 +735,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('items')}>
               打开物品页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-threads`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-threads'))}>
               去故事线程
             </Button>
           </Space>
@@ -767,7 +768,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('threads')}>
               打开故事线程
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-plot`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-plot'))}>
               去故事设计
             </Button>
           </Space>
@@ -811,7 +812,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('story-design')}>
               打开故事设计
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/volume-planning`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'volume-planning'))}>
               去卷册规划
             </Button>
           </Space>
@@ -861,7 +862,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('structure')}>
               打开结构页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/write-start`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'write-start'))}>
               去开始写作
             </Button>
           </Space>

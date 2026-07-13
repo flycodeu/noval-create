@@ -24,7 +24,7 @@ import {
   getAiExecutionModeLabel,
   type AiExecutionMode,
 } from '../../../shared/ai-execution'
-import { getChapterWritabilitySummary } from '../../../shared/novel-workspace'
+import { buildWorkspaceRoute, getChapterWritabilitySummary } from '../../../shared/novel-workspace'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -287,7 +287,19 @@ const parseCharacterKnowledgeJson = (raw?: string | null): StoryFactCharacterKno
 const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as ContinuityPayload : null } catch { return null } }
 const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
-const parseContractAudit = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterContractAudit : null } catch { return null } }
+function normalizeContractAudit(value: unknown): ChapterContractAudit | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Partial<ChapterContractAudit>
+  return {
+    ...record,
+    summary: typeof record.summary === 'string' ? record.summary : '',
+    items: Array.isArray(record.items) ? record.items : [],
+  } as ChapterContractAudit
+}
+
+const parseContractAudit = (raw?: string) => {
+  try { return raw ? normalizeContractAudit(JSON.parse(raw)) : null } catch { return null }
+}
 const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterBridgePlan : null } catch { return null } }
 const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
 const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
@@ -638,7 +650,7 @@ export default function Writing({ novelId }: Props) {
   const [advisoryPanelOpen, setAdvisoryPanelOpen] = useState(false)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
-    const routeKey = location.pathname.split('/').filter(Boolean)[4]
+    const routeKey = location.pathname.split('/').filter(Boolean)[3]
     return routeKey === 'context' || routeKey === 'review' || routeKey === 'history' ? routeKey : 'editor'
   }, [location.pathname])
   const storySettings = useMemo(
@@ -1296,7 +1308,7 @@ export default function Writing({ novelId }: Props) {
   const navigateToWritingRoute = useCallback((routeKey: WritingRouteKey) => {
     const search = searchParams.toString()
     navigate({
-      pathname: `/novels/${novelId}/writing/${routeKey}`,
+      pathname: buildWorkspaceRoute(novelId, `writing/${routeKey}`),
       search: search ? `?${search}` : '',
     })
   }, [navigate, novelId, searchParams])
@@ -1660,23 +1672,23 @@ export default function Writing({ novelId }: Props) {
     if (item.relatedPage === 'structure') {
       const params = new URLSearchParams({ chapterId: String(currentChapter.id) })
       if (typeof item.segmentId === 'number') params.set('segmentId', String(item.segmentId))
-      navigate(`/novels/${novelId}/structure?${params.toString()}`)
+      navigate(buildWorkspaceRoute(novelId, `structure?${params.toString()}`))
       return
     }
     if (item.relatedPage === 'contracts') {
-      navigate(`/novels/${novelId}/contracts?chapterId=${currentChapter.id}`)
+      navigate(buildWorkspaceRoute(novelId, `contracts?chapterId=${currentChapter.id}`))
       return
     }
     if (item.relatedPage === 'revision') {
-      navigate(`/novels/${novelId}/revision`)
+      navigate(buildWorkspaceRoute(novelId, 'revision'))
       return
     }
     if (item.relatedPage === 'volume-design') {
-      navigate(`/novels/${novelId}/volume-design`)
+      navigate(buildWorkspaceRoute(novelId, 'volume-design'))
       return
     }
     if (item.relatedPage === 'threads') {
-      navigate(`/novels/${novelId}/threads`)
+      navigate(buildWorkspaceRoute(novelId, 'threads'))
       return
     }
     navigateToWritingRoute('editor')
@@ -1733,7 +1745,7 @@ export default function Writing({ novelId }: Props) {
               handleOpenGateIssue(blockerItem)
               return
             }
-            navigate(`/novels/${novelId}/contracts?chapterId=${currentChapter.id}`)
+            navigate(buildWorkspaceRoute(novelId, `contracts?chapterId=${currentChapter.id}`))
           },
         })
         return
@@ -1904,7 +1916,7 @@ export default function Writing({ novelId }: Props) {
   const expressionDedup = useMemo(() => parseExpressionDedup(currentChapter?.expressionDedupJson), [currentChapter?.expressionDedupJson])
   const hookContinuity = useMemo(() => parseHookContinuity(currentChapter?.hookContinuityJson), [currentChapter?.hookContinuityJson])
   const currentContractAudit = useMemo(
-    () => publishCheck?.contractAudit || parseContractAudit(currentChapter?.contractAuditJson),
+    () => normalizeContractAudit(publishCheck?.contractAudit) || parseContractAudit(currentChapter?.contractAuditJson),
     [currentChapter?.contractAuditJson, publishCheck],
   )
   const allowedRevealFactIds = useMemo(
@@ -2280,7 +2292,7 @@ export default function Writing({ novelId }: Props) {
             truthStats={currentVolumeTruthStats}
             saving={updatingRevealConstraints}
             onUpdate={handleUpdateRevealConstraints}
-            onOpenBoard={() => navigate(`/novels/${novelId}/info-gap-board`)}
+            onOpenBoard={() => navigate(buildWorkspaceRoute(novelId, 'info-gap-board'))}
           />
         </InsightCard>
         <InsightCard title="本章伏笔回写" eyebrow="新增埋设 / 已回收登记" tone="soft">
@@ -2292,7 +2304,7 @@ export default function Writing({ novelId }: Props) {
             onCreate={handleCreateForeshadowWriteback}
             onPatch={handlePatchForeshadowWriteback}
             onDelete={handleDeleteForeshadowWriteback}
-            onOpenLedger={() => navigate(`/novels/${novelId}/foreshadow-ledger`)}
+            onOpenLedger={() => navigate(buildWorkspaceRoute(novelId, 'foreshadow-ledger'))}
           />
         </InsightCard>
         <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
@@ -2363,7 +2375,7 @@ export default function Writing({ novelId }: Props) {
                   <Button size="small" onClick={() => setGateReportExpanded((current) => !current)}>
                     {gateReportExpanded ? '收起报告' : '展开报告'}
                   </Button>
-                  <Button size="small" onClick={() => navigate(`/novels/${novelId}/quality`)}>
+                  <Button size="small" onClick={() => navigate(buildWorkspaceRoute(novelId, 'quality'))}>
                     去质量看板
                   </Button>
                 </div>
@@ -2458,7 +2470,7 @@ export default function Writing({ novelId }: Props) {
             <div className="writing-layout-stack writing-layout-stack--sm">
               <div className="novel-copy-block">写完本章后，在这里进入独立回写中心，先确认事实抽取和状态候选，再统一写回线程、伏笔、谜题、关系、物品与时间轴。</div>
               <div>
-                <Button onClick={() => navigate(`/novels/${novelId}/writeback?chapterId=${currentChapter.id}`)}>
+                <Button onClick={() => navigate(buildWorkspaceRoute(novelId, `writeback?chapterId=${currentChapter.id}`))}>
                   打开章后状态回写中心
                 </Button>
               </div>
@@ -2878,7 +2890,7 @@ export default function Writing({ novelId }: Props) {
                     title="卷 / 章导航"
                     description={`共 ${chapterVolumeGroups.length || 0} 卷组、${chapters.length} 章，按长篇结构选择当前要写的章节。`}
                     extra={(
-                      <Button size="small" icon={<UnorderedListOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+                      <Button size="small" icon={<UnorderedListOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'structure'))}>
                         结构
                       </Button>
                     )}
@@ -3118,7 +3130,7 @@ export default function Writing({ novelId }: Props) {
                           </div>
                           <SegmentBoardPreview
                             segments={chapterSegments}
-                            onOpenStructure={() => navigate(`/novels/${novelId}/structure`)}
+                            onOpenStructure={() => navigate(buildWorkspaceRoute(novelId, 'structure'))}
                             onCompile={() => void handleCompileCurrentChapter()}
                           />
                         </div>
@@ -3193,7 +3205,7 @@ export default function Writing({ novelId }: Props) {
                                     该章节已经拆成多个场景。请优先维护场景合同，再重新编译整章。
                                   </div>
                                   <div className="novel-writing-shell__segment-alert-actions">
-                                    <Button size="small" icon={<ApartmentOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+                                    <Button size="small" icon={<ApartmentOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'structure'))}>
                                       去结构页
                                     </Button>
                                     <Button size="small" icon={<BranchesOutlined />} onClick={() => void handleCompileCurrentChapter()}>

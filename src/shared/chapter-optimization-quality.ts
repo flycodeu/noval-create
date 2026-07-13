@@ -9,6 +9,7 @@ const STRONG_AI_FLAVOR_CODES = new Set([
   'parenthetical_explanation_abuse',
   'not_but_definition_pattern',
   'double_metaphor_or_simile_stack',
+  'paragraph_simile_stacking',
   'parallelism_overuse',
   'low_value_body_detail',
   'eye_open_close_standalone_paragraph',
@@ -36,6 +37,18 @@ function scoreAiFlavorDrift(metrics: LanguageDriftMetrics): number {
 
 function countStrongAiFlavor(codes: string[]): number {
   return codes.filter((code) => STRONG_AI_FLAVOR_CODES.has(code)).length
+}
+
+/**
+ * 把已经被质量规则命中的“不是……，是/而是……”定义句拆成两个直接陈述句。
+ * 只移动原句中的字词，不增删实体、数字或事件事实；用于模型候选的最后一道
+ * 低风险语言整理，避免同一随机句式在有限重试后仍阻塞安全应用。
+ */
+export function repairNotButDefinitionPatterns(content: string): string {
+  return String(content || '').replace(
+    /不是([^，,。！？\n]{2,28})[，,]?(?:而是|只是|是)([^。！？\n]{2,42})/gu,
+    (_match, left: string, right: string) => `并非${left.trim()}。实际是${right.trim()}`,
+  )
 }
 
 export function buildChapterOptimizationQualityGate(

@@ -73,7 +73,7 @@ const tests = [
         title: '地点层级错误',
       })
 
-      assert.match(writingPath, /\/novels\/42\/writing\?/u)
+      assert.match(writingPath, /\/novels\/42\/writing\/editor\?/u)
       assert.match(writingPath, /chapterId=17/u)
       assert.match(writingPath, /insight=health/u)
       assert.match(characterPath, /characterId=23/u)

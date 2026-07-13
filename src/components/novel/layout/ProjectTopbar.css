@@ -425,6 +425,10 @@
     scrollbar-width: none;
   }
 
+  .project-topbar__control--accent.ant-btn {
+    order: -1;
+  }
+
   .project-topbar__action-cluster::-webkit-scrollbar {
     display: none;
   }

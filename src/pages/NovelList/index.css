@@ -285,6 +285,23 @@
   border-radius: var(--radius-m);
 }
 
+.novel-list-page__idea-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: -4px 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.novel-list-page__idea-actions > span {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
 .novel-list-page__wizard-modal textarea.novel-list-page__textarea.ant-input {
   min-height: 156px;
   max-height: min(52dvh, 520px);
@@ -538,7 +555,13 @@
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1360px) {
+  .novel-list-page__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1040px) {
   .novel-list-page__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -11,6 +11,7 @@ import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateRevisionDraft } from '../shared/planning-ai-service'
 import { buildRevisionTaskTargetPath } from '../shared/workspace-navigation'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -463,7 +464,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void refresh()}>
             刷新诊断
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
             去正文页
           </Button>
         </Space>

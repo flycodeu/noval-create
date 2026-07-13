@@ -30,6 +30,7 @@ import ReadinessMeter from '../../../components/novel/workflow/ReadinessMeter'
 import StatusTag from '../../../components/novel/common/StatusTag'
 import { useNovelStore } from '../../../stores/novel.store'
 import {
+  buildWorkspaceRoute,
   getWorkspaceSnapshot,
   type WorkspaceSnapshot,
 } from '../../../shared/novel-workspace'
@@ -55,10 +56,6 @@ interface CurrentTaskCard {
   impactedRoute?: string
   canIgnoreOnce: boolean
   blocker?: ProjectBlocker
-}
-
-function resolveWorkspaceRoute(targetPage: string) {
-  return targetPage === 'writing' ? 'writing/editor' : targetPage
 }
 
 function stageDescription(groupKey: WorkspaceSnapshot['groups'][number]['key']) {
@@ -198,7 +195,7 @@ export default function StudioPage({ novelId }: Props) {
         reason: workspaceSnapshot.nextStep.reason,
         affectedModules: [workspaceSnapshot.stage.label],
         actionLabel: workspaceSnapshot.nextStep.actionLabel,
-        targetRoute: resolveWorkspaceRoute(workspaceSnapshot.nextStep.targetPage),
+        targetRoute: workspaceSnapshot.nextStep.targetPage,
         canIgnoreOnce: false,
       }
     }
@@ -211,8 +208,8 @@ export default function StudioPage({ novelId }: Props) {
       reason: currentBlocker.reason,
       affectedModules: currentBlocker.affectedModules,
       actionLabel: currentBlocker.suggestedAction.label,
-      targetRoute: resolveWorkspaceRoute(currentBlocker.suggestedAction.targetPage),
-      impactedRoute: impactedRoute || resolveWorkspaceRoute(currentBlocker.suggestedAction.targetPage),
+      targetRoute: currentBlocker.suggestedAction.targetPage,
+      impactedRoute: impactedRoute || currentBlocker.suggestedAction.targetPage,
       canIgnoreOnce: currentBlocker.canIgnoreOnce,
       blocker: currentBlocker,
     }
@@ -296,7 +293,7 @@ export default function StudioPage({ novelId }: Props) {
             <Button
               type="primary"
               icon={<ThunderboltOutlined />}
-              onClick={() => navigate(`/novels/${novelId}/${currentTask.targetRoute}`)}
+              onClick={() => navigate(buildWorkspaceRoute(novelId, currentTask.targetRoute))}
             >
               {currentTask.actionLabel}
             </Button>
@@ -305,7 +302,7 @@ export default function StudioPage({ novelId }: Props) {
             </Button>
             <Button
               icon={<FileSearchOutlined />}
-              onClick={() => navigate(`/novels/${novelId}/${currentTask.impactedRoute || currentTask.targetRoute}`)}
+              onClick={() => navigate(buildWorkspaceRoute(novelId, currentTask.impactedRoute || currentTask.targetRoute))}
             >
               查看影响
             </Button>
@@ -368,7 +365,7 @@ export default function StudioPage({ novelId }: Props) {
               key={group.key}
               type="button"
               className={`novel-dashboard__stage-card ${workspaceSnapshot.stage.key === group.key ? 'is-active' : ''}`}
-              onClick={() => navigate(`/novels/${novelId}/${group.route}`)}
+              onClick={() => navigate(buildWorkspaceRoute(novelId, group.route))}
             >
               <div className="novel-dashboard__stage-card-head">
                 <strong>{group.title}</strong>
@@ -399,7 +396,7 @@ export default function StudioPage({ novelId }: Props) {
                   <BlockerCard
                     key={blocker.id}
                     blocker={blocker}
-                    onOpen={(item) => navigate(`/novels/${novelId}/${resolveWorkspaceRoute(item.suggestedAction.targetPage)}`)}
+                    onOpen={(item) => navigate(buildWorkspaceRoute(novelId, item.suggestedAction.targetPage))}
                     onIgnore={blocker.canIgnoreOnce
                       ? (item) => setIgnoredBlockerIds((current) => [...current, item.id])
                       : undefined}
@@ -506,7 +503,7 @@ export default function StudioPage({ novelId }: Props) {
                           key={task.id}
                           type="button"
                           className="novel-dashboard__revision-card"
-                          onClick={() => navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)}
+                          onClick={() => navigate(buildWorkspaceRoute(novelId, task.relatedPage || 'revision'))}
                         >
                           <div className="novel-dashboard__revision-head">
                             <strong>{task.title}</strong>
@@ -531,7 +528,7 @@ export default function StudioPage({ novelId }: Props) {
           <section className={`novel-dashboard__panel ${queryPanel === 'next-step' ? 'is-focused' : ''}`}>
             <NextStepPanel
               nextStep={workspaceSnapshot.nextStep}
-              onOpen={() => navigate(`/novels/${novelId}/${resolveWorkspaceRoute(workspaceSnapshot.nextStep.targetPage)}`)}
+              onOpen={() => navigate(buildWorkspaceRoute(novelId, workspaceSnapshot.nextStep.targetPage))}
             />
           </section>
 
@@ -547,7 +544,7 @@ export default function StudioPage({ novelId }: Props) {
                   key={item.key}
                   type="button"
                   className="novel-dashboard__entry-card"
-                  onClick={() => navigate(`/novels/${novelId}/${item.route}`)}
+                  onClick={() => navigate(buildWorkspaceRoute(novelId, item.route))}
                 >
                   <strong>{item.label}</strong>
                   <span>{item.hint}</span>

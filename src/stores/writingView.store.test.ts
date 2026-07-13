@@ -59,4 +59,28 @@ describe('writingView.store generation isolation', () => {
       stage: 'reviewing',
     })
   })
+
+  it('ignores a late terminal event from an older task on the same chapter', () => {
+    useWritingViewStore.getState().startGeneration({ chapterId: 1, taskId: 101 })
+    useWritingViewStore.getState().completeGeneration({ chapterId: 1, taskId: 101, status: 'success' })
+    useWritingViewStore.getState().startGeneration({ chapterId: 1, taskId: 202 })
+
+    useWritingViewStore.getState().completeGeneration({
+      chapterId: 1,
+      taskId: 101,
+      status: 'failed',
+      detail: '旧任务迟到',
+    })
+
+    expect(useWritingViewStore.getState().activeGeneration).toMatchObject({
+      chapterId: 1,
+      taskId: 202,
+      status: 'running',
+      detail: null,
+    })
+    expect(useWritingViewStore.getState().lastGenerationByChapter[1]).toMatchObject({
+      taskId: 202,
+      status: 'running',
+    })
+  })
 })

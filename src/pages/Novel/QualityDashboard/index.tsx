@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Empty, Modal, Progress, Skeleton, Spin, Tabs, Tag, message } from 'antd'
+import { Alert, Button, Empty, Modal, Progress, Skeleton, Spin, Tabs, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useNavigate } from 'react-router-dom'
 import type { LanguageDriftMetrics, QualityDashboardData, QualityRepairAction, QualityRepairActionResult, TaskPipelineStats } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
 import RecommendationGovernancePanel from './RecommendationGovernancePanel'
@@ -101,6 +102,11 @@ function dialogueTrendColor(status: QualityDashboardData['dialogueDriftTrend'][n
 
 function formatSignedValue(value: number): string {
   return value > 0 ? `+${value}` : `${value}`
+}
+
+function getQualityChapterListHeight(): number {
+  if (typeof window === 'undefined') return 480
+  return Math.min(720, Math.max(420, Math.round(window.innerHeight * 0.56)))
 }
 
 function pressureColor(value: number): string {
@@ -265,7 +271,7 @@ function buildWorkspacePath(novelId: number, page: string, query?: Record<string
     if (value) params.set(key, value)
   })
   const queryString = params.toString()
-  return `/novels/${novelId}/${page}${queryString ? `?${queryString}` : ''}`
+  return buildWorkspaceRoute(novelId, `${page}${queryString ? `?${queryString}` : ''}`)
 }
 
 function buildRepairActionTargetPath(novelId: number, page?: string, query?: Record<string, string>): string | null {
@@ -442,10 +448,12 @@ export default function QualityDashboard({ novelId }: Props) {
   const [refreshing, setRefreshing] = useState(false)
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
+  const [chapterListHeight, setChapterListHeight] = useState(getQualityChapterListHeight)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
 
@@ -469,6 +477,7 @@ export default function QualityDashboard({ novelId }: Props) {
       if (loadRequestRef.current !== requestId) return
       setData(result)
       setPipelineStats(nextPipelineStats)
+      setLoadError(null)
       setSelectedChapter((current) => current
         ? result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId) || null
         : null)
@@ -477,6 +486,7 @@ export default function QualityDashboard({ novelId }: Props) {
       if (loadRequestRef.current !== requestId) return
       console.error('Failed to load quality dashboard', error)
       setPipelineStats(null)
+      setLoadError(error instanceof Error && error.message ? error.message : getUserFacingMessage('common.loadFailed'))
     } finally {
       if (loadRequestRef.current === requestId) {
         setLoading(false)
@@ -492,6 +502,11 @@ export default function QualityDashboard({ novelId }: Props) {
       setSelectedVolumeId(null)
     }
   }, [data, selectedVolumeId])
+  useEffect(() => {
+    const handleResize = () => setChapterListHeight(getQualityChapterListHeight())
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const handleRepairAction = useCallback(async (action: QualityRepairAction) => {
     setRepairingActionId(action.id)
@@ -529,6 +544,22 @@ export default function QualityDashboard({ novelId }: Props) {
     )
   }
 
+  if (loadError && !data) {
+    return (
+      <WorkspacePage title="质量监控" description="质量数据暂时不可用，修复连接后再继续判断是否适合进入正文生产。">
+        <WorkspacePanel title="质量数据加载失败">
+          <Alert
+            type="error"
+            showIcon
+            message="没有拿到可靠的质量数据"
+            description={loadError}
+            action={<Button onClick={() => void loadData(true)}>重试</Button>}
+          />
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
   const hasScoreData = Boolean(data && data.totalChaptersScored > 0)
   const hasChapterGateData = Boolean(data && data.chapterGateSummary.coveredChapterCount > 0)
   const hasStoryDynamicsData = Boolean(data && data.protagonistSetbackSummary.chapterCount > 0)
@@ -546,7 +577,7 @@ export default function QualityDashboard({ novelId }: Props) {
         <RecommendationGovernancePanel novelId={novelId} />
         <WorkspacePanel title="先产出首轮检测">
           <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。">
-            <Button type="primary" onClick={() => navigate(`/novels/${novelId}/writing`)}>
+            <Button type="primary" onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
               进入正文写作
             </Button>
           </Empty>
@@ -857,8 +888,8 @@ export default function QualityDashboard({ novelId }: Props) {
           </WorkspacePanel>
 
           <WorkspacePanel title="章节详情">
-            <div className="quality-dashboard-page__chapter-list">
-              <VirtualList data={filteredChapterDetails} height={480} itemHeight={56} itemKey="chapterId">
+            <div className="quality-dashboard-page__chapter-list" style={{ height: chapterListHeight }}>
+              <VirtualList data={filteredChapterDetails} height={chapterListHeight} itemHeight={56} itemKey="chapterId">
                 {(entry: QualityChapterEntry) => (
                   <div
                     key={entry.chapterId}

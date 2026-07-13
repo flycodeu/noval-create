@@ -18,7 +18,7 @@ function countRenderableNodes(node: React.ReactNode): number {
 export function WorkspacePage({
   eyebrow,
   title,
-  description: _description,
+  description,
   actions,
   metrics,
   contextSummary,
@@ -77,6 +77,7 @@ export function WorkspacePage({
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
+          {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
@@ -105,7 +106,7 @@ export function WorkspacePage({
 export function WorkspaceMetric({
   label,
   value,
-  hint: _hint,
+  hint,
   tone = 'default',
 }: {
   label: string
@@ -117,13 +118,14 @@ export function WorkspaceMetric({
     <div className={`novel-metric novel-metric--${tone}`}>
       <div className="novel-metric__label">{label}</div>
       <div className="novel-metric__value">{value}</div>
+      {hint ? <div className="novel-metric__hint">{hint}</div> : null}
     </div>
   )
 }
 
 export function WorkspacePanel({
   title,
-  description: _description,
+  description,
   extra,
   scrollable = false,
   sticky = false,
@@ -149,13 +151,14 @@ export function WorkspacePanel({
         className,
       )}
     >
-      {title || extra ? (
+      {title || description || extra ? (
         <div className="novel-panel__header">
           {title ? (
             <div className="novel-panel__copy">
               {title ? <h2 className="novel-panel__title">{title}</h2> : null}
+              {description ? <div className="novel-panel__desc">{description}</div> : null}
             </div>
-          ) : null}
+          ) : description ? <div className="novel-panel__copy"><div className="novel-panel__desc">{description}</div></div> : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
         </div>
       ) : null}

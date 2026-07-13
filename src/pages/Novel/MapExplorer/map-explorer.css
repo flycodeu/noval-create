@@ -307,8 +307,10 @@
 
 .map-graph-shell {
   position: relative;
-  height: clamp(760px, calc(100vh - 240px), 1020px);
-  min-height: 760px;
+  height: clamp(460px, calc(100vh - 220px), 920px);
+  height: clamp(460px, calc(100dvh - 220px), 920px);
+  min-height: clamp(460px, calc(100vh - 220px), 920px);
+  min-height: clamp(460px, calc(100dvh - 220px), 920px);
   border-radius: 32px;
   overflow: hidden;
   border: 1px solid rgba(122, 93, 52, 0.14);
@@ -664,7 +666,8 @@
 }
 
 .map-graph-loading {
-  min-height: 900px;
+  min-height: clamp(360px, calc(100vh - 260px), 680px);
+  min-height: clamp(360px, calc(100dvh - 260px), 680px);
 }
 
 .map-graph-detail-grid {
@@ -760,8 +763,10 @@
 
 @media (max-width: 768px) {
   .map-graph-shell {
-    height: 700px;
-    min-height: 700px;
+    height: clamp(420px, calc(100vh - 190px), 680px);
+    height: clamp(420px, calc(100dvh - 190px), 680px);
+    min-height: clamp(420px, calc(100vh - 190px), 680px);
+    min-height: clamp(420px, calc(100dvh - 190px), 680px);
     border-radius: 24px;
   }
 

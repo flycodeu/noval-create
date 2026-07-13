@@ -42,6 +42,7 @@ import {
 import { WorkspacePanel } from '../components/WorkspaceShell'
 import type { ChapterFormValues, SegmentFormValues } from './helpers'
 import { SEGMENT_STATUS_OPTIONS, SEGMENT_TYPE_OPTIONS, TIMELINE_STATUS_META, parseActiveThreadCount } from './helpers'
+import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 
 interface StructureLinkedEventsPanelProps {
   linked: PagedResult<TimelineEvent>
@@ -399,6 +400,8 @@ export function StructureChaptersPanel({
   onAddChapter,
   onPageChange,
 }: StructureChaptersPanelProps) {
+  const listHeight = useResponsivePanelHeight({ minHeight: 300, maxHeight: 620, fallback: 380 })
+
   return (
     <WorkspacePanel
       title={currentPart ? `章节 · ${getPartLabel(currentPart)}` : '章节'}
@@ -410,7 +413,7 @@ export function StructureChaptersPanel({
         <Empty description="当前部还没有章节。" />
       ) : (
         <div className="novel-structure-stack">
-          <VirtualList data={chapters.items} height={380} itemHeight={112} itemKey="id">
+          <VirtualList data={chapters.items} height={listHeight} itemHeight={112} itemKey="id">
             {(chapter: StoryStructureChapterSummary) => (
               <button
                 key={chapter.id}
@@ -470,6 +473,8 @@ export function StructureSegmentsPanel({
   onDragEnd,
   onPageChange,
 }: StructureSegmentsPanelProps) {
+  const listHeight = useResponsivePanelHeight({ minHeight: 280, maxHeight: 620, fallback: 340 })
+
   return (
     <WorkspacePanel
       title={chapterDetail ? `场景 · 第 ${chapterDetail.chapterNum} 章` : '场景'}
@@ -514,7 +519,7 @@ export function StructureSegmentsPanel({
             </DragDropContext>
           ) : (
             <>
-              <VirtualList data={segments.items} height={340} itemHeight={112} itemKey="id">
+              <VirtualList data={segments.items} height={listHeight} itemHeight={112} itemKey="id">
                 {(segment: StoryStructureSegmentSummary) => (
                   <button
                     key={segment.id}

@@ -21,6 +21,13 @@ type LocalBackendStatus = {
   connected: boolean
   lastError: string
   message: string
+  capabilities?: {
+    realDatabase: boolean
+    writesEnabled: boolean
+    generationEnabled: boolean
+    eventStreaming: boolean
+  }
+  demoFallbackEnabled?: boolean
 }
 
 export default function App() {
@@ -275,8 +282,10 @@ export default function App() {
               type="warning"
               showIcon
               banner
-              message="网页预览正在使用演示/空数据"
-              description={localBackendStatus.message || '本地后端未连接，请运行 npm run dev:web 后刷新页面。'}
+              message={localBackendStatus.demoFallbackEnabled ? '网页端正在使用显式演示数据' : '网页端未连接真实本地后端'}
+              description={localBackendStatus.demoFallbackEnabled
+                ? '当前为演示模式，不会读取或写入正式数据库；移除地址中的 ?demo=1 后再进行真实操作。'
+                : (localBackendStatus.message || '真实数据库与生成功能已暂停，请运行 npm run dev:web 后刷新页面。')}
             />
           ) : null}
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)' }}>页面加载中...</div>}>

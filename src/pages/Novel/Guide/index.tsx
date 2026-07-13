@@ -13,6 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { NovelConsistencyReport, NovelContextStatus, QualityDashboardData } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
@@ -564,7 +565,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: isBasicsReady(currentNovel),
       icon: <EditOutlined />,
       action: (
-        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/overview`)}>
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'overview'))}>
           打开总览
         </Button>
       ),
@@ -581,7 +582,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: isProjectBriefReady(currentNovel),
       icon: <EditOutlined />,
       action: (
-        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/project-brief`)}>
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'project-brief'))}>
           去填写
         </Button>
       ),
@@ -598,7 +599,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: isStoryCoreReady(currentNovel),
       icon: <EditOutlined />,
       action: (
-        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/core-settings`)}>
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'core-settings'))}>
           去填写
         </Button>
       ),
@@ -615,7 +616,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: isThemeVoiceReady(currentNovel),
       icon: <ThunderboltOutlined />,
       action: (
-        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
+        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'theme-voice'))}>
           去填写
         </Button>
       ),
@@ -636,7 +637,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'world-rules'} disabled={Boolean(runningKey)} icon={<ThunderboltOutlined />} onClick={syncWorldRules}>
             同步规则
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'world-rules'))}>
             进入页面
           </Button>
         </Space>
@@ -658,7 +659,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'map'} disabled={Boolean(runningKey)} icon={<CompassOutlined />} onClick={generateMap}>
             AI 生成首批
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/map`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'map'))}>
             进入页面
           </Button>
         </Space>
@@ -680,7 +681,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'items'} disabled={Boolean(runningKey)} icon={<ShoppingOutlined />} onClick={generateItems}>
             AI 生成·首批物品
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/items`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'items'))}>
             进入页面
           </Button>
         </Space>
@@ -702,7 +703,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'characters'} disabled={Boolean(runningKey)} icon={<TeamOutlined />} onClick={generateCharacters}>
             AI 生成·批量角色
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'characters'))}>
             进入页面
           </Button>
         </Space>
@@ -720,7 +721,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: stats.resistanceTrackCount > 0,
       icon: <ThunderboltOutlined />,
       action: (
-        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'resistance'))}>
           打开页面
         </Button>
       ),
@@ -741,7 +742,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'threads'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateThreads}>
             AI 生成·首批线程
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/threads`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'threads'))}>
             进入页面
           </Button>
         </Space>
@@ -763,7 +764,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'story-design'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateStoryDesign}>
             AI 生成·首版设计
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/story-design`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>
             进入页面
           </Button>
         </Space>
@@ -781,7 +782,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: isEndgameDesignReady(currentNovel),
       icon: <BarsOutlined />,
       action: (
-        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/endgame`)}>
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'endgame'))}>
           打开页面
         </Button>
       ),
@@ -798,7 +799,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: stats.volumeCount > 0,
       icon: <BarsOutlined />,
       action: (
-        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/volume-design`)}>
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'volume-design'))}>
           打开页面
         </Button>
       ),
@@ -819,7 +820,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'outline'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateOutline}>
             AI 生成·首批故事弧
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/outline`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'outline'))}>
             进入页面
           </Button>
         </Space>
@@ -841,7 +842,7 @@ export default function GuidePage({ novelId }: Props) {
           <Button loading={runningKey === 'timeline'} disabled={Boolean(runningKey)} icon={<ClockCircleOutlined />} onClick={generateTimeline}>
             AI 生成·首批事件
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/timeline`)}>
+          <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'timeline'))}>
             进入页面
           </Button>
         </Space>
@@ -858,10 +859,10 @@ export default function GuidePage({ novelId }: Props) {
       icon: <EditOutlined />,
       action: (
         <Space wrap>
-          <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>
             章节合同
           </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/writing/editor`)}>
+        <Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing/editor'))}>
             正文写作
           </Button>
         </Space>
@@ -879,7 +880,7 @@ export default function GuidePage({ novelId }: Props) {
       ready: stats.revisionTaskCount <= 0,
       icon: <EditOutlined />,
       action: (
-        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/revision`)}>
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'revision'))}>
           打开修订中心
         </Button>
       ),
@@ -996,7 +997,7 @@ export default function GuidePage({ novelId }: Props) {
           >
             AI 铺设可自动骨架
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/${stats.revisionTaskCount > 0 ? 'revision' : 'writing'}`)}>
+          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, stats.revisionTaskCount > 0 ? 'revision' : 'writing'))}>
             {stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作'}
           </Button>
         </Space>
@@ -1154,7 +1155,7 @@ export default function GuidePage({ novelId }: Props) {
           showIcon
           message={assetBloat.risk === 'high' ? '首章前资产已经开始膨胀' : '当前资产增长过快'}
           action={(
-            <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
+            <Button size="small" onClick={() => navigate(buildWorkspaceRoute(novelId, stats.outlineCount > 0 ? 'writing' : 'outline'))}>
               {stats.outlineCount > 0 ? '直接开写' : '先整理成大纲'}
             </Button>
           )}

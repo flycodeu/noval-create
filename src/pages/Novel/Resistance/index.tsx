@@ -13,6 +13,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -442,7 +443,7 @@ export default function ResistancePage({ novelId }: Props) {
             <Button icon={<PlusOutlined />} disabled={!selectedTrack?.id} onClick={() => setBeatOpen(true)}>
               登记阻力推进
             </Button>
-            <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+            <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>
               去章节合同
             </Button>
             <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>
@@ -686,19 +687,19 @@ export default function ResistancePage({ novelId }: Props) {
           <WorkspacePanel className="novel-character-graph-panel" title="联动跳转">
             <div className="novel-resistance-page__links">
               {tab === 'characters' && selectedCharacterId ? (
-                <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters?characterId=${selectedCharacterId}`)}>
+                <Button icon={<TeamOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, `characters?characterId=${selectedCharacterId}`))}>
                   打开当前人物
                 </Button>
               ) : null}
               {tab === 'factions' && selectedFaction ? (
-                <Button icon={<ApartmentOutlined />} onClick={() => navigate(`/novels/${novelId}/factions`)}>
+                <Button icon={<ApartmentOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'factions'))}>
                   打开当前势力
                 </Button>
               ) : null}
-              <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/volume-design`)}>
+                <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'volume-design'))}>
                 去卷级设计绑定主阻力
               </Button>
-              <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+                <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>
                 去章节合同登记本章出手
               </Button>
             </div>

@@ -30,6 +30,7 @@ import type {
 } from '../../../types'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
   buildWorkspaceQualityRequestBase,
@@ -389,7 +390,7 @@ export default function WorkspaceAIQualityBoard({
             type="primary"
             onClick={() => {
               onClose()
-              navigate(`/novels/${novelId}/quality`)
+              navigate(buildWorkspaceRoute(novelId, 'quality'))
             }}
           >
             打开质量监控

@@ -19,6 +19,7 @@ import type {
   WritebackSyncStatus,
 } from '../../src/types'
 import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 import {
@@ -58,11 +59,15 @@ import {
 } from './batch-workbench.service'
 
 const DEFAULT_MAX_RETRIES = 2
+const DEFAULT_WORKFLOW_WAIT_TIMEOUT_MS = 15 * 60 * 1000
+const MAX_WORKFLOW_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000
+const WORKFLOW_WAIT_TIMEOUT_ENV = 'NOVELFORGE_BATCH_WAIT_TIMEOUT_MS'
 const MAX_FACTION_GENERATION_COUNT = 200
 const MAX_ENTITY_GENERATION_COUNT = 200
 const MAX_THREAD_GENERATION_COUNT = 160
 const MAX_SUBPLOT_GENERATION_COUNT = 40
 const activeBatchWorkflows = new Set<number>()
+const batchWorkflowStartLocks = new Map<string, Promise<unknown>>()
 const ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES = new Set(['pending', 'running', 'cancel_requested'])
 
 function logWorkflowError(taskId: number) {
@@ -79,6 +84,24 @@ type BatchWorkflowTaskType =
   | 'subplot_auto_generate'
   | 'chapter_batch_generate'
   | 'chapter_quality_analysis'
+
+async function withBatchWorkflowStartLock<T>(
+  type: BatchWorkflowTaskType,
+  novelId: number,
+  start: () => Promise<T>,
+): Promise<T> {
+  const key = `${type}:${novelId}`
+  const existing = batchWorkflowStartLocks.get(key)
+  if (existing) return existing as Promise<T>
+
+  const pending = Promise.resolve().then(start)
+  batchWorkflowStartLocks.set(key, pending)
+  try {
+    return await pending
+  } finally {
+    if (batchWorkflowStartLocks.get(key) === pending) batchWorkflowStartLocks.delete(key)
+  }
+}
 
 function isActiveBatchWorkflowStatus(status?: string | null): boolean {
   return ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES.has(status || '')
@@ -106,6 +129,14 @@ function unregisterActiveBatchWorkflow(taskId: number): void {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function resolveWorkflowWaitTimeoutMs(): number {
+  const configured = Number(process.env[WORKFLOW_WAIT_TIMEOUT_ENV])
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.min(configured, MAX_WORKFLOW_WAIT_TIMEOUT_MS)
+  }
+  return DEFAULT_WORKFLOW_WAIT_TIMEOUT_MS
 }
 
 function asRecord(raw?: string | null): Record<string, unknown> {
@@ -1956,14 +1987,39 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
   }
 }
 
-async function waitForWorkflowTask(taskId: number) {
+async function waitForWorkflowTask(taskId: number, timeoutMs = resolveWorkflowWaitTimeoutMs()) {
+  const deadline = Date.now() + Math.max(1, Math.min(timeoutMs, MAX_WORKFLOW_WAIT_TIMEOUT_MS))
+
   while (true) {
     const task = getTaskRecord(taskId)
     if (!task) throwUserFacingError('workflow.taskNotFound', { taskId })
     if (['success', 'failed', 'cancelled', 'paused'].includes(task.status || '')) {
       return task
     }
-    await sleep(400)
+
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      const errorMessage = formatUserFacingMessage('workflow.waitTimedOut')
+      const progress = parseTaskProgress<Record<string, unknown>>(task)
+      updateTaskProgress(taskId, {
+        ...progress,
+        status: 'paused',
+        lastError: errorMessage,
+        message: errorMessage,
+      })
+      updateTaskStatus(taskId, 'paused', undefined, {
+        errorMessage,
+        currentChildTaskId: null,
+      })
+      return getTaskRecord(taskId) || {
+        ...task,
+        status: 'paused',
+        errorMessage,
+        currentChildTaskId: null,
+      }
+    }
+
+    await sleep(Math.min(400, remainingMs))
   }
 }
 
@@ -1978,7 +2034,7 @@ export function isBatchWorkflowType(type?: string | null): type is BatchWorkflow
     || type === 'chapter_quality_analysis'
 }
 
-export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+async function startFactionAutoGenerateWorkflowUnlocked(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.factionPausedExists')
@@ -1998,7 +2054,11 @@ export async function startFactionAutoGenerateWorkflow(novelId: number, options:
   return taskId
 }
 
-export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
+export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+  return withBatchWorkflowStartLock('faction_auto_generate', novelId, () => startFactionAutoGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startCharacterAutoGenerateWorkflowUnlocked(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'character_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.characterPausedExists')
@@ -2018,7 +2078,11 @@ export async function startCharacterAutoGenerateWorkflow(novelId: number, option
   return taskId
 }
 
-export async function startItemAutoGenerateWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
+export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
+  return withBatchWorkflowStartLock('character_auto_generate', novelId, () => startCharacterAutoGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startItemAutoGenerateWorkflowUnlocked(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'item_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.itemPausedExists')
@@ -2038,7 +2102,11 @@ export async function startItemAutoGenerateWorkflow(novelId: number, options: St
   return taskId
 }
 
-export async function startTimelineAutoGenerateWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
+export async function startItemAutoGenerateWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
+  return withBatchWorkflowStartLock('item_auto_generate', novelId, () => startItemAutoGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startTimelineAutoGenerateWorkflowUnlocked(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'timeline_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.timelinePausedExists')
@@ -2058,7 +2126,11 @@ export async function startTimelineAutoGenerateWorkflow(novelId: number, options
   return taskId
 }
 
-export async function startStoryThreadAutoGenerateWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
+export async function startTimelineAutoGenerateWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
+  return withBatchWorkflowStartLock('timeline_auto_generate', novelId, () => startTimelineAutoGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startStoryThreadAutoGenerateWorkflowUnlocked(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'story_thread_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.threadPausedExists')
@@ -2078,7 +2150,11 @@ export async function startStoryThreadAutoGenerateWorkflow(novelId: number, opti
   return taskId
 }
 
-export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGenerateRequest, sender?: WebContents) {
+export async function startStoryThreadAutoGenerateWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
+  return withBatchWorkflowStartLock('story_thread_auto_generate', novelId, () => startStoryThreadAutoGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startSubplotAutoGenerateWorkflowUnlocked(request: SubplotAutoGenerateRequest, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(request.novelId, 'subplot_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.subplotPausedExists')
@@ -2098,7 +2174,11 @@ export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGener
   return taskId
 }
 
-export async function startChapterBatchGenerateWorkflow(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
+export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGenerateRequest, sender?: WebContents) {
+  return withBatchWorkflowStartLock('subplot_auto_generate', request.novelId, () => startSubplotAutoGenerateWorkflowUnlocked(request, sender))
+}
+
+async function startChapterBatchGenerateWorkflowUnlocked(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_batch_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.chapterPausedExists')
@@ -2139,7 +2219,11 @@ export async function startChapterBatchGenerateWorkflow(novelId: number, options
   return taskId
 }
 
-export async function startChapterQualityAnalysisWorkflow(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
+export async function startChapterBatchGenerateWorkflow(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
+  return withBatchWorkflowStartLock('chapter_batch_generate', novelId, () => startChapterBatchGenerateWorkflowUnlocked(novelId, options, sender))
+}
+
+async function startChapterQualityAnalysisWorkflowUnlocked(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_quality_analysis'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
 
@@ -2184,6 +2268,10 @@ export async function startChapterQualityAnalysisWorkflow(novelId: number, optio
   updateTaskProgress(taskId, { ...initial, taskId, snapshotId }, sender)
   void runChapterQualityAnalysisWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
+}
+
+export async function startChapterQualityAnalysisWorkflow(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
+  return withBatchWorkflowStartLock('chapter_quality_analysis', novelId, () => startChapterQualityAnalysisWorkflowUnlocked(novelId, options, sender))
 }
 
 export function getCharacterAutoGenerateStatus(taskId: number) {
@@ -2393,6 +2481,7 @@ export const __testing = {
   resolveTimelineWorkflowOptions,
   resolveThreadWorkflowOptions,
   createInitialSubplotStatus,
+  waitForWorkflowTask,
   runCharacterAutoGenerateWorkflow,
   runChapterBatchGenerateWorkflow,
   runChapterQualityAnalysisWorkflow,

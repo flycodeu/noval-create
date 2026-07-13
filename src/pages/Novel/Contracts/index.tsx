@@ -15,6 +15,7 @@ import type {
   SceneContractAsset,
   StoryThread,
 } from '../../../types'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -464,7 +465,7 @@ export default function ContractsPage({ novelId }: Props) {
           <Button loading={refreshing} onClick={() => void refreshAll()}>
             刷新合同
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
+          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
             去正文写作
           </Button>
         </Space>

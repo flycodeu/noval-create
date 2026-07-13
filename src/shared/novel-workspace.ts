@@ -199,6 +199,23 @@ export const ALL_WORKSPACE_ROUTE_KEYS: WorkspaceRouteKey[] = [
   ...WORKSPACE_MODULE_DEFINITIONS.map((item) => item.key),
 ]
 
+const WORKSPACE_ROUTE_ALIASES: Record<string, string> = {
+  basics: 'overview',
+  'story-core': 'core-settings',
+  'world-foundation': 'world-rules',
+  'endgame-design': 'endgame',
+  'map-structure': 'map',
+  'character-roster': 'characters',
+  'items-equipment': 'items',
+  'resistance-system': 'resistance',
+  'story-threads': 'threads',
+  'story-plot': 'story-design',
+  'volume-planning': 'volume-design',
+  'outline-structure': 'outline',
+  'timeline-causality': 'timeline',
+  'write-start': 'writing',
+}
+
 function clamp(value: number, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value))
 }
@@ -212,8 +229,16 @@ function completionFromProgress(progress: ModuleProgress) {
 }
 
 function buildRoute(targetPage: string) {
-  if (targetPage === 'writing') return 'writing/editor'
-  return targetPage
+  const canonicalPage = WORKSPACE_ROUTE_ALIASES[targetPage] || targetPage
+  if (canonicalPage === 'writing') return 'writing/editor'
+  return canonicalPage
+}
+
+/** Keep direct page actions on the same canonical route map as the workspace shell. */
+export function buildWorkspaceRoute(novelId: number, targetPage: string) {
+  const match = targetPage.match(/^([^?#]*)([?#].*)?$/)
+  const route = buildRoute(match?.[1] || targetPage)
+  return `/novels/${novelId}/${route}${match?.[2] || ''}`
 }
 
 function finalizeProgress(progress: ModuleProgress): ModuleProgress {

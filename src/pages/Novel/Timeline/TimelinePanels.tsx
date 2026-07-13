@@ -36,6 +36,7 @@ import {
   TIMELINE_STATUS_META,
   TIMELINE_TEXT,
 } from './helpers'
+import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 
 interface TimelineBoardPanelProps {
   pageData: PagedResult<TimelineEvent>
@@ -155,6 +156,8 @@ export function TimelineListPanel({
   onSelect,
   getStructureTags,
 }: TimelineListPanelProps) {
+  const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
+
   return (
     <section className="novel-panel">
       <div className="novel-panel__header">
@@ -195,7 +198,7 @@ export function TimelineListPanel({
           <div className="novel-empty">{TIMELINE_TEXT.listEmpty}</div>
         ) : (
           <div className="novel-timeline-page__list-shell">
-            <VirtualList data={pageData.items} height={480} itemHeight={118} itemKey="id">
+            <VirtualList data={pageData.items} height={listHeight} itemHeight={118} itemKey="id">
               {(event: TimelineEvent) => (
                 <button
                   key={event.id}

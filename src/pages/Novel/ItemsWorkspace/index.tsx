@@ -38,6 +38,7 @@ import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type WorkflowStats } from '../workflow'
 import { getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
+import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 
 interface Props {
   novelId: number
@@ -332,6 +333,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
   const [form] = Form.useForm<ItemFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
   const [loading, setLoading] = useState(true)
@@ -1412,7 +1414,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             <div className="novel-empty">当前筛选下还没有记录。</div>
           ) : (
             <div className="workspace-stack-12">
-              <VirtualList data={pageData.items} height={480} itemHeight={136} itemKey="id">
+              <VirtualList data={pageData.items} height={listHeight} itemHeight={136} itemKey="id">
                 {(item: StoryItem) => {
                   const relatedCharacterCount = parseNumberArray(item.linkedCharacterIdsJson).length + (item.ownerCharacterId ? 1 : 0)
                   const relatedEventCount = parseNumberArray(item.linkedTimelineEventIdsJson).length

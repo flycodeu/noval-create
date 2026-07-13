@@ -51,6 +51,7 @@ import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 
 interface Props {
   novelId: number
@@ -450,7 +451,7 @@ export default function PremisePage({ novelId }: Props) {
           duration: 6,
           placement: 'bottomRight',
           onClick: () => {
-            navigate(`/novels/${novelId}/core-settings`)
+            navigate(buildWorkspaceRoute(novelId, 'core-settings'))
           },
         })
       }
@@ -466,7 +467,7 @@ export default function PremisePage({ novelId }: Props) {
           duration: 6,
           placement: 'bottomRight',
           onClick: () => {
-            navigate(`/novels/${novelId}/core-settings`)
+            navigate(buildWorkspaceRoute(novelId, 'core-settings'))
           },
         })
       }
@@ -557,8 +558,8 @@ export default function PremisePage({ novelId }: Props) {
           >
             AI 补全·空白字段
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-design`)}>
-            进入故事设计
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'theme-voice'))}>
+            去主题与文风
           </Button>
         </Space>
       )}
@@ -831,10 +832,10 @@ export default function PremisePage({ novelId }: Props) {
 
       <WorkspacePanel title="相关模块">
         <Space wrap>
-          <Button icon={<GlobalOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>世界规则</Button>
-          <Button icon={<EnvironmentOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>地图</Button>
-          <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters`)}>人物</Button>
-          <Button icon={<BarsOutlined />} type="primary" onClick={() => navigate(`/novels/${novelId}/story-design`)}>故事设计</Button>
+          <Button icon={<GlobalOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'world-rules'))}>世界规则</Button>
+          <Button icon={<EnvironmentOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'map'))}>地图</Button>
+          <Button icon={<TeamOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'characters'))}>人物</Button>
+          <Button icon={<BarsOutlined />} type="primary" onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>故事设计</Button>
         </Space>
       </WorkspacePanel>
     </WorkspacePage>

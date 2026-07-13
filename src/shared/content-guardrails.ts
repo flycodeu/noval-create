@@ -149,7 +149,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'parallelism_overuse',
     severity: 'medium',
     message: '排比或平衡句过度整齐，像在套模板而不是跟随人物思路。',
-    pattern: /(?:既.{2,18}又.{2,18}(?:还|更|也).{2,24})|(?:一边.{2,18}一边.{2,18})|(?:越.{1,10}越.{1,16})/u,
+    pattern: /(?:既.{2,18}又.{2,18}(?:还|更|也).{2,24})|(?:一边.{2,18}一边.{2,18})|(?:越(?!来)[^，。！？；]{2,10}越(?!来)[^，。！？；]{2,16})/u,
   },
   {
     code: 'ai_pseudo_philosophy',
@@ -809,7 +809,20 @@ export function collectQualityGuardrailFindings(text: string, genre?: string): T
 export function shouldForceRepair(findings: TextGuardrailFinding[]): boolean {
   const highCount = findings.filter((finding) => finding.severity === 'high').length
   const mediumCount = findings.filter((finding) => finding.severity === 'medium').length
-  return highCount > 0 || mediumCount >= 2
+  const highConfidenceMediumCodes = new Set([
+    'ai_slogan',
+    'ai_opener',
+    'ai_action_cliche',
+    'ai_emotional_cliche',
+    'ai_description_cliche',
+    'ai_dialogue_filler',
+    'abstract_emotion_packaging',
+    'ai_pseudo_philosophy',
+    'zero_cost_resolution',
+  ])
+  return highCount > 0
+    || mediumCount >= 2
+    || findings.some((finding) => finding.severity === 'medium' && highConfidenceMediumCodes.has(finding.code))
 }
 
 // 风格密度类命中：应持续施加修复压力并进入审校意见，但不单独构成流水线硬阻断

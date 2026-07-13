@@ -15,6 +15,7 @@ import { useNovelStore } from '../../stores/novel.store'
 import { useWorkspaceStore } from '../../stores/workspace.store'
 import {
   ALL_WORKSPACE_ROUTE_KEYS,
+  buildWorkspaceRoute,
   WORKSPACE_MODULE_DEFINITIONS,
   getWorkspaceNavKey,
   getWorkspaceSnapshot,
@@ -271,9 +272,7 @@ export default function NovelRouter() {
     [currentNovel, workflowStats, workspaceViewMode],
   )
   const recommendedRoute = useMemo(
-    () => (workspaceSnapshot.nextStep.targetPage === 'writing'
-      ? 'writing/editor'
-      : workspaceSnapshot.nextStep.targetPage),
+    () => workspaceSnapshot.nextStep.targetPage,
     [workspaceSnapshot.nextStep.targetPage],
   )
   const currentNavKey = useMemo(
@@ -493,7 +492,7 @@ export default function NovelRouter() {
     }
     warmWorkspacePage(route)
 
-    transitionNavigate(`/novels/${novelId}/${route}`, options)
+    transitionNavigate(buildWorkspaceRoute(novelId, route), options)
   }, [currentPage, novelId, resolveWorkspacePageKey, transitionNavigate, warmWorkspacePage])
 
   const notifyWorkspaceMutation = useCallback(() => {
@@ -594,7 +593,7 @@ export default function NovelRouter() {
     const list = await ensureChapterListLoaded()
     const target = list.find((chapter) => chapter.id === chapterId)
     if (!target) return
-    transitionNavigate(`/novels/${novelId}/writing/editor?chapterId=${chapterId}`)
+    transitionNavigate(buildWorkspaceRoute(novelId, `writing?chapterId=${chapterId}`))
     setChapterJumpOpen(false)
   }, [ensureChapterListLoaded, novelId, transitionNavigate])
 
@@ -637,42 +636,42 @@ export default function NovelRouter() {
           type: 'chapter' as const,
           label: `第 ${chapter.chapterNum} 章 ${chapter.title || ''}`.trim(),
           description: chapter.summary || chapter.outline || '跳到正文写作页',
-          route: `/novels/${novelId}/writing/editor?chapterId=${chapter.id}`,
+          route: buildWorkspaceRoute(novelId, `writing/editor?chapterId=${chapter.id}`),
         })),
         ...threadPage.items.map((thread) => ({
           id: `thread-${thread.id}`,
           type: 'thread' as const,
           label: thread.title,
           description: thread.summary || thread.currentState || '跳到故事线程页',
-          route: `/novels/${novelId}/threads?threadId=${thread.id}&action=edit`,
+          route: buildWorkspaceRoute(novelId, `threads?threadId=${thread.id}&action=edit`),
         })),
         ...timelineRows.map((event) => ({
           id: `timeline-${event.id}`,
           type: 'timeline' as const,
           label: event.eventTitle,
           description: event.eventSummary || event.eventResult || event.timeLabel,
-          route: `/novels/${novelId}/timeline?eventId=${event.id}`,
+          route: buildWorkspaceRoute(novelId, `timeline?eventId=${event.id}`),
         })),
         ...characterRows.map((character) => ({
           id: `character-${character.id}`,
           type: 'character' as const,
           label: character.fullName,
           description: character.background || character.goals || '跳到角色页',
-          route: `/novels/${novelId}/characters?characterId=${character.id}`,
+          route: buildWorkspaceRoute(novelId, `characters?characterId=${character.id}`),
         })),
         ...itemRows.map((item) => ({
           id: `item-${item.id}`,
           type: 'item' as const,
           label: item.itemName,
           description: item.summary || item.plotFunction || '跳到物品页',
-          route: `/novels/${novelId}/items?itemId=${item.id}`,
+          route: buildWorkspaceRoute(novelId, `items?itemId=${item.id}`),
         })),
         ...mapRows.map((node) => ({
           id: `map-${node.id}`,
           type: 'map' as const,
           label: node.name,
           description: node.description || node.plotRelevance || '跳到地图页',
-          route: `/novels/${novelId}/map?nodeId=${node.id}`,
+          route: buildWorkspaceRoute(novelId, `map?nodeId=${node.id}`),
         })),
       ]
 
@@ -871,7 +870,7 @@ export default function NovelRouter() {
           const nextIndex = key === 'arrowleft' ? currentIndex - 1 : currentIndex + 1
           const nextChapter = list[nextIndex]
           if (nextChapter) {
-            transitionNavigate(`/novels/${novelId}/writing/editor?chapterId=${nextChapter.id}`)
+            transitionNavigate(buildWorkspaceRoute(novelId, `writing?chapterId=${nextChapter.id}`))
           }
         }).catch(console.error)
         return
@@ -900,13 +899,13 @@ export default function NovelRouter() {
     if (loading || !novelId) return
 
     if (legacyRouteTarget && pathSegment !== legacyRouteTarget) {
-      transitionNavigate(`/novels/${novelId}/${legacyRouteTarget}`, { replace: true })
+      transitionNavigate(buildWorkspaceRoute(novelId, legacyRouteTarget), { replace: true })
       return
     }
 
     const validPath = ALL_WORKSPACE_ROUTE_KEYS.includes(pathSegment as WorkspaceRouteKey)
     if (!validPath) {
-      transitionNavigate(`/novels/${novelId}/${recommendedRoute}`, { replace: true })
+      transitionNavigate(buildWorkspaceRoute(novelId, recommendedRoute), { replace: true })
     }
   }, [legacyRouteTarget, loading, novelId, pathSegment, recommendedRoute, transitionNavigate])
 

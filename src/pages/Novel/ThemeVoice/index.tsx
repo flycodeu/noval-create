@@ -4,6 +4,7 @@ import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from 
 import { useNavigate } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   buildThemeVoicePayload,
   parseThemeVoiceDocument,
@@ -479,7 +480,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
           >
             AI 补全·空白字段
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'world-rules'))}>
             去世界规则
           </Button>
         </Space>

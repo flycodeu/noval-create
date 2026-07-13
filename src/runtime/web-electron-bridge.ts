@@ -11,9 +11,59 @@ import type {
   SourceSearchProviderMode,
   SourceSearchSettingsView,
 } from '../types'
+import {
+  isWebDemoPreviewEnabled,
+  WEB_DEMO_PREVIEW_STORAGE_KEY,
+} from './web-preview-mode'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
 type BridgeService = Record<string, BridgeMethod>
+type WebEventCallback = (...args: unknown[]) => void
+
+const webEventCallbacks = new Map<string, Set<WebEventCallback>>()
+let webEventSource: EventSource | null = null
+
+function ensureWebEventSource() {
+  if (typeof window === 'undefined' || typeof window.EventSource !== 'function' || webEventSource) return
+
+  webEventSource = new window.EventSource('/events')
+  webEventSource.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data) as { channel?: unknown; args?: unknown[] }
+      if (typeof payload.channel !== 'string' || !Array.isArray(payload.args)) return
+      webEventCallbacks.get(payload.channel)?.forEach((callback) => callback(...payload.args!))
+    } catch {
+      // Ignore malformed or keep-alive event frames.
+    }
+  }
+}
+
+function subscribeWebEvent(channel: string, callback: WebEventCallback): () => void {
+  const callbacks = webEventCallbacks.get(channel) || new Set<WebEventCallback>()
+  callbacks.add(callback)
+  webEventCallbacks.set(channel, callbacks)
+  ensureWebEventSource()
+
+  return () => {
+    callbacks.delete(callback)
+    if (callbacks.size === 0) webEventCallbacks.delete(channel)
+    if (webEventCallbacks.size === 0 && webEventSource) {
+      webEventSource.close()
+      webEventSource = null
+    }
+  }
+}
+
+function unsubscribeWebEvent(channel: string, callback: WebEventCallback) {
+  const callbacks = webEventCallbacks.get(channel)
+  if (!callbacks) return
+  callbacks.delete(callback)
+  if (callbacks.size === 0) webEventCallbacks.delete(channel)
+  if (webEventCallbacks.size === 0 && webEventSource) {
+    webEventSource.close()
+    webEventSource = null
+  }
+}
 
 const WEB_BRIDGE_MARKER = '__novalCreateWebBridgeInstalled'
 const NOW = '2026-05-24T09:00:00.000Z'
@@ -28,6 +78,18 @@ type WebSourceSearchSettings = Pick<SourceSearchSettingsView, 'provider' | 'tavi
 let localBackendLastError = ''
 let localBackendStatus: 'checking' | 'connected' | 'unavailable' = 'checking'
 let backendCheckPromise: Promise<boolean> | null = null
+
+function isDemoFallbackEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return isWebDemoPreviewEnabled(
+      window.location.search,
+      window.localStorage.getItem(WEB_DEMO_PREVIEW_STORAGE_KEY),
+    )
+  } catch {
+    return false
+  }
+}
 
 async function checkBackendHealth(): Promise<boolean> {
   try {
@@ -544,47 +606,46 @@ const readOnlyMutation = async (methodName: string): Promise<never> => {
   throw new WebPreviewReadOnlyError(methodName)
 }
 
-function createService(overrides: Partial<BridgeService> = {}): BridgeService {
+function createService(serviceName: string, overrides: Partial<BridgeService> = {}): BridgeService {
   return new Proxy(overrides as BridgeService, {
     get(target, property) {
       if (typeof property !== 'string') return Reflect.get(target, property)
       if (property in target) return target[property]
-      return createDefaultMethod(property)
+      return createDefaultMethod(serviceName, property)
     },
   })
 }
 
-function createDefaultMethod(methodName: string): BridgeMethod {
-  if (/^(query|.*Page)$/i.test(methodName)) {
-    return async () => emptyPagedResult
-  }
+function createDefaultMethod(serviceName: string, methodName: string): BridgeMethod {
+  return (...args) => withLocalBackend(
+    serviceName,
+    methodName,
+    args,
+    async () => {
+      if (/^(query|.*Page)$/i.test(methodName)) return emptyPagedResult
 
-  if (/^(list.*|search.*|get.*History|resolveNameOptions|get.*Options)$/i.test(methodName)) {
-    return async () => []
-  }
+      if (/^(list.*|search.*|get.*History|resolveNameOptions|get.*Options)$/i.test(methodName)) return []
 
-  if (/^(getStats|stats)$/i.test(methodName)) {
-    return async () => emptyStats
-  }
+      if (/^(getStats|stats)$/i.test(methodName)) return emptyStats
 
-  if (/^get.*Dashboard$/i.test(methodName)) {
-    return async () => ({
-      tracks: [],
-      characterArcs: [],
-      relationshipArcs: [],
-      summary: {},
-    })
-  }
+      if (/^get.*Dashboard$/i.test(methodName)) {
+        return {
+          tracks: [],
+          characterArcs: [],
+          relationshipArcs: [],
+          summary: {},
+        }
+      }
 
-  if (/^get.*Summary$/i.test(methodName)) {
-    return async () => ({ total: 0, items: [] })
-  }
+      if (/^get.*Summary$/i.test(methodName)) return { total: 0, items: [] }
 
-  if (/^(create|update|delete|clear|save|setDefault|markApplied|resume|cancel|retry|generate|start|batch|upsert|apply|sync|refresh|restore|prepare|run|format)/i.test(methodName)) {
-    return () => readOnlyMutation(methodName)
-  }
+      if (/^(create|update|delete|clear|save|setDefault|markApplied|resume|cancel|retry|generate|start|batch|upsert|apply|sync|refresh|restore|prepare|run|format)/i.test(methodName)) {
+        return readOnlyMutation(`${serviceName}.${methodName}`)
+      }
 
-  return async () => null
+      return null
+    },
+  )
 }
 
 function readJsonFromStorage<T>(key: string, fallback: T): T {
@@ -783,6 +844,13 @@ async function getLocalBackendStatus() {
     connected: localBackendStatus === 'connected',
     lastError: localBackendLastError,
     message: localBackendStatus === 'unavailable' ? getLocalBackendUnavailableMessage() : '',
+    capabilities: {
+      realDatabase: localBackendStatus === 'connected',
+      writesEnabled: localBackendStatus === 'connected',
+      generationEnabled: localBackendStatus === 'connected',
+      eventStreaming: localBackendStatus === 'connected',
+    },
+    demoFallbackEnabled: isDemoFallbackEnabled(),
   }
 }
 
@@ -850,7 +918,7 @@ async function withLocalBackend<T>(
   try {
     return await callLocalBackend<T>(service, method, args)
   } catch (error) {
-    if (error instanceof LocalBackendUnavailableError) return fallback()
+    if (error instanceof LocalBackendUnavailableError && isDemoFallbackEnabled()) return fallback()
     throw error
   }
 }
@@ -881,15 +949,17 @@ export function installWebElectronBridge(): void {
       isMaximized: async () => false,
       onMaximizedStateChange: () => () => undefined,
     },
-    on: () => () => undefined,
-    novel: createService({
-      // 读取优先走本地后端（真实数据库），后端未启动时回退到浏览器演示数据。
+    on: (channel: string, callback: (...args: unknown[]) => void) => subscribeWebEvent(channel, callback),
+    off: (channel: string, callback: (...args: unknown[]) => void) => unsubscribeWebEvent(channel, callback),
+    novel: createService('novel', {
+      // 读取优先走本地后端（真实数据库）；演示数据必须通过 ?demo=1 显式开启。
       list: async (filters?: unknown) => withLocalBackend('novel', 'list', [filters], async () => demoNovels),
       get: async (id) => withLocalBackend('novel', 'get', [id], async () => getNovelById(Number(id))),
-      create: () => readOnlyMutation('novel.create'),
-      update: () => readOnlyMutation('novel.update'),
-      delete: () => readOnlyMutation('novel.delete'),
-      export: async () => '',
+      create: (...args) => withLocalBackend('novel', 'create', args, async () => readOnlyMutation('novel.create')),
+      update: (...args) => withLocalBackend('novel', 'update', args, async () => readOnlyMutation('novel.update')),
+      delete: (...args) => withLocalBackend('novel', 'delete', args, async () => readOnlyMutation('novel.delete')),
+      export: (...args) => withLocalBackend('novel', 'export', args, async () => readOnlyMutation('novel.export')),
+      formatForPlatform: (...args) => withLocalBackend('novel', 'formatForPlatform', args, async () => readOnlyMutation('novel.formatForPlatform')),
       stats: async (id) => withLocalBackend('novel', 'stats', [id], async () => {
         const novel = getNovelById(Number(id))
         return {
@@ -968,13 +1038,13 @@ export function installWebElectronBridge(): void {
       getImpactSummary: async (id) => withLocalBackend('novel', 'getImpactSummary', [id], async () => ({ totalEvents: 0, affectedAssets: [] })),
       listImpactEvents: async (id) => withLocalBackend('novel', 'listImpactEvents', [id], async () => []),
     }),
-    template: createService({
-      list: async (type?: unknown) => {
+    template: createService('template', {
+      list: async (type?: unknown) => withLocalBackend('template', 'list', [type], async () => {
         if (typeof type !== 'string') return demoTemplates
         return demoTemplates.filter((template) => template.type === type)
-      },
+      }),
     }),
-    model: createService({
+    model: createService('model', {
       list: async () => withLocalBackend('model', 'list', [], async () => readWebModelConfigs().map(exposeWebModelConfig)),
       create: async (data?: unknown) => withLocalBackend('model', 'create', [data], async () => {
         const configs = readWebModelConfigs()
@@ -1017,7 +1087,7 @@ export function installWebElectronBridge(): void {
         info: getLocalBackendUnavailableMessage(),
       })),
     }),
-    sourceSearch: createService({
+    sourceSearch: createService('sourceSearch', {
       getSettings: async () => withLocalBackend(
         'sourceSearch',
         'getSettings',
@@ -1043,26 +1113,53 @@ export function installWebElectronBridge(): void {
         info: getLocalBackendUnavailableMessage(),
       })),
     }),
-    ai: createService({
+    ai: createService('ai', {
       runPrompt: async (data?: unknown) => withLocalBackend('ai', 'runPrompt', [data], async () => {
         throw new Error(getLocalBackendUnavailableMessage())
       }),
     }),
-    prompt: createService({ list: async () => [] }),
-    task: createService({
+    aiPatch: createService('aiPatch', {
+      suggest: async (request?: unknown) => withLocalBackend('aiPatch', 'suggest', [request], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
+      }),
+      apply: async (target?: unknown, patch?: unknown) => withLocalBackend('aiPatch', 'apply', [target, patch], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
+      }),
+    }),
+    embedding: createService('embedding', {
+      reindex: async (novelId?: unknown) => withLocalBackend('embedding', 'reindex', [novelId], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
+      }),
+    }),
+    style: createService('style', {
+      analyze: async (text?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'analyze', [text, modelConfigId], async () => null),
+      create: async (novelId?: unknown, name?: unknown, text?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'create', [novelId, name, text, modelConfigId], async () => null),
+      get: async (id?: unknown) => withLocalBackend('style', 'get', [id], async () => null),
+      list: async (novelId?: unknown) => withLocalBackend('style', 'list', [novelId], async () => []),
+      delete: async (id?: unknown) => withLocalBackend('style', 'delete', [id], async () => undefined),
+    }),
+    parallel: createService('parallel', {
+      analyzePlan: async (novelId?: unknown, chapterStart?: unknown, chapterEnd?: unknown) => withLocalBackend('parallel', 'analyzePlan', [novelId, chapterStart, chapterEnd], async () => null),
+      getWorldState: async (novelId?: unknown, atChapterNum?: unknown) => withLocalBackend('parallel', 'getWorldState', [novelId, atChapterNum], async () => null),
+      mergeOutputs: async (segments?: unknown) => withLocalBackend('parallel', 'mergeOutputs', [segments], async () => null),
+    }),
+    prompt: createService('prompt', {
+      list: async () => withLocalBackend('prompt', 'list', [], async () => []),
+    }),
+    task: createService('task', {
       list: async (novelId?: unknown) => withLocalBackend('task', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('task', 'query', [filters], async () => emptyPagedResult),
       getStats: async (novelId?: unknown) => withLocalBackend('task', 'getStats', [novelId], async () => emptyStats),
       getPipelineStats: async (novelId?: unknown) => withLocalBackend('task', 'getPipelineStats', [novelId], async () => emptyPipelineStats),
       getLatestChapterPipeline: async (chapterId?: unknown) => withLocalBackend('task', 'getLatestChapterPipeline', [chapterId], async () => null),
       get: async (id?: unknown) => withLocalBackend('task', 'get', [id], async () => null),
-      cancel: () => readOnlyMutation('task.cancel'),
+      cancel: (...args) => withLocalBackend('task', 'cancel', args, async () => readOnlyMutation('task.cancel')),
     }),
-    workflow: createService({
+    workflow: createService('workflow', {
       list: async (novelId?: unknown) => withLocalBackend('workflow', 'list', [novelId], async () => []),
       get: async (id?: unknown) => withLocalBackend('workflow', 'get', [id], async () => null),
     }),
-    structure: createService({
+    structure: createService('structure', {
       getTree: async (novelId?: unknown) => withLocalBackend('structure', 'getTree', [novelId], async () => ({ volumes: [] })),
       listVolumes: async (novelId?: unknown) => withLocalBackend('structure', 'listVolumes', [novelId], async () => []),
       listPartsPage: async (volumeId?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listPartsPage', [volumeId, page, pageSize], async () => emptyPagedResult),
@@ -1076,10 +1173,10 @@ export function installWebElectronBridge(): void {
       listLinkedTimelineEventsPage: async (filters?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listLinkedTimelineEventsPage', [filters, page, pageSize], async () => emptyPagedResult),
       resolvePath: async (filters?: unknown) => withLocalBackend('structure', 'resolvePath', [filters], async () => null),
       getLinkageSummary: async (novelId?: unknown) => withLocalBackend('structure', 'getLinkageSummary', [novelId], async () => emptyStructureLinkageSummary),
-      syncLinkage: () => readOnlyMutation('structure.syncLinkage'),
-      clear: () => readOnlyMutation('structure.clear'),
+      syncLinkage: (...args) => withLocalBackend('structure', 'syncLinkage', args, async () => readOnlyMutation('structure.syncLinkage')),
+      clear: (...args) => withLocalBackend('structure', 'clear', args, async () => readOnlyMutation('structure.clear')),
     }),
-    character: createService({
+    character: createService('character', {
       list: async (novelId?: unknown) => withLocalBackend('character', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('character', 'query', [filters], async () => emptyPagedResult),
       search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('character', 'search', [novelId, keyword, limit], async () => []),
@@ -1090,7 +1187,7 @@ export function installWebElectronBridge(): void {
       getFilterOptions: async (novelId?: unknown) => withLocalBackend('character', 'getFilterOptions', [novelId], async () => ({ species: [], entityTypes: [] })),
       getGraph: async (filters?: unknown) => withLocalBackend('character', 'getGraph', [filters], async () => ({ characters: [], relations: [] })),
     }),
-    item: createService({
+    item: createService('item', {
       list: async (novelId?: unknown) => withLocalBackend('item', 'list', [novelId], async () => []),
       search: async (novelId?: unknown, keyword?: unknown, itemKind?: unknown, limit?: unknown) => withLocalBackend('item', 'search', [novelId, keyword, itemKind, limit], async () => []),
       query: async (filters?: unknown) => withLocalBackend('item', 'query', [filters], async () => emptyPagedResult),
@@ -1099,7 +1196,7 @@ export function installWebElectronBridge(): void {
       getStats: async (filters?: unknown) => withLocalBackend('item', 'getStats', [filters], async () => ({ ...emptyStats, total: 2 })),
       getFilterOptions: async (novelId?: unknown) => withLocalBackend('item', 'getFilterOptions', [novelId], async () => ({ categories: [], rarities: [] })),
     }),
-    map: createService({
+    map: createService('map', {
       getTree: async (novelId?: unknown) => withLocalBackend('map', 'getTree', [novelId], async () => []),
       queryNodes: async (filters?: unknown) => withLocalBackend('map', 'queryNodes', [filters], async () => emptyPagedResult),
       getStats: async (novelId?: unknown) => withLocalBackend('map', 'getStats', [novelId], async () => ({ ...emptyStats, total: 2 })),
@@ -1107,10 +1204,10 @@ export function installWebElectronBridge(): void {
       searchNodes: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('map', 'searchNodes', [novelId, keyword, limit], async () => []),
       getRelations: async (novelId?: unknown, focusNodeId?: unknown) => withLocalBackend('map', 'getRelations', [novelId, focusNodeId], async () => []),
       getGraph: async (filters?: unknown) => withLocalBackend('map', 'getGraph', [filters], async () => ({ nodes: [], edges: [], relationNodeIds: [], rootNodeIds: [] })),
-      getLatestAutoGenerateTask: async () => null,
-      getAutoGenerateStatus: async () => null,
+      getLatestAutoGenerateTask: async (novelId?: unknown) => withLocalBackend('map', 'getLatestAutoGenerateTask', [novelId], async () => null),
+      getAutoGenerateStatus: async (taskId?: unknown) => withLocalBackend('map', 'getAutoGenerateStatus', [taskId], async () => null),
     }),
-    faction: createService({
+    faction: createService('faction', {
       list: async (novelId?: unknown) => withLocalBackend('faction', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('faction', 'query', [filters], async () => emptyPagedResult),
       getStats: async (filters?: unknown) => withLocalBackend('faction', 'getStats', [filters], async () => ({ ...emptyStats, total: 1 })),
@@ -1118,38 +1215,43 @@ export function installWebElectronBridge(): void {
       search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('faction', 'search', [novelId, keyword, limit], async () => []),
       getGraph: async (filters?: unknown) => withLocalBackend('faction', 'getGraph', [filters], async () => ({ nodes: [], edges: [], unalignedCharacters: [] })),
     }),
-    glossary: createService({
+    glossary: createService('glossary', {
       list: async (novelId?: unknown) => withLocalBackend('glossary', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('glossary', 'query', [filters], async () => emptyPagedResult),
       getStats: async (filters?: unknown) => withLocalBackend('glossary', 'getStats', [filters], async () => ({ ...emptyStats, total: 4 })),
       get: async (id?: unknown) => withLocalBackend('glossary', 'get', [id], async () => null),
       search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('glossary', 'search', [novelId, keyword, limit], async () => []),
     }),
-    thread: createService({
+    thread: createService('thread', {
       list: async (novelId?: unknown) => withLocalBackend('thread', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('thread', 'query', [filters], async () => emptyPagedResult),
       get: async (id?: unknown) => withLocalBackend('thread', 'get', [id], async () => null),
       getStats: async (filters?: unknown) => withLocalBackend('thread', 'getStats', [filters], async () => ({ ...emptyStats, total: 3 })),
-      getForeshadowSnapshot: async () => ({
-        currentChapterNum: 0,
-        pending: [],
-        dueSoon: [],
-        resolved: [],
-        overdue: [],
-      }),
+      getForeshadowSnapshot: async (novelId?: unknown, chapterNum?: unknown) => withLocalBackend(
+        'thread',
+        'getForeshadowSnapshot',
+        [novelId, chapterNum],
+        async () => ({
+          currentChapterNum: 0,
+          pending: [],
+          dueSoon: [],
+          resolved: [],
+          overdue: [],
+        }),
+      ),
     }),
-    sceneTemplate: createService({
+    sceneTemplate: createService('sceneTemplate', {
       list: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'list', [filters], async () => []),
       query: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'query', [filters], async () => emptyPagedResult),
       getStats: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'getStats', [filters], async () => ({ ...emptyStats, total: 2 })),
       get: async (id?: unknown) => withLocalBackend('sceneTemplate', 'get', [id], async () => null),
       search: async (novelId?: unknown, genreId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('sceneTemplate', 'search', [novelId, genreId, keyword, limit], async () => []),
     }),
-    revision: createService({
-      getStats: async () => ({ ...emptyStats, openCount: 0, inProgressCount: 0, blockerCount: 0 }),
-      getSnapshot: async () => ({ tasks: [], blockers: [] }),
+    revision: createService('revision', {
+      getStats: async (filters?: unknown) => withLocalBackend('revision', 'getStats', [filters], async () => ({ ...emptyStats, openCount: 0, inProgressCount: 0, blockerCount: 0 })),
+      getSnapshot: async (novelId?: unknown) => withLocalBackend('revision', 'getSnapshot', [novelId], async () => ({ tasks: [], blockers: [] })),
     }),
-    outline: createService({
+    outline: createService('outline', {
       getArcs: async (novelId?: unknown) => withLocalBackend('outline', 'getArcs', [novelId], async () => [{
         id: 1,
         novelId: 1,
@@ -1162,15 +1264,17 @@ export function installWebElectronBridge(): void {
         growthLedger: '',
         costLedger: '',
       }]),
-      getArcProgressSnapshot: async () => ({ arcs: [], chapterPoints: [] }),
+      getArcProgressSnapshot: async (novelId?: unknown) => withLocalBackend('outline', 'getArcProgressSnapshot', [novelId], async () => ({ arcs: [], chapterPoints: [] })),
+      generateArcs: async (novelId?: unknown) => withLocalBackend('outline', 'generateArcs', [novelId], async () => readOnlyMutation('outline.generateArcs')),
+      generateChapterOutlines: async (arcId?: unknown, options?: unknown) => withLocalBackend('outline', 'generateChapterOutlines', [arcId, options], async () => readOnlyMutation('outline.generateChapterOutlines')),
     }),
-    timeline: createService({
+    timeline: createService('timeline', {
       list: async (novelId?: unknown) => withLocalBackend('timeline', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('timeline', 'query', [filters], async () => emptyPagedResult),
       getStats: async (filters?: unknown) => withLocalBackend('timeline', 'getStats', [filters], async () => ({ ...emptyStats, total: 5 })),
       getFilterOptions: async (novelId?: unknown) => withLocalBackend('timeline', 'getFilterOptions', [novelId], async () => ({ eventTypes: [], statuses: [], volumes: [], parts: [] })),
     }),
-    characterArc: createService({
+    characterArc: createService('characterArc', {
       listCharacterArcs: async (novelId?: unknown) => withLocalBackend('characterArc', 'listCharacterArcs', [novelId], async () => []),
       getCharacterArc: async (arcId?: unknown) => withLocalBackend('characterArc', 'getCharacterArc', [arcId], async () => null),
       listRelationshipArcs: async (novelId?: unknown) => withLocalBackend('characterArc', 'listRelationshipArcs', [novelId], async () => []),
@@ -1179,7 +1283,7 @@ export function installWebElectronBridge(): void {
         relationshipArcs: [],
       })),
     }),
-    resistance: createService({
+    resistance: createService('resistance', {
       listTracks: async (novelId?: unknown) => withLocalBackend('resistance', 'listTracks', [novelId], async () => []),
       getTrack: async (trackId?: unknown) => withLocalBackend('resistance', 'getTrack', [trackId], async () => null),
       getDashboard: async (novelId?: unknown) => withLocalBackend('resistance', 'getDashboard', [novelId], async () => ({
@@ -1198,26 +1302,26 @@ export function installWebElectronBridge(): void {
         resolvedTrackCount: 0,
       })),
     }),
-    endgameAsset: createService({
+    endgameAsset: createService('endgameAsset', {
       listCommitments: async (novelId?: unknown) => withLocalBackend('endgameAsset', 'listCommitments', [novelId], async () => []),
       getSummary: async (novelId?: unknown) => withLocalBackend('endgameAsset', 'getSummary', [novelId], async () => ({ total: 0, fulfilled: 0, pending: 0 })),
     }),
-    foreshadow: createService({
+    foreshadow: createService('foreshadow', {
       listLedger: async (novelId?: unknown) => withLocalBackend('foreshadow', 'listLedger', [novelId], async () => []),
     }),
-    volumeDesign: createService({
+    volumeDesign: createService('volumeDesign', {
       list: async (novelId?: unknown) => withLocalBackend('volumeDesign', 'list', [novelId], async () => []),
       getByVolume: async (volumeId?: unknown) => withLocalBackend('volumeDesign', 'getByVolume', [volumeId], async () => null),
     }),
-    contract: createService({
+    contract: createService('contract', {
       getChapter: async (chapterId?: unknown) => withLocalBackend('contract', 'getChapter', [chapterId], async () => null),
       listScenes: async (chapterId?: unknown) => withLocalBackend('contract', 'listScenes', [chapterId], async () => []),
     }),
-    storyFact: createService({
+    storyFact: createService('storyFact', {
       list: async (novelId?: unknown) => withLocalBackend('storyFact', 'list', [novelId], async () => []),
       get: async (id?: unknown) => withLocalBackend('storyFact', 'get', [id], async () => null),
     }),
-    growthSystem: createService({
+    growthSystem: createService('growthSystem', {
       getDashboard: async (novelId?: unknown) => withLocalBackend('growthSystem', 'getDashboard', [novelId], async () => ({
         tracks: [],
         pools: [],
@@ -1238,7 +1342,7 @@ export function installWebElectronBridge(): void {
       listPools: async (novelId?: unknown) => withLocalBackend('growthSystem', 'listPools', [novelId], async () => []),
       listEvents: async (novelId?: unknown) => withLocalBackend('growthSystem', 'listEvents', [novelId], async () => []),
     }),
-    chapter: createService({
+    chapter: createService('chapter', {
       list: async (novelId?: unknown) => withLocalBackend('chapter', 'list', [novelId], async () => demoChapters),
       get: async (id) => withLocalBackend(
         'chapter',
@@ -1246,63 +1350,78 @@ export function installWebElectronBridge(): void {
         [id],
         async () => demoChapters.find((chapter) => chapter.id === Number(id)) ?? demoChapters[0] ?? null,
       ),
-      runPublishCheck: async (id) => createPublishCheck(Number(id)),
+      runPublishCheck: async (id) => withLocalBackend('chapter', 'runPublishCheck', [id], async () => createPublishCheck(Number(id))),
     }),
-    chapterBatch: createService({ getLatestQualityAnalysisTask: async () => null }),
-    writeback: createService({
-      listRuns: async () => [],
-      getCenterData: async (chapterId) => {
+    chapterBatch: createService('chapterBatch', {
+      getLatestQualityAnalysisTask: async (novelId?: unknown) => withLocalBackend('chapterBatch', 'getLatestQualityAnalysisTask', [novelId], async () => null),
+    }),
+    writeback: createService('writeback', {
+      listRuns: async (chapterId?: unknown) => withLocalBackend('writeback', 'listRuns', [chapterId], async () => []),
+      getCenterData: async (chapterId?: unknown, runId?: unknown) => withLocalBackend('writeback', 'getCenterData', [chapterId, runId], async () => {
         const chapter = demoChapters.find((item) => item.id === Number(chapterId)) ?? null
         return createEmptyWritebackCenterData(chapter)
-      },
-      prepareRun: async (chapterId) => createPreviewWritebackRun(Number(chapterId)),
-      bulkUpdateDecisions: async () => [],
-      applyRun: async () => createEmptyWritebackCenterData(demoChapters[0] ?? null),
-      retryFailed: async () => createEmptyWritebackCenterData(demoChapters[0] ?? null),
-    }),
-    batchWorkbench: createService({
-      getData: async (novelId) => createEmptyBatchWorkbenchData(Number(novelId)),
-      getGlobalLockLibrary: async (novelId) => createEmptyGlobalLockLibrary(Number(novelId)),
-      updateGlobalLockLibrary: async (novelId, patch) => ({
-        ...createEmptyGlobalLockLibrary(Number(novelId)),
-        ...(patch && typeof patch === 'object' ? patch as Partial<GlobalLockLibrary> : {}),
-        novelId: Number(novelId),
-        updatedAt: NOW,
       }),
-      previewRollback: async (snapshotId, mode) => ({
+      prepareRun: async (chapterId?: unknown, triggerSource?: unknown) => withLocalBackend('writeback', 'prepareRun', [chapterId, triggerSource], async () => createPreviewWritebackRun(Number(chapterId))),
+      updateDecision: async (diffId?: unknown, patch?: unknown) => withLocalBackend('writeback', 'updateDecision', [diffId, patch], async () => null),
+      bulkUpdateDecisions: async (runId?: unknown, patch?: unknown) => withLocalBackend('writeback', 'bulkUpdateDecisions', [runId, patch], async () => []),
+      applyRun: async (runId?: unknown) => withLocalBackend('writeback', 'applyRun', [runId], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
+      retryFailed: async (runId?: unknown) => withLocalBackend('writeback', 'retryFailed', [runId], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
+    }),
+    batchWorkbench: createService('batchWorkbench', {
+      getData: async (novelId, snapshotId) => withLocalBackend('batchWorkbench', 'getData', [novelId, snapshotId], async () => createEmptyBatchWorkbenchData(Number(novelId))),
+      createInspection: async (snapshotId?: unknown, data?: unknown) => withLocalBackend('batchWorkbench', 'createInspection', [snapshotId, data], async () => null),
+      previewRollback: async (snapshotId?: unknown, mode?: unknown) => withLocalBackend('batchWorkbench', 'previewRollback', [snapshotId, mode], async () => ({
         snapshotId: Number(snapshotId),
         mode: typeof mode === 'string' ? mode as BatchRollbackMode : 'chapter_rollback',
         chapterCount: 0,
         affectedChapters: [],
         affectedCounts: {},
         warnings: ['浏览器预览环境没有可回滚的批次快照。'],
-      }),
+      })),
+      applyRollback: async (snapshotId?: unknown, mode?: unknown) => withLocalBackend('batchWorkbench', 'applyRollback', [snapshotId, mode], async () => null),
+      getGlobalLockLibrary: async (novelId?: unknown) => withLocalBackend('batchWorkbench', 'getGlobalLockLibrary', [novelId], async () => createEmptyGlobalLockLibrary(Number(novelId))),
+      updateGlobalLockLibrary: async (novelId?: unknown, patch?: unknown) => withLocalBackend('batchWorkbench', 'updateGlobalLockLibrary', [novelId, patch], async () => ({
+        ...createEmptyGlobalLockLibrary(Number(novelId)),
+        ...(patch && typeof patch === 'object' ? patch as Partial<GlobalLockLibrary> : {}),
+        novelId: Number(novelId),
+        updatedAt: NOW,
+      })),
     }),
-    worldRules: createService(),
-    subplot: createService(),
-    history: createService({ listRecent: async () => [] }),
-    premiseDraft: createService(),
-    planningDraft: createService(),
-    app: createService({
+    worldRules: createService('worldRules'),
+    subplot: createService('subplot'),
+    history: createService('history', {
+      listRecent: async (novelId?: unknown, limit?: unknown) => withLocalBackend('history', 'listRecent', [novelId, limit], async () => []),
+    }),
+    premiseDraft: createService('premiseDraft'),
+    planningDraft: createService('planningDraft'),
+    app: createService('app', {
       getDatabasePath: async () => withLocalBackend(
         'app',
         'getDatabasePath',
         [],
         async () => 'web-preview://localStorage/novelforge',
       ),
+      getCapabilities: async () => withLocalBackend('app', 'getCapabilities', [], async () => ({
+        surface: 'local-web',
+        realDatabase: false,
+        writesEnabled: false,
+        generationEnabled: false,
+        eventStreaming: false,
+        message: '网页预览后端未连接。',
+      })),
       getLocalBackendStatus,
     }),
-    agentTools: createService({
+    agentTools: createService('agentTools', {
       list: async (query?: unknown) => withLocalBackend('agentTools', 'list', [query], async () => []),
       call: async (request?: unknown) => withLocalBackend('agentTools', 'call', [request], async () => {
         throw new Error(getLocalBackendUnavailableMessage())
       }),
-      approve: async () => ({
+      approve: async (request?: unknown) => withLocalBackend('agentTools', 'approve', [request], async () => ({
         approved: false,
-        reason: 'Web preview does not grant canonical-write approvals. Use the desktop app.',
-      }),
+        reason: '网页演示模式不发放正式写入授权，请连接本地后端。',
+      })),
     }),
-    quality: createService({
+    quality: createService('quality', {
       getDashboard: async (novelId?: unknown) => withLocalBackend('quality', 'getDashboard', [novelId], async () => emptyQualityDashboard),
     }),
   }

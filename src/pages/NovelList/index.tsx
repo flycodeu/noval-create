@@ -27,11 +27,13 @@ import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/ut
 import type { Novel, NovelLaunchMode, Template } from '../../types'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
 import { useNovelStore } from '../../stores/novel.store'
-import { getWorkspaceSnapshot, type WorkspaceSnapshot } from '../../shared/novel-workspace'
+import { buildWorkspaceRoute, getWorkspaceSnapshot, type WorkspaceSnapshot } from '../../shared/novel-workspace'
 import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
+import { buildLaunchIdeaMessages, normalizeLaunchIdeaResult, type LaunchIdeaExtractionResult } from '../../shared/launch-idea'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../Novel/workflow'
+import { parseDraftJson } from '../Novel/shared/ai-draft'
 import { buildFastLaunchBootstrapPlan, NOVEL_LAUNCH_MODE_OPTIONS } from './fast-launch'
 import './index.css'
 
@@ -52,6 +54,9 @@ interface WizardFormValues {
   coreConflict: string
   tabooRules: string
   endgameDirection: string
+  launchIdea?: string
+  launchIdeaTitle?: string
+  launchIdeaSynopsis?: string
 }
 
 interface ExpandBackgroundResult {
@@ -133,12 +138,16 @@ export default function NovelList() {
   const [expandedData, setExpandedData] = useState<ExpandBackgroundResult | null>(null)
   const [selectedLaunchMode, setSelectedLaunchMode] = useState<NovelLaunchMode>('professional_longform')
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null)
+  const [launchIdeaParsing, setLaunchIdeaParsing] = useState(false)
+  const [launchIdeaNote, setLaunchIdeaNote] = useState('')
 
   const resetWizard = useCallback(() => {
     setWizardOpen(false)
     setWizardStep(0)
     setWizardLoading(false)
     setExpandedData(null)
+    setLaunchIdeaParsing(false)
+    setLaunchIdeaNote('')
     setSelectedLaunchMode('professional_longform')
     setSelectedGenreId(null)
     wizardForm.resetFields()
@@ -291,13 +300,18 @@ export default function NovelList() {
       coreConflict: values.coreConflict.trim(),
       tabooRules: values.tabooRules.trim(),
       endgameDirection: values.endgameDirection.trim(),
+      sourceIdea: allValues.launchIdea?.trim(),
+      titleHint: allValues.launchIdeaTitle?.trim(),
+      synopsisHint: allValues.launchIdeaSynopsis?.trim(),
       targetWords,
       writingContractTags,
     })
 
     setWizardLoading(true)
+    let createdNovelId: number | null = null
+    let bootstrapCompleted = false
     try {
-      const novelId = await window.electron.novel.create({
+      createdNovelId = await window.electron.novel.create({
         title: plan.novel.title,
         synopsis: plan.novel.synopsis,
         genreId: values.genreId,
@@ -311,7 +325,7 @@ export default function NovelList() {
         targetWords: plan.novel.targetWords,
       })
 
-      await window.electron.novel.update(novelId, {
+      await window.electron.novel.update(createdNovelId, {
         title: plan.novel.title,
         synopsis: plan.novel.synopsis,
         userBackground: plan.novel.userBackground,
@@ -322,13 +336,13 @@ export default function NovelList() {
         targetWords: plan.novel.targetWords,
       })
 
-      const volumeId = await window.electron.structure.createVolume(novelId, plan.volume)
-      const arcId = await window.electron.outline.createArc(novelId, plan.outlineArc)
+      const volumeId = await window.electron.structure.createVolume(createdNovelId, plan.volume)
+      const arcId = await window.electron.outline.createArc(createdNovelId, plan.outlineArc)
 
       await Promise.all([
-        window.electron.character.create(novelId, plan.protagonist),
-        window.electron.character.create(novelId, plan.antagonist),
-        window.electron.thread.create(novelId, {
+        window.electron.character.create(createdNovelId, plan.protagonist),
+        window.electron.character.create(createdNovelId, plan.antagonist),
+        window.electron.thread.create(createdNovelId, {
           threadType: 'main',
           title: plan.thread.title,
           summary: plan.thread.summary,
@@ -340,7 +354,7 @@ export default function NovelList() {
       ])
 
       for (const chapter of plan.chapters) {
-        await window.electron.chapter.create(novelId, {
+        await window.electron.chapter.create(createdNovelId, {
           ...chapter,
           status: 'outline',
           volumeId,
@@ -349,7 +363,7 @@ export default function NovelList() {
       }
 
       for (const event of plan.timelineEvents) {
-        await window.electron.timeline.create(novelId, {
+        await window.electron.timeline.create(createdNovelId, {
           ...event,
           timeMode: 'relative-disaster',
           volumeId,
@@ -358,17 +372,63 @@ export default function NovelList() {
         })
       }
 
+      bootstrapCompleted = true
       await loadNovels()
       resetWizard()
-      navigate(`/novels/${novelId}/overview`)
+      navigate(buildWorkspaceRoute(createdNovelId, 'overview'))
       message.success(getUserFacingMessage('novel.fastLaunchCreated'))
     } catch (error) {
       console.error(error)
+      if (createdNovelId !== null && !bootstrapCompleted) {
+        try {
+          await window.electron.novel.delete(createdNovelId)
+        } catch (rollbackError) {
+          console.error('Fast launch rollback failed', rollbackError)
+          message.warning(getUserFacingMessage('novel.fastLaunchRollbackFailed'))
+        }
+      }
       message.error(getErrorMessage(error, 'novel.createFailed'))
     } finally {
       setWizardLoading(false)
     }
   }, [loadNovels, navigate, resetWizard, wizardForm])
+
+  const handleExtractLaunchIdea = useCallback(async () => {
+    const values = await wizardForm.validateFields(['genreId', 'launchIdea']).catch(() => null)
+    if (!values) return
+    const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
+    const genreLabel = GENRE_OPTIONS.find((option) => option.value === values.genreId)?.label || '未分类'
+    const idea = String(values.launchIdea || '').trim()
+    if (!idea) return
+
+    setLaunchIdeaParsing(true)
+    setLaunchIdeaNote('')
+    try {
+      const outputs = await window.electron.ai.runPrompt({
+        messages: buildLaunchIdeaMessages({ genre: genreLabel, idea }),
+        count: 1,
+        modelConfigId: allValues.modelConfigId,
+      })
+      const extracted = normalizeLaunchIdeaResult(parseDraftJson<LaunchIdeaExtractionResult>(outputs[0] || ''))
+      const nextValues: Partial<WizardFormValues> = {
+        launchIdeaTitle: extracted.title,
+        launchIdeaSynopsis: extracted.synopsis,
+      }
+      ;(['protagonistStart', 'coreHook', 'coreConflict', 'tabooRules', 'endgameDirection'] as const).forEach((field) => {
+        if (extracted[field]) nextValues[field] = extracted[field]
+      })
+      wizardForm.setFieldsValue(nextValues)
+      setLaunchIdeaNote(extracted.missing.length > 0
+        ? `已按原话提取。仍需你确认：${extracted.missing.join('、')}。`
+        : '已按原话提取，请逐项复核后再创建；系统不会替你补写未知设定。')
+      message.success(getUserFacingMessage('novel.launchIdeaExtracted'))
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'novel.launchIdeaExtractFailed'))
+    } finally {
+      setLaunchIdeaParsing(false)
+    }
+  }, [wizardForm])
 
   const handleWizardNext = async () => {
     if (selectedLaunchMode === 'fast_launch') {
@@ -433,6 +493,8 @@ export default function NovelList() {
       message.error(writingContractError)
       return
     }
+    if (wizardLoading) return
+    setWizardLoading(true)
     try {
       const novelId = await window.electron.novel.create({
         title: values.title.trim(),
@@ -453,10 +515,12 @@ export default function NovelList() {
       }
       await loadNovels()
       resetWizard()
-      navigate(`/novels/${novelId}/overview`)
+      navigate(buildWorkspaceRoute(novelId, 'overview'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'novel.createFailed'))
+    } finally {
+      setWizardLoading(false)
     }
   }
 
@@ -552,16 +616,12 @@ export default function NovelList() {
                 const snapshot = workspaceSnapshots[novel.id] || getWorkspaceSnapshot(novel, EMPTY_WORKFLOW_STATS, {
                   viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
                 })
-                const target = snapshot.nextStep.targetPage === 'writing'
-                  ? 'writing/editor'
-                  : snapshot.nextStep.targetPage
-
                 return (
                   <ProjectCard
                     key={novel.id}
                     novel={novel}
                     snapshot={snapshot}
-                    onOpen={() => navigate(`/novels/${novel.id}/${target}`)}
+                    onOpen={() => navigate(buildWorkspaceRoute(novel.id, snapshot.nextStep.targetPage))}
                     onDelete={() => void handleDelete(novel.id, novel.title)}
                     onExport={(format) => void handleExport(novel.id, format)}
                   />
@@ -620,6 +680,7 @@ export default function NovelList() {
                             <strong className="novel-list-page__launch-card-title">{option.label}</strong>
                             <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
                         </div>
+                        <span className="novel-list-page__launch-card-copy">{option.description}</span>
                       </button>
                     )
                   })}
@@ -632,6 +693,12 @@ export default function NovelList() {
                 rules={[{ required: true, message: '请选择题材' }]}
               >
                 <Input type="hidden" />
+              </Form.Item>
+              <Form.Item name="launchIdeaTitle" hidden>
+                <Input />
+              </Form.Item>
+              <Form.Item name="launchIdeaSynopsis" hidden>
+                <Input />
               </Form.Item>
 
               <Form.Item label="选择题材">
@@ -654,6 +721,7 @@ export default function NovelList() {
                         >
                           {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
                           <div className="novel-list-page__genre-title">{genre.label}</div>
+                          <div className="novel-list-page__genre-copy">{genre.description}</div>
                         </button>
                       )
                     })}
@@ -739,8 +807,31 @@ export default function NovelList() {
                 type="info"
                 showIcon
                 className="novel-list-page__wizard-note"
-                message="填写核心冲突后即可创建。"
+                message="可以直接写一段人话，再让 AI 只做字段整理；提取结果仍需你逐项确认。"
               />
+              <Form.Item
+                name="launchIdea"
+                label="直接描述灵感（可选）"
+                rules={[{ min: 20, message: '灵感描述至少写 20 个字，或直接填写下方字段。' }]}
+                extra="写人物、处境、异常、想看的冲突即可，不必先想好标准设定。"
+              >
+                <Input.TextArea
+                  autoSize={{ minRows: 4, maxRows: 8 }}
+                  className="novel-list-page__textarea novel-list-page__textarea--idea"
+                  placeholder="例如：我想写一个在县城殡仪馆值夜班的女孩。她发现每天凌晨送来的遗体都少一根手指，直到有一天送来的是她还活着的弟弟……"
+                  showCount
+                />
+              </Form.Item>
+              <div className="novel-list-page__idea-actions">
+                <Button
+                  type="default"
+                  loading={launchIdeaParsing}
+                  onClick={handleExtractLaunchIdea}
+                >
+                  AI 整理成开书卡
+                </Button>
+                {launchIdeaNote ? <span>{launchIdeaNote}</span> : null}
+              </div>
               <Row gutter={12}>
                 <Col xs={24} md={12}>
                   <Form.Item

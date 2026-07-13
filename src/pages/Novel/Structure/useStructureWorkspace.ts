@@ -14,6 +14,7 @@ import type {
   TimelineEvent,
 } from '../../../types'
 import { createEmptyPage, getPartLabel, getSegmentLabel, getVolumeLabel, optionalId } from '../shared/workspace-utils'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type { ChapterFormValues, SegmentFormValues, StructureSelection } from './helpers'
 import {
   CHAPTER_PAGE_SIZE,
@@ -272,7 +273,7 @@ export function useStructureWorkspace(novelId: number) {
         const currentRouteKey = searchParams.toString()
         if (currentRouteKey) {
           internalRouteKeyRef.current = ''
-          navigate(`/novels/${novelId}/structure`, { replace: true })
+          navigate(buildWorkspaceRoute(novelId, 'structure'), { replace: true })
         }
         return
       }
@@ -293,7 +294,7 @@ export function useStructureWorkspace(novelId: number) {
       const nextRouteKey = buildStructureParams(nextSelection).toString()
       if (nextRouteKey !== searchParams.toString()) {
         internalRouteKeyRef.current = nextRouteKey
-        navigate(`/novels/${novelId}/structure${nextRouteKey ? `?${nextRouteKey}` : ''}`, { replace: true })
+        navigate(buildWorkspaceRoute(novelId, `structure${nextRouteKey ? `?${nextRouteKey}` : ''}`), { replace: true })
       }
 
       if (resolved.volumeId) {
@@ -844,15 +845,15 @@ export function useStructureWorkspace(novelId: number) {
   }, [chapterDetail, resolveAndLoad, selection.partId, selection.volumeId])
 
   const openCreateEvent = useCallback(() => {
-    navigate(`/novels/${novelId}/timeline?${buildStructureParams(selection).toString()}&action=new`)
+    navigate(buildWorkspaceRoute(novelId, `timeline?${buildStructureParams(selection).toString()}&action=new`))
   }, [navigate, novelId, selection])
 
   const openWritingPage = useCallback(() => {
-    navigate(`/novels/${novelId}/writing`)
+    navigate(buildWorkspaceRoute(novelId, 'writing'))
   }, [navigate, novelId])
 
   const openLinkedEvent = useCallback((eventId: number) => {
-    navigate(`/novels/${novelId}/timeline?eventId=${eventId}`)
+    navigate(buildWorkspaceRoute(novelId, `timeline?eventId=${eventId}`))
   }, [navigate, novelId])
 
   return {

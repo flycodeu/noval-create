@@ -19,6 +19,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getTimelineGenerationPreset } from '../../../shared/creation-tools'
 import {
   EMPTY_WORKFLOW_STATS,
@@ -913,7 +914,7 @@ export function useTimelineWorkspace(
 
   const openSelectedEventInStructure = useCallback(() => {
     if (!selectedEvent) return
-    navigate(`/novels/${novelId}/structure?${buildStructureJumpParams(selectedEvent).toString()}`)
+    navigate(buildWorkspaceRoute(novelId, `structure?${buildStructureJumpParams(selectedEvent).toString()}`))
   }, [navigate, novelId, selectedEvent])
 
   const getStructureTagsForEvent = useCallback(

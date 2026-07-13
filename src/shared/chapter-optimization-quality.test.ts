@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildChapterOptimizationQualityGate } from './chapter-optimization-quality'
+import {
+  buildChapterOptimizationQualityGate,
+  repairNotButDefinitionPatterns,
+} from './chapter-optimization-quality'
 
 describe('chapter-optimization-quality', () => {
   it('blocks optimized drafts when strong AI flavor is not reduced', () => {
@@ -38,5 +41,22 @@ describe('chapter-optimization-quality', () => {
     expect(gate.safeToApply).toBe(true)
     expect(gate.optimizedStrongAiFlavorCount).toBeLessThan(gate.originalStrongAiFlavorCount)
     expect(gate.optimizedDriftScore).toBeLessThanOrEqual(gate.originalDriftScore)
+  })
+
+  it('splits definition-style not-but sentences without changing their facts', () => {
+    const original = '机房记录不是报警清除，是参数修改。延时从一点八秒改成二点五秒。'
+    const repaired = repairNotButDefinitionPatterns(original)
+
+    expect(repaired).toBe('机房记录并非报警清除。实际是参数修改。延时从一点八秒改成二点五秒。')
+    expect(buildChapterOptimizationQualityGate(original, repaired).safeToApply).toBe(true)
+  })
+
+  it('blocks a candidate that trades one strong AI pattern for stacked similes', () => {
+    const original = '他把钥匙压在桌边，等电梯重新启动。'
+    const optimized = '走廊像一条绷紧的弦，灯光像冷水一样铺开，脚步又像钉子一样敲在地上。'
+    const gate = buildChapterOptimizationQualityGate(original, optimized)
+
+    expect(gate.safeToApply).toBe(false)
+    expect(gate.warnings.join('\n')).toContain('强 AI 味命中未下降')
   })
 })

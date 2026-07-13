@@ -35,6 +35,7 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getCharacterBatchPreset } from '../../../shared/creation-tools'
 import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions, parseWorldRulesJson } from '../../../shared/genre-system'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
@@ -771,7 +772,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       }
       if (plan.recommended.create === 0) {
         setAgentWorkflowStage('reviewed')
-        message.info('分析完成：当前人物生态无需新增角色，请先处理更新或合并建议。')
+        message.info(getUserFacingMessage('character.noNewCharacters'))
         return
       }
 
@@ -835,7 +836,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       setAgentWorkflowStage('committed')
       await Promise.all([loadPage(committed.createdCharacterIds[0] || null, 1), loadGraph()])
       notifyWorkspaceMutation()
-      message.success(`已提交 ${committed.createdCharacterIds.length} 位审校通过的人物。`)
+      message.success(getUserFacingMessage('character.batchCommitted', { count: committed.createdCharacterIds.length }))
     } catch (error) {
       console.error(error)
       setAgentWorkflowStage('blocked')
@@ -971,10 +972,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
           </Button>
           <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>按数量生成</Button>
           <Button icon={<ApartmentOutlined />} loading={generating} onClick={() => { setWorkspaceView('graph'); void handleGenerateRelations() }}>AI 修复·关系网络</Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/arc-center?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/arc-center`)}>
+          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `arc-center?tab=characters&characterId=${selectedCharacter.id}` : 'arc-center'))}>
             去人物弧线
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/resistance?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/resistance?tab=characters`)}>
+          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `resistance?tab=characters&characterId=${selectedCharacter.id}` : 'resistance?tab=characters'))}>
             去反派与阻力
           </Button>
           <Button icon={<UserAddOutlined />} onClick={handleNew}>新建人物</Button>

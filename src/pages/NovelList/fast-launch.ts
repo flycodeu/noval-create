@@ -12,6 +12,9 @@ export interface FastLaunchDraftInput {
   coreConflict: string
   tabooRules: string
   endgameDirection: string
+  sourceIdea?: string
+  titleHint?: string
+  synopsisHint?: string
   targetWords: number
   writingContractTags?: string[]
 }
@@ -125,14 +128,23 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
   const coreConflict = normalizeLine(input.coreConflict)
   const tabooRules = normalizeLine(input.tabooRules)
   const endgameDirection = normalizeLine(input.endgameDirection)
+  const sourceIdea = normalizeLine(input.sourceIdea || '')
   const writingContractTags = normalizeWritingContractTags(input.writingContractTags)
-  const title = deriveTitle({ genreLabel, protagonistStart, coreHook })
-  const synopsis = `${protagonistStart}，因 ${coreHook} 被迫卷入 ${coreConflict}，最终走向 ${endgameDirection}。`
-  const userBackground = [
+  const title = clipText(normalizeLine(input.titleHint || '') || deriveTitle({ genreLabel, protagonistStart, coreHook }), 40)
+  const synopsis = clipText(
+    normalizeLine(input.synopsisHint || '') || `${protagonistStart}，因 ${coreHook} 被迫卷入 ${coreConflict}，最终走向 ${endgameDirection}。`,
+    240,
+  )
+  const structuredBackground = [
     `题材：${genreLabel}`,
     `主角起点：${protagonistStart}`,
     `核心钩子：${coreHook}`,
+    `核心冲突：${coreConflict}`,
+    `终局方向：${endgameDirection}`,
   ].join('\n')
+  const userBackground = sourceIdea
+    ? [`作者原始描述：\n${sourceIdea}`, `开书卡提取：\n${structuredBackground}`].join('\n\n')
+    : structuredBackground
   const expandedBackground = [
     `核心冲突：${coreConflict}`,
     `创作禁区：${tabooRules}`,
@@ -233,7 +245,7 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
       premise: `${coreHook} 将主角从“${protagonistStart}”推入不可回避的主线。`,
     },
     protagonist: {
-      fullName: '主角（待命名）',
+      fullName: '主角',
       roleType: 'protagonist',
       background: protagonistStart,
       goals: endgameDirection,
@@ -241,7 +253,7 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
       speechPattern: '谨慎、克制、被逼到角落时会变得直接。',
     },
     antagonist: {
-      fullName: '主要阻力（待命名）',
+      fullName: '主要阻力',
       roleType: 'antagonist',
       background: `主线阻力围绕“${coreConflict}”持续施压。`,
       goals: `阻止主角完成“${endgameDirection}”。`,

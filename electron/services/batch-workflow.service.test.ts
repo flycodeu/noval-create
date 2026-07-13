@@ -271,7 +271,7 @@ vi.mock('./task.service', () => ({
   }),
 }))
 
-import { __testing } from './batch-workflow.service'
+import { __testing, startFactionAutoGenerateWorkflow } from './batch-workflow.service'
 import { generateCharacterBatchChunk } from './character.service'
 import {
   loadSubplotAutoGenerateContext,
@@ -335,6 +335,37 @@ describe('chapter batch workflow', () => {
     feedbackPauseSignals.clear()
     nextTaskId = 1000
     vi.mocked(getDb).mockReturnValue(createDbMock() as never)
+  })
+
+  it('pauses a pending task instead of waiting forever when the child timeout expires', async () => {
+    taskRows.set(88, {
+      id: 88,
+      novelId: 1,
+      type: 'chapter_generate',
+      runnerType: 'workflow',
+      status: 'running',
+      progressJson: JSON.stringify({ status: 'running', currentBatch: 1 }),
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    })
+
+    const task = await __testing.waitForWorkflowTask(88, 20)
+
+    expect(task.status).toBe('paused')
+    expect(task.errorMessage).toContain('超时')
+    expect(getProgress(88)).toMatchObject({
+      status: 'paused',
+      lastError: expect.stringContaining('超时'),
+    })
+  })
+
+  it('coalesces concurrent starts for the same novel and workflow type', async () => {
+    const [firstTaskId, secondTaskId] = await Promise.all([
+      startFactionAutoGenerateWorkflow(1, { count: 1, batchSize: 1 } as never),
+      startFactionAutoGenerateWorkflow(1, { count: 1, batchSize: 1 } as never),
+    ])
+
+    expect(firstTaskId).toBe(secondTaskId)
+    expect([...taskRows.values()].filter((task) => task.type === 'faction_auto_generate')).toHaveLength(1)
   })
 
   it('keeps large entity workflow limits aligned with parsed options', () => {

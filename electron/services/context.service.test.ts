@@ -103,6 +103,7 @@ import type {
 import {
   allocateChapterContext,
   buildStoryProfile,
+  buildBackgroundText,
   buildRecallSnapshot,
   buildWritingContextUsageSnapshot,
   buildPreviousChapterContextFeed,
@@ -1252,5 +1253,20 @@ describe('buildStoryProfile source/canon grounding', () => {
     await buildStoryProfile(1, { ensureStructure: false })
 
     expect(ensureStoryStructure).not.toHaveBeenCalled()
+  })
+})
+
+describe('buildBackgroundText', () => {
+  it('keeps the author wording alongside the expanded background', () => {
+    const text = buildBackgroundText({
+      userBackground: '我只想写殡仪馆夜班，不要先解释世界。',
+      expandedBackground: '夜班工作受制度、时间和遗体交接记录约束。',
+      synopsis: '一名夜班工作人员发现异常。',
+    } as never)
+
+    expect(text).toContain('作者原始描述：')
+    expect(text).toContain('不要先解释世界')
+    expect(text).toContain('整理后的背景：')
+    expect(text.indexOf('作者原始描述')).toBeLessThan(text.indexOf('整理后的背景'))
   })
 })

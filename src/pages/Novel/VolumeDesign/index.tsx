@@ -4,6 +4,7 @@ import { Alert, Button, Form, Input, Select, Space, Spin, Switch, Tag, message }
 import { SaveOutlined, BarsOutlined, LinkOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type {
   EndgameCommitment,
   ResistanceTrack,
@@ -332,8 +333,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
           >
             卷后审计
           </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
-            去章节合同
+          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'outline'))}>
+            去故事大纲
           </Button>
         </Space>
       )}

@@ -133,6 +133,9 @@ export const AGENT_TOOL_SCOPES = Object.freeze({
 
 export const DESKTOP_AGENT_TOOL_SCOPES = Object.freeze(Object.values(AGENT_TOOL_SCOPES))
 
+// The local web surface shares the same database and explicit user workflow as
+// desktop. Canonical writes remain approval-bound, but are intentionally
+// available after the browser user confirms the operation.
 export const WEB_PREVIEW_AGENT_TOOL_SCOPES = Object.freeze([
   AGENT_TOOL_SCOPES.discover,
   AGENT_TOOL_SCOPES.novelRead,
@@ -141,9 +144,11 @@ export const WEB_PREVIEW_AGENT_TOOL_SCOPES = Object.freeze([
   AGENT_TOOL_SCOPES.auditRead,
   AGENT_TOOL_SCOPES.draftCreate,
   AGENT_TOOL_SCOPES.draftReview,
+  AGENT_TOOL_SCOPES.canonWrite,
   AGENT_TOOL_SCOPES.qualityRun,
   AGENT_TOOL_SCOPES.qualityRepair,
   AGENT_TOOL_SCOPES.recommendationRead,
+  AGENT_TOOL_SCOPES.recommendationRecord,
 ])
 
 export const MCP_AGENT_TOOL_DEFAULT_SCOPES = Object.freeze([

@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input, InputNumber, List, Modal, Select, Space, Sp
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { useNavigate } from 'react-router-dom'
 import type {
   Character,
@@ -486,7 +487,7 @@ export default function FactionsPage({ novelId }: Props) {
           {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
           {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止任务</Button> : null}
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存势力</Button>
-          <Button icon={<ShareAltOutlined />} onClick={() => navigate(selectedItem ? `/novels/${novelId}/resistance?tab=factions&factionId=${selectedItem.id}` : `/novels/${novelId}/resistance?tab=factions`)}>去反派与阻力</Button>
+          <Button icon={<ShareAltOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedItem ? `resistance?tab=factions&factionId=${selectedItem.id}` : 'resistance?tab=factions'))}>去反派与阻力</Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>新建势力</Button>
           <Button icon={<ReloadOutlined />} onClick={() => {
             void refresh()

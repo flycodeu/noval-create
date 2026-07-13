@@ -289,7 +289,7 @@ export default function ModelManager() {
           setIsNew(false)
           setEditorOpen(false)
         } else {
-          message.warning('保存返回成功，但当前列表没有读到新配置。请刷新配置列表确认。')
+          message.warning(getUserFacingMessage('model.saveListNotRefreshed'))
         }
         return
       }
@@ -326,7 +326,7 @@ export default function ModelManager() {
           if (nextConfigs.length === 0) {
             setTestResult(null)
           }
-          message.success('配置已删除')
+          message.success(getUserFacingMessage('model.deleted'))
         } catch (error) {
           message.error(getErrorMessage(error, 'common.deleteFailed'))
         }
@@ -392,7 +392,7 @@ export default function ModelManager() {
       })
       setSourceTestResult(null)
       setSourceEditorOpen(false)
-      message.success('来源检索配置已保存')
+      message.success(getUserFacingMessage('model.sourceSearchSaved'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {

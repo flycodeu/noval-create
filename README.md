@@ -331,6 +331,14 @@ npm install
 npm run dev
 ```
 
+网页端本地运行（与桌面端共用 SQLite、服务层和任务事件流）：
+
+```bash
+npm run dev:web
+```
+
+网页端默认地址为 `http://127.0.0.1:4175`，本地后端为 `http://127.0.0.1:8787`。网页端的 `/rpc`、`/health` 和 `/events` 均由 Vite 转发到本地后端；`/events` 使用 SSE 推送任务进度、流式输出和生成阶段事件。
+
 ## 8. 常用命令
 
 ### 开发
@@ -350,6 +358,7 @@ npm run test:smoke
 npm run test:migrations
 npm run test:workflow-resilience
 npm run test:workspace-routing
+npm run test:web-rpc
 ```
 
 ### 数据库

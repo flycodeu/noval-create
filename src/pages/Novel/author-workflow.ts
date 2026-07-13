@@ -1,4 +1,5 @@
 import type { Novel, QualityDashboardData } from '../../types'
+import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { resolveOperatingMode } from '../../shared/operating-mode'
 import {
   getAssetBloatSignal,
@@ -510,5 +511,5 @@ export function buildAuthorWorkflowSummary(
 
 export function resolveAuthorWorkflowHref(novelId: number, entryPage: AuthorWorkflowRouteKey): string {
   if (entryPage === 'task-center') return '/tasks'
-  return `/novels/${novelId}/${entryPage}`
+  return buildWorkspaceRoute(novelId, entryPage)
 }

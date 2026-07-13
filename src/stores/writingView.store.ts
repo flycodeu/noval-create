@@ -102,6 +102,10 @@ function buildFinishedSnapshot(
   }
 }
 
+function hasTaskMismatch(current: WritingGenerationSnapshot, taskId?: number | null): boolean {
+  return taskId != null && current.taskId != null && current.taskId !== taskId
+}
+
 export const useWritingViewStore = create<WritingViewStore>((set) => ({
   activeGeneration: idleGeneration,
   lastGenerationByChapter: {},
@@ -119,6 +123,7 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
       ? { ...state.activeGeneration, taskId }
       : state.activeGeneration
     const previousChapterSnapshot = state.lastGenerationByChapter[chapterId] ?? idleGeneration
+    if (hasTaskMismatch(previousChapterSnapshot, taskId)) return {}
     return {
       activeGeneration,
       lastGenerationByChapter: {
@@ -135,7 +140,12 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
   updateGenerationStage: (input) => set((state) => {
     const resolvedChapterId = input.chapterId ?? state.activeGeneration.chapterId
     if (!resolvedChapterId) return {}
+    const activeMatches = state.activeGeneration.chapterId !== resolvedChapterId
+      || !hasTaskMismatch(state.activeGeneration, input.taskId)
+    const previousChapterSnapshot = state.lastGenerationByChapter[resolvedChapterId] ?? idleGeneration
+    if (hasTaskMismatch(previousChapterSnapshot, input.taskId)) return {}
     const activeGeneration: WritingGenerationSnapshot = state.activeGeneration.chapterId === resolvedChapterId
+      && activeMatches
       ? {
         ...state.activeGeneration,
         taskId: input.taskId ?? state.activeGeneration.taskId,
@@ -149,7 +159,6 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
           : null,
       }
       : state.activeGeneration
-    const previousChapterSnapshot = state.lastGenerationByChapter[resolvedChapterId] ?? idleGeneration
     const nextChapterSnapshot: WritingGenerationSnapshot = {
       ...previousChapterSnapshot,
       chapterId: resolvedChapterId,
@@ -173,11 +182,13 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
   }),
 
   completeGeneration: (input) => set((state) => {
+    const previousChapterSnapshot = state.lastGenerationByChapter[input.chapterId]
+    if (previousChapterSnapshot && hasTaskMismatch(previousChapterSnapshot, input.taskId)) return {}
     const previousActive = state.activeGeneration.chapterId === input.chapterId
       ? state.activeGeneration
       : idleGeneration
     const nextSnapshot = buildFinishedSnapshot(
-      state.lastGenerationByChapter[input.chapterId] ?? previousActive,
+      previousChapterSnapshot ?? previousActive,
       input,
     )
     return {

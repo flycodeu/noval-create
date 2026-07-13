@@ -288,7 +288,7 @@ export default function Outline({ novelId }: Props) {
           await window.electron.outline.deleteArc(arc.id)
           await loadData()
           notifyWorkspaceMutation()
-          message.success('故事弧已删除。')
+          message.success(getUserFacingMessage('outline.arcDeleted'))
         } catch (error) {
           console.error(error)
           message.error(getErrorMessage(error, 'common.deleteFailed'))

@@ -30,6 +30,7 @@ import {
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 
 interface Props {
   novelId: number
@@ -335,8 +336,8 @@ export default function ProjectBriefPage({ novelId }: Props) {
           >
             AI 补全·空白字段
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
-            去主题与文风
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'core-settings'))}>
+            去基础设定
           </Button>
         </Space>
       )}

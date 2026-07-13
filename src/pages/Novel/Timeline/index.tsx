@@ -26,6 +26,7 @@ import {
 import { useTimelineWorkspace } from './useTimelineWorkspace'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { getErrorMessage } from '@/utils/user-facing-message'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import '../components/boards.css'
 import './index.css'
 
@@ -209,7 +210,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           <Button icon={<PlusOutlined />} onClick={workspace.handleNew}>
             {TIMELINE_TEXT.create}
           </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'resistance'))}>
             去反派与阻力
           </Button>
           {eventDraftButton}

@@ -47,6 +47,8 @@ import {
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { usePlanningDraft } from '../shared/planning-draft'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { getWorkspaceViewModeForNovel } from '../../../shared/operating-mode'
 
 interface Props {
   novelId: number
@@ -293,6 +295,7 @@ export default function CoreSettings({ novelId }: Props) {
     [currentNovel, stats],
   )
   const storyReady = isStoryPlotReady(currentNovel)
+  const nextDesignPage = getWorkspaceViewModeForNovel(currentNovel) === 'professional' ? 'endgame' : 'volume-design'
   const watchedBatchCount = Form.useWatch('subplot_batch_count', form) as number | undefined
   const batchCount = clampBatchCount(watchedBatchCount)
   const estimatedChapterTotal = useMemo(
@@ -632,6 +635,11 @@ export default function CoreSettings({ novelId }: Props) {
           requirements,
         })
 
+        if (result.failedSteps > 0) {
+          message.error(getUserFacingMessage('coreSettings.partialGenerationBlocked', { count: result.failedSteps }))
+          return
+        }
+
         applyGeneratedResult(result)
         void saveAppliedDraft({
           story_goal: result.story_goal || values.story_goal || '',
@@ -956,8 +964,8 @@ export default function CoreSettings({ novelId }: Props) {
           <Button icon={<DeleteOutlined />} danger onClick={clearStoryDesign}>
             清空当前设计
           </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
-            去结构页
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, nextDesignPage))}>
+            {nextDesignPage === 'endgame' ? '去终局设计' : '去卷级设计'}
           </Button>
         </Space>
       )}
@@ -1031,10 +1039,16 @@ export default function CoreSettings({ novelId }: Props) {
 
       {generationProgress ? (
         <Alert
-          type="info"
+          type={generationProgress.status === 'failed' ? 'error' : generationProgress.status === 'skipped' ? 'warning' : 'info'}
           showIcon
-          message={`AI 正在生成：${generationProgress.label}`}
-          description={generationProgress.detail || '正在根据当前设定整理故事骨架。'}
+          message={generationProgress.status === 'running'
+            ? `AI 正在生成：${generationProgress.label}`
+            : generationProgress.status === 'skipped'
+              ? `已跳过：${generationProgress.label}`
+              : generationProgress.status === 'failed'
+                ? `生成失败：${generationProgress.label}`
+                : `已完成：${generationProgress.label}`}
+          description={generationProgress.detail || generationProgress.warning || (generationProgress.status === 'running' ? '正在根据当前设定整理故事骨架。' : '')}
         />
       ) : null}
 

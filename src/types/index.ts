@@ -4739,6 +4739,7 @@ export interface ChapterOptimizeResult {
   factGuard: ChapterOptimizationFactGuard
   qualityGate: ChapterOptimizationQualityGate
   taskId?: number
+  optimizationPasses?: number
 }
 
 export type WorkspaceQualityIssueKind =
@@ -5477,6 +5478,13 @@ declare global {
           connected: boolean
           lastError: string
           message: string
+          capabilities?: {
+            realDatabase: boolean
+            writesEnabled: boolean
+            generationEnabled: boolean
+            eventStreaming: boolean
+          }
+          demoFallbackEnabled?: boolean
         }>
       }
       agentTools: {

@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 
 function splitVendorChunk(id: string): string | undefined {
   if (!id.includes('node_modules')) return undefined
+  if (/[\\/]node_modules[\\/](?:react|react-dom|react-router|react-router-dom)[\\/]/.test(id)) {
+    return 'vendor-react'
+  }
   if (/[\\/]node_modules[\\/](?:reactflow|@reactflow)[\\/]/.test(id)) {
     return 'vendor-reactflow'
   }
@@ -21,6 +24,7 @@ export default defineConfig({
     proxy: {
       '/rpc': { target: 'http://127.0.0.1:8787', changeOrigin: true },
       '/health': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/events': { target: 'http://127.0.0.1:8787', changeOrigin: true },
     },
   },
   plugins: [react()],

@@ -53,6 +53,11 @@ export interface StoryContext {
   novelTitle: string
   genre: string
   background: string
+  projectBriefSummary: string
+  premiseSummary: string
+  endgameDesignSummary: string
+  themeVoiceSummary: string
+  writingRulesSummary: string
   worldRulesSummary: string
   protagonistReference: string
   protagonistRule: string
@@ -377,7 +382,12 @@ function buildBaseContext(context: StoryContext): string {
     `小说：${context.novelTitle}`,
     `题材：${context.genre}`,
     context.background ? `故事背景：${context.background}` : '',
+    context.projectBriefSummary ? `项目立项：${context.projectBriefSummary}` : '',
+    context.premiseSummary ? `基础设定：${context.premiseSummary}` : '',
     context.worldRulesSummary ? `世界规则：${context.worldRulesSummary}` : '',
+    context.themeVoiceSummary ? `主题与文风：${context.themeVoiceSummary}` : '',
+    context.writingRulesSummary ? `反模板规则：${context.writingRulesSummary}` : '',
+    context.endgameDesignSummary ? `终局承诺：${context.endgameDesignSummary}` : '',
     `主角称呼：${context.protagonistReference}`,
     `主角命名规则：${context.protagonistRule}`,
   ].filter(Boolean).join('\n')
@@ -588,7 +598,12 @@ function buildBaseContextV2(context: StoryContext): string {
     `小说：${context.novelTitle}`,
     `题材：${context.genre}`,
     context.background ? `故事背景：${context.background}` : '',
+    context.projectBriefSummary ? `项目立项：${context.projectBriefSummary}` : '',
+    context.premiseSummary ? `基础设定：${context.premiseSummary}` : '',
     context.worldRulesSummary ? `世界规则：${context.worldRulesSummary}` : '',
+    context.themeVoiceSummary ? `主题与文风：${context.themeVoiceSummary}` : '',
+    context.writingRulesSummary ? `反模板规则：${context.writingRulesSummary}` : '',
+    context.endgameDesignSummary ? `终局承诺：${context.endgameDesignSummary}` : '',
     `主角称呼：${context.protagonistReference}`,
     `主角命名规则：${context.protagonistRule}`,
   ].filter(Boolean).join('\n')
@@ -930,6 +945,11 @@ async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise
     novelTitle: profile.novelTitle,
     genre: profile.genre,
     background: profile.background,
+    projectBriefSummary: profile.projectBriefSummary,
+    premiseSummary: profile.premiseSummary,
+    endgameDesignSummary: profile.endgameDesignSummary,
+    themeVoiceSummary: profile.themeVoiceSummary,
+    writingRulesSummary: profile.writingRulesSummary,
     worldRulesSummary: profile.worldRulesSummary,
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
@@ -1324,6 +1344,26 @@ export async function generateCoreSettings(
     }
   }
 
+  const skipStep = <T>(
+    key: CoreSettingsGenerationStepKey,
+    label: string,
+    fallbackValue: T,
+    reason: string,
+  ): T => {
+    steps.push({ key, label, status: 'skipped', warning: reason })
+    warnings.push(`${label}：${reason}`)
+    sendProgress(sender, {
+      novelId: context.novelId,
+      step: key,
+      label,
+      status: 'skipped',
+      completed: completedCount,
+      total,
+      warning: reason,
+    })
+    return fallbackValue
+  }
+
   const storyGoal = await runStep('story_goal', '故事核心目标', '', async () => ({
     value: await runPlainTextStep(
       context,
@@ -1333,25 +1373,30 @@ export async function generateCoreSettings(
     ),
   }))
 
-  const coreConflict = await runStep('core_conflict', '核心冲突', '', async () => ({
-    value: await runPlainTextStep(
-      context,
-      buildCoreConflictPromptV2(context, storyGoal),
-      '核心冲突',
-      `【故事核心目标】${storyGoal}`,
-    ),
-  }))
+  const coreConflict = clean(storyGoal)
+    ? await runStep('core_conflict', '核心冲突', '', async () => ({
+      value: await runPlainTextStep(
+        context,
+        buildCoreConflictPromptV2(context, storyGoal),
+        '核心冲突',
+        `【故事核心目标】${storyGoal}`,
+      ),
+    }))
+    : skipStep('core_conflict', '核心冲突', '', '故事核心目标未生成，不能安全推导核心冲突。')
 
-  const mainPlot = await runStep('main_plot', '主线剧情', '', async () => ({
-    value: await runPlainTextStep(
-      context,
-      buildMainPlotPromptV2(context, storyGoal, coreConflict),
-      '主线剧情',
-      `【故事核心目标】${storyGoal}\n【核心冲突】${coreConflict}`,
-    ),
-  }))
+  const mainPlot = clean(coreConflict)
+    ? await runStep('main_plot', '主线剧情', '', async () => ({
+      value: await runPlainTextStep(
+        context,
+        buildMainPlotPromptV2(context, storyGoal, coreConflict),
+        '主线剧情',
+        `【故事核心目标】${storyGoal}\n【核心冲突】${coreConflict}`,
+      ),
+    }))
+    : skipStep('main_plot', '主线剧情', '', '核心冲突未生成，不能安全推导主线剧情。')
 
-  const subplotsResult = await runStep('sub_plots_list', '支线剧情', [] as SubPlotDraft[], async () => {
+  const subplotsResult = clean(mainPlot)
+    ? await runStep('sub_plots_list', '支线剧情', [] as SubPlotDraft[], async () => {
     const baseProgress = {
       novelId: context.novelId,
       step: 'sub_plots_list' as const,
@@ -1374,9 +1419,11 @@ export async function generateCoreSettings(
       status,
       error: error || (subplots.length > 0 ? undefined : '支线未生成，本次将继续生成节奏和结局'),
     }
-  })
+      })
+    : skipStep('sub_plots_list', '支线剧情', [] as SubPlotDraft[], '主线剧情未生成，本次不自动扩写支线。')
 
-  const rhythm = await runStep('rhythm', '叙事节奏', DEFAULT_RHYTHM, async () => {
+  const rhythm = clean(mainPlot)
+    ? await runStep('rhythm', '叙事节奏', DEFAULT_RHYTHM, async () => {
     const raw = await runPromptTask(
       context.novelId,
       context.modelConfigId,
@@ -1390,9 +1437,11 @@ export async function generateCoreSettings(
     }
 
     return { value: normalizeRhythm(parsed) }
-  })
+      })
+    : skipStep('rhythm', '叙事节奏', DEFAULT_RHYTHM, '主线剧情未生成，本次不自动推导节奏。')
 
-  const endingPayload = await runStep('ending', '结局设定', {
+  const endingPayload = clean(mainPlot)
+    ? await runStep('ending', '结局设定', {
     ending_type: 'open' as CoreSettingsEndingType,
     ending: '',
   }, async () => {
@@ -1433,7 +1482,11 @@ export async function generateCoreSettings(
       },
       warning: parsed ? undefined : '结局类型解析失败，已按文案语义推断',
     }
-  })
+      })
+    : skipStep('ending', '结局设定', {
+      ending_type: 'open' as CoreSettingsEndingType,
+      ending: '',
+    }, '主线剧情未生成，本次不自动推导结局。')
 
   return {
     story_goal: storyGoal,

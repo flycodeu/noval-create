@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { cleanAiFieldText } from '../../src/utils/text'
 import { generateChapterEmbeddings } from './embedding.service'
@@ -57,7 +57,10 @@ import {
   hasBlockingGuardrailFindings,
   shouldForceRepair,
 } from '../../src/shared/content-guardrails'
-import { buildChapterOptimizationQualityGate } from '../../src/shared/chapter-optimization-quality'
+import {
+  buildChapterOptimizationQualityGate,
+  repairNotButDefinitionPatterns,
+} from '../../src/shared/chapter-optimization-quality'
 import {
   markChapterContextCurrent,
   markNovelContextChanged,
@@ -7167,6 +7170,7 @@ function buildChapterOptimizationPrompt(params: {
     '硬性要求：',
     '- 保留原章节既有事实、人物、地点、道具、能力边界、事件顺序和结尾钩子。',
     '- 不新增角色、势力、武器、物资、地名、设定规则或背景真相。',
+    '- 原文中的日期、年份、数量、编号、距离、等级和时间表达必须逐字保留；拿不准时保留原句，不得把数字改写成新数字或同义数量。',
     '- 不改变章节核心剧情，只修语言自然度、连贯性、AI味、空泛细节和读者理解阻力。',
     '- 删除 AI 过程文字、提示词残留、括号说明、破折号解释腔。',
     '- 避免“不是……而是……”、双重比喻、排比堆叠、手指/指节/指腹/瞳孔/声音很轻等低价值细节。',
@@ -7187,11 +7191,16 @@ function buildChapterOptimizationPrompt(params: {
 }
 
 function normalizeOptimizedChapterContent(raw: string): string {
-  return cleanAiFieldText(raw)
+  const normalized = cleanAiFieldText(raw)
     .replace(/^(?:优化后的完整章节正文|优化后的正文|正文)[:：]\s*/u, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+  return repairNotButDefinitionPatterns(normalized)
 }
+
+// 整章优化属于高风险候选生成：只要后验事实/质量门未通过，就允许严格保真重试，
+// 但把总调用数封顶，避免线上请求在模型不稳定时失控。
+const MAX_CHAPTER_OPTIMIZATION_PASSES = 4
 
 function uniqueNonEmpty(values: string[]): string[] {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))]
@@ -7282,9 +7291,13 @@ export async function optimizeChapterContent(
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter || !chapter.content?.trim()) throwUserFacingError('chapter.contentEmpty')
+  const originalContent = chapter.content
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  const guardrailFindings = collectQualityGuardrailFindings(chapter.content)
+  const genreName = novel?.genreId
+    ? db.select({ name: genres.name }).from(genres).where(eq(genres.id, novel.genreId)).all()[0]?.name
+    : undefined
+  const guardrailFindings = collectQualityGuardrailFindings(originalContent)
   const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
   const issueSummary = dedupeTextList([
     ...formatQualityGuardrailSummary(guardrailFindings),
@@ -7304,13 +7317,15 @@ export async function optimizeChapterContent(
     executionMode: executionMode.mode,
     resolutionSource: executionMode.source,
     modelConfigId: novel?.modelConfigId || undefined,
-    temperatureCap: 0.5,
+    // 优化是审校型任务，降低采样波动，避免候选稿重新引入已拦截的 AI 句式。
+    temperatureCap: 0.35,
     maxTokensFactor: 1.12,
     extraReasons: ['整章优化只生成候选稿，不直接覆盖正文。'],
   })
 
   let optimizationTaskId: number | undefined
-  const raw = await runChatTask({
+  let optimizationPasses = 1
+  const runOptimization = (extraRequirements?: string) => runChatTask({
     type: 'review',
     novelId: chapter.novelId,
     relatedEntityType: 'chapter',
@@ -7321,30 +7336,85 @@ export async function optimizeChapterContent(
       content: buildChapterOptimizationPrompt({
         chapter,
         novelTitle: novel?.title || '未命名小说',
-        genreName: undefined,
-        content: chapter.content,
+        genreName,
+        content: originalContent,
         issueSummary,
-        extraRequirements: options.extraRequirements?.trim(),
+        extraRequirements: extraRequirements?.trim(),
       }),
     }],
     modelConfigId: route.modelConfigId,
     chatOpts: buildChatOptionsFromRoute(route),
     onSuccess: (_output, taskId) => { optimizationTaskId = taskId },
   })
-  const optimizedContent = normalizeOptimizedChapterContent(raw)
+
+  const raw = await runOptimization(options.extraRequirements)
+  let optimizedContent = normalizeOptimizedChapterContent(raw)
   if (!optimizedContent) throwUserFacingError('writing.rewriteNoResult')
-  const factGuard = buildChapterOptimizationFactGuard(chapter.novelId, chapter.content, optimizedContent)
-  const qualityGate = buildChapterOptimizationQualityGate(chapter.content, optimizedContent)
+  let factGuard = buildChapterOptimizationFactGuard(chapter.novelId, originalContent, optimizedContent)
+  let qualityGate = buildChapterOptimizationQualityGate(originalContent, optimizedContent)
+
+  // A rejected candidate is still useful feedback, but bounded constrained passes
+  // let the online flow repair the exact fact/quality failure before surfacing a
+  // result. The UI still blocks applying every unsafe result.
+  const originalNumbers = extractNarrativeNumbers(originalContent).slice(0, 80)
+  while ((!factGuard.safeToApply || !qualityGate.safeToApply) && optimizationPasses < MAX_CHAPTER_OPTIMIZATION_PASSES) {
+    const gateFeedback = dedupeTextList([...factGuard.warnings, ...qualityGate.warnings])
+    const targetedQualityFixes = [
+      qualityGate.optimizedGuardrailHits.includes('not_but_definition_pattern')
+        ? '禁止使用“不是……而是……”或“不是……是……”句式；需要转折时拆成两个直接陈述句。'
+        : '',
+      qualityGate.optimizedGuardrailHits.includes('dash_abuse')
+        ? '删除解释型破折号，把解释改成动作、事实或独立短句。'
+        : '',
+      qualityGate.optimizedGuardrailHits.includes('low_value_body_detail')
+        ? '删除低价值身体部位和模板化感官描写，换成能推动事件的具体动作。'
+        : '',
+      qualityGate.optimizedGuardrailHits.includes('paragraph_simile_stacking')
+        ? '拆开段内密集比喻：每个段落最多保留一处必要比喻，其余改成具体动作、物件变化或可验证后果。'
+        : '',
+    ].filter(Boolean)
+    const retryRequirements = [
+      options.extraRequirements?.trim(),
+      `上一版候选未通过事实或质量门；本轮必须优先保真。具体失败项：${gateFeedback.join('；') || '未通过后验检查'}`,
+      targetedQualityFixes.length > 0 ? `针对性语言修复：${targetedQualityFixes.join('；')}` : '',
+      originalNumbers.length > 0
+        ? `原文数字/日期/数量/编号清单（必须逐字保留）：${originalNumbers.join('、')}`
+        : '',
+      '不要为了改写句子而增删或换算任何数字；无法确认时直接保留原句。输出前逐项核对事实和质量门失败项。',
+    ].filter(Boolean).join('\n')
+    try {
+      optimizationPasses += 1
+      const retryRaw = await runOptimization(retryRequirements)
+      const retryContent = normalizeOptimizedChapterContent(retryRaw)
+      if (!retryContent) continue
+
+      const retryFactGuard = buildChapterOptimizationFactGuard(chapter.novelId, originalContent, retryContent)
+      const retryQualityGate = buildChapterOptimizationQualityGate(originalContent, retryContent)
+      const currentWarningCount = factGuard.warnings.length + qualityGate.warnings.length
+      const retryWarningCount = retryFactGuard.warnings.length + retryQualityGate.warnings.length
+      if (
+        (retryFactGuard.safeToApply && retryQualityGate.safeToApply)
+        || retryWarningCount < currentWarningCount
+      ) {
+        optimizedContent = retryContent
+        factGuard = retryFactGuard
+        qualityGate = retryQualityGate
+      }
+    } catch (retryError) {
+      console.warn(`[chapter:optimize] 严格保真重试失败，沿用最近候选 chapter=${chapterId}`, retryError)
+    }
+  }
 
   return {
-    originalContent: chapter.content,
+    originalContent,
     optimizedContent,
     issueSummary,
     guardrailHits: qualityGate.originalGuardrailHits,
-    changed: optimizedContent.trim() !== chapter.content.trim(),
+    changed: optimizedContent.trim() !== originalContent.trim(),
     warnings: dedupeTextList([...factGuard.warnings, ...qualityGate.warnings]),
     factGuard,
     qualityGate,
+    optimizationPasses,
     ...(optimizationTaskId ? { taskId: optimizationTaskId } : {}),
   }
 }
