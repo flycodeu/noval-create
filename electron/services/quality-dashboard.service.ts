@@ -46,6 +46,7 @@ import type {
   VoiceEvolutionProfile,
   WorldStateAlert,
 } from '../../src/types'
+import type { QualityAgentDashboardSnapshot } from '../../src/shared/quality-agent-dashboard'
 import {
   estimateChapterCountFromOperatingMode,
   getOperatingModePolicy,
@@ -104,6 +105,7 @@ import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
 import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
 import { parseTaskProgress } from './task.service'
+import { listArtifacts } from './artifact.service'
 import {
   getHardContractValidationItems,
   isContractValidationBlockerVerdict,
@@ -2426,6 +2428,268 @@ function buildChapterFunctionSummary(
   }
 }
 
+const QUALITY_AGENT_ARTIFACT_KINDS = new Set([
+  'quality_report',
+  'repair_plan',
+  'quality_repair_draft',
+  'quality_repair_review',
+  'quality_comparison',
+])
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function asNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function asNumberList(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is number => typeof item === 'number' && Number.isInteger(item) && item > 0)
+    : []
+}
+
+function asRecordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
+    : []
+}
+
+function qualityAgentStatus(value: unknown): 'passed' | 'needs_revision' | 'blocked' {
+  return value === 'passed' || value === 'needs_revision' ? value : 'blocked'
+}
+
+function qualityAgentComparisonStatus(value: unknown): 'improved' | 'mixed' | 'regressed' | 'unchanged' {
+  return value === 'improved' || value === 'mixed' || value === 'regressed' ? value : 'unchanged'
+}
+
+function buildEmptyQualityAgentDashboardSnapshot(): QualityAgentDashboardSnapshot {
+  return {
+    artifactHistory: [],
+    repairPlans: [],
+    candidateDiffs: [],
+    independentReviews: [],
+    comparisons: [],
+    summary: {
+      artifactCount: 0,
+      reportCount: 0,
+      repairPlanCount: 0,
+      candidateDiffCount: 0,
+      independentReviewCount: 0,
+      comparisonCount: 0,
+    },
+  }
+}
+
+function buildQualityAgentDashboardSnapshot(novelId: number): QualityAgentDashboardSnapshot {
+  try {
+    const artifacts = listArtifacts({ novelId, limit: 200 })
+      .filter((artifact) => QUALITY_AGENT_ARTIFACT_KINDS.has(artifact.kind))
+    const artifactHistory = artifacts.map((artifact) => ({
+      id: artifact.id,
+      kind: artifact.kind,
+      status: artifact.status,
+      version: artifact.version,
+      parentArtifactId: artifact.parentArtifactId,
+      reviewArtifactId: artifact.reviewArtifactId,
+      contentHash: artifact.contentHash,
+      contextVersion: artifact.contextVersion,
+      taskId: artifact.taskId,
+      createdAt: artifact.createdAt,
+      updatedAt: artifact.updatedAt,
+    }))
+    const reportArtifacts = artifacts.filter((artifact) => {
+      const content = asRecord(artifact.content)
+      return artifact.kind === 'quality_report' && content?.schemaVersion === 'agent-quality-report-v1'
+    })
+    const latestReportArtifact = reportArtifacts[0]
+    const latestReport = latestReportArtifact
+      ? (() => {
+        const content = asRecord(latestReportArtifact.content) || {}
+        const profile = asRecord(content.profile)
+        const scope = asRecord(content.scope)
+        const findings = asRecordList(content.findings)
+        const semantic = asRecord(content.semanticReview)
+        return {
+          artifactId: latestReportArtifact.id,
+          status: qualityAgentStatus(content.status),
+          profile: asString(profile?.profile, '未标注'),
+          scopeLabel: asString(scope?.label, '未标注范围'),
+          score: asNumber(content.score),
+          confidenceLowerBound: asNumber(content.confidenceLowerBound),
+          coverageRate: asNumber(content.coverageRate),
+          contextVersion: asNumber(content.contextVersion, latestReportArtifact.contextVersion),
+          findingsCount: findings.length,
+          blockingFindingCount: findings.filter((finding) => asBoolean(finding.blocking)).length,
+          summary: asString(content.summary),
+          ...(semantic ? {
+            semanticReview: {
+              coveredChapterCount: asNumber(semantic.coveredChapterCount),
+              totalScopeChapterCount: asNumber(semantic.totalScopeChapterCount),
+              semanticCoverageRate: asNumber(semantic.semanticCoverageRate),
+              validEvidenceCount: asNumber(semantic.validEvidenceCount),
+              rejectedEvidenceCount: asNumber(semantic.rejectedEvidenceCount),
+              independentModelReview: asBoolean(semantic.independentModelReview),
+            },
+          } : {}),
+        }
+      })()
+      : undefined
+
+    const repairPlans = artifacts
+      .filter((artifact) => artifact.kind === 'repair_plan')
+      .map((artifact) => {
+        const content = asRecord(artifact.content) || {}
+        return {
+          artifactId: artifact.id,
+          status: content.status === 'ready' ? 'ready' as const : 'blocked' as const,
+          sourceReportArtifactId: asString(content.sourceReportArtifactId),
+          sourceContextVersion: asNumber(content.sourceContextVersion, artifact.contextVersion),
+          summary: asString(content.summary),
+          items: asRecordList(content.items).map((item) => ({
+            id: asString(item.id),
+            priority: asNumber(item.priority),
+            severity: asString(item.severity, 'warning'),
+            blocking: asBoolean(item.blocking),
+            objective: asString(item.objective),
+            targetChapterNums: asNumberList(item.targetChapterNums),
+            dependencies: asStringList(item.dependencies),
+            acceptanceCriteriaCount: asStringList(item.acceptanceCriteria).length,
+            regressionGuardsCount: asStringList(item.regressionGuards).length,
+            requiresHumanApproval: asBoolean(item.requiresHumanApproval),
+          })),
+        }
+      })
+      .slice(0, 8)
+
+    const candidateDiffs = artifacts
+      .filter((artifact) => artifact.kind === 'quality_repair_draft')
+      .map((artifact) => {
+        const content = asRecord(artifact.content) || {}
+        return {
+          artifactId: artifact.id,
+          status: artifact.status,
+          reviewArtifactId: artifact.reviewArtifactId,
+          sourceReportArtifactId: asString(content.sourceReportArtifactId),
+          sourceContextVersion: asNumber(content.sourceContextVersion, artifact.contextVersion),
+          summary: asString(content.summary),
+          readyForHumanReview: asBoolean(content.readyForHumanReview),
+          chapters: asRecordList(content.chapters).map((chapter) => {
+            const factGuard = asRecord(chapter.factGuard)
+            const qualityGate = asRecord(chapter.qualityGate)
+            return {
+              chapterId: asNumber(chapter.chapterId),
+              chapterNum: asNumber(chapter.chapterNum),
+              title: asString(chapter.title),
+              originalContentHash: asString(chapter.originalContentHash),
+              optimizedContentHash: asString(chapter.optimizedContentHash),
+              changed: asBoolean(chapter.changed),
+              issueSummary: asStringList(chapter.issueSummary),
+              warnings: asStringList(chapter.warnings),
+              factGuardStatus: asBoolean(factGuard?.safeToApply) ? '通过' : '阻塞',
+              qualityGateStatus: asBoolean(qualityGate?.safeToApply) ? '通过' : '阻塞',
+              taskId: asNullableNumber(chapter.taskId),
+            }
+          }),
+        }
+      })
+      .slice(0, 8)
+
+    const independentReviews = artifacts
+      .filter((artifact) => artifact.kind === 'quality_repair_review')
+      .map((artifact) => {
+        const content = asRecord(artifact.content) || {}
+        return {
+          artifactId: artifact.id,
+          status: artifact.status,
+          score: asNumber(content.score),
+          readyForHumanDecision: asBoolean(content.readyForHumanDecision),
+          independentModelReview: asBoolean(content.independentModelReview),
+          summary: asString(content.summary),
+          chapters: asRecordList(content.chapters).map((chapter) => {
+            const checks = asRecordList(chapter.checks)
+            return {
+              chapterId: asNumber(chapter.chapterId),
+              chapterNum: asNumber(chapter.chapterNum),
+              title: asString(chapter.title),
+              reviewTaskId: asNumber(chapter.reviewTaskId),
+              separateReviewTask: asBoolean(chapter.separateReviewTask),
+              status: asString(chapter.status, 'blocked'),
+              score: asNumber(chapter.score),
+              evidenceCoverageRate: asNumber(chapter.evidenceCoverageRate),
+              checkCount: checks.length,
+              evidencedCheckCount: checks.filter((check) => asStringList(check.evidence).length > 0).length,
+              regressionRiskCount: asRecordList(chapter.regressionRisks).length,
+            }
+          }),
+        }
+      })
+      .slice(0, 8)
+
+    const comparisons = artifacts
+      .filter((artifact) => artifact.kind === 'quality_comparison')
+      .map((artifact) => {
+        const content = asRecord(artifact.content) || {}
+        return {
+          artifactId: artifact.id,
+          createdAt: artifact.createdAt,
+          baselineReportArtifactId: asString(content.baselineReportArtifactId),
+          candidateReportArtifactId: asString(content.candidateReportArtifactId),
+          status: qualityAgentComparisonStatus(content.status),
+          scoreDelta: asNumber(content.scoreDelta),
+          coverageRateDelta: asNumber(content.coverageRateDelta),
+          confidenceLowerBoundDelta: asNumber(content.confidenceLowerBoundDelta),
+          introducedBlockerCount: asNumber(content.introducedBlockerCount),
+          candidateStatus: qualityAgentStatus(content.candidateStatus),
+          readyForHumanReview: asBoolean(content.readyForHumanReview),
+          summary: asString(content.summary),
+          warnings: asStringList(content.warnings),
+        }
+      })
+      .slice(0, 8)
+
+    return {
+      artifactHistory,
+      latestReport,
+      repairPlans,
+      candidateDiffs,
+      independentReviews,
+      comparisons,
+      summary: {
+        artifactCount: artifactHistory.length,
+        reportCount: reportArtifacts.length,
+        repairPlanCount: repairPlans.length,
+        candidateDiffCount: candidateDiffs.length,
+        independentReviewCount: independentReviews.length,
+        comparisonCount: comparisons.length,
+        ...(latestReport ? { latestContextVersion: latestReport.contextVersion } : {}),
+      },
+    }
+  } catch (error) {
+    console.warn('[quality-dashboard] failed to load agent quality artifacts', error)
+    return buildEmptyQualityAgentDashboardSnapshot()
+  }
+}
+
 export function getQualityDashboardData(novelId: number, options: QualityDashboardOptions = {}): QualityDashboardData {
   const db = getDb()
   const novelMeta = db.select({
@@ -4614,6 +4878,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       ? `已追踪 ${dialogueSnapshot.dialogueFingerprintStats.analyzedCharacterCount} 名角色对白；漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount} 名。`
       : '当前还没有足够的对白样本来分析角色声音进化。',
   }
+  const agentQualityObservability = buildQualityAgentDashboardSnapshot(novelId)
 
   return {
     dashboardVersion: 'v2-repair',
@@ -4636,6 +4901,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       }),
       recentContextWindow: currentOperatingModePolicy.recentContextWindow,
     },
+    agentQualityObservability,
     millionRuntimeObservability,
     genreGroundingObservability: {
       genreName: novelMeta?.genreName || '未设置题材',

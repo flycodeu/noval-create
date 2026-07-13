@@ -151,6 +151,8 @@ describe('applyChapterWritebackRun', () => {
     expect(result.activeRun?.errorMessage).toContain('上下文版本已从 v3 变为 v4')
     expect(syncStatus.blockedGeneration).toBe(true)
     expect(syncStatus.readyForNextChapter).toBe(false)
+    expect(syncStatus.candidateReady).toBe(true)
+    expect(syncStatus.canonApplied).toBe(false)
     expect(syncStatus.contextVersion).toBe(4)
     expect(diff?.writebackStatus).toBe('pending')
   })

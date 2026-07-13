@@ -1,6 +1,6 @@
 ﻿import { WebContents } from 'electron'
 import { createHash } from 'node:crypto'
-import { asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
@@ -34,6 +34,7 @@ import {
   buildScenePlanPrompt,
 } from './story-prompts'
 import { getQualityDashboardData } from './quality-dashboard.service'
+import { syncNovelLifecycleStatus } from './novel-lifecycle.service'
 import {
   createTask,
   executeChatTask,
@@ -3648,6 +3649,8 @@ export function createChapter(novelId: number, data: Partial<{
     writebackStatusJson: JSON.stringify({
       phase: 'idle',
       retryCount: 0,
+      candidateReady: false,
+      canonApplied: true,
       blockedGeneration: false,
       readyForNextChapter: true,
       contextVersion: novel?.contextVersion || 1,
@@ -3655,6 +3658,7 @@ export function createChapter(novelId: number, data: Partial<{
     }),
   }).run()
   ensureStoryStructure(novelId)
+  syncNovelLifecycleStatus(novelId)
   return Number(result.lastInsertRowid)
 }
 
@@ -3712,6 +3716,7 @@ export function updateChapter(id: number, data: Partial<{
       totalWords,
       updatedAt: new Date().toISOString(),
     }).where(eq(novels.id, chapter.novelId)).run()
+    syncNovelLifecycleStatus(chapter.novelId)
   }
 
   if (data.content !== undefined && chapter) {
@@ -3791,6 +3796,7 @@ export function deleteChapter(id: number) {
     }
     refreshStoryMemoryCheckpoints(current.novelId)
     scheduleDialogueFingerprintRefresh(current.novelId)
+    syncNovelLifecycleStatus(current.novelId)
     return
   }
   db.delete(chapters).where(eq(chapters.id, id)).run()
@@ -5086,10 +5092,66 @@ async function continueChapterContent(
   }
 }
 
+const chapterGenerationLocks = new Map<number, Promise<number>>()
+
+function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect): string {
+  const source = [
+    chapter.id,
+    chapter.contextVersion || 1,
+    chapter.updatedAt || '',
+    chapter.status || 'outline',
+  ].join('|')
+  return `chapter-write:${chapter.id}:${createHash('sha256').update(source).digest('hex').slice(0, 24)}`
+}
+
+function findExistingChapterGenerationTask(chapterId: number, idempotencyKey: string) {
+  const db = getDb()
+  return db.select({ id: tasks.id })
+    .from(tasks)
+    .where(and(
+      eq(tasks.type, 'chapter_write'),
+      eq(tasks.runnerType, 'workflow'),
+      eq(tasks.relatedEntityType, 'chapter'),
+      eq(tasks.relatedEntityId, chapterId),
+      eq(tasks.idempotencyKey, idempotencyKey),
+    ))
+    .all()[0] || null
+}
+
+/**
+ * Single-flight plus a durable idempotency key for one chapter generation
+ * request. The in-memory promise handles same-process double clicks; the task
+ * unique index and key make the request replay-safe across backend calls.
+ */
 export async function generateChapterContent(
   chapterId: number,
   sender?: WebContents,
   options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
+): Promise<number> {
+  const inFlight = chapterGenerationLocks.get(chapterId)
+  if (inFlight) return inFlight
+
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  const idempotencyKey = buildChapterGenerationIdempotencyKey(chapter)
+  const existing = findExistingChapterGenerationTask(chapterId, idempotencyKey)
+  if (existing) return Number(existing.id)
+
+  const run = generateChapterContentInternal(chapterId, sender, options, idempotencyKey)
+  chapterGenerationLocks.set(chapterId, run)
+  try {
+    return await run
+  } finally {
+    if (chapterGenerationLocks.get(chapterId) === run) chapterGenerationLocks.delete(chapterId)
+  }
+}
+
+async function generateChapterContentInternal(
+  chapterId: number,
+  sender?: WebContents,
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
+  idempotencyKey?: string,
 ): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -5115,6 +5177,7 @@ export async function generateChapterContent(
     modelConfigId: novel.modelConfigId || undefined,
     relatedEntityType: 'chapter',
     relatedEntityId: chapterId,
+    idempotencyKey,
     runnerType: 'workflow',
     pipelineRole: 'planner',
     pipelineStage: 'pending',

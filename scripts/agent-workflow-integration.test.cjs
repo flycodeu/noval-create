@@ -28,6 +28,7 @@ async function run() {
   const workflowService = project('electron/services/character-draft-workflow.service.ts')
   const recommendationService = project('electron/services/recommendation-governance.service.ts')
   const auditService = project('electron/services/agent-tool-audit.service.ts')
+  const qualityDashboardService = project('electron/services/quality-dashboard.service.ts')
   const { novelForgeToolRegistry } = project('electron/application/novelforge-tool-registry.ts')
   const { DESKTOP_AGENT_TOOL_SCOPES } = project('src/shared/tool-contracts/index.ts')
   initDb()
@@ -351,6 +352,17 @@ async function run() {
     assert.equal(qualityComparison.ok, true)
     assert.equal(qualityComparison.data.profileCompatible, true)
     assert.equal(qualityComparison.data.scopeCompatible, true)
+    const comparisonArtifacts = artifactService.listArtifacts({
+      novelId: recommendationNovelId,
+      kind: 'quality_comparison',
+      limit: 10,
+    })
+    assert.equal(comparisonArtifacts.length, 1)
+    const qualityDashboard = qualityDashboardService.getQualityDashboardData(recommendationNovelId, { includeDialogueInsights: false })
+    assert.ok(qualityDashboard.agentQualityObservability)
+    assert.ok(qualityDashboard.agentQualityObservability.summary.reportCount >= 2)
+    assert.equal(qualityDashboard.agentQualityObservability.summary.comparisonCount, 1)
+    assert.ok(qualityDashboard.agentQualityObservability.comparisons.some((entry) => entry.artifactId === comparisonArtifacts[0].id))
     const qualityAudits = auditService.queryAgentToolInvocations({ novelId: recommendationNovelId, limit: 20 })
     assert.ok(qualityAudits.some((entry) => entry.toolId === 'novelforge.quality.run_evaluation' && entry.status === 'success'))
     assert.ok(qualityAudits.some((entry) => entry.toolId === 'novelforge.quality.run_semantic_evaluation' && entry.errorCode === 'QUALITY_REPORT_STALE'))

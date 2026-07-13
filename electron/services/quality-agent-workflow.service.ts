@@ -1215,7 +1215,7 @@ export function compareAgentQualityRuns(
     && candidate.content.status === 'passed'
     && introducedBlockerCount === 0
     && !hasRegression
-  return {
+  const comparison: AgentQualityRunComparison = {
     schemaVersion: 'agent-quality-comparison-v1',
     baselineReportArtifactId: baseline.id,
     candidateReportArtifactId: candidate.id,
@@ -1234,4 +1234,21 @@ export function compareAgentQualityRuns(
     summary: `${status === 'improved' ? '质量改善' : status === 'regressed' ? '出现回归' : status === 'mixed' ? '改善与回归并存' : '未见实质变化'}：关闭 ${closedFindings.length} 条，持续 ${persistingFindings.length} 条，新引入 ${introducedFindings.length} 条，综合分 ${scoreDelta >= 0 ? '+' : ''}${scoreDelta}。`,
     warnings,
   }
+  try {
+    createArtifact({
+      novelId: input.novelId,
+      kind: 'quality_comparison',
+      status: 'reviewed',
+      parentArtifactId: candidate.id,
+      content: comparison,
+      contextVersion: candidate.content.contextVersion,
+      producerType: 'system',
+      producerId: 'quality-agent-compare-v1',
+      producerClient: 'novelforge-quality-agent-workflow',
+      idempotencyKey: `quality-comparison:${hashArtifactContent({ baselineReportArtifactId: baseline.id, candidateReportArtifactId: candidate.id })}`,
+    })
+  } catch (error) {
+    return mapArtifactError(error)
+  }
+  return comparison
 }

@@ -67,12 +67,17 @@ const OUT_ROOT = path.resolve(workspaceRoot, 'out', 'novel-flow-audit')
 const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(10, Number(process.env.NOVELFORGE_FLOW_CONTENT_CHAPTERS) || 2))
 const CHAPTER_TARGET_WORDS = Math.max(1200, Math.min(3600, Number(process.env.NOVELFORGE_FLOW_CHAPTER_TARGET_WORDS) || 1800))
 const CHAPTER_EXECUTION_MODE = process.env.NOVELFORGE_FLOW_EXECUTION_MODE || 'balanced'
+const FLOW_MAX_OUTPUT_TOKENS = Math.max(1024, Math.min(65536, Number(process.env.NOVELFORGE_FLOW_MAX_OUTPUT_TOKENS) || 0))
 const WORD_FLOOR_RATIO = 0.8
 const FULL_STORY_DESIGN = process.env.NOVELFORGE_FLOW_FULL_STORY_DESIGN === '1'
 const MAP_TARGET_COUNT = 5
 const ITEM_TARGET_COUNT = 5
 const CHARACTER_TARGET_COUNT = 5
 const THREAD_TARGET_COUNT = 5
+
+function flowChatOptions() {
+  return FLOW_MAX_OUTPUT_TOKENS > 0 ? { maxTokens: FLOW_MAX_OUTPUT_TOKENS } : undefined
+}
 
 const PROJECT_FILTER = new Set(
   String(process.env.NOVELFORGE_FLOW_PROJECTS || '')
@@ -720,6 +725,7 @@ async function generateStoryDesign(novelId, project, services, buildStorySetting
     const raw = await services.taskService.runChatTask({
       type: 'review',
       novelId,
+      chatOpts: flowChatOptions(),
       messages: [{ role: 'user', content: buildCompactStoryDesignPrompt(project, rows) }],
     })
     const parsed = extractJson(raw)
@@ -800,6 +806,7 @@ async function parseOutlineJsonArrayWithRepair({ raw, label, novelId, modelConfi
     novelId,
     modelConfigId,
     retryable: true,
+    chatOpts: flowChatOptions(),
     messages: [{
       role: 'user',
       content: [
@@ -860,8 +867,9 @@ async function generateChapterOutlines(novelId, project, context, services, mode
           previousChapterOutlines: all.map((item) => `第${item.chapterNum}章《${item.title}》：${clip(item.outline, 90)}`).join('\n') || undefined,
           protagonistReference: context.protagonistReference,
           protagonistRule: context.protagonistRule,
-        }),
-      }],
+          }),
+        }],
+      chatOpts: flowChatOptions(),
     })
     fs.writeFileSync(path.join(context.outDir, `${project.key}.outline-${batch.start}-${batch.end}.raw.txt`), String(raw || ''), 'utf8')
     const parsed = await parseOutlineJsonArrayWithRepair({
@@ -1113,6 +1121,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
           type: 'review',
           novelId,
           modelConfigId: chapter?.modelConfigId || undefined,
+          chatOpts: flowChatOptions(),
           messages: [
             { role: 'system', content: '你是小说扩写编辑。只输出扩写后的正文，不要解释，不要 Markdown。' },
             {
@@ -1148,6 +1157,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
         const rewritten = await services.taskService.runChatTask({
           type: 'review',
           novelId,
+          chatOpts: flowChatOptions(),
           messages: [
             { role: 'system', content: '你是小说改稿编辑。只输出改写后的完整正文，不要解释，不要 Markdown。' },
             {
@@ -1620,7 +1630,13 @@ async function main() {
   const db = getDb()
   const rawDb = getSqlite()
   const modelConfig = getDefaultModelConfig(db, schema)
-  if (!modelConfig) throw new Error('No model config found. Configure a default model before running flow audit.')
+  const databasePath = path.join(app.getPath('userData'), 'novelforge.db')
+  if (!modelConfig) {
+    throw new Error(`No usable model config found. Configure a provider, model, and API key in Settings > Model Config, mark it as default, then rerun flow audit. Database: ${databasePath}`)
+  }
+  if (!modelConfig.apiKey && modelConfig.provider !== 'custom') {
+    throw new Error(`The default model config ${modelConfig.provider}:${modelConfig.modelId} has no API key. Configure the real provider credential in Settings > Model Config, then rerun flow audit. Database: ${databasePath}`)
+  }
 
   const runStamp = process.env.NOVELFORGE_FLOW_RUN_STAMP || new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)
   const outDir = path.join(OUT_ROOT, runStamp)
@@ -1650,7 +1666,7 @@ async function main() {
 
   const runInfo = {
     generatedAt: nowIso(),
-    databasePath: path.join(app.getPath('userData'), 'novelforge.db'),
+    databasePath,
     modelLabel: `${modelConfig.provider}:${modelConfig.modelId}#${modelConfig.id}`,
     runStamp,
     contentChapterCount: CONTENT_CHAPTER_COUNT,

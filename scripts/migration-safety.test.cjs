@@ -145,6 +145,7 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'artifacts').has('context_version'))
   assert.ok(getColumns(db, 'approval_grants').has('input_hash'))
   assert.ok(getColumns(db, 'tool_invocations').has('redacted_input_json'))
+  assert.ok(getColumns(db, 'tasks').has('idempotency_key'))
   assert.ok(getColumns(db, 'novels').has('historical_profile_json'))
   assert.ok(getColumns(db, 'novels').has('source_ledger_json'))
   assert.ok(getColumns(db, 'novels').has('chapter_source_usage_json'))
@@ -266,6 +267,7 @@ function testFreshDbIsIdempotent() {
       '0040_recommendation_evaluation_governance',
       '0041_agent_artifacts_approvals_and_audit',
       '0042_recommendation_work_state_lock_history',
+      '0043_generation_idempotency_keys',
     ])
 
     runMigrations(db)
@@ -387,6 +389,7 @@ function testPartialSchemaCanResume() {
       '0040_recommendation_evaluation_governance',
       '0041_agent_artifacts_approvals_and_audit',
       '0042_recommendation_work_state_lock_history',
+      '0043_generation_idempotency_keys',
     ])
 
     const configs = db.prepare(`
@@ -517,6 +520,7 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0040_recommendation_evaluation_governance'))
     assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
     assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
+    assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
   } finally {
     db.close()
   }
@@ -606,6 +610,7 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getMigrationIds(db).includes('0040_recommendation_evaluation_governance'))
     assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
     assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
+    assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
   } finally {
     db.close()
   }

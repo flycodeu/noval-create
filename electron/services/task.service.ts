@@ -164,6 +164,7 @@ interface CreateTaskOptions {
   modelConfigId?: number
   relatedEntityType?: string
   relatedEntityId?: number
+  idempotencyKey?: string
   inputJson?: string
   runnerType?: TaskRunnerType
   retryable?: boolean
@@ -724,29 +725,46 @@ function normalizeTaskErrorMessage(error: unknown, fallback = '未知错误'): s
 
 export async function createTask(opts: CreateTaskOptions): Promise<number> {
   const db = getDb()
-  const result = db.insert(tasks).values({
-    type: opts.type,
-    novelId: opts.novelId,
-    modelConfigId: opts.modelConfigId,
-    relatedEntityType: opts.relatedEntityType,
-    relatedEntityId: opts.relatedEntityId,
-    inputJson: opts.inputJson,
-    runnerType: opts.runnerType || 'chat',
-    retryable: opts.retryable ? 1 : 0,
-    parentTaskId: opts.parentTaskId,
-    currentChildTaskId: opts.currentChildTaskId,
-    pipelineRole: opts.pipelineRole,
-    pipelineStage: opts.pipelineStage,
-    upstreamTaskId: opts.upstreamTaskId,
-    contractVersion: opts.contractVersion,
-    canonRunId: opts.canonRunId,
-    recoveryHintJson: opts.recoveryHintJson,
-    controlJson: opts.controlJson,
-    progressJson: opts.progressJson,
-    status: opts.status || 'pending',
-  }).run()
+  const idempotencyKey = opts.idempotencyKey?.trim() || undefined
+  const findExisting = () => idempotencyKey
+    ? db.select({ id: tasks.id }).from(tasks).where(eq(tasks.idempotencyKey, idempotencyKey)).all()[0]
+    : undefined
 
-  return Number(result.lastInsertRowid)
+  const existing = findExisting()
+  if (existing) return Number(existing.id)
+
+  try {
+    const result = db.insert(tasks).values({
+      type: opts.type,
+      novelId: opts.novelId,
+      modelConfigId: opts.modelConfigId,
+      relatedEntityType: opts.relatedEntityType,
+      relatedEntityId: opts.relatedEntityId,
+      idempotencyKey,
+      inputJson: opts.inputJson,
+      runnerType: opts.runnerType || 'chat',
+      retryable: opts.retryable ? 1 : 0,
+      parentTaskId: opts.parentTaskId,
+      currentChildTaskId: opts.currentChildTaskId,
+      pipelineRole: opts.pipelineRole,
+      pipelineStage: opts.pipelineStage,
+      upstreamTaskId: opts.upstreamTaskId,
+      contractVersion: opts.contractVersion,
+      canonRunId: opts.canonRunId,
+      recoveryHintJson: opts.recoveryHintJson,
+      controlJson: opts.controlJson,
+      progressJson: opts.progressJson,
+      status: opts.status || 'pending',
+    }).run()
+
+    return Number(result.lastInsertRowid)
+  } catch (error) {
+    // The unique index closes the select/insert race between two renderer or
+    // backend requests. Re-read the winner and make the operation idempotent.
+    const winner = findExisting()
+    if (winner) return Number(winner.id)
+    throw error
+  }
 }
 
 export function listTasks(novelId?: number) {

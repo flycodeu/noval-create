@@ -35,6 +35,7 @@ interface ProjectCardProps {
   onOpen: () => void
   onDelete: () => void
   onExport: (format: string) => void
+  onStatusChange: (status: Novel['status']) => void
 }
 
 export default function ProjectCard({
@@ -43,6 +44,7 @@ export default function ProjectCard({
   onOpen,
   onDelete,
   onExport,
+  onStatusChange,
 }: ProjectCardProps) {
   const status = STATUS_META[novel.status]
   const targetWords = typeof novel.targetWords === 'number' ? novel.targetWords : 0
@@ -54,6 +56,14 @@ export default function ProjectCard({
     { key: 'export-md', icon: <ExportOutlined />, label: '导出 Markdown', onClick: () => onExport('md') },
     { key: 'export-docx', icon: <ExportOutlined />, label: '导出 DOCX', onClick: () => onExport('docx') },
     { key: 'export-epub', icon: <ExportOutlined />, label: '导出 EPUB', onClick: () => onExport('epub') },
+    { type: 'divider' },
+    ...(['draft', 'writing', 'completed', 'archived'] as Novel['status'][])
+      .filter((nextStatus) => nextStatus !== novel.status)
+      .map((nextStatus) => ({
+        key: `status-${nextStatus}`,
+        label: `标记为${STATUS_META[nextStatus].label}`,
+        onClick: () => onStatusChange(nextStatus),
+      })),
     { type: 'divider' },
     { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true, onClick: onDelete },
   ]

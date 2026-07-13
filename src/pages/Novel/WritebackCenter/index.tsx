@@ -375,6 +375,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
             { label: '当前章节', value: centerData?.chapter ? `第${centerData.chapter.chapterNum}章 ${centerData.chapter.title || ''}`.trim() : '未选择' },
             { label: '当前运行', value: activeRun ? `#${activeRun.id}` : '暂无' },
             { label: '运行状态', value: activeRun ? runStatusLabel(activeRun.status) : '未生成' },
+            { label: '正典状态', value: centerData?.writebackStatus.canonApplied ? '正典已应用' : centerData?.writebackStatus.candidateReady ? '候选已生成·待应用' : '暂无候选' },
           ]}
         />
       )}
@@ -382,6 +383,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
         <>
           <WorkspaceMetric label="事实抽取" value={centerData?.extracts.length || 0} tone="cool" />
           <WorkspaceMetric label="回写候选" value={centerData?.diffs.length || 0} />
+          <WorkspaceMetric label="候选状态" value={centerData?.writebackStatus.candidateReady ? '已生成' : '暂无'} tone={centerData?.writebackStatus.candidateReady ? 'warm' : 'cool'} />
           <WorkspaceMetric label="待确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending').length} tone="warm" />
           <WorkspaceMetric label="人工确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending' && item.verificationStatus !== 'auto_ready').length} tone="warm" />
           <WorkspaceMetric label="已写回" value={(centerData?.diffs || []).filter((item) => item.writebackStatus === 'applied').length} />

@@ -945,6 +945,7 @@ export const tasks = sqliteTable('tasks', {
   errorMessage: text('error_message'),
   relatedEntityType: text('related_entity_type'),
   relatedEntityId: integer('related_entity_id'),
+  idempotencyKey: text('idempotency_key'),
   runnerType: text('runner_type').default('chat'),
   retryable: integer('retryable').default(0),
   parentTaskId: integer('parent_task_id'),

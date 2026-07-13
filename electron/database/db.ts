@@ -607,6 +607,7 @@ export function runMigrations(sqlite: Database.Database) {
       error_message TEXT,
       related_entity_type TEXT,
       related_entity_id INTEGER,
+      idempotency_key TEXT,
       runner_type TEXT DEFAULT 'chat',
       retryable INTEGER DEFAULT 0,
       parent_task_id INTEGER,
@@ -2175,6 +2176,17 @@ export function runMigrations(sqlite: Database.Database) {
         ) >= 3 THEN RAISE(ABORT, 'RECOMMENDATION_SERIALIZING_WORK_LOCKED') END;
       END;
     `)
+  })
+
+  runMigrationStep(sqlite, '0043_generation_idempotency_keys', () => {
+    if (hasTable(sqlite, 'tasks')) {
+      ensureColumn(sqlite, 'tasks', 'idempotency_key', 'TEXT')
+      sqlite.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency
+          ON tasks(idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+      `)
+    }
   })
 }
 

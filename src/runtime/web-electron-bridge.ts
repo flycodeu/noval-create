@@ -15,6 +15,7 @@ import {
   isWebDemoPreviewEnabled,
   WEB_DEMO_PREVIEW_STORAGE_KEY,
 } from './web-preview-mode'
+import { normalizeWritebackSyncStatus } from '../shared/writeback-status'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
 type BridgeService = Record<string, BridgeMethod>
@@ -472,6 +473,7 @@ function createEmptyGlobalLockLibrary(novelId: number): GlobalLockLibrary {
 function createEmptyWritebackCenterData(chapter: Chapter | null): ChapterWritebackCenterData {
   return {
     chapter,
+    writebackStatus: normalizeWritebackSyncStatus(undefined),
     runs: [],
     activeRun: null,
     extracts: [],

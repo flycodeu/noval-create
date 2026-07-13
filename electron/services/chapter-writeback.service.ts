@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import type {
   Chapter as AppChapter,
   ChapterFactExtract as AppChapterFactExtract,
@@ -40,6 +40,7 @@ import * as itemService from './item.service'
 import * as characterArcService from './character-arc.service'
 import * as revisionTaskService from './revision-task.service'
 import { resolveChapterAssetImpacts } from './asset-impact.service'
+import { mergeWritebackSyncStatus, normalizeWritebackSyncStatus } from '../../src/shared/writeback-status'
 
 type ChapterRow = typeof chapters.$inferSelect
 type NovelRow = typeof novels.$inferSelect
@@ -350,60 +351,25 @@ function normalizeDecision(value: unknown): ChapterWritebackDecision {
 }
 
 function parseWritebackSyncStatus(raw: string | null | undefined, contextVersion = 1): WritebackSyncStatus {
-  if (!raw) {
-    return {
-      phase: 'idle',
-      retryCount: 0,
-      blockedGeneration: false,
-      readyForNextChapter: true,
-      contextVersion,
-      updatedAt: new Date().toISOString(),
-    }
-  }
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const phase = parsed.phase === 'idle'
-      || parsed.phase === 'preparing'
-      || parsed.phase === 'ready'
-      || parsed.phase === 'applying'
-      || parsed.phase === 'applied'
-      || parsed.phase === 'failed'
-      ? parsed.phase
-      : 'idle'
-    return {
-      phase,
-      runId: asPositiveNumber(parsed.runId) || undefined,
-      retryCount: asPositiveNumber(parsed.retryCount) || 0,
-      lastError: asText(parsed.lastError) || undefined,
-      blockedGeneration: asBooleanNumber(parsed.blockedGeneration, 0) === 1,
-      readyForNextChapter: asBooleanNumber(parsed.readyForNextChapter, 1) === 1,
-      contextVersion: asPositiveNumber(parsed.contextVersion) || contextVersion,
-      lastAttemptAt: asText(parsed.lastAttemptAt) || undefined,
-      updatedAt: asText(parsed.updatedAt) || new Date().toISOString(),
-    }
+    parsed = raw ? JSON.parse(raw) : undefined
   } catch {
-    return {
-      phase: 'idle',
-      retryCount: 0,
-      blockedGeneration: false,
-      readyForNextChapter: true,
-      contextVersion,
-      updatedAt: new Date().toISOString(),
-    }
+    parsed = undefined
   }
+  return normalizeWritebackSyncStatus(parsed, contextVersion)
 }
 
 function updateChapterWritebackSyncStatus(chapterId: number, patch: Partial<WritebackSyncStatus>): WritebackSyncStatus {
   const db = getDb()
   const chapter = getChapterRow(chapterId)
   const current = parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
-  const next: WritebackSyncStatus = {
-    ...current,
+  const next = mergeWritebackSyncStatus(current, {
     ...patch,
     retryCount: typeof patch.retryCount === 'number' ? patch.retryCount : current.retryCount,
     contextVersion: patch.contextVersion ?? current.contextVersion ?? chapter.contextVersion ?? 1,
     updatedAt: new Date().toISOString(),
-  }
+  })
   db.update(chapters).set({
     writebackStatusJson: safeStringify(next),
     updatedAt: new Date().toISOString(),
@@ -1527,8 +1493,10 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
     updateChapterWritebackSyncStatus(chapterId, {
       phase: 'ready',
       runId,
-      blockedGeneration: false,
-      readyForNextChapter: true,
+      candidateReady: true,
+      canonApplied: false,
+      blockedGeneration: true,
+      readyForNextChapter: false,
       lastError: undefined,
       lastAttemptAt: new Date().toISOString(),
       retryCount: currentSyncStatus.retryCount,
@@ -1589,8 +1557,12 @@ export async function getChapterWritebackCenterData(chapterId: number, runId?: n
   const activeRun = typeof runId === 'number' ? runs.find((item) => item.id === runId) || null : runs[0] || null
   const extracts = activeRun ? loadExtractRows(activeRun.id).map(mapExtractRow) : []
   const diffs = activeRun ? loadDiffRows(activeRun.id).map(mapDiffRow) : []
+  const writebackStatus = chapter
+    ? parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
+    : normalizeWritebackSyncStatus(undefined)
   return {
     chapter: chapter as unknown as AppChapter | null,
+    writebackStatus,
     runs: runs.map(mapRunRow),
     activeRun: activeRun ? mapRunRow(activeRun) : null,
     extracts,
@@ -1648,6 +1620,30 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
   const db = getDb()
   const run = getRunRow(runId)
   const chapter = getChapterRow(run.chapterId)
+
+  const claimableStatuses = retryFailedOnly
+    ? ['failed', 'partially_failed']
+    : ['draft', 'ready', 'partially_failed']
+  const claimResult = db.update(chapterWritebackRuns).set({
+    status: 'applying',
+    lastAttemptAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }).where(and(
+    eq(chapterWritebackRuns.id, run.id),
+    inArray(chapterWritebackRuns.status, claimableStatuses),
+  )).run()
+
+  if (!claimResult.changes) {
+    const latestRun = getRunRow(run.id)
+    if (latestRun.status === 'applying' || latestRun.status === 'applied' || latestRun.status === 'partially_failed') {
+      // Another caller owns the compare-and-set claim, or the run has already
+      // been applied. Returning the durable state makes repeated apply calls
+      // idempotent instead of replaying entity mutations.
+      return getChapterWritebackCenterData(latestRun.chapterId, latestRun.id)
+    }
+    return getChapterWritebackCenterData(latestRun.chapterId, latestRun.id)
+  }
+
   const sourceChapterVersion = run.sourceChapterVersion || 1
   const currentContextVersion = chapter.contextVersion || 1
   if (sourceChapterVersion !== currentContextVersion) {
@@ -1683,12 +1679,6 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
     retryCount: run.retryCount || 0,
     contextVersion: chapter.contextVersion || 1,
   })
-  db.update(chapterWritebackRuns).set({
-    status: 'applying',
-    lastAttemptAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterWritebackRuns.id, run.id)).run()
-
   const targetRows = loadDiffRows(run.id).filter((row) => {
     const confirmed = row.canonDecision === 'accepted' || row.canonDecision === 'edited'
     if (!confirmed) return false

@@ -25,6 +25,7 @@ import {
   type AiExecutionMode,
 } from '../../../shared/ai-execution'
 import { buildWorkspaceRoute, getChapterWritabilitySummary } from '../../../shared/novel-workspace'
+import { normalizeWritebackSyncStatus } from '../../../shared/writeback-status'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -304,7 +305,9 @@ const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) a
 const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
 const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
 const parseHookContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as HookContinuitySnapshot : null } catch { return null } }
-const parseWritebackStatus = (raw?: string) => { try { return raw ? JSON.parse(raw) as WritebackSyncStatus : null } catch { return null } }
+const parseWritebackStatus = (raw?: string) => {
+  try { return raw ? normalizeWritebackSyncStatus(JSON.parse(raw)) : null } catch { return null }
+}
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
@@ -377,7 +380,7 @@ const getPublishCheckDriftTagColor = (status?: 'worsening' | 'improving' | 'stab
 }
 const getWritebackPhaseLabel = (phase?: WritebackSyncStatus['phase']) => {
   if (phase === 'preparing') return '准备回写'
-  if (phase === 'ready') return '待确认'
+  if (phase === 'ready') return '候选已生成·待正典确认'
   if (phase === 'applying') return '正在应用'
   if (phase === 'applied') return '已应用'
   if (phase === 'failed') return '回写失败'
@@ -2584,7 +2587,7 @@ export default function Writing({ novelId }: Props) {
     const messages = [
       !chapterWritability.ready ? chapterWritability.summary : '',
       ...chapterWritability.risks,
-      currentWritebackStatus?.blockedGeneration
+      (currentWritebackStatus?.blockedGeneration || currentWritebackStatus?.canonApplied === false)
         ? `章后回写仍处于「${getWritebackPhaseLabel(currentWritebackStatus.phase)}」，先完成回写确认再继续生成。`
         : '',
     ].filter(Boolean)
@@ -2593,7 +2596,7 @@ export default function Writing({ novelId }: Props) {
       ready: Boolean(currentChapter) && messages.length === 0,
       messages,
     }
-  }, [chapterWritability, currentChapter, currentWritebackStatus?.blockedGeneration, currentWritebackStatus?.phase])
+  }, [chapterWritability, currentChapter, currentWritebackStatus?.blockedGeneration, currentWritebackStatus?.canonApplied, currentWritebackStatus?.phase])
 
   generationPreflightRef.current = generationPreflight
 
@@ -2788,13 +2791,13 @@ export default function Writing({ novelId }: Props) {
     {
       label: '回写状态',
       value: currentWritebackStatus
-        ? `${getWritebackPhaseLabel(currentWritebackStatus.phase)}${currentWritebackStatus.blockedGeneration ? ' · 已阻断后续生成' : ''}`
+        ? `${getWritebackPhaseLabel(currentWritebackStatus.phase)} · ${currentWritebackStatus.candidateReady ? '候选已生成' : '暂无候选'} · ${currentWritebackStatus.canonApplied ? '正典已应用' : '正典待应用'}${currentWritebackStatus.blockedGeneration ? ' · 已阻断后续生成' : ''}`
         : '未记录',
     },
     {
       label: '下一章就绪',
       value: currentWritebackStatus
-        ? (currentWritebackStatus.readyForNextChapter === false ? '等待回写完成' : '已就绪')
+        ? (currentWritebackStatus.canonApplied && currentWritebackStatus.readyForNextChapter ? '正典已应用 · 下一章已就绪' : currentWritebackStatus.candidateReady ? '候选已生成 · 等待正典应用' : '等待回写候选')
         : '未记录',
     },
     {
@@ -3182,8 +3185,8 @@ export default function Writing({ novelId }: Props) {
                             <Alert
                               showIcon
                               type={currentWritebackStatus.phase === 'failed' ? 'error' : 'warning'}
-                              message="等待回写完成"
-                              description={`当前处于 ${getWritebackPhaseLabel(currentWritebackStatus.phase)}。${currentWritebackStatus.lastError ? `原因：${currentWritebackStatus.lastError}` : '系统会在章后回写完成前暂停后续章节生成。'}`}
+                              message={currentWritebackStatus.candidateReady ? '候选已生成，等待正典应用' : '等待回写候选'}
+                              description={`当前处于 ${getWritebackPhaseLabel(currentWritebackStatus.phase)}，正典${currentWritebackStatus.canonApplied ? '已应用' : '尚未应用'}。${currentWritebackStatus.lastError ? `原因：${currentWritebackStatus.lastError}` : '完成正典应用前，系统会暂停后续章节生成。'}`}
                             />
                           ) : null}
                           {publishCheck ? (

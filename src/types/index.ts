@@ -1,5 +1,6 @@
 import type { GenreWorldRules } from '../shared/genre-system'
 import type { NovelOperatingMode } from '../shared/operating-mode'
+import type { QualityAgentDashboardSnapshot } from '../shared/quality-agent-dashboard'
 import type {
   SubPlotDraft,
   SubplotGenerationRequest,
@@ -350,7 +351,12 @@ export interface WritebackSyncStatus {
   runId?: number
   retryCount: number
   lastError?: string
+  /** 候选事实/差异已经生成，但不代表已经写入正典。 */
+  candidateReady: boolean
+  /** 当前回写运行中的已确认项已经成功应用到正典。 */
+  canonApplied: boolean
   blockedGeneration: boolean
+  /** 兼容旧 UI 的派生字段，等价于 canonApplied && !blockedGeneration。 */
   readyForNextChapter: boolean
   contextVersion?: number
   lastAttemptAt?: string
@@ -1347,6 +1353,7 @@ export interface Task {
   errorMessage?: string
   relatedEntityType?: string
   relatedEntityId?: number
+  idempotencyKey?: string
   runnerType?: 'chat' | 'stream' | 'workflow'
   retryable?: number
   parentTaskId?: number
@@ -2957,6 +2964,7 @@ export interface ChapterWritebackCoverageItem {
 
 export interface ChapterWritebackCenterData {
   chapter: Chapter | null
+  writebackStatus: WritebackSyncStatus
   runs: ChapterWritebackRun[]
   activeRun: ChapterWritebackRun | null
   extracts: ChapterFactExtract[]
@@ -4862,6 +4870,7 @@ export interface WorkspaceQualityRepairPreview {
 export interface QualityDashboardData {
   dashboardVersion?: 'v1-health' | 'v2-repair'
   dashboardNotes?: string[]
+  agentQualityObservability?: QualityAgentDashboardSnapshot
   operatingModeObservability?: {
     mode: NovelOperatingMode
     label: string

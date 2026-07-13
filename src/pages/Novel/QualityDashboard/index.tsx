@@ -442,6 +442,196 @@ function recallFallbackReasonLabel(reason?: string): string {
   return reason
 }
 
+function agentArtifactKindLabel(kind: string): string {
+  if (kind === 'quality_report') return '质量报告'
+  if (kind === 'repair_plan') return '修复计划'
+  if (kind === 'quality_repair_draft') return '候选 Diff'
+  if (kind === 'quality_repair_review') return '独立审校'
+  if (kind === 'quality_comparison') return '比较结果'
+  return kind
+}
+
+function agentArtifactStatusLabel(status: string): string {
+  if (status === 'draft') return '草稿'
+  if (status === 'reviewed') return '已审校'
+  if (status === 'approved') return '已批准'
+  if (status === 'committed') return '已提交'
+  if (status === 'rejected') return '已拒绝'
+  if (status === 'superseded') return '已被替代'
+  return status
+}
+
+function agentArtifactStatusColor(status: string): string {
+  if (status === 'approved' || status === 'committed' || status === 'reviewed') return 'success'
+  if (status === 'rejected') return 'error'
+  if (status === 'superseded') return 'default'
+  return 'processing'
+}
+
+function artifactHashTail(hash: string): string {
+  return hash ? `…${hash.slice(-12)}` : '-'
+}
+
+function signedDashboardDelta(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function AgentQualityObservabilityPanel({
+  snapshot,
+}: {
+  snapshot: NonNullable<QualityDashboardData['agentQualityObservability']>
+}) {
+  if (snapshot.summary.artifactCount === 0) {
+    return <Empty description="还没有智能体质量工件；运行一次质量评审或修复流程后，这里会显示完整证据链。" />
+  }
+
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__metric-grid-180">
+        <div className="quality-dashboard-page__stat-card">
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">工件历史</div>
+          <div className="quality-dashboard-page__big-number">{snapshot.summary.artifactCount}</div>
+          <div className="quality-dashboard-page__body-copy--soft">报告、计划、候选、审校与比较均保留不可变记录</div>
+        </div>
+        <div className="quality-dashboard-page__stat-card">
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">修复链</div>
+          <div className="quality-dashboard-page__big-number">{snapshot.summary.repairPlanCount} / {snapshot.summary.candidateDiffCount}</div>
+          <div className="quality-dashboard-page__body-copy--soft">修复计划 / 候选 Diff</div>
+        </div>
+        <div className="quality-dashboard-page__stat-card">
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">独立审校</div>
+          <div className="quality-dashboard-page__big-number">{snapshot.summary.independentReviewCount}</div>
+          <div className="quality-dashboard-page__body-copy--soft">展示分章任务、证据覆盖和回归风险</div>
+        </div>
+        <div className="quality-dashboard-page__stat-card">
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">报告比较</div>
+          <div className="quality-dashboard-page__big-number">{snapshot.summary.comparisonCount}</div>
+          <div className="quality-dashboard-page__body-copy--soft">候选是否改善、回归或等待人工判断</div>
+        </div>
+      </div>
+
+      {snapshot.latestReport ? (
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>最新质量报告</strong>
+            <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+              <Tag color={snapshot.latestReport.status === 'passed' ? 'success' : snapshot.latestReport.status === 'blocked' ? 'error' : 'warning'}>
+                {snapshot.latestReport.status}
+              </Tag>
+              <Tag color="blue">{`Context ${snapshot.latestReport.contextVersion}`}</Tag>
+              <Tag>{snapshot.latestReport.profile}</Tag>
+            </div>
+          </div>
+          <div className="quality-dashboard-page__action-tags">
+            <Tag color="processing">{`综合分 ${snapshot.latestReport.score}`}</Tag>
+            <Tag color="cyan">{`置信下界 ${snapshot.latestReport.confidenceLowerBound}`}</Tag>
+            <Tag color="purple">{`覆盖 ${snapshot.latestReport.coverageRate}%`}</Tag>
+            <Tag color={snapshot.latestReport.blockingFindingCount > 0 ? 'error' : 'success'}>{`阻塞 Finding ${snapshot.latestReport.blockingFindingCount}`}</Tag>
+            {snapshot.latestReport.semanticReview ? (
+              <Tag color={snapshot.latestReport.semanticReview.independentModelReview ? 'success' : 'warning'}>
+                {`独立语义证据 ${snapshot.latestReport.semanticReview.validEvidenceCount}/${snapshot.latestReport.semanticReview.validEvidenceCount + snapshot.latestReport.semanticReview.rejectedEvidenceCount}`}
+              </Tag>
+            ) : null}
+          </div>
+          <div className="quality-dashboard-page__card-summary">{snapshot.latestReport.summary || '暂无报告摘要。'}</div>
+        </div>
+      ) : null}
+
+      <div className="quality-dashboard-page__dual-grid">
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head"><strong>工件历史</strong><Tag color="blue">{snapshot.artifactHistory.length}</Tag></div>
+          <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
+            {snapshot.artifactHistory.slice(0, 12).map((artifact) => (
+              <div key={artifact.id} className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+                <Tag color={agentArtifactStatusColor(artifact.status)}>{agentArtifactStatusLabel(artifact.status)}</Tag>
+                <strong>{agentArtifactKindLabel(artifact.kind)}</strong>
+                <span>{`v${artifact.version} · C${artifact.contextVersion} · ${artifactHashTail(artifact.contentHash)}`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head"><strong>修复计划与依赖</strong><Tag color={snapshot.repairPlans.some((plan) => plan.status === 'blocked') ? 'error' : 'success'}>{snapshot.repairPlans.length}</Tag></div>
+          <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
+            {snapshot.repairPlans.length > 0 ? snapshot.repairPlans.map((plan) => (
+              <div key={plan.artifactId}>
+                <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+                  <Tag color={plan.status === 'ready' ? 'success' : 'error'}>{plan.status}</Tag>
+                  <strong>{`计划 ${artifactHashTail(plan.artifactId)}`}</strong>
+                  <span>{`Context ${plan.sourceContextVersion} · ${plan.items.length} 项`}</span>
+                </div>
+                {plan.items.slice(0, 3).map((item) => (
+                  <div key={`${plan.artifactId}-${item.id}`} className="quality-dashboard-page__body-copy">
+                    {`P${item.priority} ${item.objective || item.id} · 依赖 ${item.dependencies.length} · 验收 ${item.acceptanceCriteriaCount} · 回归保护 ${item.regressionGuardsCount}`}
+                  </div>
+                ))}
+              </div>
+            )) : <div>暂无修复计划。</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="quality-dashboard-page__dual-grid">
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head"><strong>候选 Diff</strong><Tag color={snapshot.candidateDiffs.length > 0 ? 'processing' : 'default'}>{snapshot.candidateDiffs.length}</Tag></div>
+          <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
+            {snapshot.candidateDiffs.length > 0 ? snapshot.candidateDiffs.map((draft) => (
+              <div key={draft.artifactId}>
+                <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+                  <Tag color={draft.readyForHumanReview ? 'success' : 'warning'}>{draft.readyForHumanReview ? '待人工审阅' : '需修订'}</Tag>
+                  <strong>{`候选 ${artifactHashTail(draft.artifactId)}`}</strong>
+                  <span>{`Context ${draft.sourceContextVersion} · ${draft.chapters.length} 章`}</span>
+                </div>
+                {draft.chapters.map((chapter) => (
+                  <div key={`${draft.artifactId}-${chapter.chapterId}`} className="quality-dashboard-page__body-copy">
+                    {`第${chapter.chapterNum}章 ${chapter.changed ? '已变更' : '未变更'} · 原 ${artifactHashTail(chapter.originalContentHash)} → 候选 ${artifactHashTail(chapter.optimizedContentHash)} · 事实 ${chapter.factGuardStatus} · 质量门 ${chapter.qualityGateStatus}`}
+                  </div>
+                ))}
+              </div>
+            )) : <div>暂无章节候选 Diff。</div>}
+          </div>
+        </div>
+
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head"><strong>独立审校证据</strong><Tag color={snapshot.independentReviews.some((review) => review.readyForHumanDecision) ? 'success' : 'warning'}>{snapshot.independentReviews.length}</Tag></div>
+          <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
+            {snapshot.independentReviews.length > 0 ? snapshot.independentReviews.map((review) => (
+              <div key={review.artifactId}>
+                <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+                  <Tag color={review.readyForHumanDecision ? 'success' : 'warning'}>{review.readyForHumanDecision ? '可人工决策' : '证据不足'}</Tag>
+                  <strong>{`审校 ${artifactHashTail(review.artifactId)}`}</strong>
+                  <span>{`总分 ${review.score} · ${review.independentModelReview ? '独立模型' : '非独立'}`}</span>
+                </div>
+                {review.chapters.map((chapter) => (
+                  <div key={`${review.artifactId}-${chapter.chapterId}`} className="quality-dashboard-page__body-copy">
+                    {`第${chapter.chapterNum}章 ${chapter.status} · 评分 ${chapter.score} · 证据 ${chapter.evidencedCheckCount}/${chapter.checkCount} · 回归风险 ${chapter.regressionRiskCount} · ${chapter.separateReviewTask ? '独立 Task' : '非独立 Task'}`}
+                  </div>
+                ))}
+              </div>
+            )) : <div>暂无独立审校证据。</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="quality-card">
+        <div className="quality-dashboard-page__card-head"><strong>候选报告比较</strong><Tag color={snapshot.comparisons.some((comparison) => comparison.status === 'regressed') ? 'error' : 'blue'}>{snapshot.comparisons.length}</Tag></div>
+        <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
+          {snapshot.comparisons.length > 0 ? snapshot.comparisons.map((comparison) => (
+            <div key={comparison.artifactId} className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+              <Tag color={comparison.status === 'improved' ? 'success' : comparison.status === 'regressed' ? 'error' : comparison.status === 'mixed' ? 'warning' : 'default'}>{comparison.status}</Tag>
+              <strong>{`分数 ${signedDashboardDelta(comparison.scoreDelta)}`}</strong>
+              <span>{`覆盖 ${signedDashboardDelta(comparison.coverageRateDelta)} · 下界 ${signedDashboardDelta(comparison.confidenceLowerBoundDelta)} · 新增阻塞 ${comparison.introducedBlockerCount}`}</span>
+              <Tag color={comparison.readyForHumanReview ? 'success' : 'warning'}>{comparison.readyForHumanReview ? '可人工审阅' : '需人工判断'}</Tag>
+              <span>{comparison.summary}</span>
+            </div>
+          )) : <div>暂无候选报告比较结果。</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function QualityDashboard({ novelId }: Props) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
@@ -570,8 +760,9 @@ export default function QualityDashboard({ novelId }: Props) {
   const hasChapterFunctionData = Boolean(data && (data.chapterFunctionSummary.trackedChapterCount > 0 || data.chapterFunctionAlerts.length > 0))
   const hasEndgameDebtData = Boolean(data && data.recentEndgameDebtAlerts.length > 0)
   const hasPipelineData = Boolean(pipelineStats && pipelineStats.totalPipelineCount > 0)
+  const hasAgentQualityData = Boolean(data && (data.agentQualityObservability?.summary.artifactCount || 0) > 0)
 
-  if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData)) {
+  if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData && !hasAgentQualityData)) {
     return (
       <WorkspacePage title="质量监控">
         <RecommendationGovernancePanel novelId={novelId} />
@@ -789,6 +980,12 @@ export default function QualityDashboard({ novelId }: Props) {
       {data.typedRefObservability ? (
         <WorkspacePanel title="引用覆盖观测">
           <TypedRefObservabilityPanel observability={data.typedRefObservability} />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.agentQualityObservability ? (
+        <WorkspacePanel title="智能体质量工件" description="把 Agent 的质量报告、修复计划、章节候选 Diff、独立审校证据和报告比较集中到同一条可追溯链路。">
+          <AgentQualityObservabilityPanel snapshot={data.agentQualityObservability} />
         </WorkspacePanel>
       ) : null}
 

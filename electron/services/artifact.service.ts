@@ -156,30 +156,48 @@ export function createArtifact<T>(input: CreateAgentArtifactInput<T>): AgentArti
     throw new ArtifactServiceError('ARTIFACT_ID_CONFLICT', `工件 ID ${id} 已存在且内容不同。`)
   }
 
-  sqlite.prepare(`
-    INSERT INTO artifacts (
-      id, novel_id, kind, status, version, parent_artifact_id,
-      content_json, content_hash, context_version,
-      producer_type, producer_id, producer_client,
-      model_config_id, task_id, idempotency_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    input.novelId,
-    input.kind,
-    input.status || 'draft',
-    version,
-    input.parentArtifactId || null,
-    contentJson,
-    contentHash,
-    input.contextVersion,
-    input.producerType,
-    input.producerId,
-    input.producerClient,
-    input.modelConfigId || null,
-    input.taskId || null,
-    idempotencyKey,
-  )
+  try {
+    sqlite.prepare(`
+      INSERT INTO artifacts (
+        id, novel_id, kind, status, version, parent_artifact_id,
+        content_json, content_hash, context_version,
+        producer_type, producer_id, producer_client,
+        model_config_id, task_id, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.novelId,
+      input.kind,
+      input.status || 'draft',
+      version,
+      input.parentArtifactId || null,
+      contentJson,
+      contentHash,
+      input.contextVersion,
+      input.producerType,
+      input.producerId,
+      input.producerClient,
+      input.modelConfigId || null,
+      input.taskId || null,
+      idempotencyKey,
+    )
+  } catch (error) {
+    const errorCode = typeof error === 'object' && error && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : ''
+    if (idempotencyKey && (errorCode === 'SQLITE_CONSTRAINT_UNIQUE' || errorCode === 'SQLITE_CONSTRAINT')) {
+      const raced = sqlite.prepare(`
+        SELECT * FROM artifacts WHERE novel_id = ? AND kind = ? AND idempotency_key = ?
+      `).get(input.novelId, input.kind, idempotencyKey) as ArtifactDbRow | undefined
+      if (raced) {
+        if (raced.content_hash !== contentHash) {
+          throw new ArtifactServiceError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于不同的工件内容。')
+        }
+        return mapArtifact<T>(raced)
+      }
+    }
+    throw error
+  }
   return mapArtifact<T>(getRow(id) as ArtifactDbRow)
 }
 

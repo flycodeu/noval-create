@@ -566,7 +566,7 @@ export function registerQualityTools(
       version: '1.0.0',
       domain: 'quality',
       title: '比较修复前后质量报告',
-      description: '比较两份不可变质量报告的分数、覆盖率、关闭/持续/新增 Finding 与回归，避免只优化单一指标却引入新的硬阻塞。',
+      description: '比较两份不可变质量报告的分数、覆盖率、关闭/持续/新增 Finding 与回归，并保存可追溯的比较工件，避免只优化单一指标却引入新的硬阻塞。',
       inputSchema: objectSchema({
         novelId: { type: 'integer', minimum: 1 },
         baselineReportArtifactId: { type: 'string', minLength: 1, maxLength: 160 },
@@ -597,12 +597,13 @@ export function registerQualityTools(
         'persistingFindings', 'introducedFindings', 'introducedBlockerCount',
         'candidateStatus', 'readyForHumanReview', 'summary', 'warnings',
       ]),
-      effect: 'read',
+      effect: 'draft_write',
       approval: 'never',
       scopes: [
         AGENT_TOOL_SCOPES.novelRead,
         AGENT_TOOL_SCOPES.contextRead,
         AGENT_TOOL_SCOPES.qualityRun,
+        AGENT_TOOL_SCOPES.draftCreate,
       ],
       idempotent: true,
       taskMode: 'sync',

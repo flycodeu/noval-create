@@ -20,6 +20,7 @@ import type {
 } from '../../src/types'
 import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import { normalizeWritebackSyncStatus } from '../../src/shared/writeback-status'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 import {
@@ -170,17 +171,7 @@ function asWritebackSyncStatus(value: unknown): WritebackSyncStatus | undefined 
   if (phase !== 'idle' && phase !== 'preparing' && phase !== 'ready' && phase !== 'applying' && phase !== 'applied' && phase !== 'failed') {
     return undefined
   }
-  return {
-    phase,
-    runId: typeof record.runId === 'number' ? record.runId : Number(record.runId || 0) || undefined,
-    retryCount: typeof record.retryCount === 'number' ? record.retryCount : Number(record.retryCount || 0) || 0,
-    lastError: typeof record.lastError === 'string' ? record.lastError : undefined,
-    blockedGeneration: Boolean(record.blockedGeneration),
-    readyForNextChapter: record.readyForNextChapter !== false,
-    contextVersion: typeof record.contextVersion === 'number' ? record.contextVersion : Number(record.contextVersion || 0) || undefined,
-    lastAttemptAt: typeof record.lastAttemptAt === 'string' ? record.lastAttemptAt : undefined,
-    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : undefined,
-  }
+  return normalizeWritebackSyncStatus(record)
 }
 
 function parseChapterWritebackSyncStatus(raw?: string | null): WritebackSyncStatus | undefined {
@@ -1447,7 +1438,7 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
 
       const refreshedChapter = getChapter(chapterId)
       const writebackStatus = parseChapterWritebackSyncStatus(refreshedChapter?.writebackStatusJson)
-      if (runtimePolicy.requireWritebackReady && (writebackStatus?.blockedGeneration || writebackStatus?.readyForNextChapter === false)) {
+      if (runtimePolicy.requireWritebackReady && (writebackStatus?.blockedGeneration || writebackStatus?.canonApplied === false || writebackStatus?.readyForNextChapter === false)) {
         pauseChapterBatchWorkflow(taskId, sender, progress, {
           chapterId,
           chapterNum,
