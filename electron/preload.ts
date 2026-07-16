@@ -274,8 +274,8 @@ const api = {
     listRuns: (chapterId: number) => invokeIpc('writeback:listRuns', chapterId),
     updateDecision: (diffId: number, patch: unknown) => invokeIpc('writeback:updateDecision', diffId, patch),
     bulkUpdateDecisions: (runId: number, patch: unknown) => invokeIpc('writeback:bulkUpdateDecisions', runId, patch),
-    applyRun: (runId: number) => invokeIpc('writeback:applyRun', runId),
-    retryFailed: (runId: number) => invokeIpc('writeback:retryFailed', runId),
+    applyRun: (runId: number, options?: unknown) => invokeIpc('writeback:applyRun', runId, options),
+    retryFailed: (runId: number, options?: unknown) => invokeIpc('writeback:retryFailed', runId, options),
   },
 
   // Character APIs

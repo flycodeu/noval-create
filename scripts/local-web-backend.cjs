@@ -881,8 +881,8 @@ function createRuntime() {
       listRuns: (chapterId) => chapterWritebackService.listChapterWritebackRuns(requireId(chapterId, 'chapterId')),
       updateDecision: (diffId, patch) => chapterWritebackService.updateChapterWritebackDecision(requireId(diffId, 'diffId'), requireObject(patch, 'patch')),
       bulkUpdateDecisions: (runId, patch) => chapterWritebackService.bulkUpdateChapterWritebackDecisions(requireId(runId, 'runId'), requireObject(patch, 'patch')),
-      applyRun: (runId) => chapterWritebackService.applyChapterWritebackRun(requireId(runId, 'runId')),
-      retryFailed: (runId) => chapterWritebackService.retryFailedWritebackItems(requireId(runId, 'runId')),
+      applyRun: (runId, options) => chapterWritebackService.applyChapterWritebackRun(requireId(runId, 'runId'), requireObject(options || {}, 'options')),
+      retryFailed: (runId, options) => chapterWritebackService.retryFailedWritebackItems(requireId(runId, 'runId'), requireObject(options || {}, 'options')),
     },
     quality: {
       getDashboard: (novelId) => qualityDashboardService.getQualityDashboardData(requireId(novelId, 'novelId')),

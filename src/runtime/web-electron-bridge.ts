@@ -1366,8 +1366,8 @@ export function installWebElectronBridge(): void {
       prepareRun: async (chapterId?: unknown, triggerSource?: unknown) => withLocalBackend('writeback', 'prepareRun', [chapterId, triggerSource], async () => createPreviewWritebackRun(Number(chapterId))),
       updateDecision: async (diffId?: unknown, patch?: unknown) => withLocalBackend('writeback', 'updateDecision', [diffId, patch], async () => null),
       bulkUpdateDecisions: async (runId?: unknown, patch?: unknown) => withLocalBackend('writeback', 'bulkUpdateDecisions', [runId, patch], async () => []),
-      applyRun: async (runId?: unknown) => withLocalBackend('writeback', 'applyRun', [runId], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
-      retryFailed: async (runId?: unknown) => withLocalBackend('writeback', 'retryFailed', [runId], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
+      applyRun: async (runId?: unknown, options?: unknown) => withLocalBackend('writeback', 'applyRun', [runId, options], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
+      retryFailed: async (runId?: unknown, options?: unknown) => withLocalBackend('writeback', 'retryFailed', [runId, options], async () => createEmptyWritebackCenterData(demoChapters[0] ?? null)),
     }),
     batchWorkbench: createService('batchWorkbench', {
       getData: async (novelId, snapshotId) => withLocalBackend('batchWorkbench', 'getData', [novelId, snapshotId], async () => createEmptyBatchWorkbenchData(Number(novelId))),

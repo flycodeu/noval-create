@@ -146,6 +146,10 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'approval_grants').has('input_hash'))
   assert.ok(getColumns(db, 'tool_invocations').has('redacted_input_json'))
   assert.ok(getColumns(db, 'tasks').has('idempotency_key'))
+  assert.ok(getColumns(db, 'chapter_writeback_runs').has('apply_idempotency_key'))
+  assert.ok(getColumns(db, 'chapter_writeback_runs').has('apply_lock_version'))
+  assert.ok(db.prepare('PRAGMA index_list(chapter_writeback_runs)').all().some((row) => row.name === 'idx_chapter_writeback_runs_apply_idempotency'))
+  assert.ok(getColumns(db, 'novels').has('lifecycle_mode'))
   assert.ok(getColumns(db, 'novels').has('historical_profile_json'))
   assert.ok(getColumns(db, 'novels').has('source_ledger_json'))
   assert.ok(getColumns(db, 'novels').has('chapter_source_usage_json'))
@@ -268,6 +272,8 @@ function testFreshDbIsIdempotent() {
       '0041_agent_artifacts_approvals_and_audit',
       '0042_recommendation_work_state_lock_history',
       '0043_generation_idempotency_keys',
+      '0044_writeback_apply_claims',
+      '0045_novel_lifecycle_mode',
     ])
 
     runMigrations(db)
@@ -390,6 +396,8 @@ function testPartialSchemaCanResume() {
       '0041_agent_artifacts_approvals_and_audit',
       '0042_recommendation_work_state_lock_history',
       '0043_generation_idempotency_keys',
+      '0044_writeback_apply_claims',
+      '0045_novel_lifecycle_mode',
     ])
 
     const configs = db.prepare(`
@@ -521,6 +529,8 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
     assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
     assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
+    assert.ok(getMigrationIds(db).includes('0044_writeback_apply_claims'))
+    assert.ok(getMigrationIds(db).includes('0045_novel_lifecycle_mode'))
   } finally {
     db.close()
   }
@@ -611,6 +621,8 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
     assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
     assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
+    assert.ok(getMigrationIds(db).includes('0044_writeback_apply_claims'))
+    assert.ok(getMigrationIds(db).includes('0045_novel_lifecycle_mode'))
   } finally {
     db.close()
   }

@@ -211,6 +211,24 @@ describe('novel source/canon fields', () => {
     expect(dbSource).toContain("runMigrationStep(sqlite, '0038_novel_source_canon_fields'")
   })
 
+  it('keeps a manually selected project status when the project is reloaded', () => {
+    const rows = createRows()
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const novelId = createNovel({ title: '手动生命周期测试' })
+    updateNovel(novelId, { status: 'completed' })
+
+    const loaded = getNovel(novelId)
+    const stored = (rows.get(novels) || []).find((row) => Number(row.id) === novelId)
+
+    expect(loaded?.status).toBe('completed')
+    expect(loaded?.lifecycle).toMatchObject({
+      status: 'completed',
+      automatic: false,
+    })
+    expect(stored?.lifecycleMode).toBe('manual')
+  })
+
   it('persists and reads the new source/canon fields through create, update and get', () => {
     const rows = createRows()
     vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)

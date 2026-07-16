@@ -4795,6 +4795,9 @@ async function continueChapterContent(
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  // Resume follows the same writing gate as a fresh generation. A partial
+  // draft must not bypass missing chapter/scene contracts.
+  validateChapterContractsForGeneration(chapterId)
   const normalizedPartial = partialContent.trim()
   if (!normalizedPartial) {
     throwUserFacingError('workflow.resumeUnsupported')

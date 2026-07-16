@@ -8,6 +8,7 @@ import type {
   ChapterWritebackDecision,
   ChapterWritebackDiff as AppChapterWritebackDiff,
   ChapterWritebackRun as AppChapterWritebackRun,
+  ChapterWritebackApplyOptions,
   WritebackSyncStatus,
   WritebackVerificationStatus,
 } from '../../src/types'
@@ -416,9 +417,36 @@ function mapRunRow(row: ChapterWritebackRunRow): AppChapterWritebackRun {
     completedAt: row.completedAt,
     failedAt: row.failedAt,
     errorMessage: row.errorMessage,
+    applyIdempotencyKey: row.applyIdempotencyKey,
+    applyLockVersion: row.applyLockVersion || 0,
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',
   }
+}
+
+const WRITEBACK_APPLY_STALE_MS = 5 * 60 * 1000
+
+function buildDefaultWritebackApplyKey(runId: number, retryFailedOnly: boolean): string {
+  return `chapter-writeback-${retryFailedOnly ? 'retry' : 'apply'}:${runId}`
+}
+
+function normalizeWritebackApplyKey(runId: number, retryFailedOnly: boolean, options?: ChapterWritebackApplyOptions): string {
+  const value = typeof options?.idempotencyKey === 'string' ? options.idempotencyKey.trim() : ''
+  if (value) return value.slice(0, 200)
+  return buildDefaultWritebackApplyKey(runId, retryFailedOnly)
+}
+
+function isWritebackApplyClaimStale(run: ChapterWritebackRunRow): boolean {
+  if (run.status !== 'applying') return false
+  const updatedAt = Date.parse(run.updatedAt || '')
+  return !Number.isFinite(updatedAt) || Date.now() - updatedAt >= WRITEBACK_APPLY_STALE_MS
+}
+
+function createWritebackIdempotencyConflict(runId: number, key: string): Error {
+  const error = new Error(`回写幂等键已被其它运行占用：${key}`) as Error & { code?: string }
+  error.code = 'IDEMPOTENCY_KEY_CONFLICT'
+  error.name = `WritebackIdempotencyConflict:${runId}`
+  return error
 }
 
 function mapExtractRow(row: ChapterFactExtractRow): AppChapterFactExtract {
@@ -1616,20 +1644,37 @@ export async function bulkUpdateChapterWritebackDecisions(
   return loadDiffRows(runId).map(mapDiffRow)
 }
 
-async function executeRunApply(runId: number, retryFailedOnly = false): Promise<ChapterWritebackCenterData> {
+async function executeRunApply(
+  runId: number,
+  retryFailedOnly = false,
+  options?: ChapterWritebackApplyOptions,
+): Promise<ChapterWritebackCenterData> {
   const db = getDb()
   const run = getRunRow(runId)
   const chapter = getChapterRow(run.chapterId)
+  const idempotencyKey = normalizeWritebackApplyKey(runId, retryFailedOnly, options)
+  const keyOwner = db.select({ id: chapterWritebackRuns.id })
+    .from(chapterWritebackRuns)
+    .where(eq(chapterWritebackRuns.applyIdempotencyKey, idempotencyKey))
+    .all()[0]
+  if (keyOwner && keyOwner.id !== run.id) {
+    throw createWritebackIdempotencyConflict(run.id, idempotencyKey)
+  }
 
   const claimableStatuses = retryFailedOnly
     ? ['failed', 'partially_failed']
     : ['draft', 'ready', 'partially_failed']
+  if (isWritebackApplyClaimStale(run)) claimableStatuses.push('applying')
+  const currentApplyLockVersion = run.applyLockVersion || 0
   const claimResult = db.update(chapterWritebackRuns).set({
     status: 'applying',
+    applyIdempotencyKey: idempotencyKey,
+    applyLockVersion: currentApplyLockVersion + 1,
     lastAttemptAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }).where(and(
     eq(chapterWritebackRuns.id, run.id),
+    eq(chapterWritebackRuns.applyLockVersion, currentApplyLockVersion),
     inArray(chapterWritebackRuns.status, claimableStatuses),
   )).run()
 
@@ -1750,10 +1795,10 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
   return getChapterWritebackCenterData(run.chapterId, run.id)
 }
 
-export async function applyChapterWritebackRun(runId: number): Promise<ChapterWritebackCenterData> {
-  return executeRunApply(runId, false)
+export async function applyChapterWritebackRun(runId: number, options?: ChapterWritebackApplyOptions): Promise<ChapterWritebackCenterData> {
+  return executeRunApply(runId, false, options)
 }
 
-export async function retryFailedWritebackItems(runId: number): Promise<ChapterWritebackCenterData> {
-  return executeRunApply(runId, true)
+export async function retryFailedWritebackItems(runId: number, options?: ChapterWritebackApplyOptions): Promise<ChapterWritebackCenterData> {
+  return executeRunApply(runId, true, options)
 }

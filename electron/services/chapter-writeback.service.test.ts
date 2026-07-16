@@ -154,6 +154,8 @@ describe('applyChapterWritebackRun', () => {
     expect(syncStatus.candidateReady).toBe(true)
     expect(syncStatus.canonApplied).toBe(false)
     expect(syncStatus.contextVersion).toBe(4)
+    expect(run?.applyIdempotencyKey).toBe('chapter-writeback-apply:21')
+    expect(run?.applyLockVersion).toBe(1)
     expect(diff?.writebackStatus).toBe('pending')
   })
 

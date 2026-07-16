@@ -11,6 +11,7 @@ import { chapters, characters, genres, novels } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
+import { describeNovelLifecycle, syncNovelLifecycleStatus, syncNovelLifecycleStatuses } from './novel-lifecycle.service'
 
 type NovelSourceCanonJsonFields = {
   historicalProfileJson: string
@@ -136,14 +137,16 @@ function decorateNovelRow<T extends {
   id: number
   launchMode?: string | null
   targetWords?: number | null
+  status?: string | null
+  lifecycleMode?: string | null
   settingsJson?: string | null
-}>(row: T): T & { operatingMode: ReturnType<typeof resolveOperatingMode> } {
-  const chapterCount = getDb()
+}>(row: T): T & { operatingMode: ReturnType<typeof resolveOperatingMode>; lifecycle: ReturnType<typeof describeNovelLifecycle> } {
+  const chapterRows = getDb()
     .select()
     .from(chapters)
     .where(eq(chapters.novelId, row.id))
     .all()
-    .length
+  const chapterCount = chapterRows.length
 
   return {
     ...row,
@@ -153,6 +156,7 @@ function decorateNovelRow<T extends {
       settingsJson: row.settingsJson,
       chapterCount,
     }),
+    lifecycle: describeNovelLifecycle(row.status, chapterRows, row.lifecycleMode),
   }
 }
 
@@ -220,6 +224,10 @@ function deriveNovelChangeReasons(
 
 export function listNovels(filters?: { status?: string; genreId?: number; search?: string }) {
   const db = getDb()
+  // A project may have been changed by a recovered task, a local Web client,
+  // or an older process. Reconcile before exposing the list so the card status
+  // is always the durable lifecycle result rather than a stale cached label.
+  syncNovelLifecycleStatuses()
   let query = db.select({
     id: novels.id,
     title: novels.title,
@@ -227,6 +235,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     genreId: novels.genreId,
     launchMode: novels.launchMode,
     status: novels.status,
+    lifecycleMode: novels.lifecycleMode,
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
     settingsJson: novels.settingsJson,
@@ -245,6 +254,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
 
 export function getNovel(id: number) {
   const db = getDb()
+  syncNovelLifecycleStatus(id)
   const rows = db.select({
     id: novels.id,
     title: novels.title,
@@ -252,6 +262,7 @@ export function getNovel(id: number) {
     genreId: novels.genreId,
     launchMode: novels.launchMode,
     status: novels.status,
+    lifecycleMode: novels.lifecycleMode,
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
     coverImage: novels.coverImage,
@@ -317,6 +328,7 @@ export function createNovel(data: {
       ? writeOperatingModeSettings(data.settingsJson, explicitOperatingMode, true)
       : data.settingsJson,
     status: 'draft',
+    lifecycleMode: 'automatic',
     totalWords: 0,
     worldRulesJson: stringifyWorldRules(getBuiltinGenreRules(genre?.name)),
   }).run()
@@ -372,11 +384,13 @@ export function updateNovel(id: number, data: Partial<{
     ? writeOperatingModeSettings(data.settingsJson ?? current.settingsJson, explicitOperatingMode, true)
     : data.settingsJson
   const { operatingMode, ...dbData } = data
+  const lifecycleMode = Object.prototype.hasOwnProperty.call(data, 'status') ? 'manual' : current.lifecycleMode || 'automatic'
 
   const changeReasons = deriveNovelChangeReasons(current, data)
 
   db.update(novels).set({
     ...dbData,
+    lifecycleMode,
     settingsJson: normalizedSettingsJson,
     worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),

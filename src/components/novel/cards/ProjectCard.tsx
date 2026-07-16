@@ -74,7 +74,10 @@ export default function ProjectCard({
         <div className="novel-project-card__title-block">
           <strong className="novel-project-card__title">{novel.title}</strong>
           <div className="novel-project-card__tag-row">
-            <Tag className={`novel-project-card__status-tag novel-project-card__status-tag--${novel.status}`}>
+            <Tag
+              title={novel.lifecycle?.reason || undefined}
+              className={`novel-project-card__status-tag novel-project-card__status-tag--${novel.status}`}
+            >
               {status.label}
             </Tag>
             <Tag className="novel-project-card__tag">{novel.genreName || '未分类'}</Tag>
@@ -92,6 +95,7 @@ export default function ProjectCard({
       </div>
 
       <div className="novel-project-card__summary">
+        <div title={novel.lifecycle?.reason || undefined}>生命周期：<strong>{novel.lifecycle?.label || status.label}</strong>{novel.lifecycle?.automatic ? ' · 自动同步' : ' · 手动管理'}</div>
         <div>当前阶段：<strong>{snapshot.stage.label}</strong></div>
         <div>主任务：<strong>{snapshot.nextStep.title}</strong></div>
         <div>字数：<strong>{formatWordCount(novel.totalWords)}</strong></div>

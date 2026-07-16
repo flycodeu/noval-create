@@ -16,6 +16,7 @@ export const novels = sqliteTable('novels', {
   genreId: integer('genre_id').references(() => genres.id),
   launchMode: text('launch_mode').default('professional_longform'),
   status: text('status').default('draft'),
+  lifecycleMode: text('lifecycle_mode').notNull().default('automatic'),
   totalWords: integer('total_words').default(0),
   targetWords: integer('target_words').notNull().default(200000),
   coverImage: text('cover_image'),
@@ -743,6 +744,8 @@ export const chapterWritebackRuns = sqliteTable('chapter_writeback_runs', {
   completedAt: text('completed_at'),
   failedAt: text('failed_at'),
   errorMessage: text('error_message'),
+  applyIdempotencyKey: text('apply_idempotency_key'),
+  applyLockVersion: integer('apply_lock_version').notNull().default(0),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })

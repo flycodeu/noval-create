@@ -2188,6 +2188,33 @@ export function runMigrations(sqlite: Database.Database) {
       `)
     }
   })
+
+  runMigrationStep(sqlite, '0044_writeback_apply_claims', () => {
+    if (hasTable(sqlite, 'chapter_writeback_runs')) {
+      ensureColumn(sqlite, 'chapter_writeback_runs', 'apply_idempotency_key', 'TEXT')
+      ensureColumn(sqlite, 'chapter_writeback_runs', 'apply_lock_version', 'INTEGER NOT NULL DEFAULT 0')
+      sqlite.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_writeback_runs_apply_idempotency
+          ON chapter_writeback_runs(apply_idempotency_key)
+          WHERE apply_idempotency_key IS NOT NULL;
+      `)
+    }
+  })
+
+  runMigrationStep(sqlite, '0045_novel_lifecycle_mode', () => {
+    if (!hasTable(sqlite, 'novels')) return
+
+    ensureColumn(sqlite, 'novels', 'lifecycle_mode', "TEXT NOT NULL DEFAULT 'automatic'")
+    sqlite.exec(`
+      UPDATE novels
+      SET lifecycle_mode = 'automatic'
+      WHERE lifecycle_mode IS NULL OR lifecycle_mode = '';
+
+      UPDATE novels
+      SET lifecycle_mode = 'manual'
+      WHERE status = 'archived';
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

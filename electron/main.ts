@@ -626,10 +626,16 @@ function registerIpcHandlers() {
         assetType?: 'character' | 'world' | 'item' | 'relation' | 'thread' | 'foreshadow' | 'puzzle' | 'timeline'
       },
     ))
-  handle('writeback:applyRun', (_, runId) =>
-    chapterWritebackService.applyChapterWritebackRun(requireId(runId, 'runId')))
-  handle('writeback:retryFailed', (_, runId) =>
-    chapterWritebackService.retryFailedWritebackItems(requireId(runId, 'runId')))
+  handle('writeback:applyRun', (_, runId, options) =>
+    chapterWritebackService.applyChapterWritebackRun(
+      requireId(runId, 'runId'),
+      options == null ? {} : parseObjectPayload<{ idempotencyKey?: string }>(options, 'options'),
+    ))
+  handle('writeback:retryFailed', (_, runId, options) =>
+    chapterWritebackService.retryFailedWritebackItems(
+      requireId(runId, 'runId'),
+      options == null ? {} : parseObjectPayload<{ idempotencyKey?: string }>(options, 'options'),
+    ))
 
   handle('aiPatch:suggest', (_, request) => aiPatchService.suggestAiPatch(parseObjectPayload(request, 'request')))
   handle('aiPatch:apply', (_, target, patch) => aiPatchService.applyAiPatch(parseObjectPayload(target, 'target'), patch))

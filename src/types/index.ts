@@ -170,6 +170,13 @@ export interface Novel extends NovelSourceCanonFields {
   genreName?: string
   genreColorTag?: string
   status: 'draft' | 'writing' | 'completed' | 'archived'
+  lifecycleMode?: 'automatic' | 'manual'
+  lifecycle?: {
+    status: 'draft' | 'writing' | 'completed' | 'archived'
+    label: string
+    automatic: boolean
+    reason: string
+  }
   totalWords: number
   targetWords: number
   coverImage?: string
@@ -2914,8 +2921,15 @@ export interface ChapterWritebackRun {
   completedAt?: string | null
   failedAt?: string | null
   errorMessage?: string | null
+  applyIdempotencyKey?: string | null
+  applyLockVersion?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface ChapterWritebackApplyOptions {
+  /** Caller-stable key for replaying the same apply command safely. */
+  idempotencyKey?: string
 }
 
 export interface ChapterFactExtract {
@@ -5701,8 +5715,8 @@ declare global {
           canonDecision: Exclude<ChapterWritebackDecision, 'pending'>
           assetType?: ChapterWritebackAssetType
         }) => Promise<ChapterWritebackDiff[]>
-        applyRun: (runId: number) => Promise<ChapterWritebackCenterData>
-        retryFailed: (runId: number) => Promise<ChapterWritebackCenterData>
+        applyRun: (runId: number, options?: ChapterWritebackApplyOptions) => Promise<ChapterWritebackCenterData>
+        retryFailed: (runId: number, options?: ChapterWritebackApplyOptions) => Promise<ChapterWritebackCenterData>
       }
       character: {
         list: (novelId: number) => Promise<Character[]>

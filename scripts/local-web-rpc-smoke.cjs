@@ -62,6 +62,17 @@ async function expectRpcError(service, method, args, code) {
   assert.equal(payload.error?.code, code)
 }
 
+async function assertConcurrentHttpClients(novelId) {
+  const clientCount = 24
+  const responses = await Promise.all(Array.from({ length: clientCount }, () => Promise.all([
+    rpcPayload('novel', 'get', [novelId]),
+    rpcPayload('novel', 'stats', [novelId]),
+  ])))
+  responses.flat().forEach((payload) => {
+    assert.equal(payload.ok, true, JSON.stringify(payload))
+  })
+}
+
 async function main() {
   const stamp = Date.now().toString()
   let novelId = 0
@@ -84,6 +95,7 @@ async function main() {
     await rpc('novel', 'update', [novelId, { title: `Web RPC smoke ${stamp} updated` }])
     const after = await rpc('novel', 'get', [novelId])
     assert.equal(after.title, `Web RPC smoke ${stamp} updated`)
+    await assertConcurrentHttpClients(novelId)
     const stats = await rpc('novel', 'stats', [novelId])
     assert.equal(typeof stats.totalChapters, 'number')
     await expectRpcError('outline', 'generateArcs', [99999999], 'novel.notFound')
@@ -120,7 +132,7 @@ async function main() {
     novelId = 0
     const missing = await rpc('novel', 'get', [Number(before.id || 0) || Number(after.id || 0) || -1])
     assert.equal(missing ?? null, null)
-    console.log('PASS local web RPC: CRUD/stats, outline handlers, event stream, and single-use agent approval flow')
+    console.log('PASS local web RPC: CRUD/stats, multi-client concurrency, outline handlers, event stream, and single-use agent approval flow')
   } finally {
     if (novelId > 0) {
       try { await rpc('novel', 'delete', [novelId]) } catch (error) { console.error('[local-web-rpc-smoke] cleanup failed:', error.message) }
