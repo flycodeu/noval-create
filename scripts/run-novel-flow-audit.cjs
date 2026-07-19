@@ -10,6 +10,7 @@
 //   NOVELFORGE_FLOW_PROJECTS=steel,doupo,baiyao
 //   NOVELFORGE_FLOW_CONTENT_CHAPTERS=2
 //   NOVELFORGE_FLOW_RUN_STAMP=20260705_xxx
+//   NOVELFORGE_FLOW_KEEP_PROJECTS=1 (保留审计项目，默认自动清理)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -76,6 +77,7 @@ process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = String(FLOW_REQUEST_TIMEOUT_MS
 process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT = String(FLOW_REQUEST_RETRY_COUNT)
 const WORD_FLOOR_RATIO = 0.8
 const FULL_STORY_DESIGN = process.env.NOVELFORGE_FLOW_FULL_STORY_DESIGN === '1'
+const FLOW_KEEP_CREATED_PROJECTS = process.env.NOVELFORGE_FLOW_KEEP_PROJECTS === '1'
 const MAP_TARGET_COUNT = 5
 const ITEM_TARGET_COUNT = 5
 const CHARACTER_TARGET_COUNT = 5
@@ -1620,6 +1622,9 @@ function buildMarkdownReport(runInfo, verification) {
     FULL_STORY_DESIGN
       ? '- 本次启用了完整多步故事设计流程。'
       : '- 本次为保证三部作品都能跑完，故事设计使用 compact 单次生成；完整多步 `generateCoreSettings` 可用 `NOVELFORGE_FLOW_FULL_STORY_DESIGN=1` 单独复测。',
+    runInfo.cleanup?.enabled
+      ? `- 审计项目自动清理：删除 ${runInfo.cleanup.deletedNovelIds?.length || 0} 个，残留 ${runInfo.cleanup.remainingNovelIds?.length || 0} 个。`
+      : '- 审计项目保留模式已启用：如需回收本次项目，请取消 `NOVELFORGE_FLOW_KEEP_PROJECTS=1` 后重跑清理。',
     '- 本报告只评估原创对照样例的结构效果，不复述或续写原著正文。',
     '',
     '## 流程问题与扩展修复',
@@ -1991,6 +1996,12 @@ async function main() {
     requestTimeoutMs: FLOW_REQUEST_TIMEOUT_MS,
     requestRetryCount: FLOW_REQUEST_RETRY_COUNT,
     maxDurationMs: FLOW_MAX_DURATION_MS,
+    cleanup: {
+      enabled: !FLOW_KEEP_CREATED_PROJECTS,
+      deletedNovelIds: [],
+      failedNovelIds: [],
+      preservedNovelIds: [],
+    },
     projects: [],
   }
 
@@ -2033,10 +2044,97 @@ async function main() {
       projects,
     }
     const verification = buildVerification(artifactRunInfo)
+    if (
+      artifactRunInfo.cleanup?.enabled
+      && ((artifactRunInfo.cleanup.failedNovelIds?.length || 0) > 0
+        || (artifactRunInfo.cleanup.remainingNovelIds?.length || 0) > 0)
+    ) {
+      verification.allOk = false
+    }
     fs.writeFileSync(path.join(outDir, 'run-info.json'), JSON.stringify(artifactRunInfo, null, 2), 'utf8')
     fs.writeFileSync(path.join(outDir, 'verification.json'), JSON.stringify(verification, null, 2), 'utf8')
     fs.writeFileSync(path.join(outDir, 'report.md'), buildMarkdownReport(artifactRunInfo, verification), 'utf8')
     return { artifactRunInfo, verification }
+  }
+
+  const cleanupCreatedProjects = () => {
+    const expectedTitles = new Set(
+      selectedProjects.map((project) => `${project.savedTitlePrefix}（${runStamp}）`),
+    )
+    const reportNovelIds = runInfo.projects
+      .map((project) => Number(project.novelId))
+      .filter((novelId) => Number.isInteger(novelId) && novelId > 0)
+
+    let currentRunNovels = []
+    try {
+      currentRunNovels = services.novelService.listNovels()
+        .filter((novel) => expectedTitles.has(novel.title))
+    } catch (error) {
+      fs.writeFileSync(
+        path.join(outDir, 'cleanup-list.error.txt'),
+        `${error.stack || error.message || error}\n`,
+        'utf8',
+      )
+    }
+
+    const currentRunNovelIds = currentRunNovels
+      .map((novel) => Number(novel.id))
+      .filter((novelId) => Number.isInteger(novelId) && novelId > 0)
+    const candidateIds = [...new Set([...reportNovelIds, ...currentRunNovelIds])]
+
+    if (FLOW_KEEP_CREATED_PROJECTS) {
+      runInfo.cleanup = {
+        enabled: false,
+        deletedNovelIds: [],
+        failedNovelIds: [],
+        preservedNovelIds: candidateIds,
+        remainingNovelIds: candidateIds,
+      }
+      fs.writeFileSync(path.join(outDir, 'cleanup.json'), JSON.stringify(runInfo.cleanup, null, 2), 'utf8')
+      return
+    }
+
+    const deletedNovelIds = []
+    const failedNovelIds = []
+    for (const novelId of candidateIds) {
+      try {
+        services.novelService.deleteNovel(novelId)
+        deletedNovelIds.push(novelId)
+      } catch (error) {
+        failedNovelIds.push(novelId)
+        fs.writeFileSync(
+          path.join(outDir, `cleanup-${novelId}.error.txt`),
+          `${error.stack || error.message || error}\n`,
+          'utf8',
+        )
+      }
+    }
+    let remainingNovelIds = []
+    try {
+      remainingNovelIds = services.novelService.listNovels()
+        .filter((novel) => candidateIds.includes(Number(novel.id)))
+        .map((novel) => Number(novel.id))
+    } catch (error) {
+      fs.writeFileSync(
+        path.join(outDir, 'cleanup-verify.error.txt'),
+        `${error.stack || error.message || error}\n`,
+        'utf8',
+      )
+    }
+    runInfo.cleanup = {
+      enabled: true,
+      deletedNovelIds,
+      failedNovelIds: [...new Set([...failedNovelIds, ...remainingNovelIds])],
+      preservedNovelIds: [],
+      remainingNovelIds,
+    }
+    fs.writeFileSync(path.join(outDir, 'cleanup.json'), JSON.stringify(runInfo.cleanup, null, 2), 'utf8')
+  }
+
+  const finalizeAudit = (status, extra = {}) => {
+    writeAuditArtifacts(status, extra)
+    cleanupCreatedProjects()
+    return writeAuditArtifacts(status, extra)
   }
 
   writeRunProgress('running', selectedProjects[0]?.key || null)
@@ -2052,7 +2150,7 @@ async function main() {
     runInfo.status = 'timeout'
     runInfo.timeout = timeoutPayload
     fs.writeFileSync(path.join(outDir, 'timeout.json'), JSON.stringify(timeoutPayload, null, 2), 'utf8')
-    writeAuditArtifacts('timeout', { timeout: timeoutPayload })
+    finalizeAudit('timeout', { timeout: timeoutPayload })
     writeRunProgress('timeout', timeoutPayload.activeProjectKey)
     console.error(`[flow-audit] ${timeoutPayload.message}`)
     exitProcess(124)
@@ -2107,10 +2205,7 @@ async function main() {
       }
     }
 
-    const verification = buildVerification(runInfo)
-    fs.writeFileSync(path.join(outDir, 'run-info.json'), JSON.stringify(runInfo, null, 2), 'utf8')
-    fs.writeFileSync(path.join(outDir, 'verification.json'), JSON.stringify(verification, null, 2), 'utf8')
-    fs.writeFileSync(path.join(outDir, 'report.md'), buildMarkdownReport(runInfo, verification), 'utf8')
+    const { verification } = finalizeAudit('complete')
     clearTimeout(watchdog)
     writeRunProgress('complete', null)
     console.log(`[flow-audit] report ${path.join(outDir, 'report.md')}`)
@@ -2119,6 +2214,11 @@ async function main() {
   } catch (error) {
     clearTimeout(watchdog)
     fs.writeFileSync(path.join(outDir, 'fatal-error.txt'), `${error.stack || error.message || error}\n`, 'utf8')
+    try {
+      finalizeAudit('fatal', { fatalError: String(error && error.stack || error) })
+    } catch (artifactError) {
+      fs.writeFileSync(path.join(outDir, 'fatal-artifact-error.txt'), `${artifactError.stack || artifactError.message || artifactError}\n`, 'utf8')
+    }
     writeRunProgress('fatal', null)
     throw error
   }
