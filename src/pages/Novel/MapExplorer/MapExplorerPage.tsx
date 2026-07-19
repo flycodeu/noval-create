@@ -1606,7 +1606,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               initialValue={recommendedCount}
               tooltip={scaledLevel?.rationale}
             >
-              <InputNumber min={1} max={Math.max(12, recommendedCount)} addonAfter={recommendedCount !== level.suggestedCount ? '规模推荐' : undefined} className="workspace-input-number-full" />
+              <InputNumber min={1} max={Math.max(12, recommendedCount)} suffix={recommendedCount !== level.suggestedCount ? '规模推荐' : undefined} className="workspace-input-number-full" />
             </Form.Item>
           )})}
           <Form.Item name="parentBatchSize" label="每批父节点数量" initialValue={1}>

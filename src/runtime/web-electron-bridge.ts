@@ -69,6 +69,7 @@ function unsubscribeWebEvent(channel: string, callback: WebEventCallback) {
 const WEB_BRIDGE_MARKER = '__novalCreateWebBridgeInstalled'
 const NOW = '2026-05-24T09:00:00.000Z'
 const LOCAL_BACKEND_URL = ''
+const LOCAL_BACKEND_RPC_TIMEOUT_MS = 15_000
 const WEB_MODEL_CONFIGS_KEY = 'novelforge.webPreview.modelConfigs'
 const WEB_SOURCE_SEARCH_KEY = 'novelforge.webPreview.sourceSearchSettings'
 const MASKED_KEY = '已设置'
@@ -872,15 +873,23 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
   }
 
   let response: Response
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), LOCAL_BACKEND_RPC_TIMEOUT_MS)
   try {
     response = await fetch(`${LOCAL_BACKEND_URL}/rpc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ service, method, args }),
+      signal: controller.signal,
     })
   } catch (error) {
-    rememberLocalBackendError('无法请求 /rpc', error)
-    throw new LocalBackendUnavailableError()
+    const timedOut = error instanceof DOMException && error.name === 'AbortError'
+    rememberLocalBackendError(timedOut ? `本地后端请求超时：${service}.${method}` : '无法请求 /rpc', error)
+    throw new LocalBackendUnavailableError(
+      timedOut ? `${service}.${method} 请求超时，请检查本地后端状态` : undefined,
+    )
+  } finally {
+    window.clearTimeout(timeout)
   }
 
   if (response.status === 404) {

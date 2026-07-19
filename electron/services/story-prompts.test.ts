@@ -226,5 +226,6 @@ describe('story-prompts narrative control guidance', () => {
     expect(prompt).toContain('【避免方向】')
     expect(prompt).toContain('方案 1：只是替换近义词')
     expect(prompt).toContain('【创意方向提示】')
+    expect(prompt).toContain('删除或泛化无来源的地点、房间、楼梯、方位')
   })
 })

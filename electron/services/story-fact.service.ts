@@ -137,7 +137,11 @@ export function getStoryFact(id: number) {
   return db.select().from(storyFacts).where(eq(storyFacts.id, id)).all()[0] || null
 }
 
-export function createStoryFact(novelId: number, input: StoryFactInput) {
+export function createStoryFact(
+  novelId: number,
+  input: StoryFactInput,
+  options: { skipContextTracking?: boolean } = {},
+) {
   ensureNovelExists(novelId)
   const db = getDb()
   const payload = sanitizeStoryFactPayload(input)
@@ -159,11 +163,15 @@ export function createStoryFact(novelId: number, input: StoryFactInput) {
     notes: payload.notes || '',
   }).run()
 
-  markNovelContextChanged(novelId, 'Info gap board changed')
+  if (!options.skipContextTracking) markNovelContextChanged(novelId, 'Info gap board changed')
   return Number(result.lastInsertRowid)
 }
 
-export function updateStoryFact(id: number, input: StoryFactInput) {
+export function updateStoryFact(
+  id: number,
+  input: StoryFactInput,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   const current = db.select().from(storyFacts).where(eq(storyFacts.id, id)).all()[0]
   if (!current) throwUserFacingError('common.loadFailed')
@@ -179,7 +187,7 @@ export function updateStoryFact(id: number, input: StoryFactInput) {
   }
 
   db.update(storyFacts).set(patch).where(eq(storyFacts.id, id)).run()
-  markNovelContextChanged(current.novelId, 'Info gap board changed')
+  if (!options.skipContextTracking) markNovelContextChanged(current.novelId, 'Info gap board changed')
 }
 
 export function deleteStoryFact(id: number) {

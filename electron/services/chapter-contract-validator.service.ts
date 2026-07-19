@@ -169,6 +169,9 @@ const OPENING_SCENE_MARKERS = [
   '炉前',
   '炉膛',
   '风压表',
+  '送风管',
+  '风阀',
+  '锅炉房',
   '表盘',
   '操作台',
   '出渣口',
@@ -203,6 +206,12 @@ const OPENING_ACTION_MARKERS = [
   '盘问',
   '确认',
   '发现',
+  '插进',
+  '插入',
+  '抽出',
+  '抽',
+  '卡住',
+  '拧',
   '攥',
   '扳',
   '盯',
@@ -247,6 +256,9 @@ const OPENING_PRESSURE_MARKERS = [
   '白烟',
   '烫',
   '压差',
+  '没关',
+  '失控',
+  '猛跌',
   '红线',
   '过三格',
   '骤降',
@@ -520,11 +532,48 @@ function findBestEvidence(
   })
 }
 
+function findAggregateEvidence(
+  paragraphs: string[],
+  keywords: string[],
+  markers: string[] = [],
+): ParagraphEvidence {
+  const text = paragraphs.join('\n')
+  if (!text) return { excerpt: '', score: 0, hitCount: 0 }
+  const hitCount = countMatchedKeywords(text, keywords)
+  const markerCount = countMarkers(text, markers)
+  const bestLocalEvidence = findBestEvidence(paragraphs, keywords, markers)
+  return {
+    excerpt: bestLocalEvidence.excerpt || clipExcerpt(text),
+    score: hitCount * 10 + markerCount * 3 + Math.min(text.length, 160) / 160,
+    hitCount,
+  }
+}
+
 function getEvidenceParagraphs(
   paragraphs: string[],
   keywords: string[],
 ): string[] {
   return paragraphs.filter((paragraph) => countMatchedKeywords(paragraph, keywords) > 0)
+}
+
+function resolveSceneResultEvidenceParagraphs(
+  scene: ChapterContractValidationSceneSnapshot,
+  sceneParagraphs: string[],
+  fallbackParagraphs: string[],
+): string[] {
+  if (!scene.resultState || fallbackParagraphs.length === 0) return sceneParagraphs
+  const keywords = buildKeywordCandidates(scene.resultState)
+  const requiredHits = Math.max(1, Math.min(2, keywords.length))
+  if (countMatchedKeywords(sceneParagraphs.join('\n'), keywords) >= requiredHits) {
+    return sceneParagraphs
+  }
+
+  // Paragraph-count bucketing is only a coarse fallback: a writer can put the
+  // visible result at the end of one scene and the next scene's opening in the
+  // same paragraph window. Expand narrowly around the contract's own anchors
+  // instead of treating a valid cross-boundary result as missing.
+  const evidenceWindows = buildLocalEvidenceWindows(fallbackParagraphs, keywords, 1)
+  return evidenceWindows.length > 0 ? evidenceWindows : sceneParagraphs
 }
 
 function hasAllMarkerGroups(paragraph: string, groups: string[][]): boolean {
@@ -771,10 +820,27 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
 function validateChapterGoal(paragraphs: string[], context: ContractValidationContext): ContractValidationItem | null {
   if (!context.chapterGoal) return null
   const keywords = buildKeywordCandidates(context.chapterGoal)
-  const evidence = findBestEvidence(paragraphs, keywords, PROGRESS_MARKERS)
+  const evidence = findAggregateEvidence(paragraphs, keywords, PROGRESS_MARKERS)
   const progressHits = paragraphs.reduce((count, paragraph) => count + countMarkers(paragraph, PROGRESS_MARKERS), 0)
-  const verdict: ContractValidationVerdict = evidence.hitCount >= Math.max(1, Math.min(2, keywords.length))
-    && progressHits > 0
+  const sceneBuckets = chunkParagraphs(paragraphs, Math.max(context.sceneSnapshots.length, 1))
+  const sceneResultCoverage = context.sceneSnapshots.length > 1
+    ? context.sceneSnapshots.filter((scene, index) => {
+      const resultKeywords = buildKeywordCandidates(scene.resultState)
+      if (resultKeywords.length === 0) return false
+      const sceneParagraphs = sceneBuckets[index] || []
+      const targetParagraphs = resolveSceneResultEvidenceParagraphs(scene, sceneParagraphs, paragraphs)
+      const resultEvidence = findAggregateEvidence(targetParagraphs, resultKeywords, PROGRESS_MARKERS)
+      return resultEvidence.hitCount >= Math.max(1, Math.min(2, resultKeywords.length))
+    }).length
+    : 0
+  // 章节目标常被拆成多个场景结果来兑现，不能因为正文没有原样复述
+  // “本章目标”这句规划语言，就把已经逐场落地的目标判成弱兑现。
+  // 只有多场景结果全部具备时，才启用这一条合同证据；每个结果状态本身
+  // 已经通过同一套结果关键词验证，因此不会把纯计划复述误当作正文兑现。
+  const contractBackedGoalCoverage = context.sceneSnapshots.length > 1
+    && sceneResultCoverage === context.sceneSnapshots.length
+  const verdict: ContractValidationVerdict = (evidence.hitCount >= Math.max(1, Math.min(2, keywords.length))
+    && progressHits > 0) || contractBackedGoalCoverage
     ? 'pass'
     : evidence.hitCount > 0 || progressHits > 1
       ? 'weak'
@@ -1042,7 +1108,7 @@ function validateSceneConflict(
 ): ContractValidationItem {
   const targetParagraphs = sceneParagraphs.length > 0 ? sceneParagraphs : fallbackParagraphs
   const keywords = buildKeywordCandidates(scene.obstacle, scene.sceneGoal)
-  const evidence = findBestEvidence(targetParagraphs, keywords, CONFLICT_MARKERS)
+  const evidence = findAggregateEvidence(targetParagraphs, keywords, CONFLICT_MARKERS)
   const conflictHits = targetParagraphs.reduce((count, paragraph) => count + countMarkers(paragraph, CONFLICT_MARKERS), 0)
   const verdict: ContractValidationVerdict = evidence.hitCount >= Math.max(1, Math.min(2, keywords.length))
     && conflictHits > 0
@@ -1069,9 +1135,10 @@ function validateSceneResult(
   sceneParagraphs: string[],
   fallbackParagraphs: string[],
 ): ContractValidationItem {
-  const targetParagraphs = sceneParagraphs.length > 0 ? sceneParagraphs : fallbackParagraphs
+  const bucketParagraphs = sceneParagraphs.length > 0 ? sceneParagraphs : fallbackParagraphs
+  const targetParagraphs = resolveSceneResultEvidenceParagraphs(scene, bucketParagraphs, fallbackParagraphs)
   const keywords = buildKeywordCandidates(scene.resultState)
-  const evidence = findBestEvidence(targetParagraphs, keywords, PROGRESS_MARKERS)
+  const evidence = findAggregateEvidence(targetParagraphs, keywords, PROGRESS_MARKERS)
   const verdict: ContractValidationVerdict = evidence.hitCount >= Math.max(1, Math.min(2, keywords.length))
     ? 'pass'
     : evidence.hitCount > 0

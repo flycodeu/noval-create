@@ -9,6 +9,15 @@ export interface TextGuardrailFinding {
   excerpt: string
 }
 
+export interface QualityGuardrailOptions {
+  /**
+   * Canonical character/item/location/glossary terms that should not be
+   * treated as interchangeable descriptive prose when measuring repetition.
+   * Their surrounding sentence can still trigger the other guardrails.
+   */
+  knownTerms?: string[]
+}
+
 interface PatternRule {
   code: string
   severity: GuardrailSeverity
@@ -149,7 +158,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'parallelism_overuse',
     severity: 'medium',
     message: '排比或平衡句过度整齐，像在套模板而不是跟随人物思路。',
-    pattern: /(?:既.{2,18}又.{2,18}(?:还|更|也).{2,24})|(?:一边.{2,18}一边.{2,18})|(?:越(?!来)[^，。！？；]{2,10}越(?!来)[^，。！？；]{2,16})/u,
+    pattern: /(?:既.{2,18}又.{2,18}(?:还|更|也).{2,24})|(?:一边.{2,18}一边.{2,18})|(?:一方面.{2,24}另一方面.{2,24})/u,
   },
   {
     code: 'ai_pseudo_philosophy',
@@ -477,9 +486,43 @@ const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = 
   ],
 }
 
-function findExcerpt(text: string, pattern: RegExp): string {
-  const match = text.match(pattern)
-  return match?.[0]?.trim() || ''
+function isInsideDialogueQuote(text: string, start: number): boolean {
+  const quotePairs: Array<[string, string]> = [
+    ['“', '”'],
+    ['「', '」'],
+    ['『', '』'],
+    ['‘', '’'],
+  ]
+  if (quotePairs.some(([opening, closing]) => text.lastIndexOf(opening, start) > text.lastIndexOf(closing, start))) {
+    return true
+  }
+  return (text.slice(0, start).match(/"/gu) || []).length % 2 === 1
+}
+
+function findRelevantPatternMatch(
+  text: string,
+  pattern: RegExp,
+  code: string,
+): RegExpExecArray | null {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+  const scanner = new RegExp(pattern.source, flags)
+  let match = scanner.exec(text)
+  while (match) {
+    const movementCorrection = code === 'not_but_definition_pattern'
+      && /不是.{0,28}(?:，|,)?(?:而是|只是|是)/u.test(match[0])
+      && /(?:往|朝|向|去|来)/u.test(match[0])
+      && /(?:往|朝|向|去|来)/u.test(match[0].split(/(?:，|,)/u).slice(1).join(''))
+    if (code !== 'not_but_definition_pattern') return match
+    if (
+      !movementCorrection
+      && (!isInsideDialogueQuote(text, match.index)
+        || !/不是(?:我|你|他|她|这|那|一个人|我们|你们|他们)/u.test(match[0]))
+    ) {
+      return match
+    }
+    match = scanner.exec(text)
+  }
+  return null
 }
 
 function adjustSeverity(base: GuardrailSeverity, realismLevel: RealismLevel): GuardrailSeverity {
@@ -527,7 +570,7 @@ function collectGenreHollowingFinding(text: string, genre?: string): TextGuardra
   }
 }
 
-function collectHighFrequencyRepetitions(text: string): TextGuardrailFinding | null {
+function collectHighFrequencyRepetitions(text: string, knownTerms: string[] = []): TextGuardrailFinding | null {
   if (text.length < 500) return null
 
   // 检测高频描写词组（在短距离内出现3次以上）
@@ -546,8 +589,22 @@ function collectHighFrequencyRepetitions(text: string): TextGuardrailFinding | n
     }
   }
 
+  const protectedPhrases = new Set<string>()
+  const normalizedKnownTerms = knownTerms
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+  for (const term of normalizedKnownTerms) {
+    for (let len = 2; len <= 4; len += 1) {
+      for (let index = 0; index <= term.length - len; index += 1) {
+        const fragment = term.slice(index, index + len)
+        if (/^[\u4e00-\u9fff]{2,4}$/.test(fragment)) protectedPhrases.add(fragment)
+      }
+    }
+  }
+
   const repeated = [...phrases.entries()]
     .filter(([phrase, count]) => count >= 4 && !/^[的了是在不]/.test(phrase) && !/[的了着过]$/.test(phrase))
+    .filter(([phrase]) => !protectedPhrases.has(phrase))
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
 
@@ -771,22 +828,29 @@ export function buildGenrePacingGuidance(genre?: string): string {
   ].join('\n')
 }
 
-export function collectQualityGuardrailFindings(text: string, genre?: string): TextGuardrailFinding[] {
+export function collectQualityGuardrailFindings(
+  text: string,
+  genre?: string,
+  options: QualityGuardrailOptions = {},
+): TextGuardrailFinding[] {
   const content = text.trim()
   if (!content) return []
 
   const realismLevel = getBuiltinGenreRules(genre).writingConstraints.realismLevel
-  const patternFindings = LANGUAGE_PATTERN_RULES
-    .filter((rule) => rule.pattern.test(content))
-    .map((rule) => ({
-      code: rule.code,
-      severity: adjustSeverity(rule.severity, realismLevel),
-      message: rule.message,
-      excerpt: findExcerpt(content, rule.pattern),
-    }))
+  const patternFindings = LANGUAGE_PATTERN_RULES.flatMap((rule) => {
+    const match = findRelevantPatternMatch(content, rule.pattern, rule.code)
+    return match
+      ? [{
+          code: rule.code,
+          severity: adjustSeverity(rule.severity, realismLevel),
+          message: rule.message,
+          excerpt: match[0].trim(),
+        }]
+      : []
+  })
 
   const genreFinding = collectGenreHollowingFinding(content, genre)
-  const repetitionFinding = collectHighFrequencyRepetitions(content)
+  const repetitionFinding = collectHighFrequencyRepetitions(content, options.knownTerms)
   const densityFindings = collectDensityGuardrailFindings(content)
   const simileStackingFinding = collectParagraphSimileStacking(content)
   const endingImageryFinding = collectEndingLonelyImagery(content)
@@ -831,6 +895,7 @@ const STYLE_DENSITY_FINDING_CODES = new Set([
   'dash_abuse',
   'high_frequency_repetition',
   'parenthetical_explanation_abuse',
+  'soft_voice_cliche',
   'paragraph_simile_stacking',
   'eye_open_close_standalone_paragraph',
   'atmospheric_imagery_overuse',

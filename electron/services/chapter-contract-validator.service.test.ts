@@ -140,6 +140,47 @@ describe('validateChapterContractDelivery', () => {
     expect(result.rewriteHints).toHaveLength(0)
   })
 
+  it('accepts a chapter goal when its multi-scene result states collectively provide the evidence', () => {
+    const rows = createBaseRows(
+      '沈砚青交出铜腰牌，失去炉前资格。季逢春把事故登记表退回，命他去工册股补录事故，随后收到夜校通知。',
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      chapterGoal: '通过一次误操作让沈砚青失去炉前资格，进入工册股并接受夜校安排。',
+    })
+    Object.assign((rows.get(sceneContracts) || [])[0], {
+      sceneGoal: '让沈砚青面对资格处分',
+      obstacle: '班组拒绝继续让他独立操作',
+      resultState: '沈砚青交出铜腰牌，失去炉前资格',
+    })
+    ;(rows.get(chapterSegments) || []).push({
+      id: 1002,
+      novelId: 1,
+      chapterId: 10,
+      segmentOrder: 2,
+      title: '场景二',
+      purpose: '进入制度现场',
+      outputState: '收到夜校通知',
+    })
+    ;(rows.get(sceneContracts) || []).push({
+      id: 2,
+      novelId: 1,
+      chapterId: 10,
+      segmentId: 1002,
+      sceneGoal: '进入工册股',
+      obstacle: '表格填写被退回',
+      resultState: '去工册股补录事故，收到夜校通知',
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'chapter_goal')?.verdict).toBe('pass')
+  })
+
   it('downgrades to warning when thread and foreshadow are only mentioned without actual progress', () => {
     const rows = createBaseRows(
       '夜晚的北门外，守卫追查林远的来路，两人险些动手。林远被迫改走小巷，但至少让主线向前推进一步，也让线索升级到西巷附近。\n\n他想起密封账册和窗棂刻痕，只是扫过这个念头，没有再看第二眼。门外忽然一阵风响，他只把这件事压回心里。',
@@ -566,6 +607,37 @@ describe('validateChapterContractDelivery', () => {
       sceneGoal: '铁水旺独立盯三号炉风压表',
       obstacle: '压差跳过红线',
       resultState: '调令通知单压在木桌上',
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'golden_three_opening')?.verdict).toBe('pass')
+  })
+
+  it('recognizes industrial action and pressure in the first paragraph', () => {
+    const rows = createBaseRows(
+      [
+        '周铁生把九寸弯嘴检修钳插进送风管接口的时候，风阀没关。',
+        '他跳过了确认风阀状态这一步，风压表指针猛跌，方大炉冲过来扳动补风阀。',
+        '周铁生撞上铁梯，检修钳脱手，炉前的报警灯亮了。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapters) || [])[0], {
+      chapterNum: 1,
+      title: '检修钳插在送风管上',
+    })
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      chapterGoal: '周铁生在炉前误操作检修钳并承担事故后果',
+    })
+    Object.assign((rows.get(sceneContracts) || [])[0], {
+      sceneGoal: '周铁生在炉前独立操作送风管',
+      obstacle: '风阀没关导致风压骤降',
+      resultState: '检修钳脱手并触发报警',
     })
     vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
 

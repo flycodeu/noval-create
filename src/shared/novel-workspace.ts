@@ -242,11 +242,15 @@ export function buildWorkspaceRoute(novelId: number, targetPage: string) {
 }
 
 function finalizeProgress(progress: ModuleProgress): ModuleProgress {
-  return {
+  const normalized: ModuleProgress = {
     ...progress,
-    requiredDone: Math.min(progress.requiredDone, progress.requiredTotal),
-    optionalDone: Math.min(progress.optionalDone, progress.optionalTotal),
-    status: getModuleStatus(progress),
+    requiredDone: Math.max(0, Math.min(progress.requiredDone, progress.requiredTotal)),
+    optionalDone: Math.max(0, Math.min(progress.optionalDone, progress.optionalTotal)),
+  }
+
+  return {
+    ...normalized,
+    status: getModuleStatus(normalized),
   }
 }
 

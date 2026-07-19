@@ -8,7 +8,10 @@ import {
   analyzeChapterReadingExperience,
   analyzeRewriteNarrativeDelta,
   buildAdaptiveRewritePolicy,
+  buildDialogueRepairDirective,
+  buildReviewPriorityPrompt,
   buildReviewPrioritySummary,
+  buildStructuralRepairDirective,
   buildRewriteMiniReviewVerdict,
 } from './chapter-pipeline-policy.service'
 
@@ -106,6 +109,56 @@ describe('chapter pipeline policy', () => {
     expect(policy.contextStrategy).toBe('max_coverage')
     expect(summary.topIssues.findIndex((issue) => issue.source === 'typed_ref_risks'))
       .toBeLessThan(summary.topIssues.findIndex((issue) => issue.source === 'language_risks'))
+  })
+
+  it('emits concrete dialogue repair instructions with pair evidence', () => {
+    const directive = buildDialogueRepairDirective({
+      similarities: [{
+        characterAId: 1,
+        characterAName: '陆怀工',
+        characterBId: 2,
+        characterBName: '罗大桩',
+        similarity: 82,
+        reason: '句式偏好重合：短句密集',
+      }],
+      infoDensityRisks: ['安全员质问段落对白过简，缺少追问层次。'],
+    })
+
+    expect(directive).toContain('陆怀工 / 罗大桩')
+    expect(directive).toContain('事实/现场')
+    expect(directive).toContain('禁止安全员/旁观者直接替所有人把结论说完')
+  })
+
+  it('makes structural retry instructions measurable without weakening the gate', () => {
+    const directive = buildStructuralRepairDirective({
+      status: 'fail',
+      structuralIssueCount: 3,
+      similarityToOriginal: 0.84,
+      changedSentenceRate: 8,
+      narrativeAnchorChangeRate: -22,
+      actionVerbDeltaRate: -12,
+      findings: ['冲突链增量不足，更像改词句而不是修结构。'],
+      recommendation: '需要重新组织事件链。',
+      conflictChain: { status: 'fail', score: 20, originalHitRate: 0.2, rewrittenHitRate: 0.1, deltaRate: -10, findings: [] },
+      costChain: { status: 'weak', score: 40, originalHitRate: 0.4, rewrittenHitRate: 0.38, deltaRate: -2, findings: [] },
+      goalChain: { status: 'fail', score: 30, originalHitRate: 0.3, rewrittenHitRate: 0.25, deltaRate: -5, findings: [] },
+    }, ['场景4的信息首次披露顺序必须调整。'])
+
+    expect(directive).toContain('阻力/人物判断/行动选择/代价或结果')
+    expect(directive).toContain('按场景顺序重新安排触发、回应和结果')
+    expect(directive).toContain('场景4的信息首次披露顺序必须调整')
+    expect(directive).toContain('章尾必须留下新的未完成动作')
+    expect(directive).toContain('主动选择 -> 他人反应 -> 可见后果')
+  })
+
+  it('adds a compact dialogue repair panel when priority issues include dialogue risks', () => {
+    const summary = buildReviewPrioritySummary(createReviewNotes({
+      dialogue_homogenization_risks: ['多人对白同声化。'],
+    }))
+    const prompt = buildReviewPriorityPrompt(summary)
+
+    expect(prompt).toContain('【对白定向修复】')
+    expect(prompt).toContain('事实/现场')
   })
 
   it('routes weak theme, character, and relationship contract items into rewrite priority through arc risks', () => {
@@ -409,6 +462,52 @@ describe('chapter pipeline policy', () => {
     expect(report.costChain.status).toBe('pass')
     expect(report.goalChain.status).toBe('pass')
     expect(report.findings.join('\n')).not.toContain('更像改词句')
+  })
+
+  it('does not reject a materially rewritten low-density industrial scene for missing template tokens', () => {
+    vi.mocked(computeCandidateSimilarity).mockReturnValue(0.62)
+    const reviewNotes = createReviewNotes({
+      critical_fixes: ['压缩开篇事故并补出章尾下一步压力。'],
+      rewrite_required: true,
+    })
+    const summary = buildReviewPrioritySummary(reviewNotes)
+    const original = [
+      '周铁生站在平台边。',
+      '方大炉检查阀门。',
+      '压力表的指针停着。',
+      '炉前的灯很亮。',
+      '工具箱靠着铁梯。',
+      '值班室有人说话。',
+      '记录本摊在桌上。',
+      '周铁生看了很久。',
+      '方大炉拦住了他。',
+      '事情随后进入交接。',
+    ].join('')
+    const rewritten = [
+      '周铁生先看见油污遮住了刻度。',
+      '他把钳子换到左手。',
+      '炉膛的光在观察孔里缩了一下。',
+      '铁皮传来细碎的震动。',
+      '方大炉没有立刻回头。',
+      '周铁生想起师傅教过的顺序。',
+      '记录本上的墨迹已经晕开。',
+      '值班长在通道尽头喊了一声。',
+      '方大炉拦住他，接过了责任。',
+      '周铁生把通知单折进了口袋。',
+    ].join('')
+
+    const report = analyzeRewriteNarrativeDelta({
+      originalContent: original,
+      rewrittenContent: rewritten,
+      reviewPrioritySummary: summary,
+      reviewNotes,
+    })
+
+    expect(report.similarityToOriginal).toBeLessThan(0.8)
+    expect(report.changedSentenceRate).toBeGreaterThan(70)
+    expect(report.status).toBe('pass')
+    expect(report.conflictChain.status).not.toBe('fail')
+    expect(report.findings.join('\n')).not.toContain('证据密度仅')
   })
 
   it('blocks mini review when rewrite delta proves plot repair did not land', () => {

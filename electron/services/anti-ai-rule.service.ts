@@ -711,10 +711,14 @@ function buildAlertDetail(rule: AntiAiRuleHitSummary, highRisk: boolean): string
   return `${rule.ruleTitle} 已连续两章命中，下一章应自动升级为硬约束。`
 }
 
-export function collectAntiAiRuntimeHits(content: string, genre?: string): AntiAiRuleHitDraft[] {
+export function collectAntiAiRuntimeHits(
+  content: string,
+  genre?: string,
+  options: { knownTerms?: string[] } = {},
+): AntiAiRuleHitDraft[] {
   const normalized = content.trim()
   if (!normalized) return []
-  const findings = collectQualityGuardrailFindings(normalized, genre).map(mapFindingToDraft)
+  const findings = collectQualityGuardrailFindings(normalized, genre, options).map(mapFindingToDraft)
   const driftHits = buildDriftHitDrafts(analyzeLanguageDrift(normalized))
   return dedupeDraftsByRuleCode([...findings, ...driftHits])
 }
@@ -1004,6 +1008,7 @@ export function persistAntiAiRuleHits(params: {
   chapterNum: number
   content: string
   genre?: string
+  knownTerms?: string[]
 }): {
   hits: AntiAiRuleHitDraft[]
   promotedRules: AntiAiPromotedRule[]
@@ -1012,7 +1017,7 @@ export function persistAntiAiRuleHits(params: {
 } {
   const db = getDb()
   const now = new Date().toISOString()
-  const hits = collectAntiAiRuntimeHits(params.content, params.genre)
+  const hits = collectAntiAiRuntimeHits(params.content, params.genre, { knownTerms: params.knownTerms })
   db.delete(antiAiRuleHits).where(eq(antiAiRuleHits.chapterId, params.chapterId)).run()
 
   if (hits.length === 0) {

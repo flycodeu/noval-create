@@ -11,7 +11,7 @@ import {
   RobotOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
-import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
 import ActionBar from '../../../components/novel/common/ActionBar'
@@ -68,7 +68,13 @@ import { createChapterSaveCoordinator } from './chapter-save-coordinator'
 import './index.css'
 
 interface Props { novelId: number }
-interface AiCheckPayload { score: number; issues: Array<{ type: string; location: string; suggestion: string }>; overall_feedback: string }
+interface AiCheckPayload {
+  score: number
+  issues: Array<{ type: string; location: string; suggestion: string; severity?: 'high' | 'medium' | 'low' }>
+  overall_feedback: string
+  ai_like_rate?: number
+  repetition_risk?: '低' | '中' | '高'
+}
 interface ContinuityPayload { plot_progress?: string[]; character_state_changes?: string[]; world_state_changes?: string[]; open_loops?: string[]; continuity_notes?: string[]; arc_progress?: string }
 interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[]; climax_variant?: string }
 interface ReviewNotes {
@@ -305,10 +311,56 @@ const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) a
 const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
 const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
 const parseHookContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as HookContinuitySnapshot : null } catch { return null } }
+const parseAiCheck = (raw?: unknown): AiCheckPayload | null => {
+  if (raw === null || raw === undefined || raw === '') return null
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    const overallScore = Number(record.score ?? record.overall_score)
+    const aiLikeRate = Number(record.ai_like_rate)
+    const hasScore = Number.isFinite(overallScore)
+    const hasFeedback = typeof record.overall_feedback === 'string' && record.overall_feedback.trim().length > 0
+    if (!hasScore && !hasFeedback && !Number.isFinite(aiLikeRate)) return null
+
+    const rawIssues = Array.isArray(record.issues)
+      ? record.issues
+      : Array.isArray(record.top_fixes)
+        ? record.top_fixes.map((item) => ({ type: '重点修复', location: '', suggestion: String(item) }))
+        : []
+    const issues = rawIssues
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+      .map((item) => ({
+        type: typeof item.type === 'string' ? item.type : '重点修复',
+        location: typeof item.location === 'string' ? item.location : '',
+        suggestion: typeof item.suggestion === 'string' ? item.suggestion : String(item.detail || item.fix || ''),
+        ...(item.severity === 'high' || item.severity === 'medium' || item.severity === 'low'
+          ? { severity: item.severity as 'high' | 'medium' | 'low' }
+          : {}),
+      }))
+      .filter((item) => item.suggestion.trim().length > 0)
+
+    return {
+      score: hasScore ? Math.max(0, Math.min(100, overallScore)) : Math.max(0, Math.min(100, 100 - aiLikeRate)),
+      issues,
+      overall_feedback: hasFeedback ? String(record.overall_feedback) : '已保存章节 AI 体检结果。',
+      ...(Number.isFinite(aiLikeRate) ? { ai_like_rate: Math.max(0, Math.min(100, aiLikeRate)) } : {}),
+      ...(record.repetition_risk === '低' || record.repetition_risk === '中' || record.repetition_risk === '高'
+        ? { repetition_risk: record.repetition_risk }
+        : {}),
+    }
+  } catch {
+    return null
+  }
+}
 const parseWritebackStatus = (raw?: string) => {
   try { return raw ? normalizeWritebackSyncStatus(JSON.parse(raw)) : null } catch { return null }
 }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
+const formatPipelineMetaValue = (value: string, maxLength = 72) => {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength - 18)}…${value.slice(-16)}`
+}
 const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
@@ -694,6 +746,12 @@ export default function Writing({ novelId }: Props) {
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
   useEffect(() => { chapterIdsRef.current = new Set(chapters.map((chapter) => chapter.id)) }, [chapters])
+  useEffect(() => {
+    if (!currentChapter) return
+    const chapterRecord = currentChapter as unknown as Record<string, unknown>
+    const persisted = parseAiCheck(currentChapter.aiScoreJson ?? chapterRecord.ai_score_json)
+    if (persisted) setAiResult(persisted)
+  }, [currentChapter])
 
   useEffect(() => {
     if (!publishCheck) return
@@ -908,6 +966,8 @@ export default function Writing({ novelId }: Props) {
     if (!full || !isCurrent()) return
     setChapterSegments(segments)
     setCurrentChapter(full)
+    const fullRecord = full as unknown as Record<string, unknown>
+    setAiResult(parseAiCheck(full.aiScoreJson ?? fullRecord.ai_score_json))
     setContent(full.content || '')
     setWordCount(countWords(full.content || ''))
     resetEditorHistory(full.content || '')
@@ -937,7 +997,7 @@ export default function Writing({ novelId }: Props) {
       currentChapterIdRef.current = null
       chapterDetailRequestRef.current += 1
       resetEditorHistory('')
-      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setLatestPipelineTask(null); setLivePipelineSnapshot(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); await refreshContextStatus(); return
+      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setLatestPipelineTask(null); setLivePipelineSnapshot(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); void refreshContextStatus().catch(console.error); return
     }
     const target = list.find((chapter) => chapter.id === (preferredChapterId ?? currentChapterIdRef.current)) || list[0]
     currentChapterIdRef.current = target.id
@@ -974,28 +1034,43 @@ export default function Writing({ novelId }: Props) {
       setLoading(true)
       setRefreshing(false)
       try {
-        await Promise.all([
-          loadChapters(routeChapterId || undefined),
+        // 章节列表是首屏必需数据；一致性、质量和素材快照属于辅助信息，
+        // 不应因为其中一个接口慢或暂时不可用而把正文工作台锁在加载动画里。
+        await loadChapters(routeChapterId || undefined)
+        if (!alive) return
+        loadedOnceRef.current = true
+        setLoading(false)
+        setRefreshing(false)
+
+        void Promise.allSettled([
           refreshMeta(),
           refreshContextStatus(),
           refreshQualityDashboard(),
           refreshInfoGapAssets(),
           refreshForeshadowLedger(),
-        ])
-        loadedOnceRef.current = true
+        ]).then((results) => {
+          results.forEach((result) => {
+            if (result.status === 'rejected') console.error('Failed to refresh writing workspace metadata', result.reason)
+          })
+        })
       } catch (error) {
         if (alive) {
           console.error(error)
           message.error(getErrorMessage(error, 'common.loadFailed'))
         }
       } finally {
-        if (alive) {
+        if (alive && !loadedOnceRef.current) {
           setLoading(false)
           setRefreshing(false)
         }
       }
     })()
-    return () => { alive = false }
+    return () => {
+      alive = false
+      // React StrictMode 会在开发环境中先清理一次 effect，再重新执行。
+      // 如果首次加载尚未完成，必须允许下一次 effect 接管请求，否则空章节项目会永久停在 loading。
+      if (!loadedOnceRef.current) initializedRef.current = false
+    }
   }, [loadChapters, refreshContextStatus, refreshForeshadowLedger, refreshInfoGapAssets, refreshMeta, refreshQualityDashboard, routeChapterId])
 
   useEffect(() => {
@@ -2257,64 +2332,73 @@ export default function Writing({ novelId }: Props) {
             </div>
           ) : <div className="novel-copy-block">当前章节还没有最近一次角色化流水线快照。</div>}
         </InsightCard>
-        <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
-          <ConstraintInjectionCard
-            preview={chapterContextPreview}
-            preserveConstraintLabels={preserveConstraintLabels}
-            onPreserveConstraintChange={setPreserveConstraintLabels}
-          />
+        <InsightCard
+          title="更多诊断与回写"
+          eyebrow="上下文 / 资产 / 伏笔 / 世界规则 · 按需展开"
+          tone="soft"
+          collapsible
+        >
+          <div className="novel-writing-shell__insight-stack novel-writing-shell__insight-stack--nested">
+            <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
+              <ConstraintInjectionCard
+                preview={chapterContextPreview}
+                preserveConstraintLabels={preserveConstraintLabels}
+                onPreserveConstraintChange={setPreserveConstraintLabels}
+              />
+            </InsightCard>
+            <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
+              <PreviousChapterFeedCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="章节衔接桥" eyebrow="时间 / 地点 / 情绪 / 视角" tone="soft">
+              <ChapterBridgeMemoryCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
+              <RecallDiagnosticsCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="资产影响与注入" eyebrow="本次实际使用 / 待同步影响" tone="soft">
+              <ContextUsageImpactCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="AI 生成解释" eyebrow={`当前模式 · ${getAiExecutionModeLabel(effectiveAiExecutionMode)}`} tone="soft">
+              <AiExplainabilityCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="写作工具追踪" eyebrow="按需检索 / 降级 / 覆盖" tone="soft">
+              <WriterToolsTraceCard preview={chapterContextPreview} />
+            </InsightCard>
+            <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="先完成审校或刷新摘要，再回到这里收口定稿优先级。" /></InsightCard>
+            <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+            <InsightCard title="本章信息揭示控制" eyebrow="允许揭示 / 已揭示" tone="soft">
+              <ChapterRevealConstraintCard
+                chapter={currentChapter}
+                facts={storyFacts}
+                volumes={storyVolumes}
+                characters={chapterCharacters}
+                allowedFactIds={allowedRevealFactIds}
+                revealedFactIds={revealedFactIds}
+                truthStats={currentVolumeTruthStats}
+                saving={updatingRevealConstraints}
+                onUpdate={handleUpdateRevealConstraints}
+                onOpenBoard={() => navigate(buildWorkspaceRoute(novelId, 'info-gap-board'))}
+              />
+            </InsightCard>
+            <InsightCard title="本章伏笔回写" eyebrow="新增埋设 / 已回收登记" tone="soft">
+              <ChapterForeshadowWritebackCard
+                chapter={currentChapter}
+                chapterSegments={chapterSegments}
+                ledger={foreshadowLedger}
+                saving={updatingForeshadowWriteback}
+                onCreate={handleCreateForeshadowWriteback}
+                onPatch={handlePatchForeshadowWriteback}
+                onDelete={handleDeleteForeshadowWriteback}
+                onOpenLedger={() => navigate(buildWorkspaceRoute(novelId, 'foreshadow-ledger'))}
+              />
+            </InsightCard>
+            <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
+              <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
+            </InsightCard>
+            <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="先运行审校或刷新摘要，再集中处理需要回看的修订点。" /></InsightCard>
+            <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '本章暂未命中明确的世界边界。' : '先完善世界规则，再回来校对本章边界。'} /></InsightCard>
+          </div>
         </InsightCard>
-        <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
-          <PreviousChapterFeedCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="章节衔接桥" eyebrow="时间 / 地点 / 情绪 / 视角" tone="soft">
-          <ChapterBridgeMemoryCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
-          <RecallDiagnosticsCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="资产影响与注入" eyebrow="本次实际使用 / 待同步影响" tone="soft">
-          <ContextUsageImpactCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="AI 生成解释" eyebrow={`当前模式 · ${getAiExecutionModeLabel(effectiveAiExecutionMode)}`} tone="soft">
-          <AiExplainabilityCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="写作工具追踪" eyebrow="按需检索 / 降级 / 覆盖" tone="soft">
-          <WriterToolsTraceCard preview={chapterContextPreview} />
-        </InsightCard>
-        <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="先完成审校或刷新摘要，再回到这里收口定稿优先级。" /></InsightCard>
-        <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
-        <InsightCard title="本章信息揭示控制" eyebrow="允许揭示 / 已揭示" tone="soft">
-          <ChapterRevealConstraintCard
-            chapter={currentChapter}
-            facts={storyFacts}
-            volumes={storyVolumes}
-            characters={chapterCharacters}
-            allowedFactIds={allowedRevealFactIds}
-            revealedFactIds={revealedFactIds}
-            truthStats={currentVolumeTruthStats}
-            saving={updatingRevealConstraints}
-            onUpdate={handleUpdateRevealConstraints}
-            onOpenBoard={() => navigate(buildWorkspaceRoute(novelId, 'info-gap-board'))}
-          />
-        </InsightCard>
-        <InsightCard title="本章伏笔回写" eyebrow="新增埋设 / 已回收登记" tone="soft">
-          <ChapterForeshadowWritebackCard
-            chapter={currentChapter}
-            chapterSegments={chapterSegments}
-            ledger={foreshadowLedger}
-            saving={updatingForeshadowWriteback}
-            onCreate={handleCreateForeshadowWriteback}
-            onPatch={handlePatchForeshadowWriteback}
-            onDelete={handleDeleteForeshadowWriteback}
-            onOpenLedger={() => navigate(buildWorkspaceRoute(novelId, 'foreshadow-ledger'))}
-          />
-        </InsightCard>
-        <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
-          <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
-        </InsightCard>
-        <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="先运行审校或刷新摘要，再集中处理需要回看的修订点。" /></InsightCard>
-        <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '本章暂未命中明确的世界边界。' : '先完善世界规则，再回来校对本章边界。'} /></InsightCard>
       </div>
     </>
   )
@@ -2774,7 +2858,7 @@ export default function Writing({ novelId }: Props) {
     },
     {
       label: '合同版本',
-      value: currentPipelineSnapshot?.contractVersion || '未记录',
+      value: formatPipelineMetaValue(currentPipelineSnapshot?.contractVersion || '未记录'),
     },
     {
       label: '生成用量',
@@ -2791,7 +2875,7 @@ export default function Writing({ novelId }: Props) {
     {
       label: '回写状态',
       value: currentWritebackStatus
-        ? `${getWritebackPhaseLabel(currentWritebackStatus.phase)} · ${currentWritebackStatus.candidateReady ? '候选已生成' : '暂无候选'} · ${currentWritebackStatus.canonApplied ? '正典已应用' : '正典待应用'}${currentWritebackStatus.blockedGeneration ? ' · 已阻断后续生成' : ''}`
+        ? `${getWritebackPhaseLabel(currentWritebackStatus.phase)}${currentWritebackStatus.blockedGeneration ? ' · 后续生成已暂停' : ''}`
         : '未记录',
     },
     {
@@ -2816,13 +2900,15 @@ export default function Writing({ novelId }: Props) {
 
   const insightRouteContent = (
     <React.Suspense fallback={<div className="novel-copy-block">正在切换视图...</div>}>
-      <Routes>
-        <Route path="/" element={<Navigate to="editor" replace />} />
-        <Route path="editor" element={<WritingEditorRoute>{chapterInsightContent}</WritingEditorRoute>} />
-        <Route path="context" element={<WritingContextRoute>{memoryInsightContent}</WritingContextRoute>} />
-        <Route path="review" element={<WritingReviewRoute>{reviewInsightContent}</WritingReviewRoute>} />
-        <Route path="history" element={<WritingHistoryRoute>{historyInsightContent}</WritingHistoryRoute>} />
-      </Routes>
+      {activeWritingRoute === 'context' ? (
+        <WritingContextRoute>{memoryInsightContent}</WritingContextRoute>
+      ) : activeWritingRoute === 'review' ? (
+        <WritingReviewRoute>{reviewInsightContent}</WritingReviewRoute>
+      ) : activeWritingRoute === 'history' ? (
+        <WritingHistoryRoute>{historyInsightContent}</WritingHistoryRoute>
+      ) : (
+        <WritingEditorRoute>{chapterInsightContent}</WritingEditorRoute>
+      )}
     </React.Suspense>
   )
 
@@ -3229,7 +3315,7 @@ export default function Writing({ novelId }: Props) {
                   <SectionHeader
                     eyebrow="轻量验收反馈"
                     title="当前章检查结果"
-                    description="把最关键的验收信号放在编辑器下方，减少频繁跳出或大段切屏。"
+                    description="合同、连续性、AI 味与节奏的当前状态。"
                   />
                   <div className="chapter-console-page__acceptance-grid">
                     {acceptanceCards.slice(0, 4).map((item) => (
@@ -3294,7 +3380,7 @@ export default function Writing({ novelId }: Props) {
                   <SectionHeader
                     eyebrow="流水线元数据"
                     title="执行记录"
-                    description="任务、合同版本、生成用量、耗时和恢复提示都收在这里。"
+                    description="本次流水线运行记录。"
                   />
                   <div className="chapter-console-page__meta-grid">
                     {pipelineMetaItems.map((item) => (
@@ -3788,21 +3874,48 @@ function InsightCard({
   title,
   eyebrow,
   tone = 'default',
+  collapsible = false,
+  defaultOpen = false,
   children,
 }: {
   title: string
   eyebrow?: string
   tone?: 'default' | 'hero' | 'soft'
+  collapsible?: boolean
+  defaultOpen?: boolean
   children: React.ReactNode
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const cardClassName = `novel-writing-shell__insight-card novel-writing-shell__insight-card--${tone}`
+  const header = (
+    <div className="novel-writing-shell__insight-card-header">
+      {eyebrow ? <div className="novel-writing-shell__insight-card-eyebrow">{eyebrow}</div> : null}
+      <div className="novel-writing-shell__insight-card-title">{title}</div>
+    </div>
+  )
+
+  if (!collapsible) {
+    return (
+      <section className={cardClassName}>
+        {header}
+        <div className="novel-writing-shell__insight-card-body">{children}</div>
+      </section>
+    )
+  }
+
   return (
-    <section className={`novel-writing-shell__insight-card novel-writing-shell__insight-card--${tone}`}>
-      <div className="novel-writing-shell__insight-card-header">
-        {eyebrow ? <div className="novel-writing-shell__insight-card-eyebrow">{eyebrow}</div> : null}
-        <div className="novel-writing-shell__insight-card-title">{title}</div>
-      </div>
+    <details
+      className={`${cardClassName} novel-writing-shell__insight-card--collapsible`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="novel-writing-shell__insight-card-header">
+        {eyebrow ? <span className="novel-writing-shell__insight-card-eyebrow">{eyebrow}</span> : null}
+        <span className="novel-writing-shell__insight-card-title">{title}</span>
+        <span className="novel-writing-shell__insight-card-toggle" aria-hidden="true">{open ? '收起' : '展开'}</span>
+      </summary>
       <div className="novel-writing-shell__insight-card-body">{children}</div>
-    </section>
+    </details>
   )
 }
 

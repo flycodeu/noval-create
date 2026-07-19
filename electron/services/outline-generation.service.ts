@@ -15,6 +15,7 @@ import {
   analyzeOutlineDesignAlignment,
   type OutlineDesignGateChapter,
 } from './outline-design-gate.service'
+import { syncStructureLinkage } from './story-structure.service'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -261,12 +262,14 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
   }
 
   if (!batchStart) {
+    const structureLinkage = syncStructureLinkage(arc.novelId)
     return {
       generatedCount: 0,
       completed: true,
       batchStart: null,
       batchEnd: null,
       message: '当前故事弧的章节细纲已补齐。',
+      structureLinkage,
     }
   }
 
@@ -418,7 +421,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
   const completed = Array.from({ length: chapterEnd - chapterStart + 1 }, (_, index) => chapterStart + index)
     .every((chapterNum) => refreshedOutlinedNums.has(chapterNum))
 
-  if (generatedCount > 0) markNovelContextChanged(arc.novelId, 'Chapter outlines changed')
+  const structureLinkage = syncStructureLinkage(arc.novelId)
 
   return {
     generatedCount,
@@ -432,8 +435,9 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
       designTerms: designGate.designTerms,
       flaggedChapters: designGate.flaggedChapters,
     },
+    structureLinkage,
     message: completed
-      ? `第${batchStart}至第${batchEnd}章细纲已生成，当前故事弧已补齐。`
-      : `第${batchStart}至第${batchEnd}章细纲已生成，可继续生成下一批。`,
+      ? `第${batchStart}至第${batchEnd}章细纲已生成，当前故事弧已补齐；结构联动已同步，请到章节合同页完成草稿审核。`
+      : `第${batchStart}至第${batchEnd}章细纲已生成，可继续生成下一批；结构联动已同步，请到章节合同页完成草稿审核。`,
   }
 }

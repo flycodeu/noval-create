@@ -54,9 +54,12 @@ export function repairNotButDefinitionPatterns(content: string): string {
 export function buildChapterOptimizationQualityGate(
   originalContent: string,
   optimizedContent: string,
+  genre?: string,
+  knownTerms: string[] = [],
 ): ChapterOptimizationQualityGate {
-  const originalFindings = collectQualityGuardrailFindings(originalContent)
-  const optimizedFindings = collectQualityGuardrailFindings(optimizedContent)
+  const guardrailOptions = { knownTerms }
+  const originalFindings = collectQualityGuardrailFindings(originalContent, genre, guardrailOptions)
+  const optimizedFindings = collectQualityGuardrailFindings(optimizedContent, genre, guardrailOptions)
   const originalGuardrailHits = originalFindings.map((finding) => finding.code)
   const optimizedGuardrailHits = optimizedFindings.map((finding) => finding.code)
   const originalHighSeverityCount = originalFindings.filter((finding) => finding.severity === 'high').length

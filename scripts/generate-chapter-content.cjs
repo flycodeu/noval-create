@@ -57,6 +57,16 @@ async function main() {
   const reset = process.env.NOVELFORGE_RESET_CHAPTER === '1'
   if (!novelId || !chapterNum) throw new Error('Set NOVELFORGE_NOVEL_ID and NOVELFORGE_CHAPTER_NUM.')
 
+  // Keep the single-chapter diagnostic script aligned with the managed model
+  // request controls used by the full flow audit. The short names are kept for
+  // convenient one-off runs, but the adapters remain the source of truth.
+  if (process.env.NOVELFORGE_REQUEST_TIMEOUT_MS && !process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS) {
+    process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = process.env.NOVELFORGE_REQUEST_TIMEOUT_MS
+  }
+  if (process.env.NOVELFORGE_REQUEST_RETRY_COUNT && !process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT) {
+    process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT = process.env.NOVELFORGE_REQUEST_RETRY_COUNT
+  }
+
   const { initDb, getSqlite } = require(path.join(workspaceRoot, 'electron/database/db.ts'))
   initDb()
   const rawDb = getSqlite()

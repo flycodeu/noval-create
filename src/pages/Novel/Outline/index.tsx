@@ -266,7 +266,11 @@ export default function Outline({ novelId }: Props) {
       }
 
       await loadData()
-      const summary = lastResult?.message || '章节细纲已生成一批。'
+      const linkage = lastResult?.structureLinkage
+      const linkageSummary = linkage
+        ? `已补齐 ${linkage.createdChapterContractCount} 章合同、${linkage.createdSceneContractCount} 条场景合同和 ${linkage.createdTimelineEventCount} 个时间锚点。`
+        : ''
+      const summary = [lastResult?.message || '章节细纲已生成一批。', linkageSummary].filter(Boolean).join(' ')
       message.success(generatedCount > 0
         ? getUserFacingMessage('outline.batchGenerated', { summary, count: generatedCount })
         : summary)

@@ -670,7 +670,10 @@ export function listRelationshipArcs(novelId: number): RelationshipArc[] {
     .sort((left, right) => `${left.charAName}${left.charBName}`.localeCompare(`${right.charAName}${right.charBName}`, 'zh-Hans-CN'))
 }
 
-export function upsertRelationshipArc(data: RelationshipArcInput): RelationshipArc {
+export function upsertRelationshipArc(
+  data: RelationshipArcInput,
+  options: { skipContextTracking?: boolean } = {},
+): RelationshipArc {
   const db = getDb()
   const pair = resolveRelationshipPair(data.charAId, data.charBId)
   const charA = getCharacterById(pair.charAId)
@@ -744,7 +747,7 @@ export function upsertRelationshipArc(data: RelationshipArcInput): RelationshipA
     }).run()
   }
 
-  markNovelContextChanged(charA.novelId, 'Character arcs changed')
+  if (!options.skipContextTracking) markNovelContextChanged(charA.novelId, 'Character arcs changed')
   return listRelationshipArcs(charA.novelId).find((item) => item.charAId === pair.charAId && item.charBId === pair.charBId) as RelationshipArc
 }
 

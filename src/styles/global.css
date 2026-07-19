@@ -2567,6 +2567,43 @@ html[data-theme="light"] .ant-dropdown-menu {
   font-weight: 700;
 }
 
+.novel-writing-shell__insight-card--collapsible > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  padding-bottom: 14px;
+}
+
+.novel-writing-shell__insight-card--collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.novel-writing-shell__insight-card--collapsible > summary .novel-writing-shell__insight-card-eyebrow {
+  grid-column: 1 / -1;
+}
+
+.novel-writing-shell__insight-card-toggle {
+  color: var(--workspace-ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.novel-writing-shell__insight-card--collapsible[open] > summary {
+  border-bottom: 1px solid rgba(122, 93, 52, 0.1);
+}
+
+.novel-writing-shell__insight-stack--nested {
+  gap: 12px;
+}
+
+.novel-writing-shell__insight-stack--nested .novel-writing-shell__insight-card {
+  border-radius: 18px;
+  box-shadow: none;
+}
+
 .novel-writing-shell__insight-card-body {
   padding: 12px 16px 16px;
   color: var(--workspace-ink-soft);
@@ -5866,6 +5903,14 @@ html[data-theme="dark"] .ant-card-actions > li {
   display: grid;
   gap: 6px;
   padding: 20px 22px 0;
+}
+
+.novel-writing-page .novel-writing-shell__insight-card--collapsible > summary {
+  padding-bottom: 18px;
+}
+
+.novel-writing-page .novel-writing-shell__insight-stack--nested .novel-writing-shell__insight-card-header {
+  padding: 15px 16px 0;
 }
 
 .novel-writing-page .novel-writing-shell__insight-card-eyebrow {
@@ -10465,6 +10510,18 @@ html[data-theme="dark"] .ant-card-actions > li {
   background: var(--novel-console-surface);
 }
 
+.chapter-console-page__meta-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.chapter-console-page__meta-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .novel-dashboard__activity-card.tone-danger,
 .chapter-console-page__quality-item {
   border-color: rgba(194, 65, 12, 0.2);
@@ -10744,7 +10801,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .chapter-console-page__acceptance-grid,
 .chapter-console-page__meta-grid {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .chapter-console-page__quality-list {

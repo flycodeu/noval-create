@@ -117,6 +117,7 @@ export interface NarrativeControlReport {
 interface AnalyzeNarrativeControlsInput {
   themeVoice?: ThemeVoiceDocument | null
   sceneSnapshots?: NarrativeControlSceneSnapshot[]
+  characterNames?: string[]
   content?: string | null
   chapterGoal?: string | null
   emotionTone?: string | null
@@ -255,8 +256,8 @@ const EMOTION_TOKEN_MAP: Record<keyof typeof EMOTION_BUCKET_LABELS, string[]> = 
   desire: ['热', '渴', '躁', '心痒', '想要', '贪', '念头烧', '燥', '兴奋'],
 }
 const DIRECT_MIND_READING_PATTERNS = [
-  /(他|她|他们|她们|对方|别人|守卫|队长|敌人).{0,8}(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得)/,
-  /(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得).{0,8}(他|她|他们|她们|对方|别人|守卫|队长|敌人)/,
+  /(对方|别人|守卫|队长|敌人).{0,8}(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得)/,
+  /(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得).{0,8}(对方|别人|守卫|队长|敌人)/,
 ]
 const IMPOSSIBLE_KNOWLEDGE_PATTERNS = [
   /与此同时/,
@@ -266,6 +267,29 @@ const IMPOSSIBLE_KNOWLEDGE_PATTERNS = [
   /没人知道/,
   /此时.{0,12}(已经|正在)/,
 ]
+
+const MIND_READING_MARKERS = '(?:心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得)'
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function buildCharacterMindReadingPatterns(
+  characterNames: string[],
+  povNames: string[],
+): RegExp[] {
+  const povSet = new Set(povNames)
+  return characterNames
+    .map((name) => name.trim())
+    .filter((name) => name.length >= 2 && !povSet.has(name))
+    .flatMap((name) => {
+      const escapedName = escapeRegExp(name)
+      return [
+        new RegExp(`${escapedName}.{0,8}${MIND_READING_MARKERS}`),
+        new RegExp(`${MIND_READING_MARKERS}.{0,8}${escapedName}`),
+      ]
+    })
+}
 
 const FUNCTION_RULES: Record<NarrativeFunctionProfile, NarrativeFunctionRule> = {
   climax: {
@@ -483,6 +507,7 @@ function analyzePovBoundary(input: AnalyzeNarrativeControlsInput, sentences: str
   const themeVoice = input.themeVoice || null
   const sceneSnapshots = Array.isArray(input.sceneSnapshots) ? input.sceneSnapshots : []
   const uniqueScenePovs = [...new Set(sceneSnapshots.map((scene) => asText(scene.pov)).filter(Boolean))]
+  const characterNames = Array.isArray(input.characterNames) ? input.characterNames : []
   const missingScenePovs = sceneSnapshots.filter((scene) => !asText(scene.pov))
   const fixedNovelPov = Boolean(themeVoice?.pov && themeVoice.pov !== 'multi_pov')
   const conflictingScene = fixedNovelPov && uniqueScenePovs.length > 1
@@ -491,7 +516,10 @@ function analyzePovBoundary(input: AnalyzeNarrativeControlsInput, sentences: str
       return Boolean(pov && pov !== uniqueScenePovs[0])
     }) || null
     : null
-  const directMindReadingHits = findMatchingSentences(sentences, DIRECT_MIND_READING_PATTERNS)
+  const directMindReadingHits = findMatchingSentences(sentences, [
+    ...DIRECT_MIND_READING_PATTERNS,
+    ...buildCharacterMindReadingPatterns(characterNames, uniqueScenePovs),
+  ])
   const impossibleKnowledgeHits = fixedNovelPov
     ? findMatchingSentences(sentences, IMPOSSIBLE_KNOWLEDGE_PATTERNS)
     : []

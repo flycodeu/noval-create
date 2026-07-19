@@ -3887,6 +3887,7 @@ export interface OutlineChapterBatchGenerationResult {
   batchStart: number | null
   batchEnd: number | null
   message: string
+  structureLinkage?: StructureLinkageSyncResult
 }
 
 export interface ConsistencyIssue {

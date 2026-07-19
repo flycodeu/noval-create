@@ -605,6 +605,7 @@ export function upsertForeshadowLedger(
     linkedEndgameCommitmentId: number | null
     linkedVolumeId: number | null
   }>,
+  options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
   findNovelById(novelId)
@@ -657,7 +658,7 @@ export function upsertForeshadowLedger(
     }).run()
   }
   refreshCommitmentDerivedState(novelId)
-  markNovelContextChanged(novelId, 'Foreshadow ledger updated')
+  if (!options.skipContextTracking) markNovelContextChanged(novelId, 'Foreshadow ledger updated')
   return listForeshadowLedger(novelId)
 }
 

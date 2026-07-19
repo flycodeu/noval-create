@@ -226,6 +226,14 @@ export default function WritebackCenterPage({ novelId }: Props) {
   }, [mutationToken, refresh, searchParams, selectedChapterId, selectedRunId])
 
   const activeRun = centerData?.activeRun || null
+  const pendingDiffCount = useMemo(
+    () => (centerData?.diffs || []).filter((item) => item.canonDecision === 'pending').length,
+    [centerData?.diffs],
+  )
+  const pendingReviewCount = useMemo(
+    () => (centerData?.diffs || []).filter((item) => item.canonDecision === 'pending' && item.verificationStatus !== 'auto_ready').length,
+    [centerData?.diffs],
+  )
   const filteredDiffs = useMemo(() => {
     const rows = centerData?.diffs || []
     return rows.filter((item) => (assetFilter === 'all' || item.assetType === assetFilter))
@@ -277,6 +285,22 @@ export default function WritebackCenterPage({ novelId }: Props) {
       setActionLoading(false)
     }
   }, [activeRun?.id, centerData?.chapter?.id, notifyWorkspaceMutation, refresh])
+
+  const applyConfirmedRun = useCallback(() => {
+    if (!activeRun) return
+    const execute = () => void runAction(() => window.electron.writeback.applyRun(activeRun.id), '已执行统一回写。')
+    if (pendingDiffCount <= 0) {
+      execute()
+      return
+    }
+    Modal.confirm({
+      title: '仍有候选未确认',
+      content: `当前还有 ${pendingDiffCount} 条候选未确认${pendingReviewCount > 0 ? `，其中 ${pendingReviewCount} 条需要人工复核` : ''}。继续操作只会写回已接受或已编辑的候选，未确认项将被跳过，不会进入正典。`,
+      okText: '继续应用已确认项',
+      cancelText: '返回确认',
+      onOk: execute,
+    })
+  }, [activeRun, pendingDiffCount, pendingReviewCount, runAction])
 
   const diffColumns = [
     {
@@ -360,7 +384,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <Button loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'rejected', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量拒绝当前筛选结果。')}>
             批量拒绝
           </Button>
-          <Button type="primary" loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.applyRun(activeRun?.id || 0), '已执行统一回写。')}>
+          <Button type="primary" loading={actionLoading} disabled={!activeRun} onClick={applyConfirmedRun}>
             应用已确认项
           </Button>
           <Button icon={<ReloadOutlined />} loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.retryFailed(activeRun?.id || 0), '失败项已重试。')}>
@@ -458,10 +482,23 @@ export default function WritebackCenterPage({ novelId }: Props) {
             />
           </div>
           {activeRun ? (
-            <div className="novel-writeback-center-page__run-summary">
-              <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag>
-              <span className="novel-writeback-center-page__muted">{activeRun.summaryText || '当前运行暂无摘要。'}</span>
-            </div>
+            <>
+              <div className="novel-writeback-center-page__run-summary">
+                <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag>
+                <span className="novel-writeback-center-page__muted">{activeRun.summaryText || '当前运行暂无摘要。'}</span>
+              </div>
+              {pendingDiffCount > 0 ? (
+                <Alert
+                  className="novel-writeback-center-page__pending-alert"
+                  type="warning"
+                  showIcon
+                  message={`还有 ${pendingDiffCount} 条候选未确认`}
+                  description={pendingReviewCount > 0
+                    ? `其中 ${pendingReviewCount} 条需要人工复核。应用动作只写回已接受或已编辑项，未确认项会被跳过。`
+                    : '应用动作只写回已接受或已编辑项，未确认项会被跳过。'}
+                />
+              ) : null}
+            </>
           ) : (
             <Alert className="novel-writeback-center-page__run-empty" type="info" showIcon message="当前章节还没有回写运行" description="点击“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
           )}

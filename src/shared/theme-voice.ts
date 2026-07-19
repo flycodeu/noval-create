@@ -161,9 +161,7 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
 export function parseThemeVoiceSnapshot(raw?: string | null): ThemeVoiceSnapshot {
   const document = parseThemeVoiceDocument(raw)
   const readyCount = [
-    document.writingContractTags.length > 0,
     document.theme,
-    document.themeChapterTest,
     document.emotionalCore,
     document.pov,
     document.tense,

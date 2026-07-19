@@ -18,6 +18,7 @@ import {
   buildFingerprintFromTurns,
   buildSentencePatterns,
   computeSimilarity,
+  hasStableChapterDialogueEvidence,
   type DialogueTurn,
 } from './dialogue-fingerprint.service'
 
@@ -117,6 +118,17 @@ describe('dialogue fingerprint helpers', () => {
       ellipsisRate: 0,
       dashRate: 0,
     }))).toEqual(['陈述偏稳'])
+  })
+
+  it('requires enough chapter-local dialogue before raising a similarity blocker', () => {
+    expect(hasStableChapterDialogueEvidence(createSignature('甲', {
+      sampleCount: 3,
+      totalDialogueChars: 119,
+    }))).toBe(false)
+    expect(hasStableChapterDialogueEvidence(createSignature('甲', {
+      sampleCount: 4,
+      totalDialogueChars: 120,
+    }))).toBe(true)
   })
 
   it('computes high similarity with shared reasons', () => {

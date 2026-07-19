@@ -1,4 +1,8 @@
-import type { ChapterRewriteScope } from '../../src/types'
+import type {
+  ChapterRewriteScope,
+  DialogueDriftWarning,
+  DialogueSimilarityWarning,
+} from '../../src/types'
 import { computeCandidateSimilarity } from './variation-control.service'
 
 export type ReviewPriorityLevel = 'high' | 'medium' | 'low'
@@ -282,11 +286,16 @@ function buildRewriteDeltaChainScore(
   const findings: string[] = []
   // 初稿与重写稿在该链上都几乎没有词面信号时（克制白描文风常见），链证据不可判定，不作为拦截依据
   const chainSignalAvailable = originalHitRate >= 8 || rewrittenHitRate >= 8
+  // 当候选已经与初稿明显拉开（低相似度且大部分句子已改动）时，不能再用固定
+  // 的 14% 词面密度要求惩罚压缩后的工业/现实题材正文；此时只要求保留最低
+  // 可见链条，真正的事件兑现仍由合同门和发布门继续校验。
+  const strongSurfaceRewrite = !surfaceRewriteSuspected
+  const minimumVisibleRate = strongSurfaceRewrite ? 8 : 14
 
-  if (structuralPressure && chainSignalAvailable && rewrittenHitRate < 14) {
+  if (structuralPressure && chainSignalAvailable && rewrittenHitRate < minimumVisibleRate) {
     findings.push(`${label}证据密度仅 ${rewrittenHitRate}%，重写后仍缺少可见链条。`)
   }
-  if (structuralPressure && chainSignalAvailable && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
+  if (structuralPressure && chainSignalAvailable && surfaceRewriteSuspected && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
     findings.push(`${label}增量仅 ${deltaRate}%，更像改词句而不是修结构。`)
   }
   if (structuralPressure && chainSignalAvailable && surfaceRewriteSuspected && deltaRate < 3) {
@@ -509,10 +518,13 @@ export function analyzeRewriteNarrativeDelta(options: {
   if (structuralPressure && changedSentenceRate < 24) {
     findings.push(`新增/改动句比例仅 ${changedSentenceRate}%，不足以证明剧情链已重排。`)
   }
-  if (structuralPressure && narrativeAnchorChangeRate < 4) {
+  // 当候选已经明显脱离初稿且改动句比例足够高时，锚点密度下降可能只是
+  // 压缩、视角重排或把重复动作合并；此时由冲突/代价/目标三条链和合同门
+  // 判断剧情是否落地，不再把“必须增加动作词”当成唯一结构证据。
+  if (structuralPressure && surfaceRewriteSuspected && narrativeAnchorChangeRate < 4) {
     findings.push(`动作/结果锚点增量仅 ${narrativeAnchorChangeRate}%，更像语言润色而非剧情修复。`)
   }
-  if (structuralPressure && actionVerbDeltaRate < 3) {
+  if (structuralPressure && surfaceRewriteSuspected && actionVerbDeltaRate < 3) {
     findings.push(`动作句增量仅 ${actionVerbDeltaRate}%，冲突推进证据不足。`)
   }
   findings.push(...conflictChain.findings, ...costChain.findings, ...goalChain.findings)
@@ -741,6 +753,12 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
 export function buildReviewPriorityPrompt(summary: ReviewPrioritySummary): string {
   const urgentLines = summary.topIssues.map((issue, index) => `${index + 1}. [${issue.label}] ${issue.detail}`)
   const deferredLines = summary.deferredIssues.slice(0, 4).map((issue, index) => `${index + 1}. [${issue.label}] ${issue.detail}`)
+  const dialogueIssuePresent = [...summary.topIssues, ...summary.deferredIssues].some((issue) => (
+    issue.source === 'dialogue_separability_risks'
+    || issue.source === 'dialogue_homogenization_risks'
+    || issue.source === 'dialogue_filler_risks'
+    || issue.source === 'dialogue_info_density_risks'
+  ))
   return [
     '【重写优先级摘要】',
     `重写范围：${summary.rewriteScope}`,
@@ -750,6 +768,46 @@ export function buildReviewPriorityPrompt(summary: ReviewPrioritySummary): strin
     summary.reasons.length > 0 ? `判断依据：${summary.reasons.join('；')}` : '',
     urgentLines.length > 0 ? '本轮先修：\n' + urgentLines.join('\n') : '',
     deferredLines.length > 0 ? '可延后处理：\n' + deferredLines.join('\n') : '',
+    dialogueIssuePresent ? [
+      '【对白定向修复】',
+      '同场角色必须在句长、问法/陈述法、称呼、停顿、信息策略和关系温度上形成可观察差异；不要把同一种短句节奏复制给所有人。',
+      '质问或调查对白不能从提问直接跳到作者结论，至少经过“事实/现场 → 判断依据或核验 → 责任、动作或后果”的追问链。',
+      '每个对白回合至少承担立场、证据、筹码、关系变化或下一步动作之一；删掉只表示“知道了/怎么会/然后呢”的空转回应。',
+    ].join('\n') : '',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildDialogueRepairDirective(options: {
+  similarities?: DialogueSimilarityWarning[]
+  drifts?: DialogueDriftWarning[]
+  fillerRisks?: string[]
+  infoDensityRisks?: string[]
+}): string {
+  const similarities = options.similarities || []
+  const drifts = options.drifts || []
+  const fillerRisks = options.fillerRisks || []
+  const infoDensityRisks = options.infoDensityRisks || []
+  if (similarities.length === 0 && drifts.length === 0 && fillerRisks.length === 0 && infoDensityRisks.length === 0) {
+    return ''
+  }
+
+  return [
+    '【对白定向修复指令（本轮必须落到正文）】',
+    similarities.length > 0
+      ? `同腔组合：\n${similarities.slice(0, 4).map((item) => `- ${item.characterAName} / ${item.characterBName}（相似度 ${item.similarity}）：${item.reason}`).join('\n')}`
+      : '',
+    drifts.length > 0
+      ? `声线漂移：\n${drifts.slice(0, 4).map((item) => `- ${item.characterName}（漂移 ${item.driftRate}）：${item.reason}`).join('\n')}`
+      : '',
+    fillerRisks.length > 0 ? `对白空转证据：\n${fillerRisks.slice(0, 3).map((item) => `- ${item}`).join('\n')}` : '',
+    infoDensityRisks.length > 0 ? `对白信息密度证据：\n${infoDensityRisks.slice(0, 3).map((item) => `- ${item}`).join('\n')}` : '',
+    '重写时保留人物事实、关系和场景目标，但让同场角色各自至少有一处不同的句长、称呼、追问方式、停顿或信息取舍；不要用强行方言或口头禅制造假区分。',
+    similarities.length > 0
+      ? '如果场景包含质问/调查：按“事实/现场 → 判断依据或核验 → 责任、行动或代价”形成追问链；禁止安全员/旁观者直接替所有人把结论说完。'
+      : '',
+    fillerRisks.length > 0 || infoDensityRisks.length > 0
+      ? '删掉无立场的接话；每轮对白必须推进证据、筹码、关系或行动中的至少一项。'
+      : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -828,18 +886,31 @@ export function buildRewriteMiniReviewVerdict(options: {
   }
 }
 
-export function buildStructuralRepairDirective(delta: RewriteNarrativeDeltaReport): string {
+export function buildStructuralRepairDirective(
+  delta: RewriteNarrativeDeltaReport,
+  priorityEvidence: string[] = [],
+): string {
   if (delta.status === 'pass') return ''
+  const concreteEvidence = dedupeStrings(priorityEvidence).slice(0, 6)
   return [
     '【结构性修复指令（重写差异门未过，本轮必须改事件，不是改词句）】',
     `上一轮重写与初稿相似度 ${delta.similarityToOriginal}，改动句比例 ${delta.changedSentenceRate}%，动作/结果锚点增量 ${delta.narrativeAnchorChangeRate}%。`,
     delta.findings.length > 0
       ? `差异门具体不通过项：\n${delta.findings.map((item) => `- ${item}`).join('\n')}`
       : '',
+    concreteEvidence.length > 0
+      ? `审校已经点名的优先问题（必须逐条落实到正文，不得只在审校备注中解释）：\n${concreteEvidence.map((item) => `- ${item}`).join('\n')}`
+      : '',
+    '执行顺序（只输出正文，不要输出方案或解释）：先在内部选定两个最能解决审校问题的场景节点，再分别改写“阻力/人物判断/行动选择/代价或结果”四个可见环节；改完后让后续场景承接新的状态。',
     '本轮硬性要求：',
     '- 对照审校高优先项，至少改变 2 处事件走向、结果状态或代价落点（新增阻力、失败、暴露、损失或让步），并让后文自然承接这些变化。',
-    '- 冲突必须有正面交锋和明确结果，不允许停在气氛渲染和心理描写；每个主要场景以可见的状态变化收束。',
+    '- 变化必须可验收：至少新增一处“主动选择 -> 他人反应 -> 可见后果”，以及一处物件、资格、时间、责任或关系状态的改变；不能只替换同义词、调整顺序或重复原有结果。',
+    '- 如果审校指出本章目标只被提及，必须把该目标改成正文中的一次具体决定、拒绝、退回、补录、交接或承担，并让角色因此面对新的下一步压力。',
+    '- 每个主要场景至少保留一条可核验的“阻力 -> 判断 -> 行动 -> 结果/代价”链；冲突必须有正面交锋和明确结果，不允许停在气氛渲染和心理描写。',
     '- 主角每获得一次进展，同一场景内写出为此付出的代价或新增的风险。',
+    '- 审校若指出台词、线索或高潮顺序错位，必须按场景顺序重新安排触发、回应和结果；不得只在两处重复同一句话来制造表面差异。',
+    '- 审校若指出某条信息在错误场景提前出现，必须让首次披露、人物反应和后续告知顺序真正改变；不得保留前后两个版本再用旁白解释糊过去。',
+    '- 章尾必须留下新的未完成动作、明确追问、资源损失或下一步压力；不能用“他沉默/想了想/合上本子”单独闭合本章。',
     '- 不改变已确认的人物设定、世界规则和前文事实；结构修复以本章事件层为限。',
   ].filter(Boolean).join('\n')
 }

@@ -32,6 +32,7 @@ import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
+import type { ChatOptions } from '../adapters/base.adapter'
 
 export interface MapTreeNode {
   id: number
@@ -99,6 +100,7 @@ export interface MapNextBatchPreview {
 interface MapBatchGenerateRuntimeOptions {
   parentTaskId?: number
   sender?: WebContents
+  chatOpts?: Partial<ChatOptions>
   onBatchPlan?: (preview: MapNextBatchPreview) => void
   shouldStop?: () => boolean
 }
@@ -352,6 +354,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
     prompt: string
     parentTaskId?: number
     sender?: WebContents
+    chatOpts?: Partial<ChatOptions>
     context: ParseGeneratedNodeBatchContext
     reviewContext: string
     reviewFocus?: string[]
@@ -365,6 +368,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
     prompt: params.prompt,
     parentTaskId: params.parentTaskId,
     sender: params.sender,
+    chatOpts: params.chatOpts,
   })
 
   let candidateRaw = raw
@@ -383,6 +387,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
         prompt: buildMapNodeBatchRepairPrompt(params.context, raw),
         parentTaskId: params.parentTaskId,
         sender: params.sender,
+        chatOpts: params.chatOpts,
       })
     } catch (repairTaskError) {
       throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，自动修复步骤执行失败：${sanitizeMapErrorMessage(repairTaskError)}。原始输出片段：${previewText(raw)}`)
@@ -412,6 +417,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
     schemaHint: mapNodeBatchSchemaHint(params.context.expectedCount),
     reviewFocus: params.reviewFocus,
     rewriteConstraints: params.rewriteConstraints,
+    chatOpts: params.chatOpts,
   })
   if (quality.stage === 'rejected') {
     throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} 审校拒收：${summarizeAssetQualityWarnings(quality) || quality.review.summary}`)
@@ -1126,15 +1132,15 @@ async function runBatchWithRetries<T>(
   throw new Error(`${label}执行失败`)
 }
 
-async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: WebContents }) {
+async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: WebContents; chatOpts?: Partial<ChatOptions> }) {
   const messages = [{ role: 'user' as const, content: params.prompt }]
   if (typeof params.parentTaskId !== 'number') {
-    return runChatTask({ type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, messages, sender: params.sender })
+    return runChatTask({ type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, messages, sender: params.sender, chatOpts: params.chatOpts })
   }
   const childTaskId = await createTask({ type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, inputJson: JSON.stringify(messages), runnerType: 'chat', parentTaskId: params.parentTaskId })
   updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
   try {
-    return await executeChatTask(childTaskId, { type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, messages, sender: params.sender })
+    return await executeChatTask(childTaskId, { type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, messages, sender: params.sender, chatOpts: params.chatOpts })
   } finally {
     updateTask(params.parentTaskId, { currentChildTaskId: null })
   }
@@ -1206,6 +1212,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
           prompt,
           parentTaskId: runtime.parentTaskId,
           sender: runtime.sender,
+          chatOpts: runtime.chatOpts,
           context,
           reviewContext: [
             `题材：${profile.genre}`,
@@ -1281,6 +1288,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
             prompt,
             parentTaskId: runtime.parentTaskId,
             sender: runtime.sender,
+            chatOpts: runtime.chatOpts,
             context,
             reviewContext: [
               `题材：${profile.genre}`,

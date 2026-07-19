@@ -590,6 +590,32 @@ describe('allocateChapterContext', () => {
     expect(context.contextBudgetReport.effectiveBudget).toBe(28800)
   })
 
+  it('keeps a protected P1 scene plan when P0 context exceeds the soft budget', () => {
+    const rawData = createRawData({
+      contextParts: {
+        storyCore: '主线'.repeat(5200),
+        currentArc: '故事弧'.repeat(1200),
+        worldRules: '规则'.repeat(2400),
+        scenePlanSummary: '场景计划：先接住事故，再把处罚落到行动上。'.repeat(80),
+      },
+    })
+
+    let context: Awaited<ReturnType<typeof allocateChapterContext>>
+    try {
+      context = allocateChapterContext(rawData, {
+        totalBudget: 8000,
+        promptProfile: 'rewrite',
+        chapterComplexity: 'standard',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      context = (error as ContextOverflowError).context
+    }
+
+    expect(context.scenePlanSummary.length).toBeGreaterThan(0)
+    expect(context.softContextDecisions.find((entry) => entry.label === 'scenePlanSummary')?.status).not.toBe('dropped')
+  })
+
   it('throws ContextOverflowError when only soft context must be trimmed', () => {
     const rawData = createRawData({
       contextParts: {

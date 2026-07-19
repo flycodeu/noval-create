@@ -46,12 +46,39 @@ vi.mock('./chapter-recall-runtime.service', () => ({
   listChapterRecallRuntimeMap: vi.fn(() => new Map()),
 }))
 
+vi.mock('./dialogue-fingerprint.service', () => ({
+  analyzeChapterDialogueAgainstNovel: vi.fn((_novelId: number, _chapterNum: number, content: string) => (
+    content.includes('DIALOGUE_RISK')
+      ? {
+        fingerprintSummary: '当前对白画像',
+        voiceLockSummary: '需要 Voice Lock',
+        risks: ['当前对白同声化'],
+        similarities: [{ reason: '当前对白过近' }],
+        drifts: [{ characterName: '林远', reason: '当前口吻漂移' }],
+        fillerRisks: ['当前空转'],
+        infoDensityRisks: ['当前信息密度偏低'],
+        requiredVoiceLockCharacterIds: [1],
+      }
+      : {
+        fingerprintSummary: '当前对白画像',
+        voiceLockSummary: '',
+        risks: [],
+        similarities: [],
+        drifts: [],
+        fillerRisks: [],
+        infoDensityRisks: [],
+        requiredVoiceLockCharacterIds: [],
+      }
+  )),
+}))
+
 import { getDb } from '../database/db'
 import {
   chapterGateRuns,
   chapterContracts,
   chapterSegments,
   chapters,
+  characters,
   novels,
   revisionTasks,
   sceneContracts,
@@ -275,6 +302,24 @@ describe('runChapterPublishCheck', () => {
     expect(result.generatedTaskCount).toBe(0)
   })
 
+  it('downgrades stale context during pipeline because finalize refreshes memory and versions', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      contextVersion: 1,
+      staleReasonJson: JSON.stringify(['上下文版本落后于当前设定。']),
+    })
+    Object.assign((rows.get(novels) || [])[0], { contextVersion: 2 })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10, { phase: 'pipeline' })
+    const contextItem = result.checklist.find((item) => item.key === 'context')
+
+    expect(contextItem?.status).toBe('warning')
+    expect(contextItem?.detail).toContain('随后 finalize')
+  })
+
   it('returns blocker and creates a system revision task when required thread is not progressed', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(storyThreads) || [])[0], {
@@ -343,6 +388,11 @@ describe('runChapterPublishCheck', () => {
 
   it('returns rewrite when fixed POV content directly reads another character mind', () => {
     const rows = createBaseRows()
+    rows.set(characters, [
+      { id: 1, novelId: 1, name: '林远' },
+      { id: 2, novelId: 1, name: '赵临' },
+      { id: 3, novelId: 1, name: '守卫' },
+    ])
     Object.assign((rows.get(chapters) || [])[0], {
       content: '林远贴着墙根往前挪。赵临心里已经认定他在撒谎。守卫心中甚至开始盘算要不要先下手。',
     })
@@ -403,6 +453,7 @@ describe('runChapterPublishCheck', () => {
 
     const baseline = runChapterPublishCheck(10)
     Object.assign((rows.get(chapters) || [])[0], {
+      content: 'DIALOGUE_RISK\n' + ((rows.get(chapters) || [])[0].content || ''),
       aiScoreJson: JSON.stringify({ overall_score: 58 }),
       reviewNotesJson: JSON.stringify({
         severity: 'high',
@@ -426,6 +477,7 @@ describe('runChapterPublishCheck', () => {
     expect(worsened.drift?.scoreDelta).toBeLessThan(0)
 
     Object.assign((rows.get(chapters) || [])[0], {
+      content: String((rows.get(chapters) || [])[0].content || '').replace('DIALOGUE_RISK\n', ''),
       aiScoreJson: JSON.stringify({ overall_score: 90 }),
       reviewNotesJson: JSON.stringify({
         severity: 'low',
@@ -569,6 +621,76 @@ describe('runChapterPublishCheck', () => {
     expect(result.contractValidation?.itemResults.some((item) => item.contractItemType === 'golden_three_opening')).toBe(false)
     expect(result.rewritePlan?.recheckItems).toContain('opening_hook')
     expect(result.rewritePlan?.recheckItems).not.toContain('contract_delivery')
+  })
+
+  it('downgrades an unverified opening risk during pipeline phase', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      chapterNum: 1,
+      reviewNotesJson: JSON.stringify({
+        severity: 'high',
+        rewrite_required: true,
+        opening_hook_risks: ['前300字没有现场动作，主角入场过晚。'],
+        rewrite_recheck: null,
+      }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10, { phase: 'pipeline' })
+    const openingItem = result.checklist.find((item) => item.key === 'opening_hook')
+
+    expect(openingItem?.status).toBe('warning')
+    expect(openingItem?.detail).toContain('重写前初稿且未复检')
+  })
+
+  it('does not treat affirmative title and hallucination audits as blockers', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      reviewNotesJson: JSON.stringify({
+        severity: 'high',
+        rewrite_required: false,
+        title_alignment_risks: ['标题“第十二章”准确涵盖本章内容，无需修改。'],
+        hallucination_risks: ['林远的行动与既有设定执行正确，未越界。'],
+      }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+    const item = result.checklist.find((entry) => entry.key === 'title_and_hallucination')
+
+    expect(item?.status).not.toBe('blocker')
+    expect(result.checklist.some((entry) => entry.status === 'blocker')).toBe(false)
+  })
+
+  it('does not let a required weak structural rewrite pass as a warning', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      reviewNotesJson: JSON.stringify({
+        severity: 'high',
+        rewrite_required: true,
+        reader_hook_risks: [],
+        arc_progress_risks: ['动作/结果锚点增量仅 -4.4%，更像语言润色而非剧情修复。'],
+        rewrite_delta: {
+          status: 'weak',
+          findings: ['动作/结果锚点增量不足。'],
+        },
+      }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+    const rewritePath = result.checklist.find((item) => item.key === 'rewrite_path')
+
+    expect(rewritePath?.status).toBe('rewrite')
+    expect(rewritePath?.detail).toContain('重写差异验证偏弱')
+    expect(result.gateLevel).not.toBe('warning')
+    expect(result.ready).toBe(false)
   })
 
   it('blocks publish when recall degradation has continued for three chapters', () => {

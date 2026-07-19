@@ -748,6 +748,13 @@ function buildSignature(
   }
 }
 
+export function hasStableChapterDialogueEvidence(
+  signature: Pick<CharacterDialogueSignature, 'sampleCount' | 'totalDialogueChars'>,
+): boolean {
+  return signature.sampleCount >= PREFERRED_MIN_TURN_COUNT
+    && signature.totalDialogueChars >= PREFERRED_MIN_DIALOGUE_CHARS
+}
+
 function buildDriftReasons(baseline: CharacterDialogueFingerprint, recent: CharacterDialogueFingerprint): string[] {
   const diffs: Array<{ label: string; delta: number }> = [
     { label: '句长明显变化', delta: Math.abs(recent.avgSentenceLength - baseline.avgSentenceLength) * 4 },
@@ -1359,6 +1366,10 @@ export function analyzeChapterDialogueAgainstNovel(
   const similarities: DialogueSimilarityWarning[] = []
   for (let leftIndex = 0; leftIndex < chapterSignatures.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < chapterSignatures.length; rightIndex += 1) {
+      if (
+        !hasStableChapterDialogueEvidence(chapterSignatures[leftIndex])
+        || !hasStableChapterDialogueEvidence(chapterSignatures[rightIndex])
+      ) continue
       const pair = computeSimilarity(chapterSignatures[leftIndex], chapterSignatures[rightIndex])
       if (pair.similarity < WATCH_SIMILARITY_THRESHOLD) continue
       similarities.push({

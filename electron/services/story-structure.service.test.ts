@@ -52,7 +52,7 @@ import {
   storyVolumes,
   timelineEvents,
 } from '../database/schema'
-import { getStructureLinkageSummary } from './story-structure.service'
+import { getStructureLinkageSummary, syncStructureLinkage } from './story-structure.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
@@ -194,5 +194,20 @@ describe('structure linkage summary', () => {
     expect(summary.uncoveredSegmentCount).toBe(1)
     expect(summary.totalGapCount).toBe(4)
     expect(summary.missingChapterContractLabels[0]).toContain('第2章')
+  })
+
+  it('creates only missing linkage rows and leaves existing contracts untouched', () => {
+    const rows = createBaseRows()
+    const db = createDbMock(rows)
+    vi.mocked(getDb).mockReturnValue(db as never)
+
+    const result = syncStructureLinkage(1)
+
+    expect(result.createdChapterContractCount).toBe(1)
+    expect(result.createdSceneContractCount).toBe(1)
+    expect(result.createdTimelineEventCount).toBe(1)
+    expect(db.insert).toHaveBeenCalled()
+    expect(rows.get(chapterContracts)).toHaveLength(1)
+    expect(rows.get(sceneContracts)).toHaveLength(1)
   })
 })

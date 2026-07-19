@@ -68,15 +68,26 @@ const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(10, Number(process.env.NOVELF
 const CHAPTER_TARGET_WORDS = Math.max(1200, Math.min(3600, Number(process.env.NOVELFORGE_FLOW_CHAPTER_TARGET_WORDS) || 1800))
 const CHAPTER_EXECUTION_MODE = process.env.NOVELFORGE_FLOW_EXECUTION_MODE || 'balanced'
 const FLOW_MAX_OUTPUT_TOKENS = Math.max(1024, Math.min(65536, Number(process.env.NOVELFORGE_FLOW_MAX_OUTPUT_TOKENS) || 0))
+const FLOW_REQUEST_TIMEOUT_MS = Math.max(5_000, Math.min(300_000, Number(process.env.NOVELFORGE_FLOW_REQUEST_TIMEOUT_MS) || 90_000))
+const configuredFlowRetryCount = Number(process.env.NOVELFORGE_FLOW_REQUEST_RETRY_COUNT)
+const FLOW_REQUEST_RETRY_COUNT = Math.max(0, Math.min(5, Number.isFinite(configuredFlowRetryCount) ? configuredFlowRetryCount : 1))
+const FLOW_MAX_DURATION_MS = Math.max(60_000, Math.min(3_600_000, Number(process.env.NOVELFORGE_FLOW_MAX_DURATION_MS) || 1_200_000))
+process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = String(FLOW_REQUEST_TIMEOUT_MS)
+process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT = String(FLOW_REQUEST_RETRY_COUNT)
 const WORD_FLOOR_RATIO = 0.8
 const FULL_STORY_DESIGN = process.env.NOVELFORGE_FLOW_FULL_STORY_DESIGN === '1'
 const MAP_TARGET_COUNT = 5
 const ITEM_TARGET_COUNT = 5
 const CHARACTER_TARGET_COUNT = 5
 const THREAD_TARGET_COUNT = 5
+const REQUIRED_CHAPTER_PIPELINE_ROLES = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
 
 function flowChatOptions() {
-  return FLOW_MAX_OUTPUT_TOKENS > 0 ? { maxTokens: FLOW_MAX_OUTPUT_TOKENS } : undefined
+  return {
+    ...(FLOW_MAX_OUTPUT_TOKENS > 0 ? { maxTokens: FLOW_MAX_OUTPUT_TOKENS } : {}),
+    timeoutMs: FLOW_REQUEST_TIMEOUT_MS,
+    requestRetryCount: FLOW_REQUEST_RETRY_COUNT,
+  }
 }
 
 const PROJECT_FILTER = new Set(
@@ -333,6 +344,55 @@ function extractJson(raw) {
   }
 }
 
+function extractCompleteJsonArrayItems(raw) {
+  const text = String(raw || '').trim()
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const source = fenced ? fenced[1].trim() : text
+  const arrayStart = source.indexOf('[')
+  if (arrayStart < 0) return []
+
+  const items = []
+  let objectDepth = 0
+  let itemStart = -1
+  let inString = false
+  let escaped = false
+  for (let index = arrayStart + 1; index < source.length; index += 1) {
+    const char = source[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    if (char === '{') {
+      if (objectDepth === 0) itemStart = index
+      objectDepth += 1
+      continue
+    }
+    if (char === '}' && objectDepth > 0) {
+      objectDepth -= 1
+      if (objectDepth === 0 && itemStart >= 0) {
+        try {
+          const item = tryParseJson(source.slice(itemStart, index + 1))
+          if (item && typeof item === 'object' && !Array.isArray(item)) items.push(item)
+        } catch {
+          // Ignore a malformed item and keep scanning for later complete objects.
+        }
+        itemStart = -1
+      }
+    }
+  }
+  return items
+}
+
 function toStringArray(value) {
   if (!Array.isArray(value)) return []
   return value
@@ -392,6 +452,12 @@ function scanTaboo(text, tabooPatterns) {
     }
   }
   return hits
+}
+
+function findOutlineQualityFailures(project) {
+  return (project.chapterSummaries || [])
+    .filter((chapter) => /补齐本章推进目标|当前批次缺失|流程补救|待补/u.test(String(chapter.outline || '')))
+    .map((chapter) => `第${chapter.chapterNum}章《${chapter.title}》细纲是流程占位内容，需要人工修复。`)
 }
 
 function countPattern(text, pattern) {
@@ -572,8 +638,18 @@ function buildWorldRules(project, currentRaw, parseWorldRulesJson, stringifyWorl
   return stringifyWorldRules(rules)
 }
 
+function checkpointReport(report) {
+  try {
+    if (typeof report.checkpoint === 'function') report.checkpoint()
+  } catch (error) {
+    process.stderr.write(`[flow-audit] checkpoint failed: ${String(error && error.message || error)}\n`)
+  }
+}
+
 async function runStep(report, key, label, fn, options = {}) {
   const startedAt = Date.now()
+  report.activeStep = { key, label, startedAt: new Date(startedAt).toISOString() }
+  checkpointReport(report)
   process.stdout.write(`[flow-audit] ${report.key}: ${label}\n`)
   try {
     const value = await fn()
@@ -597,6 +673,9 @@ async function runStep(report, key, label, fn, options = {}) {
     if (options.required) throw error
     process.stdout.write(`[flow-audit] ${report.key}: ${label} failed: ${message}\n`)
     return options.fallback
+  } finally {
+    report.activeStep = null
+    checkpointReport(report)
   }
 }
 
@@ -636,7 +715,7 @@ async function generateMapToTarget(novelId, project, mapService) {
     parentBatchSize: 3,
     namedPlaces: project.input.mapFocus,
     maxRetries: 1,
-  }, { maxBatches: 4, targetNodeCount: MAP_TARGET_COUNT })
+  }, { maxBatches: 4, targetNodeCount: MAP_TARGET_COUNT, chatOpts: flowChatOptions() })
   return {
     generatedNodeCount: result.totalGeneratedNodeCount,
     completed: result.completed,
@@ -689,6 +768,38 @@ async function generateCharactersToTarget(novelId, project, characterService, ra
   return { protagonistId: ids[0], batchResult, ids, warnings }
 }
 
+async function generateStoryThreadsToTarget(novelId, project, storyThreadService, rawDb) {
+  const warnings = []
+  let lastResult = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const currentCount = Number(rawDb.prepare('SELECT COUNT(*) AS count FROM story_threads WHERE novel_id = ?').get(novelId)?.count || 0)
+    const remaining = Math.max(0, THREAD_TARGET_COUNT - currentCount)
+    if (remaining <= 0) {
+      return { createdCount: currentCount, requestedCount: THREAD_TARGET_COUNT, attempts: attempt, warnings }
+    }
+    lastResult = await storyThreadService.generateStoryThreads(novelId, {
+      count: remaining,
+      batchSize: remaining,
+      focus: [
+        project.input.coreConflict,
+        coreExecutionText(project),
+        `本轮必须实际返回 ${remaining} 条可追踪线程；若已有线程无效，改用不同标题、冲突抓手和回收条件。`,
+      ].join('\n'),
+    })
+    warnings.push(...asArray(lastResult?.warnings))
+    const nextCount = Number(rawDb.prepare('SELECT COUNT(*) AS count FROM story_threads WHERE novel_id = ?').get(novelId)?.count || 0)
+    if (nextCount >= THREAD_TARGET_COUNT) {
+      return { ...lastResult, createdCount: nextCount, attempts: attempt + 1, warnings }
+    }
+  }
+
+  const finalCount = Number(rawDb.prepare('SELECT COUNT(*) AS count FROM story_threads WHERE novel_id = ?').get(novelId)?.count || 0)
+  if (finalCount < THREAD_TARGET_COUNT) {
+    throw new Error(`故事线程经过 ${lastResult ? 3 : 0} 次有界生成仍只有 ${finalCount}/${THREAD_TARGET_COUNT} 条。${warnings.slice(-3).join('；')}`)
+  }
+  return { ...lastResult, createdCount: finalCount, attempts: 3, warnings }
+}
+
 function buildCompactStoryDesignPrompt(project, rows) {
   return [
     '你是中文长篇小说结构策划。请基于已有资产，为前十章流程审计样例生成一份压缩故事设计。',
@@ -728,7 +839,11 @@ async function generateStoryDesign(novelId, project, services, buildStorySetting
       chatOpts: flowChatOptions(),
       messages: [{ role: 'user', content: buildCompactStoryDesignPrompt(project, rows) }],
     })
-    const parsed = extractJson(raw)
+    const parsed = await parseStoryDesignJsonWithRepair({
+      raw,
+      novelId,
+      taskService: services.taskService,
+    })
     const result = {
       story_goal: requiredString(parsed.story_goal, project.input.theme),
       core_conflict: requiredString(parsed.core_conflict, project.input.coreConflict),
@@ -801,6 +916,9 @@ async function parseOutlineJsonArrayWithRepair({ raw, label, novelId, modelConfi
     // Repair below.
   }
 
+  const completeItems = extractCompleteJsonArrayItems(raw)
+  if (completeItems.length > 0) return completeItems
+
   const repairedRaw = await taskService.runChatTask({
     type: 'chapter_outline',
     novelId,
@@ -823,6 +941,36 @@ async function parseOutlineJsonArrayWithRepair({ raw, label, novelId, modelConfi
   if (Array.isArray(repaired)) return repaired
   if (Array.isArray(repaired?.chapters)) return repaired.chapters
   throw new Error(`${label} JSON repair did not return an array`)
+}
+
+async function parseStoryDesignJsonWithRepair({ raw, novelId, taskService }) {
+  try {
+    const parsed = extractJson(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+  } catch {
+    // Repair below.
+  }
+
+  const repairedRaw = await taskService.runChatTask({
+    type: 'review',
+    novelId,
+    retryable: true,
+    chatOpts: flowChatOptions(),
+    messages: [{
+      role: 'user',
+      content: [
+        '你只负责修复故事设计 JSON 的格式，不改写内容，不补充剧情，不解释，不输出 Markdown。',
+        '输出一个合法 JSON 对象，字段必须是 story_goal、core_conflict、main_plot、sub_plots_list、rhythm_setup、rhythm_conflict、rhythm_ending、ending_type、ending。',
+        'sub_plots_list 必须是数组，数组元素保留 name、characters、conflict、mainlineLink、endChapter 字段。',
+        '',
+        '原始输出：',
+        String(raw || '').slice(0, 16000),
+      ].join('\n'),
+    }],
+  })
+  const repaired = extractJson(repairedRaw)
+  if (repaired && typeof repaired === 'object' && !Array.isArray(repaired)) return repaired
+  throw new Error('story design JSON repair did not return an object')
 }
 
 async function generateChapterOutlines(novelId, project, context, services, modelConfigId) {
@@ -896,9 +1044,54 @@ async function generateChapterOutlines(novelId, project, context, services, mode
   }
 
   const byNum = new Map(all.map((item) => [item.chapterNum, item]))
+  const missingChapterNums = Array.from({ length: 10 }, (_, index) => index + 1)
+    .filter((chapterNum) => !byNum.has(chapterNum))
+  if (missingChapterNums.length > 0) {
+    const missingLabel = missingChapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')
+    const repairRaw = await services.taskService.runChatTask({
+      type: 'chapter_outline',
+      novelId,
+      modelConfigId,
+      chatOpts: flowChatOptions(),
+      messages: [{
+        role: 'user',
+        content: [
+          `前十章细纲批次输出缺少 ${missingLabel}。只补齐这些缺失章节，输出合法 JSON 数组，不要解释、不要 Markdown。`,
+          `必须只返回 chapter_num 为 ${missingChapterNums.join('、')} 的对象；每个对象必须有 title、goal、growth_ledger、cost_ledger、plot_points、characters、location、emotion_tone、bridge_in、bridge_out。`,
+          '补写必须承接已有章节的因果、人物状态、线程和代价，不得用“待补”“当前批次缺失”“流程补救”等占位语。',
+          `故事核心：${context.storyGoal}\n核心冲突：${context.coreConflict}`,
+          `已有相邻细纲：\n${all.slice(-3).map((item) => `第${item.chapterNum}章《${item.title}》：${clip(item.outline, 500)}`).join('\n')}`,
+        ].join('\n'),
+      }],
+    })
+    const repairedMissing = await parseOutlineJsonArrayWithRepair({
+      raw: repairRaw,
+      label: `${project.key} 缺失章节补纲（${missingLabel}）`,
+      novelId,
+      modelConfigId,
+      taskService: services.taskService,
+    })
+    for (const item of repairedMissing) {
+      const chapterNum = Number(item.chapter_num || item.num || item.chapterNum)
+      if (!missingChapterNums.includes(chapterNum)) continue
+      const outline = formatGeneratedOutline(item)
+      if (!outline || /补齐本章推进目标|当前批次缺失|流程补救|待补/u.test(outline)) continue
+      all.push({
+        chapterNum,
+        title: requiredString(item.title, `第${chapterNum}章`),
+        outline,
+        emotionTone: requiredString(item.emotion_tone, '推进'),
+        scenePlan: buildScenePlanFromOutline(item, chapterNum),
+        summary: requiredString(item.goal, ''),
+        nextSeed: requiredString(item.bridge_out, ''),
+      })
+    }
+  }
+
+  const repairedByNum = new Map(all.map((item) => [item.chapterNum, item]))
   const chapters = []
   for (let chapterNum = 1; chapterNum <= 10; chapterNum += 1) {
-    chapters.push(byNum.get(chapterNum) || {
+    chapters.push(repairedByNum.get(chapterNum) || {
       chapterNum,
       title: `第${chapterNum}章`,
       outline: '目标：补齐本章推进目标\n- 当前批次缺失，需要人工修复。',
@@ -1081,7 +1274,7 @@ function insertChapterStructure(rawDb, novelId, project, chapters, modelConfigId
   return { volumeId, partId, arcId, chapterIds }
 }
 
-async function generateChapterDrafts(novelId, project, savedStructure, services) {
+async function generateChapterDrafts(novelId, project, savedStructure, services, knownTerms = []) {
   const reports = []
   for (let index = 0; index < CONTENT_CHAPTER_COUNT; index += 1) {
     const chapterId = savedStructure.chapterIds[index]
@@ -1097,6 +1290,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
       targetWords: CHAPTER_TARGET_WORDS,
       antiAiHits: [],
       tabooHits: [],
+      publishGate: null,
     }
     try {
       await services.chapterService.generateChapterContent(chapterId, undefined, { executionMode: CHAPTER_EXECUTION_MODE })
@@ -1150,7 +1344,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
 
     let hits = []
     try {
-      hits = services.antiAiService.collectAntiAiRuntimeHits(content, project.genreName)
+      hits = services.antiAiService.collectAntiAiRuntimeHits(content, project.genreName, { knownTerms })
       const highHits = hits.filter((hit) => hit.severity === 'high')
       if (content && highHits.length > 0) {
         report.antiAiRewriteAttempts += 1
@@ -1179,7 +1373,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
         if (countHanzi(rewrittenText) >= Math.round(countHanzi(content) * 0.8)) {
           services.chapterService.updateChapter(chapterId, { content: rewrittenText })
           content = rewrittenText
-          hits = services.antiAiService.collectAntiAiRuntimeHits(content, project.genreName)
+          hits = services.antiAiService.collectAntiAiRuntimeHits(content, project.genreName, { knownTerms })
         }
       }
     } catch {
@@ -1188,6 +1382,69 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
 
     chapter = services.chapterService.getChapter(chapterId)
     report.finalWords = countHanzi(chapter?.content || '')
+    try {
+      const publishCheck = services.chapterService.runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+      const checklist = Array.isArray(publishCheck?.checklist) ? publishCheck.checklist : []
+      const contractValidation = publishCheck?.contractValidation
+      report.publishGate = {
+        phase: 'pipeline',
+        ready: Boolean(publishCheck?.ready),
+        gateLevel: publishCheck?.gateLevel || '',
+        summary: publishCheck?.summary || '',
+        blockers: checklist
+          .filter((item) => item.status === 'blocker')
+          .map((item) => `${item.key}: ${item.detail || ''}`)
+          .slice(0, 6),
+        rewrites: checklist
+          .filter((item) => item.status === 'rewrite')
+          .map((item) => `${item.key}: ${item.detail || ''}`)
+          .slice(0, 6),
+        warnings: checklist
+          .filter((item) => item.status === 'warning')
+          .map((item) => `${item.key}: ${item.detail || ''}`)
+          .slice(0, 10),
+        contractValidation: contractValidation
+          ? {
+            status: contractValidation.status,
+            summary: contractValidation.summary,
+            failedItems: (contractValidation.itemResults || [])
+              .filter((item) => item.verdict && item.verdict !== 'pass')
+              .map((item) => ({
+                type: item.contractItemType || '',
+                verdict: item.verdict,
+                expected: clip(item.expected || '', 240),
+              }))
+              .slice(0, 8),
+          }
+          : null,
+      }
+    } catch (error) {
+      report.publishGate = {
+        phase: 'pipeline',
+        ready: false,
+        gateLevel: 'error',
+        summary: `章节门快照失败：${String(error && error.message || error).slice(0, 240)}`,
+        blockers: [],
+        rewrites: [],
+        warnings: [],
+        contractValidation: null,
+      }
+    }
+    const roleTasks = services.taskService.listTasks(novelId)
+      .filter((task) => (
+        task.relatedEntityType === 'chapter'
+        && Number(task.relatedEntityId) === Number(chapterId)
+        && REQUIRED_CHAPTER_PIPELINE_ROLES.includes(task.pipelineRole)
+      ))
+    report.pipelineRoles = REQUIRED_CHAPTER_PIPELINE_ROLES.map((role) => {
+      const tasks = roleTasks.filter((task) => task.pipelineRole === role)
+      return {
+        role,
+        total: tasks.length,
+        successCount: tasks.filter((task) => task.status === 'success').length,
+        statuses: [...new Set(tasks.map((task) => task.status).filter(Boolean))],
+      }
+    })
     report.antiAiHits = hits.map((hit) => ({
       rule: hit.ruleCode,
       severity: hit.severity,
@@ -1205,7 +1462,7 @@ function buildComparison(project, rows, chapterReports) {
   const text = `${allOutlineText}\n${allContentText}`
   const issues = []
   const strengths = []
-  const failedOrUnreviewed = chapterReports.filter((report) => report.pipelineStatus !== 'success')
+  const failedOrUnreviewed = chapterReports.filter((report) => !['ok', 'success'].includes(report.pipelineStatus))
   if (failedOrUnreviewed.length > 0) {
     issues.push(`正文流水线有 ${failedOrUnreviewed.length} 章未通过成稿门：${failedOrUnreviewed.map((report) => `第${report.chapterNum}章 ${report.pipelineStatus}`).join('、')}。`)
   }
@@ -1242,6 +1499,12 @@ function buildComparison(project, rows, chapterReports) {
   if (rows.characterRows.length < CHARACTER_TARGET_COUNT) issues.push(`人物少于目标：${rows.characterRows.length}/${CHARACTER_TARGET_COUNT}。`)
   if (rows.threadRows.length < THREAD_TARGET_COUNT) issues.push(`故事线程少于目标：${rows.threadRows.length}/${THREAD_TARGET_COUNT}。`)
   if (rows.chapterRows.length !== 10) issues.push(`章节大纲数量异常：${rows.chapterRows.length}/10。`)
+  const outlineQualityFailures = findOutlineQualityFailures({ chapterSummaries: rows.chapterRows.map((row) => ({
+    chapterNum: row.chapter_num,
+    title: row.title,
+    outline: row.outline || '',
+  })) })
+  issues.push(...outlineQualityFailures)
   const weakContent = chapterReports.filter((report) => report.finalWords < Math.round(report.targetWords * WORD_FLOOR_RATIO))
   if (weakContent.length > 0) issues.push(`正文有 ${weakContent.length} 章低于目标字数 80%。`)
   const tabooHits = scanTaboo(text, project.tabooPatterns)
@@ -1268,12 +1531,27 @@ function buildVerification(runInfo) {
     const chapterWordFailures = project.chapterReports
       .filter((report) => report.finalWords < Math.round(report.targetWords * WORD_FLOOR_RATIO))
       .map((report) => `第${report.chapterNum}章 ${report.finalWords}/${report.targetWords}`)
-    const chapterPipelineFailures = project.chapterReports
+  const chapterPipelineFailures = project.chapterReports
       .filter((report) => report.pipelineStatus === 'error')
       .map((report) => `第${report.chapterNum}章 ${clip(report.pipelineError || report.pipelineStatus, 140)}`)
+    const chapterPipelineRoleFailures = project.chapterReports.flatMap((report) => {
+      const roles = Array.isArray(report.pipelineRoles) ? report.pipelineRoles : []
+      if (!['ok', 'success'].includes(report.pipelineStatus)) return []
+      return roles
+        .filter((role) => role.total < 1 || role.successCount < 1)
+        .map((role) => `第${report.chapterNum}章 ${role.role}（${role.total ? role.statuses.join('/') : '缺失'}）`)
+    })
+    const chapterPipelineRoleStops = project.chapterReports.flatMap((report) => {
+      if (['ok', 'success'].includes(report.pipelineStatus)) return []
+      const roles = Array.isArray(report.pipelineRoles) ? report.pipelineRoles : []
+      return roles
+        .filter((role) => role.total < 1)
+        .map((role) => `第${report.chapterNum}章 ${role.role}（质量门在 ${report.pipelineStatus} 阶段停止）`)
+    })
     const chapterNeedsReview = project.chapterReports
       .filter((report) => report.pipelineStatus === 'needs_review')
       .map((report) => `第${report.chapterNum}章 ${clip(report.pipelineError || '待人工复核', 140)}`)
+    const outlineQualityFailures = findOutlineQualityFailures(project)
     const tabooFailures = [
       ...project.outlineTabooHits,
       ...project.chapterReports.flatMap((report) => report.tabooHits.map((hit) => ({ chapterNum: report.chapterNum, ...hit }))),
@@ -1283,10 +1561,12 @@ function buildVerification(runInfo) {
       && project.counts.characters >= CHARACTER_TARGET_COUNT
       && project.counts.threads >= THREAD_TARGET_COUNT
       && project.counts.chapters === 10
+      && outlineQualityFailures.length === 0
       && project.counts.chapterContracts === 10
       && project.counts.sceneContracts >= 10
       && project.chapterReports.length === CONTENT_CHAPTER_COUNT
       && chapterPipelineFailures.length === 0
+      && chapterPipelineRoleFailures.length === 0
       && chapterNeedsReview.length === 0
       && chapterWordFailures.length === 0
       && tabooFailures.length === 0
@@ -1301,10 +1581,13 @@ function buildVerification(runInfo) {
         characters: `${project.counts.characters}/${CHARACTER_TARGET_COUNT}`,
         threads: `${project.counts.threads}/${THREAD_TARGET_COUNT}`,
         chapters: `${project.counts.chapters}/10`,
+        outlineQualityFailures,
         chapterContracts: project.counts.chapterContracts,
         sceneContracts: project.counts.sceneContracts,
         contentChapters: project.chapterReports.length,
         chapterPipelineFailures,
+        chapterPipelineRoleFailures,
+        chapterPipelineRoleStops,
         chapterNeedsReview,
         chapterWordFailures,
         tabooFailures,
@@ -1333,7 +1616,7 @@ function buildMarkdownReport(runInfo, verification) {
     verification.allOk
       ? '- 结构性验收通过：三部作品均达到本次小样本数量目标，且未命中原著专名/桥段禁用扫描。'
       : '- 结构性验收未完全通过：详见各项目的数量、字数、违禁扫描和步骤错误。',
-    '- 当前流程能把“立项底盘 -> 地图/物品/人物/线程 -> 大纲 -> 正文”串起来，但物品早于人物、outline 逻辑未 service 化、地图单次只跑一个批次，是最明确的流程问题。',
+    '- 当前流程能把“立项底盘 -> 地图/物品/人物/线程 -> 大纲 -> 正文”串起来；物品早于人物但会执行关联回填，地图按目标数量分批生成，细纲由 outline-generation.service 统一生成并同步结构草稿。',
     FULL_STORY_DESIGN
       ? '- 本次启用了完整多步故事设计流程。'
       : '- 本次为保证三部作品都能跑完，故事设计使用 compact 单次生成；完整多步 `generateCoreSettings` 可用 `NOVELFORGE_FLOW_FULL_STORY_DESIGN=1` 单独复测。',
@@ -1342,9 +1625,10 @@ function buildMarkdownReport(runInfo, verification) {
     '## 流程问题与扩展修复',
     '',
     '- 调整或补偿物品/人物顺序：保留当前顺序时，物品生成后应在人物生成完成后自动执行一次 item link repair；更稳的顺序是地图 -> 主角/核心人物 -> 物品 -> 补充人物。',
-    '- 把 outline.generateArcs / generateChapterOutlines 从 IPC handler 下沉成 outline.service，脚本、UI 和测试共用同一实现。',
-    '- 地图生成入口增加“生成到目标数量”模式，或 UI 明确显示本次只完成一个批次并提供继续生成。',
-    '- 章节大纲生成后自动补 scenePlan、chapter_contracts、scene_contracts，否则正文流水线的合同驱动优势会被削弱。',
+    '- 当前物品 -> 人物顺序仍可进一步优化为先生成主角/核心人物，再生成物品和补充人物；现有 item link repair 负责兼容回填。',
+    '- 地图生成已支持“生成到目标数量”的批次模式；仍需在 UI 中明确展示批次进度并提供继续生成入口。',
+    '- 章节大纲生成后会自动补 scenePlan、chapter_contracts、scene_contracts 草稿；正文前仍必须经过合同审核和状态切换。',
+    '- 细纲 JSON 已增加截断输出的确定性容错：保留完整对象并补齐缺失章节；原始输出截断仍应作为质量预警记录。',
     '- 三类对照作品应补题材专用检测：历史正剧查时代/劳动/组织纹理，升级玄幻查等级/资源/兑现节奏，志怪单元查妖病/人事/余味结构。',
     '',
   ]
@@ -1367,10 +1651,23 @@ function buildMarkdownReport(runInfo, verification) {
     project.chapterSummaries.forEach((chapter) => {
       lines.push(`- 第 ${chapter.chapterNum} 章《${chapter.title}》：${clip(chapter.outline, 180)}`)
     })
+    if (project.outlineQualityFailures && project.outlineQualityFailures.length > 0) {
+      lines.push('', '### 大纲质量告警')
+      project.outlineQualityFailures.forEach((item) => lines.push(`- ${item}`))
+    }
     lines.push('')
     lines.push('### 前两章正文')
     project.chapterReports.forEach((report) => {
-      lines.push(`- 第 ${report.chapterNum} 章：${report.finalWords} 字，流水线 ${report.pipelineStatus}${report.pipelineError ? `，错误：${clip(report.pipelineError, 120)}` : ''}，扩写 ${report.expandAttempts} 次，AI 味补救 ${report.antiAiRewriteAttempts} 次，违禁命中 ${report.tabooHits.length}。`)
+      const roleSummary = Array.isArray(report.pipelineRoles)
+        ? report.pipelineRoles.map((role) => `${role.role}:${role.successCount}/${role.total}${role.total === 0 && report.pipelineStatus === 'needs_review' ? '(质量门停止)' : ''}`).join('、')
+        : '未记录'
+      lines.push(`- 第 ${report.chapterNum} 章：${report.finalWords} 字，流水线 ${report.pipelineStatus}${report.pipelineError ? `，错误：${clip(report.pipelineError, 120)}` : ''}，角色 ${roleSummary}，扩写 ${report.expandAttempts} 次，AI 味补救 ${report.antiAiRewriteAttempts} 次，违禁命中 ${report.tabooHits.length}。`)
+      if (report.publishGate) {
+        lines.push(`  - 成稿后章节门快照（${report.publishGate.phase || 'pipeline'}）：${report.publishGate.gateLevel}，${clip(report.publishGate.summary || '', 220)}；阻塞 ${report.publishGate.blockers.length}，重写 ${report.publishGate.rewrites.length}，预警 ${report.publishGate.warnings.length}。`)
+        if (report.publishGate.contractValidation?.failedItems?.length) {
+          lines.push(`  - 合同失败项：${report.publishGate.contractValidation.failedItems.map((item) => `${item.type}[${item.verdict}]`).join('、')}`)
+        }
+      }
     })
     lines.push('')
     lines.push('### 与原著差异')
@@ -1416,6 +1713,7 @@ async function runProject(project, context) {
     },
     samples: { maps: [], items: [], characters: [], threads: [] },
     chapterSummaries: [],
+    outlineQualityFailures: [],
     chapterReports: [],
     outlineTabooHits: [],
     comparison: { strengths: [], issues: [], processIssues: [], tabooHits: [] },
@@ -1431,6 +1729,16 @@ async function runProject(project, context) {
     runStamp,
     outDir,
   } = context
+
+  report.checkpoint = () => {
+    report.updatedAt = nowIso()
+    fs.writeFileSync(
+      path.join(outDir, `${project.key}.progress.json`),
+      JSON.stringify(report, null, 2),
+      'utf8',
+    )
+  }
+  checkpointReport(report)
 
   const genreId = await runStep(report, 'genre', '准备题材', async () => getOrCreateGenreId(db, schema, project.genreName), {
     required: true,
@@ -1489,12 +1797,13 @@ async function runProject(project, context) {
     summary: (result) => result ? `扫描 ${result.itemsScanned}，关联 ${result.itemsLinked}，归属 ${result.ownersAssigned}` : '无返回',
   })
 
-  await runStep(report, 'threads', '生成剧情线程', async () => services.storyThreadService.generateStoryThreads(novelId, {
-    count: THREAD_TARGET_COUNT,
-    batchSize: THREAD_TARGET_COUNT,
-    focus: `${project.input.coreConflict}\n${project.input.tabooRules}`,
-  }), {
-    summary: (result) => `新增 ${result?.createdCount || 0}/${result?.requestedCount || THREAD_TARGET_COUNT} 条`,
+  await runStep(report, 'threads', '生成剧情线程', async () => generateStoryThreadsToTarget(
+    novelId,
+    project,
+    services.storyThreadService,
+    rawDb,
+  ), {
+    summary: (result) => `新增 ${result?.createdCount || 0}/${result?.requestedCount || THREAD_TARGET_COUNT} 条，尝试 ${result?.attempts || 0} 次`,
   })
 
   await runStep(report, 'story-design', '生成故事设计', async () => generateStoryDesign(novelId, project, services, helpers.buildStorySettingsPayload, rawDb), {
@@ -1541,11 +1850,17 @@ async function runProject(project, context) {
     summary: (value) => `chapterIds=${value.chapterIds.length}`,
   })
 
+  const auditKnownTerms = [
+    ...rowsBeforeOutline.characterRows.map((row) => row.full_name),
+    ...rowsBeforeOutline.itemRows.map((row) => row.item_name),
+    ...rowsBeforeOutline.mapRows.map((row) => row.name),
+  ].filter((term) => typeof term === 'string' && term.trim()).map((term) => term.trim())
   const chapterReports = await runStep(report, 'chapter-drafts', `生成前 ${CONTENT_CHAPTER_COUNT} 章正文`, async () => generateChapterDrafts(
     novelId,
     project,
     savedStructure,
     services,
+    auditKnownTerms,
   ), {
     required: true,
     summary: (items) => `正文 ${asArray(items).length} 章`,
@@ -1581,6 +1896,7 @@ async function runProject(project, context) {
     outline: row.outline || '',
     words: countHanzi(row.content || ''),
   }))
+  report.outlineQualityFailures = findOutlineQualityFailures(report)
   const outlineText = rows.chapterRows.map((row) => `${row.title}\n${row.outline || ''}`).join('\n')
   report.outlineTabooHits = scanTaboo(outlineText, project.tabooPatterns)
   report.comparison = buildComparison(project, rows, report.chapterReports)
@@ -1672,6 +1988,9 @@ async function main() {
     contentChapterCount: CONTENT_CHAPTER_COUNT,
     chapterTargetWords: CHAPTER_TARGET_WORDS,
     chapterExecutionMode: CHAPTER_EXECUTION_MODE,
+    requestTimeoutMs: FLOW_REQUEST_TIMEOUT_MS,
+    requestRetryCount: FLOW_REQUEST_RETRY_COUNT,
+    maxDurationMs: FLOW_MAX_DURATION_MS,
     projects: [],
   }
 
@@ -1679,8 +1998,69 @@ async function main() {
     ? PROJECTS.filter((project) => PROJECT_FILTER.has(project.key))
     : PROJECTS
 
+  const writeRunProgress = (status, activeProjectKey = null) => {
+    fs.writeFileSync(path.join(outDir, 'run-progress.json'), JSON.stringify({
+      ...runInfo,
+      status,
+      activeProjectKey,
+      updatedAt: nowIso(),
+    }, null, 2), 'utf8')
+  }
+
+  const writeAuditArtifacts = (status, extra = {}) => {
+    const projects = [...runInfo.projects]
+    for (const project of selectedProjects) {
+      if (projects.some((item) => item.key === project.key)) continue
+      const progressPath = path.join(outDir, `${project.key}.progress.json`)
+      if (!fs.existsSync(progressPath)) continue
+      try {
+        const progress = JSON.parse(fs.readFileSync(progressPath, 'utf8'))
+        if (progress && typeof progress === 'object') projects.push(progress)
+      } catch (error) {
+        fs.writeFileSync(
+          path.join(outDir, `${project.key}.progress-read-error.txt`),
+          `${error.stack || error.message || error}\n`,
+          'utf8',
+        )
+      }
+    }
+
+    runInfo.projects = projects
+    const artifactRunInfo = {
+      ...runInfo,
+      ...extra,
+      status,
+      projects,
+    }
+    const verification = buildVerification(artifactRunInfo)
+    fs.writeFileSync(path.join(outDir, 'run-info.json'), JSON.stringify(artifactRunInfo, null, 2), 'utf8')
+    fs.writeFileSync(path.join(outDir, 'verification.json'), JSON.stringify(verification, null, 2), 'utf8')
+    fs.writeFileSync(path.join(outDir, 'report.md'), buildMarkdownReport(artifactRunInfo, verification), 'utf8')
+    return { artifactRunInfo, verification }
+  }
+
+  writeRunProgress('running', selectedProjects[0]?.key || null)
+  const watchdog = setTimeout(() => {
+    const timeoutPayload = {
+      status: 'timeout',
+      message: `流程审计超过最大运行时长 ${Math.ceil(FLOW_MAX_DURATION_MS / 60_000)} 分钟，已主动停止。`,
+      maxDurationMs: FLOW_MAX_DURATION_MS,
+      activeProjectKey: selectedProjects[runInfo.projects.length]?.key || null,
+      runStamp,
+      generatedAt: nowIso(),
+    }
+    runInfo.status = 'timeout'
+    runInfo.timeout = timeoutPayload
+    fs.writeFileSync(path.join(outDir, 'timeout.json'), JSON.stringify(timeoutPayload, null, 2), 'utf8')
+    writeAuditArtifacts('timeout', { timeout: timeoutPayload })
+    writeRunProgress('timeout', timeoutPayload.activeProjectKey)
+    console.error(`[flow-audit] ${timeoutPayload.message}`)
+    exitProcess(124)
+  }, FLOW_MAX_DURATION_MS)
+
   try {
     for (const project of selectedProjects) {
+      writeRunProgress('running', project.key)
       try {
         const report = await runProject(project, {
           db,
@@ -1693,6 +2073,7 @@ async function main() {
           outDir,
         })
         runInfo.projects.push(report)
+        writeRunProgress('running', selectedProjects[runInfo.projects.length]?.key || null)
       } catch (error) {
         const failed = {
           key: project.key,
@@ -1722,6 +2103,7 @@ async function main() {
         }
         runInfo.projects.push(failed)
         fs.writeFileSync(path.join(outDir, `${project.key}.error.txt`), `${error.stack || error.message || error}\n`, 'utf8')
+        writeRunProgress('running', selectedProjects[runInfo.projects.length]?.key || null)
       }
     }
 
@@ -1729,11 +2111,15 @@ async function main() {
     fs.writeFileSync(path.join(outDir, 'run-info.json'), JSON.stringify(runInfo, null, 2), 'utf8')
     fs.writeFileSync(path.join(outDir, 'verification.json'), JSON.stringify(verification, null, 2), 'utf8')
     fs.writeFileSync(path.join(outDir, 'report.md'), buildMarkdownReport(runInfo, verification), 'utf8')
+    clearTimeout(watchdog)
+    writeRunProgress('complete', null)
     console.log(`[flow-audit] report ${path.join(outDir, 'report.md')}`)
     console.log(`[flow-audit] allOk=${verification.allOk}`)
     if (!verification.allOk) process.exitCode = 1
   } catch (error) {
+    clearTimeout(watchdog)
     fs.writeFileSync(path.join(outDir, 'fatal-error.txt'), `${error.stack || error.message || error}\n`, 'utf8')
+    writeRunProgress('fatal', null)
     throw error
   }
 }

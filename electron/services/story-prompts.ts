@@ -95,6 +95,8 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     '- 如果"活跃支线与伏笔"中有标注[已N章未提及]的线索，至少用一个场景的细节或对话暗示来回顾它。',
     ...CHAPTER_DELIVERY_GATE_LINES,
     '- 每个场景必须包含：开场动作或悬念钩子、至少一个具体冲突或张力点、退出时留下未解决的问题或下一步悬念。',
+    '- 同一关键物品在同一场戏只能有一个最终状态：如果退出钩子写了“收缴/拿走/放入口袋”，就不得再写“被掩埋/丢失/再也找不回来”；如果确实要写遗失，必须删除收缴动作并明确遗失的物理过程。',
+    '- 场景数量必须覆盖现有章节合同的全部场景；不得把两个合同场景合并成一个，也不得让某个合同场景只有标题没有结果状态。',
     '- 不要写"角色思考了很久"或"一番讨论后"这类跳过过程的总结句——把过程展开写。',
   ])
   return applyPromptOverride('scenePlan', fallback, params as unknown as Record<string, unknown>)

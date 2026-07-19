@@ -78,6 +78,12 @@ function countWords(text) {
   return (source.match(/[\u4e00-\u9fa5]/g) || []).length + (source.match(/\b[a-zA-Z]+\b/g) || []).length
 }
 
+function getQualityStatus(findings) {
+  if (findings.some((finding) => finding.severity === 'high')) return 'blocked'
+  if (findings.length > 0) return 'needs_review'
+  return 'clear'
+}
+
 function analyzeContent(content, genre) {
   const text = cleanText(content)
   const drift = languageDrift.analyzeLanguageDrift(text)
@@ -94,6 +100,7 @@ function analyzeContent(content, genre) {
     aiFlavorRisk: Math.round(Math.min(100, driftScore * 0.8 + guardrailRisk)),
     languageDriftScore: Math.round(driftScore * 10) / 10,
     guardrailHits: findings.map((finding) => ({ code: finding.code, severity: finding.severity, excerpt: finding.excerpt })),
+    qualityStatus: getQualityStatus(findings),
   }
 }
 
@@ -132,11 +139,14 @@ function writeMarkdown(report, outDir) {
     `生产链路：chapter.optimizeContent（只生成候选，不自动覆盖正文）`,
     `模型调用数：${report.callCount}`,
     '',
-    '说明：本报告把上一轮 After 正文送入当前生产级整章优化器，检查生成后护栏能否继续降低 AI 味风险；临时项目和章节已在每轮结束后删除。',
+    '说明：本报告把上一轮 After 正文送入当前生产级整章优化器，检查生成后护栏能否继续降低语言模板与生成痕迹风险；临时项目和章节已在每轮结束后删除。',
+    '注意：运行状态只表示模型调用和临时数据清理是否完成；质量状态单独依据修复后护栏命中计算，不把“调用成功”误报成“正文可直接发布”。',
     '',
   ]
   for (const project of report.projects) {
     lines.push(`## ${project.genre} · ${project.title}`)
+    lines.push('')
+    lines.push(`运行状态：${project.chapters.every((chapter) => chapter.status === 'success') ? 'complete' : 'partial'}；修复后质量状态：${project.qualityStatus}`)
     lines.push('')
     lines.push('| 指标 | After / 修复前 | Production repair / 修复后 | 变化（修复后-修复前） |')
     lines.push('| --- | ---: | ---: | ---: |')
@@ -145,9 +155,16 @@ function writeMarkdown(report, outDir) {
     lines.push(`| 平均护栏命中数 | ${project.before.guardrailHitCount} | ${project.after.guardrailHitCount} | ${project.comparison.guardrailHitDelta} |`)
     lines.push('')
     for (const chapter of project.chapters) {
-      lines.push(`- 第 ${chapter.chapterNum} 章：${chapter.status === 'success' ? `修复前风险 ${chapter.before.aiFlavorRisk} → 修复后 ${chapter.after.aiFlavorRisk}；候选文件 ${path.relative(outDir, chapter.rawPath)}` : `失败：${chapter.error}`}`)
+      lines.push(`- 第 ${chapter.chapterNum} 章：${chapter.status === 'success' ? `修复前风险 ${chapter.before.aiFlavorRisk} → 修复后 ${chapter.after.aiFlavorRisk}；质量状态 ${chapter.after.qualityStatus}；候选文件 ${path.relative(outDir, chapter.rawPath)}` : `失败：${chapter.error}`}`)
       if (chapter.status === 'success' && chapter.warnings.length > 0) {
         lines.push(`  - 生产事实/质量门警告：${chapter.warnings.join('；')}`)
+      }
+      if (chapter.status === 'success' && chapter.after.guardrailHits.length > 0) {
+        const hitSummary = chapter.after.guardrailHits.reduce((counts, finding) => {
+          counts[finding.code] = (counts[finding.code] || 0) + 1
+          return counts
+        }, {})
+        lines.push(`  - 修复后仍命中护栏：${Object.entries(hitSummary).map(([code, count]) => `${code}×${count}`).join('、')}`)
       }
     }
     lines.push('')
@@ -247,6 +264,9 @@ async function main() {
       languageDriftDelta: Math.round((project.after.averageLanguageDriftScore - project.before.averageLanguageDriftScore) * 10) / 10,
       guardrailHitDelta: project.after.guardrailHitCount - project.before.guardrailHitCount,
     }
+    project.qualityStatus = successful.length === 0
+      ? 'not_evaluable'
+      : getQualityStatus(successful.flatMap((item) => item.after.guardrailHits))
     report.projects.push(project)
   }
 
@@ -254,6 +274,12 @@ async function main() {
     sum + project.chapters.filter((chapter) => chapter.status === 'success').length
   ), 0)
   report.status = successfulCount === candidates.length ? 'complete' : 'partial'
+  const evaluatedChapters = report.projects.flatMap((project) => (
+    project.chapters.filter((chapter) => chapter.status === 'success')
+  ))
+  report.qualityStatus = evaluatedChapters.length === 0
+    ? 'not_evaluable'
+    : getQualityStatus(evaluatedChapters.flatMap((chapter) => chapter.after.guardrailHits))
   fs.writeFileSync(path.join(outDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   writeMarkdown(report, outDir)
   console.log(`[humanization-repair-eval] report: ${path.join(outDir, 'report.md')}`)

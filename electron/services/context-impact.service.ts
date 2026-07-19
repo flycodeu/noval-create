@@ -56,6 +56,7 @@ import {
 } from './chapter-contract-validator.service'
 import { analyzeNarrativeControls } from './narrative-control.service'
 import { getNovelAssetImpactSummary } from './asset-impact.service'
+import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -188,6 +189,19 @@ function dropNonRiskStatements(items: string[]): string[] {
     if (/^(无|没有|未发现|未识别|不存在)/.test(head)) return false
     if (item.includes('不构成') && item.includes('风险')) return false
     if (item.includes('无法评估')) return false
+    // 审校模型也会把肯定性核对结论写进风险数组，且不一定以“无/未发现”开头。
+    // 这些句子证明对应项目已核对通过，不能被发布门当成 blocker。
+    const affirmativeAuditMarkers = [
+      '执行正确',
+      '未越界',
+      '无需修改',
+      '匹配度高',
+      '均有来源',
+      '来源充分',
+      '来源清楚',
+      '链条完整',
+    ]
+    if (affirmativeAuditMarkers.some((marker) => item.includes(marker))) return false
     return true
   })
 }
@@ -237,6 +251,8 @@ interface ReviewStateSnapshot {
   styleComplianceDeviations: string[]
   styleComplianceForbiddenPatterns: string[]
   rewriteRecheckPerformed: boolean
+  rewriteDeltaStatus?: 'pass' | 'weak' | 'fail'
+  rewriteDeltaFindings: string[]
 }
 
 function parseReviewState(raw?: string | null): {
@@ -284,6 +300,8 @@ function parseReviewState(raw?: string | null): {
   styleComplianceDeviations: string[]
   styleComplianceForbiddenPatterns: string[]
   rewriteRecheckPerformed: boolean
+  rewriteDeltaStatus?: 'pass' | 'weak' | 'fail'
+  rewriteDeltaFindings: string[]
 } {
   const fallback: ReviewStateSnapshot = {
     rewriteRequired: false,
@@ -329,6 +347,8 @@ function parseReviewState(raw?: string | null): {
     styleComplianceDeviations: [],
     styleComplianceForbiddenPatterns: [],
     rewriteRecheckPerformed: false,
+    rewriteDeltaStatus: undefined,
+    rewriteDeltaFindings: [],
   }
   if (!raw) {
     return fallback
@@ -408,6 +428,19 @@ function parseReviewState(raw?: string | null): {
         && typeof parsed.rewrite_recheck === 'object'
         && (parsed.rewrite_recheck as Record<string, unknown>).performed === true,
       ),
+      rewriteDeltaStatus: parsed.rewrite_delta
+        && typeof parsed.rewrite_delta === 'object'
+        && !Array.isArray(parsed.rewrite_delta)
+        && ((parsed.rewrite_delta as Record<string, unknown>).status === 'pass'
+          || (parsed.rewrite_delta as Record<string, unknown>).status === 'weak'
+          || (parsed.rewrite_delta as Record<string, unknown>).status === 'fail')
+        ? (parsed.rewrite_delta as Record<string, unknown>).status as 'pass' | 'weak' | 'fail'
+        : undefined,
+      rewriteDeltaFindings: parsed.rewrite_delta
+        && typeof parsed.rewrite_delta === 'object'
+        && !Array.isArray(parsed.rewrite_delta)
+        ? parseUnknownStringArray((parsed.rewrite_delta as Record<string, unknown>).findings)
+        : [],
     }
   } catch {
     return fallback
@@ -1212,7 +1245,7 @@ function buildChapterGateSummary(
     return `章节验收未通过，命中 ${blockerCount} 项阻塞、${warningCount} 项预警。`
   }
   if (gateLevel === 'warning') {
-    return `章节验收可通过，但仍有 ${warningCount} 项预警。`
+    return `章节验收可进入人工复核，但仍有 ${warningCount} 项预警。`
   }
   return '章节验收通过。'
 }
@@ -2300,8 +2333,38 @@ export function runChapterPublishCheck(
   const highIssues = consistencyIssues.filter((issue) => issue.severity === 'high')
   const mediumIssues = consistencyIssues.filter((issue) => issue.severity === 'medium')
   const aiScore = parseAiScore(chapter.aiScoreJson)
-  const reviewState = parseReviewState(chapter.reviewNotesJson)
+  let reviewState = parseReviewState(chapter.reviewNotesJson)
+  // Critic findings are useful upstream evidence, but the publish gate must
+  // judge dialogue risks against the current committed text. Otherwise a
+  // blocker from the pre-rewrite draft can survive a clean revalidation and
+  // stop Canonizer/Finalize indefinitely.
+  if (chapter.content?.trim()) {
+    const currentDialogueAnalysis = analyzeChapterDialogueAgainstNovel(
+      chapter.novelId,
+      chapter.chapterNum,
+      chapter.content,
+    )
+    reviewState = {
+      ...reviewState,
+      dialogueHomogenizationRisks: currentDialogueAnalysis.risks || [],
+      dialogueDriftAlerts: (currentDialogueAnalysis.drifts || [])
+        .map((item) => normalizeText(item.reason) || normalizeText(item.characterName))
+        .filter(Boolean),
+      crossCharacterSimilarity: (currentDialogueAnalysis.similarities || [])
+        .map((item) => normalizeText(item.reason))
+        .filter(Boolean),
+      dialogueFillerRisks: currentDialogueAnalysis.fillerRisks || [],
+      dialogueInfoDensityRisks: currentDialogueAnalysis.infoDensityRisks || [],
+      dialogueVoiceLockSummary: currentDialogueAnalysis.voiceLockSummary || '',
+    }
+  }
   const contractContext = loadChapterContractAuditContext(chapterId)
+  const narrativeControlCharacterNames = db.select({ name: characters.fullName })
+    .from(characters)
+    .where(eq(characters.novelId, chapter.novelId))
+    .all()
+    .map((row) => row.name || '')
+    .filter(Boolean)
   const qualityDashboard = getQualityDashboardData(chapter.novelId, { includeDialogueInsights: false })
   const recallRuntimeByChapterId = buildLatestRecallRuntimeMap(chapter.novelId)
   const recallRuntime = recallRuntimeByChapterId.get(chapterId)
@@ -2379,6 +2442,7 @@ export function runChapterPublishCheck(
   const narrativeControlReport = analyzeNarrativeControls({
     themeVoice,
     sceneSnapshots: contractContext.sceneSnapshots,
+    characterNames: narrativeControlCharacterNames,
     content: chapter.content,
     chapterFunction: reviewState.chapterFunctionPrimary || reviewState.paceMarker,
     chapterGoal: chapterContract.chapterGoal || chapter.outline || '',
@@ -2484,6 +2548,11 @@ export function runChapterPublishCheck(
     reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
       ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
       : '',
+    reviewState.rewriteDeltaStatus === 'fail'
+      ? `重写差异验证失败：${reviewState.rewriteDeltaFindings.slice(0, 2).join('；') || '当前稿件没有证明已修复剧情、冲突或代价链。'}`
+      : reviewState.rewriteDeltaStatus === 'weak' && reviewState.rewriteRequired
+        ? `重写差异验证偏弱：${reviewState.rewriteDeltaFindings.slice(0, 2).join('；') || '当前稿件仍缺少足够的结构变化证据。'}`
+        : '',
     publishContractValidation?.status === 'blocker'
       ? '正文合同验证仍有关键缺口，当前稿件没有兑现章节目标、场景结果或必要支线/伏笔。'
       : '',
@@ -3001,10 +3070,24 @@ export function runChapterPublishCheck(
   // 流水线阶段（finalize 之前）对时序类与初稿证据类 blocker 降级：
   // - summary/continuity 由随后的 finalize 自动刷新，属于必然未就绪的簿记项
   // - context 过期原因仅为“前文章节内容已更新”时，本章恰是基于最新前文生成的
-  // - step_memory/title_and_hallucination 的审校证据来自重写前初稿，未复检重写稿，转修订任务人工复核
+  // - step_memory/opening_hook/title_and_hallucination 的审校证据来自重写前初稿，未复检重写稿，转修订任务人工复核
   if (phase === 'pipeline') {
     for (let index = 0; index < rawChecklist.length; index += 1) {
       const item = rawChecklist[index]
+      if (
+        (item.key === 'step_memory_handoff'
+          || item.key === 'opening_hook'
+          || item.key === 'title_and_hallucination')
+        && !reviewState.rewriteRecheckPerformed
+        && (item.status === 'blocker' || item.status === 'rewrite')
+      ) {
+        rawChecklist[index] = {
+          ...item,
+          status: 'warning',
+          detail: `${item.detail}（审校证据来自重写前初稿且未复检，已转修订任务复核）`,
+        }
+        continue
+      }
       if (item.status !== 'blocker') continue
       if (item.key === 'summary' || item.key === 'continuity') {
         rawChecklist[index] = {
@@ -3015,25 +3098,12 @@ export function runChapterPublishCheck(
         continue
       }
       if (item.key === 'context') {
-        const onlyFreshPreviousChapters = staleReasons.length > 0
-          && staleReasons.every((reason) => /第\s*\d+\s*章内容已更新/.test(reason))
-        if (onlyFreshPreviousChapters) {
-          rawChecklist[index] = {
-            ...item,
-            status: 'warning',
-            detail: `${item.detail}（本章基于最新前文生成，过期标记将随入稿回写解除）`,
-          }
-        }
-        continue
-      }
-      if (item.key === 'step_memory_handoff' || item.key === 'title_and_hallucination') {
-        // 已做重写稿轻量复检的章节，风险清单是针对最终稿核对过的新证据，blocker 判定有效，不再降级
-        if (reviewState.rewriteRecheckPerformed) continue
         rawChecklist[index] = {
           ...item,
           status: 'warning',
-          detail: `${item.detail}（审校证据来自重写前初稿且未复检，已转修订任务复核）`,
+          detail: `${item.detail}（流水线入稿阶段已构建当前上下文，过期标记将由随后 finalize 的记忆刷新解除）`,
         }
+        continue
       }
     }
   }

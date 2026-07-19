@@ -169,7 +169,14 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
     }
   }
 
-  if (loading && !snapshot) return <div className="recommendation-governance recommendation-governance--loading"><Spin tip="读取推荐治理状态…" /></div>
+  if (loading && !snapshot) {
+    return (
+      <div className="recommendation-governance recommendation-governance--loading">
+        <Spin />
+        <span>读取推荐治理状态…</span>
+      </div>
+    )
+  }
   if (!snapshot) return null
   const { state, latestPreflight } = snapshot
   const statusColor = state.status === 'passed' ? 'success' : state.status === 'eligible' ? 'processing' : 'error'

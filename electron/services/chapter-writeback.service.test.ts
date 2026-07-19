@@ -9,7 +9,45 @@ vi.mock('./asset-impact.service', () => ({
   resolveChapterAssetImpacts: vi.fn(),
 }))
 
-import { getDb } from '../database/db'
+vi.mock('./task.service', () => ({
+  runChatTask: vi.fn(async () => JSON.stringify({ extracts: [], diffs: [] })),
+}))
+
+vi.mock('./character-state.service', () => ({
+  listLatestCharacterStates: vi.fn(() => []),
+}))
+
+vi.mock('./world-state.service', () => ({
+  listLatestWorldStates: vi.fn(() => []),
+}))
+
+vi.mock('./story-thread.service', () => ({
+  listStoryThreads: vi.fn(() => []),
+  createStoryThread: vi.fn(() => 42),
+  updateStoryThread: vi.fn(),
+}))
+
+vi.mock('./story-fact.service', () => ({
+  listStoryFacts: vi.fn(() => []),
+}))
+
+vi.mock('./endgame-asset.service', () => ({
+  listForeshadowLedger: vi.fn(() => []),
+}))
+
+vi.mock('./timeline.service', () => ({
+  listTimelineEvents: vi.fn(() => []),
+}))
+
+vi.mock('./item.service', () => ({
+  listStoryItems: vi.fn(() => []),
+}))
+
+vi.mock('./character-arc.service', () => ({
+  listRelationshipArcs: vi.fn(() => []),
+}))
+
+import { getDb, getSqlite } from '../database/db'
 import {
   chapterFactExtracts,
   chapterWritebackDiffs,
@@ -17,7 +55,8 @@ import {
   chapters,
   novels,
 } from '../database/schema'
-import { applyChapterWritebackRun } from './chapter-writeback.service'
+import { applyChapterWritebackRun, prepareChapterWritebackRun } from './chapter-writeback.service'
+import * as storyThreadService from './story-thread.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
@@ -48,6 +87,17 @@ function createDbMock(rowsByTable: TableRows) {
             return { changes: rows.length > 0 ? 1 : 0 }
           }),
         })),
+      })),
+    })),
+    insert: vi.fn((table: unknown) => ({
+      values: vi.fn((payload: Record<string, unknown>) => ({
+        run: vi.fn(() => {
+          const rows = rowsByTable.get(table) || []
+          const nextId = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1
+          rows.push({ id: nextId, ...payload })
+          rowsByTable.set(table, rows)
+          return { lastInsertRowid: nextId }
+        }),
       })),
     })),
   }
@@ -132,6 +182,10 @@ function createRows(): TableRows {
 describe('applyChapterWritebackRun', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(getSqlite).mockReset()
+    vi.mocked(getSqlite).mockImplementation(() => ({
+      transaction: (callback: () => unknown) => callback,
+    }) as never)
   })
 
   it('blocks apply when the chapter context version changed after the draft run was created', async () => {
@@ -302,5 +356,67 @@ describe('applyChapterWritebackRun', () => {
     expect(factProvenance).toEqual([])
     expect(canonCards).toEqual([])
     expect(String(novel.canonSourceLedgerJson || '[]')).toContain('旧仓库药箱线再次被提起。')
+  })
+
+  it('does not update an entity id that belongs to another novel', async () => {
+    const rows = createRows()
+    const run = rows.get(chapterWritebackRuns)?.[0]
+    const diff = rows.get(chapterWritebackDiffs)?.[0]
+    if (!run || !diff) throw new Error('test fixture missing run or diff')
+
+    Object.assign(run, { sourceChapterVersion: 4 })
+    Object.assign(diff, {
+      assetType: 'thread',
+      entityType: 'story-thread',
+      entityId: 99,
+      afterStateJson: JSON.stringify({ title: '跨小说候选线', summary: '只能落入当前小说。' }),
+      canonDecision: 'accepted',
+      writebackStatus: 'pending',
+    })
+    vi.mocked(storyThreadService.listStoryThreads).mockReturnValue([
+      { id: 7, novelId: 1, title: '当前小说已有线索' } as never,
+    ])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = await applyChapterWritebackRun(21)
+
+    expect(result.activeRun?.status).toBe('applied')
+    expect(storyThreadService.updateStoryThread).not.toHaveBeenCalledWith(99, expect.anything())
+    expect(storyThreadService.createStoryThread).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ title: '跨小说候选线' }),
+      { skipContextTracking: true },
+    )
+  })
+})
+
+describe('prepareChapterWritebackRun', () => {
+  beforeEach(() => {
+    vi.mocked(getDb).mockReset()
+    vi.mocked(getSqlite).mockReset()
+    vi.mocked(getSqlite).mockImplementation(() => ({
+      transaction: (callback: () => unknown) => callback,
+    }) as never)
+  })
+
+  it('auto-closes an empty candidate run without blocking the next chapter', async () => {
+    const rows = createRows()
+    const chapter = rows.get(chapters)?.[0]
+    if (!chapter) throw new Error('test fixture missing chapter')
+    Object.assign(chapter, { content: '本章没有可写回的结构化事实。' })
+    rows.set(chapterWritebackDiffs, [])
+    rows.set(chapterWritebackRuns, [])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    const result = await prepareChapterWritebackRun(11, 'empty-run-test')
+    const run = rows.get(chapterWritebackRuns)?.find((item) => item.triggerSource === 'empty-run-test')
+    const status = JSON.parse(String(chapter.writebackStatusJson))
+
+    expect(result.status).toBe('applied')
+    expect(run?.status).toBe('applied')
+    expect(status.phase).toBe('applied')
+    expect(status.candidateReady).toBe(false)
+    expect(status.canonApplied).toBe(true)
+    expect(status.blockedGeneration).toBe(false)
+    expect(status.readyForNextChapter).toBe(true)
   })
 })

@@ -75,11 +75,11 @@ export async function executeManagedRequest<T>(
   options: ManagedRequestOptions,
   operation: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const retryLimit = clampRetryCount(options.requestRetryCount)
+  const retryLimit = resolveManagedRequestRetryCount(options.requestRetryCount)
   let lastError: unknown
 
   for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-    const timeoutMs = resolveTimeoutMs(options.timeoutMs)
+    const timeoutMs = resolveManagedRequestTimeoutMs(options.timeoutMs)
     const managedSignal = createManagedSignal(options.signal, timeoutMs)
 
     try {
@@ -242,13 +242,23 @@ function isAbortError(error: unknown): boolean {
     && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
 }
 
-function resolveTimeoutMs(timeoutMs?: number): number {
-  const value = typeof timeoutMs === 'number' ? Math.round(timeoutMs) : DEFAULT_REQUEST_TIMEOUT_MS
+export function resolveManagedRequestTimeoutMs(timeoutMs?: number): number {
+  const configuredDefault = Number(process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS)
+  const value = typeof timeoutMs === 'number'
+    ? Math.round(timeoutMs)
+    : Number.isFinite(configuredDefault)
+      ? Math.round(configuredDefault)
+      : DEFAULT_REQUEST_TIMEOUT_MS
   return Math.max(5_000, Math.min(300_000, value))
 }
 
-function clampRetryCount(retryCount?: number): number {
-  const value = typeof retryCount === 'number' ? Math.round(retryCount) : DEFAULT_REQUEST_RETRY_COUNT
+export function resolveManagedRequestRetryCount(retryCount?: number): number {
+  const configuredDefault = Number(process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT)
+  const value = typeof retryCount === 'number'
+    ? Math.round(retryCount)
+    : Number.isFinite(configuredDefault)
+      ? Math.round(configuredDefault)
+      : DEFAULT_REQUEST_RETRY_COUNT
   return Math.max(0, Math.min(MAX_REQUEST_RETRY_COUNT, value))
 }
 

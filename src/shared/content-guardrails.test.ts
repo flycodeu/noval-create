@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectQualityGuardrailFindings, shouldForceRepair } from './content-guardrails'
+import { collectQualityGuardrailFindings, hasBlockingGuardrailFindings, shouldForceRepair } from './content-guardrails'
 
 describe('content guardrail repair threshold', () => {
   it('repairs a single high-confidence AI cliche instead of letting it pass silently', () => {
@@ -20,5 +20,55 @@ describe('content guardrail repair threshold', () => {
     const findings = collectQualityGuardrailFindings('走廊里的脚步声越来越近，他把登记表压在桌角。')
 
     expect(findings.some((finding) => finding.code === 'parallelism_overuse')).toBe(false)
+  })
+
+  it('does not treat a natural comparative dialogue phrase as formal parallelism', () => {
+    const findings = collectQualityGuardrailFindings('“越还手他越有话说。”')
+
+    expect(findings.some((finding) => finding.code === 'parallelism_overuse')).toBe(false)
+  })
+
+  it('keeps one soft-voice cliché as a warning instead of a hard AI-flavor blocker', () => {
+    const findings = collectQualityGuardrailFindings('方大炉低声说：“先把扳手放下。”', '历史正剧')
+    const softVoiceFinding = findings.find((finding) => finding.code === 'soft_voice_cliche')
+
+    expect(softVoiceFinding).toBeDefined()
+    expect(hasBlockingGuardrailFindings(findings)).toBe(false)
+  })
+
+  it('allows a quoted character correction while keeping narrative definitions flagged', () => {
+    const dialogueFindings = collectQualityGuardrailFindings('方大炉说：“不是你一个人扣，是全班。”', '历史正剧')
+    const narrativeFindings = collectQualityGuardrailFindings('这不是一次失败，而是命运给他的另一种证明。', '历史正剧')
+
+    expect(dialogueFindings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(false)
+    expect(narrativeFindings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(true)
+  })
+
+  it('does not mistake a concrete movement correction for a definition sentence', () => {
+    const findings = collectQualityGuardrailFindings('他不是往锅炉房方向走的，是一步一顿往车间外头去的。', '历史正剧')
+
+    expect(findings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(false)
+  })
+
+  it('does not treat tracked character names as descriptive repetition', () => {
+    const content = Array.from({ length: 20 }, (_, index) => `第${index + 1}次点名时，郭大桩都站在炉门旁，手里还攥着当班记录。`).join('\n')
+
+    const findings = collectQualityGuardrailFindings(content, undefined, {
+      knownTerms: ['郭大桩'],
+    })
+
+    const repetitionFinding = findings.find((finding) => finding.code === 'high_frequency_repetition')
+    expect(repetitionFinding?.excerpt || '').not.toContain('郭大')
+    expect(repetitionFinding?.excerpt || '').not.toContain('大桩')
+  })
+
+  it('keeps flagging repeated descriptive phrases when they are not tracked terms', () => {
+    const content = Array.from({ length: 20 }, () => '阴冷的墙面贴着他的后背，阴冷气息没有散去，他把记录纸压在膝上继续核对。').join('\n')
+
+    const findings = collectQualityGuardrailFindings(content, undefined, {
+      knownTerms: ['郭大桩'],
+    })
+
+    expect(findings.some((finding) => finding.code === 'high_frequency_repetition')).toBe(true)
   })
 })

@@ -2355,6 +2355,45 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
   const warnings: TokenAllocationWarning[] = []
   const decisions = new Map<string, ContextDecisionEntry>()
   const p0Parts = parts.filter((part) => part.priority === 0)
+  const criticalP1Floors: Record<string, number> = {
+    writingContractSummary: 260,
+    mapSummary: 220,
+    itemSummary: 220,
+    previousSummaries: 320,
+    dialogueVoiceLocks: 160,
+    scenePlanSummary: 220,
+    reviewRiskSummary: 220,
+  }
+  const buildFloorReserves = (availableBudget: number) => {
+    const floorParts = parts
+      .filter((item) => item.priority === 1)
+      .map((part) => ({
+        label: part.label,
+        demand: Math.min(criticalP1Floors[part.label] || 0, estimateTokens(part.content)),
+      }))
+      .filter((part) => part.demand > 0)
+    const reserves = new Map<string, number>()
+    let floorBudget = Math.min(
+      Math.max(availableBudget, 0),
+      floorParts.reduce((sum, part) => sum + part.demand, 0),
+    )
+    // Give every protected P1 section a share before filling any one section.
+    while (floorBudget > 0 && floorParts.some((part) => (reserves.get(part.label) || 0) < part.demand)) {
+      let progressed = false
+      for (const part of floorParts) {
+        const allocated = reserves.get(part.label) || 0
+        if (allocated >= part.demand || floorBudget <= 0) continue
+        reserves.set(part.label, allocated + 1)
+        floorBudget -= 1
+        progressed = true
+      }
+      if (!progressed) break
+    }
+    return {
+      reserves,
+      used: Array.from(reserves.values()).reduce((sum, value) => sum + value, 0),
+    }
+  }
 
   let usedTokens = 0
   for (const part of p0Parts) {
@@ -2375,8 +2414,13 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
 
   const remaining = totalBudget - usedTokens
   if (remaining <= 0) {
-    // P0 已经超出预算，需要截断
-    const perP0Budget = Math.floor(totalBudget / Math.max(p0Parts.length, 1))
+    // P0 已经超出预算，需要截断，但仍保留一小段可用的 P1 证据。
+    // 否则世界观摘要一旦过长，物品/场景计划会全部消失，导致生成失去
+    // 当前章节的可执行约束。
+    const floorAllocation = buildFloorReserves(Math.floor(totalBudget * 0.2))
+    const perP0Budget = Math.floor(
+      Math.max(0, totalBudget - floorAllocation.used) / Math.max(p0Parts.length, 1),
+    )
     usedTokens = 0
     for (const part of p0Parts) {
       const originalTokens = estimateTokens(part.content)
@@ -2398,9 +2442,28 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
       }
     }
     for (const part of parts.filter((part) => part.priority > 0)) {
-      result[part.label] = ''
       const originalTokens = estimateTokens(part.content)
-      if (originalTokens > 0) {
+      const reserve = floorAllocation.reserves.get(part.label) || 0
+      if (reserve > 0) {
+        result[part.label] = truncateToTokens(part.content, reserve)
+        const allocatedTokens = estimateTokens(result[part.label])
+        decisions.set(part.label, {
+          label: part.label,
+          title: resolveContextLabelTitle(part.label as ChapterContextLabel),
+          priority: part.priority,
+          originalTokens,
+          allocatedTokens,
+          status: allocatedTokens < originalTokens ? 'truncated' : 'kept',
+          reason: allocatedTokens < originalTokens ? 'budget_insufficient' : 'budget_fit',
+          sourceKind: resolveContextSourceKind(part.label),
+        })
+        if (allocatedTokens < originalTokens) {
+          warnings.push({ label: part.label, priority: part.priority, originalTokens, allocatedTokens, reason: 'truncated' })
+        }
+      } else {
+        result[part.label] = ''
+      }
+      if (originalTokens > 0 && reserve <= 0) {
         decisions.set(part.label, {
           label: part.label,
           title: resolveContextLabelTitle(part.label as ChapterContextLabel),
@@ -2418,32 +2481,22 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
       console.warn(`[context] 上下文预算不足(${totalBudget} tokens)，${warnings.length} 个部分被截断或丢弃:`,
         warnings.map(w => `${w.label}(P${w.priority}): ${w.reason === 'dropped' ? '完全丢弃' : `${w.originalTokens}→${w.allocatedTokens}`}`).join(', '))
     }
-    return { allocated: result, warnings, decisions: [...decisions.values()], totalUsed: usedTokens, totalBudget }
+    return {
+      allocated: result,
+      warnings,
+      decisions: [...decisions.values()],
+      totalUsed: usedTokens + Array.from(decisions.values())
+        .filter((entry) => entry.priority !== 0)
+        .reduce((sum, entry) => sum + entry.allocatedTokens, 0),
+      totalBudget,
+    }
   }
 
   let budget = remaining
-  // 关键 P1 上下文保底：审校/重写高度依赖前情摘要与对白声纹锁，预算紧张时至少保留压缩版，不允许整体丢弃
-  const criticalP1Floors: Record<string, number> = {
-    writingContractSummary: 260,
-    mapSummary: 220,
-    itemSummary: 220,
-    previousSummaries: 320,
-    dialogueVoiceLocks: 160,
-    scenePlanSummary: 220,
-    reviewRiskSummary: 220,
-  }
-  const floorReserves = new Map<string, number>()
-  for (const part of parts.filter((item) => item.priority === 1)) {
-    const floor = criticalP1Floors[part.label]
-    if (!floor) continue
-    const needed = estimateTokens(part.content)
-    if (needed <= 0) continue
-    const reserve = Math.min(floor, needed, Math.max(budget, 0))
-    if (reserve > 0) {
-      floorReserves.set(part.label, reserve)
-      budget -= reserve
-    }
-  }
+  // 关键 P1 上下文保底：审校/重写高度依赖前情摘要，预算紧张时至少保留压缩版，不允许整体丢弃
+  const floorAllocation = buildFloorReserves(Math.max(budget, 0))
+  const floorReserves = floorAllocation.reserves
+  budget -= floorAllocation.used
   for (const priority of [1, 2, 3] as const) {
     for (const part of parts.filter((item) => item.priority === priority)) {
       const needed = estimateTokens(part.content)
@@ -2590,7 +2643,7 @@ function createStagePriorityMap(
           styleTemplate: 3,
           writingContractSummary: 0,
           relationSummary: 1,
-          dialogueVoiceLocks: 1,
+          dialogueVoiceLocks: 0,
           recalledMemory: 2,
           scenePlanSummary: null,
           draftTextSummary: null,
@@ -2626,7 +2679,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 0,
           relationSummary: 1,
-          dialogueVoiceLocks: 1,
+          dialogueVoiceLocks: 0,
           recalledMemory: 2,
           scenePlanSummary: 1,
           draftTextSummary: null,
@@ -2662,7 +2715,7 @@ function createStagePriorityMap(
           styleTemplate: null,
           writingContractSummary: 0,
           relationSummary: 1,
-          dialogueVoiceLocks: 1,
+          dialogueVoiceLocks: 0,
           recalledMemory: 2,
           scenePlanSummary: 0,
           draftTextSummary: 0,
@@ -2699,7 +2752,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 0,
           relationSummary: 1,
-          dialogueVoiceLocks: 1,
+          dialogueVoiceLocks: 0,
           recalledMemory: 2,
           scenePlanSummary: 1,
           draftTextSummary: 1,
@@ -4576,6 +4629,13 @@ export function allocateChapterContext(
     : contextBudget
   const hardConstraintAllocation = allocateHardConstraintEntries(hardConstraintDrafts, hardConstraintBudget)
   const softContextBudget = Math.max(0, contextBudget - hardConstraintAllocation.used)
+  const contextPartLabels = new Set<string>(Object.keys(rawData.contextParts))
+  const hardCoveredSoftLabels = new Set<ChapterContextLabel>(
+    hardConstraintAllocation.entries
+      .map((entry) => entry.label)
+      .filter((label) => contextPartLabels.has(label))
+      .map((label) => label as ChapterContextLabel),
+  )
 
   const partDefinitions = (Object.keys(rawData.contextParts) as ChapterContextLabel[]).map((label) => ({
     label,
@@ -4583,7 +4643,7 @@ export function allocateChapterContext(
   }))
 
   const parts = partDefinitions.reduce<ContextPart[]>((result, part) => {
-    if (SOFT_CONTEXT_EXCLUDED_LABELS.has(part.label)) return result
+    if (SOFT_CONTEXT_EXCLUDED_LABELS.has(part.label) || hardCoveredSoftLabels.has(part.label)) return result
     const priority = priorityMap[part.label]
     if (typeof priority !== 'number' || !part.content) return result
     result.push({
@@ -4635,7 +4695,7 @@ export function allocateChapterContext(
       .map((warning) => warning.label),
   }
   const hardCoveredDecisions: ContextDecisionEntry[] = hardConstraintAllocation.entries
-    .filter((entry) => SOFT_CONTEXT_EXCLUDED_LABELS.has(entry.label as ChapterContextLabel))
+    .filter((entry) => hardCoveredSoftLabels.has(entry.label as ChapterContextLabel))
     .map((entry) => ({
       label: entry.label,
       title: entry.title,

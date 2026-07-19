@@ -28,6 +28,7 @@ describe('analyzeNarrativeControls', () => {
         humanStyleSampleLock: '',
       },
       sceneSnapshots: [{ segmentId: 1, segmentOrder: 1, segmentTitle: '场景一', pov: '林远' }],
+      characterNames: ['林远', '赵临', '守卫'],
       content: '林远贴着墙根往前挪。赵临心里已经认定他在撒谎。守卫心中甚至开始盘算要不要先下手。',
       chapterGoal: '继续追查',
       emotionTone: '紧张',
@@ -36,6 +37,42 @@ describe('analyzeNarrativeControls', () => {
     expect(result.pov.status).toBe('rewrite')
     expect(result.pov.directMindReadingHits.length).toBeGreaterThan(0)
     expect(result.pov.fixHint).toContain('动作')
+  })
+
+  it('allows fixed-POV protagonist interior knowledge while checking named others', () => {
+    const result = analyzeNarrativeControls({
+      themeVoice: {
+        writingContractTags: [],
+        theme: '',
+        themeChapterTest: '',
+        motifs: '',
+        emotionalCore: '',
+        pov: 'third_limited',
+        tense: 'past',
+        protagonistCount: 'single',
+        viewpointMode: 'fixed',
+        parallelTimelines: 'none',
+        openingStyle: 'hook',
+        flashbackPolicy: 'limited',
+        narratorDistance: '',
+        voiceKeywords: '',
+        styleRules: '',
+        dialogueRules: '',
+        descriptionRules: '',
+        forbiddenPhrases: '',
+        targetWorkSampleGuide: '',
+        humanStyleSampleLock: '',
+      },
+      sceneSnapshots: [{ segmentId: 1, segmentOrder: 1, segmentTitle: '场景一', pov: '周铁生' }],
+      characterNames: ['周铁生', '秦满仓'],
+      content: '周铁生把号牌翻过去。他不知道自己为什么惦记那块黑印，只觉得明天的工册股报到躲不过去。秦满仓心里已经认定他在装傻。',
+      chapterGoal: '承担事故后果',
+      emotionTone: '压抑',
+    })
+
+    expect(result.pov.directMindReadingHits).toHaveLength(1)
+    expect(result.pov.directMindReadingHits[0]).toContain('秦满仓心里')
+    expect(result.pov.status).toBe('warning')
   })
 
   it('flags all-dialogue chapters as a rewrite-level narrative ratio failure', () => {
