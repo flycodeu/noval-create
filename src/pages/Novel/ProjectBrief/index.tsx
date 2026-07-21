@@ -6,6 +6,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import type { ProjectPlatformMode } from '../../../shared/project-brief'
 import {
   buildProjectBriefPayload,
+  getPlatformDesignProfile,
   parseProjectBriefDocument,
   parseProjectBriefSnapshot,
 } from '../../../shared/project-brief'
@@ -48,8 +49,10 @@ interface ProjectBriefFormValues {
 }
 
 const PLATFORM_OPTIONS: Array<{ value: ProjectPlatformMode; label: string }> = [
+  { value: 'fanqie', label: '番茄小说' },
+  { value: 'feilu', label: '飞卢小说' },
+  { value: 'web_serial', label: '通用网文连载' },
   { value: 'general', label: '通用长篇' },
-  { value: 'web_serial', label: '网文连载' },
   { value: 'publishing', label: '出版小说' },
 ]
 
@@ -166,6 +169,9 @@ export default function ProjectBriefPage({ novelId }: Props) {
 
   const watchedValues = (Form.useWatch([], form) as Partial<ProjectBriefFormValues> | undefined) || {}
   const currentValues = buildCurrentFormValues(snapshot, watchedValues)
+  const selectedPlatform = currentValues.platformMode
+    ? getPlatformDesignProfile(currentValues.platformMode)
+    : null
   const coreFilledCount = [
     currentValues.platformMode,
     currentValues.targetAudience,
@@ -346,6 +352,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
           items={[
             { label: '书名', value: currentNovel?.title || '未命名小说' },
             { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '目标平台', value: selectedPlatform?.label || '未选择' },
             { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
             { label: '完成度', value: `${coreFilledCount}/6` },
           ]}
@@ -421,10 +428,11 @@ export default function ProjectBriefPage({ novelId }: Props) {
                       includeSubplots: false,
                       extraSections: [
                         { label: '结构资产', value: `线程 ${stats.threadCount} / 大纲 ${stats.outlineCount} / 时间轴 ${stats.timelineCount} / 章节 ${stats.chapterCount}` },
+                        { label: '目标平台策略', value: selectedPlatform ? `${selectedPlatform.label}：${selectedPlatform.positioning}\n开局：${selectedPlatform.openingFocus}\n节奏：${selectedPlatform.rhythmFocus}` : '' },
                       ],
                     }),
                     fields: [
-                      { key: 'platformMode', label: '产品形态', value: currentValues.platformMode, hint: '只用 general、web_serial、publishing 之一。' },
+                      { key: 'platformMode', label: '目标平台', value: currentValues.platformMode, hint: '可选番茄、飞卢或通用网文/出版；平台会约束后续开局、节奏和质量门。' },
                       { key: 'targetAudience', label: '目标赛道', value: currentValues.targetAudience, hint: '写清题材、受众和市场位置。' },
                       { key: 'targetReader', label: '目标读者', value: currentValues.targetReader, hint: '写读者偏好、节奏预期和情绪需求。' },
                       { key: 'readerPromise', label: '读者承诺', value: currentValues.readerPromise, hint: '说明读者会稳定收到什么体验回报。' },
@@ -434,6 +442,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
                     requirements: [
                       '不要代替故事设计页面输出完整剧情。',
                       '不要写宣传口号、空泛褒义词和平台套话。',
+                      '必须服从当前目标平台策略，不要把番茄的情绪回报和飞卢的即时反馈写成同一套模板。',
                     ],
                   })}
                   onResult={(raw) => {
@@ -451,10 +460,28 @@ export default function ProjectBriefPage({ novelId }: Props) {
               </Space>
               <div className="guided-step__field-grid">
                 <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="platformMode" label="产品形态" rules={[{ required: true, message: '请选择产品形态' }]}>
-                    <Select options={PLATFORM_OPTIONS} placeholder="这本书主要面向哪种交付方式" />
+                  <Form.Item name="platformMode" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
+                    <Select options={PLATFORM_OPTIONS} placeholder="选择平台，后续设计会套用对应策略" />
                   </Form.Item>
                 </div>
+                {selectedPlatform ? (
+                  <div className="guided-step__field-card guided-step__field-card--full">
+                    <div className="workspace-stack-10">
+                      <Space wrap>
+                        <strong className="workspace-card-section-title">{selectedPlatform.label}·平台设计约束</strong>
+                        <Tag color="gold">将同步到后续生成与质量门</Tag>
+                      </Space>
+                      <div className="workspace-muted-text">{selectedPlatform.positioning}</div>
+                      <div className="workspace-grid-auto-220">
+                        <div><strong>开局</strong><div className="workspace-muted-text">{selectedPlatform.openingFocus}</div></div>
+                        <div><strong>节奏</strong><div className="workspace-muted-text">{selectedPlatform.rhythmFocus}</div></div>
+                        <div><strong>包装</strong><div className="workspace-muted-text">{selectedPlatform.packagingFocus}</div></div>
+                      </div>
+                      <div className="workspace-muted-text">质量门：{selectedPlatform.qualityFocus.join('；')}</div>
+                      <div className="workspace-muted-text">主要风险：{selectedPlatform.riskFocus.join('；')}</div>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="guided-step__field-card guided-step__field-card--compact">
                   <Form.Item name="targetAudience" label="目标赛道" rules={[{ required: true, message: '请写清目标赛道' }]}>
                     <Input placeholder="例如：女频悬疑成长 / 男频末世群像" />

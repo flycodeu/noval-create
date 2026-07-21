@@ -4,6 +4,7 @@ export interface NovelBlurbDocument {
   platformBlurbs: {
     qidian?: string
     tomato?: string
+    feilu?: string
     publishing?: string
   }
   volumeNamingStyle: string
@@ -42,6 +43,7 @@ export function parseNovelBlurbDocument(raw?: string | null): NovelBlurbDocument
       platformBlurbs: {
         qidian: asText(platformBlurbs.qidian),
         tomato: asText(platformBlurbs.tomato),
+        feilu: asText(platformBlurbs.feilu),
         publishing: asText(platformBlurbs.publishing),
       },
       volumeNamingStyle: asText(parsed.volume_naming_style ?? parsed.volumeNamingStyle),
@@ -59,6 +61,7 @@ export function buildNovelBlurbPayload(document: Partial<NovelBlurbDocument>, ex
     platformBlurbs: {
       qidian: document.platformBlurbs?.qidian ?? current.platformBlurbs.qidian,
       tomato: document.platformBlurbs?.tomato ?? current.platformBlurbs.tomato,
+      feilu: document.platformBlurbs?.feilu ?? current.platformBlurbs.feilu,
       publishing: document.platformBlurbs?.publishing ?? current.platformBlurbs.publishing,
     },
     volumeNamingStyle: document.volumeNamingStyle ?? current.volumeNamingStyle,
@@ -70,6 +73,7 @@ export function buildNovelBlurbPayload(document: Partial<NovelBlurbDocument>, ex
     platform_blurbs: {
       qidian: next.platformBlurbs.qidian?.trim() || undefined,
       tomato: next.platformBlurbs.tomato?.trim() || undefined,
+      feilu: next.platformBlurbs.feilu?.trim() || undefined,
       publishing: next.platformBlurbs.publishing?.trim() || undefined,
     },
     volume_naming_style: next.volumeNamingStyle.trim(),

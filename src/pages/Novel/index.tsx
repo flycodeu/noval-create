@@ -1107,6 +1107,11 @@ export default function NovelRouter() {
               onClick: () => void handleCopyPlatformFormat('all', 'fanqie', { batchSize: 20 }),
             },
             {
+              key: 'copy-feilu-all',
+              label: '复制全书·飞卢格式',
+              onClick: () => void handleCopyPlatformFormat('all', 'feilu'),
+            },
+            {
               key: 'copy-qidian-all',
               label: '复制全书·起点格式',
               onClick: () => void handleCopyPlatformFormat('all', 'qidian'),

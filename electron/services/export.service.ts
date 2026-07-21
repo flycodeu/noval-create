@@ -10,7 +10,7 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import { collectQualityGuardrailFindings } from '../../src/shared/content-guardrails'
 
 type ExportFormat = 'txt' | 'md' | 'json' | 'docx' | 'epub'
-type PlatformFormat = 'fanqie' | 'qidian' | 'jjwxc' | 'generic'
+type PlatformFormat = 'fanqie' | 'feilu' | 'qidian' | 'jjwxc' | 'generic'
 type PlatformFormatScope = 'currentChapter' | 'selectedChapters' | 'all'
 type ChapterRecord = typeof chapters.$inferSelect
 type NovelRecord = typeof novels.$inferSelect
@@ -91,7 +91,7 @@ function countTextWords(text: string): number {
 }
 
 function normalizePlatform(value: unknown): PlatformFormat {
-  return value === 'fanqie' || value === 'qidian' || value === 'jjwxc' || value === 'generic'
+  return value === 'fanqie' || value === 'feilu' || value === 'qidian' || value === 'jjwxc' || value === 'generic'
     ? value
     : 'generic'
 }
@@ -759,6 +759,7 @@ export function formatNovelForPlatform(novelId: number, rawOptions: PlatformForm
       .slice(0, 5)
       .map((finding) => `${finding.message}${finding.excerpt ? `：${finding.excerpt}` : ''}`),
     platform === 'fanqie' ? '番茄格式已统一为“第N章 标题 + 正文空行”。敏感词库仍需发布前人工复核。' : '',
+    platform === 'feilu' ? '飞卢格式已统一为“第 N 章 标题 + 正文空行”。新书阶段仍需人工确认更新节奏与平台规则。' : '',
   ].filter(Boolean)
 
   return {

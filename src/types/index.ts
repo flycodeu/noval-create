@@ -4688,7 +4688,7 @@ export interface AIScoreResult {
   language_drift_metrics?: LanguageDriftMetrics
 }
 
-export type PlatformFormat = 'fanqie' | 'qidian' | 'jjwxc' | 'generic'
+export type PlatformFormat = 'fanqie' | 'feilu' | 'qidian' | 'jjwxc' | 'generic'
 export type PlatformFormatScope = 'currentChapter' | 'selectedChapters' | 'all'
 
 export interface PlatformFormatOptions {

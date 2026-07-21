@@ -76,5 +76,9 @@ describe('export.service platform formatting', () => {
     expect(result.sensitiveWordHits.some((hit) => hit.word === '旧仓库')).toBe(true)
     expect(result.batches).toHaveLength(2)
     expect(result.batches[0]).toMatchObject({ chapterCount: 2, chapterStart: 1, chapterEnd: 2 })
+
+    const feilu = formatNovelForPlatform(1, { platform: 'feilu', scope: 'currentChapter', chapterId: 101 })
+    expect(feilu.content).toContain('第 1 章 旧仓')
+    expect(feilu.warnings).toContain('飞卢格式已统一为“第 N 章 标题 + 正文空行”。新书阶段仍需人工确认更新节奏与平台规则。')
   })
 })

@@ -107,6 +107,9 @@ describe('story-prompts narrative control guidance', () => {
     expect(prompt).toContain('title_alignment_risks')
     expect(prompt).toContain('step_memory_risks')
     expect(prompt).toContain('hallucination_risks')
+    expect(prompt).toContain('紧凑度检查')
+    expect(prompt).toContain('铺垫检查')
+    expect(prompt).toContain('人物刻画检查')
   })
 
   it('injects genre-core execution chains for zhiguai and historical drama', () => {

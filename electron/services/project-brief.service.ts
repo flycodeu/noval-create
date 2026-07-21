@@ -5,7 +5,12 @@ import type {
   ProjectBriefGenerationStepResult,
 } from '../../src/shared/project-brief-generation'
 import type { ProjectBriefDocument, ProjectPlatformMode } from '../../src/shared/project-brief'
-import { parseProjectBriefDocument } from '../../src/shared/project-brief'
+import {
+  buildProjectBriefSummary,
+  getPlatformDesignProfile,
+  isProjectPlatformMode,
+  parseProjectBriefDocument,
+} from '../../src/shared/project-brief'
 import {
   buildContextAlignmentRules,
   buildHumanLanguageRules,
@@ -51,8 +56,7 @@ function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string
 
 function normalizePlatformMode(value: unknown): ProjectPlatformMode | '' {
   const text = typeof value === 'string' ? value.trim() : ''
-  if (text === 'general' || text === 'web_serial' || text === 'publishing') return text
-  return ''
+  return isProjectPlatformMode(text) ? text : ''
 }
 
 function normalizeBlockText(value: unknown): string {
@@ -69,18 +73,7 @@ function normalizeBlockText(value: unknown): string {
 }
 
 function buildCurrentBriefSummary(document: ProjectBriefDocument): string {
-  const lines = [
-    document.platformMode ? `产品模式：${document.platformMode}` : '',
-    document.targetAudience ? `目标赛道：${document.targetAudience}` : '',
-    document.targetReader ? `目标读者：${document.targetReader}` : '',
-    document.readerPromise ? `读者承诺：${document.readerPromise}` : '',
-    document.sellingPoints ? `卖点：${document.sellingPoints}` : '',
-    document.compTitles ? `参考作品：${document.compTitles}` : '',
-    document.tabooRules ? `禁区：${document.tabooRules}` : '',
-    document.deliveryRhythm ? `交付节奏：${document.deliveryRhythm}` : '',
-  ].filter(Boolean)
-
-  return lines.length > 0 ? lines.join('\n') : '当前还没有可用的项目立项草稿。'
+  return buildProjectBriefSummary(document) || '当前还没有可用的项目立项草稿。'
 }
 
 function buildProjectBriefPrompt(
@@ -100,6 +93,16 @@ function buildProjectBriefPrompt(
       profile.themeVoiceSummary ? `主题与文风：${profile.themeVoiceSummary}` : '',
     ]),
     section('当前立项草稿', buildCurrentBriefSummary(current)),
+    current.platformMode
+      ? sectionLines('当前平台设计约束', [
+        `平台：${getPlatformDesignProfile(current.platformMode).label}`,
+        `定位：${getPlatformDesignProfile(current.platformMode).positioning}`,
+        `开局：${getPlatformDesignProfile(current.platformMode).openingFocus}`,
+        `节奏：${getPlatformDesignProfile(current.platformMode).rhythmFocus}`,
+        `质量门：${getPlatformDesignProfile(current.platformMode).qualityFocus.join('；')}`,
+        `风险：${getPlatformDesignProfile(current.platformMode).riskFocus.join('；')}`,
+      ])
+      : '',
     requirements ? section('额外要求', requirements) : '',
     section('本轮目标', [
       mode === 'fill_blanks'
@@ -109,7 +112,7 @@ function buildProjectBriefPrompt(
       '不要把主线剧情、章节推进和世界规则误写进 Brief。',
     ].join('\n')),
     section('字段要求', [
-      '- platformMode 只能是 general / web_serial / publishing 之一。',
+      '- platformMode 只能是 general / web_serial / fanqie / feilu / publishing 之一；选择番茄或飞卢后，后续设计必须服从对应平台策略。',
       '- targetAudience 写清赛道和内容形态，不要只写大类题材。',
       '- targetReader 写清阅读偏好、节奏预期、情绪需求。',
       '- readerPromise 写读者稳定能收到的体验回报。',
@@ -136,7 +139,7 @@ function buildProjectBriefPrompt(
       '优先给判断标准、读者感受和创作边界，不要堆抽象名词。',
     ])),
     '只输出 JSON，不要解释，不要 Markdown，不要代码块。',
-    '{"platformMode":"general","targetAudience":"","targetReader":"","readerPromise":"","sellingPoints":"每行一条","compTitles":"每行一条","tabooRules":"每行一条","deliveryRhythm":"每行一条"}',
+    '{"platformMode":"fanqie","targetAudience":"","targetReader":"","readerPromise":"","sellingPoints":"每行一条","compTitles":"每行一条","tabooRules":"每行一条","deliveryRhythm":"每行一条"}',
   ])
 }
 
@@ -185,7 +188,7 @@ export async function generateProjectBrief(
 
     const document = parseGeneratedProjectBrief(result)
     const warnings = [
-      document.platformMode ? '' : '未生成明确的平台模式，请保存前确认是通用、网文长篇还是出版形态。',
+      document.platformMode ? '' : '未生成明确的目标平台，请保存前确认是番茄、飞卢、通用网文还是出版形态。',
       document.targetAudience ? '' : '目标赛道仍为空，后续角色和文风会缺少产品定位。',
       document.readerPromise ? '' : '读者承诺仍为空，建议补一条稳定体验回报。',
       document.sellingPoints ? '' : '卖点列表仍为空，建议至少补 3 条可执行卖点。',

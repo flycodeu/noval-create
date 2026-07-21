@@ -234,7 +234,6 @@ export default function Overview({ novelId }: Props) {
     [authorWorkflow, stats],
   )
   const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
-  const nextFocus = authorWorkflow.primaryTask.title
   const keyGapCount = GUIDED_STEP_ORDER.length - workflowStepReadyCount
   const hasContextLag = stats.staleChapterCount > 0 || stats.staleCheckpointCount > 0 || stats.staleAssetCount > 0
   const writingStageValue = displayState.isZeroState
@@ -452,8 +451,6 @@ export default function Overview({ novelId }: Props) {
             { label: '题材', value: currentNovel?.genreName || '未设置' },
             { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
             { label: '当前模式', value: getAuthorWorkModeLabel(selectedAuthorMode) },
-            { label: '当前主任务', value: nextFocus },
-            { label: '正文阶段', value: displayState.isZeroState ? '首章前' : '正文推进中' },
           ]}
         />
       )}
@@ -521,9 +518,6 @@ export default function Overview({ novelId }: Props) {
       <WorkspacePanel
         className="novel-overview-page__focus-panel"
         title={displayState.isZeroState ? '首章启动' : '今天最该做什么'}
-        description={displayState.isZeroState
-          ? '当前处于 0 章 / 0 字阶段，先给启动动作，再给统计与管理信息。'
-          : '总览页只保留当前最值钱的下一步；详细模式切换仍放在创作向导。'}
         extra={<div className="novel-pill">{getAuthorWorkModeLabel(selectedAuthorMode)}</div>}
       >
         <div className="workspace-stack-16">
@@ -550,7 +544,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspacePanel
           className="novel-overview-page__alternate-panel"
           title="首章启动路径"
-          description="先给动作，再给统计；新项目优先在这里落成第一章入口。"
         >
           <div className="guided-step__action-grid">
             {OVERVIEW_ZERO_STATE_ACTIONS.map((task) => (
@@ -570,7 +563,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspacePanel
           className="novel-overview-page__alternate-panel"
           title="备选路径"
-          description="如果你不打算执行当前主任务，可以从这两个次优动作继续推进。"
         >
           <div className="guided-step__action-grid">
             {authorWorkflow.alternateTasks.slice(0, 2).map((task) => (
@@ -592,7 +584,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspacePanel
           className="novel-overview-page__signal-panel"
           title="当前阻塞项"
-          description="这里回答为什么现在不建议继续下一步，并给出直接处理入口。"
         >
           <div className="novel-issue-list">
             {authorWorkflow.blockers.slice(0, 2).map((blocker) => (
@@ -614,7 +605,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspacePanel
           className="novel-overview-page__signal-panel"
           title="风险和影响"
-          description="这里回答最近的变更正在波及什么，避免作者靠记忆自己回查。"
         >
           <div className="novel-note-list">
             {authorWorkflow.impactNotices.slice(0, 2).map((notice) => (
@@ -625,7 +615,7 @@ export default function Overview({ novelId }: Props) {
       ) : null}
 
       {displayState.showProgressPanel ? (
-        <WorkspacePanel className="novel-overview-page__progress-panel" title="推进热度" description="进入正文后再看字数与章节进度，避免起步阶段被弱信息占住视线。">
+        <WorkspacePanel className="novel-overview-page__progress-panel" title="推进热度">
           <div className="workspace-stack-16">
             <div>
               <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
@@ -649,7 +639,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspacePanel
           className="novel-overview-page__health-panel"
           title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
-          description="健康信息降为次级区，只在进入正文后帮助你判断能否继续扩批。"
         >
           <div className="workspace-grid-auto-220">
             <div className="guided-step__fact-card">
@@ -674,7 +663,6 @@ export default function Overview({ novelId }: Props) {
       <WorkspacePanel
         className="novel-overview-page__basic-panel"
         title="基础信息"
-        description="基础信息已降到次级区；需要时再集中编辑，而不是一进来先管理表单。"
         extra={(
           <Space wrap>
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -749,7 +737,6 @@ export default function Overview({ novelId }: Props) {
       <WorkspacePanel
         className="novel-overview-page__packaging-panel"
         title="包装信息"
-        description="生成后可单独保存，不受基础信息必填校验影响。"
         extra={(
           <Space wrap>
             <Button
@@ -764,6 +751,7 @@ export default function Overview({ novelId }: Props) {
                       role: 'user',
                       content: [
                         '你是中文网络小说包装编辑，只输出 JSON，不要解释，不要 Markdown。',
+                        '番茄版简介优先写清开局处境、第一重冲突和持续追读问题；飞卢版简介优先写清开局冲突、能力/身份差、即时回报和连载爽点；不要用空泛的“精彩纷呈”“热血沸腾”填充。',
                         `书名：${form.getFieldValue('title') || currentNovel?.title || ''}`,
                         `一句话简介：${form.getFieldValue('synopsis') || currentNovel?.synopsis || ''}`,
                         `扩展背景：${form.getFieldValue('expandedBackground') || currentNovel?.expandedBackground || ''}`,
@@ -773,9 +761,9 @@ export default function Overview({ novelId }: Props) {
                         '返回：',
                         '- titleCandidates: 5 个可上架书名候选',
                         '- oneLineHook: 1 句导语',
-                        '- platformBlurbs.qidian / tomato / publishing: 3 种平台简介',
+                        '- platformBlurbs.qidian / tomato / feilu / publishing: 4 种平台简介',
                         '- volumeNamingStyle: 卷名风格规范',
-                        '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","publishing":""},"volumeNamingStyle":""}',
+                        '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","feilu":"","publishing":""},"volumeNamingStyle":""}',
                       ].filter(Boolean).join('\n'),
                     }],
                   })
@@ -790,6 +778,7 @@ export default function Overview({ novelId }: Props) {
                     platformBlurbs: {
                       qidian: typeof parsed.platformBlurbs?.qidian === 'string' ? parsed.platformBlurbs.qidian : current.platformBlurbs.qidian,
                       tomato: typeof parsed.platformBlurbs?.tomato === 'string' ? parsed.platformBlurbs.tomato : current.platformBlurbs.tomato,
+                      feilu: typeof parsed.platformBlurbs?.feilu === 'string' ? parsed.platformBlurbs.feilu : current.platformBlurbs.feilu,
                       publishing: typeof parsed.platformBlurbs?.publishing === 'string' ? parsed.platformBlurbs.publishing : current.platformBlurbs.publishing,
                     },
                     volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
@@ -859,6 +848,18 @@ export default function Overview({ novelId }: Props) {
               }))}
             />
           </div>
+          <div className="guided-step__field-card">
+            <strong className="workspace-card-section-title">飞卢版简介</strong>
+            <Input.TextArea
+              rows={8}
+              value={packagingDraft.platformBlurbs.feilu}
+              onChange={(event) => setPackagingDraft((current) => ({
+                ...current,
+                platformBlurbs: { ...current.platformBlurbs, feilu: event.target.value },
+              }))}
+              placeholder="突出开局冲突、即时回报和连续更新承诺。"
+            />
+          </div>
           <div className="guided-step__field-card guided-step__field-card--full">
             <strong className="workspace-card-section-title">出版版简介</strong>
             <Input.TextArea
@@ -882,7 +883,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel className="novel-overview-page__summary-panel" title="创作流程概览" description="按阶段查看当前缺口，点击进入该阶段第一个未完成步骤。">
+      <WorkspacePanel className="novel-overview-page__summary-panel" title="创作流程概览">
         <div className="novel-overview-page__summary-stack">
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">

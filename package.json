@@ -60,6 +60,7 @@
     "eval:novel:flow": "electron scripts/run-novel-flow-audit.cjs",
     "eval:humanization": "node scripts/run-humanization-eval.cjs",
     "eval:humanization:repair": "node scripts/run-humanization-repair-eval.cjs",
+    "eval:platform-samples": "node todo/platform-evaluation-2026/scripts/evaluate-samples.cjs",
     "eval:novel:verify": "electron scripts/verify-novel-ai-eval.cjs",
     "backfill:huaishang": "electron scripts/backfill-huaishang-xinjing.cjs",
     "sample:create-shuangwen": "electron scripts/create-shuangwen-sample.cjs",

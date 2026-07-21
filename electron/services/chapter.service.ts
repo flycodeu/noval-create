@@ -1310,8 +1310,11 @@ function assertContractDrivenWriterInputs(
 }
 
 function buildStoryCore(profile: Awaited<ReturnType<typeof buildStoryProfile>>, fallback?: string): string {
-  if (fallback?.trim()) return fallback
+  if (fallback?.trim()) {
+    return [profile.projectBriefSummary, fallback].filter(Boolean).join('\n\n')
+  }
   return [
+    profile.projectBriefSummary,
     profile.premiseSummary,
     profile.storyDesignSummary,
     profile.endgameDesignSummary,
