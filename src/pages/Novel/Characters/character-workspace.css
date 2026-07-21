@@ -780,6 +780,37 @@
   font: 700 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
+.character-agent-workflow__updates {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.character-agent-workflow__updates > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.35fr) minmax(120px, 0.65fr);
+  gap: 2px 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #c98d43;
+  border-radius: 10px;
+  background: rgba(250, 239, 216, 0.72);
+}
+
+.character-agent-workflow__updates strong {
+  color: var(--character-copy-strong);
+  font-size: 12px;
+}
+
+.character-agent-workflow__updates span,
+.character-agent-workflow__updates small {
+  color: var(--character-copy);
+  font-size: 11px;
+}
+
+.character-agent-workflow__updates small {
+  grid-column: 1 / -1;
+}
+
 .character-agent-workflow__review-copy {
   display: grid;
   gap: 4px;
@@ -1071,7 +1102,8 @@
 [data-theme="dark"] .character-agent-workflow__slot,
 [data-theme="dark"] .character-agent-workflow__score-grid > div,
 [data-theme="dark"] .character-agent-workflow__review-copy,
-[data-theme="dark"] .character-agent-workflow__checks > div {
+[data-theme="dark"] .character-agent-workflow__checks > div,
+[data-theme="dark"] .character-agent-workflow__updates > div {
   border-color: rgba(210, 190, 156, 0.14);
   background: rgba(31, 38, 52, 0.78);
 }

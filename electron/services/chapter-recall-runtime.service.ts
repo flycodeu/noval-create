@@ -7,6 +7,7 @@ import type {
 } from '../../src/types'
 import { getDb } from '../database/db'
 import { chapterRecallRuntimeSnapshots, chapters, tasks } from '../database/schema'
+import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import {
   allocateChapterContext,
   collectChapterContextRawData,
@@ -202,7 +203,10 @@ async function buildBackfilledRecallRuntimeRecord(chapterId: number): Promise<Ch
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const complexity = classifyBackfillComplexity(rawContext)
-  const budget = resolveDraftBudget(complexity, chapter.targetWords || 3000, rawContext.novel.targetWords || 0)
+  const chapterReferenceWords = chapter.targetWords > 0
+    ? chapter.targetWords
+    : getRecommendedChapterWordsForOperatingMode({ targetWords: rawContext.novel.targetWords })
+  const budget = resolveDraftBudget(complexity, chapterReferenceWords, rawContext.novel.targetWords || 0)
 
   try {
     const context = allocateChapterContext(rawContext, {

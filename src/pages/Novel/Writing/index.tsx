@@ -2339,6 +2339,25 @@ export default function Writing({ novelId }: Props) {
           collapsible
         >
           <div className="novel-writing-shell__insight-stack novel-writing-shell__insight-stack--nested">
+            {chapterContextPreview?.contractReady === false ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="当前章节还不能启动合同驱动写作"
+                description={(
+                  <div className="writing-layout-stack writing-layout-stack--xs">
+                    <div>{(chapterContextPreview.contractBlockers || ['请先补齐章节合同和场景合同。']).join('；')}</div>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => currentChapter && navigate(buildWorkspaceRoute(novelId, `contracts?chapterId=${currentChapter.id}`))}
+                    >
+                      去补齐章节合同
+                    </Button>
+                  </div>
+                )}
+              />
+            ) : null}
             <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
               <ConstraintInjectionCard
                 preview={chapterContextPreview}
@@ -2714,7 +2733,7 @@ export default function Writing({ novelId }: Props) {
         items: [
           currentChapter?.summary ? `摘要：${currentChapter.summary}` : '',
           currentChapter?.outline ? `大纲：${currentChapter.outline}` : '',
-          currentChapter?.targetWords ? `目标字数：${currentChapter.targetWords} 字` : '',
+          currentChapter?.targetWords ? `篇幅参考：${currentChapter.targetWords} 字（弹性）` : '',
           currentChapter?.nextChapterSeed ? `下一章接力：${currentChapter.nextChapterSeed}` : '',
         ].filter(Boolean),
         tone: 'soft',

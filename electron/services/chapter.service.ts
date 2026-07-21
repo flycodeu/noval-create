@@ -10,7 +10,7 @@ import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { assessHistoricalGrounding } from '../../src/shared/genre-system'
 import { countUnresolvedTypedRefs, hasTypedRefOverlay } from '../../src/shared/typed-ref'
-import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
+import { getOperatingModeRuntimePolicy, getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
@@ -67,6 +67,7 @@ import {
   markChapterContextCurrent,
   markNovelContextChanged,
   markSubsequentChaptersStale,
+  getChapterContractBlockers,
   runChapterPublishCheck,
   validateChapterContractsForGeneration,
 } from './context-impact.service'
@@ -222,6 +223,13 @@ type ReversalSupportState = 'supported' | 'weak' | 'forced'
 type ChapterPacingMarker = 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
 type RewardState = 'none' | 'partial' | 'major'
 type ChapterFunctionTag = 'setup' | 'progression' | 'reversal' | 'payoff' | 'breather' | 'climax' | 'exposition' | 'closure'
+
+function resolveChapterReferenceWords(chapterWords?: number | null, novelWords?: number | null): number {
+  const explicit = typeof chapterWords === 'number' && Number.isFinite(chapterWords) && chapterWords > 0
+    ? Math.round(chapterWords)
+    : 0
+  return explicit || getRecommendedChapterWordsForOperatingMode({ targetWords: novelWords })
+}
 
 interface ChapterReviewNotes {
   summary: string
@@ -1267,7 +1275,15 @@ function assertChapterPipelineActive(taskId: number) {
   }
 }
 
-function buildChapterContractVersion(chapterId: number): string {
+function getChapterContractPreviewGate(chapterId: number): {
+  ready: boolean
+  blockers: string[]
+} {
+  const blockers = getChapterContractBlockers(chapterId)
+  return { ready: blockers.length === 0, blockers }
+}
+
+function buildChapterContractVersion(chapterId: number, options: { allowMissing?: boolean } = {}): string {
   const db = getDb()
   const chapterContract = db.select().from(chapterContracts).where(eq(chapterContracts.chapterId, chapterId)).all()[0] || null
   const sceneRows = db.select().from(sceneContracts)
@@ -1276,6 +1292,7 @@ function buildChapterContractVersion(chapterId: number): string {
     .all()
 
   if (!chapterContract) {
+    if (options.allowMissing) return `missing:chapter:${chapterId}`
     throwUserFacingError('chapter.contractRequiredForPipeline')
   }
 
@@ -2931,10 +2948,6 @@ function applyReadingExperienceToReviewNotes(
   }
 }
 
-const CHAPTER_WORD_FLOOR_RATIO = 0.8
-const CHAPTER_WORD_CEILING_RATIO = 1.5
-const CHAPTER_WORD_HARD_CEILING_RATIO = 1.8
-
 function countNarrativeWords(text: string): number {
   const source = String(text || '')
   return (source.match(/[一-鿿]/g) || []).length + (source.match(/\b[a-zA-Z]+\b/g) || []).length
@@ -2989,10 +3002,11 @@ function buildTitleMismatchRisk(detectedTitle: string, chapterTitle: string, cha
 }
 
 /**
- * 字数带宽控制：低于 0.8x 要求补写，高于 1.5x 要求压缩（删低信息密度段落而不是删剧情），
- * 高于 1.8x 升级为必须整改项。
+ * 字数只做异常观察，不把章节目标当作硬性配额。
+ * 章节可以因场景数量、冲突强度和收束位置自然变长或变短；只有极端偏离参考值时，
+ * 才给编辑一个低优先级提示，不能自动补写、压缩或把章节判为重写失败。
  */
-function applyWordBudgetToReviewNotes(
+function applyWordShapeObservation(
   reviewNotes: ChapterReviewNotes,
   content: string,
   targetWords: number,
@@ -3001,33 +3015,16 @@ function applyWordBudgetToReviewNotes(
   if (target < 300) return reviewNotes
   const words = countNarrativeWords(content)
   if (words === 0) return reviewNotes
-  const floor = Math.round(target * CHAPTER_WORD_FLOOR_RATIO)
-  const ceiling = Math.round(target * CHAPTER_WORD_CEILING_RATIO)
-  const hardCeiling = Math.round(target * CHAPTER_WORD_HARD_CEILING_RATIO)
-
-  if (words >= floor && words <= ceiling) return reviewNotes
-
-  if (words < floor) {
-    const directive = `正文 ${words} 字低于目标带宽下限 ${floor} 字（目标 ${target}），需要通过加深现场阻力、对白交锋和后果落点补足密度，不允许注水。`
-    return {
-      ...reviewNotes,
-      language_risks: dedupeTextList([...reviewNotes.language_risks, directive]),
-      revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [directive]),
-      severity: mergeSeverity(reviewNotes.severity, 'medium'),
-    }
-  }
-
-  const overHard = words > hardCeiling
-  const directive = `正文 ${words} 字超出目标带宽上限 ${ceiling} 字（目标 ${target}），必须压缩：优先删除微动作细节堆叠、重复感官描写和无信息增量段落，保留全部事件、冲突结果与伏笔，压到 ${floor}-${ceiling} 字。`
+  const lowerObservation = Math.round(target * 0.45)
+  const upperObservation = Math.round(target * 2.2)
+  if (words >= lowerObservation && words <= upperObservation) return reviewNotes
+  const direction = words < lowerObservation ? '偏短' : '偏长'
+  const directive = `篇幅观察：本章约 ${words} 字，较参考值 ${target} 字${direction}。仅检查场景是否完整、冲突是否自然收束；不要为了达到参考值强行补写或删戏。`
   return {
     ...reviewNotes,
-    critical_fixes: overHard
-      ? dedupeTextList([directive, ...reviewNotes.critical_fixes])
-      : reviewNotes.critical_fixes,
     language_risks: dedupeTextList([...reviewNotes.language_risks, directive]),
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [directive]),
-    severity: mergeSeverity(reviewNotes.severity, overHard ? 'high' : 'medium'),
-    rewrite_required: reviewNotes.rewrite_required || overHard,
+    severity: mergeSeverity(reviewNotes.severity, 'low'),
   }
 }
 
@@ -3380,7 +3377,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           hardConstraintContext: input.context.hardConstraintContext,
           dialogueVoiceLocks: input.context.dialogueVoiceLocks,
           emotionTone: input.chapter.emotionTone || '平稳',
-          targetWords: input.chapter.targetWords || 3000,
+          targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel.targetWords),
           storyCore: input.storyCore,
           writingContractSummary: input.context.writingContractSummary,
           relationSummary: input.context.relationSummary,
@@ -3474,7 +3471,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               hardConstraintContext: input.context.hardConstraintContext,
               dialogueVoiceLocks: input.context.dialogueVoiceLocks,
               emotionTone: input.chapter.emotionTone || '平稳',
-              targetWords: input.chapter.targetWords || 3000,
+              targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel.targetWords),
               storyCore: input.storyCore,
               writingContractSummary: input.context.writingContractSummary,
               relationSummary: input.context.relationSummary,
@@ -4486,7 +4483,7 @@ function allocateStageContextForPipeline(
       totalBudget: totalBudget || resolveContextBudgetForStage(
         promptProfile,
         complexity,
-        chapter.targetWords || 3000,
+        resolveChapterReferenceWords(chapter.targetWords, rawContext.novel.targetWords),
         novelTargetWords,
       ),
       preserveConstraintLabels,
@@ -5079,7 +5076,7 @@ async function continueChapterContent(
     dialogueVoiceLocks: draftContext.dialogueVoiceLocks,
     plotPoints: chapter.outline || '',
     emotionTone: chapter.emotionTone || '平稳',
-    targetWords: chapter.targetWords || 3000,
+    targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
     storyCore,
     writingContractSummary: draftContext.writingContractSummary,
     relationSummary: draftContext.relationSummary,
@@ -5940,7 +5937,7 @@ async function generateChapterContentInternal(
         dialogueVoiceLocks: scenePlanContext.dialogueVoiceLocks,
         plotPoints: chapter.outline || '',
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: chapter.targetWords || 3000,
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
         storyCore,
         writingContractSummary: scenePlanContext.writingContractSummary,
         relationSummary: scenePlanContext.relationSummary,
@@ -6090,7 +6087,7 @@ async function generateChapterContentInternal(
         hardConstraintContext: draftContext.hardConstraintContext,
         dialogueVoiceLocks: draftContext.dialogueVoiceLocks,
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: chapter.targetWords || 3000,
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
         storyCore,
         writingContractSummary: draftContext.writingContractSummary,
         relationSummary: draftContext.relationSummary,
@@ -6162,7 +6159,7 @@ async function generateChapterContentInternal(
     const draftHeading = stripChapterHeadingNoise(draftContentRaw, chapter.chapterNum, chapterTitleForCheck)
     const draftContent = draftHeading.content
     const draftTitleMismatchRisk = buildTitleMismatchRisk(draftHeading.detectedTitle, chapterTitleForCheck, chapter.chapterNum)
-    const chapterWordTarget = Number(chapter.targetWords) || 3000
+    const chapterWordTarget = resolveChapterReferenceWords(chapter.targetWords, novel.targetWords)
     latestUsableDraft = draftContent.trim()
     if (!latestUsableDraft) {
       failRoleTask('writer', writerTaskId, new ChapterPipelineStageError(
@@ -6340,7 +6337,7 @@ async function generateChapterContentInternal(
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
     reviewNotes = applyReadingExperienceToReviewNotes(reviewNotes, draftContent)
-    reviewNotes = applyWordBudgetToReviewNotes(reviewNotes, draftContent, chapterWordTarget)
+    reviewNotes = applyWordShapeObservation(reviewNotes, draftContent, chapterWordTarget)
     if (draftTitleMismatchRisk) {
       reviewNotes = {
         ...reviewNotes,
@@ -6448,7 +6445,7 @@ async function generateChapterContentInternal(
           ? Math.round(resolveContextBudgetForStage(
             'rewrite',
             complexity,
-            chapter.targetWords || 3000,
+            resolveChapterReferenceWords(chapter.targetWords, rawContext.novel.targetWords),
             rawContext.novel.targetWords || 0,
           ) * rewritePolicy.contextBudgetMultiplier)
           : undefined,
@@ -6527,7 +6524,7 @@ async function generateChapterContentInternal(
         hardConstraintContext: rewriteContext.hardConstraintContext,
         dialogueVoiceLocks: rewriteContext.dialogueVoiceLocks,
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: chapter.targetWords || 3000,
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
         storyCore,
         writingContractSummary: rewriteContext.writingContractSummary,
         relationSummary: rewriteContext.relationSummary,
@@ -6744,7 +6741,7 @@ async function generateChapterContentInternal(
       repairedStyleReviewNotes,
       repairedContent,
     )
-    const repairedReadableReviewNotes = applyWordBudgetToReviewNotes(
+    const repairedReadableReviewNotes = applyWordShapeObservation(
       repairedReadableReviewNotesBase,
       repairedContent,
       chapterWordTarget,
@@ -6946,65 +6943,8 @@ async function generateChapterContentInternal(
     let repairedContent = rewriteOutcome.content
     let finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
     let rewriteMiniReview = rewriteOutcome.miniReview
-    // 字数硬上限兜底：提示词带宽约束被忽视时，程序化触发压缩改写（最多 2 轮，一轮压不够继续压）
-    const hardCeilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_HARD_CEILING_RATIO)
-    if (chapterWordTarget >= 300) {
-      const floorWords = Math.round(chapterWordTarget * CHAPTER_WORD_FLOOR_RATIO)
-      const ceilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_CEILING_RATIO)
-      for (let compressAttempt = 1; compressAttempt <= 2 && countNarrativeWords(repairedContent) > hardCeilingWords; compressAttempt += 1) {
-        const currentWords = countNarrativeWords(repairedContent)
-        console.warn(`[chapter:pipeline] 正文 ${currentWords} 字超硬上限 ${hardCeilingWords}，触发压缩改写（第 ${compressAttempt}/2 轮） chapter=${chapterId}`)
-        try {
-          const compressed = (await runChatTask({
-            type: 'chapter_write',
-            novelId: chapter.novelId,
-            relatedEntityType: 'chapter',
-            relatedEntityId: chapterId,
-            messages: [{
-              role: 'user',
-              content: [
-                `下面这一章当前 ${currentWords} 个汉字，严重超出上限。把它压缩到 ${floorWords}-${ceilingWords} 个汉字。`,
-                `硬性要求：压缩后正文不得超过 ${ceilingWords} 个汉字，需要删掉约 ${Math.max(currentWords - ceilingWords, 0)} 字，这不是润色任务，是删减任务。`,
-                '删减优先级（从先到后）：1) 微动作细节堆叠（握拳/松手/抬头/指尖类）；2) 重复的感官与环境描写；3) 解释性旁白和心理复述；4) 不推进事件的过渡段。',
-                '必须保留：全部事件与顺序、冲突交锋与结果状态、伏笔、对白立场；不新增情节。',
-                '压缩后禁止新增或保留“不是……而是……”式定义句；删除解释型破折号，只有真实打断/抢话才保留；同一姓名或称谓不要在相邻句中机械重复，能明确指代时改用动作主语、代词或关系称呼。',
-                '只输出压缩后的正文，不要解释，不要标题行。',
-                `本章大纲：${chapter.outline || ''}`,
-                '',
-                '正文：',
-                repairedContent,
-              ].join('\n'),
-            }],
-            modelConfigId: novel.modelConfigId || undefined,
-          })).trim()
-          const strippedCompressed = stripChapterHeadingNoise(compressed, chapter.chapterNum, chapterTitleForCheck).content
-          const compressedWords = countNarrativeWords(strippedCompressed)
-          const compressedFindings = collectQualityGuardrailFindings(strippedCompressed, profile.genre, { knownTerms: guardrailKnownTerms })
-          const compressedHasBlockingFinding = compressedFindings.length > 0 && (
-            hasBlockingGuardrailFindings(compressedFindings)
-            || compressedFindings.some((finding) => finding.code === 'not_but_definition_pattern')
-          )
-          if (strippedCompressed && compressedWords >= floorWords && compressedWords < currentWords) {
-            const protectedCompressed = enforceLockedParagraphProtection(
-              strippedCompressed,
-              lockedParagraphContext.lockedParagraphs,
-              repairedContent,
-              finalReviewNotesWithRewriteDelta,
-            )
-            if (!protectedCompressed.violated && !compressedHasBlockingFinding) {
-              repairedContent = protectedCompressed.content
-              console.log(`[chapter:pipeline] 压缩改写完成 ${currentWords}→${countNarrativeWords(repairedContent)} 字 chapter=${chapterId}`)
-              continue
-            }
-          }
-          console.warn(`[chapter:pipeline] 第 ${compressAttempt} 轮压缩结果不可用（${compressedWords} 字，质量命中 ${compressedFindings.map((finding) => finding.code).join('、') || '无'}），保留当前稿并尝试下一轮`)
-          continue
-        } catch (error) {
-          console.warn(`[chapter:pipeline] 压缩改写失败，保留当前稿 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
-          break
-        }
-      }
-    }
+    // 参考字数只用于读感观察，不自动压缩。章节应在场景自然完成后收束，
+    // 关键转折、高潮或回收章可以明显长于参考值，短过渡章也可以明显短于参考值。
     // 重写稿轻量复检：初稿时代的 LLM 审校证据（接力/开篇/幻觉/标题）在最终稿上逐条核对，
     // 发布门据新证据判定，不再依赖 pipeline 阶段降级兜底。最终验收门若再次改稿，
     // 必须对新正文再次复检，避免把上一版正文的 rewrite_recheck 误当成当前稿证据。
@@ -7528,7 +7468,8 @@ export async function getChapterContextPreview(
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
-  const contractVersion = buildChapterContractVersion(chapterId)
+  const contractVersion = buildChapterContractVersion(chapterId, { allowMissing: true })
+  const contractGate = getChapterContractPreviewGate(chapterId)
   const executionModeResolution = resolveAiExecutionMode({
     explicitMode: options.executionMode,
     settingsJson: rawContext.novel.settingsJson,
@@ -7666,6 +7607,9 @@ export async function getChapterContextPreview(
   return {
     chapterId: chapter.id,
     chapterNum: chapter.chapterNum,
+    contractVersion,
+    contractReady: contractGate.ready,
+    contractBlockers: contractGate.blockers,
     complexity,
     assemblyVersion: 'v2-unified',
     assemblyNotes: [

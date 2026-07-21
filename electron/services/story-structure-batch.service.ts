@@ -1197,7 +1197,7 @@ export function applyStructureBatchPlan(novelId: number, plan: StructureBatchPla
             status: chapterInput.status || 'outline',
             aiScoreJson: '',
             arcId: null,
-            targetWords: typeof chapterInput.targetWords === 'number' ? chapterInput.targetWords : 3000,
+            targetWords: typeof chapterInput.targetWords === 'number' ? chapterInput.targetWords : 0,
             emotionTone: '',
             compiledFromSegments: 0,
             segmentCount: 0,

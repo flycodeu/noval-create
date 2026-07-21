@@ -14,7 +14,6 @@ const DEFAULT_TABOO_PATTERNS = [
   '[一二三两四五六七八九十0-9]+(?:个)?(?:年|月)之约',
 ]
 
-const WORD_FLOOR_RATIO = 0.8
 
 function pickRunDir() {
   const requested = process.argv[2] || process.env.NOVELFORGE_EVAL_RUN_STAMP
@@ -113,14 +112,15 @@ function main() {
       const contentRows = rows.filter((row) => (row.content || '').trim() !== '')
       const laterContentRows = contentRows.filter((row) => row.chapterNum > contentChapterCount)
 
-      // 校验 1：字数下限（正文章节实际汉字数 >= 目标 * 0.8）
-      const wordFloorFailures = contentRows
+      // 校验 1：篇幅只做异常观察，不把参考值当作成稿门槛。
+      const lengthObservations = contentRows
         .filter((row) => row.chapterNum <= contentChapterCount)
         .filter((row) => {
           const target = row.chapterTargetWords || 1200
-          return countHanzi(row.content) < Math.round(target * WORD_FLOOR_RATIO)
+          const words = countHanzi(row.content)
+          return words > 0 && (words < Math.round(target * 0.45) || words > Math.round(target * 2.2))
         })
-        .map((row) => `第${row.chapterNum}章 ${countHanzi(row.content)}/${row.chapterTargetWords || 1200}`)
+        .map((row) => `第${row.chapterNum}章 ${countHanzi(row.content)}/${row.chapterTargetWords || 1200}（仅观察）`)
 
       // 校验 2：scenePlan 非空（全部 10 章）
       const emptyScenePlanChapters = rows
@@ -160,12 +160,11 @@ function main() {
         chapterContractCount: chapterContracts[novel.id] || 0,
         sceneContractCount: sceneContracts[novel.id] || 0,
         characterCount: characters[novel.id] || 0,
-        wordFloorFailures,
+        lengthObservations,
         emptyScenePlanChapters,
         tabooHits,
         structureOk,
         ok: structureOk
-          && wordFloorFailures.length === 0
           && emptyScenePlanChapters.length === 0
           && tabooHits.length === 0,
       }
@@ -176,7 +175,7 @@ function main() {
       databasePath: runInfo.databasePath,
       checkedAt: new Date().toISOString(),
       contentChapterCount,
-      checks: ['结构完整', `字数下限（目标×${WORD_FLOOR_RATIO}）`, 'scenePlan 非空', '违禁桥段扫描'],
+      checks: ['结构完整', '篇幅异常仅观察（不按参考值判失败）', 'scenePlan 非空', '违禁桥段扫描'],
       verification,
       allOk: verification.every((item) => item.ok),
     }

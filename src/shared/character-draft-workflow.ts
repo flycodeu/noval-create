@@ -50,9 +50,29 @@ export interface CharacterDraftContent {
   planContentHash: string
   plan: CharacterNeedsAnalysisResult
   characters: CharacterDraftCard[]
+  /**
+   * Existing-character changes are kept beside new cards so the review and
+   * commit steps can show/apply a real diff instead of silently skipping the
+   * plan's update actions.
+   */
+  updatePatches: CharacterUpdatePatchDraft[]
   taskId: number
   qualityReview: Record<string, unknown>
   generatedAt: string
+}
+
+export interface CharacterUpdatePatchDraft {
+  characterId: number
+  characterName: string
+  summary: string
+  patch: Record<string, unknown>
+  changedFields: Array<{
+    field: string
+    label: string
+    before: string
+    after: string
+  }>
+  taskId?: number
 }
 
 export type CharacterDraftReviewStatus = 'passed' | 'needs_revision' | 'blocked'
@@ -94,6 +114,12 @@ export interface GenerateCharacterDraftResult {
   taskId: number
   characterCount: number
   characterNames: string[]
+  updatePreview?: Array<{
+    characterId: number
+    characterName: string
+    summary: string
+    fields: string[]
+  }>
   diffSummary: {
     createCount: number
     updateSuggestionCount: number
@@ -124,6 +150,11 @@ export interface CharacterCommitDiffContent {
   reviewArtifactId: string
   createdCharacterIds: number[]
   createdCharacterNames: string[]
+  updatedCharacterIds?: number[]
+  updatedCharacterNames?: string[]
+  archivedCharacterIds?: number[]
+  archivedCharacterNames?: string[]
+  mergedCharacterIds?: number[]
   skippedPlanActions: Array<{ action: string; characterId: number; characterName: string }>
   contextVersionBefore: number
   contextVersionAfter: number
@@ -135,6 +166,11 @@ export interface CommitCharacterDraftResult {
   commitArtifact: AgentArtifact<CharacterCommitDiffContent>
   createdCharacterIds: number[]
   createdCharacterNames: string[]
+  updatedCharacterIds?: number[]
+  updatedCharacterNames?: string[]
+  archivedCharacterIds?: number[]
+  archivedCharacterNames?: string[]
+  mergedCharacterIds?: number[]
   contextVersionBefore: number
   contextVersionAfter: number
   idempotentReplay: boolean

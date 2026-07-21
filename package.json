@@ -64,6 +64,8 @@
     "eval:novel:verify": "electron scripts/verify-novel-ai-eval.cjs",
     "backfill:huaishang": "electron scripts/backfill-huaishang-xinjing.cjs",
     "sample:create-shuangwen": "electron scripts/create-shuangwen-sample.cjs",
+    "sample:create-character-continuity": "electron scripts/create-character-continuity-sample.cjs",
+    "eval:character-continuity": "electron scripts/evaluate-character-continuity-sample.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck": "npm run typecheck:web && npm run typecheck:node",

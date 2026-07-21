@@ -1057,7 +1057,7 @@ export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文�
 10. 对话辨识度：如果人物状态中给了说话方式、口头禅、用词水平或方言特征，必须体现在对话中。不同角色的对话应一眼可辨。
 11. 对话真实感：允许打断、省略、答非所问、沉默代替回答。上下级说话不同调，亲人和陌生人不同温度，紧张时短句碎句，放松时废话和口头禅变多。
 12. 段落和句子要有自然参差：允许短段、长段、半截被打断的对白和不完美停顿，不要把每段都收成整齐的结论句。
-13. 每 600 到 900 字至少发生一次可见变化：有人做选择、让步、隐瞒、误判、损失资源、改变关系或获得新信息。
+13. 每个场景或关键叙事单元至少完成一次可追踪变化：有人做选择、让步、隐瞒、误判、损失资源、改变关系或获得新信息；场景未完成时不要因达到某个字数提前结束，已经完成时也不要为凑篇幅重复动作或解释。
 14. 允许信息不完美：人物可以估错数字、迟疑官文措辞、误读对方意图；不要把旁白写成全知报告。
 15. 历史、权谋、战争、现实题材优先写制度、路程、粮饷、官职、账册、传报、伤亡、天气和地形这些硬材料，少靠气氛词撑篇幅。
 16. 不要把“去 AI 味”写成口语化灌水；真正的人类质感来自具体观察、取舍、偏见、遗漏和不完全漂亮的节奏。
@@ -1398,7 +1398,7 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
       '结局方向：' + (params.ending || '未提供'),
       '节奏比例：' + (params.rhythmSummary || '未配置'),
       '预计总章节：' + params.totalChapters + '章',
-      params.targetWords ? '全书目标字数：' + params.targetWords + '字，请在每个弧的 target_words 字段中分配字数预算，总和必须等于全书目标。' : '',
+      params.targetWords ? '全书规模参考：' + params.targetWords + '字。请在每个弧的 target_words 字段中给出阶段预算，允许根据实际剧情进展重新分配，不要求各弧预算机械相加。' : '',
     ]),
     section('规划要求', [
       '规划 3 到 5 个故事弧，章节范围必须连续、无重叠、无空档。',
@@ -1603,10 +1603,8 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
 
 function formatTargetWordsBand(targetWords: number): string {
   const target = Math.max(0, Math.round(targetWords || 0))
-  if (target < 300) return '目标字数：' + target + ' 字左右'
-  const floor = Math.round(target * 0.8)
-  const ceiling = Math.round(target * 1.5)
-  return '目标字数：' + target + ' 字（正文控制在 ' + floor + '-' + ceiling + ' 字之间；超过上限必须先删掉微动作堆叠、重复感官描写和无信息增量段落再交稿，不许靠加戏凑字数）'
+  if (target < 300) return '篇幅参考：' + target + ' 字左右（仅用于估算，不是硬性字数）'
+  return '篇幅参考：约 ' + target + ' 字（非硬性字数上下限；以场景完整、冲突结果、人物变化和自然收束为准。关键章可以更长，过渡章可以更短，不得为了凑字数加戏或删掉必要剧情）'
 }
 
 export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
@@ -1617,7 +1615,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
-      '目标字数：' + params.targetWords + ' 字左右',
+      '篇幅参考：约 ' + params.targetWords + ' 字（非硬性字数；仅用于规划场景密度，根据本章场景和收束位置自然决定长度）。',
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
@@ -1784,7 +1782,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '如果上下文给了关系摘要，就把亲疏、权力差、潜台词和说话习惯写进对白。',
       '主角在本章里可以害怕、迟疑、失望、心软或犯错，但这些反应必须推动后续选择。',
       '每个场景要么推进本章任务，要么承担关系、伏笔、质感或喘息的次级功能；允许有节制的闲笔与日常，但不写无信息增量的注水段落。',
-      '每 600 到 900 字要出现一次明确变化：军令、账册、物资、关系、态度、位置、伤亡、线索或选择至少有一项发生改变。',
+      '每完成一个场景或一段自然叙事单元，都要出现可感知的变化：军令、账册、物资、关系、态度、位置、伤亡、线索或选择至少有一项发生改变；不要用固定字数切段。',
       '段落节奏要参差：不要每段都三五句、不要每段都用动作或总结收尾；允许被打断的句子、答非所问、未说完的命令和留白。',
       '涉及历史/战争/权谋时，至少把一个抽象压力落到具体材料上：官职程序、传报时差、粮草数目、船型地形、伤亡清点、军纪执行或奏疏措辞。',
       '不要让旁白替人物把道理说完；把判断拆回人物当场能看到的证据、愿意付出的代价和不敢说出口的顾虑。',
@@ -1872,7 +1870,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '人物情绪必须通过停顿、动作、措辞变化、错误判断、资源消耗或关系反应体现，禁止用“他心中一震”“命运的齿轮”“某种情绪蔓延”这类模板句替代刻画。',
       '冲突不能只靠外部口号推进：至少写出一处具体阻力、一处主角判断成本、一处后续仍会持续的代价或未解决问题。',
       '初稿允许有人的不整齐：场景中可以有犹豫、误读、答非所问、账目没对上、传令迟到、官文措辞被改，不要把所有信息处理得过度干净。',
-      '每 600 到 900 字至少推进一个可追踪变量：人物立场、资源余量、伤亡压力、地理位置、支线状态、伏笔状态或下一章钩子。',
+      '每个场景或关键叙事单元至少推进一个可追踪变量：人物立场、资源余量、伤亡压力、地理位置、支线状态、伏笔状态或下一章压力；不要用固定字数切段。',
       '同一类感官意象一章最多保留两组，多余篇幅改写成行为、制度、物资、路线或对白博弈。',
       '涉及多人对话时，家人、朋友、陌生人、上下级和恋爱关系不能一个语气。',
       '对白每轮必须承担信息推进、关系变化、试探遮掩或行动决策之一；删掉寒暄式互相解释和角色替作者讲设定的句子。',

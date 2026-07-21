@@ -849,7 +849,7 @@ export interface AiPatchResult {
 }
 
 export type CharacterAiPatchChange = AiPatchChange & { field: keyof Character | string }
-export type CharacterAiPatchResult = AiPatchResult & { patch: Partial<Character> }
+export type CharacterAiPatchResult = AiPatchResult & { patch: Partial<Character>; taskId?: number }
 
 export interface StoryItemSourceContext {
   page?: string
@@ -2316,6 +2316,9 @@ export interface ChapterContextPreviewStage {
 export interface ChapterContextPreview {
   chapterId: number
   chapterNum: number
+  contractVersion?: string
+  contractReady?: boolean
+  contractBlockers?: string[]
   complexity: ChapterContextComplexity
   assemblyVersion?: 'v1-base' | 'v2-unified'
   assemblyNotes?: string[]

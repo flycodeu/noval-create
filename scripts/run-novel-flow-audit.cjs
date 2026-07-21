@@ -75,7 +75,6 @@ const FLOW_REQUEST_RETRY_COUNT = Math.max(0, Math.min(5, Number.isFinite(configu
 const FLOW_MAX_DURATION_MS = Math.max(60_000, Math.min(3_600_000, Number(process.env.NOVELFORGE_FLOW_MAX_DURATION_MS) || 1_200_000))
 process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = String(FLOW_REQUEST_TIMEOUT_MS)
 process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT = String(FLOW_REQUEST_RETRY_COUNT)
-const WORD_FLOOR_RATIO = 0.8
 const FULL_STORY_DESIGN = process.env.NOVELFORGE_FLOW_FULL_STORY_DESIGN === '1'
 const FLOW_KEEP_CREATED_PROJECTS = process.env.NOVELFORGE_FLOW_KEEP_PROJECTS === '1'
 const MAP_TARGET_COUNT = 5
@@ -1308,41 +1307,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services,
 
     let chapter = services.chapterService.getChapter(chapterId)
     let content = String(chapter?.content || '')
-    const wordFloor = Math.round(CHAPTER_TARGET_WORDS * WORD_FLOOR_RATIO)
-
-    for (let attempt = 0; attempt < 2 && content && countHanzi(content) < wordFloor; attempt += 1) {
-      report.expandAttempts += 1
-      try {
-        const expanded = await services.taskService.runChatTask({
-          type: 'review',
-          novelId,
-          modelConfigId: chapter?.modelConfigId || undefined,
-          chatOpts: flowChatOptions(),
-          messages: [
-            { role: 'system', content: '你是小说扩写编辑。只输出扩写后的正文，不要解释，不要 Markdown。' },
-            {
-              role: 'user',
-              content: [
-                `把下面这一章扩写到 ${CHAPTER_TARGET_WORDS} 到 ${Math.round(CHAPTER_TARGET_WORDS * 1.2)} 个汉字。`,
-                '要求：不改变已有事件顺序、人物行为和对白立场；通过现场细节、对白来回、动作阻力和感官事实增加密度；不加新的重大情节。',
-                `题材核心执行链：\n${coreExecutionText(project)}`,
-                `违禁约束：${project.input.tabooRules}`,
-                '',
-                '当前正文：',
-                content,
-              ].join('\n'),
-            },
-          ],
-        })
-        const expandedText = String(expanded || '').trim()
-        if (countHanzi(expandedText) > countHanzi(content)) {
-          services.chapterService.updateChapter(chapterId, { content: expandedText })
-          content = expandedText
-        }
-      } catch {
-        break
-      }
-    }
+    // 参考字数只用于报告和人工判断；不因篇幅偏短自动扩写。
 
     let hits = []
     try {
@@ -1507,8 +1472,6 @@ function buildComparison(project, rows, chapterReports) {
     outline: row.outline || '',
   })) })
   issues.push(...outlineQualityFailures)
-  const weakContent = chapterReports.filter((report) => report.finalWords < Math.round(report.targetWords * WORD_FLOOR_RATIO))
-  if (weakContent.length > 0) issues.push(`正文有 ${weakContent.length} 章低于目标字数 80%。`)
   const tabooHits = scanTaboo(text, project.tabooPatterns)
   if (tabooHits.length > 0) issues.push(`存在原著专名/桥段禁用命中：${tabooHits.map((hit) => hit.matches.join('/')).join('；')}`)
 
@@ -1530,9 +1493,9 @@ function buildComparison(project, rows, chapterReports) {
 function buildVerification(runInfo) {
   const verification = runInfo.projects.map((project) => {
     const instanceItemCount = project.counts.items.instances
-    const chapterWordFailures = project.chapterReports
-      .filter((report) => report.finalWords < Math.round(report.targetWords * WORD_FLOOR_RATIO))
-      .map((report) => `第${report.chapterNum}章 ${report.finalWords}/${report.targetWords}`)
+    const chapterWordObservations = project.chapterReports
+      .filter((report) => report.finalWords > 0 && (report.finalWords < Math.round(report.targetWords * 0.45) || report.finalWords > Math.round(report.targetWords * 2.2)))
+      .map((report) => `第${report.chapterNum}章 ${report.finalWords}/${report.targetWords}（仅观察）`)
   const chapterPipelineFailures = project.chapterReports
       .filter((report) => report.pipelineStatus === 'error')
       .map((report) => `第${report.chapterNum}章 ${clip(report.pipelineError || report.pipelineStatus, 140)}`)
@@ -1570,7 +1533,6 @@ function buildVerification(runInfo) {
       && chapterPipelineFailures.length === 0
       && chapterPipelineRoleFailures.length === 0
       && chapterNeedsReview.length === 0
-      && chapterWordFailures.length === 0
       && tabooFailures.length === 0
       && project.steps.every((step) => step.status === 'ok')
     return {
@@ -1591,7 +1553,7 @@ function buildVerification(runInfo) {
         chapterPipelineRoleFailures,
         chapterPipelineRoleStops,
         chapterNeedsReview,
-        chapterWordFailures,
+        chapterWordObservations,
         tabooFailures,
       },
       ok,

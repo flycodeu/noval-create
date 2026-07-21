@@ -5,6 +5,7 @@ import type {
   CharacterDraftContent,
   CharacterDraftReviewCheck,
   CharacterDraftReviewContent,
+  CharacterUpdatePatchDraft,
   CommitCharacterDraftInput,
   CommitCharacterDraftResult,
   GenerateCharacterDraftInput,
@@ -87,6 +88,7 @@ function reviewDraftContent(
   currentNames: string[],
   currentContextVersion: number,
 ): CharacterDraftReviewContent {
+  const updatePatches = draft.updatePatches || []
   const names = draft.characters.map((character) => character.fullName.trim())
   const normalizedCurrent = new Set(currentNames.map((name) => name.replace(/\s+/gu, '').toLowerCase()))
   const seen = new Set<string>()
@@ -95,6 +97,7 @@ function reviewDraftContent(
   const missingCore: string[] = []
   const weakDramaticEngine: string[] = []
   const invalidRole: string[] = []
+  const invalidUpdates: string[] = []
   draft.characters.forEach((character) => {
     const key = character.fullName.replace(/\s+/gu, '').toLowerCase()
     if (!key || seen.has(key)) duplicateNames.push(character.fullName || '(未命名)')
@@ -108,6 +111,18 @@ function reviewDraftContent(
     }
     if (!['protagonist', 'major', 'antagonist', 'supporting', 'minor'].includes(character.roleType)) {
       invalidRole.push(character.fullName)
+    }
+  })
+
+  const currentNameSet = new Set(currentNames.map((name) => name.trim()))
+  const seenUpdateIds = new Set<number>()
+  updatePatches.forEach((update) => {
+    if (seenUpdateIds.has(update.characterId) || !currentNameSet.has(update.characterName.trim())) {
+      invalidUpdates.push(update.characterName || `#${update.characterId}`)
+    }
+    seenUpdateIds.add(update.characterId)
+    if (update.changedFields.length === 0 || Object.keys(update.patch).length === 0) {
+      invalidUpdates.push(update.characterName || `#${update.characterId}`)
     }
   })
 
@@ -159,6 +174,12 @@ function reviewDraftContent(
       characterNames: invalidRole,
     },
     {
+      code: 'existing_character_updates',
+      status: invalidUpdates.length === 0 ? 'pass' : 'fail',
+      message: invalidUpdates.length === 0 ? '已有角色变更均对应当前人物并包含字段级差异。' : '已有角色变更缺少有效人物或字段级差异。',
+      characterNames: [...new Set(invalidUpdates)],
+    },
+    {
       code: 'independent_model_review',
       status: modelReject ? 'fail' : modelRewrite ? 'warn' : 'pass',
       message: text(modelReviewDetail.summary) || '已记录生成阶段独立模型审校。',
@@ -167,7 +188,11 @@ function reviewDraftContent(
   ]
   const hardBlockers = checks.filter((check) => check.status === 'fail').map((check) => check.message)
   const warnings = checks.filter((check) => check.status === 'warn').map((check) => check.message)
-  if (draft.characters.length === 0) hardBlockers.push('草稿中没有可提交的人物。')
+  const hasPlanChange = draft.characters.length > 0
+    || updatePatches.length > 0
+    || draft.plan.mergeGroups.length > 0
+    || draft.plan.existingActions.some((action) => action.action === 'archive')
+  if (!hasPlanChange) hardBlockers.push('草稿中没有可提交的人物变化。')
   if (currentContextVersion !== draft.plan.contextVersion) {
     warnings.push(`当前上下文版本 ${currentContextVersion} 与草稿基线 ${draft.plan.contextVersion} 不同；提交前必须重新生成。`)
   }
@@ -216,11 +241,17 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
       draftArtifact: replay,
       reviewArtifact: replayReview,
       taskId: replay.content.taskId,
-      characterCount: replay.content.characters.length,
+      characterCount: replay.content.characters.length + (replay.content.updatePatches?.length || 0),
       characterNames: replay.content.characters.map((character) => character.fullName),
+      updatePreview: (replay.content.updatePatches || []).map((item) => ({
+        characterId: item.characterId,
+        characterName: item.characterName,
+        summary: item.summary,
+        fields: item.changedFields.map((field) => field.label || field.field),
+      })),
       diffSummary: {
         createCount: replay.content.characters.length,
-        updateSuggestionCount: replay.content.plan.existingActions.filter((action) => action.action === 'update').length,
+        updateSuggestionCount: replay.content.updatePatches?.length || 0,
         mergeSuggestionCount: replay.content.plan.mergeGroups.length,
         archiveSuggestionCount: replay.content.plan.existingActions.filter((action) => action.action === 'archive').length,
       },
@@ -245,8 +276,11 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
   }
 
   const slots = planArtifact.content.roleSlots.filter((slot) => slot.proposedAction === 'create')
-  if (slots.length === 0) {
-    throw new CharacterDraftWorkflowError('PLAN_HAS_NO_CREATE_ACTIONS', '人物计划没有需要新增的角色功能位。')
+  const updateActions = planArtifact.content.existingActions.filter((action) => action.action === 'update')
+  const mergeCount = planArtifact.content.mergeGroups.length
+  const archiveCount = planArtifact.content.existingActions.filter((action) => action.action === 'archive').length
+  if (slots.length === 0 && updateActions.length === 0 && mergeCount === 0 && archiveCount === 0) {
+    throw new CharacterDraftWorkflowError('PLAN_HAS_NO_CREATE_ACTIONS', '人物计划没有需要提交的角色变化。')
   }
   if (typeof input.maxCharacters === 'number' && slots.length > input.maxCharacters) {
     throw new CharacterDraftWorkflowError('QUALITY_GATE_BLOCKED', `计划需要新增 ${slots.length} 人，超过调用方上限 ${input.maxCharacters}。`)
@@ -259,27 +293,61 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
     slot.independenceReason ? `独立成角原因：${slot.independenceReason}` : '',
     `首次出场窗口：${slot.firstAppearanceWindow}`,
   ].filter(Boolean).join('；')).join('\n')
-  const generated = await characterService.generateCharacterBatchChunk(input.novelId, {
-    ...counts,
-    genderRatio: '不限',
-    batchSize: slots.length,
-    specialRequirements: [
-      '本次生成来自已审校的人物功能位计划，只生成下列缺口，不得额外凑人数。',
-      slotRequirements,
-      input.specialRequirements?.trim() || '',
-    ].filter(Boolean).join('\n'),
-    helperRoles: slots.map((slot) => slot.function),
-    diversityConstraints: [
-      '姓名、职业、行动策略、价值观与语言习惯必须可区分。',
-      '每个角色必须有不可替代的叙事动作，不得只写标签。',
-    ],
-  }, {
-    commit: false,
-    roleQueue: roles,
-  })
-  const draftCharacters = (generated.draftCharacters || []) as CharacterDraftCard[]
-  if (draftCharacters.length === 0 || !generated.taskId) {
-    throw new CharacterDraftWorkflowError('MODEL_OUTPUT_INVALID', generated.warning || '模型未生成可用的人物草稿。')
+  let generated: Awaited<ReturnType<typeof characterService.generateCharacterBatchChunk>> | null = null
+  let draftCharacters: CharacterDraftCard[] = []
+  if (slots.length > 0) {
+    generated = await characterService.generateCharacterBatchChunk(input.novelId, {
+      ...counts,
+      genderRatio: '不限',
+      batchSize: slots.length,
+      specialRequirements: [
+        '本次生成来自已审校的人物功能位计划，只生成下列缺口，不得额外凑人数。',
+        slotRequirements,
+        input.specialRequirements?.trim() || '',
+      ].filter(Boolean).join('\n'),
+      helperRoles: slots.map((slot) => slot.function),
+      diversityConstraints: [
+        '姓名、职业、行动策略、价值观与语言习惯必须可区分。',
+        '每个角色必须有不可替代的叙事动作，不得只写标签。',
+      ],
+    }, {
+      commit: false,
+      roleQueue: roles,
+    })
+    draftCharacters = (generated.draftCharacters || []) as CharacterDraftCard[]
+    if (draftCharacters.length === 0 || !generated.taskId) {
+      throw new CharacterDraftWorkflowError('MODEL_OUTPUT_INVALID', generated.warning || '模型未生成可用的人物草稿。')
+    }
+  }
+
+  const updatePatches: CharacterUpdatePatchDraft[] = []
+  for (const action of updateActions) {
+    const suggestion = await characterService.suggestCharacterPatch(
+      action.characterId,
+      [
+        `根据当前正文和人物网络，补足叙事功能：${action.targetedChanges.join('；') || action.rationale}`,
+        '保留姓名、角色类型和已确立事实，只修改能支撑后续正文的必要字段。',
+        '把变化落到目标、矛盾、关系张力、行为习惯、语言方式或人物弧线等具体字段，不要写泛化评价。',
+      ].join('\n'),
+    )
+    if (suggestion.changedFields.length > 0 && Object.keys(suggestion.patch).length > 0) {
+      updatePatches.push({
+        characterId: action.characterId,
+        characterName: action.characterName,
+        summary: suggestion.summary,
+        patch: suggestion.patch as Record<string, unknown>,
+        changedFields: suggestion.changedFields,
+        taskId: suggestion.taskId,
+      })
+    }
+  }
+
+  if (draftCharacters.length === 0 && updatePatches.length === 0 && mergeCount === 0 && archiveCount === 0) {
+    throw new CharacterDraftWorkflowError('MODEL_OUTPUT_INVALID', '人物计划有变化建议，但没有生成可审校的字段差异。')
+  }
+  const workflowTaskId = generated?.taskId || updatePatches.find((item) => item.taskId)?.taskId || planArtifact.content.taskId
+  if (!workflowTaskId) {
+    throw new CharacterDraftWorkflowError('MODEL_OUTPUT_INVALID', '人物草稿缺少可追踪的任务记录。')
   }
   const content: CharacterDraftContent = {
     schemaVersion: 'character-draft-v1',
@@ -288,8 +356,9 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
     planContentHash: planArtifact.contentHash,
     plan: planArtifact.content,
     characters: draftCharacters,
-    taskId: generated.taskId,
-    qualityReview: generated.qualityReview || {},
+    updatePatches,
+    taskId: workflowTaskId,
+    qualityReview: generated?.qualityReview || {},
     generatedAt: new Date().toISOString(),
   }
 
@@ -303,10 +372,10 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
       content,
       contextVersion: planArtifact.contextVersion,
       producerType: 'novelforge_model',
-      producerId: `task:${generated.taskId}`,
+      producerId: `task:${workflowTaskId}`,
       producerClient: 'novelforge-character-draft-workflow',
       modelConfigId: novel.modelConfigId || null,
-      taskId: generated.taskId,
+      taskId: workflowTaskId,
       idempotencyKey: input.idempotencyKey,
     })
   } catch (error) {
@@ -329,7 +398,7 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
     producerType: 'system',
     producerId: 'character-draft-reviewer-v1',
     producerClient: 'novelforge-character-draft-workflow',
-    taskId: generated.taskId,
+    taskId: workflowTaskId,
     idempotencyKey: `${input.idempotencyKey}:review`,
   })
   updateArtifactLifecycle(draftArtifact.id, {
@@ -340,12 +409,21 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
   return {
     draftArtifact: refreshedDraft,
     reviewArtifact,
-    taskId: generated.taskId,
-    characterCount: draftCharacters.length,
-    characterNames: draftCharacters.map((character) => character.fullName),
+    taskId: workflowTaskId,
+    characterCount: draftCharacters.length + updatePatches.length,
+    characterNames: [
+      ...draftCharacters.map((character) => character.fullName),
+      ...updatePatches.map((item) => `${item.characterName}（更新）`),
+    ],
+    updatePreview: updatePatches.map((item) => ({
+      characterId: item.characterId,
+      characterName: item.characterName,
+      summary: item.summary,
+      fields: item.changedFields.map((field) => field.label || field.field),
+    })),
     diffSummary: {
       createCount: draftCharacters.length,
-      updateSuggestionCount: planArtifact.content.existingActions.filter((action) => action.action === 'update').length,
+      updateSuggestionCount: updatePatches.length,
       mergeSuggestionCount: planArtifact.content.mergeGroups.length,
       archiveSuggestionCount: planArtifact.content.existingActions.filter((action) => action.action === 'archive').length,
     },
@@ -405,10 +483,15 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
       commitArtifact: replay,
       createdCharacterIds: replay.content.createdCharacterIds,
       createdCharacterNames: replay.content.createdCharacterNames,
+      updatedCharacterIds: replay.content.updatedCharacterIds || [],
+      updatedCharacterNames: replay.content.updatedCharacterNames || [],
+      archivedCharacterIds: replay.content.archivedCharacterIds || [],
+      archivedCharacterNames: replay.content.archivedCharacterNames || [],
+      mergedCharacterIds: replay.content.mergedCharacterIds || [],
       contextVersionBefore: replay.content.contextVersionBefore,
       contextVersionAfter: replay.content.contextVersionAfter,
       idempotentReplay: true,
-      warnings: replay.content.skippedPlanActions.length > 0 ? ['人物更新、合并或归档建议尚未自动提交。'] : [],
+      warnings: replay.content.skippedPlanActions.length > 0 ? ['部分人物计划动作仍需人工处理。'] : [],
     }
   }
 
@@ -443,9 +526,15 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
 
   const createdCharacterIds: number[] = []
   const createdCharacterNames: string[] = []
+  const updatedCharacterIds: number[] = []
+  const updatedCharacterNames: string[] = []
+  const archivedCharacterIds: number[] = []
+  const archivedCharacterNames: string[] = []
+  const mergedCharacterIds: number[] = []
   const skippedPlanActions = draftArtifact.content.plan.existingActions
-    .filter((action) => action.action !== 'keep')
+    .filter((action) => action.action !== 'keep' && action.action !== 'update')
     .map((action) => ({ action: action.action, characterId: action.characterId, characterName: action.characterName }))
+  const updatePatches = draftArtifact.content.updatePatches || []
   const committedAt = new Date().toISOString()
   let commitArtifact
   let contextVersionAfter = currentVersion
@@ -463,6 +552,28 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
       createdCharacterIds.push(id)
       createdCharacterNames.push(character.fullName)
     })
+    updatePatches.forEach((update) => {
+      const current = characterService.getCharacter(update.characterId)
+      if (!current || current.novelId !== input.novelId || current.fullName !== update.characterName) {
+        throw new CharacterDraftWorkflowError('CONTEXT_VERSION_CONFLICT', `人物「${update.characterName}」已发生变化，请重新分析。`)
+      }
+      const updated = characterService.applyCharacterPatch(update.characterId, update.patch, { skipContextTracking: true })
+      if (updated) {
+        updatedCharacterIds.push(updated.id)
+        updatedCharacterNames.push(updated.fullName)
+        recordAssetChangeEvent({
+          novelId: input.novelId,
+          assetType: 'character',
+          assetId: updated.id,
+          assetLabel: updated.fullName,
+          operation: 'update',
+          changeReason: `Committed character update from artifact ${draftArtifact.id}`,
+          impactLevel: 'medium',
+          triggeredBy: 'character-draft-workflow',
+          payload: update.patch,
+        })
+      }
+    })
     const diff: CharacterCommitDiffContent = {
       schemaVersion: 'character-commit-diff-v1',
       draftArtifactId: draftArtifact.id,
@@ -470,6 +581,11 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
       reviewArtifactId: reviewArtifact.id,
       createdCharacterIds,
       createdCharacterNames,
+      updatedCharacterIds,
+      updatedCharacterNames,
+      archivedCharacterIds,
+      archivedCharacterNames,
+      mergedCharacterIds,
       skippedPlanActions,
       contextVersionBefore: currentVersion,
       contextVersionAfter: currentVersion + 1,
@@ -488,7 +604,10 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
       taskId: draftArtifact.taskId,
       idempotencyKey: input.idempotencyKey,
     })
-    updateArtifactLifecycle(draftArtifact.id, { status: 'committed', committedEntityIds: createdCharacterIds })
+    updateArtifactLifecycle(draftArtifact.id, {
+      status: 'committed',
+      committedEntityIds: [...createdCharacterIds, ...updatedCharacterIds],
+    })
     contextVersionAfter = markNovelContextChanged(input.novelId, 'Character draft artifact committed')
     if (contextVersionAfter !== currentVersion + 1) {
       throw new CharacterDraftWorkflowError('CONTEXT_VERSION_CONFLICT', '人物提交未能获得预期的下一上下文版本。')
@@ -515,9 +634,14 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
     commitArtifact: commitArtifact as NonNullable<typeof commitArtifact>,
     createdCharacterIds,
     createdCharacterNames,
+    updatedCharacterIds,
+    updatedCharacterNames,
+    archivedCharacterIds,
+    archivedCharacterNames,
+    mergedCharacterIds,
     contextVersionBefore: currentVersion,
     contextVersionAfter,
     idempotentReplay: false,
-    warnings: skippedPlanActions.length > 0 ? ['本次只提交新增人物；计划中的更新、合并或归档建议仍需单独处理。'] : [],
+    warnings: skippedPlanActions.length > 0 ? ['合并或归档动作仍需人工处理，已保留在提交差异中。'] : [],
   }
 }

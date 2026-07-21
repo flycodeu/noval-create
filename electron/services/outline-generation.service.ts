@@ -16,6 +16,7 @@ import {
   type OutlineDesignGateChapter,
 } from './outline-design-gate.service'
 import { syncStructureLinkage } from './story-structure.service'
+import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -393,7 +394,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
         emotionTone,
         arcId,
         status: 'outline',
-        targetWords: 3000,
+        targetWords: getRecommendedChapterWordsForOperatingMode({ targetWords: novel.targetWords }),
         contextVersion: novel.contextVersion || 1,
         staleReasonJson: JSON.stringify([]),
       }).run()

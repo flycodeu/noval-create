@@ -91,8 +91,18 @@ export function registerCharacterDraftTools(
         draftArtifact: artifactReferenceSchema,
         reviewArtifact: artifactReferenceSchema,
         taskId: { type: 'integer', minimum: 1 },
-        characterCount: { type: 'integer', minimum: 1, maximum: 30 },
+        characterCount: { type: 'integer', minimum: 0, maximum: 30 },
         characterNames: { type: 'array', items: { type: 'string' }, maxItems: 30 },
+        updatePreview: {
+          type: 'array',
+          maxItems: 30,
+          items: objectSchema({
+            characterId: { type: 'integer', minimum: 1 },
+            characterName: { type: 'string' },
+            summary: { type: 'string' },
+            fields: { type: 'array', items: { type: 'string' } },
+          }, ['characterId', 'characterName', 'summary', 'fields']),
+        },
         diffSummary: objectSchema({
           createCount: { type: 'integer', minimum: 0 },
           updateSuggestionCount: { type: 'integer', minimum: 0 },
@@ -101,7 +111,7 @@ export function registerCharacterDraftTools(
         }, ['createCount', 'updateSuggestionCount', 'mergeSuggestionCount', 'archiveSuggestionCount']),
         review: reviewSchema,
         idempotentReplay: { type: 'boolean' },
-      }, ['draftArtifact', 'reviewArtifact', 'taskId', 'characterCount', 'characterNames', 'diffSummary', 'review', 'idempotentReplay']),
+      }, ['draftArtifact', 'reviewArtifact', 'taskId', 'characterCount', 'characterNames', 'updatePreview', 'diffSummary', 'review', 'idempotentReplay']),
       effect: 'draft_write',
       approval: 'policy',
       scopes: [
@@ -124,6 +134,7 @@ export function registerCharacterDraftTools(
           taskId: result.taskId,
           characterCount: result.characterCount,
           characterNames: result.characterNames,
+          updatePreview: result.updatePreview || [],
           diffSummary: result.diffSummary,
           review: result.review,
           idempotentReplay: result.idempotentReplay,
@@ -190,12 +201,18 @@ export function registerCharacterDraftTools(
         commitArtifact: artifactReferenceSchema,
         createdCharacterIds: { type: 'array', items: { type: 'integer', minimum: 1 } },
         createdCharacterNames: { type: 'array', items: { type: 'string' } },
+        updatedCharacterIds: { type: 'array', items: { type: 'integer', minimum: 1 } },
+        updatedCharacterNames: { type: 'array', items: { type: 'string' } },
+        archivedCharacterIds: { type: 'array', items: { type: 'integer', minimum: 1 } },
+        archivedCharacterNames: { type: 'array', items: { type: 'string' } },
+        mergedCharacterIds: { type: 'array', items: { type: 'integer', minimum: 1 } },
         contextVersionBefore: { type: 'integer', minimum: 1 },
         contextVersionAfter: { type: 'integer', minimum: 1 },
         idempotentReplay: { type: 'boolean' },
         warnings: { type: 'array', items: { type: 'string' } },
       }, [
         'draftArtifactId', 'commitArtifact', 'createdCharacterIds', 'createdCharacterNames',
+        'updatedCharacterIds', 'updatedCharacterNames', 'archivedCharacterIds', 'archivedCharacterNames', 'mergedCharacterIds',
         'contextVersionBefore', 'contextVersionAfter', 'idempotentReplay', 'warnings',
       ]),
       effect: 'canonical_write',
@@ -214,7 +231,15 @@ export function registerCharacterDraftTools(
     handler: (input) => {
       try {
         const result = dependencies.commitDraft(input)
-        return { ...result, commitArtifact: compactArtifact(result.commitArtifact) }
+        return {
+          ...result,
+          updatedCharacterIds: result.updatedCharacterIds || [],
+          updatedCharacterNames: result.updatedCharacterNames || [],
+          archivedCharacterIds: result.archivedCharacterIds || [],
+          archivedCharacterNames: result.archivedCharacterNames || [],
+          mergedCharacterIds: result.mergedCharacterIds || [],
+          commitArtifact: compactArtifact(result.commitArtifact),
+        }
       } catch (error) {
         return mapError(error)
       }

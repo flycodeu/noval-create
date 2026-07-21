@@ -104,16 +104,19 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
 
 function buildRhythmGuide(emotionTone?: string, targetWords?: number): string {
   const tone = (emotionTone || '').toLowerCase()
-  const words = targetWords || 3000
+  const words = typeof targetWords === 'number' && targetWords > 0 ? Math.round(targetWords) : 0
+  const lengthGuide = words > 0
+    ? `篇幅参考约${words}字，仅作估算`
+    : '不设固定篇幅，以场景完成、冲突结果和自然收束为准'
 
   if (tone.includes('高潮') || tone.includes('climax') || tone.includes('激烈') || tone.includes('爆发')) {
-    return `高潮节奏——短句为主（每句≤15字），段落紧凑（≤100字），对话密集且急促，动作描写优先，删掉一切不推进冲突的修饰。目标字数${words}字可适当上浮20%以充分展开。`
+    return `高潮节奏——短句与未完成反应交替，段落紧凑，对话密集且急促，动作描写优先，删掉一切不推进冲突的修饰。${lengthGuide}；冲突未完成时允许自然展开。`
   }
   if (tone.includes('过渡') || tone.includes('transition') || tone.includes('平缓') || tone.includes('日常')) {
-    return `过渡节奏——长短句交替，段落舒展（150-300字），允许环境描写和内心独白，对话节奏放松，可用细节暗埋伏笔。目标字数${words}字可适当下调20%以快速推进。`
+    return `过渡节奏——长短句交替，段落可以舒展，允许环境描写和内心独白，对话节奏放松，可用细节暗埋伏笔。${lengthGuide}；本章完成承接和递进后可以提前收束。`
   }
   if (tone.includes('悬念') || tone.includes('suspense') || tone.includes('紧张') || tone.includes('压抑')) {
-    return `悬念节奏——句子长短参差制造不安感，关键信息放在段落末尾，适度留白和省略，对话含糊暗示多于直说。控制在${words}字左右，不要写满，留出呼吸空间。`
+    return `悬念节奏——句子长短参差制造不安感，关键信息放在段落末尾，适度留白和省略，对话含糊暗示多于直说。${lengthGuide}；悬念成立后即可收束，不要为了写满重复信息。`
   }
   if (tone.includes('悲伤') || tone.includes('沉重') || tone.includes('告别')) {
     return `沉郁节奏——句子偏长但不拖沓，重感官细节（触觉、温度、声音），对话少而重，沉默和停顿比语言更有力。`

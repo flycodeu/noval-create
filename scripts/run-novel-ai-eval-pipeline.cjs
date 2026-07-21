@@ -2,7 +2,7 @@
 // 1. 大纲拆两批生成（1-5 / 6-10 章），避免长 JSON 后段偷懒
 // 2. scenePlan 空缺定向补全
 // 3. 前 N 章正文走生产链路 generateChapterContent（含合同校验、审校、anti-ai 强制修复、发布门）
-// 4. 字数低于目标 80% 自动触发扩写补写
+// 4. 章节长度只做结果观察，不按目标值自动扩写
 // 5. 残留高危 AI 味自动带命中片段发起补救重写
 // 6. 违禁桥段正则扫描
 //
@@ -68,7 +68,6 @@ function requireProject(relativePath) {
 const OUT_ROOT = path.resolve(workspaceRoot, 'out', 'novel-ai-eval-pipeline')
 const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(10, Number(process.env.NOVELFORGE_EVAL_CONTENT_CHAPTERS) || 2))
 const CHAPTER_TARGET_WORDS = 1200
-const WORD_FLOOR_RATIO = 0.8
 const PROJECT_FILTER = new Set(
   String(process.env.NOVELFORGE_EVAL_PROJECTS || '')
     .split(',')
@@ -615,7 +614,6 @@ async function main() {
     modelLabel: `${modelConfig.provider}:${modelConfig.modelId}#${modelConfig.id}`,
     contentChapterCount: CONTENT_CHAPTER_COUNT,
     chapterTargetWords: CHAPTER_TARGET_WORDS,
-    wordFloorRatio: WORD_FLOOR_RATIO,
     projects: [],
   }
 
@@ -713,37 +711,7 @@ async function main() {
         let chapterRow = chapterService.getChapter(chapterId)
         let content = String(chapterRow?.content || '')
 
-        // 字数下限程序化控制：低于目标 80% 自动扩写，最多 2 次
-        const wordFloor = Math.round(CHAPTER_TARGET_WORDS * WORD_FLOOR_RATIO)
-        for (let attempt = 0; attempt < 2 && content && countHanzi(content) < wordFloor; attempt += 1) {
-          report.expandAttempts += 1
-          console.log(`[eval-pipeline] ${project.key} ch${chapterNum}: ${countHanzi(content)} < ${wordFloor}, expanding (attempt ${report.expandAttempts})`)
-          try {
-            const expanded = await callModel([
-              { role: 'system', content: '你是小说扩写编辑。只输出扩写后的正文，不要解释，不要 Markdown。' },
-              {
-                role: 'user',
-                content: [
-                  `把下面这一章扩写到 ${CHAPTER_TARGET_WORDS} 到 ${Math.round(CHAPTER_TARGET_WORDS * 1.2)} 个汉字。`,
-                  '要求：不改变已有事件顺序、人物行为和对白立场；通过加深现场细节、对白来回、动作阻力和感官事实增加密度；不加新的重大情节。',
-                  `本章大纲：${generated.chapters[chapterIndex].outline}`,
-                  `违禁约束：${project.input.tabooRules}`,
-                  '',
-                  '当前正文：',
-                  content,
-                ].join('\n'),
-              },
-            ], `${project.key} ch${chapterNum} expand`)
-            const expandedText = String(expanded || '').trim()
-            if (countHanzi(expandedText) > countHanzi(content)) {
-              chapterService.updateChapter(chapterId, { content: expandedText })
-              content = expandedText
-            }
-          } catch (error) {
-            console.warn(`[eval-pipeline] ${project.key} ch${chapterNum}: expand failed: ${error.message}`)
-            break
-          }
-        }
+        // 参考字数只记录在报告中；章节是否需要续写应由场景完成度和截断迹象决定。
 
         // 残留高危 AI 味补救重写（带具体命中片段）
         let hits = antiAiService.collectAntiAiRuntimeHits(content, project.genreName)

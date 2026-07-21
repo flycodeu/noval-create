@@ -22,6 +22,8 @@ describe('fast-launch bootstrap plan', () => {
     const themeVoice = parseThemeVoiceSnapshot(plan.novel.themeVoiceJson)
 
     expect(plan.chapters).toHaveLength(3)
+    expect(plan.chapters[0].targetWords).toBeLessThan(plan.chapters[1].targetWords)
+    expect(plan.chapters[1].targetWords).toBeLessThan(plan.chapters[2].targetWords)
     expect(plan.timelineEvents).toHaveLength(3)
     expect(plan.characterArcs).toHaveLength(2)
     expect(plan.characterArcs.map((arc) => arc.characterRole)).toEqual(['protagonist', 'antagonist'])

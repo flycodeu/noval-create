@@ -107,6 +107,12 @@ interface CharacterWorkflowDraftResult {
   taskId: number
   characterCount: number
   characterNames: string[]
+  updatePreview: Array<{
+    characterId: number
+    characterName: string
+    summary: string
+    fields: string[]
+  }>
   diffSummary: {
     createCount: number
     updateSuggestionCount: number
@@ -120,6 +126,11 @@ interface CharacterWorkflowDraftResult {
 interface CharacterWorkflowCommitResult {
   createdCharacterIds: number[]
   createdCharacterNames: string[]
+  updatedCharacterIds: number[]
+  updatedCharacterNames: string[]
+  archivedCharacterIds: number[]
+  archivedCharacterNames: string[]
+  mergedCharacterIds: number[]
   contextVersionBefore: number
   contextVersionAfter: number
   idempotentReplay: boolean
@@ -770,7 +781,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
         setAgentWorkflowError(plan.review.hardBlockers.join('；') || '人物计划未通过审校。')
         return
       }
-      if (plan.recommended.create === 0) {
+      if (
+        plan.recommended.create === 0
+        && plan.recommended.update === 0
+        && plan.recommended.mergeGroups === 0
+        && plan.recommended.archive === 0
+      ) {
         setAgentWorkflowStage('reviewed')
         message.info(getUserFacingMessage('character.noNewCharacters'))
         return
@@ -834,9 +850,18 @@ export default function CharacterWorkspace({ novelId }: Props) {
       }))
       setAgentCommit(committed)
       setAgentWorkflowStage('committed')
-      await Promise.all([loadPage(committed.createdCharacterIds[0] || null, 1), loadGraph()])
+      const refreshedCharacterId = committed.createdCharacterIds[0] || committed.updatedCharacterIds[0] || null
+      await Promise.all([loadPage(refreshedCharacterId, 1), loadGraph()])
+      try {
+        await window.electron.character.generateRelations(novelId)
+        await loadGraph()
+      } catch (relationError) {
+        console.warn('提交后关系网络刷新失败:', relationError)
+      }
       notifyWorkspaceMutation()
-      message.success(getUserFacingMessage('character.batchCommitted', { count: committed.createdCharacterIds.length }))
+      message.success(getUserFacingMessage('character.batchCommitted', {
+        count: committed.createdCharacterIds.length + committed.updatedCharacterIds.length,
+      }))
     } catch (error) {
       console.error(error)
       setAgentWorkflowStage('blocked')
@@ -1532,6 +1557,17 @@ export default function CharacterWorkspace({ novelId }: Props) {
                           <span key={`${name}-${index}`}><b>{String(index + 1).padStart(2, '0')}</b>{name}</span>
                         ))}
                       </div>
+                      {agentDraft.updatePreview.length > 0 ? (
+                        <div className="character-agent-workflow__updates">
+                          {agentDraft.updatePreview.map((update) => (
+                            <div key={update.characterId}>
+                              <strong>{update.characterName}</strong>
+                              <span>{update.fields.join('、')}</span>
+                              <small>{update.summary}</small>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="character-agent-workflow__review-copy">
                         <strong>{agentDraft.review.summary}</strong>
                         <span>草稿哈希：{agentDraft.draftArtifact.contentHash}</span>
@@ -1553,8 +1589,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
                       <CheckCircleOutlined />
                       <div>
                         <span>CANONICAL COMMIT</span>
-                        <strong>已把 {agentCommit.createdCharacterIds.length} 位人物写入正式人物库</strong>
-                        <p>{agentCommit.createdCharacterNames.join('、')} · 上下文 v{agentCommit.contextVersionBefore} → v{agentCommit.contextVersionAfter}</p>
+                        <strong>已提交 {agentCommit.createdCharacterIds.length + agentCommit.updatedCharacterIds.length} 项人物变化</strong>
+                        <p>{[...agentCommit.createdCharacterNames, ...agentCommit.updatedCharacterNames.map((name) => `${name}（更新）`)].join('、')} · 上下文 v{agentCommit.contextVersionBefore} → v{agentCommit.contextVersionAfter}</p>
                       </div>
                     </section>
                   ) : null}

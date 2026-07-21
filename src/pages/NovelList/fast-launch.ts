@@ -271,26 +271,30 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
     launchMode: 'fast_launch',
     targetWords: input.targetWords,
   })
-  const chapterTargetWords = operatingModePolicy.chapterWords.recommended
+  const chapterReferenceWords = [
+    Math.max(1000, Math.round(operatingModePolicy.chapterWords.recommended * 0.8)),
+    operatingModePolicy.chapterWords.recommended,
+    Math.round(operatingModePolicy.chapterWords.recommended * 1.2),
+  ]
 
   const chapters = [
     {
       chapterNum: 1,
       title: '钩子引爆',
       outline: `让主角以“${protagonistStart}”状态登场，并在本章内被“${coreHook}”直接击中，结尾必须进入不可回退的新局面。`,
-      targetWords: chapterTargetWords,
+      targetWords: chapterReferenceWords[0],
     },
     {
       chapterNum: 2,
       title: '阻力落地',
       outline: `把“${coreConflict}”落成具体阻力，展示主角第一次试图应对时碰到的失败、代价或关系裂缝。`,
-      targetWords: chapterTargetWords,
+      targetWords: chapterReferenceWords[1],
     },
     {
       chapterNum: 3,
       title: '方向确认',
       outline: `确认第一卷方向与代价链，让主角看见通往“${endgameDirection}”的代价，并给出足够强的继续追读钩子。`,
-      targetWords: chapterTargetWords,
+      targetWords: chapterReferenceWords[2],
     },
   ]
 
@@ -350,7 +354,7 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
       arcSummary: `围绕“${coreHook}”起势，在前三章建立冲突、阻力与代价，并把故事推向“${endgameDirection}”。`,
       chapterStart: 1,
       chapterEnd: 3,
-      targetWords: Math.max(9000, chapterTargetWords * 3),
+      targetWords: Math.max(9000, chapterReferenceWords.reduce((sum, words) => sum + words, 0)),
     },
     thread: {
       title: '主线线程',

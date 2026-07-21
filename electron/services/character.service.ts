@@ -1,7 +1,7 @@
 import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
+import { chapters, characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
 import type { CharacterAiPatchResult, CharacterBatchGenerationOptions } from '../../src/types'
 import { safeParseJson, salvageAiJsonArrayItems } from '../utils/json'
 import { buildStoryProfile } from './context.service'
@@ -471,6 +471,7 @@ function buildCharacterPatchPrompt(params: {
   currentProfile: string
   relationSummary: string
   itemSummary: string
+  recentEvidence?: string
   instruction: string
 }): string {
   return [
@@ -494,12 +495,48 @@ function buildCharacterPatchPrompt(params: {
     params.profile.worldRulesSummary ? `世界规则：\n${params.profile.worldRulesSummary}` : '',
     params.relationSummary ? `人物关系：\n${params.relationSummary}` : '',
     params.itemSummary ? `关联资源：\n${params.itemSummary}` : '',
+    params.recentEvidence ? `最近正文证据：\n${params.recentEvidence}` : '',
     '',
     `当前人物：${params.current.fullName}（${params.current.roleType || 'minor'}）`,
     params.currentProfile,
     '',
     `用户修改要求：${params.instruction}`,
   ].filter(Boolean).join('\n')
+}
+
+function buildRecentCharacterEvidence(novelId: number, character: typeof characters.$inferSelect): string {
+  const db = getDb()
+  const aliases = new Set([character.fullName])
+  try {
+    const sourceContext = JSON.parse(character.sourceContextJson || '{}') as Record<string, unknown>
+    for (const key of ['aliases', 'aliasTerms']) {
+      const values = sourceContext[key]
+      if (Array.isArray(values)) {
+        values.filter((value): value is string => typeof value === 'string' && value.trim().length > 1)
+          .forEach((value) => aliases.add(value.trim()))
+      }
+    }
+  } catch {
+    // Historical character cards may contain non-JSON source context.
+  }
+  const evidenceTerms = [...aliases]
+  const rows = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+    .filter((chapter) => {
+      const haystack = [chapter.title, chapter.summary, chapter.outline, chapter.content]
+        .filter(Boolean)
+        .join(' ')
+      return evidenceTerms.some((term) => haystack.includes(term))
+    })
+    .slice(-6)
+
+  return rows.map((chapter) => {
+    const content = (chapter.content || '').replace(/\s+/gu, ' ').trim()
+    const evidence = chapter.summary || chapter.outline || content.slice(0, 360)
+    return `第${chapter.chapterNum}章《${chapter.title || '未命名'}》：${evidence.slice(0, 420)}`
+  }).join('\n')
 }
 
 function buildCharacterReviewContext(params: {
@@ -2139,23 +2176,40 @@ export async function suggestCharacterPatch(id: number, instruction: string): Pr
     .filter(Boolean)
     .join('\n')
 
-  const raw = await runChatTask({
+  const recentEvidence = buildRecentCharacterEvidence(current.novelId, current)
+  const messages = [{
+    role: 'user' as const,
+    content: buildCharacterPatchPrompt({
+      novelTitle: novel.title,
+      profile,
+      current,
+      currentProfile: buildCurrentProfileSummary(current),
+      relationSummary,
+      itemSummary: buildItemResourceSummary(itemRows),
+      recentEvidence,
+      instruction: trimmedInstruction,
+    }),
+  }]
+  const inputJson = JSON.stringify(messages)
+  const taskId = await createTask({
     type: 'character_gen',
     novelId: current.novelId,
     relatedEntityType: 'character',
     relatedEntityId: current.id,
     retryable: true,
+    inputJson,
+    runnerType: 'chat',
+  })
+  const raw = await executeChatTask(taskId, {
+    type: 'character_gen',
+    novelId: current.novelId,
+    relatedEntityType: 'character',
+    relatedEntityId: current.id,
+    retryable: true,
+    inputJson,
     messages: [{
       role: 'user',
-      content: buildCharacterPatchPrompt({
-        novelTitle: novel.title,
-        profile,
-        current,
-        currentProfile: buildCurrentProfileSummary(current),
-        relationSummary,
-        itemSummary: buildItemResourceSummary(itemRows),
-        instruction: trimmedInstruction,
-      }),
+      content: messages[0].content,
     }],
     modelConfigId: novel.modelConfigId || undefined,
   })
@@ -2172,12 +2226,14 @@ export async function suggestCharacterPatch(id: number, instruction: string): Pr
     changedFields,
     warnings: toStringArray(parsed.warnings).slice(0, 6),
     target: { type: 'character', id: current.id, novelId: current.novelId },
+    taskId,
   }
 }
 
 export function applyCharacterPatch(
   id: number,
   patchInput: unknown,
+  options: { skipContextTracking?: boolean } = {},
 ): typeof characters.$inferSelect | null {
   const db = getDb()
   const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
@@ -2189,7 +2245,7 @@ export function applyCharacterPatch(
       : {},
   )
   if (Object.keys(patch).length === 0) return getCharacter(id)
-  updateCharacter(id, patch)
+  updateCharacter(id, patch, options)
   return getCharacter(id)
 }
 

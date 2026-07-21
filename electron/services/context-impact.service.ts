@@ -817,7 +817,7 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
   }
 }
 
-export function validateChapterContractsForGeneration(chapterId: number): void {
+export function getChapterContractBlockers(chapterId: number): string[] {
   const context = loadChapterContractAuditContext(chapterId)
   const blockers: string[] = []
 
@@ -847,6 +847,11 @@ export function validateChapterContractsForGeneration(chapterId: number): void {
     }
   })
 
+  return blockers
+}
+
+export function validateChapterContractsForGeneration(chapterId: number): void {
+  const blockers = getChapterContractBlockers(chapterId)
   if (blockers.length > 0) {
     throw new Error(`章节流水线启动前合同校验未通过：${blockers.join('；')}`)
   }

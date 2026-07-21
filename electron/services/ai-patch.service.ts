@@ -18,6 +18,7 @@ import { markNovelContextChanged } from './context-impact.service'
 import { suggestCharacterPatch, applyCharacterPatch } from './character.service'
 import { updateChapter } from './chapter.service'
 import { updateChapterSegment } from './story-structure.service'
+import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 
 type PatchRecord = Record<string, unknown>
 
@@ -366,7 +367,7 @@ async function suggestStructureChapterPatch(target: AiPatchTarget, instruction: 
           title: current.title || '',
           outline: current.outline || '',
           summary: current.summary || '',
-          targetWords: current.targetWords || 3000,
+          targetWords: current.targetWords || getRecommendedChapterWordsForOperatingMode({ targetWords: novel.targetWords }),
         },
         instruction,
         extraRules: ['不要修改章节编号、所属卷部和正文 content。'],

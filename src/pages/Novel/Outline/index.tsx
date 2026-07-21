@@ -865,7 +865,7 @@ function ChapterCard({
             {arcPoint.alertDetails.length > 0 ? <Tag color="error" className="novel-outline-page__tag-reset">{arcPoint.alertDetails.length} 条告警</Tag> : null}
           </div>
         ) : null}
-        <div className="novel-outline-chapter-card__words novel-outline-page__chapter-words">{chapter.wordCount ?? 0} / {chapter.targetWords ?? 0} 字</div>
+        <div className="novel-outline-chapter-card__words novel-outline-page__chapter-words">已写 {chapter.wordCount ?? 0} 字 · 参考 {chapter.targetWords ?? 0} 字（弹性）</div>
       </div>
     </div>
   )

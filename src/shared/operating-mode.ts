@@ -6,8 +6,10 @@ export interface OperatingModePolicy {
   mode: NovelOperatingMode
   label: string
   chapterWords: {
+    /** 编辑参考范围，不是正文生成的硬性上下限。 */
     min: number
     max: number
+    /** 用于估算章节数、场景密度和上下文预算的参考值。 */
     recommended: number
   }
   defaultSceneCountRange: [number, number]
@@ -42,7 +44,7 @@ const OPERATING_MODE_POLICIES: Record<NovelOperatingMode, OperatingModePolicy> =
   shortform: {
     mode: 'shortform',
     label: '短篇',
-    chapterWords: { min: 2200, max: 2800, recommended: 2500 },
+    chapterWords: { min: 1000, max: 5000, recommended: 2400 },
     defaultSceneCountRange: [2, 4],
     recentContextWindow: 8,
     checkpointScopes: ['novel'],
@@ -51,7 +53,7 @@ const OPERATING_MODE_POLICIES: Record<NovelOperatingMode, OperatingModePolicy> =
   standard_longform: {
     mode: 'standard_longform',
     label: '标准长篇',
-    chapterWords: { min: 2800, max: 3500, recommended: 3000 },
+    chapterWords: { min: 1200, max: 7000, recommended: 3200 },
     defaultSceneCountRange: [4, 6],
     recentContextWindow: 10,
     checkpointScopes: ['novel', 'volume'],
@@ -60,7 +62,7 @@ const OPERATING_MODE_POLICIES: Record<NovelOperatingMode, OperatingModePolicy> =
   epic_longform: {
     mode: 'epic_longform',
     label: '史诗长篇',
-    chapterWords: { min: 2600, max: 3200, recommended: 2900 },
+    chapterWords: { min: 1200, max: 8000, recommended: 3500 },
     defaultSceneCountRange: [3, 5],
     recentContextWindow: 22,
     checkpointScopes: ['novel', 'volume', 'part'],
@@ -69,7 +71,7 @@ const OPERATING_MODE_POLICIES: Record<NovelOperatingMode, OperatingModePolicy> =
   million_longform: {
     mode: 'million_longform',
     label: '百万字长篇',
-    chapterWords: { min: 2200, max: 3000, recommended: 2600 },
+    chapterWords: { min: 1000, max: 8000, recommended: 3200 },
     defaultSceneCountRange: [3, 5],
     recentContextWindow: 35,
     checkpointScopes: ['novel', 'volume', 'part'],
@@ -264,5 +266,5 @@ export function getOperatingModeOptionsSummary(novel: {
     targetWords: novel?.targetWords,
     settingsJson: novel?.settingsJson,
   })
-  return `${policy.label} · ${policy.chapterWords.recommended} 字/章 · 近期窗口 ${policy.recentContextWindow} 章`
+  return `${policy.label} · 参考 ${policy.chapterWords.recommended} 字/章（弹性） · 近期窗口 ${policy.recentContextWindow} 章`
 }
