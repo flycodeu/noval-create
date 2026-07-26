@@ -9,6 +9,7 @@ import type {
   AssetImpactTargetType,
 } from '../../src/types'
 import { getDb } from '../database/db'
+import { translateContextChangeReason } from '../../src/shared/context-change-reasons'
 import {
   assetChangeEvents,
   assetChangeImpacts,
@@ -522,7 +523,7 @@ export function recordAssetChangeEvent(input: AssetChangeEventInput): AppAssetCh
     assetId: input.assetId ?? null,
     assetLabel,
     operation: input.operation || 'update',
-    changeReason: input.changeReason || null,
+    changeReason: input.changeReason ? translateContextChangeReason(input.changeReason) : null,
     impactLevel: input.impactLevel || 'medium',
     triggeredBy: input.triggeredBy || 'system',
     payloadJson: stringifyPayload(input.payload),
