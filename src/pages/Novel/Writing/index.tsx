@@ -260,10 +260,14 @@ function getSelectionSnapshot(container: HTMLElement): TextSelectionSnapshot | n
   prefixRange.selectNodeContents(container)
   prefixRange.setEnd(range.startContainer, range.startOffset)
 
-  const text = normalizeEditorText(range.toString()).trim()
+  const rawText = normalizeEditorText(range.toString())
+  const text = rawText.trim()
   if (!text) return null
 
-  const start = normalizeEditorText(prefixRange.toString()).length
+  // Offset the start by any trimmed leading whitespace, otherwise the
+  // replacement range shifts forward and eats trailing characters.
+  const leadingTrimmed = rawText.length - rawText.trimStart().length
+  const start = normalizeEditorText(prefixRange.toString()).length + leadingTrimmed
   return {
     start,
     end: start + text.length,
@@ -1475,7 +1479,19 @@ export default function Writing({ novelId }: Props) {
       : getUserFacingMessage('writing.gateIssueOpen'))
   }, [currentChapter, navigate, navigateToWritingRoute, novelId])
 
+  const statusChangeInFlightRef = useRef(false)
   const handleStatusChange = async (status: string) => {
+    if (!currentChapter) return
+    if (statusChangeInFlightRef.current) return
+    statusChangeInFlightRef.current = true
+    try {
+      await handleStatusChangeInternal(status)
+    } finally {
+      statusChangeInFlightRef.current = false
+    }
+  }
+
+  const handleStatusChangeInternal = async (status: string) => {
     if (!currentChapter) return
     if (status === 'final') {
       const nextPublishCheck = await window.electron.chapter.runPublishCheck(currentChapter.id)
