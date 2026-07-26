@@ -17,9 +17,16 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
+import { useThemeStore, type Theme } from '../../../stores/theme.store'
 import WindowControls from '../../Layout/WindowControls'
 import TaskIndicator from '../../TaskIndicator'
 import './ProjectTopbar.css'
+
+const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: string }> = [
+  { value: 'dark', label: '深色', icon: '🌙' },
+  { value: 'light', label: '浅色', icon: '☀️' },
+  { value: 'soft', label: '柔和', icon: '🍵' },
+]
 
 interface ProjectTopbarProps {
   projectTitle: string
@@ -77,6 +84,16 @@ export default function ProjectTopbar({
   statusText,
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
+  const { theme, setTheme } = useThemeStore()
+  const themeMenu = useMemo<MenuProps>(() => ({
+    selectedKeys: [theme],
+    items: THEME_OPTIONS.map((option) => ({
+      key: option.value,
+      label: `${option.icon} ${option.label}`,
+      onClick: () => setTheme(option.value),
+    })),
+  }), [theme, setTheme])
+  const activeThemeIcon = THEME_OPTIONS.find((option) => option.value === theme)?.icon || '🌙'
   const overflowMenu = useMemo<MenuProps>(() => {
     const items: NonNullable<MenuProps['items']> = []
     const appendDivider = () => {
@@ -190,6 +207,16 @@ export default function ProjectTopbar({
         </div>
 
         <div className="project-topbar__toolbar">
+          <Dropdown menu={themeMenu} trigger={['click']} placement="bottomRight">
+            <button
+              type="button"
+              className="project-topbar__theme-toggle"
+              aria-label="切换主题"
+              title="切换主题"
+            >
+              {activeThemeIcon}
+            </button>
+          </Dropdown>
           <TaskIndicator className="project-topbar__task-indicator" />
           <div className={`project-topbar__status-badge project-topbar__status-badge--${statusTone}`}>
             <span className="project-topbar__status-dot" aria-hidden="true" />

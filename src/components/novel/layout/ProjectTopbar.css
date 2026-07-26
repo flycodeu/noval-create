@@ -459,3 +459,21 @@
     padding-inline: 12px;
   }
 }
+
+.project-topbar__theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.project-topbar__theme-toggle:hover {
+  background: var(--bg-hover, rgba(125, 125, 125, 0.12));
+}
