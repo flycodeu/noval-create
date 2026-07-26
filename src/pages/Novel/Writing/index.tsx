@@ -11,6 +11,7 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
+import ActionErrorAlert from '../../../components/common/ActionErrorAlert'
 import TruncatedList from '../../../components/common/TruncatedList'
 import ActionBar from '../../../components/novel/common/ActionBar'
 import SectionHeader from '../../../components/novel/common/SectionHeader'
@@ -83,6 +84,7 @@ import InsightPanel, {
   normalizeIdArray,
   type WritingRouteKey,
 } from './components/InsightPanel'
+import StreamingOutput from './components/StreamingOutput'
 import RewriteSelectionModal from './components/modals/RewriteSelectionModal'
 import OptimizeCandidateModal from './components/modals/OptimizeCandidateModal'
 import ParallelGenerationModal from './components/modals/ParallelGenerationModal'
@@ -116,6 +118,13 @@ interface TextSelectionSnapshot {
   start: number
   end: number
   text: string
+}
+
+/** 主链路（生成 / 优化 / 审校）失败后的区域内持久提示。 */
+interface WritingActionError {
+  title: string
+  message: string
+  retry?: () => void
 }
 interface ChapterGenerationProgressEvent {
   chapterId: number
@@ -347,6 +356,10 @@ export default function Writing({ novelId }: Props) {
   const [insightPanelOpen, setInsightPanelOpen] = useState(false)
   // 正文优先：修订建议/验收提示默认折叠在编辑器下方，避免把正文挤出首屏。
   const [advisoryPanelOpen, setAdvisoryPanelOpen] = useState(false)
+  // 主链路失败提示常驻编辑器区域，替代一闪而过的 message.error。
+  const [actionError, setActionError] = useState<WritingActionError | null>(null)
+  const generateRetryRef = useRef<() => void>(() => {})
+  const resumeRetryRef = useRef<() => void>(() => {})
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
     const routeKey = location.pathname.split('/').filter(Boolean)[3]
@@ -414,6 +427,7 @@ export default function Writing({ novelId }: Props) {
     setPublishCheck(null)
     setGateReportExpanded(false)
     setSelectedSnippet(null)
+    setActionError(null)
   }, [])
 
   const resetEditorHistory = useCallback((nextText: string) => {
@@ -818,6 +832,12 @@ export default function Writing({ novelId }: Props) {
         })
         if (payload.status === 'cancelled') {
           message.info(getUserFacingMessage('writing.generateCancelled'))
+        } else if (currentChapterIdRef.current === payload.chapterId) {
+          setActionError({
+            title: '章节流水线执行失败',
+            message: payload.detail || getUserFacingMessage('writing.generateFailed'),
+            retry: () => generateRetryRef.current(),
+          })
         } else {
           message.error(getUserFacingMessage('writing.generateFailed'))
         }
@@ -907,7 +927,15 @@ export default function Writing({ novelId }: Props) {
         detail: activeGeneration.detail || getUserFacingMessage('writing.generateFailed'),
         error: activeGeneration.error || activeGeneration.detail || getUserFacingMessage('writing.generateFailed'),
       })
-      message.error(getUserFacingMessage('writing.generateFailed'))
+      if (currentChapterIdRef.current === chapterId) {
+        setActionError({
+          title: '章节流水线执行失败',
+          message: activeGeneration.error || activeGeneration.detail || getUserFacingMessage('writing.generateFailed'),
+          retry: () => generateRetryRef.current(),
+        })
+      } else {
+        message.error(getUserFacingMessage('writing.generateFailed'))
+      }
     }
     if (stream.status === 'cancelled') {
       const chapterId = activeGeneration.chapterId
@@ -1127,6 +1155,7 @@ export default function Writing({ novelId }: Props) {
     }
     generationStartingRef.current = true
     generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
+    setActionError(null)
     startGeneration({ chapterId: currentChapter.id })
     updateGenerationStage({
       chapterId: currentChapter.id,
@@ -1150,7 +1179,11 @@ export default function Writing({ novelId }: Props) {
         detail: errorMessage,
         error: errorMessage,
       })
-      message.error(errorMessage)
+      setActionError({
+        title: '章节流水线启动失败',
+        message: errorMessage,
+        retry: () => generateRetryRef.current(),
+      })
     } finally {
       generationStartingRef.current = false
     }
@@ -1165,6 +1198,10 @@ export default function Writing({ novelId }: Props) {
     updateGenerationStage,
     updateGenerationTask,
   ])
+
+  useEffect(() => {
+    generateRetryRef.current = () => void handleGenerateContent()
+  }, [handleGenerateContent])
 
   const persistedPipelineSnapshot = useMemo(
     () => parsePipelineSnapshot(latestPipelineTask?.progressJson),
@@ -1194,6 +1231,7 @@ export default function Writing({ novelId }: Props) {
     if (generationStartingRef.current || activeGeneration.status === 'running') return
     generationStartingRef.current = true
     generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
+    setActionError(null)
     startGeneration({ chapterId: currentChapter.id, taskId: latestPipelineTask.id })
     updateGenerationStage({
       chapterId: currentChapter.id,
@@ -1216,11 +1254,19 @@ export default function Writing({ novelId }: Props) {
         detail: errorMessage,
         error: errorMessage,
       })
-      message.error(errorMessage)
+      setActionError({
+        title: '断点续写启动失败',
+        message: errorMessage,
+        retry: () => resumeRetryRef.current(),
+      })
     } finally {
       generationStartingRef.current = false
     }
   }, [activeGeneration.status, completeGeneration, currentChapter, hasResumablePartialContent, latestPipelineTask?.id, resumablePartialContent, startGeneration, updateGenerationStage, updateGenerationTask])
+
+  useEffect(() => {
+    resumeRetryRef.current = () => void handleResumePartialContent()
+  }, [handleResumePartialContent])
 
   const handleRestartGeneration = useCallback(async () => {
     await handleGenerateContent()
@@ -1278,15 +1324,20 @@ export default function Writing({ novelId }: Props) {
 
   const handleAiCheck = async () => {
     if (!currentChapter) return
+    setActionError(null)
     try {
       setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload)
       navigateToWritingRoute('review')
       await refreshQualityDashboard()
     }
     catch (error: unknown) {
-      message.error(getUserFacingMessage('writing.aiCheckFailed', {
-        detail: error instanceof Error ? error.message : '请稍后重试。',
-      }))
+      setActionError({
+        title: '章节审校失败',
+        message: getUserFacingMessage('writing.aiCheckFailed', {
+          detail: error instanceof Error ? error.message : '请稍后重试。',
+        }),
+        retry: () => void handleAiCheck(),
+      })
     }
   }
 
@@ -1338,6 +1389,7 @@ export default function Writing({ novelId }: Props) {
     if (!currentChapter || hasMultiSegments) return
     const latestText = normalizeEditorText(editorRef.current?.innerText || content)
     setOptimizingChapter(true)
+    setActionError(null)
     try {
       await saveNow(currentChapter.id, latestText)
       const result = await window.electron.chapter.optimizeContent(currentChapter.id, {
@@ -1348,7 +1400,11 @@ export default function Writing({ novelId }: Props) {
       setOptimizeModalOpen(true)
       navigateToWritingRoute('review')
     } catch (error: unknown) {
-      message.error(getErrorMessage(error, 'writing.optimizeFailed'))
+      setActionError({
+        title: '整章优化失败',
+        message: getErrorMessage(error, 'writing.optimizeFailed'),
+        retry: () => void handleOptimizeChapter(),
+      })
     } finally {
       setOptimizingChapter(false)
     }
@@ -1836,9 +1892,6 @@ export default function Writing({ novelId }: Props) {
   }, [currentPipelineSnapshot])
 
   const currentStatusLabel = currentChapter ? getStatusLabel(currentChapter.status) : '未选择章节'
-  const streamContent = currentChapterGenerating && activeGeneration.streamTaskId
-    ? streams[activeGeneration.streamTaskId]?.content || ''
-    : ''
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
   const editorAdvisoryCount = productionBriefItems.length
     + (currentChapterStaleReasons.length > 0 ? 1 : 0)
@@ -2700,11 +2753,17 @@ export default function Writing({ novelId }: Props) {
                     </div>
                   </ActionBar>
 
+                  {actionError ? (
+                    <ActionErrorAlert
+                      title={actionError.title}
+                      message={actionError.message}
+                      onRetry={actionError.retry}
+                      onDismiss={() => setActionError(null)}
+                    />
+                  ) : null}
+
                   {currentChapterGenerating ? (
-                    <div className="chapter-console-page__stream">
-                      <div className="chapter-console-page__stream-head">AI 正在生产本章 <Spin size="small" /></div>
-                      <div className="chapter-console-page__stream-body">{streamContent}<span className="streaming-cursor" /></div>
-                    </div>
+                    <StreamingOutput streamTaskId={activeGeneration.streamTaskId} />
                   ) : null}
 
                   {hasResumablePartialContent ? (
