@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Spin, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Input, InputNumber, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -9,7 +9,6 @@ import {
   LoadingOutlined,
   PlusOutlined,
   RobotOutlined,
-  UnorderedListOutlined,
 } from '@ant-design/icons'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -57,9 +56,11 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
-import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
+import { useWritingViewStore, type WritingGenerationStage } from '../../../stores/writingView.store'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { createChapterSaveCoordinator } from './chapter-save-coordinator'
+import { formatChapterNumber, getStatusLabel } from './chapter-labels'
+import ChapterNavigator from './components/ChapterNavigator'
 import RewriteSelectionModal from './components/modals/RewriteSelectionModal'
 import OptimizeCandidateModal from './components/modals/OptimizeCandidateModal'
 import ParallelGenerationModal from './components/modals/ParallelGenerationModal'
@@ -140,21 +141,11 @@ const WritingContextRoute = React.lazy(loadWritingContextRoute)
 const WritingReviewRoute = React.lazy(loadWritingReviewRoute)
 const WritingHistoryRoute = React.lazy(loadWritingHistoryRoute)
 
-const STATUS_OPTIONS = [
-  { value: 'outline', label: '待写' },
-  { value: 'writing', label: '写作中' },
-  { value: 'draft', label: '草稿' },
-  { value: 'reviewing', label: '审校中' },
-  { value: 'final', label: '已完成' },
-]
-
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatPipelineMetaValue = (value: string, maxLength = 72) => {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength - 18)}…${value.slice(-16)}`
 }
-const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
-const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
 const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '需要处理问题')
@@ -309,17 +300,6 @@ function getCurrentVolumeNumber(chapter: Chapter | null, volumes: StoryVolume[])
   return currentVolume?.volumeNumber || null
 }
 
-function getVolumeDisplayName(volume?: StoryVolume | null): string {
-  if (!volume) return '未绑定卷'
-  return volume.title?.trim() || `第${volume.volumeNumber}卷`
-}
-
-function getVolumeStatusLabel(status?: StoryVolume['status']): string {
-  if (status === 'locked') return '已锁定'
-  if (status === 'draft') return '草稿'
-  return '规划中'
-}
-
 function computeVolumeTruthRevealStats(
   chapter: Chapter | null,
   volumes: StoryVolume[],
@@ -396,13 +376,6 @@ function chapterVersionSourceLabel(source: ChapterVersion['versionSource']) {
   return '手动保存'
 }
 
-function getGenerationTagMeta(snapshot: WritingGenerationSnapshot) {
-  if (snapshot.status === 'running') return { color: 'processing' as const, label: '生成中' }
-  if (snapshot.status === 'failed') return { color: 'error' as const, label: '失败' }
-  if (snapshot.status === 'cancelled') return { color: 'default' as const, label: '已取消' }
-  return { color: 'success' as const, label: '刚完成' }
-}
-
 export default function Writing({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -466,7 +439,6 @@ export default function Writing({ novelId }: Props) {
   const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
   const [livePipelineSnapshot, setLivePipelineSnapshot] = useState<WritingPipelineSnapshot | null>(null)
   const [gateReportExpanded, setGateReportExpanded] = useState(false)
-  const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [selectedSnippet, setSelectedSnippet] = useState<TextSelectionSnapshot | null>(null)
   const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
   const [rewriteRequirements, setRewriteRequirements] = useState('')
@@ -1788,61 +1760,6 @@ export default function Writing({ novelId }: Props) {
     () => computeVolumeTruthRevealStats(currentChapter, storyVolumes, storyFacts),
     [currentChapter, storyFacts, storyVolumes],
   )
-  const chapterVolumeGroups = useMemo(() => {
-    const volumeById = new Map(storyVolumes.map((volume) => [volume.id, volume]))
-    const grouped = new Map<string, {
-      key: string
-      volumeId: number | null
-      label: string
-      meta: string
-      chapters: Chapter[]
-      sort: number
-    }>()
-
-    storyVolumes.forEach((volume) => {
-      grouped.set(`volume-${volume.id}`, {
-        key: `volume-${volume.id}`,
-        volumeId: volume.id,
-        label: getVolumeDisplayName(volume),
-        meta: `${getVolumeStatusLabel(volume.status)} · 目标 ${volume.targetWords.toLocaleString()} 字`,
-        chapters: [],
-        sort: volume.volumeNumber || 9999,
-      })
-    })
-
-    chapters.forEach((chapter) => {
-      const volume = chapter.volumeId ? volumeById.get(chapter.volumeId) : null
-      const key = volume ? `volume-${volume.id}` : 'unbound'
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          key,
-          volumeId: volume?.id || null,
-          label: volume ? getVolumeDisplayName(volume) : '未绑定卷',
-          meta: volume
-            ? `${getVolumeStatusLabel(volume.status)} · 目标 ${volume.targetWords.toLocaleString()} 字`
-            : '这些章节还没有归入卷级结构',
-          chapters: [],
-          sort: volume?.volumeNumber || 9999,
-        })
-      }
-      grouped.get(key)?.chapters.push(chapter)
-    })
-
-    return Array.from(grouped.values())
-      .filter((group) => group.chapters.length > 0 || group.volumeId !== null)
-      .sort((left, right) => left.sort - right.sort || left.label.localeCompare(right.label))
-      .map((group) => ({
-        ...group,
-        chapters: group.chapters.sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id),
-      }))
-  }, [chapters, storyVolumes])
-  const currentVolumeGroupKey = currentChapter
-    ? currentChapter.volumeId ? `volume-${currentChapter.volumeId}` : 'unbound'
-    : chapterVolumeGroups.find((group) => group.chapters.length > 0)?.key || chapterVolumeGroups[0]?.key || 'unbound'
-  const currentVolumeGroup = useMemo(
-    () => chapterVolumeGroups.find((group) => group.key === currentVolumeGroupKey) || null,
-    [chapterVolumeGroups, currentVolumeGroupKey],
-  )
   const currentChapterStaleReasons = useMemo(() => parseStringArray(currentChapter?.staleReasonJson), [currentChapter?.staleReasonJson])
   const worldRulesSummary = useMemo(() => getWorldRulesSummary(currentNovel?.worldRulesJson), [currentNovel?.worldRulesJson])
   const chapterIdToNum = useMemo(() => new Map(chapters.map((chapter) => [chapter.id, chapter.chapterNum])), [chapters])
@@ -2776,103 +2693,19 @@ export default function Writing({ novelId }: Props) {
 
             <div className={`chapter-console-page__grid${insightPanelOpen ? ' has-assist-panel' : ' is-assist-collapsed'}`}>
               <aside className="chapter-console-page__column chapter-console-page__column--left">
-                <section className="chapter-console-page__panel">
-                  <SectionHeader
-                    eyebrow="章节生产"
-                    title="卷 / 章导航"
-                    description={`共 ${chapterVolumeGroups.length || 0} 卷组、${chapters.length} 章，按长篇结构选择当前要写的章节。`}
-                    extra={(
-                      <Button size="small" icon={<UnorderedListOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'structure'))}>
-                        结构
-                      </Button>
-                    )}
-                  />
-                  <div className="chapter-console-page__chapter-list">
-                    {chapterVolumeGroups.length > 0 ? chapterVolumeGroups.map((group) => (
-                      <section
-                        key={group.key}
-                        className={`chapter-console-page__volume-group${group.key === currentVolumeGroupKey ? ' is-active' : ''}`}
-                      >
-                        <div className="chapter-console-page__volume-head">
-                          <div className="chapter-console-page__volume-title">
-                            <strong>{group.label}</strong>
-                            <span>{`${group.chapters.length} 章 · ${group.chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字`}</span>
-                          </div>
-                          <div className="chapter-console-page__volume-tools">
-                            <span>{group.meta}</span>
-                            {group.volumeId ? (
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={<PlusOutlined />}
-                                onClick={() => void handleAddChapter(group.volumeId)}
-                              >
-                                新章
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="chapter-console-page__volume-chapters">
-                          {group.chapters.length > 0 ? group.chapters.map((chapter) => {
-                            const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
-                              ? activeGeneration
-                              : lastGenerationByChapter[chapter.id]
-                            const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
-                            return (
-                              <div
-                                key={chapter.id}
-                                className={`chapter-console-page__chapter-card ${currentChapterId === chapter.id ? 'is-active' : ''}`}
-                                onClick={() => void handleSelectChapter(chapter.id)}
-                                onMouseEnter={() => setHoverChapterId(chapter.id)}
-                                onMouseLeave={() => setHoverChapterId(null)}
-                              >
-                                <div className="chapter-console-page__chapter-copy">
-                                  <strong>{formatChapterNumber(chapter.chapterNum)}</strong>
-                                  <span>{chapter.title || `第${chapter.chapterNum}章`}</span>
-                                  <small>{`${chapter.wordCount} 字 · ${getStatusLabel(chapter.status)}`}</small>
-                                  <div className="chapter-console-page__chapter-tags">
-                                    {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
-                                    {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
-                                  </div>
-                                </div>
-                                {hoverChapterId === chapter.id ? (
-                                  <Button
-                                    type="text"
-                                    size="small"
-                                    danger
-                                    icon={<DeleteOutlined />}
-                                    onClick={(event) => handleDeleteChapter(chapter.id, event)}
-                                  />
-                                ) : null}
-                              </div>
-                            )
-                          }) : (
-                            <div className="chapter-console-page__volume-empty">当前卷还没有章节。</div>
-                          )}
-                        </div>
-                      </section>
-                    )) : <Empty description="还没有章节，先创建一个。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-                  </div>
-                  <ActionBar align="between">
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter(currentVolumeGroup?.volumeId)}>
-                      在当前卷新建章
-                    </Button>
-                    <Select
-                      size="small"
-                      className="writing-layout-select-generation"
-                      value={generationExecutionModeOverride}
-                      options={[
-                        { value: 'follow_default', label: `跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）` },
-                        ...AI_EXECUTION_MODE_OPTIONS.map((item) => ({
-                          value: item.value,
-                          label: `本次覆盖·${item.label}`,
-                        })),
-                      ]}
-                      onChange={(value) => setGenerationExecutionModeOverride(value)}
-                    />
-                  </ActionBar>
-                </section>
-
+                <ChapterNavigator
+                  chapters={chapters}
+                  volumes={storyVolumes}
+                  currentChapter={currentChapter}
+                  currentChapterId={currentChapterId}
+                  defaultAiExecutionMode={defaultAiExecutionMode}
+                  executionModeOverride={generationExecutionModeOverride}
+                  onExecutionModeChange={setGenerationExecutionModeOverride}
+                  onSelectChapter={(chapterId) => void handleSelectChapter(chapterId)}
+                  onAddChapter={(volumeId) => void handleAddChapter(volumeId)}
+                  onDeleteChapter={(chapterId, event) => void handleDeleteChapter(chapterId, event)}
+                  onOpenStructure={() => navigate(buildWorkspaceRoute(novelId, 'structure'))}
+                />
               </aside>
 
               <section className="chapter-console-page__column chapter-console-page__column--center">
