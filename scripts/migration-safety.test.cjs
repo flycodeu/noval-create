@@ -274,6 +274,10 @@ function testFreshDbIsIdempotent() {
       '0043_generation_idempotency_keys',
       '0044_writeback_apply_claims',
       '0045_novel_lifecycle_mode',
+      '0046_semantic_gate_reviews',
+      '0047_style_lab',
+      '0048_scene_design_fields',
+      '0049_outline_design_gate_results',
     ])
 
     runMigrations(db)
@@ -398,6 +402,10 @@ function testPartialSchemaCanResume() {
       '0043_generation_idempotency_keys',
       '0044_writeback_apply_claims',
       '0045_novel_lifecycle_mode',
+      '0046_semantic_gate_reviews',
+      '0047_style_lab',
+      '0048_scene_design_fields',
+      '0049_outline_design_gate_results',
     ])
 
     const configs = db.prepare(`
@@ -531,6 +539,10 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
     assert.ok(getMigrationIds(db).includes('0044_writeback_apply_claims'))
     assert.ok(getMigrationIds(db).includes('0045_novel_lifecycle_mode'))
+    assert.ok(getMigrationIds(db).includes('0046_semantic_gate_reviews'))
+    assert.ok(getMigrationIds(db).includes('0047_style_lab'))
+    assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
+    assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
   } finally {
     db.close()
   }
@@ -623,6 +635,10 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getMigrationIds(db).includes('0043_generation_idempotency_keys'))
     assert.ok(getMigrationIds(db).includes('0044_writeback_apply_claims'))
     assert.ok(getMigrationIds(db).includes('0045_novel_lifecycle_mode'))
+    assert.ok(getMigrationIds(db).includes('0046_semantic_gate_reviews'))
+    assert.ok(getMigrationIds(db).includes('0047_style_lab'))
+    assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
+    assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
   } finally {
     db.close()
   }
