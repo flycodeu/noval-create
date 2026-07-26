@@ -1338,3 +1338,23 @@ export type CharacterStateVersion = typeof characterStateVersions.$inferSelect
 export type NewCharacterStateVersion = typeof characterStateVersions.$inferInsert
 export type WorldStateVersion = typeof worldStateVersions.$inferSelect
 export type NewWorldStateVersion = typeof worldStateVersions.$inferInsert
+
+export const semanticGateReviews = sqliteTable('semantic_gate_reviews', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  chapterId: integer('chapter_id').notNull(),
+  stage: text('stage').notNull().default('critic'),
+  mode: text('mode').notNull().default('shadow'),
+  dimensionsJson: text('dimensions_json').notNull().default('[]'),
+  verdictsJson: text('verdicts_json').notNull().default('[]'),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  evidenceAccepted: integer('evidence_accepted').notNull().default(0),
+  evidenceRejected: integer('evidence_rejected').notNull().default(0),
+  failed: integer('failed').notNull().default(0),
+  modelConfigId: integer('model_config_id'),
+  promptFingerprint: text('prompt_fingerprint'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type SemanticGateReviewRow = typeof semanticGateReviews.$inferSelect
+export type NewSemanticGateReviewRow = typeof semanticGateReviews.$inferInsert

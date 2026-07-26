@@ -2215,6 +2215,31 @@ export function runMigrations(sqlite: Database.Database) {
       WHERE status = 'archived';
     `)
   })
+
+  runMigrationStep(sqlite, '0046_semantic_gate_reviews', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS semantic_gate_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        chapter_id INTEGER NOT NULL,
+        stage TEXT NOT NULL DEFAULT 'critic',
+        mode TEXT NOT NULL DEFAULT 'shadow',
+        dimensions_json TEXT NOT NULL DEFAULT '[]',
+        verdicts_json TEXT NOT NULL DEFAULT '[]',
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        evidence_accepted INTEGER NOT NULL DEFAULT 0,
+        evidence_rejected INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        model_config_id INTEGER,
+        prompt_fingerprint TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_semantic_gate_reviews_chapter
+        ON semantic_gate_reviews(chapter_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_semantic_gate_reviews_novel
+        ON semantic_gate_reviews(novel_id, created_at);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

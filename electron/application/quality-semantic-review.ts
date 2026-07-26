@@ -2,6 +2,7 @@ import type {
   AgentQualityFindingSeverity,
   AgentQualitySemanticDimension,
 } from '../../src/shared/quality-agent-workflow'
+import { normalizeForEvidence } from '../../src/shared/semantic-gate'
 
 const WINDOW_SIZE = 10
 const WINDOW_OVERLAP = 2
@@ -83,10 +84,6 @@ function text(value: unknown, limit = 1_200): string {
   if (typeof value !== 'string') return ''
   const normalized = value.trim()
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}…`
-}
-
-function normalizeForEvidence(value: string): string {
-  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 }
 
 function dimension(value: unknown, allowed: Set<AgentQualitySemanticDimension>): AgentQualitySemanticDimension | null {
