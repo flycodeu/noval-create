@@ -19,6 +19,7 @@ import { type ContractPanelSection } from '../../../components/novel/writing/Con
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
 import ReviewNotesPanel from '../../../components/novel/writing/ReviewNotesPanel'
 import { formatFailure } from '../../../shared/task-labels'
+import { formatStaleReasonsSummary, translateContextChangeReasons } from '../../../shared/context-change-reasons'
 import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
   AI_EXECUTION_MODE_OPTIONS,
@@ -1731,7 +1732,10 @@ export default function Writing({ novelId }: Props) {
     () => computeVolumeTruthRevealStats(currentChapter, storyVolumes, storyFacts),
     [currentChapter, storyFacts, storyVolumes],
   )
-  const currentChapterStaleReasons = useMemo(() => parseStringArray(currentChapter?.staleReasonJson), [currentChapter?.staleReasonJson])
+  const currentChapterStaleReasons = useMemo(
+    () => translateContextChangeReasons(parseStringArray(currentChapter?.staleReasonJson)),
+    [currentChapter?.staleReasonJson],
+  )
   const worldRulesSummary = useMemo(() => getWorldRulesSummary(currentNovel?.worldRulesJson), [currentNovel?.worldRulesJson])
   const chapterIdToNum = useMemo(() => new Map(chapters.map((chapter) => [chapter.id, chapter.chapterNum])), [chapters])
 
@@ -2867,7 +2871,7 @@ export default function Writing({ novelId }: Props) {
                               showIcon
                               type="warning"
                               message="当前章节上下文已过期"
-                              description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先同步后再继续写。`}
+                              description={formatStaleReasonsSummary(currentChapterStaleReasons)}
                             />
                           ) : null}
                           {currentWritebackStatus?.readyForNextChapter === false ? (
