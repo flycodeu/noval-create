@@ -53,6 +53,7 @@ import * as qualityDashboardService from './services/quality-dashboard.service'
 import * as qualityRepairService from './services/quality-repair.service'
 import * as chapterRecallRuntimeService from './services/chapter-recall-runtime.service'
 import * as storyArcProgressService from './services/story-arc-progress.service'
+import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
@@ -882,6 +883,15 @@ function registerIpcHandlers() {
   handle('outline:generateArcs', (_, novelId) => outlineGenerationService.generateStoryArcs(novelId))
   handle('outline:generateChapterOutlines', (_, arcId, options?: { batchSize?: number }) =>
     outlineGenerationService.generateChapterOutlines(arcId, options))
+
+  // Rhythm Templates（内置节奏模板，纯 TS 常量）
+  handle('rhythm:listTemplates', (_, novelId: number) =>
+    rhythmTemplateService.listRhythmTemplatesForNovel(requireId(novelId, 'novelId')))
+  handle('rhythm:attachToArc', (_, arcId: number, templateKey: string | null) =>
+    rhythmTemplateService.attachRhythmTemplateToArc(
+      requireId(arcId, 'arcId'),
+      typeof templateKey === 'string' && templateKey ? templateKey : null,
+    ))
 
   handle('thread:list', (_, novelId) => storyThreadService.listStoryThreads(novelId))
   handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))

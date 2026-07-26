@@ -160,6 +160,7 @@ export const storyArcs = sqliteTable('story_arcs', {
   progressPercent: integer('progress_percent').notNull().default(0),
   stalledChapterCount: integer('stalled_chapter_count').notNull().default(0),
   lastProgressChapterNum: integer('last_progress_chapter_num'),
+  rhythmTemplateKey: text('rhythm_template_key'),
 })
 
 export const storyThreads = sqliteTable('story_threads', {

@@ -264,6 +264,7 @@ import {
 import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
 import { pickProtagonistDramaticEngine } from './context-cards'
 import { getUnresolvedDesignGateFlags } from './outline-design-gate.service'
+import { getChapterRhythmSection } from './rhythm-template.service'
 import {
   buildFallbackScenePlan,
   collectSceneDesignFieldGaps,
@@ -4199,6 +4200,8 @@ async function generateChapterContentInternal(
     if (unresolvedDesignGateFlag) {
       console.warn(`[chapter:plan] 本章处于未消解的设计校验 flagged 记录中 chapter=${chapterId}，已注入设计对齐矫正指令。`)
     }
+    // 弧级节奏模板传导：本章所属弧挂了节奏模板时，把单章节拍段注入 planner prompt（失败静默降级）。
+    const chapterRhythmSection = getChapterRhythmSection(chapter.novelId, chapter.chapterNum, chapter.arcId)
     const plannerMessages = [{
       role: 'user' as const,
       content: buildScenePlanPrompt({
@@ -4210,6 +4213,7 @@ async function generateChapterContentInternal(
         hardConstraintContext: scenePlanContext.hardConstraintContext,
         dialogueVoiceLocks: scenePlanContext.dialogueVoiceLocks,
         designGateDirective: designGateDirective || undefined,
+        rhythmSection: chapterRhythmSection || undefined,
         plotPoints: chapter.outline || '',
         emotionTone: chapter.emotionTone || '平稳',
         targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),

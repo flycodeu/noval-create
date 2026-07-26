@@ -163,6 +163,7 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_arcs').has('progress_percent'))
   assert.ok(getColumns(db, 'story_arcs').has('stalled_chapter_count'))
   assert.ok(getColumns(db, 'story_arcs').has('last_progress_chapter_num'))
+  assert.ok(getColumns(db, 'story_arcs').has('rhythm_template_key'))
   assert.ok(getColumns(db, 'story_threads').has('planted_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('last_referenced_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('resolved_chapter'))
@@ -278,6 +279,7 @@ function testFreshDbIsIdempotent() {
       '0047_style_lab',
       '0048_scene_design_fields',
       '0049_outline_design_gate_results',
+      '0050_story_arc_rhythm',
     ])
 
     runMigrations(db)
@@ -406,6 +408,7 @@ function testPartialSchemaCanResume() {
       '0047_style_lab',
       '0048_scene_design_fields',
       '0049_outline_design_gate_results',
+      '0050_story_arc_rhythm',
     ])
 
     const configs = db.prepare(`
@@ -543,6 +546,7 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0047_style_lab'))
     assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
     assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
+    assert.ok(getMigrationIds(db).includes('0050_story_arc_rhythm'))
   } finally {
     db.close()
   }
@@ -639,6 +643,7 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getMigrationIds(db).includes('0047_style_lab'))
     assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
     assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
+    assert.ok(getMigrationIds(db).includes('0050_story_arc_rhythm'))
   } finally {
     db.close()
   }

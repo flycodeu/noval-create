@@ -101,6 +101,8 @@ export interface StoryArcPromptInput {
   protagonistRule: string
   targetWords?: number
   attemptNumber?: number
+  /** 按题材筛出的节奏骨架参考（模板名+概述），只作可选参考，不强制。 */
+  rhythmTemplateSection?: string
 }
 
 export interface ChapterOutlinePromptInput {
@@ -127,6 +129,8 @@ export interface ChapterOutlinePromptInput {
   protagonistRule: string
   attemptNumber?: number
   designGateDirective?: string
+  /** 弧上挂载的节奏模板换算成本弧章节区间后的节拍约束段。 */
+  rhythmSection?: string
 }
 
 export interface TimelineEventPromptInput {
@@ -213,6 +217,8 @@ export interface ScenePlanPromptInput {
   dialogueVoiceLocks?: string
   /** 弧级设计校验未通过时的矫正指令（设计词元 + 重写要求），本章被 flagged 时注入。 */
   designGateDirective?: string
+  /** 本章所属弧挂载节奏模板时的单章节拍约束段。 */
+  rhythmSection?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -1402,6 +1408,9 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
       '预计总章节：' + params.totalChapters + '章',
       params.targetWords ? '全书规模参考：' + params.targetWords + '字。请在每个弧的 target_words 字段中给出阶段预算，允许根据实际剧情进展重新分配，不要求各弧预算机械相加。' : '',
     ]),
+    params.rhythmTemplateSection
+      ? section('可选节奏骨架参考（不强制）', params.rhythmTemplateSection + '\n以上模板只是常见节奏骨架，可为某些弧借用其张力结构，也可以完全不用；不要为了套模板牺牲主线因果。')
+      : '',
     section('规划要求', [
       '规划 3 到 5 个故事弧，章节范围必须连续、无重叠、无空档。',
       '每个故事弧都要回答：这一段推进了什么、加压了什么、把什么交给下一段。',
@@ -1446,6 +1455,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       params.arcTargetWords ? '本弧字数预算：' + params.arcTargetWords + '字，章节数量和单章篇幅要匹配这个预算。' : '',
       '章节范围：第' + params.chapterStart + '章到第' + params.chapterEnd + '章',
     ]),
+    section('节奏模板约束（本弧已选定，必须执行）', params.rhythmSection),
     sectionLines('连续性上下文', [
       params.previousSummary ? '前情摘要：\n' + params.previousSummary : '',
       params.continuitySummary ? '连续性记忆：\n' + params.continuitySummary : '',
@@ -1631,6 +1641,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
     section('设计对齐矫正（本章被弧级设计校验标记，必须执行）', params.designGateDirective),
+    section('本章节奏节拍（弧级节奏模板换算）', params.rhythmSection),
     section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),

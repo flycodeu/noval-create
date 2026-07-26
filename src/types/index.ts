@@ -3016,6 +3016,17 @@ export interface StoryArc {
   progressPercent?: number
   stalledChapterCount?: number
   lastProgressChapterNum?: number
+  rhythmTemplateKey?: string | null
+}
+
+export interface RhythmTemplateOption {
+  key: string
+  name: string
+  scope: 'opening' | 'arc' | 'volume'
+  summary: string
+  beatCount: number
+  checklist: string[]
+  genreHints: string[]
 }
 
 export interface StoryArcPhaseTarget {
@@ -5884,6 +5895,10 @@ declare global {
         generateArcs: (novelId: number) => Promise<StoryArc[]>
         generateChapterOutlines: (arcId: number, options?: OutlineChapterBatchGenerateOptions) => Promise<OutlineChapterBatchGenerationResult>
         clear: (novelId: number) => Promise<void>
+      }
+      rhythm: {
+        listTemplates: (novelId: number) => Promise<RhythmTemplateOption[]>
+        attachToArc: (arcId: number, templateKey: string | null) => Promise<void>
       }
       thread: {
         list: (novelId: number) => Promise<StoryThread[]>

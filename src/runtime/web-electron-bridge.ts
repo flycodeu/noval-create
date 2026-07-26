@@ -1283,6 +1283,10 @@ export function installWebElectronBridge(): void {
       generateArcs: async (novelId?: unknown) => withLocalBackend('outline', 'generateArcs', [novelId], async () => readOnlyMutation('outline.generateArcs')),
       generateChapterOutlines: async (arcId?: unknown, options?: unknown) => withLocalBackend('outline', 'generateChapterOutlines', [arcId, options], async () => readOnlyMutation('outline.generateChapterOutlines')),
     }),
+    rhythm: createService('rhythm', {
+      listTemplates: async (novelId?: unknown) => withLocalBackend('rhythm', 'listTemplates', [novelId], async () => []),
+      attachToArc: async (arcId?: unknown, templateKey?: unknown) => withLocalBackend('rhythm', 'attachToArc', [arcId, templateKey], async () => readOnlyMutation('rhythm.attachToArc')),
+    }),
     timeline: createService('timeline', {
       list: async (novelId?: unknown) => withLocalBackend('timeline', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('timeline', 'query', [filters], async () => emptyPagedResult),

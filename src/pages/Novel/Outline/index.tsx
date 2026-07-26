@@ -5,6 +5,7 @@ import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type 
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Chapter,
+  RhythmTemplateOption,
   StoryArc,
   StoryArcProgressPoint,
   StoryArcProgressSnapshot,
@@ -47,6 +48,11 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 }
 
 const OUTLINE_CHAPTER_PAGE_SIZE = 50
+const RHYTHM_SCOPE_LABELS: Record<RhythmTemplateOption['scope'], string> = {
+  opening: '开局',
+  arc: '弧级',
+  volume: '卷级',
+}
 const PHASE_FIELD_CONFIG = [
   { key: 'phase_25', label: '25%', ratio: 0.25, chapterField: 'phase25Chapter', beatField: 'phase25Beat' },
   { key: 'phase_50', label: '50%', ratio: 0.5, chapterField: 'phase50Chapter', beatField: 'phase50Beat' },
@@ -128,6 +134,7 @@ export default function Outline({ novelId }: Props) {
     registerSaveHandler,
   } = useNovelWorkspaceActions()
   const [arcs, setArcs] = useState<StoryArc[]>([])
+  const [rhythmTemplates, setRhythmTemplates] = useState<RhythmTemplateOption[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [arcSaving, setArcSaving] = useState(false)
@@ -174,6 +181,31 @@ export default function Outline({ novelId }: Props) {
   }, [novelId, setChapters])
 
   useEffect(() => { void loadData() }, [loadData, mutationToken])
+
+  useEffect(() => {
+    let cancelled = false
+    void window.electron.rhythm.listTemplates(novelId)
+      .then((templates) => { if (!cancelled) setRhythmTemplates(templates) })
+      .catch((error) => console.error(error))
+    return () => { cancelled = true }
+  }, [novelId])
+
+  const rhythmTemplateMap = useMemo(
+    () => new Map(rhythmTemplates.map((template) => [template.key, template])),
+    [rhythmTemplates],
+  )
+
+  const handleAttachRhythmTemplate = useCallback(async (arc: StoryArc, templateKey: string | null) => {
+    try {
+      await window.electron.rhythm.attachToArc(arc.id, templateKey)
+      await loadData()
+      notifyWorkspaceMutation()
+      message.success(getUserFacingMessage(templateKey ? 'rhythm.attached' : 'rhythm.detached'))
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    }
+  }, [loadData, notifyWorkspaceMutation])
 
   const outlineBatch = useChapterOutlineBatch(loadData)
   const outlineBatchRunning = outlineBatch.progress.phase === 'running'
@@ -681,6 +713,13 @@ export default function Outline({ novelId }: Props) {
                       {arc.arcGoal ? <div className="novel-outline-arc__desc">{arc.arcGoal}</div> : null}
                       {arc.growthLedger ? <div className="novel-outline-arc__desc">成长账本：{arc.growthLedger}</div> : null}
                       {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
+                      {arc.rhythmTemplateKey ? (
+                        <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
+                          <Tag color="geekblue" className="novel-outline-page__tag-reset">
+                            节奏模板：{rhythmTemplateMap.get(arc.rhythmTemplateKey)?.name || arc.rhythmTemplateKey}
+                          </Tag>
+                        </div>
+                      ) : null}
                       <div className="novel-outline-arc__desc">{missingOutlineCount > 0 ? `待补细纲：${missingOutlineCount} 章` : '当前故事弧细纲已补齐'}</div>
                       {arcSummary ? (
                         <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
@@ -708,6 +747,20 @@ export default function Outline({ novelId }: Props) {
                         >
                           {arcChapters.some((chapter) => chapter.outline?.trim()) ? '继续生成' : '生成细纲'}
                         </Button>
+                        <Select
+                          size="small"
+                          allowClear
+                          placeholder="节奏模板"
+                          popupMatchSelectWidth={false}
+                          style={{ minWidth: 128 }}
+                          value={arc.rhythmTemplateKey || undefined}
+                          options={rhythmTemplates.map((template) => ({
+                            value: template.key,
+                            label: `${template.name}（${RHYTHM_SCOPE_LABELS[template.scope]}）`,
+                            title: template.summary,
+                          }))}
+                          onChange={(value) => void handleAttachRhythmTemplate(arc, value || null)}
+                        />
                         <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(arc)} />
                         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDeleteArc(arc)} />
                       </div>

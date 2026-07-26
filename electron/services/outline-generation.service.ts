@@ -19,6 +19,8 @@ import {
 } from './outline-design-gate.service'
 import { syncStructureLinkage } from './story-structure.service'
 import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
+import { listRhythmTemplatesForGenre } from '../../src/shared/rhythm-templates'
+import { buildArcRhythmSection } from './rhythm-template.service'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -148,6 +150,11 @@ export async function generateStoryArcs(novelId: number): Promise<Record<string,
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  // 按题材筛出开局/弧级节奏模板，作为“可选节奏骨架参考”注入弧规划 prompt（不强制套用）。
+  const rhythmTemplateSection = listRhythmTemplatesForGenre(profile.genre)
+    .filter((template) => template.scope === 'opening' || template.scope === 'arc')
+    .map((template) => `- ${template.name}（${template.scope === 'opening' ? '开局' : '弧级'}）：${template.summary}`)
+    .join('\n')
   const result = await taskService.runChatTask({
     type: 'generate_arcs',
     novelId,
@@ -166,6 +173,7 @@ export async function generateStoryArcs(novelId: number): Promise<Record<string,
         background: profile.background,
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
+        rhythmTemplateSection: rhythmTemplateSection || undefined,
       }),
     }],
     modelConfigId: novel.modelConfigId || undefined,
@@ -380,6 +388,9 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
     .map((chapter) => `第${chapter.chapterNum}章《${chapter.title || '无标题'}》：${(chapter.outline || '').split('\n')[0].slice(0, 60)}`)
     .join('\n')
 
+  // 弧上挂了节奏模板时，把全节拍换算成本弧章节区间注入细纲规划 prompt。
+  const arcRhythmSection = buildArcRhythmSection(arc)
+
   const generateOutlineBatch = async (designGateDirective?: string): Promise<Record<string, unknown>[]> => {
     const raw = await taskService.runChatTask({
       type: 'chapter_outline',
@@ -409,6 +420,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
           protagonistReference: context.profile.protagonistReference,
           protagonistRule: context.profile.protagonistRule,
           designGateDirective,
+          rhythmSection: arcRhythmSection || undefined,
         }),
       }],
       modelConfigId: novel.modelConfigId || undefined,

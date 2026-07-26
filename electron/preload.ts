@@ -392,6 +392,10 @@ const api = {
     generateChapterOutlines: (arcId: number, options?: unknown) => invokeIpc('outline:generateChapterOutlines', arcId, options),
     clear: (novelId: number) => invokeIpc('outline:clear', novelId),
   },
+  rhythm: {
+    listTemplates: (novelId: number) => invokeIpc('rhythm:listTemplates', novelId),
+    attachToArc: (arcId: number, templateKey: string | null) => invokeIpc('rhythm:attachToArc', arcId, templateKey),
+  },
 
   thread: {
     list: (novelId: number) => invokeIpc('thread:list', novelId),

@@ -139,6 +139,7 @@ function createRuntime() {
   const storyStructureService = requireProject('electron/services/story-structure.service.ts')
   const outlineGenerationService = requireProject('electron/services/outline-generation.service.ts')
   const storyArcProgressService = requireProject('electron/services/story-arc-progress.service.ts')
+  const rhythmTemplateService = requireProject('electron/services/rhythm-template.service.ts')
   const timelineService = requireProject('electron/services/timeline.service.ts')
   const { buildAiModelRouteReport, buildChatOptionsFromRoute, resolveAiExecutionMode } = requireProject('electron/services/ai-engine.service.ts')
   const { appendVariationMessage, buildVariationDigest, isCandidateTooSimilar } = requireProject('electron/services/variation-control.service.ts')
@@ -713,6 +714,13 @@ function createRuntime() {
       generateChapterOutlines: (arcId, options) => outlineGenerationService.generateChapterOutlines(
         requireId(arcId, 'arcId'),
         options || {},
+      ),
+    },
+    rhythm: {
+      listTemplates: (novelId) => rhythmTemplateService.listRhythmTemplatesForNovel(requireId(novelId, 'novelId')),
+      attachToArc: (arcId, templateKey) => rhythmTemplateService.attachRhythmTemplateToArc(
+        requireId(arcId, 'arcId'),
+        typeof templateKey === 'string' && templateKey ? templateKey : null,
       ),
     },
     timeline: {

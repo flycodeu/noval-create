@@ -2303,6 +2303,13 @@ export function runMigrations(sqlite: Database.Database) {
         ON outline_design_gate_results(arc_id, created_at);
     `)
   })
+
+  runMigrationStep(sqlite, '0050_story_arc_rhythm', () => {
+    // 节奏模板接线：story_arcs 记录所选内置节奏模板 key（纯 TS 常量，不 seed 进 templates 表）。
+    if (hasTable(sqlite, 'story_arcs')) {
+      ensureColumn(sqlite, 'story_arcs', 'rhythm_template_key', 'TEXT')
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
