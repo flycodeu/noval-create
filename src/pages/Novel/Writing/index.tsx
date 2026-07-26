@@ -20,12 +20,6 @@ import SectionHeader from '../../../components/novel/common/SectionHeader'
 import ContractPanel, { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
 import ReviewNotesPanel from '../../../components/novel/writing/ReviewNotesPanel'
-import QualityGateReport from '../../../components/novel/quality/QualityGateReport'
-import {
-  fromFactGuard,
-  fromOptimizationQualityGate,
-  fromStructuralGate,
-} from '../../../components/novel/quality/gate-adapters'
 import { formatFailure } from '../../../shared/task-labels'
 import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
@@ -53,7 +47,6 @@ import type {
   ForeshadowSnapshot,
   NovelConsistencyReport,
   NovelContextStatus,
-  ParallelGenerationPlan,
   QualityDashboardData,
   StoryFact,
   StoryItem,
@@ -67,6 +60,9 @@ import { useTaskStore } from '../../../stores/task.store'
 import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { createChapterSaveCoordinator } from './chapter-save-coordinator'
+import RewriteSelectionModal from './components/modals/RewriteSelectionModal'
+import OptimizeCandidateModal from './components/modals/OptimizeCandidateModal'
+import ParallelGenerationModal from './components/modals/ParallelGenerationModal'
 import {
   getWorldRulesSummary,
   normalizeContractAudit,
@@ -3218,97 +3214,25 @@ export default function Writing({ novelId }: Props) {
           </>
         )}
       </div>
-      <Modal
-        title="重写选中文段"
+      <RewriteSelectionModal
         open={rewriteModalOpen}
+        selectedText={selectedSnippet?.text || ''}
+        requirements={rewriteRequirements}
+        confirmLoading={rewritingSelection}
+        onRequirementsChange={setRewriteRequirements}
         onCancel={() => setRewriteModalOpen(false)}
         onOk={() => void handleRewriteSelectedText()}
-        confirmLoading={rewritingSelection}
-        okText="应用重写"
-      >
-        <div className="novel-note-list writing-layout-note-space-bottom">
-          <div className="novel-note-list__item">AI 只会重写当前选中的文段，不会改动其他正文。</div>
-          <div className="novel-note-list__item">默认保留事件与设定，优先修正语言、逻辑和衔接。</div>
-        </div>
-        <Input.TextArea value={selectedSnippet?.text || ''} rows={6} readOnly />
-        <Input.TextArea
-          className="writing-layout-note-space-top"
-          value={rewriteRequirements}
-          rows={6}
-          onChange={(event) => setRewriteRequirements(event.target.value)}
-          placeholder="补充要求，例如：更克制、减少说明句、强化动作细节。"
-        />
-      </Modal>
+      />
 
-      <Modal
-        title="整章 AI 优化候选稿"
+      <OptimizeCandidateModal
         open={optimizeModalOpen}
+        result={optimizationResult}
+        requirements={optimizeRequirements}
+        applying={applyingOptimizedChapter}
+        onRequirementsChange={setOptimizeRequirements}
         onCancel={() => setOptimizeModalOpen(false)}
-        onOk={handleApplyOptimizedChapter}
-        okButtonProps={{
-          disabled: Boolean(
-            applyingOptimizedChapter
-            || (optimizationResult?.factGuard && !optimizationResult.factGuard.safeToApply)
-            || (optimizationResult?.qualityGate && !optimizationResult.qualityGate.safeToApply),
-          ),
-          loading: applyingOptimizedChapter,
-        }}
-        okText="应用优化稿"
-        width={920}
-      >
-        <div className="novel-note-list writing-layout-note-space-bottom">
-          <div className="novel-note-list__item">整章优化只生成候选稿，应用前不会覆盖正文。</div>
-          <div className="novel-note-list__item">重点保留剧情事实，修正 AI 味、衔接、空泛细节和读感问题。</div>
-          {optimizationResult?.qualityGate ? (
-            <div className="novel-note-list__item">
-              {`后验质量门：强 AI 味 ${optimizationResult.qualityGate.originalStrongAiFlavorCount} -> ${optimizationResult.qualityGate.optimizedStrongAiFlavorCount}，漂移分 ${optimizationResult.qualityGate.originalDriftScore} -> ${optimizationResult.qualityGate.optimizedDriftScore}。`}
-            </div>
-          ) : null}
-          {optimizationResult?.issueSummary.slice(0, 4).map((item) => (
-            <div key={item} className="novel-note-list__item">{item}</div>
-          ))}
-        </div>
-        {optimizationResult?.warnings.length ? (
-          <Alert
-            className="writing-layout-note-space-bottom"
-            type="warning"
-            showIcon
-            message="优化稿需要人工核验"
-            description={optimizationResult.warnings.slice(0, 5).join('；')}
-          />
-        ) : null}
-        <Input.TextArea
-          value={optimizeRequirements}
-          rows={3}
-          onChange={(event) => setOptimizeRequirements(event.target.value)}
-          placeholder="下次整章优化的补充要求，例如：更克制、减少破折号、保留结尾钩子。"
-        />
-        <div className="novel-grid novel-grid--2 writing-layout-note-space-top">
-          <Input.TextArea
-            value={optimizationResult?.originalContent || ''}
-            rows={14}
-            readOnly
-            placeholder="原正文"
-          />
-          <Input.TextArea
-            value={optimizationResult?.optimizedContent || ''}
-            rows={14}
-            readOnly
-            placeholder="优化候选稿"
-          />
-        </div>
-        {optimizationResult ? (
-          <div className="writing-layout-note-space-top">
-            <QualityGateReport
-              reports={[
-                fromFactGuard(optimizationResult.factGuard),
-                fromOptimizationQualityGate(optimizationResult.qualityGate),
-                ...(optimizationResult.structuralGate ? [fromStructuralGate(optimizationResult.structuralGate)] : []),
-              ]}
-            />
-          </div>
-        ) : null}
-      </Modal>
+        onApply={() => void handleApplyOptimizedChapter()}
+      />
 
       <ParallelGenerationModal novelId={novelId} chapters={chapters} />
     </>
@@ -4694,120 +4618,5 @@ function SegmentBoardPreview({
         ))}
       </div>
     </div>
-  )
-}
-
-function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: number; chapters: Chapter[] }) {
-  const [open, setOpen] = useState(false)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [plan, setPlan] = useState<ParallelGenerationPlan | null>(null)
-
-  const handleAnalyze = async () => {
-    if (chapterList.length < 2) {
-      message.warning(getUserFacingMessage('writing.parallelNeedMoreChapters'))
-      return
-    }
-    setAnalyzing(true)
-    try {
-      const minNum = Math.min(...chapterList.map((c) => c.chapterNum))
-      const maxNum = Math.max(...chapterList.map((c) => c.chapterNum))
-      const result = await window.electron.parallel.analyzePlan(novelId, minNum, maxNum)
-      setPlan(result)
-    } catch (error) {
-      message.error(getUserFacingMessage('writing.parallelAnalyzeFailed', {
-        detail: error instanceof Error ? error.message : '未知错误',
-      }))
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-  return (
-    <>
-      <div className="writing-layout-floating-entry">
-        <Button
-          icon={<BranchesOutlined />}
-          onClick={() => setOpen(true)}
-          shape="circle"
-          size="large"
-          title="并行生成分析"
-        />
-      </div>
-      <Modal
-        title="多视角并行生成分析"
-        open={open}
-        onCancel={() => setOpen(false)}
-        footer={null}
-        width={640}
-      >
-        <div className="writing-layout-parallel-intro">
-          <p className="writing-layout-parallel-copy">
-            分析故事弧中哪些叙事线可以并行生成。独立叙事线（无共享角色和线索）可以同时生成以加速创作。
-          </p>
-          <Button
-            type="primary"
-            icon={<BranchesOutlined />}
-            loading={analyzing}
-            onClick={() => void handleAnalyze()}
-          >
-            分析并行可能性
-          </Button>
-        </div>
-
-        {plan ? (
-          <div className="writing-layout-stack writing-layout-stack--lg">
-            <div className="writing-layout-parallel-tags">
-              <Tag color="blue">预计加速 {plan.estimatedSpeedup}x</Tag>
-              <Tag color="green">{plan.parallelGroups.length} 组可并行</Tag>
-              <Tag>{plan.sequentialSegments.length} 段需串行</Tag>
-            </div>
-
-            {plan.parallelGroups.length > 0 ? (
-              <div>
-                <div className="writing-layout-parallel-section-title">可并行组</div>
-                {plan.parallelGroups.map((group, gi) => (
-                  <div key={gi} className="writing-layout-parallel-group">
-                    <div className="writing-layout-parallel-group-label">并行组 {gi + 1}</div>
-                    {group.map((seg) => (
-                      <div key={seg.id} className="writing-layout-row writing-layout-row--wrap">
-                        <Tag color="processing">{seg.arcName}</Tag>
-                        <span className="writing-layout-parallel-meta">第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
-                        <span className="writing-layout-parallel-meta writing-layout-parallel-meta--tiny">
-                          {seg.primaryCharacterNames.slice(0, 3).join('、')}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Alert type="info" message="当前章节范围内未发现可并行的独立叙事线。不同弧共享了相同角色或线索。" />
-            )}
-
-            {plan.convergencePoints.length > 0 ? (
-              <div>
-                <div className="writing-layout-parallel-section-title">汇合点</div>
-                <div className="writing-layout-parallel-copy writing-layout-parallel-meta">
-                  并行生成完成后需在以下章节做状态合并：
-                  {plan.convergencePoints.map((cp) => `第${cp}章`).join('、')}
-                </div>
-              </div>
-            ) : null}
-
-            {plan.sequentialSegments.length > 0 ? (
-              <div>
-                <div className="writing-layout-parallel-section-title">需串行</div>
-                {plan.sequentialSegments.map((seg) => (
-                  <div key={seg.id} className="writing-layout-row writing-layout-row--wrap">
-                    <Tag>{seg.arcName}</Tag>
-                    <span className="writing-layout-parallel-meta">第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </Modal>
-    </>
   )
 }
