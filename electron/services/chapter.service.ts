@@ -265,6 +265,7 @@ import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.ser
 import { pickProtagonistDramaticEngine } from './context-cards'
 import { getUnresolvedDesignGateFlags } from './outline-design-gate.service'
 import { getChapterRhythmSection } from './rhythm-template.service'
+import { scanChapterForGlossaryTerms } from './glossary-reference.service'
 import {
   buildFallbackScenePlan,
   collectSceneDesignFieldGaps,
@@ -2004,6 +2005,12 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
     // 异步 fire-and-forget：采样失败绝不阻塞章节定稿。
     try {
       void maybeRefreshNovelStyleFingerprint(chapter.novelId).catch(() => {})
+    } catch { /* ignore */ }
+    // 词条引用扫描（幂等：按章删插）。同样 fire-and-forget，失败不阻塞定稿。
+    try {
+      void Promise.resolve()
+        .then(() => scanChapterForGlossaryTerms(chapter.novelId, chapter.id))
+        .catch(() => {})
     } catch { /* ignore */ }
   }
 

@@ -49,6 +49,7 @@ import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
 import * as factionService from './services/faction.service'
 import * as glossaryService from './services/glossary.service'
+import * as glossaryReferenceService from './services/glossary-reference.service'
 import * as qualityDashboardService from './services/quality-dashboard.service'
 import * as qualityRepairService from './services/quality-repair.service'
 import * as chapterRecallRuntimeService from './services/chapter-recall-runtime.service'
@@ -944,6 +945,8 @@ function registerIpcHandlers() {
   handle('glossary:create', (_, novelId, data) => glossaryService.createGlossaryEntry(requireId(novelId, 'novelId'), data))
   handle('glossary:update', (_, id, data) => glossaryService.updateGlossaryEntry(requireId(id), data))
   handle('glossary:delete', (_, id) => glossaryService.deleteGlossaryEntry(requireId(id)))
+  handle('glossary:scanReferences', (_, novelId) => glossaryReferenceService.scanNovelGlossaryReferences(requireId(novelId, 'novelId')))
+  handle('glossary:usageReport', (_, novelId) => glossaryReferenceService.getGlossaryUsageReport(requireId(novelId, 'novelId')))
   handle('sceneTemplate:list', (_, filters) => sceneTemplateService.listSceneTemplates(filters || {}))
   handle('sceneTemplate:query', (_, filters) => sceneTemplateService.querySceneTemplates(filters || {}))
   handle('sceneTemplate:getStats', (_, filters) => sceneTemplateService.getSceneTemplateStats(filters || {}))

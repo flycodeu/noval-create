@@ -1236,6 +1236,8 @@ export function installWebElectronBridge(): void {
       getStats: async (filters?: unknown) => withLocalBackend('glossary', 'getStats', [filters], async () => ({ ...emptyStats, total: 4 })),
       get: async (id?: unknown) => withLocalBackend('glossary', 'get', [id], async () => null),
       search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('glossary', 'search', [novelId, keyword, limit], async () => []),
+      scanReferences: async (novelId?: unknown) => withLocalBackend('glossary', 'scanReferences', [novelId], async () => readOnlyMutation('glossary.scanReferences')),
+      usageReport: async (novelId?: unknown) => withLocalBackend('glossary', 'usageReport', [novelId], async () => ({ novelId: 0, latestChapterNum: 0, items: [] })),
     }),
     thread: createService('thread', {
       list: async (novelId?: unknown) => withLocalBackend('thread', 'list', [novelId], async () => []),

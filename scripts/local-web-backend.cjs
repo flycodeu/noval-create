@@ -130,6 +130,7 @@ function createRuntime() {
   const storyThreadService = requireProject('electron/services/story-thread.service.ts')
   const factionService = requireProject('electron/services/faction.service.ts')
   const glossaryService = requireProject('electron/services/glossary.service.ts')
+  const glossaryReferenceService = requireProject('electron/services/glossary-reference.service.ts')
   const sceneTemplateService = requireProject('electron/services/scene-template.service.ts')
   const endgameAssetService = requireProject('electron/services/endgame-asset.service.ts')
   const storyFactService = requireProject('electron/services/story-fact.service.ts')
@@ -597,6 +598,8 @@ function createRuntime() {
       create: (novelId, data) => glossaryService.createGlossaryEntry(requireId(novelId, 'novelId'), data),
       update: (id, data) => glossaryService.updateGlossaryEntry(requireId(id), data),
       delete: (id) => glossaryService.deleteGlossaryEntry(requireId(id)),
+      scanReferences: (novelId) => glossaryReferenceService.scanNovelGlossaryReferences(requireId(novelId, 'novelId')),
+      usageReport: (novelId) => glossaryReferenceService.getGlossaryUsageReport(requireId(novelId, 'novelId')),
     },
     sceneTemplate: {
       list: (filters) => sceneTemplateService.listSceneTemplates(filters || {}),

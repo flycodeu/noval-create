@@ -2310,6 +2310,30 @@ export function runMigrations(sqlite: Database.Database) {
       ensureColumn(sqlite, 'story_arcs', 'rhythm_template_key', 'TEXT')
     }
   })
+
+  runMigrationStep(sqlite, '0051_glossary_lore', () => {
+    // lore 词条与引用检测：glossary 支持长文设定（body_md）与标签（tags_json）；
+    // glossary_term_references 记录词条在章节正文中的命中，按章删插保持幂等。
+    if (hasTable(sqlite, 'glossary')) {
+      ensureColumn(sqlite, 'glossary', 'body_md', 'TEXT')
+      ensureColumn(sqlite, 'glossary', 'tags_json', 'TEXT')
+    }
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS glossary_term_references (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        glossary_id INTEGER NOT NULL,
+        chapter_id INTEGER NOT NULL,
+        chapter_num INTEGER NOT NULL,
+        hit_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_glossary_term_references_novel_glossary
+        ON glossary_term_references(novel_id, glossary_id);
+      CREATE INDEX IF NOT EXISTS idx_glossary_term_references_chapter
+        ON glossary_term_references(chapter_id);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

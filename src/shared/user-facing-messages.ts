@@ -271,6 +271,7 @@ export const USER_FACING_MESSAGES = {
   'glossary.updated': '术语已更新。',
   'glossary.created': '术语已创建。',
   'glossary.deleted': '术语已删除。',
+  'glossary.scanCompleted': '引用扫描完成：共扫 {{chapters}} 章，命中 {{terms}} 个词条、{{hits}} 次引用。',
   'rhythm.templateNotFound': '节奏模板不存在或已下线。',
   'rhythm.attached': '节奏模板已应用到该故事弧。',
   'rhythm.detached': '已取消该故事弧的节奏模板。',

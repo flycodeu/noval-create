@@ -407,6 +407,8 @@ export const glossary = sqliteTable('glossary', {
   term: text('term').notNull(),
   category: text('category').default('custom'),
   definition: text('definition'),
+  bodyMd: text('body_md'),
+  tagsJson: text('tags_json'),
   aliasesJson: text('aliases_json'),
   firstAppearChapter: integer('first_appear_chapter'),
   relatedEntityIdsJson: text('related_entity_ids_json'),
@@ -414,6 +416,17 @@ export const glossary = sqliteTable('glossary', {
   sortOrder: integer('sort_order').default(0),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+/** 词条在章节正文中的引用命中，按章删插保持幂等（glossary-reference.service 维护）。 */
+export const glossaryTermReferences = sqliteTable('glossary_term_references', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  glossaryId: integer('glossary_id').notNull().references(() => glossary.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterNum: integer('chapter_num').notNull(),
+  hitCount: integer('hit_count').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
 export const sceneTemplates = sqliteTable('scene_templates', {
@@ -1183,6 +1196,8 @@ export type Faction = typeof factions.$inferSelect
 export type NewFaction = typeof factions.$inferInsert
 export type GlossaryEntry = typeof glossary.$inferSelect
 export type NewGlossaryEntry = typeof glossary.$inferInsert
+export type GlossaryTermReference = typeof glossaryTermReferences.$inferSelect
+export type NewGlossaryTermReference = typeof glossaryTermReferences.$inferInsert
 export type SceneTemplate = typeof sceneTemplates.$inferSelect
 export type NewSceneTemplate = typeof sceneTemplates.$inferInsert
 export type Character = typeof characters.$inferSelect

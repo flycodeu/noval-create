@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlusOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import type { GlossaryEntry } from '../../../types'
+import type { GlossaryEntry, GlossaryUsageReport, GlossaryUsageReportItem } from '../../../types'
 import { parseGlossaryAliases, stringifyGlossaryAliases } from '../../../shared/glossary'
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
@@ -17,6 +17,10 @@ const GLOSSARY_CATEGORY_OPTIONS = [
   { value: 'event', label: '事件' },
   { value: 'material', label: '材料' },
   { value: 'species', label: '种族' },
+  { value: 'lore', label: '设定' },
+  { value: 'concept', label: '概念' },
+  { value: 'organization', label: '组织' },
+  { value: 'other', label: '其他' },
   { value: 'custom', label: '自定义' },
 ] as const
 
@@ -28,6 +32,7 @@ interface GlossaryFormValues {
   term: string
   category: GlossaryEntry['category']
   definition: string
+  bodyMd: string
   aliases: string[]
   firstAppearChapter?: number
   relatedEntityIds: string
@@ -38,6 +43,7 @@ const EMPTY_VALUES: GlossaryFormValues = {
   term: '',
   category: 'custom',
   definition: '',
+  bodyMd: '',
   aliases: [],
   firstAppearChapter: undefined,
   relatedEntityIds: '',
@@ -63,6 +69,7 @@ function buildFormValues(item?: GlossaryEntry | null): GlossaryFormValues {
     term: item.term,
     category: item.category,
     definition: item.definition || '',
+    bodyMd: item.bodyMd || '',
     aliases: parseGlossaryAliases(item.aliasesJson),
     firstAppearChapter: item.firstAppearChapter,
     relatedEntityIds: parseNumberJson(item.relatedEntityIdsJson || '[]').join(', '),
@@ -80,6 +87,8 @@ export default function GlossaryPage({ novelId }: Props) {
   const [workflowStats, setWorkflowStats] = useState({ threadCount: 0, chapterCount: 0 })
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [usageReport, setUsageReport] = useState<GlossaryUsageReport | null>(null)
   const [keyword, setKeyword] = useState('')
   const [canonicalFilter, setCanonicalFilter] = useState<'all' | 'active' | 'deprecated'>('all')
   const refreshRequestRef = useRef(0)
@@ -90,18 +99,26 @@ export default function GlossaryPage({ novelId }: Props) {
     [items, selectedId],
   )
 
+  const usageByGlossaryId = useMemo(() => {
+    const map = new Map<number, GlossaryUsageReportItem>()
+    usageReport?.items.forEach((item) => map.set(item.glossaryId, item))
+    return map
+  }, [usageReport])
+
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
-      const [page, nextStats, nextWorkflowStats] = await Promise.all([
+      const [page, nextStats, nextWorkflowStats, nextUsageReport] = await Promise.all([
         window.electron.glossary.query({ novelId, keyword, canonical: canonicalFilter, page: 1, pageSize: 200 }),
         window.electron.glossary.getStats({ novelId }),
         loadWorkflowStats(novelId),
+        window.electron.glossary.usageReport(novelId).catch(() => null),
       ])
       if (refreshRequestRef.current !== requestId) return
       setItems(page.items)
       setStats(nextStats)
+      setUsageReport(nextUsageReport)
       setWorkflowStats({ threadCount: nextWorkflowStats.threadCount, chapterCount: nextWorkflowStats.chapterCount })
       setSelectedId((current) => {
         if (creatingRef.current) return null
@@ -138,6 +155,7 @@ export default function GlossaryPage({ novelId }: Props) {
         term: values.term.trim(),
         category: values.category,
         definition: values.definition.trim(),
+        bodyMd: (values.bodyMd || '').trim(),
         aliasesJson: stringifyGlossaryAliases(values.aliases || []),
         firstAppearChapter: values.firstAppearChapter || undefined,
         relatedEntityIdsJson: JSON.stringify(relatedEntityIds),
@@ -182,6 +200,24 @@ export default function GlossaryPage({ novelId }: Props) {
     creatingRef.current = true
     setSelectedId(null)
     form.setFieldsValue(EMPTY_VALUES)
+  }
+
+  const handleScanReferences = async () => {
+    setScanning(true)
+    try {
+      const result = await window.electron.glossary.scanReferences(novelId)
+      message.success(getUserFacingMessage('glossary.scanCompleted', {
+        chapters: result.scannedChapters,
+        terms: result.matchedTermCount,
+        hits: result.totalHits,
+      }))
+      await refresh()
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.executionFailed'))
+    } finally {
+      setScanning(false)
+    }
   }
 
   return (
@@ -237,6 +273,9 @@ export default function GlossaryPage({ novelId }: Props) {
             保存术语
           </Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>新建术语</Button>
+          <Button icon={<ScanOutlined />} loading={scanning} onClick={() => void handleScanReferences()}>
+            扫描全书引用
+          </Button>
           <Button danger icon={<DeleteOutlined />} disabled={!selectedItem} onClick={() => void handleDelete()}>
             删除术语
           </Button>
@@ -298,6 +337,20 @@ export default function GlossaryPage({ novelId }: Props) {
                         <strong className="novel-resource-workspace__title-text">{item.term}</strong>
                         <Tag>{GLOSSARY_CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label || item.category}</Tag>
                         {item.isCanonical > 0 ? <Tag color="success">规范</Tag> : <Tag>废弃</Tag>}
+                        {(() => {
+                          const usage = usageByGlossaryId.get(item.id)
+                          if (!usage) return null
+                          if (usage.unused) return <Tag color="default">未引用</Tag>
+                          return (
+                            <>
+                              <Tag color="blue">引用 {usage.totalHits} 次</Tag>
+                              {usage.lastChapterNum ? <Tag color="cyan">最近第{usage.lastChapterNum}章</Tag> : null}
+                              {typeof usage.chaptersSinceLastHit === 'number' && usage.chaptersSinceLastHit >= 20
+                                ? <Tag color="warning">断代 {usage.chaptersSinceLastHit} 章</Tag>
+                                : null}
+                            </>
+                          )
+                        })()}
                       </div>
                     )}
                     description={(
@@ -336,6 +389,11 @@ export default function GlossaryPage({ novelId }: Props) {
               <div className="guided-step__field-card guided-step__field-card--full">
                 <Form.Item name="definition" label="定义" rules={[{ required: true, message: '请填写定义' }]}>
                   <Input.TextArea rows={6} placeholder="写清这个词在小说里的确切含义、作用边界和常见误用。" />
+                </Form.Item>
+              </div>
+              <div className="guided-step__field-card guided-step__field-card--full">
+                <Form.Item name="bodyMd" label="设定长文（Markdown，可选）">
+                  <Input.TextArea rows={8} placeholder="用于 lore/世界观类词条的长文设定：起源、规则、组织结构、大事记等。会随词条一起沉淀，正文生成不直接注入全文。" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">

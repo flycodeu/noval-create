@@ -971,6 +971,8 @@ export interface GlossaryEntry {
   term: string
   category: GlossaryCategory
   definition?: string
+  bodyMd?: string
+  tagsJson?: string
   aliasesJson?: string
   firstAppearChapter?: number
   relatedEntityIdsJson?: string
@@ -994,6 +996,30 @@ export interface GlossaryStats {
   canonicalCount: number
   deprecatedCount: number
   categoryCount: number
+}
+
+export interface GlossaryScanResult {
+  scannedChapters: number
+  termCount: number
+  matchedTermCount: number
+  totalHits: number
+}
+
+export interface GlossaryUsageReportItem {
+  glossaryId: number
+  term: string
+  category?: string
+  totalHits: number
+  chapterCount: number
+  lastChapterNum: number | null
+  chaptersSinceLastHit: number | null
+  unused: boolean
+}
+
+export interface GlossaryUsageReport {
+  novelId: number
+  latestChapterNum: number
+  items: GlossaryUsageReportItem[]
 }
 
 export interface SceneTemplate {
@@ -5946,6 +5972,8 @@ declare global {
         create: (novelId: number, data: Partial<GlossaryEntry>) => Promise<number>
         update: (id: number, data: Partial<GlossaryEntry>) => Promise<void>
         delete: (id: number) => Promise<void>
+        scanReferences: (novelId: number) => Promise<GlossaryScanResult>
+        usageReport: (novelId: number) => Promise<GlossaryUsageReport>
       }
       sceneTemplate: {
         list: (filters: { novelId?: number; genreId?: number }) => Promise<SceneTemplate[]>

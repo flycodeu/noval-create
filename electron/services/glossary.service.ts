@@ -50,6 +50,8 @@ function sanitizeGlossaryPayload(data: Partial<typeof glossary.$inferInsert>): P
   if (typeof data.term === 'string') next.term = asText(data.term)
   if (typeof data.category === 'string') next.category = asText(data.category)
   if (typeof data.definition === 'string') next.definition = asText(data.definition)
+  if (typeof data.bodyMd === 'string') next.bodyMd = data.bodyMd.trim()
+  if (typeof data.tagsJson === 'string') next.tagsJson = data.tagsJson
   if (typeof data.aliasesJson === 'string') next.aliasesJson = data.aliasesJson
   if ('firstAppearChapter' in data) next.firstAppearChapter = asNumber(data.firstAppearChapter)
   if (typeof data.relatedEntityIdsJson === 'string') next.relatedEntityIdsJson = data.relatedEntityIdsJson
@@ -66,6 +68,8 @@ function mapGlossaryEntry(row: typeof glossary.$inferSelect): AppGlossaryEntry {
     term: row.term,
     category: (row.category as AppGlossaryEntry['category']) || 'custom',
     definition: row.definition ?? undefined,
+    bodyMd: row.bodyMd ?? undefined,
+    tagsJson: row.tagsJson ?? undefined,
     aliasesJson: row.aliasesJson ?? undefined,
     firstAppearChapter: row.firstAppearChapter ?? undefined,
     relatedEntityIdsJson: row.relatedEntityIdsJson ?? undefined,
@@ -137,6 +141,8 @@ export function createGlossaryEntry(novelId: number, data: Partial<typeof glossa
     term: payload.term || '未命名术语',
     category: payload.category || 'custom',
     definition: payload.definition || '',
+    bodyMd: payload.bodyMd || '',
+    tagsJson: payload.tagsJson || '[]',
     aliasesJson: payload.aliasesJson || '[]',
     firstAppearChapter: payload.firstAppearChapter ?? null,
     relatedEntityIdsJson: payload.relatedEntityIdsJson || '[]',

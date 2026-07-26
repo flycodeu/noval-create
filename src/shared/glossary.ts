@@ -1,4 +1,14 @@
-export type GlossaryCategory = 'skill' | 'rank' | 'event' | 'material' | 'species' | 'custom'
+export type GlossaryCategory =
+  | 'skill'
+  | 'rank'
+  | 'event'
+  | 'material'
+  | 'species'
+  | 'lore'
+  | 'concept'
+  | 'organization'
+  | 'other'
+  | 'custom'
 
 export function parseGlossaryAliases(raw?: string | null): string[] {
   if (!raw) return []

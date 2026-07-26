@@ -443,6 +443,8 @@ const api = {
     create: (novelId: number, data: unknown) => invokeIpc('glossary:create', novelId, data),
     update: (id: number, data: unknown) => invokeIpc('glossary:update', id, data),
     delete: (id: number) => invokeIpc('glossary:delete', id),
+    scanReferences: (novelId: number) => invokeIpc('glossary:scanReferences', novelId),
+    usageReport: (novelId: number) => invokeIpc('glossary:usageReport', novelId),
   },
   sceneTemplate: {
     list: (filters: unknown) => invokeIpc('sceneTemplate:list', filters),

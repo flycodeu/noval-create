@@ -164,6 +164,11 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_arcs').has('stalled_chapter_count'))
   assert.ok(getColumns(db, 'story_arcs').has('last_progress_chapter_num'))
   assert.ok(getColumns(db, 'story_arcs').has('rhythm_template_key'))
+  assert.ok(getColumns(db, 'glossary').has('body_md'))
+  assert.ok(getColumns(db, 'glossary').has('tags_json'))
+  assert.ok(getColumns(db, 'glossary_term_references').has('glossary_id'))
+  assert.ok(getColumns(db, 'glossary_term_references').has('chapter_num'))
+  assert.ok(getColumns(db, 'glossary_term_references').has('hit_count'))
   assert.ok(getColumns(db, 'story_threads').has('planted_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('last_referenced_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('resolved_chapter'))
@@ -280,6 +285,7 @@ function testFreshDbIsIdempotent() {
       '0048_scene_design_fields',
       '0049_outline_design_gate_results',
       '0050_story_arc_rhythm',
+      '0051_glossary_lore',
     ])
 
     runMigrations(db)
@@ -409,6 +415,7 @@ function testPartialSchemaCanResume() {
       '0048_scene_design_fields',
       '0049_outline_design_gate_results',
       '0050_story_arc_rhythm',
+      '0051_glossary_lore',
     ])
 
     const configs = db.prepare(`
@@ -547,6 +554,7 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
     assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
     assert.ok(getMigrationIds(db).includes('0050_story_arc_rhythm'))
+    assert.ok(getMigrationIds(db).includes('0051_glossary_lore'))
   } finally {
     db.close()
   }
@@ -644,6 +652,7 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getMigrationIds(db).includes('0048_scene_design_fields'))
     assert.ok(getMigrationIds(db).includes('0049_outline_design_gate_results'))
     assert.ok(getMigrationIds(db).includes('0050_story_arc_rhythm'))
+    assert.ok(getMigrationIds(db).includes('0051_glossary_lore'))
   } finally {
     db.close()
   }
