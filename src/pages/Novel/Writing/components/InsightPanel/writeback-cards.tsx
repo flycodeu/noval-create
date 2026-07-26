@@ -66,16 +66,22 @@ export function ChapterForeshadowWritebackCard({
       message.warning(getUserFacingMessage('writing.foreshadowTitleRequired'))
       return
     }
-    await onCreate({
-      title: normalizedTitle,
-      detail: detail.trim() || undefined,
-      sourceSegmentId: sourceSegmentId || null,
-      plantMethod: plantMethod.trim() || undefined,
-      salienceLevel,
-      targetPayoffChapter: targetPayoffChapter || null,
-      impactScope,
-      status: 'active',
-    })
+    try {
+      await onCreate({
+        title: normalizedTitle,
+        detail: detail.trim() || undefined,
+        sourceSegmentId: sourceSegmentId || null,
+        plantMethod: plantMethod.trim() || undefined,
+        salienceLevel,
+        targetPayoffChapter: targetPayoffChapter || null,
+        impactScope,
+        status: 'active',
+      })
+    } catch {
+      // Creation failed: keep the form values so the user can retry;
+      // the handler already surfaced the error message.
+      return
+    }
     setTitle('')
     setDetail('')
     setSourceSegmentId(undefined)
