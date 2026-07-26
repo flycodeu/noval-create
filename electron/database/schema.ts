@@ -1366,3 +1366,22 @@ export const semanticGateReviews = sqliteTable('semantic_gate_reviews', {
 
 export type SemanticGateReviewRow = typeof semanticGateReviews.$inferSelect
 export type NewSemanticGateReviewRow = typeof semanticGateReviews.$inferInsert
+
+// 弧→章设计校验结果（outline design gate）：每轮判定落库，供章节流水线传导。
+export const outlineDesignGateResults = sqliteTable('outline_design_gate_results', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  arcId: integer('arc_id').notNull(),
+  batchStart: integer('batch_start').notNull(),
+  batchEnd: integer('batch_end').notNull(),
+  judgeable: integer('judgeable').notNull().default(0),
+  passed: integer('passed').notNull().default(0),
+  retryCount: integer('retry_count').notNull().default(0),
+  designTermsJson: text('design_terms_json').notNull().default('[]'),
+  findingsJson: text('findings_json').notNull().default('[]'),
+  correctiveDirective: text('corrective_directive').notNull().default(''),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type OutlineDesignGateResultRow = typeof outlineDesignGateResults.$inferSelect
+export type NewOutlineDesignGateResultRow = typeof outlineDesignGateResults.$inferInsert

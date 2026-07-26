@@ -1,9 +1,18 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('../database/db', () => ({
+  getDb: vi.fn(),
+}))
+
+import { getDb } from '../database/db'
 import {
   analyzeOutlineDesignAlignment,
   extractDesignTerms,
+  getUnresolvedDesignGateFlags,
+  resolveUnresolvedDesignGateFlag,
   type OutlineDesignGateArc,
   type OutlineDesignGateChapter,
+  type StoredOutlineDesignGateRow,
 } from './outline-design-gate.service'
 
 // 真实回归案例：novelId 34《淮上新旌》。弧设计的是原创戏（新旌/涡口/义军/查粮/立旗），
@@ -81,5 +90,87 @@ describe('analyzeOutlineDesignAlignment', () => {
     )
     const first = findings.findings.find((f) => f.chapterNum === 1)
     expect(first?.historyRecitalRisk).toBe(false)
+  })
+})
+
+function buildStoredRow(overrides: Partial<StoredOutlineDesignGateRow> = {}): StoredOutlineDesignGateRow {
+  return {
+    id: 1,
+    arcId: 5,
+    batchStart: 1,
+    batchEnd: 4,
+    passed: 0,
+    designTermsJson: JSON.stringify(['新旌', '涡口', '义军']),
+    findingsJson: JSON.stringify([
+      { chapterNum: 1, title: '海上回銮', hitTerms: [], ledgerStrength: 0, historyRecitalRisk: true },
+      { chapterNum: 2, title: '金山设伏', hitTerms: ['新旌'], ledgerStrength: 2, historyRecitalRisk: false },
+    ]),
+    correctiveDirective: '必须围绕新旌/涡口/义军重写。',
+    ...overrides,
+  }
+}
+
+describe('resolveUnresolvedDesignGateFlag（未消解判定）', () => {
+  it('最新记录 passed=0 且本章被点名 → 返回 flag（含设计词元与矫正指令）', () => {
+    const flag = resolveUnresolvedDesignGateFlag([buildStoredRow()], 1)
+    expect(flag).not.toBeNull()
+    expect(flag?.designTerms).toEqual(['新旌', '涡口', '义军'])
+    expect(flag?.correctiveDirective).toContain('重写')
+    expect(flag?.flaggedChapters).toEqual([1])
+  })
+
+  it('本章在批次内但未被点名 → 视为已消解', () => {
+    expect(resolveUnresolvedDesignGateFlag([buildStoredRow()], 2)).toBeNull()
+  })
+
+  it('同批次重试轮（id 更大）passed=1 覆盖首轮 flagged', () => {
+    const rows = [
+      buildStoredRow({ id: 1, passed: 0 }),
+      buildStoredRow({ id: 2, passed: 1 }),
+    ]
+    expect(resolveUnresolvedDesignGateFlag(rows, 1)).toBeNull()
+  })
+
+  it('章节不在任何批次范围内 → null；损坏的 findings JSON 安全降级为 null', () => {
+    expect(resolveUnresolvedDesignGateFlag([buildStoredRow()], 9)).toBeNull()
+    expect(resolveUnresolvedDesignGateFlag([buildStoredRow({ findingsJson: '不是JSON' })], 1)).toBeNull()
+  })
+
+  it('不同批次的记录互不干扰：取覆盖该章的最新记录', () => {
+    const rows = [
+      buildStoredRow({ id: 1, batchStart: 1, batchEnd: 4, passed: 0 }),
+      buildStoredRow({
+        id: 2,
+        batchStart: 5,
+        batchEnd: 8,
+        passed: 1,
+        findingsJson: JSON.stringify([]),
+      }),
+    ]
+    expect(resolveUnresolvedDesignGateFlag(rows, 1)).not.toBeNull()
+    expect(resolveUnresolvedDesignGateFlag(rows, 5)).toBeNull()
+  })
+})
+
+describe('getUnresolvedDesignGateFlags（DB 包装）', () => {
+  it('查询失败时返回 null（设计传导不阻断正文生成）', () => {
+    vi.mocked(getDb).mockImplementation(() => {
+      throw new Error('db unavailable')
+    })
+    expect(getUnresolvedDesignGateFlags(1, 1)).toBeNull()
+  })
+
+  it('从落库记录解析未消解 flag', () => {
+    const rows = [buildStoredRow()]
+    const query = {
+      where: () => query,
+      orderBy: () => query,
+      all: () => rows,
+    }
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({ from: () => query }),
+    } as never)
+    const flag = getUnresolvedDesignGateFlags(1, 1)
+    expect(flag?.designTerms).toContain('新旌')
   })
 })

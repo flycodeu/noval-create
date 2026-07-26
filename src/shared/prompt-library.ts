@@ -211,6 +211,8 @@ export interface ScenePlanPromptInput {
   chapterGoal: string
   hardConstraintContext?: string
   dialogueVoiceLocks?: string
+  /** 弧级设计校验未通过时的矫正指令（设计词元 + 重写要求），本章被 flagged 时注入。 */
+  designGateDirective?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -1628,6 +1630,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     }),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
+    section('设计对齐矫正（本章被弧级设计校验标记，必须执行）', params.designGateDirective),
     section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),

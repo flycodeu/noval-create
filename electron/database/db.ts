@@ -2276,6 +2276,31 @@ export function runMigrations(sqlite: Database.Database) {
       ensureColumn(sqlite, 'scene_contracts', 'irony_gap', 'TEXT')
     }
   })
+
+  runMigrationStep(sqlite, '0049_outline_design_gate_results', () => {
+    // 弧→章设计校验结果落库：每轮（首轮+重试）判定都持久化，
+    // 供章节流水线查询“未消解的 flagged 记录”并向 planner / critic 传导。
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS outline_design_gate_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        arc_id INTEGER NOT NULL,
+        batch_start INTEGER NOT NULL,
+        batch_end INTEGER NOT NULL,
+        judgeable INTEGER NOT NULL DEFAULT 0,
+        passed INTEGER NOT NULL DEFAULT 0,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        design_terms_json TEXT NOT NULL DEFAULT '[]',
+        findings_json TEXT NOT NULL DEFAULT '[]',
+        corrective_directive TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_outline_design_gate_results_novel
+        ON outline_design_gate_results(novel_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_outline_design_gate_results_arc
+        ON outline_design_gate_results(arc_id, created_at);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

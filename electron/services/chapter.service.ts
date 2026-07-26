@@ -262,6 +262,7 @@ import {
 } from '../../src/shared/semantic-gate-policy'
 import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
 import { pickProtagonistDramaticEngine } from './context-cards'
+import { getUnresolvedDesignGateFlags } from './outline-design-gate.service'
 import {
   buildFallbackScenePlan,
   collectSceneDesignFieldGaps,
@@ -4179,6 +4180,19 @@ async function generateChapterContentInternal(
       errorMessage: null,
     })
 
+    // 弧级设计校验传导：本章仍在未消解的 flagged 记录中时，把设计词元 top12 与
+    // 矫正指令注入 planner prompt，并在 critic 语义门追加 design_alignment 维度。
+    const unresolvedDesignGateFlag = getUnresolvedDesignGateFlags(chapter.novelId, chapter.chapterNum)
+    const designGateDirective = unresolvedDesignGateFlag
+      ? [
+          '本章在弧级设计校验中被标记为“史实复述/零弧推进”。场景计划必须显式推进以下原创设计元素，不要按历史事件时间线铺陈：',
+          `本弧原创设计词元：${unresolvedDesignGateFlag.designTerms.slice(0, 12).join('、')}`,
+          unresolvedDesignGateFlag.correctiveDirective,
+        ].filter(Boolean).join('\n')
+      : ''
+    if (unresolvedDesignGateFlag) {
+      console.warn(`[chapter:plan] 本章处于未消解的设计校验 flagged 记录中 chapter=${chapterId}，已注入设计对齐矫正指令。`)
+    }
     const plannerMessages = [{
       role: 'user' as const,
       content: buildScenePlanPrompt({
@@ -4189,6 +4203,7 @@ async function generateChapterContentInternal(
         chapterGoal: scenePlanContext.chapterGoal,
         hardConstraintContext: scenePlanContext.hardConstraintContext,
         dialogueVoiceLocks: scenePlanContext.dialogueVoiceLocks,
+        designGateDirective: designGateDirective || undefined,
         plotPoints: chapter.outline || '',
         emotionTone: chapter.emotionTone || '平稳',
         targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
@@ -4688,6 +4703,9 @@ async function generateChapterContentInternal(
       if (protagonistDramaticEngine) {
         criticSemanticDimensions.push('dramatic_drive')
       }
+      if (unresolvedDesignGateFlag) {
+        criticSemanticDimensions.push('design_alignment')
+      }
       const criticGateRun = await runChapterSemanticGate({
         novelId: chapter.novelId,
         chapterId,
@@ -4702,6 +4720,7 @@ async function generateChapterContentInternal(
         scenePlanSummary: reviewContext.scenePlanSummary || summarizeStageArtifactText(scenePlanText, 520),
         protagonistBrief: profile.protagonistReference,
         dramaticEngine: protagonistDramaticEngine || undefined,
+        designTerms: unresolvedDesignGateFlag ? unresolvedDesignGateFlag.designTerms.slice(0, 12) : undefined,
         heuristicHints: collectSemanticGateHeuristicHints(reviewNotes),
       })
       criticSemanticReview = criticGateRun.degraded ? null : criticGateRun.review

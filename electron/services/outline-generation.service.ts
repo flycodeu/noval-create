@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, novels, storyArcs } from '../database/schema'
+import { chapters, novels, revisionTasks, storyArcs } from '../database/schema'
 import * as taskService from './task.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './context.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
@@ -13,7 +13,9 @@ import { parseAiJsonResult } from '../utils/json'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   analyzeOutlineDesignAlignment,
+  persistOutlineDesignGateResult,
   type OutlineDesignGateChapter,
+  type OutlineDesignGateResult,
 } from './outline-design-gate.service'
 import { syncStructureLinkage } from './story-structure.service'
 import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
@@ -235,6 +237,93 @@ export async function generateStoryArcs(novelId: number): Promise<Record<string,
   return arcs
 }
 
+/**
+ * 设计校验重试后仍未通过时不再静默：为每个 flagged 章节建（或重开）一条
+ * “设计对齐”修订任务；本轮已通过或不再 flagged 的章节自动消解旧任务。
+ * 走 revision_tasks 现有渠道（issueKey 幂等），taskSource 用 manual——
+ * system 同步器会自动回收它不认识的 issueKey，design gate 任务需独立生命周期。
+ */
+function syncDesignAlignmentRevisionTasks(input: {
+  novelId: number
+  arcName: string
+  batchStart: number
+  batchEnd: number
+  designGate: OutlineDesignGateResult
+  chapterIdByNum: Map<number, number>
+}): void {
+  try {
+    const db = getDb()
+    const now = new Date().toISOString()
+    const flaggedNums = new Set(
+      input.designGate.passed
+        ? []
+        : input.designGate.flaggedChapters.filter((num) => num >= input.batchStart && num <= input.batchEnd),
+    )
+
+    input.chapterIdByNum.forEach((chapterId, chapterNum) => {
+      if (chapterNum < input.batchStart || chapterNum > input.batchEnd) return
+      const issueKey = `design_alignment:chapter:${chapterId}`
+      const existing = db.select().from(revisionTasks)
+        .where(and(eq(revisionTasks.novelId, input.novelId), eq(revisionTasks.issueKey, issueKey)))
+        .all()[0]
+
+      if (flaggedNums.has(chapterNum)) {
+        const title = `第${chapterNum}章需要设计对齐重写`
+        const description = `弧《${input.arcName}》的设计校验重试后仍未通过：本章大纲仍是史实/事件复述，未推进弧的原创设计元素（${input.designGate.designTerms.slice(0, 12).join('、')}）。`
+        const fixBrief = input.designGate.correctiveDirective || '围绕弧的原创设计元素重写本章细纲，不要按历史事件时间线铺陈。'
+        if (existing) {
+          if (existing.status === 'ignored') return
+          db.update(revisionTasks).set({
+            status: 'open',
+            severity: 'medium',
+            title,
+            description,
+            fixBrief,
+            lastDetectedAt: now,
+            resolvedAt: null,
+            updatedAt: now,
+          }).where(eq(revisionTasks.id, existing.id)).run()
+          return
+        }
+        db.insert(revisionTasks).values({
+          novelId: input.novelId,
+          taskSource: 'manual',
+          issueKey,
+          taskType: 'outline',
+          status: 'open',
+          severity: 'medium',
+          title,
+          description,
+          fixBrief,
+          relatedPage: 'outline',
+          entityType: 'chapter',
+          entityId: chapterId,
+          chapterId,
+          originMetaJson: JSON.stringify({
+            issueCategory: 'design_alignment',
+            autoFixable: false,
+            suggestion: fixBrief,
+          }),
+          lastDetectedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }).run()
+        return
+      }
+
+      if (existing && existing.status !== 'ignored' && existing.status !== 'resolved') {
+        db.update(revisionTasks).set({
+          status: 'resolved',
+          resolvedAt: now,
+          updatedAt: now,
+        }).where(eq(revisionTasks.id, existing.id)).run()
+      }
+    })
+  } catch (error) {
+    console.warn('[outline-design-gate] 设计对齐修订任务同步失败', error)
+  }
+}
+
 export async function generateChapterOutlines(arcId: number, options: { batchSize?: number } = {}) {
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
@@ -353,6 +442,16 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
 
   let outlines = await generateOutlineBatch()
   let designGate = analyzeOutlineDesignAlignment(gateArc, toGateChapters(outlines))
+  // 每轮判定都落库：首轮 retryCount=0；重试后再落一条 retryCount=1（记录“实际采用的那轮”），
+  // 最新一条即当前生效结果，供章节流水线查未消解 flagged。
+  persistOutlineDesignGateResult({
+    novelId: arc.novelId,
+    arcId,
+    batchStart,
+    batchEnd,
+    retryCount: 0,
+    result: designGate,
+  })
   if (!designGate.passed) {
     console.warn(`[outline-design-gate] arc=${arc.arcName} ${designGate.summary} 触发重生成。`)
     try {
@@ -362,6 +461,14 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
         outlines = retryOutlines
         designGate = retryGate
       }
+      persistOutlineDesignGateResult({
+        novelId: arc.novelId,
+        arcId,
+        batchStart,
+        batchEnd,
+        retryCount: 1,
+        result: designGate,
+      })
       console.warn(`[outline-design-gate] arc=${arc.arcName} 重生成后：${designGate.summary}`)
     } catch (retryError) {
       console.error('[outline-design-gate] 重生成失败，沿用首轮结果。', retryError)
@@ -413,6 +520,14 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
   }
 
   const refreshedChapters = db.select().from(chapters).where(eq(chapters.novelId, arc.novelId)).all()
+  syncDesignAlignmentRevisionTasks({
+    novelId: arc.novelId,
+    arcName: arc.arcName,
+    batchStart,
+    batchEnd,
+    designGate,
+    chapterIdByNum: new Map(refreshedChapters.map((chapter) => [chapter.chapterNum, chapter.id])),
+  })
   const refreshedOutlinedNums = new Set(
     refreshedChapters
       .filter((chapter) => chapter.chapterNum >= chapterStart && chapter.chapterNum <= chapterEnd)

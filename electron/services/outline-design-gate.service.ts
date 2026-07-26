@@ -6,8 +6,14 @@
  * 人物、筹码）。如果一批章节大纲里出现大量“纯史实节点、零弧推进”的章，说明
  * 下游把弧的设计架空了，必须打回重写。
  *
- * 判定完全离线（无模型、无 DB），可单测。
+ * 判定（analyzeOutlineDesignAlignment）完全离线（无模型、无 DB），可单测。
+ * 文件尾部另有结果落库与“未消解 flagged 记录”查询：持久化到
+ * outline_design_gate_results，供章节流水线把设计词元与矫正指令传导到正文生成。
  */
+
+import { desc, eq } from 'drizzle-orm'
+import { getDb } from '../database/db'
+import { outlineDesignGateResults } from '../database/schema'
 
 export interface OutlineDesignGateArc {
   arcName?: string | null
@@ -204,5 +210,123 @@ export function analyzeOutlineDesignAlignment(
     flaggedChapters,
     correctiveDirective,
     summary,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 结果落库与未消解 flagged 查询（唯一的 DB 访问入口；判定纯函数不依赖以下代码）
+// ---------------------------------------------------------------------------
+
+/** outline_design_gate_results 行的最小只读形状（便于纯函数判定与单测）。 */
+export interface StoredOutlineDesignGateRow {
+  id: number
+  arcId: number
+  batchStart: number
+  batchEnd: number
+  passed: number
+  designTermsJson: string | null
+  findingsJson: string | null
+  correctiveDirective: string | null
+}
+
+export interface UnresolvedDesignGateFlag {
+  arcId: number
+  batchStart: number
+  batchEnd: number
+  designTerms: string[]
+  correctiveDirective: string
+  flaggedChapters: number[]
+}
+
+function parseJsonArraySafe(raw?: string | null): unknown[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function parseFlaggedChaptersFromFindings(findingsJson?: string | null): number[] {
+  return parseJsonArraySafe(findingsJson)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    .filter((item) => item.historyRecitalRisk === true)
+    .map((item) => (typeof item.chapterNum === 'number' ? item.chapterNum : 0))
+    .filter((num) => num > 0)
+}
+
+/**
+ * “未消解”判定（纯函数）：取覆盖该章的最新一条记录（同批次重试轮 id 更大，
+ * 自然覆盖首轮），该记录 passed=0 且 findings 里本章 historyRecitalRisk=true
+ * 时返回 flag；记录已 passed 或本章未被点名则视为已消解。
+ */
+export function resolveUnresolvedDesignGateFlag(
+  rows: StoredOutlineDesignGateRow[],
+  chapterNum: number,
+): UnresolvedDesignGateFlag | null {
+  const latest = [...rows]
+    .sort((left, right) => right.id - left.id)
+    .find((row) => chapterNum >= row.batchStart && chapterNum <= row.batchEnd)
+  if (!latest || latest.passed) return null
+
+  const flaggedChapters = parseFlaggedChaptersFromFindings(latest.findingsJson)
+  if (!flaggedChapters.includes(chapterNum)) return null
+
+  return {
+    arcId: latest.arcId,
+    batchStart: latest.batchStart,
+    batchEnd: latest.batchEnd,
+    designTerms: parseJsonArraySafe(latest.designTermsJson)
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean),
+    correctiveDirective: (latest.correctiveDirective || '').trim(),
+    flaggedChapters,
+  }
+}
+
+/** 每轮（首轮 retryCount=0 / 重试 retryCount=1）判定结果落库；失败只告警不阻断。 */
+export function persistOutlineDesignGateResult(input: {
+  novelId: number
+  arcId: number
+  batchStart: number
+  batchEnd: number
+  retryCount: number
+  result: OutlineDesignGateResult
+}): void {
+  try {
+    const db = getDb()
+    db.insert(outlineDesignGateResults).values({
+      novelId: input.novelId,
+      arcId: input.arcId,
+      batchStart: input.batchStart,
+      batchEnd: input.batchEnd,
+      judgeable: input.result.judgeable ? 1 : 0,
+      passed: input.result.passed ? 1 : 0,
+      retryCount: input.retryCount,
+      designTermsJson: JSON.stringify(input.result.designTerms),
+      findingsJson: JSON.stringify(input.result.findings),
+      correctiveDirective: input.result.correctiveDirective,
+    }).run()
+  } catch (error) {
+    console.warn('[outline-design-gate] 校验结果落库失败', error)
+  }
+}
+
+/**
+ * 章节流水线入口：本章是否仍处于未消解的设计校验 flagged 记录中。
+ * 查询失败一律返回 null（设计传导是增强项，绝不阻断正文生成）。
+ */
+export function getUnresolvedDesignGateFlags(novelId: number, chapterNum: number): UnresolvedDesignGateFlag | null {
+  try {
+    const db = getDb()
+    const rows = db.select().from(outlineDesignGateResults)
+      .where(eq(outlineDesignGateResults.novelId, novelId))
+      .orderBy(desc(outlineDesignGateResults.id))
+      .all()
+    return resolveUnresolvedDesignGateFlag(rows, chapterNum)
+  } catch {
+    return null
   }
 }
