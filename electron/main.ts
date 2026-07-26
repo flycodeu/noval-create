@@ -1,6 +1,17 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { execSync } from 'child_process'
+
+// Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码
+// （如 "涓婁笅鏂?"）。启动时把当前控制台切到 UTF-8，仅影响显示。
+if (process.platform === 'win32') {
+  try {
+    execSync('chcp 65001', { stdio: 'ignore' })
+  } catch {
+    // 无控制台（打包后 GUI 启动）时忽略
+  }
+}
 import { desc, eq } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'

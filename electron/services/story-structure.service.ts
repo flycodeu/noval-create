@@ -32,6 +32,7 @@ import {
   reorderStoryVolumesTransactional,
 } from './story-structure-batch.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
 import type {
   StructureLinkageSummary,
   StructureLinkageSyncResult,
@@ -398,9 +399,7 @@ function markNovelContextChangedInline(novelId: number, reasons: string | string
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
-    .map((item) => item.trim())
-    .filter(Boolean))]
+  const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
 
   if (normalizedReasons.length === 0) return novel.contextVersion || 1
 

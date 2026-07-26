@@ -22,6 +22,7 @@ import type {
   StructureBatchPreviewItem,
 } from '../../src/types'
 import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
+import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 function asText(value: unknown): string {
@@ -263,7 +264,7 @@ function markNovelContextChangedInline(novelId: number, reason: string) {
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
   for (const chapter of chapterRows) {
     db.update(chapters).set({
-      staleReasonJson: mergeStoredReasons(chapter.staleReasonJson, [reason]),
+      staleReasonJson: mergeStoredReasons(chapter.staleReasonJson, translateContextChangeReasons([reason])),
       updatedAt: now,
     }).where(eq(chapters.id, chapter.id)).run()
   }

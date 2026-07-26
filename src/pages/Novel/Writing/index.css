@@ -582,13 +582,17 @@
   }
 
   .novel-writing-console-page .chapter-console-page__column--left {
-    position: static;
+    position: sticky;
+    top: 88px;
+    align-self: start;
   }
 
+  /* 章节多时列表必须保留自身滚动区，否则左栏无限增高会撑爆布局。 */
   .novel-writing-console-page .chapter-console-page__chapter-list {
-    max-height: none;
-    overflow: visible;
-    padding-right: 0;
+    max-height: calc(100dvh - 280px);
+    overflow: auto;
+    padding-right: 2px;
+    scrollbar-gutter: stable;
   }
 }
 
@@ -646,9 +650,11 @@
     grid-template-columns: 1fr;
   }
 
+  /* 窄屏下左栏与正文纵向堆叠，列表限高避免把编辑器推出屏幕。 */
   .novel-writing-console-page .chapter-console-page__chapter-list {
-    max-height: none;
-    overflow: visible;
+    max-height: min(48dvh, 520px);
+    overflow: auto;
+    scrollbar-gutter: stable;
   }
 
   .novel-writing-console-page .novel-writing-shell__editor-sheet,

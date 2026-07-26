@@ -32,6 +32,7 @@ import {
   volumeDesigns,
 } from '../database/schema'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { formatStaleReasonsSummary, translateContextChangeReasons } from '../../src/shared/context-change-reasons'
 import {
   deriveChapterContractValidationStatus,
   isContractValidationBlockerVerdict as isContractValidationBlockerVerdictValue,
@@ -2197,9 +2198,7 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
     throwUserFacingError('novel.notFound')
   }
 
-  const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
-    .map((item) => item.trim())
-    .filter(Boolean))]
+  const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
   if (normalizedReasons.length === 0) {
     return novel.contextVersion || 1
   }
@@ -2241,9 +2240,7 @@ export function markSubsequentChaptersStale(
   reasons: string | string[],
 ): void {
   const db = getDb()
-  const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
-    .map((item) => item.trim())
-    .filter(Boolean))]
+  const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
   if (normalizedReasons.length === 0) return
 
   const now = new Date().toISOString()
@@ -2347,7 +2344,7 @@ export function runChapterPublishCheck(
     throwUserFacingError('novel.notFound')
   }
 
-  const staleReasons = parseStringArray(chapter.staleReasonJson)
+  const staleReasons = translateContextChangeReasons(parseStringArray(chapter.staleReasonJson))
   const consistencyIssues = collectChapterRelatedIssues(chapter.novelId, chapter.id, chapter.chapterNum)
   const highIssues = consistencyIssues.filter((issue) => issue.severity === 'high')
   const mediumIssues = consistencyIssues.filter((issue) => issue.severity === 'medium')
@@ -2611,7 +2608,7 @@ export function runChapterPublishCheck(
       status: staleReasons.length === 0 && (chapter.contextVersion || 1) === (novel.contextVersion || 1) ? 'pass' : 'blocker',
       detail: staleReasons.length === 0 && (chapter.contextVersion || 1) === (novel.contextVersion || 1)
         ? '章节上下文与当前全书版本一致。'
-        : `需要先处理这些过期原因：${staleReasons.join('；') || '上下文版本落后于当前设定。'}`,
+        : `上下文已过期：${formatStaleReasonsSummary(staleReasons)}`,
       relatedPage: 'writing',
       fixHint: '回到正文页先刷新摘要、连续性记忆和相关上下文。',
     }),

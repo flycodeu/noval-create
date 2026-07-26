@@ -1,6 +1,15 @@
 const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')
+
+// Windows 终端默认 GBK 代码页会把 UTF-8 中文日志显示成乱码，先切到 UTF-8。
+if (process.platform === 'win32') {
+  try {
+    require('node:child_process').execSync('chcp 65001', { stdio: 'ignore' })
+  } catch {
+    // 无控制台时忽略
+  }
+}
 const { LOCAL_WEB_BACKEND_VERSION } = require('./local-web-contract.cjs')
 const Module = require('node:module')
 const ts = require('typescript')
