@@ -10,8 +10,9 @@ import {
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { getDb } from '../database/db'
 import { antiAiRuleHits, revisionTasks } from '../database/schema'
+import { analyzeNovelStyleCompliance } from './style-compliance.service'
 
-export type AntiAiRuleHitScope = AntiAiPromptRuleBucket | 'genre' | 'drift' | 'quality'
+export type AntiAiRuleHitScope = AntiAiPromptRuleBucket | 'genre' | 'drift' | 'quality' | 'style'
 export type AntiAiRuleHitSource = 'guardrail' | 'language_drift'
 
 export interface AntiAiRuleHitDraft {
@@ -105,6 +106,10 @@ type AntiAiRuleHitRowLike = {
   promotedToHardConstraint?: number | null
   detail?: string | null
 }
+
+/** Rule-code prefix for hits promoted from style fingerprint forbidden patterns. */
+export const STYLE_FORBIDDEN_RULE_PREFIX = 'style_forbidden_pattern'
+const MAX_STYLE_FORBIDDEN_HITS = 8
 
 const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   ai_slogan: 'expression',
@@ -537,9 +542,10 @@ function asText(value: unknown): string {
 }
 
 function normalizeScope(value: unknown, ruleCode: string): AntiAiRuleHitScope {
-  if (value === 'expression' || value === 'sentence' || value === 'structure' || value === 'genre' || value === 'drift' || value === 'quality') {
+  if (value === 'expression' || value === 'sentence' || value === 'structure' || value === 'genre' || value === 'drift' || value === 'quality' || value === 'style') {
     return value
   }
+  if (ruleCode.startsWith('style_forbidden_pattern')) return 'style'
   return RULE_SCOPE_FALLBACK[ruleCode] || 'structure'
 }
 
@@ -583,6 +589,15 @@ function limitUnique(values: string[], limit: number): string[] {
 function getRuleDescriptor(ruleCode: string): AntiAiRuleDescriptor {
   const descriptor = RULE_DESCRIPTOR_MAP[ruleCode]
   if (descriptor) return descriptor
+  if (ruleCode.startsWith(STYLE_FORBIDDEN_RULE_PREFIX)) {
+    const pattern = ruleCode.slice(STYLE_FORBIDDEN_RULE_PREFIX.length + 1) || '该表达'
+    return {
+      title: `风格禁用模式：${pattern}`,
+      scope: 'style',
+      avoid: `不要再写「${pattern}」及其近似变体，这已被当前风格指纹列为禁用模式。`,
+      prefer: '换成风格指纹允许的表达：动作、对白或具体结果。',
+    }
+  }
   return {
     title: ruleCode,
     scope: RULE_SCOPE_FALLBACK[ruleCode] || 'structure',
@@ -1002,6 +1017,33 @@ export function getPromotedAntiAiRulesForChapter(
   return resolvePromotedRules(loadRecentRuleRows(novelId, chapterNum), chapterNum)
 }
 
+/**
+ * Pure mapper: style-compliance matched forbidden patterns → anti-AI rule hit
+ * drafts under scope 'style'. Rule codes are stable per pattern so re-running
+ * the persist step stays idempotent and recurrence promotion keeps working.
+ */
+export function buildStyleForbiddenRuleHits(matchedForbiddenPatterns: string[]): AntiAiRuleHitDraft[] {
+  return limitUnique(matchedForbiddenPatterns, MAX_STYLE_FORBIDDEN_HITS).map((pattern) => ({
+    ruleCode: `${STYLE_FORBIDDEN_RULE_PREFIX}:${pattern.slice(0, 24)}`,
+    ruleTitle: `风格禁用模式：${pattern}`,
+    scope: 'style',
+    severity: 'medium',
+    excerpt: pattern,
+    source: 'guardrail',
+    detail: `正文命中当前风格指纹的禁用模式「${pattern}」，需要替换为指纹允许的表达。`,
+  }))
+}
+
+function collectStyleForbiddenRuleHits(novelId: number, content: string): AntiAiRuleHitDraft[] {
+  try {
+    const compliance = analyzeNovelStyleCompliance(novelId, content)
+    if (!compliance || compliance.matchedForbiddenPatterns.length === 0) return []
+    return buildStyleForbiddenRuleHits(compliance.matchedForbiddenPatterns)
+  } catch {
+    return []
+  }
+}
+
 export function persistAntiAiRuleHits(params: {
   novelId: number
   chapterId: number
@@ -1017,7 +1059,10 @@ export function persistAntiAiRuleHits(params: {
 } {
   const db = getDb()
   const now = new Date().toISOString()
-  const hits = collectAntiAiRuntimeHits(params.content, params.genre, { knownTerms: params.knownTerms })
+  const hits = dedupeDraftsByRuleCode([
+    ...collectAntiAiRuntimeHits(params.content, params.genre, { knownTerms: params.knownTerms }),
+    ...collectStyleForbiddenRuleHits(params.novelId, params.content),
+  ])
   db.delete(antiAiRuleHits).where(eq(antiAiRuleHits.chapterId, params.chapterId)).run()
 
   if (hits.length === 0) {

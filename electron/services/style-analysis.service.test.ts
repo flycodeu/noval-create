@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
@@ -9,12 +9,20 @@ vi.mock('./model.service', () => ({
   getDefaultAdapter: vi.fn(),
 }))
 
+vi.mock('./task.service', () => ({
+  runChatTask: vi.fn(),
+}))
+
+import { getDb } from '../database/db'
+import { runChatTask } from './task.service'
 import type { StyleFingerprint } from './style-analysis.service'
 import {
   buildStyleHardGuard,
   getDefaultFingerprint,
   mergeStyleResults,
   parseStyleResult,
+  runStyleAbTest,
+  selectAutoSampleChapters,
 } from './style-analysis.service'
 
 describe('style-analysis helpers', () => {
@@ -153,5 +161,108 @@ describe('style-analysis helpers', () => {
     expect(guard.abstractTokenDensityMax).toBe(11)
     expect(guard.hardRules.some((item) => item.includes('动作驱动'))).toBe(true)
     expect(guard.rewriteTriggers.some((item) => item.includes('不要空喊'))).toBe(true)
+  })
+})
+
+describe('runStyleAbTest', () => {
+  const fingerprintRecord = {
+    id: 7,
+    novelId: 3,
+    name: '测试指纹',
+    sourceText: null,
+    fingerprintJson: JSON.stringify({
+      avgSentenceLength: 16,
+      avgParagraphLength: 70,
+      dialogueLineRate: 30,
+      abstractTokenDensity: 6,
+      sentencePatterns: ['短句优先'],
+      wordFrequencyProfile: {},
+      narrativeTechniques: '动作驱动',
+      dialogueStyle: '干脆利落',
+      descriptionDensity: '偏少',
+      paceProfile: '快',
+      toneKeywords: ['冷硬'],
+      forbiddenPatterns: ['不要空喊口号'],
+      exampleExcerpts: [],
+    }),
+    analysisModelId: null,
+    sourceType: 'pasted',
+    sourceChapterIdsJson: null,
+    statsJson: null,
+    genreId: null,
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+  }
+
+  beforeEach(() => {
+    vi.mocked(runChatTask).mockReset()
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            all: () => [fingerprintRecord],
+          }),
+        }),
+      }),
+    } as never)
+  })
+
+  it('generates paired drafts, injecting fingerprint prompt only into variant A', async () => {
+    vi.mocked(runChatTask)
+      .mockResolvedValueOnce('他抬手就砸了过去。桌角断裂。\n\n“滚。”他说。')
+      .mockResolvedValueOnce('夜色深沉，他心中充满了希望，忍不住空喊口号，觉得未来充满意义。')
+
+    const result = await runStyleAbTest(3, 7, '主角在酒馆被三个人围住，他要在不惊动官府的情况下脱身。')
+
+    expect(vi.mocked(runChatTask)).toHaveBeenCalledTimes(2)
+    const firstPrompt = String(vi.mocked(runChatTask).mock.calls[0][0].messages[0].content)
+    const secondPrompt = String(vi.mocked(runChatTask).mock.calls[1][0].messages[0].content)
+    expect(firstPrompt).toContain('目标风格指纹')
+    expect(firstPrompt).toContain('风格硬约束')
+    expect(firstPrompt).toContain('场景梗概')
+    expect(secondPrompt).not.toContain('目标风格指纹')
+    expect(secondPrompt).toContain('场景梗概')
+
+    expect(result.fingerprintName).toBe('测试指纹')
+    expect(result.withFingerprint.stats.avgSentenceLength).toBeGreaterThan(0)
+    expect(result.without.stats.avgSentenceLength).toBeGreaterThan(0)
+    expect(result.withFingerprint.compliance.status).toBeDefined()
+    // Variant B hits the fingerprint's forbidden pattern (normalized to 空喊口号).
+    expect(result.without.compliance.matchedForbiddenPatterns).toContain('空喊口号')
+    expect(result.withFingerprint.compliance.matchedForbiddenPatterns).toEqual([])
+  })
+
+  it('rejects empty scene briefs without calling the model', async () => {
+    await expect(runStyleAbTest(3, 7, '   ')).rejects.toThrow('场景梗概不能为空')
+    expect(vi.mocked(runChatTask)).not.toHaveBeenCalled()
+  })
+})
+
+describe('selectAutoSampleChapters', () => {
+  const finalChapters = (nums: number[]) => nums.map((num) => ({ id: num * 10, chapterNum: num }))
+
+  it('returns null before five finalized chapters accumulate', () => {
+    expect(selectAutoSampleChapters(finalChapters([1, 2, 3, 4]), null)).toBeNull()
+    expect(selectAutoSampleChapters([], null)).toBeNull()
+  })
+
+  it('samples the latest five finalized chapters on first trigger', () => {
+    const decision = selectAutoSampleChapters(finalChapters([1, 2, 3, 4, 5, 6]), null)
+    expect(decision).toEqual({
+      chapterIds: [20, 30, 40, 50, 60],
+      startChapterNum: 2,
+      endChapterNum: 6,
+    })
+  })
+
+  it('requires five NEW finalized chapters after the last sample', () => {
+    expect(selectAutoSampleChapters(finalChapters([1, 2, 3, 4, 5, 6, 7, 8]), 5)).toBeNull()
+
+    const decision = selectAutoSampleChapters(finalChapters([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), 5)
+    expect(decision).toEqual({
+      chapterIds: [60, 70, 80, 90, 100],
+      startChapterNum: 6,
+      endChapterNum: 10,
+    })
   })
 })

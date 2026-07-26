@@ -64,6 +64,7 @@ export type TaskType =
   | 'planning_draft'
   | 'entity_discovery'
   | 'story_thread_generate'
+  | 'style_ab_test'
 
 export type TaskRunnerType = 'chat' | 'stream' | 'workflow'
 export type TaskStatus =

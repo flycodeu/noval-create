@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAntiAiHardConstraintContext,
+  buildStyleForbiddenRuleHits,
   collectAntiAiRuntimeHits,
+  STYLE_FORBIDDEN_RULE_PREFIX,
   summarizeAntiAiRuleHits,
 } from './anti-ai-rule.service'
 
@@ -134,5 +136,36 @@ describe('anti-ai-rule.service', () => {
     expect(summary.topRepeatedRules[0]?.ruleCode).toBe('ai_ending_summary')
     expect(summary.recentAlerts.some((item) => item.ruleCode === 'ai_ending_summary' && item.severity === 'critical')).toBe(true)
     expect(summary.chapterSignals.find((item) => item.chapterNum === 13)?.rules.length).toBe(2)
+  })
+
+  it('maps style forbidden pattern hits into scope=style rule drafts with stable codes', () => {
+    const hits = buildStyleForbiddenRuleHits(['空喊口号', '空喊口号', '命运的齿轮'])
+
+    expect(hits).toHaveLength(2)
+    expect(hits[0].ruleCode).toBe(`${STYLE_FORBIDDEN_RULE_PREFIX}:空喊口号`)
+    expect(hits.every((hit) => hit.scope === 'style')).toBe(true)
+    expect(hits.every((hit) => hit.source === 'guardrail')).toBe(true)
+    // Stable codes: re-running the same content yields identical drafts (idempotent persist).
+    expect(buildStyleForbiddenRuleHits(['空喊口号', '命运的齿轮'])).toEqual(hits)
+  })
+
+  it('caps style forbidden hits and keeps rule summaries scoped as style', () => {
+    const manyPatterns = Array.from({ length: 12 }, (_, index) => `禁用模式${index + 1}`)
+    expect(buildStyleForbiddenRuleHits(manyPatterns)).toHaveLength(8)
+
+    const summary = summarizeAntiAiRuleHits([
+      {
+        chapterId: 21,
+        chapterNum: 21,
+        ruleCode: `${STYLE_FORBIDDEN_RULE_PREFIX}:空喊口号`,
+        ruleTitle: '风格禁用模式：空喊口号',
+        scope: 'style',
+        severity: 'medium',
+        excerpt: '空喊口号',
+        source: 'guardrail',
+        promotedToHardConstraint: 0,
+      },
+    ])
+    expect(summary.topRepeatedRules[0]?.scope).toBe('style')
   })
 })

@@ -4352,7 +4352,7 @@ export interface AntiAiRuleHitDetail {
 export interface AntiAiRuleTrendSummary {
   ruleCode: string
   ruleTitle: string
-  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality'
+  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality' | 'style'
   severity: 'low' | 'medium' | 'high'
   chapterCount: number
   hitCount: number
@@ -4366,7 +4366,7 @@ export interface AntiAiRuleTrendSummary {
 export interface AntiAiPromotedRuleSummary {
   ruleCode: string
   ruleTitle: string
-  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality'
+  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality' | 'style'
   chapterNums: number[]
   avoid: string
   prefer?: string

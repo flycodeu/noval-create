@@ -111,6 +111,7 @@ import {
 } from './expression-dedup.service'
 import { analyzeSummaryHealthForChapter, refreshSummaryHealthSemantic } from './summary-decay.service'
 import { analyzeNovelStyleCompliance } from './style-compliance.service'
+import { maybeRefreshNovelStyleFingerprint } from './style-analysis.service'
 import {
   analyzeNarrativeControls,
   type NarrativeControlSceneSnapshot,
@@ -1998,6 +1999,11 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
       `第${chapter.chapterNum}章内容已更新`,
     )
     syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
+    // 定稿章节积累到阈值后自动采样新的风格指纹（不自动激活）。
+    // 异步 fire-and-forget：采样失败绝不阻塞章节定稿。
+    try {
+      void maybeRefreshNovelStyleFingerprint(chapter.novelId).catch(() => {})
+    } catch { /* ignore */ }
   }
 
   return {

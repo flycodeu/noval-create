@@ -1,9 +1,11 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import type { StyleFingerprint, StyleHardGuard } from '../../src/types'
+import type { StyleComplianceResult, StyleFingerprint, StyleHardGuard } from '../../src/types'
 import { computeStyleStats, type StyleStats } from '../../src/shared/style-fingerprint-stats'
 import { getDb } from '../database/db'
 import { chapters, novels, styleFingerprints } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
+import { analyzeStyleCompliance } from './style-compliance.service'
+import { runChatTask } from './task.service'
 
 export type { StyleFingerprint, StyleHardGuard }
 
@@ -489,4 +491,178 @@ export function getLatestStyleFingerprintForNovel(novelId: number): {
     record: latest,
     fingerprint,
   }
+}
+
+// ---------------------------------------------------------------------------
+// A/B 试写：同一场景梗概，注入指纹 vs 不注入，对照统计与合规结果。
+// ---------------------------------------------------------------------------
+
+export interface StyleAbTestVariant {
+  text: string
+  stats: StyleStats
+  compliance: StyleComplianceResult
+}
+
+export interface StyleAbTestResult {
+  withFingerprint: StyleAbTestVariant
+  without: StyleAbTestVariant
+  fingerprintName: string
+}
+
+const AB_TEST_TARGET_WORDS = 400
+
+function buildAbTestBasePrompt(sceneBrief: string): string {
+  return [
+    `你是一位中文小说写手。请根据下面的场景梗概写一段约 ${AB_TEST_TARGET_WORDS} 字的正文片段。`,
+    '要求：只输出正文，不要标题、不要解释、不要列点；写成可以直接放进章节的叙事文字。',
+    '',
+    '场景梗概：',
+    sceneBrief.trim(),
+  ].join('\n')
+}
+
+export async function runStyleAbTest(
+  novelId: number,
+  fingerprintId: number,
+  sceneBrief: string,
+  modelConfigId?: number,
+): Promise<StyleAbTestResult> {
+  if (!sceneBrief.trim()) {
+    throw new Error('场景梗概不能为空。')
+  }
+  const payload = getStyleFingerprintPayload(fingerprintId)
+  if (!payload?.record) {
+    throw new Error('风格指纹不存在或数据已损坏。')
+  }
+
+  const basePrompt = buildAbTestBasePrompt(sceneBrief)
+  const fingerprintSections = [
+    buildStyleFingerprintPromptSection(fingerprintId),
+    buildStyleHardGuardPromptSection(fingerprintId),
+  ].filter(Boolean).join('\n\n')
+
+  const withFingerprintText = (await runChatTask({
+    type: 'style_ab_test',
+    novelId,
+    relatedEntityType: 'style_fingerprint',
+    relatedEntityId: fingerprintId,
+    modelConfigId,
+    messages: [{ role: 'user', content: `${fingerprintSections}\n\n${basePrompt}` }],
+  })).trim()
+
+  const withoutText = (await runChatTask({
+    type: 'style_ab_test',
+    novelId,
+    relatedEntityType: 'style_fingerprint',
+    relatedEntityId: fingerprintId,
+    modelConfigId,
+    messages: [{ role: 'user', content: basePrompt }],
+  })).trim()
+
+  const buildVariant = (text: string): StyleAbTestVariant => ({
+    text,
+    stats: computeStyleStats(text),
+    compliance: analyzeStyleCompliance(text, payload.fingerprint),
+  })
+
+  return {
+    withFingerprint: buildVariant(withFingerprintText),
+    without: buildVariant(withoutText),
+    fingerprintName: payload.record.name,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 自动采样刷新：定稿章节积累到阈值后自动生成新的章节采样指纹（不自动激活）。
+// ---------------------------------------------------------------------------
+
+export interface AutoSampleDecision {
+  chapterIds: number[]
+  startChapterNum: number
+  endChapterNum: number
+}
+
+/**
+ * Pure trigger logic: given the novel's finalized chapters and the highest
+ * chapter number already covered by the latest chapter-sampled fingerprint,
+ * decide whether to resample. Requires at least `minNewFinalCount` NEW final
+ * chapters since the last sample, then samples the most recent `sampleSize`
+ * final chapters.
+ */
+export function selectAutoSampleChapters(
+  finalChapters: Array<{ id: number; chapterNum: number }>,
+  lastSampledMaxChapterNum: number | null,
+  options: { minNewFinalCount?: number; sampleSize?: number } = {},
+): AutoSampleDecision | null {
+  const minNewFinalCount = options.minNewFinalCount ?? 5
+  const sampleSize = options.sampleSize ?? 5
+
+  const sorted = [...finalChapters].sort((left, right) => left.chapterNum - right.chapterNum)
+  const freshCount = lastSampledMaxChapterNum === null
+    ? sorted.length
+    : sorted.filter((chapter) => chapter.chapterNum > lastSampledMaxChapterNum).length
+  if (freshCount < minNewFinalCount) return null
+
+  const sample = sorted.slice(-sampleSize)
+  if (sample.length === 0) return null
+  return {
+    chapterIds: sample.map((chapter) => chapter.id),
+    startChapterNum: sample[0].chapterNum,
+    endChapterNum: sample[sample.length - 1].chapterNum,
+  }
+}
+
+/**
+ * Fire-and-forget refresher called after chapter finalization. Creates a new
+ * chapter-sampled fingerprint once enough new finalized chapters accumulated.
+ * Never touches the active pointer — the user opts in manually.
+ */
+export async function maybeRefreshNovelStyleFingerprint(novelId: number): Promise<number | null> {
+  const db = getDb()
+
+  const latestSampled = db.select().from(styleFingerprints)
+    .where(and(eq(styleFingerprints.novelId, novelId), eq(styleFingerprints.sourceType, 'chapters')))
+    .orderBy(desc(styleFingerprints.id))
+    .limit(1)
+    .all()[0]
+
+  const chapterRows = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    status: chapters.status,
+    content: chapters.content,
+  })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+
+  let lastSampledMaxChapterNum: number | null = null
+  if (latestSampled?.sourceChapterIdsJson) {
+    try {
+      const sampledIds = JSON.parse(latestSampled.sourceChapterIdsJson) as unknown
+      if (Array.isArray(sampledIds)) {
+        const idSet = new Set(sampledIds.filter((id): id is number => typeof id === 'number'))
+        const sampledNums = chapterRows
+          .filter((row) => idSet.has(row.id))
+          .map((row) => row.chapterNum)
+        if (sampledNums.length > 0) {
+          lastSampledMaxChapterNum = Math.max(...sampledNums)
+        }
+      }
+    } catch {
+      lastSampledMaxChapterNum = null
+    }
+  }
+
+  const finalChapters = chapterRows
+    .filter((row) => row.status === 'final' && row.content?.trim())
+    .map((row) => ({ id: row.id, chapterNum: row.chapterNum }))
+
+  const decision = selectAutoSampleChapters(finalChapters, lastSampledMaxChapterNum)
+  if (!decision) return null
+
+  const name = decision.startChapterNum === decision.endChapterNum
+    ? `自动采样 · 第${decision.startChapterNum}章`
+    : `自动采样 · 第${decision.startChapterNum}-${decision.endChapterNum}章`
+  return createStyleFingerprintFromChapters(novelId, name, decision.chapterIds)
 }
