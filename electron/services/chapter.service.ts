@@ -4540,7 +4540,7 @@ async function generateChapterContentInternal(
       },
     })
     if (reviewParse.success) {
-      const normalizedNotes = normalizeReviewNotes(reviewParse.data)
+      const normalizedNotes = normalizeReviewNotes(reviewParse.data, { chapterContent: draftContent })
       reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
     }
 

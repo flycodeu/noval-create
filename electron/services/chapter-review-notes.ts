@@ -24,6 +24,15 @@ import {
   isContractValidationBlockerVerdict,
   isHardContractValidationItem,
 } from '../../src/shared/contract-validation'
+import {
+  SEMANTIC_GATE_DIMENSION_SPECS,
+  normalizeForEvidence,
+  normalizeSemanticGateReview,
+  type SemanticGateDimension,
+  type SemanticGateStatus,
+  type SemanticGateVerdict,
+} from '../../src/shared/semantic-gate'
+import { CORE_SEMANTIC_GATE_DIMENSIONS } from '../../src/shared/semantic-gate-policy'
 import { normalizeChapterContractValidationResult } from './chapter-contract-validator.service'
 import { getQualityDashboardData } from './quality-dashboard.service'
 import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
@@ -130,6 +139,12 @@ export interface ChapterReviewNotes {
     checkedAt: string
     resolved: string[]
   }
+  /** Critic 输出的语义门格式判定（经 normalizeSemanticGateReview 证据回指校验后挂载） */
+  semantic_verdicts?: SemanticGateVerdict[]
+  /** 语义判定归一过程中产生的纪律性警告（证据缺失降级、维度缺失等） */
+  semantic_review_warnings?: string[]
+  /** shadow 模式下语义门与关键词门的分歧记录（仅观察，不阻断） */
+  semantic_divergence_notes?: string[]
 }
 
 export const STYLE_COMPLIANCE_RISK_PREFIX = '风格硬约束：'
@@ -311,7 +326,105 @@ export function mergeSeverity(current: ReviewSeverity, incoming: ReviewSeverity)
   return rank[incoming] > rank[current] ? incoming : current
 }
 
-export function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
+export const UNVERIFIED_EVIDENCE_PREFIX = '[证据未核实] '
+
+const RISK_EVIDENCE_MARKER = '【证据】'
+
+const MIN_RISK_EVIDENCE_NEEDLE_LENGTH = 6
+
+/**
+ * 对带『【证据】』段的风险条目做逐字回指核验：证据能在正文中找到则原样保留，
+ * 回指失败的条目不删除，但打上『[证据未核实] 』前缀，供下游降权处理。
+ */
+export function annotateRiskEvidence(items: string[], normalizedCorpus: string): string[] {
+  return items.map((item) => {
+    const markerIndex = item.indexOf(RISK_EVIDENCE_MARKER)
+    if (markerIndex < 0 || item.startsWith(UNVERIFIED_EVIDENCE_PREFIX)) return item
+    const excerpt = item.slice(markerIndex + RISK_EVIDENCE_MARKER.length).trim()
+    const needle = normalizeForEvidence(excerpt)
+    if (needle.length >= MIN_RISK_EVIDENCE_NEEDLE_LENGTH && normalizedCorpus.includes(needle)) {
+      return item
+    }
+    return `${UNVERIFIED_EVIDENCE_PREFIX}${item}`
+  })
+}
+
+function parseSemanticStatus(value: unknown): SemanticGateStatus | null {
+  return value === 'pass' || value === 'warning' || value === 'blocker' || value === 'uncertain'
+    ? value
+    : null
+}
+
+/** 已归一过的 semantic_verdicts 在 JSON round-trip 后的轻量校验（不重新做证据回指）。 */
+function normalizeStoredSemanticVerdicts(value: unknown): SemanticGateVerdict[] {
+  if (!Array.isArray(value)) return []
+  const results: SemanticGateVerdict[] = []
+  const seen = new Set<SemanticGateDimension>()
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+    const record = entry as Record<string, unknown>
+    const dimension = typeof record.dimension === 'string' ? record.dimension as SemanticGateDimension : null
+    if (!dimension || !(dimension in SEMANTIC_GATE_DIMENSION_SPECS) || seen.has(dimension)) return
+    const status = parseSemanticStatus(record.status)
+    if (!status) return
+    seen.add(dimension)
+    const downgradedFrom = parseSemanticStatus(record.downgradedFrom)
+    results.push({
+      dimension,
+      status,
+      confidence: typeof record.confidence === 'number' && Number.isFinite(record.confidence)
+        ? Math.max(0, Math.min(1, record.confidence))
+        : 0,
+      summary: asText(record.summary),
+      suggestion: asText(record.suggestion),
+      evidence: Array.isArray(record.evidence)
+        ? record.evidence
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+          .map((item) => ({ excerpt: asText(item.excerpt), explanation: asText(item.explanation) }))
+          .filter((item) => item.excerpt)
+        : [],
+      rejectedEvidenceCount: typeof record.rejectedEvidenceCount === 'number' && Number.isFinite(record.rejectedEvidenceCount)
+        ? Math.max(0, Math.round(record.rejectedEvidenceCount))
+        : 0,
+      ...(downgradedFrom ? { downgradedFrom } : {}),
+    })
+  })
+  return results
+}
+
+export interface NormalizeReviewNotesOptions {
+  /** 提供正文时：对 payload.verdicts 做语义门证据归一，并对风险条目的【证据】段做逐字回指核验。 */
+  chapterContent?: string
+}
+
+const EVIDENCE_ANNOTATED_RISK_KEYS = [
+  'critical_fixes',
+  'continuity_risks',
+  'arc_progress_risks',
+  'context_drift_risks',
+  'realism_risks',
+  'coherence_risks',
+  'reader_hook_risks',
+  'step_memory_risks',
+  'opening_hook_risks',
+  'title_alignment_risks',
+  'hallucination_risks',
+  'language_risks',
+  'genre_hollowing_risks',
+  'design_flatness_risks',
+  'typed_ref_risks',
+  'source_grounding_risks',
+  'operating_mode_risks',
+  'long_window_humanization_risks',
+  'genre_register_risks',
+  'dialogue_separability_risks',
+  'dialogue_homogenization_risks',
+  'dialogue_filler_risks',
+  'dialogue_info_density_risks',
+  'missing_payoffs',
+] as const satisfies ReadonlyArray<keyof ChapterReviewNotes>
+
+export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotesOptions = {}): ChapterReviewNotes {
   const record = raw && typeof raw === 'object' && !Array.isArray(raw)
     ? raw as Record<string, unknown>
     : {}
@@ -359,7 +472,7 @@ export function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
       }
     : undefined
 
-  return {
+  const notes: ChapterReviewNotes = {
     summary: asText(record.summary),
     critical_fixes: toStringArray(record.critical_fixes),
     continuity_risks: toStringArray(record.continuity_risks),
@@ -443,6 +556,43 @@ export function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     rewrite_recheck: rewriteRecheck,
     contract_validation: normalizeChapterContractValidationResult(record.contract_validation) || undefined,
   }
+
+  // JSON round-trip 保留：已归一的语义判定与警告字段不因重新 normalize 丢失。
+  const storedSemanticVerdicts = normalizeStoredSemanticVerdicts(record.semantic_verdicts)
+  if (storedSemanticVerdicts.length > 0) notes.semantic_verdicts = storedSemanticVerdicts
+  const storedSemanticWarnings = toStringArray(record.semantic_review_warnings)
+  if (storedSemanticWarnings.length > 0) notes.semantic_review_warnings = dedupeTextList(storedSemanticWarnings)
+  const storedDivergenceNotes = toStringArray(record.semantic_divergence_notes)
+  if (storedDivergenceNotes.length > 0) notes.semantic_divergence_notes = dedupeTextList(storedDivergenceNotes)
+
+  const chapterContent = options.chapterContent || ''
+  if (chapterContent.trim()) {
+    const normalizedCorpus = normalizeForEvidence(chapterContent)
+    EVIDENCE_ANNOTATED_RISK_KEYS.forEach((key) => {
+      const list = notes[key]
+      if (Array.isArray(list) && list.length > 0) {
+        ;(notes as unknown as Record<string, unknown>)[key] = annotateRiskEvidence(list, normalizedCorpus)
+      }
+    })
+    if (Array.isArray(record.verdicts) && record.verdicts.length > 0) {
+      const semanticReview = normalizeSemanticGateReview({
+        chapterContent,
+        dimensions: CORE_SEMANTIC_GATE_DIMENSIONS,
+        parsedPayload: { verdicts: record.verdicts },
+      })
+      if (!semanticReview.failed) {
+        notes.semantic_verdicts = semanticReview.verdicts
+        if (semanticReview.warnings.length > 0) {
+          notes.semantic_review_warnings = dedupeTextList([
+            ...(notes.semantic_review_warnings || []),
+            ...semanticReview.warnings,
+          ])
+        }
+      }
+    }
+  }
+
+  return notes
 }
 
 export function hasReviewNotes(notes: ChapterReviewNotes): boolean {
