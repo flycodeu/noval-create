@@ -736,3 +736,157 @@ export function findChapterByNum(
 ): QualityChapterEntry | null {
   return chapterDetails.find((entry) => entry.chapterNum === chapterNum) || null
 }
+
+// ---------------------------------------------------------------------------
+// 顶部筛选条：章节范围 / 严重度 / 指标类别
+// ---------------------------------------------------------------------------
+
+export type QualitySeverityFilter = 'all' | 'high' | 'medium' | 'low'
+export type QualityCategoryFilter = 'all' | 'overview' | 'language' | 'structure' | 'stability'
+
+export interface QualityDashboardFilters {
+  chapterStart: number | null
+  chapterEnd: number | null
+  severity: QualitySeverityFilter
+  category: QualityCategoryFilter
+}
+
+export const DEFAULT_QUALITY_FILTERS: QualityDashboardFilters = {
+  chapterStart: null,
+  chapterEnd: null,
+  severity: 'all',
+  category: 'all',
+}
+
+export function hasActiveQualityFilters(filters: QualityDashboardFilters): boolean {
+  return filters.chapterStart != null
+    || filters.chapterEnd != null
+    || filters.severity !== 'all'
+    || filters.category !== 'all'
+}
+
+/** 把各处不一致的严重度口径归一到 高/中/低；未知口径返回 null。 */
+export function normalizeSeverityRank(severity?: string | null): Exclude<QualitySeverityFilter, 'all'> | null {
+  if (!severity) return null
+  if (severity === 'high' || severity === 'critical' || severity === 'blocker' || severity === 'rewrite' || severity === 'fatal') return 'high'
+  if (severity === 'medium' || severity === 'warning' || severity === 'warn') return 'medium'
+  if (severity === 'low' || severity === 'info' || severity === 'minor') return 'low'
+  return null
+}
+
+/** 严重度筛选；无法识别的严重度保守保留。 */
+export function matchesSeverityFilter(severity: string | null | undefined, filter: QualitySeverityFilter): boolean {
+  if (filter === 'all') return true
+  const rank = normalizeSeverityRank(severity)
+  if (rank == null) return true
+  return rank === filter
+}
+
+/** 单章号是否落在筛选范围；无章号的条目保守保留。 */
+export function isChapterInRange(chapterNum: number | null | undefined, filters: QualityDashboardFilters): boolean {
+  if (typeof chapterNum !== 'number') return true
+  if (filters.chapterStart != null && chapterNum < filters.chapterStart) return false
+  if (filters.chapterEnd != null && chapterNum > filters.chapterEnd) return false
+  return true
+}
+
+/** 章号集合与筛选范围是否有交集；空集合保守保留。 */
+export function chapterNumsOverlapRange(chapterNums: number[] | undefined, filters: QualityDashboardFilters): boolean {
+  if (filters.chapterStart == null && filters.chapterEnd == null) return true
+  if (!chapterNums || chapterNums.length === 0) return true
+  return chapterNums.some((chapterNum) => isChapterInRange(chapterNum, filters))
+}
+
+/** 风险类型映射到 Tab 维度的指标类别。 */
+export function qualityRiskCategory(
+  kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind'],
+): Exclude<QualityCategoryFilter, 'all'> {
+  if (
+    kind === 'language_drift'
+    || kind === 'feedback_recurrence'
+    || kind === 'style_compliance'
+    || kind === 'voice_distinction'
+    || kind === 'dialogue_separability'
+    || kind === 'genre_register_drift'
+    || kind === 'exposition_density'
+    || kind === 'long_window_homogenization'
+  ) return 'language'
+  if (
+    kind === 'story_dynamics'
+    || kind === 'chapter_function'
+    || kind === 'story_arc'
+    || kind === 'foreshadow_debt'
+    || kind === 'endgame_debt'
+    || kind === 'growth_cost_balance'
+    || kind === 'commitment_delivery'
+    || kind === 'info_reveal_pacing'
+  ) return 'structure'
+  if (kind === 'recall' || kind === 'world_state') return 'stability'
+  return 'overview'
+}
+
+/** 风险列表筛选：严重度 + 指标类别 + 章节范围（无绑定章节保守保留）。 */
+export function filterQualityRisks<T extends Pick<QualityRiskEntry, 'kind' | 'severity' | 'chapterNums'>>(
+  risks: T[],
+  filters: QualityDashboardFilters,
+): T[] {
+  return risks.filter((risk) => (
+    matchesSeverityFilter(risk.severity, filters.severity)
+    && (filters.category === 'all' || qualityRiskCategory(risk.kind) === filters.category)
+    && chapterNumsOverlapRange(risk.chapterNums, filters)
+  ))
+}
+
+/** 只按严重度筛选带 severity 字段的告警列表。 */
+export function filterSeverityAlerts<T extends { severity?: string }>(
+  alerts: T[],
+  filters: QualityDashboardFilters,
+): T[] {
+  if (filters.severity === 'all') return alerts
+  return alerts.filter((alert) => matchesSeverityFilter(alert.severity, filters.severity))
+}
+
+/** 在卷筛选之后再叠加章节范围与严重度筛选。 */
+export function applyQualityDashboardFilters(
+  view: VolumeFilteredDashboard,
+  filters: QualityDashboardFilters,
+): VolumeFilteredDashboard {
+  if (!hasActiveQualityFilters(filters)) return view
+
+  const inRange = (chapterNum: number | null | undefined) => isChapterInRange(chapterNum, filters)
+  const overlap = (chapterNums: number[] | undefined) => chapterNumsOverlapRange(chapterNums, filters)
+  const severityOk = (severity: string | null | undefined) => matchesSeverityFilter(severity, filters.severity)
+
+  return {
+    ...view,
+    chapterDetails: view.chapterDetails.filter((entry) => inRange(entry.chapterNum)),
+    heatmapData: view.heatmapData.filter((entry) => inRange(entry.chapterNum)),
+    chapterGateTrend: view.chapterGateTrend.filter((entry) => inRange(entry.chapterNum)),
+    chapterGateHeatmap: view.chapterGateHeatmap.filter((entry) => inRange(entry.chapterNum)),
+    chapterGateAlerts: view.chapterGateAlerts.filter((entry) => inRange(entry.chapterNum)),
+    overallTrend: view.overallTrend.filter((entry) => inRange(entry.chapterNum)),
+    aiLikeTrend: view.aiLikeTrend.filter((entry) => inRange(entry.chapterNum)),
+    chapterFunctionRuns: view.chapterFunctionRuns.filter((entry) => overlap(entry.chapterNums)),
+    chapterFunctionAlerts: view.chapterFunctionAlerts.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+    recallAlerts: view.recallAlerts.filter((entry) => inRange(entry.chapterNum)),
+    worldAlerts: view.worldAlerts.filter((entry) => inRange(entry.chapterNum) && severityOk(entry.severity)),
+    antiAiRecurrence: {
+      ...view.antiAiRecurrence,
+      topRepeatedRules: view.antiAiRecurrence.topRepeatedRules.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+      promotedRules: view.antiAiRecurrence.promotedRules.filter((entry) => overlap(entry.chapterNums)),
+      recentAlerts: view.antiAiRecurrence.recentAlerts.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+    },
+    feedbackRecurrence: {
+      ...view.feedbackRecurrence,
+      topRepeatedIssues: view.feedbackRecurrence.topRepeatedIssues.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+      promotedIssues: view.feedbackRecurrence.promotedIssues.filter((entry) => overlap(entry.chapterNums)),
+      recentAlerts: view.feedbackRecurrence.recentAlerts.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+      humanization: {
+        ...view.feedbackRecurrence.humanization,
+        topRepeatedIssues: view.feedbackRecurrence.humanization.topRepeatedIssues.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+        promotedIssues: view.feedbackRecurrence.humanization.promotedIssues.filter((entry) => overlap(entry.chapterNums)),
+        recentAlerts: view.feedbackRecurrence.humanization.recentAlerts.filter((entry) => overlap(entry.chapterNums) && severityOk(entry.severity)),
+      },
+    },
+  }
+}

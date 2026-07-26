@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
 import {
+  DEFAULT_QUALITY_FILTERS,
+  applyQualityDashboardFilters,
   buildChapterGateHeatmapModel,
   buildMiniTrendGeometry,
   buildQualityHeatmapModel,
@@ -11,14 +13,24 @@ import {
   buildWeakDimensionBars,
   buildWorkspacePath,
   chapterGateScoreBand,
+  chapterNumsOverlapRange,
   filterDashboardByVolume,
+  filterQualityRisks,
+  filterSeverityAlerts,
   findChapterByNum,
   formatSignedValue,
   getTopLanguageDriftMetrics,
   getVisibleGateAlerts,
+  hasActiveQualityFilters,
+  isChapterInRange,
+  matchesSeverityFilter,
+  normalizeSeverityRank,
+  qualityRiskCategory,
   quotePowerShellArg,
   scoreColor,
   summarizeChapterGateTrend,
+  type QualityDashboardFilters,
+  type QualityRiskEntry,
   type VolumeQualityEntry,
 } from './quality-dashboard-presentation'
 
@@ -417,5 +429,151 @@ describe('findChapterByNum', () => {
     const details = makeVolumeFilterSource().chapterDetails
     expect(findChapterByNum(details, 2)?.chapterId).toBe(12)
     expect(findChapterByNum(details, 99)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 顶部筛选条
+// ---------------------------------------------------------------------------
+
+function makeFilters(partial: Partial<QualityDashboardFilters>): QualityDashboardFilters {
+  return { ...DEFAULT_QUALITY_FILTERS, ...partial }
+}
+
+describe('hasActiveQualityFilters', () => {
+  it('默认筛选视为未激活', () => {
+    expect(hasActiveQualityFilters(DEFAULT_QUALITY_FILTERS)).toBe(false)
+  })
+
+  it('任一条件激活即返回 true', () => {
+    expect(hasActiveQualityFilters(makeFilters({ chapterStart: 3 }))).toBe(true)
+    expect(hasActiveQualityFilters(makeFilters({ chapterEnd: 9 }))).toBe(true)
+    expect(hasActiveQualityFilters(makeFilters({ severity: 'high' }))).toBe(true)
+    expect(hasActiveQualityFilters(makeFilters({ category: 'language' }))).toBe(true)
+  })
+})
+
+describe('normalizeSeverityRank / matchesSeverityFilter', () => {
+  it('把各处口径归一到高/中/低', () => {
+    expect(normalizeSeverityRank('critical')).toBe('high')
+    expect(normalizeSeverityRank('blocker')).toBe('high')
+    expect(normalizeSeverityRank('warning')).toBe('medium')
+    expect(normalizeSeverityRank('info')).toBe('low')
+    expect(normalizeSeverityRank('unknown-word')).toBeNull()
+    expect(normalizeSeverityRank(undefined)).toBeNull()
+  })
+
+  it('未知口径的条目保守保留', () => {
+    expect(matchesSeverityFilter('unknown-word', 'high')).toBe(true)
+    expect(matchesSeverityFilter('critical', 'high')).toBe(true)
+    expect(matchesSeverityFilter('warning', 'high')).toBe(false)
+    expect(matchesSeverityFilter('warning', 'all')).toBe(true)
+  })
+})
+
+describe('isChapterInRange / chapterNumsOverlapRange', () => {
+  it('按起止章号裁剪，无章号条目保留', () => {
+    const filters = makeFilters({ chapterStart: 3, chapterEnd: 5 })
+    expect(isChapterInRange(2, filters)).toBe(false)
+    expect(isChapterInRange(3, filters)).toBe(true)
+    expect(isChapterInRange(5, filters)).toBe(true)
+    expect(isChapterInRange(6, filters)).toBe(false)
+    expect(isChapterInRange(undefined, filters)).toBe(true)
+  })
+
+  it('只填起点或终点时按单边裁剪', () => {
+    expect(isChapterInRange(9, makeFilters({ chapterStart: 10 }))).toBe(false)
+    expect(isChapterInRange(9, makeFilters({ chapterEnd: 8 }))).toBe(false)
+  })
+
+  it('章号集合按交集判断，空集合保留', () => {
+    const filters = makeFilters({ chapterStart: 3, chapterEnd: 5 })
+    expect(chapterNumsOverlapRange([1, 4], filters)).toBe(true)
+    expect(chapterNumsOverlapRange([1, 2], filters)).toBe(false)
+    expect(chapterNumsOverlapRange([], filters)).toBe(true)
+    expect(chapterNumsOverlapRange(undefined, filters)).toBe(true)
+  })
+})
+
+describe('qualityRiskCategory', () => {
+  it('把风险类型映射到 Tab 维度', () => {
+    expect(qualityRiskCategory('language_drift')).toBe('language')
+    expect(qualityRiskCategory('dialogue_separability')).toBe('language')
+    expect(qualityRiskCategory('story_arc')).toBe('structure')
+    expect(qualityRiskCategory('endgame_debt')).toBe('structure')
+    expect(qualityRiskCategory('recall')).toBe('stability')
+    expect(qualityRiskCategory('world_state')).toBe('stability')
+    expect(qualityRiskCategory('typed_ref_coverage')).toBe('overview')
+  })
+})
+
+describe('filterQualityRisks', () => {
+  const risks = [
+    { kind: 'language_drift', severity: 'high', chapterNums: [3] },
+    { kind: 'story_arc', severity: 'medium', chapterNums: [12] },
+    { kind: 'recall', severity: 'high', chapterNums: [] },
+  ] as unknown as QualityRiskEntry[]
+
+  it('按严重度过滤', () => {
+    const result = filterQualityRisks(risks, makeFilters({ severity: 'high' }))
+    expect(result.map((risk) => risk.kind)).toEqual(['language_drift', 'recall'])
+  })
+
+  it('按指标类别过滤', () => {
+    const result = filterQualityRisks(risks, makeFilters({ category: 'structure' }))
+    expect(result.map((risk) => risk.kind)).toEqual(['story_arc'])
+  })
+
+  it('按章节范围过滤，未绑定章节的风险保留', () => {
+    const result = filterQualityRisks(risks, makeFilters({ chapterStart: 1, chapterEnd: 10 }))
+    expect(result.map((risk) => risk.kind)).toEqual(['language_drift', 'recall'])
+  })
+})
+
+describe('filterSeverityAlerts', () => {
+  it('全部严重度时原样返回', () => {
+    const alerts = [{ severity: 'warning' }, { severity: 'critical' }]
+    expect(filterSeverityAlerts(alerts, DEFAULT_QUALITY_FILTERS)).toBe(alerts)
+  })
+
+  it('按归一后的严重度过滤', () => {
+    const alerts = [{ severity: 'warning' }, { severity: 'critical' }, {}]
+    expect(filterSeverityAlerts(alerts, makeFilters({ severity: 'high' }))).toEqual([{ severity: 'critical' }, {}])
+  })
+})
+
+describe('applyQualityDashboardFilters', () => {
+  it('未激活筛选时原样返回同一引用', () => {
+    const view = filterDashboardByVolume(makeVolumeFilterSource(), null)
+    expect(applyQualityDashboardFilters(view, DEFAULT_QUALITY_FILTERS)).toBe(view)
+  })
+
+  it('按章节范围收窄各切片', () => {
+    const view = filterDashboardByVolume(makeVolumeFilterSource(), null)
+    const filters = makeFilters({ chapterStart: 1, chapterEnd: 10 })
+    const result = applyQualityDashboardFilters(view, filters)
+    expect(result.chapterDetails.map((entry) => entry.chapterNum)).toEqual([1, 2])
+    expect(result.heatmapData.map((entry) => entry.chapterNum)).toEqual([1])
+    expect(result.chapterGateTrend.map((entry) => entry.chapterNum)).toEqual([2])
+    expect(result.chapterGateAlerts.map((entry) => entry.chapterNum)).toEqual([2])
+    expect(result.overallTrend.map((entry) => entry.chapterNum)).toEqual([1])
+    expect(result.chapterFunctionRuns.map((entry) => entry.startChapterNum)).toEqual([1])
+    expect(result.recallAlerts.map((entry) => entry.chapterNum)).toEqual([1])
+    expect(result.worldAlerts.map((entry) => entry.chapterNum)).toEqual([2])
+    expect(result.antiAiRecurrence.recentAlerts.map((entry) => entry.ruleCode)).toEqual(['a'])
+    expect(result.feedbackRecurrence.humanization.topRepeatedIssues.map((entry) => entry.issueType)).toEqual(['h1'])
+    // 卷级聚合切片不受章节范围影响
+    expect(result.languageVolumes).toBe(view.languageVolumes)
+  })
+
+  it('按严重度收窄带 severity 字段的告警', () => {
+    const source = makeVolumeFilterSource()
+    source.recentWorldStateAlerts = [
+      { chapterNum: 2, entityType: 'character', severity: 'critical' },
+      { chapterNum: 3, entityType: 'character', severity: 'warning' },
+    ] as QualityDashboardData['recentWorldStateAlerts']
+    const view = filterDashboardByVolume(source, null)
+    const result = applyQualityDashboardFilters(view, makeFilters({ severity: 'high' }))
+    expect(result.worldAlerts.map((entry) => entry.chapterNum)).toEqual([2])
   })
 })

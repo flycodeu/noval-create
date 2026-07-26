@@ -8,8 +8,11 @@ import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
 import RecommendationGovernancePanel from './RecommendationGovernancePanel'
 import {
+  DEFAULT_QUALITY_FILTERS,
+  applyQualityDashboardFilters,
   buildRepairActionTargetPath,
   buildRepairResultTargetPath,
+  buildWorkspacePath,
   filterDashboardByVolume,
   findChapterByNum,
   historicalModeLabel,
@@ -18,8 +21,9 @@ import {
   runtimePressureLevelLabel,
   sourceCoverageLabel,
 } from './quality-dashboard-presentation'
-import type { QualityChapterEntry, QualityRiskEntry } from './quality-dashboard-presentation'
+import type { QualityChapterEntry, QualityDashboardFilters, QualityRiskEntry } from './quality-dashboard-presentation'
 import ChapterDetailModal from './sections/ChapterDetailModal'
+import QualityFilterBar from './sections/QualityFilterBar'
 
 const OverviewSection = React.lazy(() => import('./sections/OverviewSection'))
 const LanguageSection = React.lazy(() => import('./sections/LanguageSection'))
@@ -44,6 +48,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
+  const [filters, setFilters] = useState<QualityDashboardFilters>(DEFAULT_QUALITY_FILTERS)
   const [chapterListHeight, setChapterListHeight] = useState(getQualityChapterListHeight)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -181,7 +186,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const selectedVolumeMetrics = selectedVolumeId != null
     ? data.volumeQualityMetrics.find((entry) => entry.volumeId === selectedVolumeId) || null
     : null
-  const filtered = filterDashboardByVolume(data, selectedVolumeMetrics)
+  const filtered = applyQualityDashboardFilters(filterDashboardByVolume(data, selectedVolumeMetrics), filters)
   const openChapterByNum = (chapterNum: number) => {
     const matched = findChapterByNum(data.chapterDetails, chapterNum)
     if (!matched) return
@@ -192,6 +197,15 @@ export default function QualityDashboard({ novelId }: Props) {
     if (typeof risk.volumeId === 'number') setSelectedVolumeId(risk.volumeId)
     const chapterNum = risk.chapterNums[0]
     if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
+  }
+  const locateChapterInWriting = (chapterNum?: number) => {
+    const matched = typeof chapterNum === 'number' ? findChapterByNum(data.chapterDetails, chapterNum) : null
+    if (matched) {
+      navigate(buildWorkspacePath(novelId, 'writing', { chapterId: String(matched.chapterId) }))
+      return
+    }
+    message.info('该条目没有可定位的章节，已打开正文页。')
+    navigate(buildWorkspacePath(novelId, 'writing'))
   }
 
   return (
@@ -221,6 +235,7 @@ export default function QualityDashboard({ novelId }: Props) {
           刷新质量数据
         </Button>
       </div>
+      <QualityFilterBar filters={filters} onChange={setFilters} />
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -235,6 +250,7 @@ export default function QualityDashboard({ novelId }: Props) {
                   data={data}
                   pipelineStats={pipelineStats}
                   filtered={filtered}
+                  filters={filters}
                   selectedVolumeMetrics={selectedVolumeMetrics}
                   selectedVolumeId={selectedVolumeId}
                   hasScoreData={hasScoreData}
@@ -244,6 +260,7 @@ export default function QualityDashboard({ novelId }: Props) {
                   onSelectRisk={handleRiskSelect}
                   onRunAction={handleRepairAction}
                   onSelectChapter={setSelectedChapter}
+                  onLocateChapter={locateChapterInWriting}
                 />
               </React.Suspense>
             ),
@@ -265,11 +282,13 @@ export default function QualityDashboard({ novelId }: Props) {
                 <StructureSection
                   data={data}
                   filtered={filtered}
+                  filters={filters}
                   selectedVolumeLabel={selectedVolumeMetrics?.volumeName}
                   hasChapterGateData={hasChapterGateData}
                   hasChapterFunctionData={hasChapterFunctionData}
                   hasArcProgressData={hasArcProgressData}
                   onSelectChapter={openChapterByNum}
+                  onLocateChapter={locateChapterInWriting}
                 />
               </React.Suspense>
             ),
@@ -284,6 +303,7 @@ export default function QualityDashboard({ novelId }: Props) {
                   filtered={filtered}
                   hasRecallData={hasRecallData}
                   hasStateData={hasStateData}
+                  onLocateChapter={locateChapterInWriting}
                 />
               </React.Suspense>
             ),

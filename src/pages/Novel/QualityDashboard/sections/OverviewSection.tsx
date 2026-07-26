@@ -5,6 +5,7 @@ import type { QualityDashboardData, QualityRepairAction, TaskPipelineStats } fro
 import { WorkspacePanel } from '../../components/WorkspaceShell'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import RecommendationGovernancePanel from '../RecommendationGovernancePanel'
+import TruncatedList from '../../../../components/common/TruncatedList'
 import { getQualityRiskSeverityColor, getQualityRiskSeverityLabel } from '../../shared/revision-quality'
 import RepairRiskCard from './RepairRiskCard'
 import {
@@ -21,8 +22,11 @@ import {
   buildTrendPath,
   buildWeakDimensionBars,
   chapterGenerationModeLabel,
+  filterQualityRisks,
+  filterSeverityAlerts,
   healthScoreColor,
   heatmapCellColor,
+  isChapterInRange,
   mainThreadPressureStrategyLabel,
   memoryScopeLabel,
   pipelineRoleLabel,
@@ -37,6 +41,7 @@ import {
   scoreColor,
   signedDashboardDelta,
   type QualityChapterEntry,
+  type QualityDashboardFilters,
   type QualityHeatmapPoint,
   type QualityRiskEntry,
   type VolumeFilteredDashboard,
@@ -48,6 +53,7 @@ interface OverviewSectionProps {
   data: QualityDashboardData
   pipelineStats: TaskPipelineStats | null
   filtered: VolumeFilteredDashboard
+  filters: QualityDashboardFilters
   selectedVolumeMetrics: VolumeQualityEntry | null
   selectedVolumeId: number | null
   hasScoreData: boolean
@@ -57,6 +63,7 @@ interface OverviewSectionProps {
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
   onSelectChapter: (entry: QualityChapterEntry) => void
+  onLocateChapter: (chapterNum?: number) => void
 }
 
 /** 总览 Tab：健康指标、修复引擎、观测面板与章节详情列表。 */
@@ -65,6 +72,7 @@ export default function OverviewSection({
   data,
   pipelineStats,
   filtered,
+  filters,
   selectedVolumeMetrics,
   selectedVolumeId,
   hasScoreData,
@@ -74,7 +82,10 @@ export default function OverviewSection({
   onSelectRisk,
   onRunAction,
   onSelectChapter,
+  onLocateChapter,
 }: OverviewSectionProps) {
+  const filteredEndgameAlerts = filterSeverityAlerts(data.recentEndgameDebtAlerts, filters)
+    .filter((alert) => isChapterInRange(alert.targetResolutionChapter, filters))
   return (
     <>
       <RecommendationGovernancePanel novelId={novelId} />
@@ -190,11 +201,13 @@ export default function OverviewSection({
       <WorkspacePanel title="全书健康总览">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
+          topRisks={filterQualityRisks(data.novelQualityMetrics.topRisks, filters)}
           activeVolume={selectedVolumeMetrics}
           onSelectVolume={onSelectVolume}
           onClearVolume={() => onSelectVolume(null)}
           onSelectRisk={onSelectRisk}
           onRunAction={onRunAction}
+          onLocateChapter={onLocateChapter}
           repairingActionId={repairingActionId}
         />
       </WorkspacePanel>
@@ -274,10 +287,12 @@ export default function OverviewSection({
         <WorkspacePanel title="卷级健康面板">
           <VolumeHealthPanel
             volumes={data.volumeQualityMetrics}
+            filters={filters}
             activeVolumeId={selectedVolumeId}
             onSelectVolume={onSelectVolume}
             onSelectRisk={onSelectRisk}
             onRunAction={onRunAction}
+            onLocateChapter={onLocateChapter}
             repairingActionId={repairingActionId}
           />
         </WorkspacePanel>
@@ -285,7 +300,7 @@ export default function OverviewSection({
 
       {data.recentEndgameDebtAlerts.length > 0 ? (
         <WorkspacePanel title="终局债务预警">
-          <EndgameDebtPanel alerts={data.recentEndgameDebtAlerts} onSelectRisk={onSelectRisk} />
+          <EndgameDebtPanel alerts={filteredEndgameAlerts} onSelectRisk={onSelectRisk} />
         </WorkspacePanel>
       ) : null}
 
@@ -330,6 +345,15 @@ export default function OverviewSection({
                     {entry.weakDimensions.length > 0 ? (
                       <Tag color="warning">{`薄弱：${entry.weakDimensions.join('、')}`}</Tag>
                     ) : null}
+                    <Button
+                      size="small"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onLocateChapter(entry.chapterNum)
+                      }}
+                    >
+                      定位
+                    </Button>
                   </div>
                 )}
               </VirtualList>
@@ -416,13 +440,17 @@ function AgentQualityObservabilityPanel({
         <div className="quality-card">
           <div className="quality-dashboard-page__card-head"><strong>工件历史</strong><Tag color="blue">{snapshot.artifactHistory.length}</Tag></div>
           <div className="quality-dashboard-page__note-list quality-dashboard-page__card-summary--dense">
-            {snapshot.artifactHistory.slice(0, 12).map((artifact) => (
-              <div key={artifact.id} className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
-                <Tag color={agentArtifactStatusColor(artifact.status)}>{agentArtifactStatusLabel(artifact.status)}</Tag>
-                <strong>{agentArtifactKindLabel(artifact.kind)}</strong>
-                <span>{`v${artifact.version} · C${artifact.contextVersion} · ${artifactHashTail(artifact.contentHash)}`}</span>
-              </div>
-            ))}
+            <TruncatedList
+              items={snapshot.artifactHistory}
+              limit={8}
+              renderItem={(artifact) => (
+                <div key={artifact.id} className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+                  <Tag color={agentArtifactStatusColor(artifact.status)}>{agentArtifactStatusLabel(artifact.status)}</Tag>
+                  <strong>{agentArtifactKindLabel(artifact.kind)}</strong>
+                  <span>{`v${artifact.version} · C${artifact.contextVersion} · ${artifactHashTail(artifact.contentHash)}`}</span>
+                </div>
+              )}
+            />
           </div>
         </div>
 
@@ -509,19 +537,23 @@ function AgentQualityObservabilityPanel({
 
 function NovelHealthOverviewPanel({
   summary,
+  topRisks,
   activeVolume,
   onSelectVolume,
   onClearVolume,
   onSelectRisk,
   onRunAction,
+  onLocateChapter,
   repairingActionId,
 }: {
   summary: QualityDashboardData['novelQualityMetrics']
+  topRisks: QualityRiskEntry[]
   activeVolume: VolumeQualityEntry | null
   onSelectVolume: (volumeId: number | null) => void
   onClearVolume: () => void
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
+  onLocateChapter: (chapterNum?: number) => void
   repairingActionId: string | null
 }) {
   return (
@@ -624,15 +656,22 @@ function NovelHealthOverviewPanel({
 
       <div className="quality-dashboard-page__pipeline-list">
         <div className="quality-dashboard-page__section-title">全书最高优先风险</div>
-        {summary.topRisks.length > 0 ? summary.topRisks.map((risk, index) => (
-          <RepairRiskCard
-            key={`${risk.kind}-${risk.title}-${index}`}
-            risk={risk}
-            onSelectRisk={onSelectRisk}
-            onRunAction={onRunAction}
-            repairingActionId={repairingActionId}
+        {topRisks.length > 0 ? (
+          <TruncatedList
+            items={topRisks}
+            limit={8}
+            renderItem={(risk, index) => (
+              <RepairRiskCard
+                key={`${risk.kind}-${risk.title}-${index}`}
+                risk={risk}
+                onSelectRisk={onSelectRisk}
+                onRunAction={onRunAction}
+                onLocateChapter={onLocateChapter}
+                repairingActionId={repairingActionId}
+              />
+            )}
           />
-        )) : <Empty description="当前全书级风险已压到可继续推进" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+        ) : <Empty description="当前全书级风险已压到可继续推进" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
       </div>
     </div>
   )
@@ -640,17 +679,21 @@ function NovelHealthOverviewPanel({
 
 function VolumeHealthPanel({
   volumes,
+  filters,
   activeVolumeId,
   onSelectVolume,
   onSelectRisk,
   onRunAction,
+  onLocateChapter,
   repairingActionId,
 }: {
   volumes: QualityDashboardData['volumeQualityMetrics']
+  filters: QualityDashboardFilters
   activeVolumeId: number | null
   onSelectVolume: (volumeId: number | null) => void
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
+  onLocateChapter: (chapterNum?: number) => void
   repairingActionId: string | null
 }) {
   return (
@@ -713,12 +756,13 @@ function VolumeHealthPanel({
                 <div className="quality-dashboard-page__body-copy--strong quality-dashboard-page__section-title">本卷最高优先风险</div>
                 {volume.repeatedFunctionRunCount > 0 ? <Tag color="warning" className="quality-dashboard-page__tag-reset">{`重复功能 ${volume.repeatedFunctionRunCount}`}</Tag> : null}
               </div>
-              {volume.topRisks.length > 0 ? volume.topRisks.slice(0, 3).map((risk, index) => (
+              {filterQualityRisks(volume.topRisks, filters).length > 0 ? filterQualityRisks(volume.topRisks, filters).slice(0, 3).map((risk, index) => (
                 <RepairRiskCard
                   key={`${volume.volumeId}-${risk.kind}-${index}`}
                   risk={risk}
                   onSelectRisk={onSelectRisk}
                   onRunAction={onRunAction}
+                  onLocateChapter={onLocateChapter}
                   repairingActionId={repairingActionId}
                   compact
                 />
@@ -744,41 +788,45 @@ function EndgameDebtPanel({
 
   return (
     <div className="quality-dashboard-page__pipeline-list">
-      {alerts.map((alert) => (
-        <button
-          key={`endgame-debt-${alert.commitmentId}`}
-          type="button"
-          onClick={() => onSelectRisk({
-            kind: 'endgame_debt',
-            severity: alert.severity,
-            title: alert.title,
-            detail: alert.detail,
-            chapterNums: alert.targetResolutionChapter ? [alert.targetResolutionChapter] : [],
-            volumeId: alert.volumeId,
-            metricKey: 'commitment_delivery',
-            whyItHappened: '终局承诺已经接近计划兑现节点，但仍未被稳定服务或进入执行链。',
-            howToFix: '补卷级绑定、章节合同或兑现桥段，并明确新的兑现节点。',
-            suggestedActions: [],
-          })}
-          className="quality-dashboard-page__risk-button"
-        >
-          <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
-            <Tag color={getQualityRiskSeverityColor(alert.severity)} className="quality-dashboard-page__tag-reset">
-              {getQualityRiskSeverityLabel(alert.severity)}
-            </Tag>
-            <Tag color="blue" className="quality-dashboard-page__tag-reset">{alert.kind === 'payoff' ? '终局回收' : '终局承诺'}</Tag>
-            <strong>{alert.title}</strong>
-          </div>
-          <div className="quality-dashboard-page__body-copy">{alert.detail}</div>
-          <div className="quality-dashboard-page__body-copy--soft">
-            {[
-              alert.volumeName || '',
-              typeof alert.targetResolutionChapter === 'number' ? `目标章位：第${alert.targetResolutionChapter}章` : '',
-              `引用次数：${alert.referenceCount}`,
-            ].filter(Boolean).join(' · ')}
-          </div>
-        </button>
-      ))}
+      <TruncatedList
+        items={alerts}
+        limit={8}
+        renderItem={(alert) => (
+          <button
+            key={`endgame-debt-${alert.commitmentId}`}
+            type="button"
+            onClick={() => onSelectRisk({
+              kind: 'endgame_debt',
+              severity: alert.severity,
+              title: alert.title,
+              detail: alert.detail,
+              chapterNums: alert.targetResolutionChapter ? [alert.targetResolutionChapter] : [],
+              volumeId: alert.volumeId,
+              metricKey: 'commitment_delivery',
+              whyItHappened: '终局承诺已经接近计划兑现节点，但仍未被稳定服务或进入执行链。',
+              howToFix: '补卷级绑定、章节合同或兑现桥段，并明确新的兑现节点。',
+              suggestedActions: [],
+            })}
+            className="quality-dashboard-page__risk-button"
+          >
+            <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
+              <Tag color={getQualityRiskSeverityColor(alert.severity)} className="quality-dashboard-page__tag-reset">
+                {getQualityRiskSeverityLabel(alert.severity)}
+              </Tag>
+              <Tag color="blue" className="quality-dashboard-page__tag-reset">{alert.kind === 'payoff' ? '终局回收' : '终局承诺'}</Tag>
+              <strong>{alert.title}</strong>
+            </div>
+            <div className="quality-dashboard-page__body-copy">{alert.detail}</div>
+            <div className="quality-dashboard-page__body-copy--soft">
+              {[
+                alert.volumeName || '',
+                typeof alert.targetResolutionChapter === 'number' ? `目标章位：第${alert.targetResolutionChapter}章` : '',
+                `引用次数：${alert.referenceCount}`,
+              ].filter(Boolean).join(' · ')}
+            </div>
+          </button>
+        )}
+      />
     </div>
   )
 }

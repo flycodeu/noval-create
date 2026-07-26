@@ -1,4 +1,4 @@
-import { Empty, Progress, Tag } from 'antd'
+import { Button, Empty, Progress, Tag } from 'antd'
 import type { QualityDashboardData } from '../../../../types'
 import { WorkspacePanel } from '../../components/WorkspaceShell'
 import {
@@ -7,6 +7,7 @@ import {
   getStoryPacingSeverityColor,
   getStoryPacingSeverityLabel,
 } from '../../shared/revision-quality'
+import TruncatedList from '../../../../components/common/TruncatedList'
 import MiniTrendRow from './MiniTrendRow'
 import {
   CHAPTER_FUNCTION_ORDER,
@@ -22,32 +23,42 @@ import {
   chapterGateHeatmapColor,
   chapterGateLevelColor,
   chapterGateLevelLabel,
+  chapterNumsOverlapRange,
+  filterSeverityAlerts,
   getVisibleGateAlerts,
   pressureColor,
   summarizeChapterGateTrend,
+  type QualityDashboardFilters,
   type VolumeFilteredDashboard,
 } from '../quality-dashboard-presentation'
 
 interface StructureSectionProps {
   data: QualityDashboardData
   filtered: VolumeFilteredDashboard
+  filters: QualityDashboardFilters
   selectedVolumeLabel?: string
   hasChapterGateData: boolean
   hasChapterFunctionData: boolean
   hasArcProgressData: boolean
   onSelectChapter: (chapterNum: number) => void
+  onLocateChapter: (chapterNum?: number) => void
 }
 
 /** 结构与推进 Tab：章节验收门、主角节奏、章节功能与故事弧。 */
 export default function StructureSection({
   data,
   filtered,
+  filters,
   selectedVolumeLabel,
   hasChapterGateData,
   hasChapterFunctionData,
   hasArcProgressData,
   onSelectChapter,
+  onLocateChapter,
 }: StructureSectionProps) {
+  const filteredPacingAlerts = filterSeverityAlerts(data.storyPacingAlerts, filters)
+    .filter((alert) => chapterNumsOverlapRange(alert.chapterNums, filters))
+  const filteredArcAlerts = filterSeverityAlerts(data.storyArcProgressAlerts, filters)
   return (
     <>
       {hasChapterGateData ? (
@@ -59,6 +70,7 @@ export default function StructureSection({
             alerts={filtered.chapterGateAlerts}
             selectedVolumeLabel={selectedVolumeLabel}
             onSelectChapter={onSelectChapter}
+            onLocateChapter={onLocateChapter}
           />
         </WorkspacePanel>
       ) : null}
@@ -66,7 +78,7 @@ export default function StructureSection({
       <WorkspacePanel title="主角受挫与节奏">
         <StoryDynamicsPanel
           trend={data.storyDynamicsTrend}
-          alerts={data.storyPacingAlerts}
+          alerts={filteredPacingAlerts}
           protagonistSummary={data.protagonistSetbackSummary}
           costSummary={data.costPersistenceSummary}
           reversalSummary={data.reversalDistributionSummary}
@@ -91,7 +103,7 @@ export default function StructureSection({
             summary={data.storyArcProgressSummary}
             trend={data.storyArcProgressTrend}
             arcs={data.storyArcProgressArcs}
-            alerts={data.storyArcProgressAlerts}
+            alerts={filteredArcAlerts}
             volumeEntries={filtered.arcVolumes}
           />
         </WorkspacePanel>
@@ -107,6 +119,7 @@ function ChapterGatePanel({
   alerts,
   selectedVolumeLabel,
   onSelectChapter,
+  onLocateChapter,
 }: {
   summary: QualityDashboardData['chapterGateSummary']
   trend: QualityDashboardData['chapterGateTrend']
@@ -114,6 +127,7 @@ function ChapterGatePanel({
   alerts: QualityDashboardData['chapterGateDriftAlerts']
   selectedVolumeLabel?: string
   onSelectChapter: (chapterNum: number) => void
+  onLocateChapter: (chapterNum?: number) => void
 }) {
   if (summary.coveredChapterCount === 0 || trend.length === 0) {
     return <Empty description="先跑一轮章节验收门，历史快照会从这里累计" />
@@ -177,19 +191,30 @@ function ChapterGatePanel({
         <div className="quality-dashboard-page__panel-card">
           <div className="quality-dashboard-page__section-title">最近漂移告警</div>
           {visibleAlerts.length > 0 ? visibleAlerts.map((alert) => (
-            <button
+            <div
               key={`${alert.chapterId}-${alert.createdAt}`}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectChapter(alert.chapterNum)}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelectChapter(alert.chapterNum) }}
               className="quality-dashboard-page__risk-button"
             >
               <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
                 <Tag color={chapterGateAlertColor(alert.status)} className="quality-dashboard-page__tag-reset">{chapterGateAlertLabel(alert.status)}</Tag>
                 <Tag color={chapterGateLevelColor(alert.currentGateLevel)} className="quality-dashboard-page__tag-reset">{chapterGateLevelLabel(alert.currentGateLevel)}</Tag>
                 <strong>{alert.title}</strong>
+                <Button
+                  size="small"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onLocateChapter(alert.chapterNum)
+                  }}
+                >
+                  定位
+                </Button>
               </div>
               <div className="quality-dashboard-page__body-copy">{alert.detail}</div>
-            </button>
+            </div>
           )) : <div className="quality-dashboard-page__body-copy">当前视图内最近没有明显的门级恶化或回升。</div>}
         </div>
       </div>
@@ -420,30 +445,42 @@ function ChapterFunctionPanel({
       <div className="quality-dashboard-page__metric-grid-260">
         <div className="quality-dashboard-page__panel-card quality-dashboard-page__panel-card--tight">
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">重复功能区段</div>
-          {runs.length > 0 ? runs.slice(0, 8).map((run, index) => (
-            <div key={`${run.startChapterNum}-${run.primaryTag}-${index}`} className="quality-dashboard-page__detail-block">
-              <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
-                <Tag color={run.length >= 5 ? 'error' : 'warning'} className="quality-dashboard-page__tag-reset">{chapterFunctionLabel(run.primaryTag)}</Tag>
-                <span className="quality-dashboard-page__row-label">第{run.startChapterNum}-{run.endChapterNum}章</span>
-              </div>
-              <div className="quality-dashboard-page__body-copy--tiny-strong">连续 {run.length} 章都以 {chapterFunctionLabel(run.primaryTag)} 为主功能。</div>
-            </div>
-          )) : <div className="quality-dashboard-page__body-copy">章节主功能没有出现连续空转。</div>}
+          {runs.length > 0 ? (
+            <TruncatedList
+              items={runs}
+              limit={8}
+              renderItem={(run, index) => (
+                <div key={`${run.startChapterNum}-${run.primaryTag}-${index}`} className="quality-dashboard-page__detail-block">
+                  <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
+                    <Tag color={run.length >= 5 ? 'error' : 'warning'} className="quality-dashboard-page__tag-reset">{chapterFunctionLabel(run.primaryTag)}</Tag>
+                    <span className="quality-dashboard-page__row-label">第{run.startChapterNum}-{run.endChapterNum}章</span>
+                  </div>
+                  <div className="quality-dashboard-page__body-copy--tiny-strong">连续 {run.length} 章都以 {chapterFunctionLabel(run.primaryTag)} 为主功能。</div>
+                </div>
+              )}
+            />
+          ) : <div className="quality-dashboard-page__body-copy">章节主功能没有出现连续空转。</div>}
         </div>
 
         <div className="quality-dashboard-page__panel-card quality-dashboard-page__panel-card--tight">
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">近期功能告警</div>
-          {alerts.length > 0 ? alerts.slice(0, 8).map((alert, index) => (
-            <div key={`${alert.code}-${index}-${alert.chapterNums.join('-')}`} className="quality-dashboard-page__detail-block">
-              <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
-                <Tag color={chapterFunctionAlertColor(alert.severity)} className="quality-dashboard-page__tag-reset">
-                  {getStoryPacingSeverityLabel(alert.severity)}
-                </Tag>
-                <span className="quality-dashboard-page__row-label">{alert.title}</span>
-              </div>
-              <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.detail}</div>
-            </div>
-          )) : <div className="quality-dashboard-page__body-copy">近期没有新的章节功能偏移。</div>}
+          {alerts.length > 0 ? (
+            <TruncatedList
+              items={alerts}
+              limit={8}
+              renderItem={(alert, index) => (
+                <div key={`${alert.code}-${index}-${alert.chapterNums.join('-')}`} className="quality-dashboard-page__detail-block">
+                  <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
+                    <Tag color={chapterFunctionAlertColor(alert.severity)} className="quality-dashboard-page__tag-reset">
+                      {getStoryPacingSeverityLabel(alert.severity)}
+                    </Tag>
+                    <span className="quality-dashboard-page__row-label">{alert.title}</span>
+                  </div>
+                  <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.detail}</div>
+                </div>
+              )}
+            />
+          ) : <div className="quality-dashboard-page__body-copy">近期没有新的章节功能偏移。</div>}
         </div>
       </div>
 

@@ -1,6 +1,7 @@
-import { Empty, Tag } from 'antd'
+import { Button, Empty, Tag } from 'antd'
 import type { QualityDashboardData } from '../../../../types'
 import { WorkspacePanel } from '../../components/WorkspaceShell'
+import TruncatedList from '../../../../components/common/TruncatedList'
 import MiniTrendRow from './MiniTrendRow'
 import {
   recallSnapshotSourceColor,
@@ -15,10 +16,11 @@ interface StabilitySectionProps {
   filtered: VolumeFilteredDashboard
   hasRecallData: boolean
   hasStateData: boolean
+  onLocateChapter: (chapterNum?: number) => void
 }
 
 /** 召回与状态 Tab：召回可靠性与世界状态稳定性。 */
-export default function StabilitySection({ data, filtered, hasRecallData, hasStateData }: StabilitySectionProps) {
+export default function StabilitySection({ data, filtered, hasRecallData, hasStateData, onLocateChapter }: StabilitySectionProps) {
   return (
     <>
       {hasRecallData ? (
@@ -27,6 +29,7 @@ export default function StabilitySection({ data, filtered, hasRecallData, hasSta
             summary={data.recallSummary}
             alerts={filtered.recallAlerts}
             volumeEntries={filtered.recallVolumes}
+            onLocateChapter={onLocateChapter}
           />
         </WorkspacePanel>
       ) : null}
@@ -39,6 +42,7 @@ export default function StabilitySection({ data, filtered, hasRecallData, hasSta
             conflictEntities={data.worldConflictEntities}
             summary={data.worldStateSummary}
             volumeEntries={filtered.worldVolumes}
+            onLocateChapter={onLocateChapter}
           />
         </WorkspacePanel>
       ) : null}
@@ -50,10 +54,12 @@ function RecallReliabilityPanel({
   summary,
   alerts,
   volumeEntries,
+  onLocateChapter,
 }: {
   summary: QualityDashboardData['recallSummary']
   alerts: QualityDashboardData['recentRecallAlerts']
   volumeEntries: QualityDashboardData['volumeRecallDiagnostics']
+  onLocateChapter: (chapterNum?: number) => void
 }) {
   if (summary.analyzedChapterCount === 0 && alerts.length === 0) {
     return <Empty description="先产出召回样本，可靠性数据会在这里汇总" />
@@ -117,20 +123,27 @@ function RecallReliabilityPanel({
       <div className="quality-dashboard-page__metric-grid-240">
         <div className="quality-dashboard-page__panel-card quality-dashboard-page__panel-card--tight">
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">近期召回降级章节</div>
-          {alerts.length > 0 ? alerts.map((alert) => (
-            <div key={alert.chapterId} className="quality-dashboard-page__detail-block">
-              <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
-                <Tag color={alert.degraded ? 'error' : 'warning'} className="quality-dashboard-page__tag-reset">{alert.degraded ? '召回降级' : '过期召回'}</Tag>
-                {alert.recallSnapshotSource ? (
-                  <Tag color={recallSnapshotSourceColor(alert.recallSnapshotSource)} className="quality-dashboard-page__tag-reset">
-                    {recallSnapshotSourceLabel(alert.recallSnapshotSource)}
-                  </Tag>
-                ) : null}
-                <span className="quality-dashboard-page__row-label">第{alert.chapterNum}章 · {alert.title}</span>
-              </div>
-              <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.detail}</div>
-            </div>
-          )) : <div className="quality-dashboard-page__body-copy">最近没有新的召回降级章节。</div>}
+          {alerts.length > 0 ? (
+            <TruncatedList
+              items={alerts}
+              limit={8}
+              renderItem={(alert) => (
+                <div key={alert.chapterId} className="quality-dashboard-page__detail-block">
+                  <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap quality-dashboard-page__row--center">
+                    <Tag color={alert.degraded ? 'error' : 'warning'} className="quality-dashboard-page__tag-reset">{alert.degraded ? '召回降级' : '过期召回'}</Tag>
+                    {alert.recallSnapshotSource ? (
+                      <Tag color={recallSnapshotSourceColor(alert.recallSnapshotSource)} className="quality-dashboard-page__tag-reset">
+                        {recallSnapshotSourceLabel(alert.recallSnapshotSource)}
+                      </Tag>
+                    ) : null}
+                    <span className="quality-dashboard-page__row-label">第{alert.chapterNum}章 · {alert.title}</span>
+                    <Button size="small" onClick={() => onLocateChapter(alert.chapterNum)}>定位</Button>
+                  </div>
+                  <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.detail}</div>
+                </div>
+              )}
+            />
+          ) : <div className="quality-dashboard-page__body-copy">最近没有新的召回降级章节。</div>}
         </div>
 
         <div className="quality-dashboard-page__panel-card quality-dashboard-page__panel-card--tight">
@@ -172,12 +185,14 @@ function WorldStateStabilityPanel({
   conflictEntities,
   summary,
   volumeEntries,
+  onLocateChapter,
 }: {
   trend: QualityDashboardData['worldStateTrend']
   alerts: QualityDashboardData['recentWorldStateAlerts']
   conflictEntities: QualityDashboardData['worldConflictEntities']
   summary: QualityDashboardData['worldStateSummary']
   volumeEntries: QualityDashboardData['volumeWorldStateStability']
+  onLocateChapter: (chapterNum?: number) => void
 }) {
   if (summary.trackedEntityCount === 0 && alerts.length === 0) {
     return <Empty description="先积累状态回写样本，再看稳定性数据" />
@@ -228,6 +243,7 @@ function WorldStateStabilityPanel({
               <div className="quality-dashboard-page__row quality-dashboard-page__row--center">
                 <Tag color={worldStateSeverityColor(alert.severity)} className="quality-dashboard-page__tag-reset">{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
                 <span className="quality-dashboard-page__row-label">{worldStateEntityLabel(alert.entityType)} · {alert.entityName}</span>
+                <Button size="small" onClick={() => onLocateChapter(alert.chapterNum)}>定位</Button>
               </div>
               <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.summary}</div>
             </div>

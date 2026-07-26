@@ -650,3 +650,24 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+.quality-dashboard-page__filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.quality-dashboard-page__filter-bar-label {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.quality-dashboard-page__filter-bar-select {
+  min-width: 112px;
+}
+
+.quality-dashboard-page__filter-bar-select--wide {
+  min-width: 132px;
+}

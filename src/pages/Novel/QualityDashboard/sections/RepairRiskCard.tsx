@@ -11,12 +11,14 @@ export default function RepairRiskCard({
   risk,
   onSelectRisk,
   onRunAction,
+  onLocateChapter,
   repairingActionId,
   compact = false,
 }: {
   risk: QualityRiskEntry
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
+  onLocateChapter?: (chapterNum?: number) => void
   repairingActionId: string | null
   compact?: boolean
 }) {
@@ -40,6 +42,9 @@ export default function RepairRiskCard({
       </div>
       <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
         <Button size="small" onClick={() => onSelectRisk(risk)}>定位风险</Button>
+        {onLocateChapter && risk.chapterNums.length > 0 ? (
+          <Button size="small" onClick={() => onLocateChapter(risk.chapterNums[0])}>定位正文</Button>
+        ) : null}
         {risk.suggestedActions.slice(0, compact ? 2 : 3).map((action) => (
           <Button
             key={action.id}
