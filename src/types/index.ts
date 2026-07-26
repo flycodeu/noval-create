@@ -1,5 +1,6 @@
 import type { GenreWorldRules } from '../shared/genre-system'
 import type { NovelOperatingMode } from '../shared/operating-mode'
+import type { StyleStats } from '../shared/style-fingerprint-stats'
 import type { QualityAgentDashboardSnapshot } from '../shared/quality-agent-dashboard'
 import type {
   SubPlotDraft,
@@ -5319,6 +5320,8 @@ export interface StyleFingerprint {
   styleHardGuard?: StyleHardGuard
 }
 
+export type StyleFingerprintSourceType = 'pasted' | 'chapters' | 'genre-default'
+
 export interface StyleFingerprintRecord {
   id: number
   novelId: number | null
@@ -5326,8 +5329,30 @@ export interface StyleFingerprintRecord {
   sourceText: string | null
   fingerprintJson: string | null
   analysisModelId: string | null
+  sourceType: StyleFingerprintSourceType | string | null
+  sourceChapterIdsJson: string | null
+  statsJson: string | null
+  genreId: number | null
   createdAt: string
   updatedAt: string
+}
+
+export interface ResolvedStyleFingerprintPayload {
+  record: StyleFingerprintRecord
+  fingerprint: StyleFingerprint
+  source: 'active' | 'latest' | 'genre-default'
+}
+
+export interface StyleAbTestVariant {
+  text: string
+  stats: StyleStats
+  compliance: StyleComplianceResult
+}
+
+export interface StyleAbTestResult {
+  withFingerprint: StyleAbTestVariant
+  without: StyleAbTestVariant
+  fingerprintName: string
 }
 
 export interface DialogueTokenStat {
@@ -6029,9 +6054,13 @@ declare global {
       style: {
         analyze: (text: string, modelConfigId?: number) => Promise<StyleFingerprint>
         create: (novelId: number | null, name: string, text: string, modelConfigId?: number) => Promise<number>
+        createFromChapters: (novelId: number, name: string, chapterIds: number[], modelConfigId?: number) => Promise<number>
         get: (id: number) => Promise<StyleFingerprintRecord | null>
         list: (novelId?: number) => Promise<StyleFingerprintRecord[]>
         delete: (id: number) => Promise<void>
+        setActive: (novelId: number, fingerprintId: number | null) => Promise<void>
+        resolveActive: (novelId: number) => Promise<ResolvedStyleFingerprintPayload | null>
+        abTest: (novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) => Promise<StyleAbTestResult>
       }
       parallel: {
         analyzePlan: (novelId: number, chapterStart: number, chapterEnd: number) => Promise<ParallelGenerationPlan>

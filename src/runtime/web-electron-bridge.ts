@@ -1145,9 +1145,13 @@ export function installWebElectronBridge(): void {
     style: createService('style', {
       analyze: async (text?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'analyze', [text, modelConfigId], async () => null),
       create: async (novelId?: unknown, name?: unknown, text?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'create', [novelId, name, text, modelConfigId], async () => null),
+      createFromChapters: async (novelId?: unknown, name?: unknown, chapterIds?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'createFromChapters', [novelId, name, chapterIds, modelConfigId], async () => null),
       get: async (id?: unknown) => withLocalBackend('style', 'get', [id], async () => null),
       list: async (novelId?: unknown) => withLocalBackend('style', 'list', [novelId], async () => []),
       delete: async (id?: unknown) => withLocalBackend('style', 'delete', [id], async () => undefined),
+      setActive: async (novelId?: unknown, fingerprintId?: unknown) => withLocalBackend('style', 'setActive', [novelId, fingerprintId], async () => undefined),
+      resolveActive: async (novelId?: unknown) => withLocalBackend('style', 'resolveActive', [novelId], async () => null),
+      abTest: async (novelId?: unknown, fingerprintId?: unknown, sceneBrief?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'abTest', [novelId, fingerprintId, sceneBrief, modelConfigId], async () => null),
     }),
     parallel: createService('parallel', {
       analyzePlan: async (novelId?: unknown, chapterStart?: unknown, chapterEnd?: unknown) => withLocalBackend('parallel', 'analyzePlan', [novelId, chapterStart, chapterEnd], async () => null),

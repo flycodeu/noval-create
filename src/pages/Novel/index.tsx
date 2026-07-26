@@ -98,6 +98,7 @@ const WORKSPACE_STAGE_LOADERS = {
   'project-brief': () => import('./ProjectBrief'),
   'core-settings': () => import('./Premise'),
   'theme-voice': () => import('./ThemeVoice'),
+  'style-lab': () => import('./StyleLab'),
   'world-rules': () => import('./WorldRules'),
   endgame: () => import('./Endgame'),
   map: () => import('./MapExplorer'),

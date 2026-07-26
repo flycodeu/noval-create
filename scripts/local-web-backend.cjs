@@ -921,9 +921,26 @@ function createRuntime() {
     style: {
       analyze: (text, modelConfigId) => styleAnalysisService.analyzeReferenceText(text, modelConfigId),
       create: (novelId, name, text, modelConfigId) => styleAnalysisService.createStyleFingerprint(novelId, name, text, modelConfigId),
+      createFromChapters: (novelId, name, chapterIds, modelConfigId) => styleAnalysisService.createStyleFingerprintFromChapters(
+        requireId(novelId, 'novelId'),
+        name,
+        Array.isArray(chapterIds) ? chapterIds.map((id) => requireId(id, 'chapterId')) : [],
+        modelConfigId,
+      ),
       get: (id) => styleAnalysisService.getStyleFingerprint(requireId(id)),
       list: (novelId) => styleAnalysisService.listStyleFingerprints(novelId),
       delete: (id) => styleAnalysisService.deleteStyleFingerprint(requireId(id)),
+      setActive: (novelId, fingerprintId) => styleAnalysisService.setActiveStyleFingerprint(
+        requireId(novelId, 'novelId'),
+        fingerprintId === null || fingerprintId === undefined ? null : requireId(fingerprintId, 'fingerprintId'),
+      ),
+      resolveActive: (novelId) => styleAnalysisService.resolveActiveStyleFingerprint(requireId(novelId, 'novelId')),
+      abTest: (novelId, fingerprintId, sceneBrief, modelConfigId) => styleAnalysisService.runStyleAbTest(
+        requireId(novelId, 'novelId'),
+        requireId(fingerprintId, 'fingerprintId'),
+        sceneBrief,
+        modelConfigId,
+      ),
     },
     parallel: {
       analyzePlan: (novelId, chapterStart, chapterEnd) => parallelGenerationService.identifyParallelizableSegments(requireId(novelId, 'novelId'), chapterStart, chapterEnd),

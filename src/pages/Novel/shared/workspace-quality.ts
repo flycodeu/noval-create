@@ -26,6 +26,7 @@ export type WorkspaceQualityRouteKey =
   | 'project-brief'
   | 'core-settings'
   | 'theme-voice'
+  | 'style-lab'
   | 'world-rules'
   | 'endgame'
   | 'map'
@@ -70,6 +71,7 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'project-brief', label: '项目立项', summary: '先定读者承诺、卖点和禁区。' },
   { key: 'core-settings', label: '基础设定', summary: '固定定位、主角起点和底层约束。' },
   { key: 'theme-voice', label: '主题与文风', summary: '固定主题、叙事口吻和语言边界。' },
+  { key: 'style-lab', label: '文风实验室', summary: '管理风格指纹、题材声线与 A/B 试写对照。' },
   { key: 'world-rules', label: '世界规则', summary: '统一题材规则、时间制度和写作约束。' },
   { key: 'endgame', label: '终局设计', summary: '提前锁定最终冲突、兑现承诺和最后一幕。' },
   { key: 'map', label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },

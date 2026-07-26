@@ -6,6 +6,7 @@ import { chapters, novels, styleFingerprints } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
 import { analyzeStyleCompliance } from './style-compliance.service'
 import { runChatTask } from './task.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 export type { StyleFingerprint, StyleHardGuard }
 
@@ -340,7 +341,7 @@ export async function createStyleFingerprintFromChapters(
     .filter((row) => chapterIds.includes(row.id) && row.content?.trim())
     .sort((left, right) => left.chapterNum - right.chapterNum)
   if (rows.length === 0) {
-    throw new Error('所选章节没有可用正文，无法生成风格指纹。')
+    throwUserFacingError('styleLab.chapterSampleEmpty')
   }
   const sample = rows.map((row) => row.content || '').join('\n\n').slice(0, 48000)
   return createStyleFingerprint(novelId, name, sample, modelConfigId, {
@@ -353,9 +354,9 @@ export function setActiveStyleFingerprint(novelId: number, fingerprintId: number
   const db = getDb()
   if (fingerprintId !== null) {
     const record = getStyleFingerprint(fingerprintId)
-    if (!record) throw new Error('风格指纹不存在。')
+    if (!record) throwUserFacingError('styleLab.fingerprintNotFound')
     if (record.novelId !== null && record.novelId !== novelId) {
-      throw new Error('不能激活其他小说的风格指纹。')
+      throwUserFacingError('styleLab.activateWrongNovel')
     }
   }
   db.update(novels)
@@ -528,11 +529,11 @@ export async function runStyleAbTest(
   modelConfigId?: number,
 ): Promise<StyleAbTestResult> {
   if (!sceneBrief.trim()) {
-    throw new Error('场景梗概不能为空。')
+    throwUserFacingError('styleLab.sceneBriefRequired')
   }
   const payload = getStyleFingerprintPayload(fingerprintId)
   if (!payload?.record) {
-    throw new Error('风格指纹不存在或数据已损坏。')
+    throwUserFacingError('styleLab.fingerprintMissing')
   }
 
   const basePrompt = buildAbTestBasePrompt(sceneBrief)

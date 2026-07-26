@@ -25,6 +25,7 @@ export type WorkspaceRouteKey =
   | 'project-brief'
   | 'core-settings'
   | 'theme-voice'
+  | 'style-lab'
   | 'world-rules'
   | 'endgame'
   | 'map'
@@ -151,6 +152,7 @@ export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
   { key: 'project-brief', label: '项目简报', description: '读者承诺、赛道、卖点和禁区。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'core-settings', label: '故事底盘', description: '主角起点、核心钩子与底层约束。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'theme-voice', label: '主题文风', description: '主题、情绪核心、视角和对白边界。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
+  { key: 'style-lab', label: '文风实验室', description: '风格指纹、题材声线与 A/B 试写对照。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: false },
   { key: 'world-rules', label: '世界规则', description: '时间制度、力量边界与世界口径。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
   { key: 'map', label: '地点场景', description: '地点层级、活动半径与事件发生地。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
   { key: 'items', label: '物品线索', description: '资源流通、道具证据和争夺物。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
@@ -459,6 +461,16 @@ function buildBaseProgressMap(
       optionalTotal: 2,
       optionalDone: Math.max(0, Math.min(themeVoice.readyCount - 4, 2)),
       status: themeVoice.readyCount >= 4 ? (themeVoice.readyCount >= 6 ? 'done' : 'ready') : themeVoice.readyCount > 0 ? 'draft' : 'not_started',
+      blockers: [],
+    }),
+    // 文风实验室是随时可用的工具页：没有指纹时走题材默认声线兜底，
+    // 因此不设置阻塞条件，始终视为就绪。
+    'style-lab': buildProgress('style-lab', {
+      requiredTotal: 1,
+      requiredDone: 1,
+      optionalTotal: 0,
+      optionalDone: 0,
+      status: 'ready',
       blockers: [],
     }),
     'world-rules': buildProgress('world-rules', {

@@ -413,12 +413,33 @@ function registerIpcHandlers() {
     styleAnalysisService.analyzeReferenceText(text, modelConfigId))
   handle('style:create', (_, novelId: number | null, name: string, text: string, modelConfigId?: number) =>
     styleAnalysisService.createStyleFingerprint(novelId, name, text, modelConfigId))
+  handle('style:createFromChapters', (_, novelId: number, name: string, chapterIds: number[], modelConfigId?: number) =>
+    styleAnalysisService.createStyleFingerprintFromChapters(
+      requireId(novelId, 'novelId'),
+      requireString(name, 'name'),
+      Array.isArray(chapterIds) ? chapterIds.map((id) => requireId(id, 'chapterId')) : [],
+      modelConfigId,
+    ))
   handle('style:get', (_, id: number) =>
     styleAnalysisService.getStyleFingerprint(id))
   handle('style:list', (_, novelId?: number) =>
     styleAnalysisService.listStyleFingerprints(novelId))
   handle('style:delete', (_, id: number) =>
     styleAnalysisService.deleteStyleFingerprint(requireId(id)))
+  handle('style:setActive', (_, novelId: number, fingerprintId: number | null) =>
+    styleAnalysisService.setActiveStyleFingerprint(
+      requireId(novelId, 'novelId'),
+      fingerprintId === null || fingerprintId === undefined ? null : requireId(fingerprintId, 'fingerprintId'),
+    ))
+  handle('style:resolveActive', (_, novelId: number) =>
+    styleAnalysisService.resolveActiveStyleFingerprint(requireId(novelId, 'novelId')))
+  handle('style:abTest', (_, novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) =>
+    styleAnalysisService.runStyleAbTest(
+      requireId(novelId, 'novelId'),
+      requireId(fingerprintId, 'fingerprintId'),
+      requireString(sceneBrief, 'sceneBrief'),
+      modelConfigId,
+    ))
 
   // Parallel Generation
   handle('parallel:analyzePlan', (_, novelId: number, chapterStart: number, chapterEnd: number) =>

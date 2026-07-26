@@ -557,9 +557,13 @@ const api = {
   style: {
     analyze: (text: string, modelConfigId?: number) => invokeIpc('style:analyze', text, modelConfigId),
     create: (novelId: number | null, name: string, text: string, modelConfigId?: number) => invokeIpc('style:create', novelId, name, text, modelConfigId),
+    createFromChapters: (novelId: number, name: string, chapterIds: number[], modelConfigId?: number) => invokeIpc('style:createFromChapters', novelId, name, chapterIds, modelConfigId),
     get: (id: number) => invokeIpc('style:get', id),
     list: (novelId?: number) => invokeIpc('style:list', novelId),
     delete: (id: number) => invokeIpc('style:delete', id),
+    setActive: (novelId: number, fingerprintId: number | null) => invokeIpc('style:setActive', novelId, fingerprintId),
+    resolveActive: (novelId: number) => invokeIpc('style:resolveActive', novelId),
+    abTest: (novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) => invokeIpc('style:abTest', novelId, fingerprintId, sceneBrief, modelConfigId),
   },
 
   // Parallel Generation
