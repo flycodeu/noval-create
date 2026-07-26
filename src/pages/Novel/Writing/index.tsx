@@ -34,23 +34,18 @@ import {
   type AiExecutionMode,
 } from '../../../shared/ai-execution'
 import { buildWorkspaceRoute, getChapterWritabilitySummary } from '../../../shared/novel-workspace'
-import { normalizeWritebackSyncStatus } from '../../../shared/writeback-status'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
 } from '../../../shared/story-settings'
 import type {
   Chapter,
-  ChapterBridgePlan,
   ChapterContractAudit,
-  ChapterContractValidationResult,
   ChapterContextPreview,
   ChapterOptimizeResult,
   HardConstraintSourceLabel,
   ChapterPublishCheck,
   ChapterSegment,
-  ExpressionDedupReport,
-  HookContinuitySnapshot,
   Task,
   ChapterVersion,
   Character,
@@ -60,9 +55,7 @@ import type {
   NovelContextStatus,
   ParallelGenerationPlan,
   QualityDashboardData,
-  SummaryHealthReport,
   StoryFact,
-  StoryFactCharacterKnowledge,
   StoryItem,
   StoryMemorySnapshot,
   StoryVolume,
@@ -74,72 +67,32 @@ import { useTaskStore } from '../../../stores/task.store'
 import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { createChapterSaveCoordinator } from './chapter-save-coordinator'
+import {
+  getWorldRulesSummary,
+  normalizeContractAudit,
+  parseAiCheck,
+  parseBridgePlan,
+  parseCharacterKnowledgeJson,
+  parseContinuity,
+  parseContractAudit,
+  parseExpressionDedup,
+  parseHookContinuity,
+  parseNumberArray,
+  parsePipelineSnapshot,
+  parseReviewNotes,
+  parseScenePlan,
+  parseStringArray,
+  parseSummaryHealth,
+  parseWritebackStatus,
+  type AiCheckPayload,
+  type ReviewNotes,
+  type WritingPipelineRole,
+  type WritingPipelineRoleState,
+  type WritingPipelineSnapshot,
+} from './parsers'
 import './index.css'
 
 interface Props { novelId: number }
-interface AiCheckPayload {
-  score: number
-  issues: Array<{ type: string; location: string; suggestion: string; severity?: 'high' | 'medium' | 'low' }>
-  overall_feedback: string
-  ai_like_rate?: number
-  repetition_risk?: '低' | '中' | '高'
-}
-interface ContinuityPayload { plot_progress?: string[]; character_state_changes?: string[]; world_state_changes?: string[]; open_loops?: string[]; continuity_notes?: string[]; arc_progress?: string }
-interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[]; climax_variant?: string }
-interface ReviewNotes {
-  summary: string
-  critical_fixes: string[]
-  continuity_risks: string[]
-  arc_progress_risks?: string[]
-  context_drift_risks?: string[]
-  realism_risks?: string[]
-  coherence_risks?: string[]
-  reader_hook_risks?: string[]
-  language_risks: string[]
-  human_language_repairs?: string[]
-  genre_hollowing_risks: string[]
-  revision_brief: string
-  protagonist_setback?: 'none' | 'minor' | 'major'
-  setback_summary?: string
-  cost_present?: boolean
-  cost_summary?: string
-  cost_resolution_state?: 'new' | 'ongoing' | 'resolved' | 'evaporated'
-  reversal_marker?: boolean
-  reversal_summary?: string
-  reversal_support_state?: 'supported' | 'weak' | 'forced'
-  pace_marker?: 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
-  reward_state?: 'none' | 'partial' | 'major'
-  protagonist_pressure?: number
-  dialogue_homogenization_risks?: string[]
-  dialogue_fingerprint_summary?: string
-  dialogue_voice_lock_summary?: string
-  dialogue_filler_risks?: string[]
-  dialogue_info_density_risks?: string[]
-  required_voice_lock_character_ids?: number[]
-  cross_character_similarity?: Array<{
-    characterAId: number
-    characterAName: string
-    characterBId: number
-    characterBName: string
-    similarity: number
-    reason: string
-  }>
-  dialogue_drift_alerts?: Array<{
-    characterId: number
-    characterName: string
-    driftRate: number
-    reason: string
-  }>
-  humanization_signals?: Array<{
-    issueType: string
-    title: string
-    severity: 'low' | 'medium' | 'high'
-    detail: string
-    avoid: string
-    prefer?: string
-  }>
-  contract_validation?: ChapterContractValidationResult
-}
 
 const HARD_CONSTRAINT_PRESERVE_OPTIONS: Array<{ value: HardConstraintSourceLabel; label: string }> = [
   { value: 'chapterGoal', label: '章节目标' },
@@ -159,54 +112,6 @@ interface TextSelectionSnapshot {
   end: number
   text: string
 }
-type WritingPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
-
-interface WritingPipelineRoleState {
-  role: WritingPipelineRole
-  label: string
-  summary: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'blocked'
-  detail?: string
-  taskId?: number
-  upstreamTaskId?: number
-  contractVersion?: string
-  canonRunId?: number
-  durationMs?: number
-  tokensUsed?: number
-  failureCode?: string
-  rewriteScope?: string
-  targetSegmentId?: number | null
-}
-
-interface StepMemoryRuntimeState {
-  summary: string
-  runtimeAssertions: string[]
-}
-
-interface WritingPipelineSnapshot {
-  kind: 'chapter_pipeline'
-  chapterId: number
-  workflowTaskId: number
-  currentRole: WritingPipelineRole | null
-  currentStage: WritingGenerationStage | null
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
-  message?: string
-  streamTaskId?: number
-  executionMode?: AiExecutionMode
-  contractVersion?: string
-  canonRunId?: number
-  totalTokensUsed: number
-  totalDurationMs: number
-  stepMemory?: StepMemoryRuntimeState
-  failureCode?: string
-  rewriteScope?: string
-  targetSegmentId?: number | null
-  partialContent?: string
-  resumeReason?: 'failed' | 'cancelled' | 'timeout' | 'network' | 'unknown'
-  resumeSourceTaskId?: number
-  roles: Record<WritingPipelineRole, WritingPipelineRoleState>
-}
-
 interface ChapterGenerationProgressEvent {
   chapterId: number
   taskId?: number
@@ -247,124 +152,6 @@ const STATUS_OPTIONS = [
   { value: 'final', label: '已完成' },
 ]
 
-const parseNumberArray = (raw?: string | null) => {
-  if (!raw) return []
-  try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed.map((v) => Number(v)).filter(Number.isFinite) : [] } catch { return [] }
-}
-const parseStringArray = (raw?: string | null) => {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed)
-      ? parsed
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean)
-      : []
-  } catch {
-    return []
-  }
-}
-const parsePipelineSnapshot = (task?: Task | null): WritingPipelineSnapshot | null => {
-  if (!task?.progressJson) return null
-  try {
-    const parsed = JSON.parse(task.progressJson) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const record = parsed as Record<string, unknown>
-    return record.kind === 'chapter_pipeline' ? record as unknown as WritingPipelineSnapshot : null
-  } catch {
-    return null
-  }
-}
-const parseCharacterKnowledgeJson = (raw?: string | null): StoryFactCharacterKnowledge[] => {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    const normalized: StoryFactCharacterKnowledge[] = []
-    parsed.forEach((entry) => {
-      if (!entry || typeof entry !== 'object') return
-      const record = entry as Record<string, unknown>
-      const characterId = Number(record.characterId)
-      if (!Number.isFinite(characterId) || characterId <= 0) return
-      const knownChapterId = Number(record.knownChapterId)
-      normalized.push({
-        characterId,
-        knownChapterId: Number.isFinite(knownChapterId) && knownChapterId > 0
-          ? knownChapterId
-          : null,
-      })
-    })
-    return normalized
-  } catch {
-    return []
-  }
-}
-const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as ContinuityPayload : null } catch { return null } }
-const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
-const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
-function normalizeContractAudit(value: unknown): ChapterContractAudit | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Partial<ChapterContractAudit>
-  return {
-    ...record,
-    summary: typeof record.summary === 'string' ? record.summary : '',
-    items: Array.isArray(record.items) ? record.items : [],
-  } as ChapterContractAudit
-}
-
-const parseContractAudit = (raw?: string) => {
-  try { return raw ? normalizeContractAudit(JSON.parse(raw)) : null } catch { return null }
-}
-const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterBridgePlan : null } catch { return null } }
-const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
-const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
-const parseHookContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as HookContinuitySnapshot : null } catch { return null } }
-const parseAiCheck = (raw?: unknown): AiCheckPayload | null => {
-  if (raw === null || raw === undefined || raw === '') return null
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const record = parsed as Record<string, unknown>
-    const overallScore = Number(record.score ?? record.overall_score)
-    const aiLikeRate = Number(record.ai_like_rate)
-    const hasScore = Number.isFinite(overallScore)
-    const hasFeedback = typeof record.overall_feedback === 'string' && record.overall_feedback.trim().length > 0
-    if (!hasScore && !hasFeedback && !Number.isFinite(aiLikeRate)) return null
-
-    const rawIssues = Array.isArray(record.issues)
-      ? record.issues
-      : Array.isArray(record.top_fixes)
-        ? record.top_fixes.map((item) => ({ type: '重点修复', location: '', suggestion: String(item) }))
-        : []
-    const issues = rawIssues
-      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-      .map((item) => ({
-        type: typeof item.type === 'string' ? item.type : '重点修复',
-        location: typeof item.location === 'string' ? item.location : '',
-        suggestion: typeof item.suggestion === 'string' ? item.suggestion : String(item.detail || item.fix || ''),
-        ...(item.severity === 'high' || item.severity === 'medium' || item.severity === 'low'
-          ? { severity: item.severity as 'high' | 'medium' | 'low' }
-          : {}),
-      }))
-      .filter((item) => item.suggestion.trim().length > 0)
-
-    return {
-      score: hasScore ? Math.max(0, Math.min(100, overallScore)) : Math.max(0, Math.min(100, 100 - aiLikeRate)),
-      issues,
-      overall_feedback: hasFeedback ? String(record.overall_feedback) : '已保存章节 AI 体检结果。',
-      ...(Number.isFinite(aiLikeRate) ? { ai_like_rate: Math.max(0, Math.min(100, aiLikeRate)) } : {}),
-      ...(record.repetition_risk === '低' || record.repetition_risk === '中' || record.repetition_risk === '高'
-        ? { repetition_risk: record.repetition_risk }
-        : {}),
-    }
-  } catch {
-    return null
-  }
-}
-const parseWritebackStatus = (raw?: string) => {
-  try { return raw ? normalizeWritebackSyncStatus(JSON.parse(raw)) : null } catch { return null }
-}
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatPipelineMetaValue = (value: string, maxLength = 72) => {
   if (value.length <= maxLength) return value
@@ -516,19 +303,6 @@ const assetImpactTargetLabel = (targetType: string) => {
   if (targetType === 'volume_design') return '分卷设计'
   return targetType
 }
-const getWorldRulesSummary = (raw?: string) => {
-  if (!raw) return []
-  try {
-    const rules = JSON.parse(raw) as Record<string, unknown>
-    const power = rules.power_system && typeof rules.power_system === 'object' ? (rules.power_system as Record<string, unknown>).name : ''
-    return [
-      typeof power === 'string' && power.trim() ? `力量体系：${power.trim()}` : '',
-      typeof rules.social_structure === 'string' && rules.social_structure.trim() ? `社会结构：${rules.social_structure.trim()}` : '',
-      Array.isArray(rules.forbidden_elements) && rules.forbidden_elements.length > 0 ? `禁用元素：${rules.forbidden_elements.slice(0, 3).join('、')}` : '',
-    ].filter(Boolean)
-  } catch { return [] }
-}
-
 function normalizeIdArray(values: number[]): number[] {
   return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))]
 }
@@ -1532,7 +1306,7 @@ export default function Writing({ novelId }: Props) {
   ])
 
   const persistedPipelineSnapshot = useMemo(
-    () => parsePipelineSnapshot(latestPipelineTask),
+    () => parsePipelineSnapshot(latestPipelineTask?.progressJson),
     [latestPipelineTask],
   )
   const currentPipelineSnapshot = useMemo(() => {
