@@ -16,397 +16,93 @@ import {
   getStoryPacingSeverityColor,
   getStoryPacingSeverityLabel,
 } from '../shared/revision-quality'
+import {
+  CHAPTER_FUNCTION_ORDER,
+  LANGUAGE_DRIFT_LABELS,
+  agentArtifactKindLabel,
+  agentArtifactStatusColor,
+  agentArtifactStatusLabel,
+  arcProgressRateColor,
+  artifactHashTail,
+  batchStatusColor,
+  batchStatusLabel,
+  buildChapterGateHeatmapModel,
+  buildMiniTrendGeometry,
+  buildQualityHeatmapModel,
+  buildRepairActionTargetPath,
+  buildRepairResultTargetPath,
+  buildSoakExportCommand,
+  buildSoakReportPath,
+  buildSoakValidateCommand,
+  buildTrendPath,
+  buildWeakDimensionBars,
+  chapterFunctionAlertColor,
+  chapterFunctionColor,
+  chapterFunctionLabel,
+  chapterGateAlertColor,
+  chapterGateAlertLabel,
+  chapterGateBandColor,
+  chapterGateBandLabel,
+  chapterGateHeatmapColor,
+  chapterGateLevelColor,
+  chapterGateLevelLabel,
+  chapterGateScoreBand,
+  chapterGenerationModeLabel,
+  characterRoleTypeLabel,
+  costResolutionStateLabel,
+  dialogueSimilarityColor,
+  dialogueTrendColor,
+  dialogueTrendLabel,
+  filterDashboardByVolume,
+  findChapterByNum,
+  formatSignedValue,
+  getTopLanguageDriftMetrics,
+  getVisibleGateAlerts,
+  healthScoreColor,
+  heatmapCellColor,
+  historicalModeLabel,
+  languageDriftRiskColor,
+  languageDriftStatusColor,
+  languageDriftStatusLabel,
+  mainThreadPressureStrategyLabel,
+  memoryScopeLabel,
+  paceMarkerLabel,
+  pipelineRoleLabel,
+  precomputeQueueStatusLabel,
+  pressureColor,
+  promptSummaryModeLabel,
+  qualityRepairMetricLabel,
+  qualityRiskKindLabel,
+  readinessStatusColor,
+  recallFallbackReasonLabel,
+  recallSnapshotSourceColor,
+  recallSnapshotSourceLabel,
+  reversalSupportStateLabel,
+  rewardStateLabel,
+  runtimePressureLevelLabel,
+  scoreColor,
+  signedDashboardDelta,
+  sourceCoverageLabel,
+  summarizeChapterGateTrend,
+  worldStateEntityLabel,
+  worldStateSeverityColor,
+} from './quality-dashboard-presentation'
+import type { QualityChapterEntry, QualityHeatmapPoint, QualityRiskEntry, VolumeQualityEntry } from './quality-dashboard-presentation'
 
 interface Props { novelId: number }
 
-type QualityChapterEntry = QualityDashboardData['chapterDetails'][number]
-type QualityHeatmapPoint = QualityDashboardData['heatmapData'][number]
-type QualityRiskEntry = QualityDashboardData['novelQualityMetrics']['topRisks'][number]
-type VolumeQualityEntry = QualityDashboardData['volumeQualityMetrics'][number]
 
 const OverviewTab = React.lazy(() => import('./tabs/OverviewTab'))
 const LanguageTab = React.lazy(() => import('./tabs/LanguageTab'))
 const StructureTab = React.lazy(() => import('./tabs/StructureTab'))
 const StabilityTab = React.lazy(() => import('./tabs/StabilityTab'))
 
-const DIMENSION_NAMES = [
-  '文笔质量', '逻辑连贯', '节奏控制', '情感深度',
-  '人物塑造', '世界一致', '创新性', '追读欲',
-]
-const CHAPTER_FUNCTION_ORDER: Array<Exclude<QualityDashboardData['chapterFunctionSummary']['dominantTag'], undefined>> = [
-  'setup',
-  'progression',
-  'reversal',
-  'payoff',
-  'breather',
-  'climax',
-  'exposition',
-  'closure',
-]
-
-function scoreColor(score: number): string {
-  if (score >= 8) return '#52c41a'
-  if (score >= 6) return '#faad14'
-  if (score >= 4) return '#fa8c16'
-  return '#f5222d'
-}
-
-function heatmapCellColor(score: number): string {
-  if (score >= 9) return '#135200'
-  if (score >= 8) return '#237804'
-  if (score >= 7) return '#389e0d'
-  if (score >= 6) return '#52c41a'
-  if (score >= 5) return '#fadb14'
-  if (score >= 4) return '#faad14'
-  if (score >= 3) return '#fa8c16'
-  return '#f5222d'
-}
-
-function languageDriftRiskColor(value: number): string {
-  if (value >= 70) return '#f5222d'
-  if (value >= 50) return '#fa8c16'
-  if (value >= 30) return '#faad14'
-  return '#52c41a'
-}
-
-function languageDriftStatusLabel(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']): string {
-  if (status === 'worsening') return '恶化中'
-  if (status === 'improving') return '改善中'
-  return '稳定'
-}
-
-function languageDriftStatusColor(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']): string {
-  if (status === 'worsening') return 'error'
-  if (status === 'improving') return 'success'
-  return 'default'
-}
-
-function dialogueSimilarityColor(value: number): string {
-  if (value >= 85) return '#f5222d'
-  if (value >= 75) return '#fa8c16'
-  if (value >= 60) return '#faad14'
-  return '#52c41a'
-}
-
-function dialogueTrendLabel(status: QualityDashboardData['dialogueDriftTrend'][number]['status']): string {
-  if (status === 'worsening') return '漂移加剧'
-  if (status === 'improving') return '回稳中'
-  return '稳定'
-}
-
-function dialogueTrendColor(status: QualityDashboardData['dialogueDriftTrend'][number]['status']): string {
-  if (status === 'worsening') return 'error'
-  if (status === 'improving') return 'success'
-  return 'default'
-}
-
-function formatSignedValue(value: number): string {
-  return value > 0 ? `+${value}` : `${value}`
-}
 
 function getQualityChapterListHeight(): number {
   if (typeof window === 'undefined') return 480
   return Math.min(720, Math.max(420, Math.round(window.innerHeight * 0.56)))
 }
 
-function pressureColor(value: number): string {
-  if (value >= 80) return '#f5222d'
-  if (value >= 60) return '#fa8c16'
-  if (value >= 40) return '#faad14'
-  return '#52c41a'
-}
-
-function arcProgressRateColor(value: number): string {
-  if (value >= 45) return '#52c41a'
-  if (value >= 30) return '#faad14'
-  if (value >= 15) return '#fa8c16'
-  return '#f5222d'
-}
-
-function paceMarkerLabel(marker?: QualityDashboardData['storyDynamicsTrend'][number]['paceMarker']): string {
-  if (marker === 'setup') return '铺垫'
-  if (marker === 'conflict') return '冲突'
-  if (marker === 'reversal') return '反转'
-  if (marker === 'climax') return '高潮'
-  if (marker === 'payoff') return '回收'
-  if (marker === 'breather') return '喘息'
-  return '未标注'
-}
-
-function chapterFunctionLabel(tag?: QualityDashboardData['chapterFunctionSummary']['dominantTag']): string {
-  if (tag === 'setup') return '铺垫'
-  if (tag === 'progression') return '推进'
-  if (tag === 'reversal') return '反转'
-  if (tag === 'payoff') return '回收'
-  if (tag === 'breather') return '喘息'
-  if (tag === 'climax') return '爆发'
-  if (tag === 'exposition') return '解释'
-  if (tag === 'closure') return '收束'
-  return '未标注'
-}
-
-function chapterFunctionColor(tag?: QualityDashboardData['chapterFunctionSummary']['dominantTag']): string {
-  if (tag === 'setup') return '#6c8ebf'
-  if (tag === 'progression') return '#52c41a'
-  if (tag === 'reversal') return '#fa8c16'
-  if (tag === 'payoff') return '#13c2c2'
-  if (tag === 'breather') return '#8c8c8c'
-  if (tag === 'climax') return '#f5222d'
-  if (tag === 'exposition') return '#722ed1'
-  if (tag === 'closure') return '#2f54eb'
-  return '#8c8c8c'
-}
-
-function chapterFunctionAlertColor(severity: QualityDashboardData['chapterFunctionAlerts'][number]['severity']): string {
-  return severity === 'blocker' ? 'error' : 'warning'
-}
-
-function healthScoreColor(value: number): string {
-  if (value >= 85) return '#52c41a'
-  if (value >= 70) return '#13c2c2'
-  if (value >= 55) return '#faad14'
-  if (value >= 40) return '#fa8c16'
-  return '#f5222d'
-}
-
-function chapterGateLevelLabel(level: QualityDashboardData['chapterGateTrend'][number]['gateLevel']): string {
-  if (level === 'rewrite') return '退回重写'
-  if (level === 'blocker') return '阻塞'
-  if (level === 'warning') return '预警'
-  return '通过'
-}
-
-function chapterGateLevelColor(level: QualityDashboardData['chapterGateTrend'][number]['gateLevel']): string {
-  if (level === 'rewrite') return 'red'
-  if (level === 'blocker') return 'error'
-  if (level === 'warning') return 'warning'
-  return 'success'
-}
-
-function chapterGateBandLabel(band: QualityDashboardData['chapterGateTrend'][number]['scoreBand']): string {
-  if (band === 'stable') return '稳定'
-  if (band === 'attention') return '关注'
-  if (band === 'risky') return '风险'
-  return '失稳'
-}
-
-function chapterGateScoreBand(score: number): QualityDashboardData['chapterGateTrend'][number]['scoreBand'] {
-  if (score >= 80) return 'stable'
-  if (score >= 60) return 'attention'
-  if (score >= 40) return 'risky'
-  return 'unstable'
-}
-
-function chapterGateBandColor(band: QualityDashboardData['chapterGateTrend'][number]['scoreBand']): string {
-  if (band === 'stable') return 'success'
-  if (band === 'attention') return 'processing'
-  if (band === 'risky') return 'warning'
-  return 'error'
-}
-
-function chapterGateAlertColor(status: QualityDashboardData['chapterGateDriftAlerts'][number]['status']): string {
-  if (status === 'worsening') return 'error'
-  if (status === 'improving') return 'success'
-  return 'default'
-}
-
-function chapterGateAlertLabel(status: QualityDashboardData['chapterGateDriftAlerts'][number]['status']): string {
-  if (status === 'worsening') return '恶化'
-  if (status === 'improving') return '改善'
-  return '稳定'
-}
-
-function chapterGateHeatmapColor(score: number): string {
-  if (score >= 85) return '#237804'
-  if (score >= 70) return '#52c41a'
-  if (score >= 60) return '#13c2c2'
-  if (score >= 45) return '#faad14'
-  if (score >= 30) return '#fa8c16'
-  return '#f5222d'
-}
-
-function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
-  if (kind === 'commitment_delivery') return '承诺兑现率'
-  if (kind === 'typed_ref_coverage') return '引用覆盖'
-  if (kind === 'source_grounding') return '来源支撑'
-  if (kind === 'operating_mode_policy') return '运行模式策略'
-  if (kind === 'genre_register_drift') return '题材语域漂移'
-  if (kind === 'exposition_density') return '解释密度 / 说明文'
-  if (kind === 'long_window_homogenization') return '累积同质化'
-  if (kind === 'dialogue_separability') return '对白可分离度'
-  if (kind === 'language_drift') return 'AI 味退化'
-  if (kind === 'feedback_recurrence') return '审校复现'
-  if (kind === 'style_compliance') return '风格硬约束'
-  if (kind === 'voice_distinction') return '角色声音区分度'
-  if (kind === 'growth_cost_balance') return '成长-代价平衡'
-  if (kind === 'story_dynamics') return '主角与节奏'
-  if (kind === 'chapter_function') return '章节功能'
-  if (kind === 'story_arc') return '故事弧推进'
-  if (kind === 'foreshadow_debt') return '伏笔债务'
-  if (kind === 'endgame_debt') return '终局债务'
-  if (kind === 'recall') return '召回风险'
-  if (kind === 'info_reveal_pacing') return '信息揭示节奏'
-  return '状态稳定性'
-}
-
-function qualityRepairMetricLabel(key: QualityRepairAction['metricKey']): string {
-  if (key === 'commitment_delivery') return '承诺兑现率'
-  if (key === 'typed_ref_coverage') return '引用覆盖'
-  if (key === 'source_grounding') return '来源支撑'
-  if (key === 'operating_mode_policy') return '运行模式策略'
-  if (key === 'genre_register_drift') return '题材语域漂移'
-  if (key === 'exposition_density') return '解释密度 / 说明文'
-  if (key === 'long_window_homogenization') return '累积同质化'
-  if (key === 'dialogue_separability') return '对白可分离度'
-  if (key === 'voice_distinction') return '角色声音区分度'
-  if (key === 'growth_cost_balance') return '成长-代价平衡'
-  if (key === 'foreshadow_debt') return '伏笔债务压力'
-  if (key === 'world_state_drift') return '世界状态漂移'
-  return '信息揭示节奏'
-}
-
-function buildWorkspacePath(novelId: number, page: string, query?: Record<string, string>): string {
-  const params = new URLSearchParams()
-  Object.entries(query || {}).forEach(([key, value]) => {
-    if (value) params.set(key, value)
-  })
-  const queryString = params.toString()
-  return buildWorkspaceRoute(novelId, `${page}${queryString ? `?${queryString}` : ''}`)
-}
-
-function buildRepairActionTargetPath(novelId: number, page?: string, query?: Record<string, string>): string | null {
-  if (!page) return null
-  return buildWorkspacePath(novelId, page, query)
-}
-
-function buildRepairResultTargetPath(novelId: number, result: QualityRepairActionResult): string | null {
-  if (!result.relatedPage) return null
-  return buildWorkspacePath(novelId, result.relatedPage, result.navigationQuery)
-}
-
-function readinessStatusColor(status: QualityDashboardData['productionReadiness']['status']): string {
-  if (status === 'ready') return 'success'
-  if (status === 'warning') return 'warning'
-  return 'error'
-}
-
-function batchStatusColor(status: QualityDashboardData['batchHealth']['status']): string {
-  if (status === 'success' || status === 'idle') return 'success'
-  if (status === 'paused') return 'warning'
-  if (status === 'failed' || status === 'cancelled') return 'error'
-  return 'processing'
-}
-
-function batchStatusLabel(status: QualityDashboardData['batchHealth']['status']): string {
-  if (status === 'idle') return '空闲'
-  if (status === 'pending') return '待启动'
-  if (status === 'running') return '运行中'
-  if (status === 'paused') return '已暂停'
-  if (status === 'success') return '已完成'
-  if (status === 'failed') return '失败'
-  return '已取消'
-}
-
-function pipelineRoleLabel(role: TaskPipelineStats['roleStats'][number]['role']): string {
-  if (role === 'planner') return '规划'
-  if (role === 'writer') return '写作'
-  if (role === 'critic') return '审校'
-  if (role === 'rewriter') return '重写'
-  if (role === 'canonizer') return '回写'
-  return '定稿'
-}
-
-function runtimePressureLevelLabel(level: NonNullable<QualityDashboardData['millionRuntimeObservability']>['runtimePressureLevel']): string {
-  if (level === 'high') return '高'
-  if (level === 'medium') return '中'
-  return '低'
-}
-
-function precomputeQueueStatusLabel(status: NonNullable<QualityDashboardData['millionRuntimeObservability']>['precomputeQueueStatus']): string {
-  if (status === 'queued') return '排队'
-  if (status === 'running') return '运行中'
-  if (status === 'failed') return '失败'
-  return '空闲'
-}
-
-function chapterGenerationModeLabel(mode: NonNullable<QualityDashboardData['millionRuntimeObservability']>['chapterGenerationMode']): string {
-  if (mode === 'serial_only') return '正文串行'
-  return mode
-}
-
-function mainThreadPressureStrategyLabel(strategy: NonNullable<QualityDashboardData['millionRuntimeObservability']>['mainThreadPressureStrategy']): string {
-  if (strategy === 'latency_first') return '优先速度'
-  if (strategy === 'balanced') return '均衡'
-  return '优先稳定'
-}
-
-function sourceCoverageLabel(coverage?: NonNullable<QualityDashboardData['genreGroundingObservability']>['sourceCoverage']): string {
-  if (coverage === 'grounded') return '已支撑'
-  if (coverage === 'partial') return '部分支撑'
-  return '无来源'
-}
-
-function historicalModeLabel(mode?: NonNullable<QualityDashboardData['genreGroundingObservability']>['historicalMode']): string {
-  if (mode === 'historical_realist') return '历史写实'
-  if (mode === 'alternate_history') return '架空历史'
-  if (mode === 'pseudo_historical_fantasy') return '类史幻想'
-  return '非历史'
-}
-
-function promptSummaryModeLabel(mode: NonNullable<QualityDashboardData['structuredMemoryObservability']>['promptSummaryMode']): string {
-  if (mode === 'structured_first') return '结构化优先'
-  return mode
-}
-
-function memoryScopeLabel(scope: NonNullable<QualityDashboardData['structuredMemoryObservability']>['buckets'][number]['scopeType']): string {
-  if (scope === 'novel') return '全书'
-  if (scope === 'volume') return '分卷'
-  return '分部'
-}
-
-function characterRoleTypeLabel(roleType: string): string {
-  if (roleType === 'protagonist') return '主角'
-  if (roleType === 'major') return '主要角色'
-  if (roleType === 'minor') return '次要角色'
-  if (roleType === 'antagonist') return '对手'
-  if (roleType === 'supporting') return '配角'
-  return roleType
-}
-
-function costResolutionStateLabel(state?: NonNullable<QualityDashboardData['chapterDetails'][number]['storyDynamics']>['costResolutionState'] | null): string {
-  if (state === 'ongoing') return '持续中'
-  if (state === 'resolved') return '已解决'
-  if (state === 'evaporated') return '已蒸发'
-  return '新代价'
-}
-
-function reversalSupportStateLabel(state?: NonNullable<QualityDashboardData['chapterDetails'][number]['storyDynamics']>['reversalSupportState'] | null): string {
-  if (state === 'supported') return '有支撑'
-  if (state === 'forced') return '生硬'
-  return '偏弱'
-}
-
-function rewardStateLabel(state: NonNullable<QualityDashboardData['chapterDetails'][number]['storyDynamics']>['rewardState']): string {
-  if (state === 'major') return '明确回报'
-  if (state === 'partial') return '部分回报'
-  return '无回报'
-}
-
-function buildSoakReportPath(novelId: number): string {
-  return `.tmp-tests/real-chapter-soak-report-${novelId}.json`
-}
-
-function quotePowerShellArg(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`
-}
-
-function buildSoakExportCommand(novelId: number): string {
-  return `npm run soak:export-chapter-report -- --db ${quotePowerShellArg('path/to/novelforge.db')} --novelId ${novelId} --out ${quotePowerShellArg(buildSoakReportPath(novelId))}`
-}
-
-function buildSoakValidateCommand(novelId: number): string {
-  return `npm run test:chapter-soak -- --report ${quotePowerShellArg(buildSoakReportPath(novelId))}`
-}
 
 async function copySoakCommand(command: string): Promise<void> {
   try {
@@ -418,63 +114,6 @@ async function copySoakCommand(command: string): Promise<void> {
   }
 }
 
-function recallSnapshotSourceLabel(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string | null {
-  if (source === 'runtime') return '真实运行快照'
-  if (source === 'backfilled') return '历史回填快照'
-  return null
-}
-
-function recallSnapshotSourceColor(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string {
-  return source === 'backfilled' ? 'gold' : 'cyan'
-}
-
-function recallFallbackReasonLabel(reason?: string): string {
-  if (!reason) return ''
-  if (reason === 'embedding_service_failed') return '向量服务失败'
-  if (reason === 'query_embedding_failed') return '查询向量失败'
-  if (reason === 'no_hits') return '无命中'
-  if (reason === 'only_stale_hits') return '仅命中过期片段'
-  if (reason === 'budget_trimmed') return '预算裁剪'
-  if (reason === 'disabled_by_config') return '配置关闭'
-  if (reason === 'service_failed') return '服务失败'
-  if (reason === 'empty_result') return '结果为空'
-  if (reason === 'render_empty') return '渲染为空'
-  return reason
-}
-
-function agentArtifactKindLabel(kind: string): string {
-  if (kind === 'quality_report') return '质量报告'
-  if (kind === 'repair_plan') return '修复计划'
-  if (kind === 'quality_repair_draft') return '候选 Diff'
-  if (kind === 'quality_repair_review') return '独立审校'
-  if (kind === 'quality_comparison') return '比较结果'
-  return kind
-}
-
-function agentArtifactStatusLabel(status: string): string {
-  if (status === 'draft') return '草稿'
-  if (status === 'reviewed') return '已审校'
-  if (status === 'approved') return '已批准'
-  if (status === 'committed') return '已提交'
-  if (status === 'rejected') return '已拒绝'
-  if (status === 'superseded') return '已被替代'
-  return status
-}
-
-function agentArtifactStatusColor(status: string): string {
-  if (status === 'approved' || status === 'committed' || status === 'reviewed') return 'success'
-  if (status === 'rejected') return 'error'
-  if (status === 'superseded') return 'default'
-  return 'processing'
-}
-
-function artifactHashTail(hash: string): string {
-  return hash ? `…${hash.slice(-12)}` : '-'
-}
-
-function signedDashboardDelta(value: number): string {
-  return value > 0 ? `+${value}` : `${value}`
-}
 
 function AgentQualityObservabilityPanel({
   snapshot,
@@ -780,69 +419,9 @@ export default function QualityDashboard({ novelId }: Props) {
   const selectedVolumeMetrics = selectedVolumeId != null
     ? data.volumeQualityMetrics.find((entry) => entry.volumeId === selectedVolumeId) || null
     : null
-  const selectedVolumeChapterNums = selectedVolumeMetrics
-    ? new Set(
-      data.chapterDetails
-        .filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-        .map((entry) => entry.chapterNum),
-    )
-    : null
-  const filteredChapterDetails = selectedVolumeMetrics
-    ? data.chapterDetails.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.chapterDetails
-  const filteredHeatmapData = selectedVolumeChapterNums
-    ? data.heatmapData.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
-    : data.heatmapData
-  const filteredChapterGateTrend = selectedVolumeChapterNums
-    ? data.chapterGateTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
-    : data.chapterGateTrend
-  const filteredChapterGateHeatmap = selectedVolumeChapterNums
-    ? data.chapterGateHeatmap.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
-    : data.chapterGateHeatmap
-  const filteredChapterGateAlerts = selectedVolumeMetrics
-    ? data.chapterGateDriftAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
-    : data.chapterGateDriftAlerts
-  const filteredOverallTrend = selectedVolumeChapterNums
-    ? data.overallScoreTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
-    : data.overallScoreTrend
-  const filteredAiLikeTrend = selectedVolumeChapterNums
-    ? data.aiLikeRateTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
-    : data.aiLikeRateTrend
-  const filteredLanguageVolumes = selectedVolumeMetrics
-    ? data.volumeLanguageDrift.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.volumeLanguageDrift
-  const filteredStoryVolumes = selectedVolumeMetrics
-    ? data.volumeStoryDynamics.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.volumeStoryDynamics
-  const filteredChapterFunctionRuns = selectedVolumeMetrics
-    ? data.repeatedFunctionRuns.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd))
-    : data.repeatedFunctionRuns
-  const filteredChapterFunctionAlerts = selectedVolumeMetrics
-    ? data.chapterFunctionAlerts.filter((entry) => (
-      entry.volumeId === selectedVolumeMetrics.volumeId
-      || entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)
-    ))
-    : data.chapterFunctionAlerts
-  const filteredChapterFunctionVolumes = selectedVolumeMetrics
-    ? data.volumeChapterFunctions.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.volumeChapterFunctions
-  const filteredArcVolumes = selectedVolumeMetrics
-    ? data.storyArcProgressVolumes.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.storyArcProgressVolumes
-  const filteredRecallAlerts = selectedVolumeMetrics
-    ? data.recentRecallAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
-    : data.recentRecallAlerts
-  const filteredRecallVolumes = selectedVolumeMetrics
-    ? data.volumeRecallDiagnostics.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.volumeRecallDiagnostics
-  const filteredWorldAlerts = selectedVolumeMetrics
-    ? data.recentWorldStateAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
-    : data.recentWorldStateAlerts
-  const filteredWorldVolumes = selectedVolumeMetrics
-    ? data.volumeWorldStateStability.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
-    : data.volumeWorldStateStability
+  const filtered = filterDashboardByVolume(data, selectedVolumeMetrics)
   const openChapterByNum = (chapterNum: number) => {
-    const matched = data.chapterDetails.find((entry) => entry.chapterNum === chapterNum)
+    const matched = findChapterByNum(data.chapterDetails, chapterNum)
     if (!matched) return
     if (typeof matched.volumeId === 'number') setSelectedVolumeId(matched.volumeId)
     setSelectedChapter(matched)
@@ -1070,13 +649,13 @@ export default function QualityDashboard({ novelId }: Props) {
       {hasScoreData ? (
         <>
           <WorkspacePanel title="质量热力图">
-            <HeatmapChart data={filteredHeatmapData} chapterNums={filteredOverallTrend.map((d) => d.chapterNum)} />
+            <HeatmapChart data={filtered.heatmapData} chapterNums={filtered.overallTrend.map((d) => d.chapterNum)} />
           </WorkspacePanel>
 
           <WorkspacePanel title="评分趋势">
             <TrendChart
-              overallTrend={filteredOverallTrend}
-              aiLikeTrend={filteredAiLikeTrend}
+              overallTrend={filtered.overallTrend}
+              aiLikeTrend={filtered.aiLikeTrend}
             />
           </WorkspacePanel>
 
@@ -1086,7 +665,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
           <WorkspacePanel title="章节详情">
             <div className="quality-dashboard-page__chapter-list" style={{ height: chapterListHeight }}>
-              <VirtualList data={filteredChapterDetails} height={chapterListHeight} itemHeight={56} itemKey="chapterId">
+              <VirtualList data={filtered.chapterDetails} height={chapterListHeight} itemHeight={56} itemKey="chapterId">
                 {(entry: QualityChapterEntry) => (
                   <div
                     key={entry.chapterId}
@@ -1126,29 +705,11 @@ export default function QualityDashboard({ novelId }: Props) {
             averages={data.averageLanguageDrift}
             trends={data.languageDriftTrends}
             recentAlerts={data.recentLanguageDriftAlerts}
-            volumeEntries={filteredLanguageVolumes}
+            volumeEntries={filtered.languageVolumes}
             novelSummary={data.novelLanguageDriftSummary}
             expressionDedupSummary={data.expressionDedupSummary}
-            antiAiRecurrence={selectedVolumeMetrics
-              ? {
-                ...data.antiAiRecurrence,
-                recentAlerts: data.antiAiRecurrence.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
-                volumeEntries: data.antiAiRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
-              }
-              : data.antiAiRecurrence}
-            feedbackRecurrence={selectedVolumeMetrics
-              ? {
-                ...data.feedbackRecurrence,
-                recentAlerts: data.feedbackRecurrence.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
-                humanization: {
-                  ...data.feedbackRecurrence.humanization,
-                  topRepeatedIssues: data.feedbackRecurrence.humanization.topRepeatedIssues.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
-                  promotedIssues: data.feedbackRecurrence.humanization.promotedIssues.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
-                  recentAlerts: data.feedbackRecurrence.humanization.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
-                },
-                volumeEntries: data.feedbackRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
-              }
-              : data.feedbackRecurrence}
+            antiAiRecurrence={filtered.antiAiRecurrence}
+            feedbackRecurrence={filtered.feedbackRecurrence}
           />
         </WorkspacePanel>
       ) : null}
@@ -1179,9 +740,9 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="章节验收门">
           <ChapterGatePanel
             summary={data.chapterGateSummary}
-            trend={filteredChapterGateTrend}
-            heatmap={filteredChapterGateHeatmap}
-            alerts={filteredChapterGateAlerts}
+            trend={filtered.chapterGateTrend}
+            heatmap={filtered.chapterGateHeatmap}
+            alerts={filtered.chapterGateAlerts}
             selectedVolumeLabel={selectedVolumeMetrics?.volumeName}
             onSelectChapter={openChapterByNum}
           />
@@ -1195,7 +756,7 @@ export default function QualityDashboard({ novelId }: Props) {
           protagonistSummary={data.protagonistSetbackSummary}
           costSummary={data.costPersistenceSummary}
           reversalSummary={data.reversalDistributionSummary}
-          volumeEntries={filteredStoryVolumes}
+          volumeEntries={filtered.storyVolumes}
         />
       </WorkspacePanel>
 
@@ -1203,9 +764,9 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="章节功能与节奏分布">
           <ChapterFunctionPanel
             summary={data.chapterFunctionSummary}
-            runs={filteredChapterFunctionRuns}
-            alerts={filteredChapterFunctionAlerts}
-            volumeEntries={filteredChapterFunctionVolumes}
+            runs={filtered.chapterFunctionRuns}
+            alerts={filtered.chapterFunctionAlerts}
+            volumeEntries={filtered.chapterFunctionVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -1217,7 +778,7 @@ export default function QualityDashboard({ novelId }: Props) {
             trend={data.storyArcProgressTrend}
             arcs={data.storyArcProgressArcs}
             alerts={data.storyArcProgressAlerts}
-            volumeEntries={filteredArcVolumes}
+            volumeEntries={filtered.arcVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -1230,8 +791,8 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="召回可靠性">
           <RecallReliabilityPanel
             summary={data.recallSummary}
-            alerts={filteredRecallAlerts}
-            volumeEntries={filteredRecallVolumes}
+            alerts={filtered.recallAlerts}
+            volumeEntries={filtered.recallVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -1240,10 +801,10 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="状态稳定性">
           <WorldStateStabilityPanel
             trend={data.worldStateTrend}
-            alerts={filteredWorldAlerts}
+            alerts={filtered.worldAlerts}
             conflictEntities={data.worldConflictEntities}
             summary={data.worldStateSummary}
-            volumeEntries={filteredWorldVolumes}
+            volumeEntries={filtered.worldVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -1406,21 +967,9 @@ function ChapterGatePanel({
     return <Empty description="先跑一轮章节验收门，历史快照会从这里累计" />
   }
 
-  const averageVisibleScore = trend.length > 0
-    ? Math.round((trend.reduce((sum, entry) => sum + entry.totalScore, 0) / trend.length) * 10) / 10
-    : 0
-  const bandCounts = trend.reduce<Record<QualityDashboardData['chapterGateTrend'][number]['scoreBand'], number>>((result, entry) => {
-    result[entry.scoreBand] += 1
-    return result
-  }, { stable: 0, attention: 0, risky: 0, unstable: 0 })
-  const levelCounts = trend.reduce<Record<QualityDashboardData['chapterGateTrend'][number]['gateLevel'], number>>((result, entry) => {
-    result[entry.gateLevel] += 1
-    return result
-  }, { pass: 0, warning: 0, blocker: 0, rewrite: 0 })
-  const visibleAlerts = alerts.filter((alert) => alert.status !== 'stable').slice(0, 6)
-  const dimensions = Array.from(new Set(heatmap.map((entry) => entry.dimension)))
-  const chapterNums = trend.map((entry) => entry.chapterNum)
-  const heatmapValueMap = new Map(heatmap.map((entry) => [`${entry.chapterNum}:${entry.dimension}`, entry] as const))
+  const { averageVisibleScore, bandCounts, levelCounts } = summarizeChapterGateTrend(trend)
+  const visibleAlerts = getVisibleGateAlerts(alerts)
+  const { dimensions, chapterNums, valueMap: heatmapValueMap } = buildChapterGateHeatmapModel(heatmap, trend)
   const recentTrend = trend.slice(-8).reverse()
 
   return (
@@ -2119,22 +1668,10 @@ function RecallReliabilityPanel({
 }
 
 function HeatmapChart({ data, chapterNums }: { data: QualityHeatmapPoint[]; chapterNums: number[] }) {
-  const byDim = useMemo(() => {
-    const map = new Map<string, Map<number, number>>()
-    for (const p of data) {
-      if (!map.has(p.dimension)) map.set(p.dimension, new Map())
-      map.get(p.dimension)!.set(p.chapterNum, p.score)
-    }
-    return map
-  }, [data])
-
-  const dimensions = useMemo(() => {
-    const seen = new Set<string>()
-    for (const p of data) seen.add(p.dimension)
-    return DIMENSION_NAMES.filter((d) => seen.has(d))
-  }, [data])
-
-  const displayNums = chapterNums.length > 50 ? chapterNums.filter((_, i) => i % Math.ceil(chapterNums.length / 50) === 0) : chapterNums
+  const { byDim, dimensions, displayNums } = useMemo(
+    () => buildQualityHeatmapModel(data, chapterNums),
+    [data, chapterNums],
+  )
 
   return (
     <div className="quality-dashboard-page__heatmap-scroll">
@@ -2171,23 +1708,11 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
 }) {
   if (overallTrend.length === 0) return <Empty description="当前样本还不足以形成趋势" />
 
-  const maxScore = 10
-  const maxRate = 100
   const chartHeight = 200
   const chartWidth = Math.max(400, overallTrend.length * 16)
 
-  const toScorePath = (points: Array<{ chapterNum: number; value: number }>, maxVal: number) => {
-    if (points.length === 0) return ''
-    const stepX = chartWidth / Math.max(points.length - 1, 1)
-    return points.map((p, i) => {
-      const x = i * stepX
-      const y = chartHeight - (p.value / maxVal) * chartHeight
-      return `${i === 0 ? 'M' : 'L'}${x},${y}`
-    }).join(' ')
-  }
-
-  const overallPath = toScorePath(overallTrend.map((d) => ({ chapterNum: d.chapterNum, value: d.score })), maxScore)
-  const aiLikePath = toScorePath(aiLikeTrend.map((d) => ({ chapterNum: d.chapterNum, value: d.rate })), maxRate)
+  const overallPath = buildTrendPath(overallTrend.map((d) => ({ chapterNum: d.chapterNum, value: d.score })), chartWidth, chartHeight, 10)
+  const aiLikePath = buildTrendPath(aiLikeTrend.map((d) => ({ chapterNum: d.chapterNum, value: d.rate })), chartWidth, chartHeight, 100)
 
   return (
     <div className="quality-dashboard-page__chart-scroll">
@@ -2205,14 +1730,12 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
 }
 
 function WeakDimensionChart({ data }: { data: Array<{ dimension: string; count: number }> }) {
-  const filtered = data.filter((d) => d.count > 0)
-  if (filtered.length === 0) return <Empty description="当前维度表现稳定，没有持续走弱项" />
-
-  const maxCount = Math.max(...filtered.map((d) => d.count), 1)
+  const { items, maxCount } = buildWeakDimensionBars(data)
+  if (items.length === 0) return <Empty description="当前维度表现稳定，没有持续走弱项" />
 
   return (
     <div className="quality-dashboard-page__bar-chart">
-      {filtered.map((item) => (
+      {items.map((item) => (
         <div key={item.dimension} className="quality-dashboard-page__bar-row">
           <span className="quality-dashboard-page__bar-label">{item.dimension}</span>
           <div className="quality-dashboard-page__bar-track">
@@ -2225,26 +1748,6 @@ function WeakDimensionChart({ data }: { data: Array<{ dimension: string; count: 
   )
 }
 
-const LANGUAGE_DRIFT_LABELS: Array<{ key: keyof LanguageDriftMetrics; label: string }> = [
-  { key: 'abstractTokenDensity', label: '抽象词密度' },
-  { key: 'sentencePatternRepeatRate', label: '句式重复率' },
-  { key: 'endingSummaryRate', label: '段尾升华率' },
-  { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
-  { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
-  { key: 'dashDensity', label: '破折号密度' },
-  { key: 'parentheticalExplanationDensity', label: '括号说明密度' },
-  { key: 'metaphorStackRate', label: '比喻堆叠率' },
-  { key: 'parallelismRate', label: '排比句率' },
-  { key: 'bodyDetailClicheRate', label: '手眼声音细节密度' },
-  { key: 'isolatedTemplateParagraphRate', label: '孤立模板短段率' },
-]
-
-function getTopLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit = 3) {
-  return [...LANGUAGE_DRIFT_LABELS]
-    .map(({ key, label }) => ({ key, label, value: metrics[key] }))
-    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
-    .slice(0, limit)
-}
 
 function LanguageDriftPanel({
   averages,
@@ -2669,15 +2172,7 @@ function MiniTrendRow({
     )
   }
 
-  const width = Math.max(200, points.length * 12)
-  const height = 36
-  const stepX = width / Math.max(points.length - 1, 1)
-  const path = points.map((point, index) => {
-    const x = index * stepX
-    const y = height - (Math.max(0, Math.min(100, point.value)) / 100) * height
-    return `${index === 0 ? 'M' : 'L'}${x},${y}`
-  }).join(' ')
-  const latest = points[points.length - 1]?.value ?? 0
+  const { width, height, path, latest } = buildMiniTrendGeometry(points)
 
   return (
     <div className="quality-dashboard-page__mini-trend-row">
@@ -3073,19 +2568,6 @@ function StoryArcProgressPanel({
   )
 }
 
-function worldStateSeverityColor(severity: QualityDashboardData['recentWorldStateAlerts'][number]['severity']): string {
-  if (severity === 'critical') return 'red'
-  if (severity === 'warning') return 'orange'
-  return 'default'
-}
-
-function worldStateEntityLabel(entityType: QualityDashboardData['recentWorldStateAlerts'][number]['entityType']): string {
-  if (entityType === 'character') return '人物'
-  if (entityType === 'faction') return '势力'
-  if (entityType === 'item') return '物品'
-  if (entityType === 'relation') return '关系'
-  return '地点'
-}
 
 function WorldStateStabilityPanel({
   trend,
