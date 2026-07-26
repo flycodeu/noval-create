@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import { AssetReviewObservability, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
 import { hasResumableWorkflowCheckpoint } from '../../shared/workflow-resilience'
+import { formatFailure } from '../../shared/task-labels'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
@@ -580,7 +581,9 @@ export default function TaskCenter() {
       typeof pipeline?.message === 'string' && pipeline.message.trim() ? `流水线摘要：${pipeline.message.trim()}` : '',
       typeof pipeline?.currentRole === 'string' ? `当前角色：${PIPELINE_ROLE_LABELS[pipeline.currentRole] || pipeline.currentRole}` : '',
       typeof pipeline?.contractVersion === 'string' && pipeline.contractVersion.trim() ? `合同版本：${pipeline.contractVersion.trim()}` : '',
-      typeof pipeline?.failureCode === 'string' ? `失败退出码：${pipeline.failureCode}` : '',
+      typeof pipeline?.failureCode === 'string'
+        ? `失败原因：${formatFailure(pipeline.failureCode).title} · ${formatFailure(pipeline.failureCode).action}`
+        : '',
       typeof pipeline?.rewriteScope === 'string' ? `重写粒度：${pipeline.rewriteScope}` : '',
       typeof pipeline?.targetSegmentId === 'number' ? `目标场景：#${pipeline.targetSegmentId}` : '',
       typeof pipeline?.canonRunId === 'number' ? `Canon Run：#${pipeline.canonRunId}` : '',
@@ -605,7 +608,7 @@ export default function TaskCenter() {
           const label = typeof item.label === 'string' ? item.label : (typeof item.role === 'string' ? (PIPELINE_ROLE_LABELS[item.role] || item.role) : '阶段')
           const status = typeof item.status === 'string' ? (PIPELINE_STAGE_LABELS[item.status] || item.status) : '未知'
           const detail = typeof item.detail === 'string' ? item.detail : ''
-          const failureCode = typeof item.failureCode === 'string' ? ` · ${item.failureCode}` : ''
+          const failureCode = typeof item.failureCode === 'string' ? ` · ${formatFailure(item.failureCode).title}` : ''
           const rewriteScope = typeof item.rewriteScope === 'string' ? ` · ${item.rewriteScope}` : ''
           const segment = typeof item.targetSegmentId === 'number' ? ` · scene#${item.targetSegmentId}` : ''
           return detail ? `${label}：${status}${failureCode}${rewriteScope}${segment} · ${detail}` : `${label}：${status}${failureCode}${rewriteScope}${segment}`

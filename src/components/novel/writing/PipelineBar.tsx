@@ -1,5 +1,6 @@
 import React from 'react'
 import { Button, Tag } from 'antd'
+import { formatFailure } from '../../../shared/task-labels'
 import './PipelineBar.css'
 
 export interface PipelineBarItem {
@@ -39,6 +40,7 @@ export default function PipelineBar({ items }: PipelineBarProps) {
       <div className="pipeline-bar__grid">
         {items.map((item) => {
           const meta = statusMeta(item.status)
+          const failure = item.error ? formatFailure(item.error) : null
 
           return (
             <article key={item.key} className={`pipeline-bar__item${item.status === 'running' ? ' is-running' : ''}`}>
@@ -50,8 +52,11 @@ export default function PipelineBar({ items }: PipelineBarProps) {
               <span className="pipeline-bar__item-meta">
                 {`任务 ${item.taskId || '-'} · 合同 ${item.contractVersion || '-'} · ${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}秒` : '-'} · 用量 ${item.tokensUsed || 0}`}
               </span>
-              {item.error ? (
-                <span className="pipeline-bar__item-error">{item.error}</span>
+              {failure ? (
+                <span className="pipeline-bar__item-error" title={failure.action}>
+                  {failure.title}
+                  <span className="pipeline-bar__item-error-action">{failure.action}</span>
+                </span>
               ) : null}
               {item.canRetry && item.onRetry ? (
                 <div>

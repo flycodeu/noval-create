@@ -20,6 +20,13 @@ import SectionHeader from '../../../components/novel/common/SectionHeader'
 import ContractPanel, { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
 import ReviewNotesPanel from '../../../components/novel/writing/ReviewNotesPanel'
+import QualityGateReport from '../../../components/novel/quality/QualityGateReport'
+import {
+  fromFactGuard,
+  fromOptimizationQualityGate,
+  fromStructuralGate,
+} from '../../../components/novel/quality/gate-adapters'
+import { formatFailure } from '../../../shared/task-labels'
 import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
   AI_EXECUTION_MODE_OPTIONS,
@@ -2323,7 +2330,7 @@ export default function Writing({ novelId }: Props) {
                     </div>
                     <div className="novel-issue-item__desc">{item.detail || item.summary}</div>
                     <div className="novel-issue-item__suggestion">
-                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}秒` : '-'} / 用量 ${item.tokensUsed || 0}${item.failureCode ? ` · ${item.failureCode}` : ''}${item.rewriteScope ? ` · ${item.rewriteScope}` : ''}${typeof item.targetSegmentId === 'number' ? ` · 场景#${item.targetSegmentId}` : ''}`}
+                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}秒` : '-'} / 用量 ${item.tokensUsed || 0}${item.failureCode ? ` · ${formatFailure(item.failureCode).title}` : ''}${item.rewriteScope ? ` · ${item.rewriteScope}` : ''}${typeof item.targetSegmentId === 'number' ? ` · 场景#${item.targetSegmentId}` : ''}`}
                     </div>
                   </div>
                 ))}
@@ -2894,7 +2901,9 @@ export default function Writing({ novelId }: Props) {
     },
     {
       label: '失败原因',
-      value: currentPipelineSnapshot?.failureCode || '当前无失败',
+      value: currentPipelineSnapshot?.failureCode
+        ? formatFailure(currentPipelineSnapshot.failureCode).title
+        : '当前无失败',
     },
     {
       label: '回写状态',
@@ -3514,6 +3523,17 @@ export default function Writing({ novelId }: Props) {
             placeholder="优化候选稿"
           />
         </div>
+        {optimizationResult ? (
+          <div className="writing-layout-note-space-top">
+            <QualityGateReport
+              reports={[
+                fromFactGuard(optimizationResult.factGuard),
+                fromOptimizationQualityGate(optimizationResult.qualityGate),
+                ...(optimizationResult.structuralGate ? [fromStructuralGate(optimizationResult.structuralGate)] : []),
+              ]}
+            />
+          </div>
+        ) : null}
       </Modal>
 
       <ParallelGenerationModal novelId={novelId} chapters={chapters} />

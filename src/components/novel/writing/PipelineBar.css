@@ -74,6 +74,11 @@
   color: var(--danger);
 }
 
+.pipeline-bar__item-error-action {
+  display: block;
+  color: var(--text-muted);
+}
+
 [data-theme="dark"] .pipeline-bar {
   background: rgba(26, 29, 39, 0.92);
 }
