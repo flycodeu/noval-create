@@ -674,4 +674,34 @@ describe('validateChapterContractDelivery', () => {
 
     expect(result.itemResults.find((item) => item.contractItemType === 'theme_chapter_response')?.verdict).toBe('pass')
   })
+
+  it('advisoryOnly 选项保留 verdict 原值但为结果与条目打上 advisoryOnly 标记', () => {
+    const rows = createBaseRows(
+      '夜晚的北门外，守卫追查林远的来路，两人险些动手。他只把这件事压回心里，没有别的动作。',
+    )
+    Object.assign((rows.get(chapters) || [])[0], {
+      scenePlanJson: JSON.stringify([]),
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const baseline = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+    const advisory = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    }, { advisoryOnly: true })
+
+    expect(advisory.advisoryOnly).toBe(true)
+    expect(advisory.itemResults.every((item) => item.advisoryOnly === true)).toBe(true)
+    // verdict 与 status 不因 advisoryOnly 改变
+    expect(advisory.status).toBe(baseline.status)
+    expect(advisory.itemResults.map((item) => item.verdict)).toEqual(baseline.itemResults.map((item) => item.verdict))
+    // 默认调用不带 advisoryOnly 标记
+    expect((baseline as { advisoryOnly?: boolean }).advisoryOnly).toBeUndefined()
+    expect(baseline.itemResults.every((item) => (item as { advisoryOnly?: boolean }).advisoryOnly === undefined)).toBe(true)
+  })
 })

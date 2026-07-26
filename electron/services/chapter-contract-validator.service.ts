@@ -28,6 +28,23 @@ import {
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { analyzeForeshadowProgress, analyzeStoryThreadProgress } from './thread-progress.service'
 
+/**
+ * enforce 模式下合同关键词验证降级为建议：verdict 不变，但打上 advisoryOnly 标记，
+ * 下游聚合处（applyContractValidationToReviewNotes / publish gate）按 warning 处理。
+ */
+export type AdvisoryContractValidationItem = ContractValidationItem & { advisoryOnly?: boolean }
+
+export type AdvisoryChapterContractValidationResult = Omit<ChapterContractValidationResult, 'itemResults'> & {
+  advisoryOnly?: boolean
+  itemResults: AdvisoryContractValidationItem[]
+}
+
+export function isAdvisoryOnlyContractValidation(
+  result: ChapterContractValidationResult | null | undefined,
+): boolean {
+  return Boolean(result && (result as AdvisoryChapterContractValidationResult).advisoryOnly === true)
+}
+
 interface ChapterContractValidationSceneSnapshot {
   segmentId?: number
   segmentTitle: string
@@ -657,7 +674,7 @@ function makeItem(input: ContractValidationItem): ContractValidationItem {
   }
 }
 
-function normalizeContractValidationItem(raw: unknown): ContractValidationItem | null {
+function normalizeContractValidationItem(raw: unknown): AdvisoryContractValidationItem | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
   const verdict = normalizeText(typeof record.verdict === 'string' ? record.verdict : '') as ContractValidationVerdict
@@ -667,6 +684,7 @@ function normalizeContractValidationItem(raw: unknown): ContractValidationItem |
     contractItemId: typeof record.contractItemId === 'number' ? record.contractItemId : undefined,
     expected: normalizeText(typeof record.expected === 'string' ? record.expected : ''),
     verdict,
+    ...(record.advisoryOnly === true ? { advisoryOnly: true } : {}),
     semanticState: normalizeText(typeof record.semanticState === 'string' ? record.semanticState : '') as ThreadProgressSemanticState || undefined,
     semanticReason: normalizeText(typeof record.semanticReason === 'string' ? record.semanticReason : ''),
     evidenceExcerpt: normalizeText(typeof record.evidenceExcerpt === 'string' ? record.evidenceExcerpt : ''),
@@ -676,7 +694,7 @@ function normalizeContractValidationItem(raw: unknown): ContractValidationItem |
   }
 }
 
-export function normalizeChapterContractValidationResult(raw: unknown): ChapterContractValidationResult | null {
+export function normalizeChapterContractValidationResult(raw: unknown): AdvisoryChapterContractValidationResult | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
   const rawStatus = normalizeText(typeof record.status === 'string' ? record.status : '')
@@ -684,7 +702,7 @@ export function normalizeChapterContractValidationResult(raw: unknown): ChapterC
   const itemResults = Array.isArray(record.itemResults)
     ? record.itemResults
       .map((item) => normalizeContractValidationItem(item))
-      .filter((item): item is ContractValidationItem => Boolean(item))
+      .filter((item): item is AdvisoryContractValidationItem => Boolean(item))
     : []
   const status = itemResults.length > 0
     ? deriveChapterContractValidationStatus(itemResults)
@@ -694,6 +712,7 @@ export function normalizeChapterContractValidationResult(raw: unknown): ChapterC
     summary: normalizeText(typeof record.summary === 'string' ? record.summary : ''),
     itemResults,
     rewriteHints: parseUnknownStringArray(record.rewriteHints),
+    ...(record.advisoryOnly === true ? { advisoryOnly: true } : {}),
   }
 }
 
@@ -1321,7 +1340,7 @@ export function validateChapterContractDelivery(input: {
   chapterId: number
   content: string
   reviewNotes?: unknown
-}): ChapterContractValidationResult {
+}, options: { advisoryOnly?: boolean } = {}): AdvisoryChapterContractValidationResult {
   const context = loadValidationContext(input.chapterId)
   const reviewSignals = parseReviewSignals(input.reviewNotes)
   const content = normalizeText(input.content)
@@ -1371,6 +1390,15 @@ export function validateChapterContractDelivery(input: {
   const summary = buildSummary(items)
   const status = buildStatus(items)
   const rewriteHints = buildRewriteHints(items)
+  if (options.advisoryOnly) {
+    return {
+      status,
+      summary,
+      itemResults: items.map((item) => ({ ...item, advisoryOnly: true })),
+      rewriteHints,
+      advisoryOnly: true,
+    }
+  }
   return {
     status,
     summary,

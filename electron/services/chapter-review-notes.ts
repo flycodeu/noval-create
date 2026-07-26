@@ -29,10 +29,16 @@ import {
   normalizeForEvidence,
   normalizeSemanticGateReview,
   type SemanticGateDimension,
+  type SemanticGateHeuristicHint,
   type SemanticGateStatus,
+  type SemanticGateReview,
   type SemanticGateVerdict,
 } from '../../src/shared/semantic-gate'
-import { CORE_SEMANTIC_GATE_DIMENSIONS } from '../../src/shared/semantic-gate-policy'
+import {
+  CORE_SEMANTIC_GATE_DIMENSIONS,
+  type SemanticGateMode,
+  type SemanticGatePolicy,
+} from '../../src/shared/semantic-gate-policy'
 import { normalizeChapterContractValidationResult } from './chapter-contract-validator.service'
 import { getQualityDashboardData } from './quality-dashboard.service'
 import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
@@ -820,6 +826,9 @@ export function applyContractValidationToReviewNotes(
   reviewNotes: ChapterReviewNotes,
   contractValidation: ChapterContractValidationResult,
 ): ChapterReviewNotes {
+  // enforce 模式下合同关键词验证降级为建议（advisoryOnly）：verdict 保留，
+  // 但 blocker 汇总按 warning 处理——不强制 rewrite_required，也不把严重度顶到 high。
+  const advisoryOnly = (contractValidation as ChapterContractValidationResult & { advisoryOnly?: boolean }).advisoryOnly === true
   const failedItems = contractValidation.itemResults.filter((item) => item.verdict !== 'pass')
   const hardFailedItems = failedItems.filter(isHardContractValidationItem)
   const hardBlockerItems = hardFailedItems.filter((item) => isContractValidationBlockerVerdict(item.verdict))
@@ -878,14 +887,146 @@ export function applyContractValidationToReviewNotes(
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismRisks]),
     summary: reviewNotes.summary || contractValidation.summary,
     severity: hardBlockerItems.length > 0
-      ? mergeSeverity(reviewNotes.severity, 'high')
+      ? mergeSeverity(reviewNotes.severity, advisoryOnly ? 'medium' : 'high')
       : contractValidation.status === 'warning'
         ? mergeSeverity(reviewNotes.severity, 'medium')
         : reviewNotes.severity,
-    rewrite_required: reviewNotes.rewrite_required || hardBlockerItems.length > 0,
+    rewrite_required: reviewNotes.rewrite_required || (!advisoryOnly && hardBlockerItems.length > 0),
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, hardRewriteHints),
     contract_validation: contractValidation,
   }
+}
+
+/**
+ * 把审校/关键词门的启发式命中映射为语义门疑点线索（须由语义门逐条核实）：
+ * - 合同 marker 未命中 → contract_delivery
+ * - 结构 marker（场景冲突/结果、代价蒸发、强行反转）→ structural_beat / cost_and_choice
+ * - 对白计数信号 → dialogue_voice
+ */
+export function collectSemanticGateHeuristicHints(notes: ChapterReviewNotes): SemanticGateHeuristicHint[] {
+  const hints: SemanticGateHeuristicHint[] = []
+  const failedContractItems = (notes.contract_validation?.itemResults || [])
+    .filter((item) => item.verdict !== 'pass')
+  failedContractItems
+    .filter((item) => item.contractItemType !== 'scene_result_state' && item.contractItemType !== 'scene_conflict')
+    .slice(0, 6)
+    .forEach((item) => {
+      hints.push({
+        dimension: 'contract_delivery',
+        source: 'contract-marker',
+        detail: `${item.expected}（关键词验证 ${item.verdict}）`,
+      })
+    })
+  failedContractItems
+    .filter((item) => item.contractItemType === 'scene_result_state' || item.contractItemType === 'scene_conflict')
+    .slice(0, 4)
+    .forEach((item) => {
+      hints.push({
+        dimension: 'structural_beat',
+        source: 'structure-marker',
+        detail: `${item.segmentTitle ? `${item.segmentTitle}：` : ''}${item.expected}（关键词验证 ${item.verdict}）`,
+      })
+    })
+  if (notes.cost_present && notes.cost_resolution_state === 'evaporated') {
+    hints.push({
+      dimension: 'cost_and_choice',
+      source: 'structure-marker',
+      detail: notes.cost_summary || '关键代价疑似被快速抹平（代价蒸发）。',
+    })
+  }
+  if (notes.reversal_marker && notes.reversal_support_state === 'forced') {
+    hints.push({
+      dimension: 'cost_and_choice',
+      source: 'structure-marker',
+      detail: notes.reversal_summary || '反转缺少铺垫支撑（疑似强行反转）。',
+    })
+  }
+  ;[
+    ...notes.dialogue_homogenization_risks,
+    ...notes.dialogue_filler_risks,
+    ...notes.dialogue_info_density_risks,
+  ].slice(0, 5).forEach((detail) => {
+    hints.push({ dimension: 'dialogue_voice', source: 'dialogue-counter', detail })
+  })
+  return hints.slice(0, 20)
+}
+
+export interface SemanticGateRunOutcome {
+  review: SemanticGateReview
+  degraded: boolean
+}
+
+export interface AppliedSemanticGateOutcome {
+  reviewNotes: ChapterReviewNotes
+  /** 本轮生效的语义门模式：degraded + heuristic fallback 时降为 off（关键词门恢复原始行为）。 */
+  effectiveMode: SemanticGateMode
+  /** true 表示需要以非 advisory 方式重新聚合合同关键词验证（恢复其 blocker 语义）。 */
+  restoreHeuristicContractBlockers: boolean
+}
+
+export const SEMANTIC_GATE_FIX_PREFIX = '[语义门] '
+
+export function formatSemanticGateBlockerFix(verdict: SemanticGateVerdict): string {
+  const label = SEMANTIC_GATE_DIMENSION_SPECS[verdict.dimension]?.label || verdict.dimension
+  return `${SEMANTIC_GATE_FIX_PREFIX}${label}：${verdict.summary}${verdict.suggestion ? `（修复方向：${verdict.suggestion}）` : ''}`
+}
+
+/**
+ * critic 阶段语义门结果落地（enforce 降级链的纯函数部分，便于单测）：
+ * - shadow：只挂载 verdicts/warnings，不影响判定。
+ * - enforce + 评审成功：blocker 维度注入 critical_fixes（带『[语义门]』前缀），
+ *   使既有重写循环自然响应。
+ * - enforce + degraded + fallback=heuristic：本轮当作 off，要求调用方恢复关键词门 blocker。
+ * - enforce + degraded + fallback=warn-pass：放行，仅记录『语义评审缺席』警告。
+ */
+export function applyCriticSemanticGateOutcomeToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  outcome: SemanticGateRunOutcome,
+  policy: SemanticGatePolicy,
+): AppliedSemanticGateOutcome {
+  let notes = reviewNotes
+  if (!outcome.degraded) {
+    notes = {
+      ...notes,
+      semantic_verdicts: outcome.review.verdicts,
+      semantic_review_warnings: dedupeTextList([
+        ...(notes.semantic_review_warnings || []),
+        ...outcome.review.warnings,
+      ]),
+    }
+  }
+  if (policy.mode !== 'enforce') {
+    return { reviewNotes: notes, effectiveMode: policy.mode, restoreHeuristicContractBlockers: false }
+  }
+  if (outcome.degraded) {
+    if (policy.fallbackMode === 'heuristic') {
+      return { reviewNotes: notes, effectiveMode: 'off', restoreHeuristicContractBlockers: true }
+    }
+    return {
+      reviewNotes: {
+        ...notes,
+        semantic_review_warnings: dedupeTextList([
+          ...(notes.semantic_review_warnings || []),
+          '语义评审缺席：critic 阶段语义门调用失败，按 warn-pass 策略放行本章。',
+        ]),
+      },
+      effectiveMode: 'enforce',
+      restoreHeuristicContractBlockers: false,
+    }
+  }
+  const blockerVerdicts = outcome.review.verdicts.filter((verdict) => verdict.status === 'blocker')
+  if (blockerVerdicts.length > 0) {
+    notes = {
+      ...notes,
+      critical_fixes: dedupeTextList([
+        ...blockerVerdicts.map(formatSemanticGateBlockerFix),
+        ...notes.critical_fixes,
+      ]),
+      severity: mergeSeverity(notes.severity, 'high'),
+      rewrite_required: true,
+    }
+  }
+  return { reviewNotes: notes, effectiveMode: 'enforce', restoreHeuristicContractBlockers: false }
 }
 
 export function applyHistoricalGroundingToReviewNotes(

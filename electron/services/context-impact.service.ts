@@ -57,6 +57,10 @@ import {
 import { analyzeNarrativeControls } from './narrative-control.service'
 import { getNovelAssetImpactSummary } from './asset-impact.service'
 import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
+import type { SemanticGateMode } from '../../src/shared/semantic-gate-policy'
+
+/** enforce 模式下被语义门接管的启发式门项，其 blocker/rewrite 降级为 warning 时追加的后缀。 */
+const HEURISTIC_TAKEOVER_SUFFIX = '（启发式，已由语义门接管）'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -2319,9 +2323,19 @@ function collectChapterRelatedIssues(
 
 export function runChapterPublishCheck(
   chapterId: number,
-  options: { phase?: 'pipeline' | 'final' } = {},
+  options: { phase?: 'pipeline' | 'final'; semanticGateMode?: SemanticGateMode } = {},
 ): ChapterPublishCheck {
   const phase = options.phase || 'final'
+  // off/shadow 保持原行为；enforce 时关键词/计数类启发式门的 blocker 一律降级为
+  // warning（文本保留并加接管后缀），由语义门 verdict 接管阻断职责。
+  const semanticGateMode = options.semanticGateMode || 'off'
+  const degradedHeuristicGateKeys = new Set<string>()
+  const degradeHeuristicStatus = (gateKey: string, status: ChapterGateLevel): ChapterGateLevel => {
+    if (semanticGateMode !== 'enforce') return status
+    if (status !== 'blocker' && status !== 'rewrite') return status
+    degradedHeuristicGateKeys.add(gateKey)
+    return 'warning'
+  }
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
@@ -2387,7 +2401,7 @@ export function runChapterPublishCheck(
       chapterId,
       content: chapter.content,
       reviewNotes: chapter.reviewNotesJson,
-    })
+    }, { advisoryOnly: semanticGateMode === 'enforce' })
     : null
   const publishContractValidation = buildHardContractValidationResult(contractValidation)
   const openingHookIssues = dedupeTextList([
@@ -2488,13 +2502,13 @@ export function runChapterPublishCheck(
   const strictVolumeDesign = normalizeText(currentVolumeDesign?.auditStatus) === 'locked'
     || normalizeText(currentVolumeDesign?.auditStatus) === 'ready'
 
-  const contractDeliveryStatus: ChapterGateLevel = publishContractValidation
+  const contractDeliveryStatus: ChapterGateLevel = degradeHeuristicStatus('contract_delivery', publishContractValidation
     ? publishContractValidation.status
     : contractAudit.blockerCount > 0
       ? 'blocker'
       : contractAudit.warningCount > 0
         ? 'warning'
-        : 'pass'
+        : 'pass')
   const dialogueSignalCount =
     reviewState.dialogueHomogenizationRisks.length
     + reviewState.dialogueDriftAlerts.length
@@ -2502,12 +2516,12 @@ export function runChapterPublishCheck(
     + reviewState.dialogueFillerRisks.length
     + reviewState.dialogueInfoDensityRisks.length
     + (reviewState.dialogueVoiceLockSummary ? 1 : 0)
-  const dialogueVoiceStatus: ChapterGateLevel = dialogueSignalCount >= 3
+  const dialogueVoiceStatus: ChapterGateLevel = degradeHeuristicStatus('dialogue_voice', dialogueSignalCount >= 3
     || (reviewState.dialogueDriftAlerts.length > 0 && reviewState.crossCharacterSimilarity.length > 0 && reviewState.severity === 'high')
     ? 'blocker'
     : dialogueSignalCount > 0
       ? 'warning'
-      : 'pass'
+      : 'pass')
   const povPurityStatus: ChapterGateLevel = fixedNovelPov && uniqueScenePovs.length > 1
     ? 'rewrite'
     : missingScenePovs.length > 0
@@ -2515,12 +2529,15 @@ export function runChapterPublishCheck(
       : uniqueScenePovs.length > 1
         ? 'warning'
         : 'pass'
-  const povBoundaryStatus: ChapterGateLevel = narrativeControlReport.pov.status
-  const sensoryCoverageStatus: ChapterGateLevel = narrativeControlReport.sensory.status
-  const narrativeRatioStatus: ChapterGateLevel = narrativeControlReport.narrativeRatio.status
-  const transitionDensityStatus: ChapterGateLevel = narrativeControlReport.transitionDensity.status
-  const emotionFocusStatus: ChapterGateLevel = narrativeControlReport.emotionFocus.status
-  const expositionStatus: ChapterGateLevel = narrativeControlReport.exposition.status
+  // POV 越界（direct mind reading）是精确判定，保持可 blocker/rewrite，不参与降级。
+  const povBoundaryStatus: ChapterGateLevel = narrativeControlReport.pov.directMindReadingHits.length > 0
+    ? narrativeControlReport.pov.status
+    : degradeHeuristicStatus('pov_boundary', narrativeControlReport.pov.status)
+  const sensoryCoverageStatus: ChapterGateLevel = degradeHeuristicStatus('sensory_coverage', narrativeControlReport.sensory.status)
+  const narrativeRatioStatus: ChapterGateLevel = degradeHeuristicStatus('narrative_ratio', narrativeControlReport.narrativeRatio.status)
+  const transitionDensityStatus: ChapterGateLevel = degradeHeuristicStatus('transition_density', narrativeControlReport.transitionDensity.status)
+  const emotionFocusStatus: ChapterGateLevel = degradeHeuristicStatus('emotion_focus', narrativeControlReport.emotionFocus.status)
+  const expositionStatus: ChapterGateLevel = degradeHeuristicStatus('world_exposition', narrativeControlReport.exposition.status)
   const hookStrengthStatus: ChapterGateLevel = !chapterContract.hookType && sceneHookCount === 0 && reviewState.readerHookRisks.length > 0 && weakFunction
     ? 'blocker'
     : (!chapterContract.hookType || sceneHookCount === 0 || reviewState.readerHookRisks.length > 0)
@@ -2558,7 +2575,7 @@ export function runChapterPublishCheck(
       : reviewState.rewriteDeltaStatus === 'weak' && reviewState.rewriteRequired
         ? `重写差异验证偏弱：${reviewState.rewriteDeltaFindings.slice(0, 2).join('；') || '当前稿件仍缺少足够的结构变化证据。'}`
         : '',
-    publishContractValidation?.status === 'blocker'
+    publishContractValidation?.status === 'blocker' && !degradedHeuristicGateKeys.has('contract_delivery')
       ? '正文合同验证仍有关键缺口，当前稿件没有兑现章节目标、场景结果或必要支线/伏笔。'
       : '',
   ].filter(Boolean)
@@ -3071,6 +3088,18 @@ export function runChapterPublishCheck(
         : '先在正文页做局部修订，再复检章节验收门。',
     }),
   ]
+
+  // enforce 模式：被语义门接管的启发式门项在 detail 上标注接管说明（状态已在上方降级）。
+  if (degradedHeuristicGateKeys.size > 0) {
+    for (let index = 0; index < rawChecklist.length; index += 1) {
+      const item = rawChecklist[index]
+      if (!degradedHeuristicGateKeys.has(item.key)) continue
+      rawChecklist[index] = {
+        ...item,
+        detail: `${item.detail}${HEURISTIC_TAKEOVER_SUFFIX}`,
+      }
+    }
+  }
 
   // 流水线阶段（finalize 之前）对时序类与初稿证据类 blocker 降级：
   // - summary/continuity 由随后的 finalize 自动刷新，属于必然未就绪的簿记项

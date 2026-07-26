@@ -243,10 +243,23 @@ import {
   replacePrefixedNotes,
   STYLE_COMPLIANCE_FIX_PREFIX,
   STYLE_COMPLIANCE_RISK_PREFIX,
+  applyCriticSemanticGateOutcomeToReviewNotes,
+  collectSemanticGateHeuristicHints,
+  formatSemanticGateBlockerFix,
   stripChapterHeadingNoise,
   toNumberArray,
   toStringArray,
 } from './chapter-review-notes'
+import {
+  SEMANTIC_GATE_DIMENSION_SPECS,
+  collectBlockerDimensions,
+  type SemanticGateReview,
+} from '../../src/shared/semantic-gate'
+import {
+  CORE_SEMANTIC_GATE_DIMENSIONS,
+  resolveSemanticGatePolicy,
+} from '../../src/shared/semantic-gate-policy'
+import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
 import {
   buildFallbackScenePlan,
   extractChapterGoal,
@@ -4449,6 +4462,14 @@ async function generateChapterContentInternal(
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
 
+    // 语义评审门策略：off 保持关键词门原始行为；shadow 只落库观察；enforce 由语义
+    // verdict 接管阻断，关键词门降级为提示。critic 阶段的语义门调用不计入
+    // maxSemanticCallsPerChapter 预算（预算只约束修复复评与 golden_final 加验）。
+    const semanticGatePolicy = resolveSemanticGatePolicy(novel.settingsJson)
+    let effectiveSemanticGateMode = semanticGatePolicy.mode
+    let semanticGateCallsUsed = 0
+    let criticSemanticReview: SemanticGateReview | null = null
+
     const criticMessages = [{
       role: 'user' as const,
       content: buildChapterReviewPrompt({
@@ -4565,7 +4586,7 @@ async function generateChapterContentInternal(
       chapterId,
       content: draftContent,
       reviewNotes,
-    }))
+    }, { advisoryOnly: effectiveSemanticGateMode === 'enforce' }))
     const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
       .where(eq(glossary.novelId, chapter.novelId))
       .all()
@@ -4613,6 +4634,41 @@ async function generateChapterContentInternal(
       chapterFunction: reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
       emotionTone: chapter.emotionTone || '',
     })
+    // 语义评审门（critic 阶段）：把启发式命中转为疑点线索交给语义门核实。
+    // runChapterSemanticGate 永不抛错并自动落库；degraded 时按 fallbackMode 处理。
+    if (semanticGatePolicy.mode !== 'off' && draftContent.trim()) {
+      const criticGateRun = await runChapterSemanticGate({
+        novelId: chapter.novelId,
+        chapterId,
+        chapterNum: chapter.chapterNum,
+        chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+        chapterContent: draftContent,
+        dimensions: CORE_SEMANTIC_GATE_DIMENSIONS,
+        stage: 'critic',
+        mode: semanticGatePolicy.mode,
+        modelConfigId: novel.modelConfigId || undefined,
+        contractSummary: reviewContext.writingContractSummary,
+        scenePlanSummary: reviewContext.scenePlanSummary || summarizeStageArtifactText(scenePlanText, 520),
+        protagonistBrief: profile.protagonistReference,
+        heuristicHints: collectSemanticGateHeuristicHints(reviewNotes),
+      })
+      criticSemanticReview = criticGateRun.degraded ? null : criticGateRun.review
+      const appliedOutcome = applyCriticSemanticGateOutcomeToReviewNotes(reviewNotes, {
+        review: criticGateRun.review,
+        degraded: criticGateRun.degraded,
+      }, semanticGatePolicy)
+      reviewNotes = appliedOutcome.reviewNotes
+      effectiveSemanticGateMode = appliedOutcome.effectiveMode
+      if (appliedOutcome.restoreHeuristicContractBlockers) {
+        // 语义评审失败（fallback=heuristic）：本轮当作 off，合同关键词验证恢复 blocker 语义。
+        reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
+          chapterId,
+          content: draftContent,
+          reviewNotes,
+        }))
+        console.warn(`[semantic-gate] critic 语义评审失败，本章回退启发式门 chapter=${chapterId}`)
+      }
+    }
     latestReviewNotesJson = JSON.stringify(reviewNotes)
     updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
@@ -4967,7 +5023,7 @@ async function generateChapterContentInternal(
       chapterId,
       content: repairedContent,
       reviewNotes: repairedReadableReviewNotes,
-    }))
+    }, { advisoryOnly: effectiveSemanticGateMode === 'enforce' }))
     const repairedGroundedReviewNotes = applyHistoricalGroundingToReviewNotes(repairedContractReviewNotes, {
       genreName: profile.genre,
       worldRulesJson: novel.worldRulesJson,
@@ -5376,7 +5432,7 @@ async function generateChapterContentInternal(
       versionSource: false,
     })
     hasCommittedContent = true
-    let publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+    let publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
     const finalGateRepairItems = publishCheck.checklist.filter((item) => (
       (item.status === 'blocker' || item.status === 'rewrite')
       && !['summary', 'continuity', 'context'].includes(item.key)
@@ -5452,7 +5508,7 @@ async function generateChapterContentInternal(
             skipStaleTracking: true,
             versionSource: false,
           })
-          publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+          publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
           console.warn(`[chapter:pipeline] 章节验收门定向重写${publishCheck.ready ? '通过' : '仍有阻塞'} chapter=${chapterId}`)
         } else {
           console.warn(`[chapter:pipeline] 章节验收门候选未改善，保留原稿 chapter=${chapterId}`)
@@ -5474,6 +5530,109 @@ async function generateChapterContentInternal(
       skipStaleTracking: true,
       versionSource: false,
     })
+    // 黄金章节终验：enforce 模式且命中 goldenChapterNums 时，finalize 前追加一次
+    // stage=golden_final 的语义评审（计入 maxSemanticCallsPerChapter 预算，超预算跳过并记警告）。
+    if (
+      effectiveSemanticGateMode === 'enforce'
+      && semanticGatePolicy.goldenChapterNums.includes(chapter.chapterNum)
+      && repairedContent.trim()
+    ) {
+      if (semanticGateCallsUsed >= semanticGatePolicy.maxSemanticCallsPerChapter) {
+        finalReviewNotesWithRewriteDelta = {
+          ...finalReviewNotesWithRewriteDelta,
+          semantic_review_warnings: dedupeTextList([
+            ...(finalReviewNotesWithRewriteDelta.semantic_review_warnings || []),
+            `黄金章节 golden_final 语义复核因超出本章语义调用预算（${semanticGatePolicy.maxSemanticCallsPerChapter} 次）被跳过。`,
+          ]),
+        }
+        latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
+        updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson }, {
+          skipStaleTracking: true,
+          versionSource: false,
+        })
+      } else {
+        semanticGateCallsUsed += 1
+        const goldenGateRun = await runChapterSemanticGate({
+          novelId: chapter.novelId,
+          chapterId,
+          chapterNum: chapter.chapterNum,
+          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+          chapterContent: repairedContent,
+          dimensions: CORE_SEMANTIC_GATE_DIMENSIONS,
+          stage: 'golden_final',
+          mode: effectiveSemanticGateMode,
+          modelConfigId: novel.modelConfigId || undefined,
+          contractSummary: rewriteContext.writingContractSummary,
+          scenePlanSummary: rewriteContext.scenePlanSummary || summarizeStageArtifactText(scenePlanText, 520),
+          protagonistBrief: profile.protagonistReference,
+          heuristicHints: collectSemanticGateHeuristicHints(finalReviewNotesWithRewriteDelta),
+        })
+        if (goldenGateRun.degraded) {
+          if (semanticGatePolicy.fallbackMode === 'heuristic') {
+            // 语义终验缺席：恢复关键词门原始 blocker 行为重新验收，交由下方既有阻断逻辑处理。
+            publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+            console.warn(`[semantic-gate] golden_final 语义评审失败，已回退启发式验收 chapter=${chapterId}`)
+          } else {
+            finalReviewNotesWithRewriteDelta = {
+              ...finalReviewNotesWithRewriteDelta,
+              semantic_review_warnings: dedupeTextList([
+                ...(finalReviewNotesWithRewriteDelta.semantic_review_warnings || []),
+                '语义评审缺席：golden_final 语义门调用失败，按 warn-pass 策略放行本章。',
+              ]),
+            }
+            latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
+            updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson }, {
+              skipStaleTracking: true,
+              versionSource: false,
+            })
+          }
+        } else {
+          const goldenBlockerVerdicts = goldenGateRun.review.verdicts.filter((verdict) => verdict.status === 'blocker')
+          finalReviewNotesWithRewriteDelta = {
+            ...finalReviewNotesWithRewriteDelta,
+            semantic_verdicts: goldenGateRun.review.verdicts,
+            semantic_review_warnings: dedupeTextList([
+              ...(finalReviewNotesWithRewriteDelta.semantic_review_warnings || []),
+              ...goldenGateRun.review.warnings,
+            ]),
+            ...(goldenBlockerVerdicts.length > 0
+              ? {
+                  critical_fixes: dedupeTextList([
+                    ...goldenBlockerVerdicts.map(formatSemanticGateBlockerFix),
+                    ...finalReviewNotesWithRewriteDelta.critical_fixes,
+                  ]),
+                  severity: mergeSeverity(finalReviewNotesWithRewriteDelta.severity, 'high'),
+                  rewrite_required: true,
+                }
+              : {}),
+          }
+          latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
+          updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson }, {
+            skipStaleTracking: true,
+            versionSource: false,
+          })
+          if (goldenBlockerVerdicts.length > 0) {
+            const goldenSummary = goldenBlockerVerdicts
+              .map((verdict) => `${SEMANTIC_GATE_DIMENSION_SPECS[verdict.dimension]?.label || verdict.dimension}：${verdict.summary}`)
+              .slice(0, 3)
+              .join('；')
+            failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+              'human_review_required',
+              `黄金章节语义终验未通过：${goldenSummary}`,
+              {
+                blocked: true,
+                rewriteScope: 'chapter_rewrite',
+                outputText: buildPipelineFailureOutput(
+                  'human_review_required',
+                  `黄金章节语义终验未通过：${goldenSummary}`,
+                  { rewriteScope: 'chapter_rewrite' },
+                ),
+              },
+            ), { blocked: true })
+          }
+        }
+      }
+    }
     const publishCheckFailureMeta = getPublishCheckRewriteFailureMeta(publishCheck)
     syncFeedbackRecurrenceState(chapter.novelId)
     syncDialogueDriftRevisionTasks(chapter.novelId)

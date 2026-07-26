@@ -64,11 +64,20 @@ vi.mock('./chapter-pipeline-policy.service', () => ({
 }))
 
 import {
+  SEMANTIC_GATE_FIX_PREFIX,
   UNVERIFIED_EVIDENCE_PREFIX,
   annotateRiskEvidence,
+  applyContractValidationToReviewNotes,
+  applyCriticSemanticGateOutcomeToReviewNotes,
+  collectSemanticGateHeuristicHints,
   normalizeReviewNotes,
 } from './chapter-review-notes'
-import { normalizeForEvidence } from '../../src/shared/semantic-gate'
+import {
+  normalizeForEvidence,
+  type SemanticGateReview,
+  type SemanticGateVerdict,
+} from '../../src/shared/semantic-gate'
+import { DEFAULT_SEMANTIC_GATE_POLICY, type SemanticGatePolicy } from '../../src/shared/semantic-gate-policy'
 
 const CHAPTER_CONTENT = [
   '陈默把铜牌按进泥里，指节因为用力而发白。他知道这一步没有回头路。',
@@ -176,5 +185,194 @@ describe('normalizeReviewNotes 证据核实', () => {
     const restored = normalizeReviewNotes(JSON.parse(JSON.stringify(first)))
     expect(restored.semantic_verdicts).toEqual(first.semantic_verdicts)
     expect(restored.semantic_review_warnings).toEqual(first.semantic_review_warnings)
+  })
+})
+
+function buildVerdict(overrides: Partial<SemanticGateVerdict> & Pick<SemanticGateVerdict, 'dimension' | 'status'>): SemanticGateVerdict {
+  return {
+    confidence: 1,
+    summary: `${overrides.dimension} 判定说明`,
+    suggestion: '',
+    evidence: [{ excerpt: '逐字证据句', explanation: '说明' }],
+    rejectedEvidenceCount: 0,
+    ...overrides,
+  }
+}
+
+function buildReview(verdicts: SemanticGateVerdict[], warnings: string[] = []): SemanticGateReview {
+  return {
+    failed: false,
+    verdicts,
+    warnings,
+    evidenceAccepted: verdicts.reduce((sum, verdict) => sum + verdict.evidence.length, 0),
+    evidenceRejected: 0,
+  }
+}
+
+const ENFORCE_POLICY: SemanticGatePolicy = {
+  ...DEFAULT_SEMANTIC_GATE_POLICY,
+  mode: 'enforce',
+  fallbackMode: 'heuristic',
+}
+
+describe('applyContractValidationToReviewNotes advisoryOnly 聚合', () => {
+  const blockerValidation = {
+    status: 'blocker' as const,
+    summary: '章节目标未兑现',
+    itemResults: [{
+      contractItemType: 'chapter_goal',
+      expected: '让主线再向前推进一步',
+      verdict: 'missing' as const,
+      evidenceExcerpt: '',
+      rewriteHint: '把章节目标写成可核验的动作与结果。',
+    }],
+    rewriteHints: ['把章节目标写成可核验的动作与结果。'],
+  }
+
+  it('默认（非 advisory）hard blocker 判 high 且强制重写', () => {
+    const notes = applyContractValidationToReviewNotes(normalizeReviewNotes({}), blockerValidation)
+    expect(notes.severity).toBe('high')
+    expect(notes.rewrite_required).toBe(true)
+  })
+
+  it('advisoryOnly 时 hard blocker 按 warning 处理：不强制重写、严重度 medium', () => {
+    const notes = applyContractValidationToReviewNotes(normalizeReviewNotes({}), {
+      ...blockerValidation,
+      itemResults: blockerValidation.itemResults.map((item) => ({ ...item, advisoryOnly: true })),
+      advisoryOnly: true,
+    } as never)
+    expect(notes.severity).toBe('medium')
+    expect(notes.rewrite_required).toBe(false)
+    // verdict 与提示文本保留
+    expect(notes.contract_validation?.itemResults[0]?.verdict).toBe('missing')
+    expect(notes.critical_fixes).toContain('把章节目标写成可核验的动作与结果。')
+  })
+})
+
+describe('applyCriticSemanticGateOutcomeToReviewNotes（enforce 降级链）', () => {
+  it('shadow：只挂载 verdicts，不注入 critical_fixes、不改判定', () => {
+    const review = buildReview([buildVerdict({ dimension: 'contract_delivery', status: 'blocker' })])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review, degraded: false },
+      { ...DEFAULT_SEMANTIC_GATE_POLICY, mode: 'shadow' },
+    )
+    expect(outcome.effectiveMode).toBe('shadow')
+    expect(outcome.restoreHeuristicContractBlockers).toBe(false)
+    expect(outcome.reviewNotes.semantic_verdicts).toEqual(review.verdicts)
+    expect(outcome.reviewNotes.critical_fixes).toHaveLength(0)
+    expect(outcome.reviewNotes.rewrite_required).toBe(false)
+  })
+
+  it('enforce + blocker：blocker 维度带[语义门]前缀注入 critical_fixes 并强制重写', () => {
+    const review = buildReview([
+      buildVerdict({ dimension: 'cost_and_choice', status: 'blocker', summary: '代价没有落地', suggestion: '补一处不可逆损失' }),
+      buildVerdict({ dimension: 'dialogue_voice', status: 'pass' }),
+    ])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review, degraded: false },
+      ENFORCE_POLICY,
+    )
+    expect(outcome.effectiveMode).toBe('enforce')
+    expect(outcome.reviewNotes.critical_fixes.some((item) => (
+      item.startsWith(SEMANTIC_GATE_FIX_PREFIX) && item.includes('代价没有落地') && item.includes('补一处不可逆损失')
+    ))).toBe(true)
+    expect(outcome.reviewNotes.rewrite_required).toBe(true)
+    expect(outcome.reviewNotes.severity).toBe('high')
+  })
+
+  it('enforce + 全 pass：不注入修复项也不强制重写', () => {
+    const review = buildReview([buildVerdict({ dimension: 'contract_delivery', status: 'pass' })])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review, degraded: false },
+      ENFORCE_POLICY,
+    )
+    expect(outcome.reviewNotes.critical_fixes).toHaveLength(0)
+    expect(outcome.reviewNotes.rewrite_required).toBe(false)
+  })
+
+  it('enforce + degraded + fallback=heuristic：本轮当作 off 并要求恢复关键词门 blocker', () => {
+    const failedReview: SemanticGateReview = {
+      failed: true,
+      verdicts: [],
+      warnings: ['语义门输出无法解析'],
+      evidenceAccepted: 0,
+      evidenceRejected: 0,
+    }
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review: failedReview, degraded: true },
+      ENFORCE_POLICY,
+    )
+    expect(outcome.effectiveMode).toBe('off')
+    expect(outcome.restoreHeuristicContractBlockers).toBe(true)
+    expect(outcome.reviewNotes.semantic_verdicts).toBeUndefined()
+  })
+
+  it('enforce + degraded + fallback=warn-pass：放行并记录语义评审缺席警告', () => {
+    const failedReview: SemanticGateReview = {
+      failed: true,
+      verdicts: [],
+      warnings: [],
+      evidenceAccepted: 0,
+      evidenceRejected: 0,
+    }
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review: failedReview, degraded: true },
+      { ...ENFORCE_POLICY, fallbackMode: 'warn-pass' },
+    )
+    expect(outcome.effectiveMode).toBe('enforce')
+    expect(outcome.restoreHeuristicContractBlockers).toBe(false)
+    expect(outcome.reviewNotes.semantic_review_warnings?.some((item) => item.includes('语义评审缺席'))).toBe(true)
+  })
+})
+
+describe('collectSemanticGateHeuristicHints', () => {
+  it('把合同/结构/对白启发式命中映射为对应维度的疑点线索', () => {
+    const notes = normalizeReviewNotes({
+      cost_present: true,
+      cost_resolution_state: 'evaporated',
+      cost_summary: '重伤一段后凭空痊愈',
+      reversal_marker: true,
+      reversal_support_state: 'forced',
+      dialogue_filler_risks: ['对白空转互相接话'],
+      contract_validation: {
+        status: 'blocker',
+        summary: '',
+        itemResults: [
+          {
+            contractItemType: 'chapter_goal',
+            expected: '让主线再向前推进一步',
+            verdict: 'missing',
+            evidenceExcerpt: '',
+            rewriteHint: '',
+          },
+          {
+            contractItemType: 'scene_result_state',
+            expected: '线索升级',
+            verdict: 'weak',
+            evidenceExcerpt: '',
+            segmentTitle: '场景一',
+            rewriteHint: '',
+          },
+        ],
+        rewriteHints: [],
+      },
+    })
+    const hints = collectSemanticGateHeuristicHints(notes)
+    const dimensions = hints.map((hint) => hint.dimension)
+    expect(dimensions).toContain('contract_delivery')
+    expect(dimensions).toContain('structural_beat')
+    expect(dimensions).toContain('cost_and_choice')
+    expect(dimensions).toContain('dialogue_voice')
+    expect(hints.find((hint) => hint.dimension === 'contract_delivery')?.detail).toContain('让主线再向前推进一步')
+    expect(hints.find((hint) => hint.dimension === 'structural_beat')?.detail).toContain('场景一')
+  })
+
+  it('无命中时返回空数组', () => {
+    expect(collectSemanticGateHeuristicHints(normalizeReviewNotes({}))).toEqual([])
   })
 })
