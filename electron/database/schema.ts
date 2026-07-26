@@ -37,6 +37,7 @@ export const novels = sqliteTable('novels', {
   blurbJson: text('blurb_json'),
   styleTemplateId: integer('style_template_id'),
   worldTemplateId: integer('world_template_id'),
+  activeStyleFingerprintId: integer('active_style_fingerprint_id'),
   contextVersion: integer('context_version').default(1),
   modelConfigId: integer('model_config_id'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -1268,6 +1269,10 @@ export const styleFingerprints = sqliteTable('style_fingerprints', {
   sourceText: text('source_text'),
   fingerprintJson: text('fingerprint_json'),
   analysisModelId: text('analysis_model_id'),
+  sourceType: text('source_type').default('pasted'),
+  sourceChapterIdsJson: text('source_chapter_ids_json'),
+  statsJson: text('stats_json'),
+  genreId: integer('genre_id'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })

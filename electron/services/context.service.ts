@@ -13,7 +13,7 @@ import {
 import {
   buildStyleFingerprintPromptSection,
   buildStyleHardGuardPromptSection,
-  listStyleFingerprints,
+  resolveActiveStyleFingerprint,
 } from './style-analysis.service'
 import {
   buildEndgameDesignSummary,
@@ -2926,12 +2926,10 @@ function formatStyleTemplateSummary(contentJson?: string | null): string {
 
 function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: number): string {
   try {
-    const fingerprints = listStyleFingerprints(novelId)
-    if (fingerprints.length === 0) return baseTemplate
+    const resolved = resolveActiveStyleFingerprint(novelId)
+    if (!resolved) return baseTemplate
 
-    // Use the most recent fingerprint for this novel
-    const latest = fingerprints[fingerprints.length - 1]
-    const section = buildStyleFingerprintPromptSection(latest.id)
+    const section = buildStyleFingerprintPromptSection(resolved.record.id)
     if (!section) return baseTemplate
 
     return baseTemplate ? `${baseTemplate}\n\n${section}` : section
@@ -2959,11 +2957,10 @@ function buildManualStyleSampleConstraint(themeVoiceJson?: string | null): strin
 function buildStyleHardConstraintForNovel(novelId: number, themeVoiceJson?: string | null): string {
   const manualConstraint = buildManualStyleSampleConstraint(themeVoiceJson)
   try {
-    const fingerprints = listStyleFingerprints(novelId)
-    if (fingerprints.length === 0) return manualConstraint
-    const latest = fingerprints[fingerprints.length - 1]
+    const resolved = resolveActiveStyleFingerprint(novelId)
+    if (!resolved) return manualConstraint
     return [
-      buildStyleHardGuardPromptSection(latest.id),
+      buildStyleHardGuardPromptSection(resolved.record.id),
       manualConstraint,
     ].filter(Boolean).join('\n\n')
   } catch {

@@ -1,7 +1,8 @@
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { StyleFingerprint, StyleHardGuard } from '../../src/types'
+import { computeStyleStats, type StyleStats } from '../../src/shared/style-fingerprint-stats'
 import { getDb } from '../database/db'
-import { styleFingerprints } from '../database/schema'
+import { chapters, novels, styleFingerprints } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
 
 export type { StyleFingerprint, StyleHardGuard }
@@ -60,30 +61,51 @@ function buildRepresentativeChunks(text: string, maxChunkSize = 8000): string[] 
   return chunks
 }
 
+function buildStatsPreamble(stats: StyleStats): string {
+  return [
+    '以下数值已由程序精确统计，请勿重新估算，直接沿用（你只分析语气、视角、修辞等不可量化维度）：',
+    `- 平均句长 ${stats.avgSentenceLength} 字（标准差 ${stats.sentenceLengthStdev}）`,
+    `- 平均段长 ${stats.avgParagraphLength} 字`,
+    `- 对话段占比 ${stats.dialogueLineRate}%`,
+  ].join('\n')
+}
+
+/** Deterministic numbers always win over LLM estimates. */
+function overrideWithComputedStats(fingerprint: StyleFingerprint, stats: StyleStats): StyleFingerprint {
+  return {
+    ...fingerprint,
+    avgSentenceLength: stats.avgSentenceLength > 0 ? Math.round(stats.avgSentenceLength) : fingerprint.avgSentenceLength,
+    avgParagraphLength: stats.avgParagraphLength > 0 ? Math.round(stats.avgParagraphLength) : fingerprint.avgParagraphLength,
+    dialogueLineRate: Math.round(stats.dialogueLineRate),
+  }
+}
+
 export async function analyzeReferenceText(
   text: string,
   modelConfigId?: number,
 ): Promise<StyleFingerprint> {
   const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
   const chunks = buildRepresentativeChunks(text)
+  const stats = computeStyleStats(text)
+  const statsPreamble = buildStatsPreamble(stats)
 
   if (chunks.length === 1) {
     const result = await adapter.chat([
-      { role: 'user', content: `${STYLE_ANALYSIS_PROMPT}\n\n---\n参考文本：\n${chunks[0]}` },
+      { role: 'user', content: `${STYLE_ANALYSIS_PROMPT}\n\n${statsPreamble}\n\n---\n参考文本：\n${chunks[0]}` },
     ], { temperature: 0.3, maxTokens: 4096 })
-    return parseStyleResult(result)
+    return overrideWithComputedStats(parseStyleResult(result), stats)
   }
 
   // Multi-chunk: analyze each, then merge
   const partialResults: StyleFingerprint[] = []
   for (const chunk of chunks) {
     const result = await adapter.chat([
-      { role: 'user', content: `${STYLE_ANALYSIS_PROMPT}\n\n---\n参考文本片段：\n${chunk}` },
+      { role: 'user', content: `${STYLE_ANALYSIS_PROMPT}\n\n${statsPreamble}\n\n---\n参考文本片段：\n${chunk}` },
     ], { temperature: 0.3, maxTokens: 4096 })
     partialResults.push(parseStyleResult(result))
   }
 
-  return mergeStyleResults(partialResults)
+  return overrideWithComputedStats(mergeStyleResults(partialResults), stats)
 }
 
 function normalizeStyleStringArray(value: unknown, limit?: number): string[] {
@@ -280,8 +302,10 @@ export async function createStyleFingerprint(
   name: string,
   text: string,
   modelConfigId?: number,
+  options: { sourceType?: 'pasted' | 'chapters' | 'genre-default'; sourceChapterIds?: number[]; genreId?: number } = {},
 ): Promise<number> {
   const fingerprint = await analyzeReferenceText(text, modelConfigId)
+  const stats = computeStyleStats(text)
   const db = getDb()
 
   const result = db.insert(styleFingerprints).values({
@@ -290,9 +314,93 @@ export async function createStyleFingerprint(
     sourceText: text.slice(0, 50000), // Cap storage at 50k chars
     fingerprintJson: JSON.stringify(fingerprint),
     analysisModelId: modelConfigId ? String(modelConfigId) : null,
+    sourceType: options.sourceType || 'pasted',
+    sourceChapterIdsJson: options.sourceChapterIds ? JSON.stringify(options.sourceChapterIds) : null,
+    statsJson: JSON.stringify(stats),
+    genreId: options.genreId ?? null,
   }).run()
 
   return Number(result.lastInsertRowid)
+}
+
+/** Build a fingerprint by sampling existing (preferably finalized) chapters. */
+export async function createStyleFingerprintFromChapters(
+  novelId: number,
+  name: string,
+  chapterIds: number[],
+  modelConfigId?: number,
+): Promise<number> {
+  const db = getDb()
+  const rows = db.select({ id: chapters.id, content: chapters.content, chapterNum: chapters.chapterNum })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+    .filter((row) => chapterIds.includes(row.id) && row.content?.trim())
+    .sort((left, right) => left.chapterNum - right.chapterNum)
+  if (rows.length === 0) {
+    throw new Error('所选章节没有可用正文，无法生成风格指纹。')
+  }
+  const sample = rows.map((row) => row.content || '').join('\n\n').slice(0, 48000)
+  return createStyleFingerprint(novelId, name, sample, modelConfigId, {
+    sourceType: 'chapters',
+    sourceChapterIds: rows.map((row) => row.id),
+  })
+}
+
+export function setActiveStyleFingerprint(novelId: number, fingerprintId: number | null): void {
+  const db = getDb()
+  if (fingerprintId !== null) {
+    const record = getStyleFingerprint(fingerprintId)
+    if (!record) throw new Error('风格指纹不存在。')
+    if (record.novelId !== null && record.novelId !== novelId) {
+      throw new Error('不能激活其他小说的风格指纹。')
+    }
+  }
+  db.update(novels)
+    .set({ activeStyleFingerprintId: fingerprintId, updatedAt: new Date().toISOString() })
+    .where(eq(novels.id, novelId))
+    .run()
+}
+
+export interface ResolvedStyleFingerprint {
+  record: NonNullable<ReturnType<typeof getStyleFingerprint>>
+  fingerprint: StyleFingerprint
+  source: 'active' | 'latest' | 'genre-default'
+}
+
+/**
+ * Fingerprint fallback chain: explicitly activated → newest novel fingerprint
+ * → genre default seed (novel_id NULL + genre_id) → null.
+ */
+export function resolveActiveStyleFingerprint(novelId: number, genreId?: number | null): ResolvedStyleFingerprint | null {
+  const db = getDb()
+  const novel = db.select({ activeId: novels.activeStyleFingerprintId, genreId: novels.genreId })
+    .from(novels)
+    .where(eq(novels.id, novelId))
+    .all()[0]
+
+  if (novel?.activeId) {
+    const payload = getStyleFingerprintPayload(novel.activeId)
+    if (payload?.record) return { record: payload.record, fingerprint: payload.fingerprint, source: 'active' }
+  }
+
+  const latest = getLatestStyleFingerprintForNovel(novelId)
+  if (latest?.record) return { record: latest.record, fingerprint: latest.fingerprint, source: 'latest' }
+
+  const effectiveGenreId = genreId ?? novel?.genreId
+  if (effectiveGenreId) {
+    const seed = db.select().from(styleFingerprints)
+      .where(and(isNull(styleFingerprints.novelId), eq(styleFingerprints.genreId, effectiveGenreId)))
+      .orderBy(desc(styleFingerprints.id))
+      .limit(1)
+      .all()[0]
+    if (seed) {
+      const fingerprint = parseStoredFingerprint(seed.fingerprintJson)
+      if (fingerprint) return { record: seed, fingerprint, source: 'genre-default' }
+    }
+  }
+
+  return null
 }
 
 export function getStyleFingerprint(id: number) {

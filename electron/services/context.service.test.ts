@@ -14,7 +14,7 @@ vi.mock('./embedding.service', () => ({
 vi.mock('./style-analysis.service', () => ({
   buildStyleFingerprintPromptSection: vi.fn(() => ''),
   buildStyleHardGuardPromptSection: vi.fn(() => ''),
-  listStyleFingerprints: vi.fn(() => []),
+  resolveActiveStyleFingerprint: vi.fn(() => null),
 }))
 
 vi.mock('./story-memory.service', () => ({
@@ -134,7 +134,7 @@ import {
 import { resolveModelRuntimeBudget } from './model.service'
 import {
   buildStyleHardGuardPromptSection,
-  listStyleFingerprints,
+  resolveActiveStyleFingerprint,
 } from './style-analysis.service'
 import {
   buildCharacterContextCards,
@@ -335,7 +335,7 @@ function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
 describe('allocateChapterContext', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
-    vi.mocked(listStyleFingerprints).mockReturnValue([])
+    vi.mocked(resolveActiveStyleFingerprint).mockReturnValue(null)
     vi.mocked(buildStyleHardGuardPromptSection).mockReturnValue('')
     vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
       maxContextTokens: 32000,
@@ -441,8 +441,8 @@ describe('allocateChapterContext', () => {
   })
 
   it('injects style hard-guard constraints when the novel has a style fingerprint', () => {
-    vi.mocked(listStyleFingerprints).mockReturnValue([
-      {
+    vi.mocked(resolveActiveStyleFingerprint).mockReturnValue({
+      record: {
         id: 8,
         novelId: 1,
         name: '冷硬短句',
@@ -452,7 +452,9 @@ describe('allocateChapterContext', () => {
         createdAt: '',
         updatedAt: '',
       },
-    ] as never)
+      fingerprint: {},
+      source: 'active',
+    } as never)
     vi.mocked(buildStyleHardGuardPromptSection).mockReturnValue(
       '【风格硬约束 · 冷硬短句】\n- 句长尽量维持在 14-24 字。\n- 抽象词密度不高于 12%。',
     )

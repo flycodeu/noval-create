@@ -22,7 +22,7 @@ import {
   getModelProviderOptions,
   getProviderTokenSafetyMarginPct,
 } from './model.service'
-import { getLatestStyleFingerprintForNovel } from './style-analysis.service'
+import { resolveActiveStyleFingerprint } from './style-analysis.service'
 
 type AiModeResolutionSource = 'request_override' | 'global_default' | 'fallback_default'
 
@@ -241,7 +241,7 @@ export function buildAiStageExecutionReport(options: {
 }
 
 export function buildAuthorStyleLockSummary(novelId: number, themeVoiceJson?: string | null): AuthorStyleLockSummary {
-  const latestFingerprint = getLatestStyleFingerprintForNovel(novelId)
+  const latestFingerprint = resolveActiveStyleFingerprint(novelId)
   const themeVoice = parseThemeVoiceDocument(themeVoiceJson)
   const fingerprint = latestFingerprint?.fingerprint
   const hardRules = dedupeStrings([

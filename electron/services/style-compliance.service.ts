@@ -3,8 +3,9 @@ import type {
   StyleComplianceResult,
   StyleFingerprint,
 } from '../../src/types'
-import { getLatestStyleFingerprintForNovel } from './style-analysis.service'
+import { resolveActiveStyleFingerprint } from './style-analysis.service'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { isDialogueParagraph, splitProseParagraphs, splitProseSentences } from '../../src/shared/style-fingerprint-stats'
 import { getDb } from '../database/db'
 import { novels } from '../database/schema'
 import { eq } from 'drizzle-orm'
@@ -40,26 +41,8 @@ function roundMetric(value: number): number {
   return Math.round(value * 10) / 10
 }
 
-function splitParagraphs(content: string): string[] {
-  return content
-    .split(/\n\s*\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function splitSentences(content: string): string[] {
-  return content
-    .replace(/\r/g, '')
-    .split(/[。！？!?]+|\n+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length >= 2)
-}
-
-function isDialogueParagraph(paragraph: string): boolean {
-  const trimmed = paragraph.trim()
-  if (!trimmed) return false
-  return /^[“"「『]/.test(trimmed) || /^[^，。！？!?]{1,18}[：:]/.test(trimmed)
-}
+const splitParagraphs = splitProseParagraphs
+const splitSentences = splitProseSentences
 
 function countOccurrences(content: string, token: string): number {
   if (!token) return 0
@@ -353,7 +336,7 @@ export function analyzeNovelStyleCompliance(
   novelId: number,
   content: string,
 ): StyleComplianceResult | null {
-  const payload = getLatestStyleFingerprintForNovel(novelId)
+  const payload = resolveActiveStyleFingerprint(novelId)
   const baseResult = payload ? analyzeStyleCompliance(content, payload.fingerprint) : null
   let themeVoiceJson = ''
   try {

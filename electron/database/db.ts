@@ -2240,6 +2240,33 @@ export function runMigrations(sqlite: Database.Database) {
         ON semantic_gate_reviews(novel_id, created_at);
     `)
   })
+
+  runMigrationStep(sqlite, '0047_style_lab', () => {
+    if (hasTable(sqlite, 'style_fingerprints')) {
+      ensureColumn(sqlite, 'style_fingerprints', 'source_type', "TEXT DEFAULT 'pasted'")
+      ensureColumn(sqlite, 'style_fingerprints', 'source_chapter_ids_json', 'TEXT')
+      ensureColumn(sqlite, 'style_fingerprints', 'stats_json', 'TEXT')
+      ensureColumn(sqlite, 'style_fingerprints', 'genre_id', 'INTEGER')
+    }
+    if (hasTable(sqlite, 'novels')) {
+      ensureColumn(sqlite, 'novels', 'active_style_fingerprint_id', 'INTEGER')
+      // Backfill: pin each novel to its latest fingerprint so switching the
+      // resolver from "take latest" to "take active" cannot change the style
+      // of an existing project.
+      if (hasTable(sqlite, 'style_fingerprints')) {
+        sqlite.exec(`
+          UPDATE novels
+          SET active_style_fingerprint_id = (
+            SELECT sf.id FROM style_fingerprints sf
+            WHERE sf.novel_id = novels.id
+            ORDER BY sf.id DESC
+            LIMIT 1
+          )
+          WHERE active_style_fingerprint_id IS NULL;
+        `)
+      }
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

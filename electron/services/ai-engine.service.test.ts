@@ -29,7 +29,7 @@ vi.mock('./model.service', () => ({
 }))
 
 vi.mock('./style-analysis.service', () => ({
-  getLatestStyleFingerprintForNovel: vi.fn(() => null),
+  resolveActiveStyleFingerprint: vi.fn(() => null),
 }))
 
 import { getModelConfigRecord } from './model.service'
