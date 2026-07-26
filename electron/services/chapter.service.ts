@@ -253,6 +253,7 @@ import {
 import {
   SEMANTIC_GATE_DIMENSION_SPECS,
   collectBlockerDimensions,
+  type SemanticGateDimension,
   type SemanticGateReview,
 } from '../../src/shared/semantic-gate'
 import {
@@ -262,11 +263,14 @@ import {
 import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
 import {
   buildFallbackScenePlan,
+  collectSceneDesignFieldGaps,
   extractChapterGoal,
   formatScenePlan,
   getDefaultChapterTitle,
+  hasSceneDesignDeclarations,
   loadScenePlanContractSeeds,
   normalizeScenePlan,
+  writeBackSceneDesignFields,
   type ScenePlanStep,
 } from './chapter-scene-plan'
 import {
@@ -4283,6 +4287,14 @@ async function generateChapterContentInternal(
     }
 
     updateChapter(chapterId, { scenePlanJson: JSON.stringify(scenePlan) })
+    // 设计层闭环：把归一后的 hidden_agendas / irony_gap 按 sceneOrder 写回场景合同
+    // （仅两列，合同行缺失不写），使重生成时设计字段可延续。写回失败不阻断流水线。
+    writeBackSceneDesignFields(chapterId, scenePlan)
+    // planner 空输出体检：声明冲突却缺设计字段的场景计数，稍后挂到 reviewNotes（提示级）。
+    const sceneDesignFieldGaps = collectSceneDesignFieldGaps(scenePlan)
+    if (sceneDesignFieldGaps.length > 0) {
+      console.warn(`[chapter:plan] 场景设计字段缺口 chapter=${chapterId}：${sceneDesignFieldGaps.length} 项`)
+    }
     const scenePlanText = formatScenePlan(scenePlan)
     const writerStepMemory = buildStepMemorySummary({
       chapterBridgePlan: chapterBridgePlanText,
@@ -4636,16 +4648,31 @@ async function generateChapterContentInternal(
       chapterFunction: reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
       emotionTone: chapter.emotionTone || '',
     })
+    if (sceneDesignFieldGaps.length > 0) {
+      // planner 阶段统计的设计字段缺口挂到 reviewNotes（提示级，不阻塞）。
+      reviewNotes = {
+        ...reviewNotes,
+        design_field_gaps: dedupeTextList([...(reviewNotes.design_field_gaps || []), ...sceneDesignFieldGaps]),
+      }
+    }
     // 语义评审门（critic 阶段）：把启发式命中转为疑点线索交给语义门核实。
     // runChapterSemanticGate 永不抛错并自动落库；degraded 时按 fallbackMode 处理。
+    // 设计维度按需追加（只扩充本次调用的 dimensions，不新增调用次数）：
+    // - design_subtext：本章场景计划声明了非空 hidden_agendas / irony_gap；
+    // - dramatic_drive：主角卡带非空 dramaticEngine；
+    // - design_alignment：本章仍在未消解的弧级设计校验 flagged 记录中。
     if (semanticGatePolicy.mode !== 'off' && draftContent.trim()) {
+      const criticSemanticDimensions: SemanticGateDimension[] = [...CORE_SEMANTIC_GATE_DIMENSIONS]
+      if (hasSceneDesignDeclarations(scenePlan)) {
+        criticSemanticDimensions.push('design_subtext')
+      }
       const criticGateRun = await runChapterSemanticGate({
         novelId: chapter.novelId,
         chapterId,
         chapterNum: chapter.chapterNum,
         chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
         chapterContent: draftContent,
-        dimensions: CORE_SEMANTIC_GATE_DIMENSIONS,
+        dimensions: criticSemanticDimensions,
         stage: 'critic',
         mode: semanticGatePolicy.mode,
         modelConfigId: novel.modelConfigId || undefined,

@@ -80,4 +80,69 @@ describe('scene plan reconciliation', () => {
     expect(result.plan[0].must_cover).toContain('合同结果：旧档柜留下三个待查问题，明早先到辅助工位报到')
     expect(result.corrections).toContain('场景2：将现有合同结果状态加入 must_cover，要求 Writer 在本场落地。')
   })
+
+  it('planner 留空时从合同 seed 延续设计字段；已有输出不覆盖', () => {
+    const seed = {
+      sceneOrder: 1,
+      sceneTitle: '炉前赌气',
+      sceneGoal: '建立冲突',
+      location: '锅炉场',
+      obstacle: '标准工序',
+      conflictType: '开局压力',
+      resultState: '风门卡死',
+      hiddenAgendas: ['韩铁根在护着侄子'],
+      ironyGap: '读者知道缺页是韩铁根撕的',
+    }
+
+    const emptyResult = reconcileScenePlanForContracts(
+      [buildStep({ exit_hook: '转入下一场。', hidden_agendas: [], irony_gap: '' })],
+      [seed],
+    )
+    expect(emptyResult.plan[0].hidden_agendas).toEqual(['韩铁根在护着侄子'])
+    expect(emptyResult.plan[0].irony_gap).toBe('读者知道缺页是韩铁根撕的')
+    expect(emptyResult.corrections).toContain('场景1：Planner 未输出 hidden_agendas，已从场景合同延续既有设计。')
+    expect(emptyResult.corrections).toContain('场景1：Planner 未输出 irony_gap，已从场景合同延续既有设计。')
+
+    const filledResult = reconcileScenePlanForContracts(
+      [buildStep({
+        exit_hook: '转入下一场。',
+        hidden_agendas: ['沈砚青想借事故换岗位'],
+        irony_gap: '读者知道风门早已锈死',
+      })],
+      [seed],
+    )
+    expect(filledResult.plan[0].hidden_agendas).toEqual(['沈砚青想借事故换岗位'])
+    expect(filledResult.plan[0].irony_gap).toBe('读者知道风门早已锈死')
+  })
+
+  it('补齐缺失场景时同步带出 seed 里的设计字段', () => {
+    const result = reconcileScenePlanForContracts(
+      [buildStep({ exit_hook: '转入下一场。' })],
+      [
+        {
+          sceneOrder: 1,
+          sceneTitle: '炉前赌气',
+          sceneGoal: '建立冲突',
+          location: '锅炉场',
+          obstacle: '标准工序',
+          conflictType: '开局压力',
+          resultState: '风门卡死',
+        },
+        {
+          sceneOrder: 2,
+          sceneTitle: '纸上的惩罚',
+          sceneGoal: '进入工册股',
+          location: '工册股',
+          obstacle: '文字与制度',
+          conflictType: '推进压力',
+          resultState: '事故登记表被退回',
+          hiddenAgendas: ['股长只想不担责'],
+          ironyGap: '无',
+        },
+      ],
+    )
+    expect(result.plan).toHaveLength(2)
+    expect(result.plan[1].hidden_agendas).toEqual(['股长只想不担责'])
+    expect(result.plan[1].irony_gap).toBe('无')
+  })
 })

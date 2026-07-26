@@ -2267,6 +2267,15 @@ export function runMigrations(sqlite: Database.Database) {
       }
     }
   })
+
+  runMigrationStep(sqlite, '0048_scene_design_fields', () => {
+    // 设计层闭环（P1）：把 planner 生成的场景设计字段（hidden_agendas / irony_gap）
+    // 落到 scene_contracts，供重生成延续与语义评审（design_subtext 维度）消费。
+    if (hasTable(sqlite, 'scene_contracts')) {
+      ensureColumn(sqlite, 'scene_contracts', 'hidden_agendas_json', 'TEXT')
+      ensureColumn(sqlite, 'scene_contracts', 'irony_gap', 'TEXT')
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

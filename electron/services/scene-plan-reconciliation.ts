@@ -24,6 +24,9 @@ export interface SceneContractSeed {
   obstacle: string
   conflictType: string
   resultState: string
+  /** 上一轮 planner 写回 scene_contracts 的设计字段（重生成时延续，不凭空发明）。 */
+  hiddenAgendas?: string[]
+  ironyGap?: string
 }
 
 export interface ScenePlanReconciliationResult {
@@ -54,8 +57,8 @@ function buildCoverageStep(seed: SceneContractSeed, fallbackOrder: number): Scen
     must_cover: [purpose, seed.resultState].filter(Boolean),
     climax_variant: '',
     exit_hook: seed.resultState || '把当前冲突的结果状态落到下一场。',
-    hidden_agendas: [],
-    irony_gap: '',
+    hidden_agendas: (seed.hiddenAgendas || []).map((item) => item.trim()).filter(Boolean),
+    irony_gap: (seed.ironyGap || '').trim(),
     audience: '',
   }
 }
@@ -116,6 +119,23 @@ export function reconcileScenePlanForContracts(
 
     step.must_cover.push(`合同结果：${resultState}`)
     corrections.push(`场景${step.scene_order}：将现有合同结果状态加入 must_cover，要求 Writer 在本场落地。`)
+  })
+
+  // 设计字段延续：planner 本轮留空、但场景合同里已固化过 hidden_agendas / irony_gap
+  // 时按 sceneOrder 回填，避免重生成把上一轮的设计冲掉。已有输出不覆盖。
+  plan.forEach((step) => {
+    const contract = contractByOrder.get(step.scene_order)
+    if (!contract) return
+    const seedAgendas = (contract.hiddenAgendas || []).map((item) => item.trim()).filter(Boolean)
+    if (seedAgendas.length > 0 && !step.hidden_agendas.some((item) => item.trim())) {
+      step.hidden_agendas = [...seedAgendas]
+      corrections.push(`场景${step.scene_order}：Planner 未输出 hidden_agendas，已从场景合同延续既有设计。`)
+    }
+    const seedIronyGap = (contract.ironyGap || '').trim()
+    if (seedIronyGap && !step.irony_gap.trim()) {
+      step.irony_gap = seedIronyGap
+      corrections.push(`场景${step.scene_order}：Planner 未输出 irony_gap，已从场景合同延续既有设计。`)
+    }
   })
 
   if (contractSeeds.length > plan.length) {

@@ -186,6 +186,16 @@ describe('normalizeReviewNotes 证据核实', () => {
     expect(restored.semantic_verdicts).toEqual(first.semantic_verdicts)
     expect(restored.semantic_review_warnings).toEqual(first.semantic_review_warnings)
   })
+
+  it('design_field_gaps 经 JSON round-trip 后保留', () => {
+    const first = normalizeReviewNotes({
+      design_field_gaps: ['场景1《炉前对峙》声明了冲突但 hidden_agendas 为空：各方真实诉求未设计。'],
+    })
+    expect(first.design_field_gaps).toHaveLength(1)
+
+    const restored = normalizeReviewNotes(JSON.parse(JSON.stringify(first)))
+    expect(restored.design_field_gaps).toEqual(first.design_field_gaps)
+  })
 })
 
 function buildVerdict(overrides: Partial<SemanticGateVerdict> & Pick<SemanticGateVerdict, 'dimension' | 'status'>): SemanticGateVerdict {

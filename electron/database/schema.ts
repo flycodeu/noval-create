@@ -312,6 +312,9 @@ export const sceneContracts = sqliteTable('scene_contracts', {
   linkageMode: text('linkage_mode'),
   requiredEndgameCommitmentIdsJson: text('required_endgame_commitment_ids_json'),
   requiredForeshadowIdsJson: text('required_foreshadow_ids_json'),
+  // 设计维度（P1，由 chapter planner 写回）：各方隐藏诉求与读者信息差声明。
+  hiddenAgendasJson: text('hidden_agendas_json'),
+  ironyGap: text('irony_gap'),
   status: text('status').notNull().default('draft'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),

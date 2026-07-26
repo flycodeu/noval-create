@@ -90,6 +90,8 @@ export interface ChapterReviewNotes {
   genre_hollowing_risks: string[]
   // P3 设计感专项（warning 级，仅提示不阻塞）：本章是否只是把事件/史实写顺，缺戏剧设计。
   design_flatness_risks?: string[]
+  // 设计层闭环（提示级）：planner 声明了冲突却没给 hidden_agendas / irony_gap 的场景清单。
+  design_field_gaps?: string[]
   typed_ref_risks: string[]
   source_grounding_risks: string[]
   operating_mode_risks: string[]
@@ -495,6 +497,7 @@ export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotes
     human_language_repairs: toStringArray(record.human_language_repairs),
     genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
     design_flatness_risks: toStringArray(record.design_flatness_risks),
+    design_field_gaps: toStringArray(record.design_field_gaps),
     typed_ref_risks: toStringArray(record.typed_ref_risks),
     source_grounding_risks: toStringArray(record.source_grounding_risks),
     operating_mode_risks: toStringArray(record.operating_mode_risks),
@@ -738,6 +741,7 @@ export function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.human_language_repairs.length > 0 ? `语言替换建议：\n- ${notes.human_language_repairs.join('\n- ')}` : '',
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
     notes.design_flatness_risks && notes.design_flatness_risks.length > 0 ? `设计扁平（仅提示，不阻塞）：\n- ${notes.design_flatness_risks.join('\n- ')}` : '',
+    notes.design_field_gaps && notes.design_field_gaps.length > 0 ? `场景设计字段缺口（Planner 未完成设计，仅提示）：\n- ${notes.design_field_gaps.join('\n- ')}` : '',
     notes.typed_ref_risks.length > 0 ? `Typed Ref 缺口：\n- ${notes.typed_ref_risks.join('\n- ')}` : '',
     notes.source_grounding_risks.length > 0 ? `来源/grounding 风险：\n- ${notes.source_grounding_risks.join('\n- ')}` : '',
     notes.operating_mode_risks.length > 0 ? `OperatingMode 违规：\n- ${notes.operating_mode_risks.join('\n- ')}` : '',

@@ -4,6 +4,15 @@ import { chapterSegments, chapters, sceneContracts } from '../database/schema'
 import type { SceneContractSeed } from './scene-plan-reconciliation'
 import { asText, toStringArray } from './chapter-review-notes'
 
+function parseStoredStringArray(raw?: string | null): string[] {
+  if (!raw?.trim()) return []
+  try {
+    return toStringArray(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
 export interface ScenePlanStep {
   scene_order: number
   scene_title: string
@@ -98,6 +107,8 @@ export function loadScenePlanContractSeeds(chapterId: number): SceneContractSeed
       obstacle: contract?.obstacle || '',
       conflictType: contract?.conflictType || '',
       resultState: contract?.resultState || segment.outputState || '',
+      hiddenAgendas: parseStoredStringArray(contract?.hiddenAgendasJson),
+      ironyGap: asText(contract?.ironyGap),
     }
   })
 
@@ -112,6 +123,8 @@ export function loadScenePlanContractSeeds(chapterId: number): SceneContractSeed
         obstacle: contract.obstacle || '',
         conflictType: contract.conflictType || '',
         resultState: contract.resultState || '',
+        hiddenAgendas: parseStoredStringArray(contract.hiddenAgendasJson),
+        ironyGap: asText(contract.ironyGap),
       })
     })
 
@@ -146,6 +159,131 @@ export function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): S
     irony_gap: '',
     audience: '',
   }))
+}
+
+/** irony_gap 的“显式无信息差”合法值：算已完成设计，但不算设计声明。 */
+const IRONY_GAP_EXPLICIT_NONE = new Set(['无', '暂无', '没有'])
+
+function hasDeclaredIronyGap(value: string): boolean {
+  const text = value.trim()
+  return text.length > 0 && !IRONY_GAP_EXPLICIT_NONE.has(text)
+}
+
+/**
+ * 本章场景计划是否携带了实际的设计声明（hidden_agendas 或有效 irony_gap）。
+ * critic 语义门据此决定是否追加 design_subtext 维度；显式写“无”的 irony_gap
+ * 不算声明（没有可核实的落地目标）。
+ */
+export function hasSceneDesignDeclarations(scenePlan: ScenePlanStep[]): boolean {
+  return scenePlan.some((step) =>
+    step.hidden_agendas.some((item) => item.trim())
+    || hasDeclaredIronyGap(step.irony_gap))
+}
+
+/**
+ * planner 空输出体检：声明了冲突却没给设计字段的场景逐条计数。
+ * 结果挂到 reviewNotes.design_field_gaps（提示级），不追加任何 LLM 调用。
+ */
+export function collectSceneDesignFieldGaps(scenePlan: ScenePlanStep[]): string[] {
+  const gaps: string[] = []
+  scenePlan.forEach((step) => {
+    if (!step.conflict.trim()) return
+    if (!step.hidden_agendas.some((item) => item.trim())) {
+      gaps.push(`场景${step.scene_order}《${step.scene_title}》声明了冲突但 hidden_agendas 为空：各方真实诉求未设计。`)
+    }
+    if (!step.irony_gap.trim()) {
+      gaps.push(`场景${step.scene_order}《${step.scene_title}》声明了冲突但 irony_gap 为空：读者信息差未设计（确无信息差应显式写“无”）。`)
+    }
+  })
+  return gaps
+}
+
+export interface SceneDesignSegmentRef {
+  id: number
+  segmentOrder: number | null
+}
+
+export interface SceneDesignContractRef {
+  id: number
+  segmentId: number | null
+}
+
+export interface SceneDesignFieldWrite {
+  contractId: number
+  /** null 表示该列本轮不写（planner 未产出），保留合同上已有的值。 */
+  hiddenAgendasJson: string | null
+  ironyGap: string | null
+}
+
+/**
+ * 设计字段写回的纯对位逻辑：plan.scene_order → segment.segmentOrder → contract.segmentId。
+ * 对位失败（场景序号错位、合同行缺失）一律不写；两个字段都为空也不写，
+ * 避免空输出覆盖此前已固化的设计。
+ */
+export function computeSceneDesignFieldWrites(
+  scenePlan: ScenePlanStep[],
+  segments: SceneDesignSegmentRef[],
+  contracts: SceneDesignContractRef[],
+): SceneDesignFieldWrite[] {
+  const contractBySegmentId = new Map<number, SceneDesignContractRef>()
+  contracts.forEach((contract) => {
+    if (typeof contract.segmentId === 'number' && !contractBySegmentId.has(contract.segmentId)) {
+      contractBySegmentId.set(contract.segmentId, contract)
+    }
+  })
+  const segmentByOrder = new Map<number, SceneDesignSegmentRef>()
+  segments.forEach((segment, index) => {
+    const order = typeof segment.segmentOrder === 'number' ? segment.segmentOrder : index + 1
+    if (!segmentByOrder.has(order)) segmentByOrder.set(order, segment)
+  })
+
+  const writes: SceneDesignFieldWrite[] = []
+  scenePlan.forEach((step) => {
+    const segment = segmentByOrder.get(step.scene_order)
+    if (!segment) return
+    const contract = contractBySegmentId.get(segment.id)
+    if (!contract) return
+
+    const hiddenAgendas = step.hidden_agendas.map((item) => item.trim()).filter(Boolean)
+    const ironyGap = step.irony_gap.trim()
+    const hiddenAgendasJson = hiddenAgendas.length > 0 ? JSON.stringify(hiddenAgendas) : null
+    if (!hiddenAgendasJson && !ironyGap) return
+    writes.push({
+      contractId: contract.id,
+      hiddenAgendasJson,
+      ironyGap: ironyGap || null,
+    })
+  })
+  return writes
+}
+
+/**
+ * planner 成功后把设计字段写回 scene_contracts（只 UPDATE 两个新列，不新建行、
+ * 不触碰设计工作流写入的其他列）。写回失败只告警，不阻断章节流水线。
+ */
+export function writeBackSceneDesignFields(chapterId: number, scenePlan: ScenePlanStep[]): number {
+  try {
+    const db = getDb()
+    const segments = db.select().from(chapterSegments)
+      .where(eq(chapterSegments.chapterId, chapterId))
+      .orderBy(asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+      .all()
+    const contracts = db.select().from(sceneContracts)
+      .where(eq(sceneContracts.chapterId, chapterId))
+      .orderBy(asc(sceneContracts.segmentId), asc(sceneContracts.id))
+      .all()
+    const writes = computeSceneDesignFieldWrites(scenePlan, segments, contracts)
+    writes.forEach((write) => {
+      db.update(sceneContracts).set({
+        ...(write.hiddenAgendasJson !== null ? { hiddenAgendasJson: write.hiddenAgendasJson } : {}),
+        ...(write.ironyGap !== null ? { ironyGap: write.ironyGap } : {}),
+      }).where(eq(sceneContracts.id, write.contractId)).run()
+    })
+    return writes.length
+  } catch (error) {
+    console.warn(`[chapter:plan] 场景设计字段写回失败 chapter=${chapterId}`, error)
+    return 0
+  }
 }
 
 export function formatScenePlan(scenePlan: ScenePlanStep[]): string {
