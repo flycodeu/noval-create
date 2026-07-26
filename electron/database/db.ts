@@ -5,6 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
+import { selectGenreVoiceSeedInserts } from './genre-voice-seeds'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
 
@@ -43,6 +44,7 @@ export function initDb(): AppDatabase {
 
   runMigrations(_sqlite)
   seedBuiltinData(_db)
+  seedGenreVoiceFingerprints(_db)
 
   return _db
 }
@@ -3440,5 +3442,44 @@ function seedBuiltinData(db: ReturnType<typeof drizzle>) {
 
   if (sceneTemplatesToInsert.length > 0) {
     db.insert(schema.sceneTemplates).values(sceneTemplatesToInsert).run()
+  }
+}
+
+/**
+ * Seed genre-default voice fingerprints (题材默认声线): global rows with
+ * novel_id = NULL + genre_id, used as the last fallback of
+ * resolveActiveStyleFingerprint. Idempotent by fingerprint name — running the
+ * seed repeatedly never duplicates rows.
+ */
+export function seedGenreVoiceFingerprints(db: ReturnType<typeof drizzle>) {
+  try {
+    const genreRows = db.select({ id: schema.genres.id, name: schema.genres.name })
+      .from(schema.genres)
+      .all()
+    const existingSeedNames = db.select({
+      novelId: schema.styleFingerprints.novelId,
+      name: schema.styleFingerprints.name,
+    })
+      .from(schema.styleFingerprints)
+      .all()
+      .filter((row) => row.novelId === null)
+      .map((row) => row.name)
+
+    const inserts = selectGenreVoiceSeedInserts(genreRows, existingSeedNames)
+    if (inserts.length === 0) return
+
+    db.insert(schema.styleFingerprints).values(inserts.map((item) => ({
+      novelId: null,
+      name: item.name,
+      sourceText: null,
+      fingerprintJson: JSON.stringify(item.fingerprint),
+      analysisModelId: null,
+      sourceType: 'genre-default',
+      sourceChapterIdsJson: null,
+      statsJson: null,
+      genreId: item.genreId,
+    }))).run()
+  } catch (error) {
+    console.warn('[database] 题材默认声线种子写入失败：', error)
   }
 }
