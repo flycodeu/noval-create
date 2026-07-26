@@ -951,6 +951,55 @@ export function collectSemanticGateHeuristicHints(notes: ChapterReviewNotes): Se
   return hints.slice(0, 20)
 }
 
+/**
+ * shadow 模式分歧记录：对比语义门 verdict 与关键词门（启发式）判定，
+ * 只记录不阻断，供后续 eval 分析语义门可否接管。
+ * - 语义 blocker 但关键词门在该维度无命中 → 记录（关键词门漏报候选）。
+ * - 关键词门在该维度命中 blocker 级信号但语义 pass → 记录（关键词门误报候选）。
+ */
+export function collectSemanticGateDivergenceNotes(
+  notes: ChapterReviewNotes,
+  review: SemanticGateReview,
+): string[] {
+  const keywordBlockerDims = new Map<SemanticGateDimension, string>()
+  const hardContractBlockers = (notes.contract_validation?.itemResults || [])
+    .filter((item) => item.verdict !== 'pass')
+    .filter(isHardContractValidationItem)
+    .filter((item) => isContractValidationBlockerVerdict(item.verdict))
+  const sceneBlockers = hardContractBlockers
+    .filter((item) => item.contractItemType === 'scene_result_state' || item.contractItemType === 'scene_conflict')
+  const contractBlockers = hardContractBlockers
+    .filter((item) => item.contractItemType !== 'scene_result_state' && item.contractItemType !== 'scene_conflict')
+  if (contractBlockers.length > 0) {
+    keywordBlockerDims.set('contract_delivery', `合同关键词验证 ${contractBlockers.length} 项 blocker（如：${contractBlockers[0].expected}）`)
+  }
+  if (sceneBlockers.length > 0) {
+    keywordBlockerDims.set('structural_beat', `场景冲突/结果关键词验证 ${sceneBlockers.length} 项 blocker`)
+  }
+  if ((notes.cost_present && notes.cost_resolution_state === 'evaporated') || (notes.reversal_marker && notes.reversal_support_state === 'forced')) {
+    keywordBlockerDims.set('cost_and_choice', notes.cost_resolution_state === 'evaporated' ? '结构 marker 判定代价蒸发' : '结构 marker 判定强行反转')
+  }
+  const dialogueSignalCount = notes.dialogue_homogenization_risks.length
+    + notes.dialogue_filler_risks.length
+    + notes.dialogue_info_density_risks.length
+    + notes.dialogue_drift_alerts.length
+    + notes.cross_character_similarity.length
+  if (dialogueSignalCount >= 3) {
+    keywordBlockerDims.set('dialogue_voice', `对白计数信号 ${dialogueSignalCount} 项（≥3 即关键词门 blocker）`)
+  }
+
+  const divergences: string[] = []
+  review.verdicts.forEach((verdict) => {
+    const label = SEMANTIC_GATE_DIMENSION_SPECS[verdict.dimension]?.label || verdict.dimension
+    if (verdict.status === 'blocker' && !keywordBlockerDims.has(verdict.dimension)) {
+      divergences.push(`语义门判定「${label}」blocker，但关键词门未命中该维度：${verdict.summary}`)
+    } else if (verdict.status === 'pass' && keywordBlockerDims.has(verdict.dimension)) {
+      divergences.push(`关键词门在「${label}」命中 blocker 级信号（${keywordBlockerDims.get(verdict.dimension)}），但语义门判定 pass。`)
+    }
+  })
+  return dedupeTextList(divergences).slice(0, 12)
+}
+
 export interface SemanticGateRunOutcome {
   review: SemanticGateReview
   degraded: boolean
@@ -996,6 +1045,19 @@ export function applyCriticSemanticGateOutcomeToReviewNotes(
     }
   }
   if (policy.mode !== 'enforce') {
+    // shadow：额外记录语义门与关键词门的分歧（仅观察，不阻断）。
+    if (policy.mode === 'shadow' && !outcome.degraded) {
+      const divergences = collectSemanticGateDivergenceNotes(notes, outcome.review)
+      if (divergences.length > 0) {
+        notes = {
+          ...notes,
+          semantic_divergence_notes: dedupeTextList([
+            ...(notes.semantic_divergence_notes || []),
+            ...divergences,
+          ]),
+        }
+      }
+    }
     return { reviewNotes: notes, effectiveMode: policy.mode, restoreHeuristicContractBlockers: false }
   }
   if (outcome.degraded) {

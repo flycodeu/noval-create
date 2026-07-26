@@ -330,6 +330,71 @@ describe('applyCriticSemanticGateOutcomeToReviewNotes（enforce 降级链）', (
   })
 })
 
+describe('collectSemanticGateDivergenceNotes（shadow 分歧记录）', () => {
+  it('语义 blocker 但关键词门未命中 → 记录漏报候选分歧', () => {
+    const review = buildReview([
+      buildVerdict({ dimension: 'cost_and_choice', status: 'blocker', summary: '代价只停留在口头' }),
+      buildVerdict({ dimension: 'dialogue_voice', status: 'pass' }),
+    ])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review, degraded: false },
+      { ...DEFAULT_SEMANTIC_GATE_POLICY, mode: 'shadow' },
+    )
+    expect(outcome.reviewNotes.semantic_divergence_notes?.some((item) => (
+      item.includes('代价与选择') && item.includes('关键词门未命中')
+    ))).toBe(true)
+    // 不阻断：不注入 critical_fixes、不强制重写
+    expect(outcome.reviewNotes.critical_fixes).toHaveLength(0)
+    expect(outcome.reviewNotes.rewrite_required).toBe(false)
+  })
+
+  it('关键词门 blocker 级信号但语义 pass → 记录误报候选分歧', () => {
+    const notes = normalizeReviewNotes({
+      dialogue_homogenization_risks: ['对白同声化'],
+      dialogue_filler_risks: ['对白空转'],
+      dialogue_info_density_risks: ['信息密度不足'],
+    })
+    const review = buildReview([buildVerdict({ dimension: 'dialogue_voice', status: 'pass' })])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      notes,
+      { review, degraded: false },
+      { ...DEFAULT_SEMANTIC_GATE_POLICY, mode: 'shadow' },
+    )
+    expect(outcome.reviewNotes.semantic_divergence_notes?.some((item) => (
+      item.includes('对白声纹') && item.includes('语义门判定 pass')
+    ))).toBe(true)
+  })
+
+  it('语义门与关键词门一致时不产生分歧记录', () => {
+    const notes = normalizeReviewNotes({
+      cost_present: true,
+      cost_resolution_state: 'evaporated',
+    })
+    const review = buildReview([
+      buildVerdict({ dimension: 'cost_and_choice', status: 'blocker', summary: '代价蒸发' }),
+      buildVerdict({ dimension: 'supporting_agency', status: 'warning' }),
+    ])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      notes,
+      { review, degraded: false },
+      { ...DEFAULT_SEMANTIC_GATE_POLICY, mode: 'shadow' },
+    )
+    expect(outcome.reviewNotes.semantic_divergence_notes).toBeUndefined()
+  })
+
+  it('分歧记录经 JSON round-trip 后保留', () => {
+    const review = buildReview([buildVerdict({ dimension: 'structural_beat', status: 'blocker', summary: '无状态变化' })])
+    const outcome = applyCriticSemanticGateOutcomeToReviewNotes(
+      normalizeReviewNotes({}),
+      { review, degraded: false },
+      { ...DEFAULT_SEMANTIC_GATE_POLICY, mode: 'shadow' },
+    )
+    const restored = normalizeReviewNotes(JSON.parse(JSON.stringify(outcome.reviewNotes)))
+    expect(restored.semantic_divergence_notes).toEqual(outcome.reviewNotes.semantic_divergence_notes)
+  })
+})
+
 describe('collectSemanticGateHeuristicHints', () => {
   it('把合同/结构/对白启发式命中映射为对应维度的疑点线索', () => {
     const notes = normalizeReviewNotes({
