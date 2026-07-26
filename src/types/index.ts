@@ -421,6 +421,8 @@ export interface Character {
   contradiction?: string
   relationshipTension?: string
   resonancePoint?: string
+  /** 戏剧引擎：欲望/恐惧/矛盾如何持续驱动剧情的一段文字（DB 列 dramatic_engine，IPC 已映射为驼峰）。 */
+  dramaticEngine?: string
   characterArc?: string
   speechPattern?: string
   catchphrases?: string

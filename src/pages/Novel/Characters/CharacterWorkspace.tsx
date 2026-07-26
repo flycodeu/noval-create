@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -17,6 +17,13 @@ import type { CharacterNeedsAnalysisResult } from '../../../shared/character-cas
 import type { CharacterDraftReviewContent } from '../../../shared/character-draft-workflow'
 import type { AgentToolCallRequest, AgentToolCallResult } from '../../../shared/tool-contracts'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import DramaticEnginePanel from '../../../components/novel/characters/DramaticEnginePanel'
+import {
+  formatCharacterBatchProgress,
+  parseCharacterBatchProgress,
+  type CharacterBatchProgress,
+} from '../../../components/novel/characters/character-batch-progress'
+import { onTaskBridgeEvent } from '../../../services/task-events'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type {
   Character,
@@ -334,6 +341,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<CharacterBatchProgress | null>(null)
   const [agentWorkflowOpen, setAgentWorkflowOpen] = useState(false)
   const [agentWorkflowLoading, setAgentWorkflowLoading] = useState(false)
   const [agentWorkflowStage, setAgentWorkflowStage] = useState<'idle' | 'planning' | 'drafting' | 'reviewed' | 'committing' | 'committed' | 'blocked'>('idle')
@@ -577,6 +585,11 @@ export default function CharacterWorkspace({ novelId }: Props) {
     })
   }, [batchForm, batchPreset, factionOptions])
 
+  useEffect(() => onTaskBridgeEvent('character:batch-progress', (payload) => {
+    const parsed = parseCharacterBatchProgress(payload)
+    if (parsed) setBatchProgress(parsed)
+  }), [])
+
   const handleNew = () => {
     detailRequestRef.current += 1
     selectedIdRef.current = null
@@ -733,6 +746,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
     const values = batchForm.getFieldsValue()
     setGenerating(true)
+    setBatchProgress(null)
     try {
       await window.electron.character.batchGenerate(novelId, values)
       setBatchOpen(false)
@@ -744,6 +758,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       message.error(getErrorMessage(error, 'character.batchGenerateFailed'))
     } finally {
       setGenerating(false)
+      setBatchProgress(null)
     }
   }
 
@@ -1236,6 +1251,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
               ) : null}
 
               {selectedCharacter ? (
+                <div style={{ marginBottom: 12 }}>
+                  <DramaticEnginePanel text={selectedCharacter.dramaticEngine} />
+                </div>
+              ) : null}
+
+              {selectedCharacter ? (
                 <AiPatchEditor
                   target={{ type: 'character', id: selectedCharacter.id, novelId }}
                   description="面向当前人物档案的字段级补丁，确认后才写入。"
@@ -1602,6 +1623,15 @@ export default function CharacterWorkspace({ novelId }: Props) {
       </Modal>
 
       <Modal title="按数量批量生成人物网络" open={batchOpen} forceRender onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
+        {generating && batchProgress ? (() => {
+          const { percent, text } = formatCharacterBatchProgress(batchProgress)
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <Progress percent={percent} status={percent >= 100 ? 'success' : 'active'} />
+              <div style={{ fontSize: 12, opacity: 0.75 }}>{text}</div>
+            </div>
+          )
+        })() : null}
         <Form form={batchForm} layout="vertical">
           <Alert
             showIcon
