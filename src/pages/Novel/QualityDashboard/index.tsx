@@ -204,7 +204,7 @@ export default function QualityDashboard({ novelId }: Props) {
       navigate(buildWorkspacePath(novelId, 'writing', { chapterId: String(matched.chapterId) }))
       return
     }
-    message.info('该条目没有可定位的章节，已打开正文页。')
+    message.info(getUserFacingMessage('qualityDashboard.locateChapterMissing'))
     navigate(buildWorkspacePath(novelId, 'writing'))
   }
 

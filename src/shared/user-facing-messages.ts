@@ -490,6 +490,7 @@ export const USER_FACING_MESSAGES = {
   'infoGapBoard.updated': '信息点已更新。',
   'infoGapBoard.ratioUpdated': '卷级真相揭示比例已更新。',
   'qualityDashboard.repairFailed': '执行修复动作失败。',
+  'qualityDashboard.locateChapterMissing': '该条目没有可定位的章节，已打开正文页。',
   'qualityDashboard.commandCopied': '命令已复制',
   'qualityDashboard.clipboardUnavailable': '当前环境不能写剪贴板，请手动复制命令。',
   'aiPatch.noApplicableChanges': 'AI 没有生成可应用字段修改。',
