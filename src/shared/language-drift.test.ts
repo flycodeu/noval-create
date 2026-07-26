@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeLanguageDrift } from './language-drift'
+import { analyzeLanguageDrift, analyzeReferenceDensity } from './language-drift'
 
 describe('language-drift', () => {
   it('tracks punctuation, metaphor, body-detail, and isolated paragraph drift', () => {
@@ -35,5 +35,24 @@ describe('language-drift', () => {
     const metrics = analyzeLanguageDrift('她并非来取原件。实际是来确认谁动过档案。')
 
     expect(metrics.parallelismRate).toBeGreaterThan(0)
+  })
+
+  it('flags over-dense character names with actionable rewrite briefs', () => {
+    const paragraph = Array.from({ length: 4 }, () => '程烁看向门口。程烁没有说话。程烁把钥匙收好。').join('\n\n')
+    const report = analyzeReferenceDensity(paragraph, ['程烁', '林晚'])
+
+    expect(report.nameFindings).toHaveLength(1)
+    expect(report.nameFindings[0].name).toBe('程烁')
+    expect(report.nameFindings[0].denseParagraphCount).toBe(4)
+    expect(report.rewriteBriefs[0]).toContain('代词')
+  })
+
+  it('flags body-part token overuse and stays silent within budget', () => {
+    const dense = Array.from({ length: 12 }, () => '他的掌心出汗。').join('')
+    const report = analyzeReferenceDensity(dense, [])
+    expect(report.bodyPartFindings.some((finding) => finding.name === '掌心')).toBe(true)
+
+    const clean = '他推开门，看了一眼窗外，转身下楼。'
+    expect(analyzeReferenceDensity(clean, ['程烁']).rewriteBriefs).toHaveLength(0)
   })
 })

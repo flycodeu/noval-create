@@ -235,6 +235,93 @@ function analyzeIsolatedTemplateParagraphRate(text: string): number {
   return clampPercent((hits / paragraphs.length) * 100)
 }
 
+export interface ReferenceDensityFinding {
+  name: string
+  count: number
+  perThousand: number
+  /** Paragraphs where the name appears 3+ times. */
+  denseParagraphCount: number
+}
+
+export interface ReferenceDensityReport {
+  totalChars: number
+  nameFindings: ReferenceDensityFinding[]
+  bodyPartFindings: ReferenceDensityFinding[]
+  /** Actionable one-liners for the rewrite brief; empty when everything is within budget. */
+  rewriteBriefs: string[]
+}
+
+const NAME_DENSITY_PER_THOUSAND_LIMIT = 8
+const BODY_PART_DENSITY_PER_THOUSAND_LIMIT = 6
+const DENSE_PARAGRAPH_OCCURRENCES = 3
+const BODY_PART_REFERENCE_TOKENS = ['手指', '指节', '指腹', '指尖', '掌心', '喉咙', '睫毛', '瞳孔', '肩膀', '下颌']
+
+function countPlainOccurrences(text: string, token: string): number {
+  if (!token) return 0
+  let count = 0
+  let index = text.indexOf(token)
+  while (index !== -1) {
+    count += 1
+    index = text.indexOf(token, index + token.length)
+  }
+  return count
+}
+
+function buildDensityFinding(
+  text: string,
+  paragraphs: string[],
+  totalChars: number,
+  token: string,
+): ReferenceDensityFinding {
+  const count = countPlainOccurrences(text, token)
+  return {
+    name: token,
+    count,
+    perThousand: Math.round((count / Math.max(totalChars, 1)) * 1000 * 10) / 10,
+    denseParagraphCount: paragraphs.filter(
+      (paragraph) => countPlainOccurrences(paragraph, token) >= DENSE_PARAGRAPH_OCCURRENCES,
+    ).length,
+  }
+}
+
+/**
+ * Objective repetition counter for character names and body-part tokens.
+ * Kept as a deterministic rule on purpose: raw counts cannot be gamed the way
+ * keyword-presence gates can, and repair verification is a simple recount.
+ */
+export function analyzeReferenceDensity(text: string, characterNames: string[]): ReferenceDensityReport {
+  const normalized = normalizeText(text)
+  const paragraphs = splitParagraphs(normalized)
+  const totalChars = normalized.replace(/\s+/g, '').length
+  if (totalChars === 0) {
+    return { totalChars: 0, nameFindings: [], bodyPartFindings: [], rewriteBriefs: [] }
+  }
+
+  const uniqueNames = [...new Set(characterNames.map((name) => String(name || '').trim()).filter((name) => name.length >= 2))]
+  const nameFindings = uniqueNames
+    .map((name) => buildDensityFinding(normalized, paragraphs, totalChars, name))
+    .filter((finding) => finding.perThousand > NAME_DENSITY_PER_THOUSAND_LIMIT || finding.denseParagraphCount > 0)
+    .sort((left, right) => right.perThousand - left.perThousand)
+    .slice(0, 8)
+
+  const bodyPartFindings = BODY_PART_REFERENCE_TOKENS
+    .map((token) => buildDensityFinding(normalized, paragraphs, totalChars, token))
+    .filter((finding) => finding.perThousand > BODY_PART_DENSITY_PER_THOUSAND_LIMIT)
+    .sort((left, right) => right.perThousand - left.perThousand)
+    .slice(0, 6)
+
+  const rewriteBriefs = [
+    ...nameFindings.map((finding) => (
+      `人名「${finding.name}」出现 ${finding.count} 次（每千字 ${finding.perThousand} 次${finding.denseParagraphCount > 0 ? `，${finding.denseParagraphCount} 个段落内出现 3 次以上` : ''}）：同一段落内第二次起改用代词、称谓或动作主语省略。`
+    )),
+    ...bodyPartFindings.map((finding) => (
+      `身体部位词「${finding.name}」每千字 ${finding.perThousand} 次，超出预算：保留承载动作阻力的一处，其余改写为推动事件的具体行为。`
+    )),
+  ]
+
+  return { totalChars, nameFindings, bodyPartFindings, rewriteBriefs }
+}
+
 export function analyzeLanguageDrift(text: string): LanguageDriftMetrics {
   const normalized = normalizeText(text)
   const sentences = splitSentences(normalized)
