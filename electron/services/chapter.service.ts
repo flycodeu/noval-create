@@ -261,6 +261,7 @@ import {
   resolveSemanticGatePolicy,
 } from '../../src/shared/semantic-gate-policy'
 import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
+import { pickProtagonistDramaticEngine } from './context-cards'
 import {
   buildFallbackScenePlan,
   collectSceneDesignFieldGaps,
@@ -2504,6 +2505,23 @@ function buildContractVersionArtifactSummary(contractVersion?: string): string {
   return contractVersion ? `当前章节合同版本：${contractVersion}` : ''
 }
 
+/**
+ * 主角（roleType='protagonist'）的戏剧引擎；查询失败或未填写时返回空串，
+ * critic 语义门据此决定是否追加 dramatic_drive 维度（空则跳过，不额外调用）。
+ */
+function getProtagonistDramaticEngine(novelId: number): string {
+  try {
+    const db = getDb()
+    const rows = db.select().from(characters)
+      .where(and(eq(characters.novelId, novelId), eq(characters.roleType, 'protagonist')))
+      .orderBy(asc(characters.sortOrder), asc(characters.id))
+      .all()
+    return pickProtagonistDramaticEngine(rows)
+  } catch {
+    return ''
+  }
+}
+
 function buildPersistedScenePlanText(scenePlanJson?: string | null): string {
   if (!scenePlanJson?.trim()) return ''
   try {
@@ -4666,6 +4684,10 @@ async function generateChapterContentInternal(
       if (hasSceneDesignDeclarations(scenePlan)) {
         criticSemanticDimensions.push('design_subtext')
       }
+      const protagonistDramaticEngine = getProtagonistDramaticEngine(chapter.novelId)
+      if (protagonistDramaticEngine) {
+        criticSemanticDimensions.push('dramatic_drive')
+      }
       const criticGateRun = await runChapterSemanticGate({
         novelId: chapter.novelId,
         chapterId,
@@ -4679,6 +4701,7 @@ async function generateChapterContentInternal(
         contractSummary: reviewContext.writingContractSummary,
         scenePlanSummary: reviewContext.scenePlanSummary || summarizeStageArtifactText(scenePlanText, 520),
         protagonistBrief: profile.protagonistReference,
+        dramaticEngine: protagonistDramaticEngine || undefined,
         heuristicHints: collectSemanticGateHeuristicHints(reviewNotes),
       })
       criticSemanticReview = criticGateRun.degraded ? null : criticGateRun.review

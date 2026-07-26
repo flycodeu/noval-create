@@ -28,6 +28,8 @@ export interface CharacterContextCard {
   relationToProtagonist: string
   currentState: string
   currentGoal: string
+  /** 贯穿全书的戏剧引擎（欲望/恐惧/矛盾），解释该角色每场戏的选择。 */
+  dramaticEngine: string
   speechStyle: string
   hardConstraint: string
 }
@@ -314,6 +316,20 @@ function extractRecentCharacterState(characterName: string, recentStateEntries: 
   return joinCardValues(matched.reverse(), { maxLength: 72, perValueMaxLength: 40, limit: 2 })
 }
 
+/**
+ * 主角戏剧引擎选取（设计层闭环）：优先 confirmed 主角里第一个非空 dramaticEngine；
+ * 没有 confirmed 时容忍草稿态主角。critic 语义门据此决定是否追加 dramatic_drive 维度。
+ */
+export function pickProtagonistDramaticEngine(
+  rows: Array<Pick<CharacterRow, 'roleType' | 'recordStatus' | 'dramaticEngine'>>,
+): string {
+  const protagonists = rows.filter((row) => row.roleType === 'protagonist')
+  const preferred = protagonists.find((row) =>
+    (row.recordStatus || 'confirmed') === 'confirmed' && (row.dramaticEngine || '').trim())
+    || protagonists.find((row) => (row.dramaticEngine || '').trim())
+  return (preferred?.dramaticEngine || '').trim()
+}
+
 export function buildCharacterContextCards(options: CharacterCardOptions): CharacterContextCard[] {
   const protagonist = getCanonicalProtagonist(options.allCharacters)
   const recentStateEntries = options.recentStateEntries || []
@@ -337,6 +353,7 @@ export function buildCharacterContextCards(options: CharacterCardOptions): Chara
         perValueMaxLength: 30,
         limit: 2,
       }),
+      dramaticEngine: normalizeInlineText(character.dramaticEngine, 72),
       speechStyle: joinCardValues([
         character.speechPattern,
         character.catchphrases ? `口头禅=${character.catchphrases}` : '',
@@ -700,6 +717,7 @@ export function renderCharacterCards(cards: CharacterContextCard[]): string {
     ['与主角关系', card.relationToProtagonist],
     ['当前状态', card.currentState],
     ['当前目标', card.currentGoal],
+    ['戏剧引擎', card.dramaticEngine],
     ['说话特征', card.speechStyle],
     ['硬约束', card.hardConstraint],
   ])).join('\n')
