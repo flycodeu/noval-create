@@ -3,9 +3,8 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Alert, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import AppLayout from './components/Layout'
-import { useTaskStore } from './stores/task.store'
 import { useThemeStore } from './stores/theme.store'
-import { parseTaskChunkEvent, parseTaskStatusEvent } from './shared/task-stream-events'
+import { initTaskEventBridge } from './services/task-events'
 
 const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif"
 const NovelList = React.lazy(() => import('./pages/NovelList'))
@@ -31,7 +30,6 @@ type LocalBackendStatus = {
 }
 
 export default function App() {
-  const { addStream, appendStreamChunk, completeStream } = useTaskStore()
   const { theme } = useThemeStore()
   const [localBackendStatus, setLocalBackendStatus] = useState<LocalBackendStatus | null>(null)
   const isDarkTheme = theme === 'dark'
@@ -45,29 +43,8 @@ export default function App() {
       console.error('Runtime bridge is unavailable. Refresh the page or start the desktop app through Electron.')
       return undefined
     }
-
-    const unsubChunk = window.electron.on('task:stream-chunk', (data: unknown) => {
-      const event = parseTaskChunkEvent(data)
-      if (event) appendStreamChunk(event.taskId, event.chunk)
-    })
-    const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
-      const event = parseTaskStatusEvent(data)
-      if (!event || !['success', 'failed', 'cancelled'].includes(event.status)) return
-      completeStream(
-        event.taskId,
-        event.status === 'success'
-          ? 'completed'
-          : event.status === 'cancelled'
-            ? 'cancelled'
-            : 'failed',
-      )
-    })
-    const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
-      const event = parseTaskStatusEvent(data)
-      if (event?.status === 'running') addStream(event.taskId)
-    })
-    return () => { unsubChunk(); unsubComplete(); unsubStatus() }
-  }, [addStream, appendStreamChunk, completeStream, hasElectronBridge])
+    return initTaskEventBridge()
+  }, [hasElectronBridge])
 
   useEffect(() => {
     if (!hasElectronBridge || typeof window.electron.app?.getLocalBackendStatus !== 'function') return undefined

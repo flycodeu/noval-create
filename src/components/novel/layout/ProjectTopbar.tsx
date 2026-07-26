@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons'
 import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
 import WindowControls from '../../Layout/WindowControls'
+import TaskIndicator from '../../TaskIndicator'
 import './ProjectTopbar.css'
 
 interface ProjectTopbarProps {
@@ -189,6 +190,7 @@ export default function ProjectTopbar({
         </div>
 
         <div className="project-topbar__toolbar">
+          <TaskIndicator className="project-topbar__task-indicator" />
           <div className={`project-topbar__status-badge project-topbar__status-badge--${statusTone}`}>
             <span className="project-topbar__status-dot" aria-hidden="true" />
             <span>{statusText || '工作区已就绪'}</span>

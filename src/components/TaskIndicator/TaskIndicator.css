@@ -1,0 +1,77 @@
+.task-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, inherit);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.task-indicator:hover {
+  background: var(--bg-hover, rgba(125, 125, 125, 0.12));
+}
+
+.task-indicator--active {
+  color: var(--color-primary, #d4944a);
+}
+
+.task-indicator-popover .ant-popover-inner {
+  padding: 12px;
+}
+
+.task-indicator-panel {
+  width: 300px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-indicator-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-default, rgba(125, 125, 125, 0.2));
+  border-radius: 8px;
+}
+
+.task-indicator-panel__row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-indicator-panel__row-title {
+  border: none;
+  background: none;
+  padding: 0;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-indicator-panel__row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.task-indicator-panel__footer {
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid var(--border-default, rgba(125, 125, 125, 0.15));
+  padding-top: 6px;
+}

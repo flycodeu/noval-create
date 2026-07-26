@@ -1,11 +1,10 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined, SwapOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Chapter,
-  OutlineChapterBatchGenerationResult,
   StoryArc,
   StoryArcProgressPoint,
   StoryArcProgressSnapshot,
@@ -17,6 +16,7 @@ import { generateOutlineArcDraft } from '../shared/planning-ai-service'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useChapterOutlineBatch } from './useChapterOutlineBatch'
 import './index.css'
 
 interface Props { novelId: number }
@@ -175,6 +175,9 @@ export default function Outline({ novelId }: Props) {
 
   useEffect(() => { void loadData() }, [loadData, mutationToken])
 
+  const outlineBatch = useChapterOutlineBatch(loadData)
+  const outlineBatchRunning = outlineBatch.progress.phase === 'running'
+
   const openCreateModal = () => {
     setEditingArc(null)
     arcForm.setFieldsValue({
@@ -250,37 +253,19 @@ export default function Outline({ novelId }: Props) {
   }
 
   const handleGenerateChapterOutlines = async (arcId: number) => {
-    setGenerating(true)
-    try {
-      const safeBatchSize = Math.max(1, Math.min(outlineBatchSize, 6))
-      const safeTargetCount = Math.max(1, Math.min(outlineTargetCount, 24))
-      let generatedCount = 0
-      let lastResult: OutlineChapterBatchGenerationResult | null = null
-
-      while (generatedCount < safeTargetCount) {
-        const currentBatchSize = Math.min(safeBatchSize, safeTargetCount - generatedCount)
-        const result = await window.electron.outline.generateChapterOutlines(arcId, { batchSize: currentBatchSize })
-        lastResult = result as OutlineChapterBatchGenerationResult
-        generatedCount += lastResult.generatedCount || 0
-        if (lastResult.completed || lastResult.generatedCount <= 0) break
-      }
-
-      await loadData()
-      const linkage = lastResult?.structureLinkage
-      const linkageSummary = linkage
-        ? `已补齐 ${linkage.createdChapterContractCount} 章合同、${linkage.createdSceneContractCount} 条场景合同和 ${linkage.createdTimelineEventCount} 个时间锚点。`
-        : ''
-      const summary = [lastResult?.message || '章节细纲已生成一批。', linkageSummary].filter(Boolean).join(' ')
-      message.success(generatedCount > 0
-        ? getUserFacingMessage('outline.batchGenerated', { summary, count: generatedCount })
-        : summary)
-    } catch (error: unknown) {
-      message.error(getUserFacingMessage('outline.generateFailedDetail', {
-        detail: error instanceof Error ? error.message : '',
-      }))
-    } finally {
-      setGenerating(false)
-    }
+    const finished = await outlineBatch.start(arcId, {
+      batchSize: outlineBatchSize,
+      targetCount: outlineTargetCount,
+    })
+    if (finished.phase !== 'done') return
+    const linkage = finished.lastResult?.structureLinkage
+    const linkageSummary = linkage
+      ? `已补齐 ${linkage.createdChapterContractCount} 章合同、${linkage.createdSceneContractCount} 条场景合同和 ${linkage.createdTimelineEventCount} 个时间锚点。`
+      : ''
+    const summary = [finished.lastResult?.message || '章节细纲已生成一批。', linkageSummary].filter(Boolean).join(' ')
+    message.success(finished.generated > 0
+      ? getUserFacingMessage('outline.batchGenerated', { summary, count: finished.generated })
+      : summary)
   }
 
   const handleDeleteArc = async (arc: StoryArc) => {
@@ -587,6 +572,72 @@ export default function Outline({ novelId }: Props) {
       )}
       metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" hint="按阶段组织长篇结构" /><WorkspaceMetric label="章节数" value={chapters.length} hint="当前小说全部章节" /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" hint="状态为 final 的章节" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} hint="展开后查看章节细纲" /></>}
     >
+      {outlineBatch.progress.phase !== 'idle' ? (
+        <WorkspacePanel title="细纲批量生成">
+          <div className="novel-outline-page__batch-progress">
+            <Progress
+              percent={outlineBatch.progress.target > 0
+                ? Math.min(100, Math.round((outlineBatch.progress.generated / outlineBatch.progress.target) * 100))
+                : 0}
+              status={outlineBatch.progress.phase === 'failed'
+                ? 'exception'
+                : outlineBatch.progress.phase === 'running' ? 'active' : 'success'}
+              format={() => `${outlineBatch.progress.generated}/${outlineBatch.progress.target} 章`}
+            />
+            {outlineBatch.progress.phase === 'running' ? (
+              <Space>
+                <span className="novel-outline-page__batch-hint">
+                  {outlineBatch.progress.cancelRequested
+                    ? '将在当前批次结束后停止…'
+                    : `正在生成第 ${outlineBatch.progress.batchIndex} 批，已生成的细纲会即时保存。`}
+                </span>
+                <Button size="small" danger disabled={outlineBatch.progress.cancelRequested} onClick={outlineBatch.cancel}>
+                  停止生成
+                </Button>
+              </Space>
+            ) : null}
+            {outlineBatch.progress.phase === 'failed' ? (
+              <Alert
+                type="error"
+                showIcon
+                message="细纲生成中断"
+                description={`${outlineBatch.progress.errorMessage || '生成失败'}；已生成 ${outlineBatch.progress.generated} 章并已保存，可点击重试从中断处继续。`}
+                action={(
+                  <Space direction="vertical">
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => {
+                        const arcId = outlineBatch.progress.arcId
+                        if (arcId) void handleGenerateChapterOutlines(arcId)
+                      }}
+                    >
+                      重试
+                    </Button>
+                    <Button size="small" onClick={outlineBatch.reset}>关闭</Button>
+                  </Space>
+                )}
+              />
+            ) : null}
+            {outlineBatch.progress.phase === 'done' ? (
+              <Space>
+                <span className="novel-outline-page__batch-hint">
+                  {outlineBatch.progress.cancelRequested ? '已按请求停止，进度已保存。' : '本轮生成完成。'}
+                </span>
+                <Button size="small" onClick={outlineBatch.reset}>关闭</Button>
+              </Space>
+            ) : null}
+            {outlineBatch.progress.designGate && !outlineBatch.progress.designGate.passed ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="设计对齐提醒"
+                description={`${outlineBatch.progress.designGate.summary}${outlineBatch.progress.designGate.flaggedChapters.length > 0 ? `（涉及第 ${outlineBatch.progress.designGate.flaggedChapters.join('、')} 章）` : ''}`}
+              />
+            ) : null}
+          </div>
+        </WorkspacePanel>
+      ) : null}
       {draftWarnings.length > 0 ? (
         <WorkspacePanel title="AI 修补提示">
           <div className="novel-note-list">
@@ -648,7 +699,15 @@ export default function Outline({ novelId }: Props) {
                       <div className="novel-outline-arc__progress"><div className="novel-outline-page__progress-fill" style={{ width: `${progressPercent}%`, background: progressPercent === 100 ? '#4f8b64' : '#8f6330' }} /></div>
                       <div className="novel-outline-arc__progress-label">{completedCount}/{arcChapters.length} 章完成</div>
                       <div className="novel-outline-arc__actions" onClick={(event) => event.stopPropagation()}>
-                        <Button size="small" icon={<RobotOutlined />} loading={generating} disabled={missingOutlineCount <= 0} onClick={() => void handleGenerateChapterOutlines(arc.id)}>{arcChapters.some((chapter) => chapter.outline?.trim()) ? '继续生成' : '生成细纲'}</Button>
+                        <Button
+                          size="small"
+                          icon={<RobotOutlined />}
+                          loading={outlineBatchRunning && outlineBatch.progress.arcId === arc.id}
+                          disabled={missingOutlineCount <= 0 || outlineBatchRunning}
+                          onClick={() => void handleGenerateChapterOutlines(arc.id)}
+                        >
+                          {arcChapters.some((chapter) => chapter.outline?.trim()) ? '继续生成' : '生成细纲'}
+                        </Button>
                         <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(arc)} />
                         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDeleteArc(arc)} />
                       </div>

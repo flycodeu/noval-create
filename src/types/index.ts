@@ -3884,12 +3884,22 @@ export interface OutlineChapterBatchGenerateOptions {
   batchSize?: number
 }
 
+export interface OutlineDesignGateSummary {
+  /** False when the arc lacks enough original design terms to judge; the gate degrades to pass. */
+  judgeable: boolean
+  passed: boolean
+  summary: string
+  designTerms: string[]
+  flaggedChapters: number[]
+}
+
 export interface OutlineChapterBatchGenerationResult {
   generatedCount: number
   completed: boolean
   batchStart: number | null
   batchEnd: number | null
   message: string
+  designGate?: OutlineDesignGateSummary
   structureLinkage?: StructureLinkageSyncResult
 }
 

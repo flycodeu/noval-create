@@ -261,3 +261,14 @@
     max-width: none;
   }
 }
+
+.novel-outline-page__batch-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.novel-outline-page__batch-hint {
+  color: var(--text-secondary, inherit);
+  font-size: 12px;
+}
