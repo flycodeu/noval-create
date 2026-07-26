@@ -23,7 +23,12 @@ export * from './types'
 export const parseNumberArray = (raw?: string | null): number[] => safeParse(
   'parseNumberArray',
   raw,
-  (parsed) => Array.isArray(parsed) ? parsed.map((v) => Number(v)).filter(Number.isFinite) : null,
+  (parsed) => Array.isArray(parsed)
+    ? parsed
+      .filter((v) => v !== null && v !== undefined && v !== '')
+      .map((v) => Number(v))
+      .filter(Number.isFinite)
+    : null,
   [],
 )
 

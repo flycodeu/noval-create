@@ -58,9 +58,8 @@ describe('safeParse', () => {
 })
 
 describe('parseNumberArray', () => {
-  it('正常解析并过滤非数字', () => {
-    // 注意：Number(null) === 0，沿用原实现行为保留 0
-    expect(parseNumberArray('[1, "2", "x", null]')).toEqual([1, 2, 0])
+  it('正常解析并过滤非数字与 null（null 不再变成 id 0）', () => {
+    expect(parseNumberArray('[1, "2", "x", null]')).toEqual([1, 2])
   })
   it('损坏 JSON 返回空数组', () => {
     expect(parseNumberArray(BROKEN)).toEqual([])

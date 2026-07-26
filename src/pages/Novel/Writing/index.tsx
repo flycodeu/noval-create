@@ -288,7 +288,7 @@ export default function Writing({ novelId }: Props) {
   const location = useLocation()
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, setCurrentNovel, updateChapter } = useNovelStore()
-  const { streams, clearStream } = useTaskStore()
+  const clearStream = useTaskStore((state) => state.clearStream)
   const {
     activeGeneration,
     lastGenerationByChapter,
@@ -875,10 +875,16 @@ export default function Writing({ novelId }: Props) {
     void refreshChapterContextPreview(currentChapter, isCurrent)
   }, [currentChapter, effectiveAiExecutionMode, refreshChapterContextPreview])
 
+  // Fine-grained subscription: only this task's stream status can rerun the
+  // effect, instead of every chunk of every stream re-rendering the page.
+  const activeStreamStatus = useTaskStore((state) => (
+    activeGeneration.taskId ? state.streams[activeGeneration.taskId]?.status ?? null : null
+  ))
+
   useEffect(() => {
     if (activeGeneration.status !== 'running' || !activeGeneration.taskId || !activeGeneration.chapterId) return
-    const stream = streams[activeGeneration.taskId]
-    if (!stream) return
+    if (!activeStreamStatus) return
+    const stream = { taskId: activeGeneration.taskId, status: activeStreamStatus }
     if (stream.status === 'completed') {
       const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
@@ -959,7 +965,7 @@ export default function Writing({ novelId }: Props) {
       })
       message.info(getUserFacingMessage('writing.generateCancelled'))
     }
-  }, [activeGeneration, clearStream, completeGeneration, refreshBackgroundChapter, refreshMeta, refreshQualityDashboard, streams])
+  }, [activeGeneration, activeStreamStatus, clearStream, completeGeneration, refreshBackgroundChapter, refreshMeta, refreshQualityDashboard])
 
   const persistChapter = useCallback(async (
     chapterId: number,
