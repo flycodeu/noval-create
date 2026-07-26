@@ -271,7 +271,9 @@ import {
 } from './chapter-scene-plan'
 import {
   chooseBetterGuardrailCandidate,
+  chooseBetterRepairCandidate,
   guardrailRepairScore,
+  judgeRepairOutcome,
   rewriteMiniReviewScore,
   rewriteOutcomeScore,
 } from './chapter-repair-loop'
@@ -5081,6 +5083,41 @@ async function generateChapterContentInternal(
     }
     }
 
+    // enforce 模式的修复复评：对候选稿只复评 critic 语义门标记的 blocker/warning 维度，
+    // 计入 maxSemanticCallsPerChapter 预算；预算耗尽或复评失败时返回 null（回退原判据）。
+    const evaluateRepairCandidateSemantics = async (candidateContent: string): Promise<SemanticGateReview | null> => {
+      if (effectiveSemanticGateMode !== 'enforce' || !criticSemanticReview) return null
+      const previousRelevant = criticSemanticReview.verdicts
+        .filter((verdict) => verdict.status === 'blocker' || verdict.status === 'warning')
+      if (previousRelevant.length === 0 || !candidateContent.trim()) return null
+      if (semanticGateCallsUsed >= semanticGatePolicy.maxSemanticCallsPerChapter) {
+        console.warn(`[semantic-gate] 修复复评超出预算（${semanticGatePolicy.maxSemanticCallsPerChapter} 次/章），跳过 chapter=${chapterId}`)
+        return null
+      }
+      semanticGateCallsUsed += 1
+      const judgement = await judgeRepairOutcome({
+        previousBlockerVerdicts: criticSemanticReview.verdicts,
+        repairedContent: candidateContent,
+        runGate: (dimensions, hints) => runChapterSemanticGate({
+          novelId: chapter.novelId,
+          chapterId,
+          chapterNum: chapter.chapterNum,
+          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+          chapterContent: candidateContent,
+          dimensions,
+          stage: 'repair_review',
+          mode: effectiveSemanticGateMode,
+          modelConfigId: novel.modelConfigId || undefined,
+          contractSummary: rewriteContext.writingContractSummary,
+          scenePlanSummary: rewriteContext.scenePlanSummary || summarizeStageArtifactText(scenePlanText, 520),
+          protagonistBrief: profile.protagonistReference,
+          heuristicHints: hints,
+        }),
+      })
+      return judgement.degraded ? null : judgement.review
+    }
+    const draftNarrativeWords = countNarrativeWords(draftContent)
+
     let rewriteOutcome = await processRewriteOutcome(rewriteResult.output)
     // 差异门闭环：轻量复检拦截（差异门失败或相似度过高）时，把结论回灌给 Rewriter 自动做一轮结构性重写，而不是直接卡人工
     const dialogueRepairScore = (analysis: ReturnType<typeof analyzeChapterDialogueAgainstNovel>): number => (
@@ -5167,9 +5204,24 @@ async function generateChapterContentInternal(
       const retriedOutcome = await processRewriteOutcome(rewriteResult.output)
       const currentDialogueRepairScore = dialogueRepairScore(rewriteOutcome.dialogueAnalysis)
       const retriedDialogueRepairScore = dialogueRepairScore(retriedOutcome.dialogueAnalysis)
-      const retriedBetter = rewriteOutcomeScore(retriedOutcome, profile.genre, guardrailKnownTerms) < rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)
-        || (rewriteOutcomeScore(retriedOutcome, profile.genre, guardrailKnownTerms) === rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)
-          && retriedDialogueRepairScore < currentDialogueRepairScore)
+      // enforce 模式：候选稿先过语义复评（预算内），有语义退步或删戏过门直接判负；
+      // 非 enforce（或复评缺席）沿用原有分数判据。
+      const retriedCandidateSemantic = await evaluateRepairCandidateSemantics(retriedOutcome.content)
+      const retriedBetter = retriedCandidateSemantic
+        ? chooseBetterRepairCandidate(
+          { content: rewriteOutcome.content, reviewNotes: rewriteOutcome.reviewNotes },
+          { content: retriedOutcome.content, reviewNotes: retriedOutcome.reviewNotes },
+          {
+            currentSemantic: criticSemanticReview || undefined,
+            candidateSemantic: retriedCandidateSemantic,
+            originalLength: draftNarrativeWords,
+            genre: profile.genre,
+            knownTerms: guardrailKnownTerms,
+          },
+        ).content === retriedOutcome.content
+        : rewriteOutcomeScore(retriedOutcome, profile.genre, guardrailKnownTerms) < rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)
+          || (rewriteOutcomeScore(retriedOutcome, profile.genre, guardrailKnownTerms) === rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)
+            && retriedDialogueRepairScore < currentDialogueRepairScore)
       if (retriedBetter) {
         rewriteOutcome = retriedOutcome
       }
@@ -5207,7 +5259,21 @@ async function generateChapterContentInternal(
         rewriterTaskId = rewriteRun.taskId
         rewriteResult = rewriteRun.result
         const finalRetriedOutcome = await processRewriteOutcome(rewriteResult.output)
-        if (rewriteOutcomeScore(finalRetriedOutcome, profile.genre, guardrailKnownTerms) < rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)) {
+        const finalCandidateSemantic = await evaluateRepairCandidateSemantics(finalRetriedOutcome.content)
+        const finalRetriedBetter = finalCandidateSemantic
+          ? chooseBetterRepairCandidate(
+            { content: rewriteOutcome.content, reviewNotes: rewriteOutcome.reviewNotes },
+            { content: finalRetriedOutcome.content, reviewNotes: finalRetriedOutcome.reviewNotes },
+            {
+              currentSemantic: criticSemanticReview || undefined,
+              candidateSemantic: finalCandidateSemantic,
+              originalLength: draftNarrativeWords,
+              genre: profile.genre,
+              knownTerms: guardrailKnownTerms,
+            },
+          ).content === finalRetriedOutcome.content
+          : rewriteOutcomeScore(finalRetriedOutcome, profile.genre, guardrailKnownTerms) < rewriteOutcomeScore(rewriteOutcome, profile.genre, guardrailKnownTerms)
+        if (finalRetriedBetter) {
           rewriteOutcome = finalRetriedOutcome
         }
       }
@@ -5363,8 +5429,17 @@ async function generateChapterContentInternal(
         const currentStyleScore = guardrailRepairScore(remainingGuardrailFindings)
         const styleRepairFindings = collectQualityGuardrailFindings(strippedStyleRepair, profile.genre, { knownTerms: guardrailKnownTerms })
         const styleRepairScore = guardrailRepairScore(styleRepairFindings)
+        // enforce 模式：风格修复候选也不得让语义门维度出现新增 blocker（预算内复评，缺席时跳过否决）。
+        const styleCandidateSemantic = strippedStyleRepair
+          ? await evaluateRepairCandidateSemantics(strippedStyleRepair)
+          : null
+        const criticBlockerDims = new Set(criticSemanticReview ? collectBlockerDimensions(criticSemanticReview) : [])
+        const styleSemanticRegressed = styleCandidateSemantic
+          ? collectBlockerDimensions(styleCandidateSemantic).some((dimension) => !criticBlockerDims.has(dimension))
+          : false
         if (
           strippedStyleRepair
+          && !styleSemanticRegressed
           && styleRepairWords >= Math.round(countNarrativeWords(repairedContent) * 0.75)
           && styleRepairScore < currentStyleScore
         ) {
