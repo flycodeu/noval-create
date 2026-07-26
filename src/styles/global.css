@@ -13925,6 +13925,17 @@ html[data-runtime="web"] .project-topbar__main-row {
   margin-bottom: 4px;
 }
 
+.model-manager-agent-note {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default, rgba(125, 125, 125, 0.28));
+  border-radius: 8px;
+  background: var(--bg-muted, rgba(125, 125, 125, 0.08));
+  color: var(--text-secondary, inherit);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .model-manager-modal-form .ant-input-number,
 .model-manager-modal-form .ant-select,
 .model-manager-modal-form .ant-input-affix-wrapper,

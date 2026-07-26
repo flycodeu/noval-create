@@ -31,7 +31,7 @@ export function registerAuditTools(registry: AgentToolRegistry, dependencies: Au
       inputSchema: objectSchema({
         novelId: { type: 'integer', minimum: 1 },
         toolId: { type: 'string', minLength: 1, maxLength: 160 },
-        actorType: { enum: ['human', 'codex', 'claude_code', 'system', 'api_client'] },
+        actorType: { enum: ['human', 'system', 'api_client'] },
         status: { enum: ['success', 'error', 'denied'] },
         limit: { type: 'integer', minimum: 1, maximum: 500 },
       }, ['novelId']),

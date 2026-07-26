@@ -15,6 +15,8 @@ vi.mock('../database/db', () => ({
 import {
   getKimiModelContextWindow,
   getModelProviderOptions,
+  isNativeAgentProvider,
+  providerRequiresApiKey,
   isSupportedModelProvider,
   normalizeModelBaseUrl,
   normalizeModelContextTokensForModel,
@@ -26,7 +28,12 @@ describe('model service normalization', () => {
   it('normalizes provider aliases and rejects unsupported providers', () => {
     expect(normalizeModelProvider('moonshot')).toBe('kimi')
     expect(normalizeModelProvider('claude')).toBe('anthropic')
+    expect(normalizeModelProvider('codex-cli')).toBe('codex')
+    expect(normalizeModelProvider('claude-code')).toBe('claude_code')
     expect(isSupportedModelProvider('kimi')).toBe(true)
+    expect(isSupportedModelProvider('codex')).toBe(true)
+    expect(isSupportedModelProvider('claude_code')).toBe(true)
+    expect(isSupportedModelProvider('legacy-cli')).toBe(false)
     expect(isSupportedModelProvider('unknown')).toBe(false)
   })
 
@@ -51,6 +58,17 @@ describe('model service normalization', () => {
     expect(normalizeModelBaseUrl('', 'openai')).toBeNull()
     expect(normalizeModelBaseUrl('', 'kimi')).toBeNull()
     expect(normalizeModelBaseUrl('', 'custom')).toBe('http://localhost:11434/v1')
+    expect(normalizeModelBaseUrl('https://ignored.example/v1', 'codex')).toBeNull()
     expect(normalizeModelBaseUrl(' https://deepseek.example/v1 ', 'deepseek')).toBe('https://deepseek.example/v1')
+  })
+
+  it('requires API keys for every remote provider and keeps custom local models keyless', () => {
+    expect(providerRequiresApiKey('custom')).toBe(false)
+    expect(providerRequiresApiKey('openai')).toBe(true)
+    expect(providerRequiresApiKey('anthropic')).toBe(true)
+    expect(isNativeAgentProvider('codex')).toBe(true)
+    expect(isNativeAgentProvider('claude_code')).toBe(true)
+    expect(providerRequiresApiKey('codex')).toBe(false)
+    expect(providerRequiresApiKey('claude_code')).toBe(false)
   })
 })

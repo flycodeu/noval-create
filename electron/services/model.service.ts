@@ -11,6 +11,7 @@ import { AliyunAdapter } from '../adapters/aliyun.adapter'
 import { DeepSeekAdapter } from '../adapters/deepseek.adapter'
 import { CustomAdapter } from '../adapters/custom.adapter'
 import { KimiAdapter } from '../adapters/kimi.adapter'
+import { AgentCliAdapter, type NativeAgentProvider } from '../adapters/agent-cli.adapter'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import os from 'os'
 
@@ -25,6 +26,8 @@ const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens
   deepseek: { temperature: 0.7, maxTokens: 384000 },
   kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  codex: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  claude_code: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
 }
 const SUPPORTED_MODEL_PROVIDERS = new Set(Object.keys(PROVIDER_RUNTIME_DEFAULTS))
 type KimiThinkingMode = 'enabled' | 'disabled'
@@ -37,11 +40,23 @@ export function normalizeModelProvider(provider: unknown): string {
   const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
   if (normalized === 'moonshot') return 'kimi'
   if (normalized === 'claude') return 'anthropic'
+  if (normalized === 'codex-cli' || normalized === 'codexcli') return 'codex'
+  if (normalized === 'claude-code' || normalized === 'claudecli' || normalized === 'claude_cli') return 'claude_code'
   return normalized || 'openai'
 }
 
 export function isSupportedModelProvider(provider: unknown): boolean {
   return SUPPORTED_MODEL_PROVIDERS.has(normalizeModelProvider(provider))
+}
+
+export function providerRequiresApiKey(provider: unknown): boolean {
+  const normalized = normalizeModelProvider(provider)
+  return normalized !== 'custom' && !isNativeAgentProvider(normalized)
+}
+
+export function isNativeAgentProvider(provider: unknown): provider is NativeAgentProvider {
+  const normalized = normalizeModelProvider(provider)
+  return normalized === 'codex' || normalized === 'claude_code'
 }
 
 export function normalizeModelConcurrency(value: unknown): number {
@@ -59,6 +74,7 @@ export function getProviderTokenSafetyMarginPct(provider?: string | null): numbe
   if (normalized === 'openai') return 10
   if (normalized === 'anthropic') return 12
   if (normalized === 'kimi') return 12
+  if (isNativeAgentProvider(normalized)) return 15
   return 15
 }
 
@@ -107,6 +123,7 @@ export function normalizeModelContextTokensForModel(
 export function normalizeModelBaseUrl(value: unknown, provider: string): string | null {
   const normalizedProvider = normalizeModelProvider(provider)
   const text = typeof value === 'string' ? value.trim() : ''
+  if (isNativeAgentProvider(normalizedProvider)) return null
   if (text) return text
   return normalizedProvider === 'custom' ? 'http://localhost:11434/v1' : null
 }
@@ -205,6 +222,9 @@ export function createAdapter(config: {
       return new KimiAdapter(key, modelId || 'kimi-k2.6', baseUrl || undefined, maxContextTokens, temperature, maxTokens)
     case 'custom':
       return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1', maxContextTokens, temperature, maxTokens)
+    case 'codex':
+    case 'claude_code':
+      return new AgentCliAdapter(provider, modelId, maxContextTokens, temperature, maxTokens)
     default:
       throwUserFacingError('model.unknownProvider', { provider })
   }
@@ -215,6 +235,9 @@ export function getModelConfigRecord(id: number) {
   const config = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
   if (!config) throwUserFacingError('model.configNotFound', { id })
   const provider = normalizeModelProvider(config.provider)
+  if (!isSupportedModelProvider(provider)) {
+    throwUserFacingError('model.unknownProvider', { provider })
+  }
   return {
     ...config,
     provider,
@@ -229,7 +252,9 @@ export function getModelConfigRecord(id: number) {
 export function getDefaultModelConfigRecord() {
   const db = getDb()
   const defaults = db.select().from(modelConfigs).where(eq(modelConfigs.isDefault, 1)).all()
-  const config = defaults[0] || db.select().from(modelConfigs).all()[0]
+  const configs = db.select().from(modelConfigs).all()
+  const config = defaults.find((candidate) => isSupportedModelProvider(candidate.provider))
+    || configs.find((candidate) => isSupportedModelProvider(candidate.provider))
   if (!config) throwUserFacingError('model.noneConfigured')
   const provider = normalizeModelProvider(config.provider)
   return {

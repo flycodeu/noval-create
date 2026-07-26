@@ -377,6 +377,7 @@ export function registerQualityTools(
         novelId: { type: 'integer', minimum: 1 },
         repairPlanArtifactId: { type: 'string', minLength: 1, maxLength: 160 },
         repairItemIds: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 }, maxItems: 30 },
+        chapterNums: { type: 'array', items: { type: 'integer', minimum: 1 }, maxItems: 3 },
         maxChapters: { type: 'integer', minimum: 1, maximum: 3 },
         executionMode: { enum: ['fast', 'balanced', 'premium', 'review_first', 'cost_saver'] },
         extraRequirements: { type: 'string', maxLength: 6000 },

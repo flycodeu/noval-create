@@ -95,7 +95,7 @@ const reviewArtifact = artifact<GenericAssetReviewContent>({
   content: reviewContent,
 })
 const allScopes = Object.values(AGENT_TOOL_SCOPES)
-const actor = { type: 'claude_code' as const, actorId: 'claude-test', clientId: 'vitest' }
+const actor = { type: 'api_client' as const, actorId: 'api-test', clientId: 'vitest' }
 
 function dependencies() {
   return {

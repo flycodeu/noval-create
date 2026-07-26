@@ -79,7 +79,8 @@ const METAPHOR_STACK_PATTERNS = [
 ]
 
 const PARALLELISM_PATTERNS = [
-  /不是.{2,24}(?:而是|只是|是).{2,36}/u,
+  /不是[^。！？\n]{2,24}(?:而是|只是|(?<!不)是)[^。！？\n]{2,36}/u,
+  /并非[^。！？\n]{2,24}实际是[^。！？\n]{2,36}/u,
   /既.{2,18}又.{2,18}(?:还|更|也).{2,24}/u,
   /一边.{2,18}一边.{2,18}/u,
   /越.{1,10}越.{1,16}/u,
@@ -211,10 +212,13 @@ function analyzeMetaphorStackRate(sentences: string[]): number {
   return clampPercent((hits / sentences.length) * 100)
 }
 
-function analyzeParallelismRate(sentences: string[]): number {
+function analyzeParallelismRate(text: string, sentences: string[]): number {
   if (sentences.length === 0) return 0
-  const hits = sentences.filter((sentence) => PARALLELISM_PATTERNS.some((pattern) => pattern.test(sentence))).length
-  return clampPercent((hits / sentences.length) * 100)
+  const sentenceHits = sentences.filter((sentence) => PARALLELISM_PATTERNS.some((pattern) => pattern.test(sentence))).length
+  // splitSentences intentionally removes punctuation, so count this specific
+  // adjacent two-sentence form on the original text as well.
+  const splitDefinitionHits = (text.match(/并非[^。！？\n]{2,24}。实际是[^。！？\n]{2,36}/gu) || []).length
+  return clampPercent(((sentenceHits + splitDefinitionHits) / sentences.length) * 100)
 }
 
 function analyzeBodyDetailClicheRate(text: string, sentences: string[]): number {
@@ -259,7 +263,7 @@ export function analyzeLanguageDrift(text: string): LanguageDriftMetrics {
     dashDensity: analyzeDashDensity(normalized, sentences),
     parentheticalExplanationDensity: analyzeParentheticalExplanationDensity(normalized, sentences),
     metaphorStackRate: analyzeMetaphorStackRate(sentences),
-    parallelismRate: analyzeParallelismRate(sentences),
+    parallelismRate: analyzeParallelismRate(normalized, sentences),
     bodyDetailClicheRate: analyzeBodyDetailClicheRate(normalized, sentences),
     isolatedTemplateParagraphRate: analyzeIsolatedTemplateParagraphRate(normalized),
   }

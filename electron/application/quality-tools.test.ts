@@ -209,7 +209,7 @@ function dependencies() {
   }
 }
 
-const actor = { type: 'codex' as const, actorId: 'codex-test', clientId: 'vitest' }
+const actor = { type: 'api_client' as const, actorId: 'api-test', clientId: 'vitest' }
 const allScopes = Object.values(AGENT_TOOL_SCOPES)
 
 describe('quality tool adapter', () => {
@@ -239,7 +239,13 @@ describe('quality tool adapter', () => {
     }, { actor, scopes: allScopes })
     const repairDraftCall = await registry.invoke({
       toolId: 'novelforge.quality.apply_repair_draft',
-      input: { novelId: 5, repairPlanArtifactId: 'repair-plan-1', idempotencyKey: 'repair-draft-001' },
+      input: {
+        novelId: 5,
+        repairPlanArtifactId: 'repair-plan-1',
+        chapterNums: [2, 3],
+        maxChapters: 2,
+        idempotencyKey: 'repair-draft-001',
+      },
     }, { actor, scopes: allScopes })
     const repairReviewCall = await registry.invoke({
       toolId: 'novelforge.quality.review_repair_draft',
@@ -250,6 +256,7 @@ describe('quality tool adapter', () => {
     expect(semanticEvaluation).toMatchObject({ ok: true, data: { sourceReportArtifact: { id: 'quality-report-1' } } })
     expect(compared).toMatchObject({ ok: true, data: { status: 'improved', readyForHumanReview: true } })
     expect(repairDraftCall).toMatchObject({ ok: true, data: { draft: { canonicalWriteAllowed: false } } })
+    expect(deps.applyRepairDraft).toHaveBeenCalledWith(expect.objectContaining({ chapterNums: [2, 3], maxChapters: 2 }))
     expect(repairReviewCall).toMatchObject({
       ok: true,
       data: { review: { independentModelReview: true, readyForHumanDecision: true } },

@@ -959,7 +959,7 @@ function registerIpcHandlers() {
         extraParamsJson: modelService.normalizeModelExtraParamsJson(config.extraParamsJson, provider),
         apiKey: config.apiKey ? '已设置' : '',
       }
-    })
+    }).filter((config) => modelService.isSupportedModelProvider(config.provider))
   })
 
   handle('model:create', (_, data) => {
@@ -969,9 +969,10 @@ function registerIpcHandlers() {
     if (!modelService.isSupportedModelProvider(provider)) {
       throwUserFacingError('model.unknownProvider', { provider })
     }
-    if (provider !== 'custom' && (!data.apiKey || data.apiKey === '已设置')) {
+    if (modelService.providerRequiresApiKey(provider) && (!data.apiKey || data.apiKey === '已设置')) {
       throwUserFacingError('model.apiKeyRequired')
     }
+    if (modelService.isNativeAgentProvider(provider)) data.apiKey = null
     delete data.kimiThinking
     const encryptedKey = data.apiKey ? encryptApiKey(data.apiKey) : null
     const result = db.insert(modelConfigs).values({
@@ -1001,12 +1002,13 @@ function registerIpcHandlers() {
     }
     const existingProvider = modelService.normalizeModelProvider(existing?.provider || 'openai')
     const providerChanged = Boolean(existing) && provider !== existingProvider
-    if (providerChanged && data.apiKey === '已设置') {
+    if (providerChanged && data.apiKey === '已设置' && modelService.providerRequiresApiKey(provider)) {
       throwUserFacingError('model.providerChangeNeedsApiKey')
     }
-    if (providerChanged && provider !== 'custom' && !data.apiKey) {
+    if (providerChanged && modelService.providerRequiresApiKey(provider) && !data.apiKey) {
       throwUserFacingError('model.apiKeyRequired')
     }
+    if (modelService.isNativeAgentProvider(provider)) data.apiKey = null
     if ('provider' in data || existing?.provider) {
       data.provider = provider
     }
@@ -1057,6 +1059,10 @@ function registerIpcHandlers() {
   handle('model:setDefault', (_, id) => {
     requireId(id)
     const db = getDb()
+    const config = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
+    if (!config || !modelService.isSupportedModelProvider(config.provider)) {
+      throwUserFacingError('model.unknownProvider', { provider: config?.provider || 'unknown' })
+    }
     db.update(modelConfigs).set({ isDefault: 0 }).run()
     db.update(modelConfigs).set({ isDefault: 1 }).where(eq(modelConfigs.id, id)).run()
   })

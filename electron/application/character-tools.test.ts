@@ -51,8 +51,8 @@ const result: CharacterNeedsAnalysisResult = {
 
 const context = {
   actor: {
-    type: 'codex' as const,
-    actorId: 'codex-test',
+    type: 'api_client' as const,
+    actorId: 'api-test',
     clientId: 'test-client',
   },
   scopes: [
@@ -121,4 +121,3 @@ describe('character planning tool adapter', () => {
     })
   })
 })
-

@@ -45,6 +45,8 @@ const PROVIDER_OPTIONS = [
   { value: 'aliyun', label: '阿里通义 Qwen', models: ['qwen3.6-max', 'qwen3.6-plus', 'qwen3.5-plus', 'qwen-max', 'qwen-plus', 'qwen-long'] },
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
+  { value: 'codex', label: 'Codex 原生模型（本机登录）', models: [] },
+  { value: 'claude_code', label: 'Claude 原生模型（本机登录）', models: [] },
 ]
 
 const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number; modelId?: string; baseUrl?: string; maxContextTokens?: number }> = {
@@ -56,6 +58,8 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen3.6-max', maxContextTokens: 128000 },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, baseUrl: 'http://localhost:11434/v1' },
+  codex: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-5', maxContextTokens: 128000 },
+  claude_code: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'sonnet', maxContextTokens: 200000 },
 }
 
 const SOURCE_PROVIDER_OPTIONS = [
@@ -85,7 +89,11 @@ const SOURCE_PROVIDER_GUIDE: Record<SourceSearchProviderMode, { title: string; d
 }
 
 function providerRequiresApiKey(provider?: string): boolean {
-  return provider !== 'custom'
+  return provider !== 'custom' && provider !== 'codex' && provider !== 'claude_code'
+}
+
+function isNativeAgentProvider(provider?: string): boolean {
+  return provider === 'codex' || provider === 'claude_code'
 }
 
 function parseModelExtraParams(raw?: string | null): { kimiThinking?: 'enabled' | 'disabled' } {
@@ -118,6 +126,8 @@ function getProviderDefaultContextWindow(provider?: string, modelId?: string): n
   if (provider === 'openai') return 128000
   if (provider === 'aliyun') return 32000
   if (provider === 'baidu') return 8192
+  if (provider === 'codex') return 128000
+  if (provider === 'claude_code') return 200000
   return 32000
 }
 
@@ -713,27 +723,38 @@ export default function ModelManager() {
                     ? '输入模型名称，例如：deepseek-v4-flash'
                     : selectedProvider === 'kimi'
                       ? '输入模型 ID，例如：kimi-k2.6'
+                      : selectedProvider === 'codex'
+                        ? '输入 Codex 模型 ID，例如：gpt-5'
+                        : selectedProvider === 'claude_code'
+                          ? '输入 Claude 模型 ID，例如：sonnet / opus'
                       : '输入模型名称，例如：llama3:latest'}
                 />
               )}
             </Form.Item>
           </div>
 
-          <Form.Item
-            name="apiKey"
-            label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}
-            rules={[{
-              validator: async (_, value) => {
-                if (!providerRequiresApiKey(selectedProvider)) return
-                const textValue = typeof value === 'string' ? value.trim() : ''
-                if (textValue && textValue !== MASKED_KEY) return
-                if (!isNew && selected?.apiKey && selectedProvider === selectedConfigProvider && textValue === MASKED_KEY) return
-                throw new Error(getUserFacingMessage('model.apiKeyRequired'))
-              },
-            }]}
-          >
-            <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
-          </Form.Item>
+          {!isNativeAgentProvider(selectedProvider) ? (
+            <Form.Item
+              name="apiKey"
+              label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}
+              rules={[{
+                validator: async (_, value) => {
+                  if (!providerRequiresApiKey(selectedProvider)) return
+                  const textValue = typeof value === 'string' ? value.trim() : ''
+                  if (textValue && textValue !== MASKED_KEY) return
+                  if (!isNew && selected?.apiKey && selectedProvider === selectedConfigProvider && textValue === MASKED_KEY) return
+                  throw new Error(getUserFacingMessage('model.apiKeyRequired'))
+                },
+              }]}
+            >
+              <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
+            </Form.Item>
+          ) : (
+            <div className="model-manager-agent-note">
+              使用本机已登录的 {selectedProvider === 'codex' ? 'Codex' : 'Claude'} 原生模型，不读取或保存 API Key。
+              NovelForge 会禁用工具与持久会话，结果仍只进入草稿、质量门、独立审校和人工 Diff 链。
+            </div>
+          )}
 
           {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek' || selectedProvider === 'kimi') && (
             <Form.Item name="baseUrl" label="接口地址（Base URL）">

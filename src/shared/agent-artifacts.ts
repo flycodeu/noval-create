@@ -22,7 +22,7 @@ export interface AgentArtifact<T = unknown> {
   content: T
   contentHash: string
   contextVersion: number
-  producerType: 'novelforge_model' | 'codex' | 'claude_code' | 'human' | 'system' | 'api_client'
+  producerType: 'novelforge_model' | 'human' | 'system' | 'api_client'
   producerId: string
   producerClient: string
   modelConfigId: number | null

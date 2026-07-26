@@ -145,8 +145,8 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
   {
     code: 'not_but_definition_pattern',
     severity: 'medium',
-    message: '“不是……是/而是……”式定义句过于工整，容易暴露生成腔。',
-    pattern: /不是.{2,28}(?:，|,)?(?:而是|只是|是).{2,42}/u,
+    message: '“不是……是/而是……”或“并非……实际是……”式定义句过于工整，容易暴露生成腔。',
+    pattern: /(?:不是[^。！？\n]{2,28}(?:而是|只是|(?<!不)是)[^。！？\n]{2,42}|并非[^。！？\n]{2,28}(?:实际是|。实际是)[^。！？\n]{2,42})/u,
   },
   {
     code: 'double_metaphor_or_simile_stack',
@@ -508,13 +508,15 @@ function findRelevantPatternMatch(
   const scanner = new RegExp(pattern.source, flags)
   let match = scanner.exec(text)
   while (match) {
+    const definitionPattern = /(?:不是[^。！？\n]{0,28}(?:而是|只是|(?<!不)是)|并非[^。！？\n]{0,28}(?:实际是|。实际是))/u
     const movementCorrection = code === 'not_but_definition_pattern'
-      && /不是.{0,28}(?:，|,)?(?:而是|只是|是)/u.test(match[0])
+      && /不是[^。！？\n]{0,28}(?:而是|只是|(?<!不)是)/u.test(match[0])
       && /(?:往|朝|向|去|来)/u.test(match[0])
       && /(?:往|朝|向|去|来)/u.test(match[0].split(/(?:，|,)/u).slice(1).join(''))
     if (code !== 'not_but_definition_pattern') return match
     if (
-      !movementCorrection
+      definitionPattern.test(match[0])
+      && !movementCorrection
       && (!isInsideDialogueQuote(text, match.index)
         || !/不是(?:我|你|他|她|这|那|一个人|我们|你们|他们)/u.test(match[0]))
     ) {

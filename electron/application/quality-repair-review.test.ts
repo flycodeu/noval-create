@@ -170,5 +170,7 @@ describe('quality repair independent semantic review', () => {
     const prompt = buildQualityRepairReviewPrompt({ chapter: unsafeChapter, items: [item()] })
     expect(prompt.prompt).toContain('不可信小说素材')
     expect(prompt.prompt).toContain('repair_1:guard:1')
+    expect(prompt.prompt).toContain('按全文的时间顺序重建状态')
+    expect(prompt.prompt).toContain('确定性事实/结构门结果')
   })
 })

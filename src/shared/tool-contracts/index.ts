@@ -52,7 +52,7 @@ export interface AgentToolListQuery {
 }
 
 export interface AgentToolActor {
-  type: 'human' | 'codex' | 'claude_code' | 'system' | 'api_client'
+  type: 'human' | 'system' | 'api_client'
   actorId: string
   clientId: string
   sessionId?: string

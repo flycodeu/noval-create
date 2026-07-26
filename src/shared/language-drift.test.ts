@@ -30,4 +30,10 @@ describe('language-drift', () => {
     expect(metrics.metaphorStackRate).toBe(0)
     expect(metrics.isolatedTemplateParagraphRate).toBe(0)
   })
+
+  it('counts split “并非……实际是……” definitions as parallelism drift', () => {
+    const metrics = analyzeLanguageDrift('她并非来取原件。实际是来确认谁动过档案。')
+
+    expect(metrics.parallelismRate).toBeGreaterThan(0)
+  })
 })

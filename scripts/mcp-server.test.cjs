@@ -1,16 +1,31 @@
 const assert = require('node:assert/strict')
+const { randomUUID } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js')
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js')
 
 const workspaceRoot = path.resolve(__dirname, '..')
-const testUserData = path.join(workspaceRoot, '.tmp-tests', 'mcp-user-data')
+const testUserData = path.join(workspaceRoot, '.tmp-tests', `mcp-user-data-${process.pid}-${randomUUID()}`)
 const launcher = path.join(workspaceRoot, 'scripts', 'run-novelforge-mcp.cjs')
+
+async function removeWithRetry(target) {
+  let lastError
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      lastError = error
+      if (!error || error.code !== 'EBUSY') throw error
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+  throw lastError
+}
 
 async function main() {
   fs.mkdirSync(path.dirname(testUserData), { recursive: true })
-  fs.rmSync(testUserData, { recursive: true, force: true })
 
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -23,7 +38,18 @@ async function main() {
     },
     stderr: 'pipe',
   })
-  const client = new Client({ name: 'codex-mcp-contract-test', version: '1.0.0' })
+  const client = new Client(
+    { name: 'api-mcp-contract-test', version: '1.0.0' },
+    {
+      capabilities: {
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: { tools: { call: {} } },
+        },
+      },
+    },
+  )
   let stderr = ''
 
   transport.stderr?.on('data', (chunk) => {
@@ -71,6 +97,9 @@ async function main() {
     assert(!document.grantedScopes.includes('recommendation:record'))
     assert(document.grantedScopes.includes('quality:repair'))
 
+    const qualityApplyTool = listed.tools.find((tool) => tool.name === 'novelforge.quality.apply_repair_draft')
+    assert.equal(qualityApplyTool.execution.taskSupport, 'optional')
+
     const deniedWrite = await client.callTool({
       name: 'novelforge.characters.commit_draft',
       arguments: {
@@ -84,13 +113,33 @@ async function main() {
     assert.equal(deniedWrite.isError, true)
     assert.match(deniedWrite.content[0].text, /AUTH_SCOPE_REQUIRED/)
 
+    const taskStream = client.experimental.tasks.callToolStream(
+      {
+        name: 'novelforge.quality.run_evaluation',
+        arguments: { novelId: 0, idempotencyKey: `mcp-task-${randomUUID()}` },
+      },
+      undefined,
+      { task: { ttl: 60_000 }, timeout: 5_000 },
+    )
+    let createdTask
+    let taskResult
+    for await (const message of taskStream) {
+      if (message.type === 'taskCreated') createdTask = message.task
+      if (message.type === 'result') taskResult = message.result
+      if (message.type === 'error') throw message.error
+    }
+    assert(createdTask)
+    assert.equal(createdTask.status, 'working')
+    assert(taskResult)
+    assert.equal(taskResult.isError, true)
+
     process.stdout.write(`PASS NovelForge MCP: tools=${toolIds.length}, resources=${resources.resources.length}\n`)
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error
   } finally {
     await client.close().catch(() => undefined)
-    fs.rmSync(testUserData, { recursive: true, force: true })
+    await removeWithRetry(testUserData)
   }
 }
 

@@ -742,6 +742,7 @@ function repairDraftFingerprint(
     repairPlanArtifactId: repairPlan.id,
     repairPlanContentHash: repairPlan.contentHash,
     repairItemIds: normalizeLines(input.repairItemIds, 30).sort(),
+    chapterNums: uniqueNumbers((input.chapterNums || []).filter((chapterNum) => Number.isInteger(chapterNum) && chapterNum > 0)),
     maxChapters: Math.max(1, Math.min(input.maxChapters || 2, 3)),
     executionMode: input.executionMode || null,
     extraRequirements: input.extraRequirements?.trim() || '',
@@ -771,11 +772,20 @@ function buildRepairRequirements(
 function collectRepairDraftBlockers(chapter: AgentQualityRepairDraftChapter): string[] {
   return normalizeLines([
     !chapter.changed ? `第${chapter.chapterNum}章优化稿与原文没有实质变化。` : '',
+    !chapter.factGuard.safeToApply
+      ? `第${chapter.chapterNum}章事实差异门未通过：${chapter.factGuard.warnings.join('；') || '存在未确认的事实、数字或实体变化。'}`
+      : '',
+    !chapter.qualityGate.safeToApply
+      ? `第${chapter.chapterNum}章语言质量门未通过：${chapter.qualityGate.warnings.join('；') || '优化稿引入了需要先修复的语言或 AI 痕迹问题。'}`
+      : '',
     chapter.factGuard.aiProcessLeakCount > 0
       ? `第${chapter.chapterNum}章仍含 ${chapter.factGuard.aiProcessLeakCount} 处 AI 过程或提示词残留。`
       : '',
     chapter.qualityGate.optimizedHighSeverityCount > chapter.qualityGate.originalHighSeverityCount
       ? `第${chapter.chapterNum}章高严重度语言问题由 ${chapter.qualityGate.originalHighSeverityCount} 增至 ${chapter.qualityGate.optimizedHighSeverityCount}。`
+      : '',
+    chapter.structuralGate && !chapter.structuralGate.safeToApply
+      ? `第${chapter.chapterNum}章结构性修订门未通过：${chapter.structuralGate.warnings.join('；')}`
       : '',
   ], 10)
 }
@@ -856,7 +866,18 @@ export async function applyAgentQualityRepairDraft(
     )
   }
   const maxChapters = Math.max(1, Math.min(input.maxChapters || 2, 3))
-  const selectedChapterNums = targetChapterNums.slice(0, maxChapters)
+  const requestedChapterNums = uniqueNumbers((input.chapterNums || [])
+    .filter((chapterNum) => Number.isInteger(chapterNum) && chapterNum > 0))
+  const scopedChapterNums = requestedChapterNums.length > 0
+    ? targetChapterNums.filter((chapterNum) => requestedChapterNums.includes(chapterNum))
+    : targetChapterNums
+  if (requestedChapterNums.length > 0 && scopedChapterNums.length === 0) {
+    throw new QualityWorkflowError(
+      'REPAIR_PLAN_NO_CHAPTER_TARGETS',
+      `指定章节 ${requestedChapterNums.join('、')} 不在所选修复项的目标范围内。`,
+    )
+  }
+  const selectedChapterNums = scopedChapterNums.slice(0, maxChapters)
   const chapterRows = listChapters(input.novelId)
   const chaptersByNum = new Map(chapterRows.map((chapter) => [chapter.chapterNum, chapter]))
   const missingChapterNums = selectedChapterNums.filter((chapterNum) => !chaptersByNum.get(chapterNum)?.content?.trim())
@@ -873,6 +894,7 @@ export async function applyAgentQualityRepairDraft(
     const chapterItems = selectedItems.filter((item) => item.targetChapterNums.includes(chapterNum))
     const optimized = await optimizeChapterContent(chapter.id, {
       executionMode: input.executionMode,
+      repairMode: 'structural',
       extraRequirements: buildRepairRequirements(chapterNum, chapterItems, input.extraRequirements),
     })
     draftedChapters.push({
@@ -889,6 +911,7 @@ export async function applyAgentQualityRepairDraft(
       warnings: optimized.warnings,
       factGuard: optimized.factGuard,
       qualityGate: optimized.qualityGate,
+      structuralGate: optimized.structuralGate,
       taskId: optimized.taskId || null,
     })
   }
@@ -897,7 +920,10 @@ export async function applyAgentQualityRepairDraft(
   const warnings = normalizeLines([
     ...draftedChapters.flatMap((chapter) => chapter.warnings.map((warning) => `第${chapter.chapterNum}章：${warning}`)),
     targetChapterNums.length > selectedChapterNums.length
-      ? `本次只处理前 ${selectedChapterNums.length} 章，另有 ${targetChapterNums.length - selectedChapterNums.length} 章需使用新幂等键分批生成。`
+      ? `本次只处理 ${selectedChapterNums.join('、')} 章，另有 ${targetChapterNums.length - selectedChapterNums.length} 个目标章节未生成；可用 chapterNums 或新幂等键分批处理。`
+      : '',
+    requestedChapterNums.length > 0 && scopedChapterNums.length < targetChapterNums.length
+      ? `本次按 chapterNums=${requestedChapterNums.join('、')} 缩小范围，依赖项仍保留在修复计划中但未在此候选中生成。`
       : '',
     selectedItems.some((item) => item.targetChapterNums.length === 0)
       ? '部分所选修复项没有章节定位，本次未自动处理这些全局项。'
@@ -906,7 +932,7 @@ export async function applyAgentQualityRepairDraft(
   ], 40)
   const status: AgentQualityRepairDraftContent['status'] = hardBlockers.length > 0
     ? 'blocked'
-    : warnings.length > 1 || draftedChapters.some((chapter) => !chapter.factGuard.safeToApply || !chapter.qualityGate.safeToApply)
+    : warnings.length > 1
       ? 'needs_revision'
       : 'ready_for_review'
   const draft: AgentQualityRepairDraftContent = {
@@ -1005,6 +1031,17 @@ export async function reviewAgentQualityRepairDraft(
     || repairDraftArtifact.content.hardBlockers.length > 0
     || repairDraftArtifact.content.chapters.length === 0) {
     throw new QualityWorkflowError('REPAIR_DRAFT_INVALID', '质量修订草稿已被确定性门阻塞或没有章节候选，不能继续消耗模型审校。')
+  }
+  const unsafeDeterministicChapter = repairDraftArtifact.content.chapters.find((chapter) => (
+    !chapter.factGuard.safeToApply
+    || !chapter.qualityGate.safeToApply
+    || Boolean(chapter.structuralGate && !chapter.structuralGate.safeToApply)
+  ))
+  if (unsafeDeterministicChapter) {
+    throw new QualityWorkflowError(
+      'REPAIR_DRAFT_INVALID',
+      `第${unsafeDeterministicChapter.chapterNum}章事实、语言质量或结构修订门未通过，不能进入独立语义审校；请先生成新的候选稿。`,
+    )
   }
   if (repairDraftArtifact.content.chapters.length > 3) {
     throw new QualityWorkflowError('REPAIR_DRAFT_INVALID', '单份质量修订草稿最多允许三章。')

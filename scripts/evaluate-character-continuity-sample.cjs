@@ -41,6 +41,84 @@ const aliasesOf = (character) => {
   }
 }
 const result = (score, evidence, blockers = []) => ({ score, evidence, blockers })
+const splitSentences = (text) => String(text || '')
+  .split(/[。！？!?；;\n]+/u)
+  .map((item) => item.trim())
+  .filter(Boolean)
+const ACTION_TERMS = ['选择', '决定', '拒绝', '隐瞒', '承认', '改口', '坚持', '拿走', '留下', '取消', '改变', '转移', '提前', '绕开', '交出', '销毁', '带走', '打开', '扣住', '追上', '切断', '报警', '给', '递', '约', '安排', '通知', '提供', '要求', '拦住']
+const CHOICE_TERMS = ['选择', '决定', '拒绝', '隐瞒', '改口', '坚持', '取消', '改变', '转移', '提前', '绕开', '销毁', '切断', '报警', '要求', '临时改', '交换', '阻止', '不肯']
+const COST_TERMS = ['代价', '失去', '错过', '暴露', '被跟踪', '跟踪', '受伤', '扣留', '泄露', '来不及', '没赶上', '断掉', '撕开', '烧掉', '失联', '风险']
+const PAYOFF_TERMS = ['确认', '证实', '查明', '承认', '签名', '签字', '改为', '收到', '拿到', '交出', '打开', '兑现', '回答', '不是']
+const MISJUDGMENT_TERMS = ['误判', '判断错', '猜错', '看错', '没想到', '没料到']
+
+function classifyHookType(text) {
+  const tail = splitSentences(text).slice(-3).join('，')
+  if (/误判|判断错|猜错|看错|认错/u.test(tail)) return 'misjudgment'
+  if (/不再|拒绝|翻脸|别回头|断绝|挂断|拉黑|离开/u.test(tail)) return 'relationship_break'
+  if (/失去|错过|损失|被扣|受伤|烧掉|撕掉|没赶上|来不及/u.test(tail)) return 'loss'
+  if (/确认|证实|查明|签名|签字|承认|原来|不是/u.test(tail)) return 'local_truth'
+  if (/有人|跟踪|盯上|追来|暴露|危险|消失|赶到|来过|先到了/u.test(tail)) return 'new_danger'
+  if (/文件|记录|短信|照片|线索|钥匙|名单|消息|纸|单子/u.test(tail)) return 'new_clue'
+  return 'unclear'
+}
+
+function findAgencyEvidence(chapterText, characters) {
+  const sentences = splitSentences(chapterText)
+  return characters
+    .map((character) => {
+      const aliases = aliasesOf(character)
+      const matched = sentences.filter((sentence) => aliases.some((alias) => sentence.includes(alias)))
+      const actionSentences = matched.filter((sentence) => ACTION_TERMS.some((term) => sentence.includes(term)))
+      const choiceSentences = matched.filter((sentence) => CHOICE_TERMS.some((term) => sentence.includes(term)))
+      return {
+        name: character.fullName,
+        roleType: character.roleType,
+        actionCount: actionSentences.length,
+        actionEvidence: actionSentences.slice(0, 2).map((sentence) => clip(sentence, 100)),
+        independentChoiceCount: choiceSentences.length,
+        independentChoiceEvidence: choiceSentences.slice(0, 2).map((sentence) => clip(sentence, 100)),
+      }
+    })
+    .filter((item) => item.actionCount > 0)
+}
+
+function buildStateLedger(chapters, characters) {
+  return chapters.map((chapter, index) => {
+    const body = chapter.content || ''
+    const previous = chapters[index - 1]
+    const tail = splitSentences(body).slice(-3).join('，')
+    const agency = findAgencyEvidence(body, characters)
+    const supportingActions = agency.filter((item) => item.roleType !== 'protagonist')
+    const supportingAgency = supportingActions.filter((item) => item.independentChoiceCount > 0)
+    const payoffSignals = hit(body, PAYOFF_TERMS)
+    const costSignals = hit(body, COST_TERMS)
+    const stateSignals = hit(body, ['改变', '改为', '不再', '拿走', '留下', '进入', '离开', '切断', '暴露', '被扣', '关系', '决定', '选择'])
+    const misjudgmentSignals = hit(body, MISJUDGMENT_TERMS)
+    const hookType = classifyHookType(body)
+    const localQuestionPaid = index === 0
+      ? null
+      : payoffSignals.length > 0 && stateSignals.length > 0
+    const durableStateChange = index === 0
+      ? stateSignals.length > 0
+      : stateSignals.length >= 2 && costSignals.length > 0
+    return {
+      chapter: chapter.chapterNum,
+      entryState: previous ? clip(splitSentences(previous.content || '').slice(-2).join('，'), 180) : '开篇，无上章状态',
+      exitState: clip(tail, 180),
+      stateChangeSignals: [...new Set(stateSignals)].slice(0, 8),
+      durableStateChange,
+      localQuestionPaid,
+      payoffSignals: [...new Set(payoffSignals)].slice(0, 8),
+      costSignals: [...new Set(costSignals)].slice(0, 8),
+      misjudgmentSignals: [...new Set(misjudgmentSignals)].slice(0, 8),
+      supportingActions,
+      supportingAgency,
+      protagonistAgency: agency.filter((item) => item.roleType === 'protagonist'),
+      hookType,
+      heuristicEvidence: true,
+    }
+  })
+}
 
 async function main() {
   const { initDb } = require(path.join(workspaceRoot, 'electron/database/db.ts'))
@@ -84,6 +162,29 @@ async function main() {
   const pacingScore = Math.min(15, pacingEvidence.reduce((sum, item) => sum + (item.hasStateChange ? 5 : 2), 0))
   evidence.push(result(pacingScore, pacingEvidence.map((item) => '第' + item.chapter + '章状态变化信号' + item.markers.length + '个').join('；'), pacingEvidence.filter((item) => !item.hasStateChange).map((item) => '第' + item.chapter + '章状态变化不足')))
 
+  const stateLedger = buildStateLedger(chapters, characters)
+  const stateLedgerBlockers = stateLedger.slice(1).flatMap((item) => {
+    const blockers = []
+    if (!item.localQuestionPaid) blockers.push('第' + item.chapter + '章没有形成可确认的局部问题回收')
+    if (!item.durableStateChange) blockers.push('第' + item.chapter + '章没有形成带持续代价的不可逆状态变化')
+    if (item.supportingAgency.length === 0) blockers.push('第' + item.chapter + '章没有检测到配角独立行动信号')
+    if (item.costSignals.length === 0) blockers.push('第' + item.chapter + '章缺少可见且持续的代价信号')
+    return blockers
+  })
+  const hookTypes = stateLedger.map((item) => item.hookType)
+  const repeatedHookTypes = [...new Set(hookTypes.filter((type, index) => hookTypes.indexOf(type) !== index && type !== 'unclear'))]
+  const readerQuality = {
+    heuristic: true,
+    stateLedger,
+    hookTypes,
+    hookRotationIssues: repeatedHookTypes.length > 0 ? repeatedHookTypes.map((type) => '钩子类型重复：' + type) : [],
+    protagonistCorrectnessRisk: stateLedger.slice(1).every((item) => item.misjudgmentSignals.length === 0)
+      ? '第 2-3 章未检测到主角误判或错误选择信号，需人工确认主角是否一路正确。'
+      : null,
+    blockers: [...new Set(stateLedgerBlockers)],
+    interpretation: '状态账本是辅助审读信号，不替代模型审校；localQuestionPaid、配角主动性和代价需要结合正文语义复核。',
+  }
+
   const foreshadowTerms = ['第十三户', '借阅单', '七码', '北济路', '钥匙', '转运记录']
   const foreshadowHits = hit(text, foreshadowTerms)
   const foreshadowScore = Math.min(15, foreshadowHits.length * 2 + (chapters[2]?.content?.includes('转运记录') ? 3 : 0))
@@ -120,15 +221,17 @@ async function main() {
     antiAi: evidence[5],
   }
   const blockers = evidence.flatMap((item) => item.blockers)
+  const allBlockers = [...new Set([...blockers, ...stateLedgerBlockers])]
   const total = Object.values(scores).reduce((sum, item) => sum + item.score, 0)
-  const status = blockers.length > 0 || total < 75 ? 'needs_revision' : 'conditional_pass'
+  const status = allBlockers.length > 0 || total < 75 ? 'needs_revision' : 'conditional_pass'
   const report = {
     schemaVersion: 'character-story-evaluation-v1',
     sampleKey: SAMPLE_KEY,
     novel: { id: novel.id, title: fullNovel.title, contextVersion: fullNovel.contextVersion || 1 },
     coverage: { chapters: chapters.length, characters: characters.length, relations: relations.length, hasStateTracking: true },
     scoring: { total, status, scores },
-    blockers: [...new Set(blockers)],
+    blockers: allBlockers,
+    readerQuality,
     recommendations: [
       '补充第 3 章后的人物使用记录和关系变化证据，再进入正式生成。',
       '让顾衡或周启明在后续章节做一次不可替代的独立选择，避免功能角色化。',

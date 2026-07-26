@@ -9,20 +9,17 @@ const {
 } = require('@modelcontextprotocol/sdk/types.js')
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js')
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js')
+const { InMemoryTaskStore } = require('@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const electronExecutable = require('electron')
 const runtimeEntry = path.join(workspaceRoot, 'scripts', 'novelforge-mcp.cjs')
 
-function inferActorType(clientName) {
-  const normalized = String(clientName || '').toLowerCase()
-  if (normalized.includes('claude')) return 'claude_code'
-  if (normalized.includes('codex') || normalized.includes('openai')) return 'codex'
-  return 'api_client'
-}
-
 function mapToolDescriptor(descriptor) {
   const readOnly = descriptor.effect === 'read'
+  const taskSupport = descriptor.taskMode === 'app_async' || descriptor.taskMode === 'mcp_task_optional'
+    ? 'optional'
+    : 'forbidden'
   return {
     name: descriptor.id,
     title: descriptor.title,
@@ -37,7 +34,7 @@ function mapToolDescriptor(descriptor) {
       openWorldHint: descriptor.effect === 'external_effect',
     },
     execution: {
-      taskSupport: descriptor.taskMode === 'mcp_task_optional' ? 'optional' : 'forbidden',
+      taskSupport,
     },
     _meta: {
       'novelforge/version': descriptor.version,
@@ -49,6 +46,55 @@ function mapToolDescriptor(descriptor) {
       'novelforge/timeoutClass': descriptor.timeoutClass,
       'novelforge/tags': descriptor.tags,
     },
+  }
+}
+
+const DEFAULT_TASK_TTL_MS = 30 * 60 * 1000
+const MAX_TASK_TTL_MS = 2 * 60 * 60 * 1000
+const DEFAULT_TASK_POLL_INTERVAL_MS = 1000
+const MIN_TASK_POLL_INTERVAL_MS = 250
+const MAX_TASK_POLL_INTERVAL_MS = 10_000
+
+function boundedNumber(value, fallback, minimum, maximum) {
+  return Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, Math.trunc(value)))
+    : fallback
+}
+
+function taskCreationOptions(taskRequest) {
+  const requestedTtl = taskRequest && typeof taskRequest.ttl === 'number'
+    ? taskRequest.ttl
+    : undefined
+  return {
+    ttl: boundedNumber(requestedTtl, DEFAULT_TASK_TTL_MS, 60_000, MAX_TASK_TTL_MS),
+    pollInterval: boundedNumber(
+      taskRequest && typeof taskRequest.pollInterval === 'number' ? taskRequest.pollInterval : undefined,
+      DEFAULT_TASK_POLL_INTERVAL_MS,
+      MIN_TASK_POLL_INTERVAL_MS,
+      MAX_TASK_POLL_INTERVAL_MS,
+    ),
+  }
+}
+
+function toMcpToolResult(result) {
+  if (result && result.ok) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ data: result.data, meta: result.meta }, null, 2) }],
+      structuredContent: result.data,
+      _meta: { 'novelforge/run': result.meta },
+    }
+  }
+  return {
+    content: [{ type: 'text', text: JSON.stringify({ error: result && result.error, meta: result && result.meta }, null, 2) }],
+    isError: true,
+    _meta: { 'novelforge/run': result && result.meta },
+  }
+}
+
+function toMcpInfrastructureError(error) {
+  return {
+    content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
+    isError: true,
   }
 }
 
@@ -152,6 +198,7 @@ async function main() {
   const runtime = startElectronRuntime()
   const readyState = await runtime.ready
   const descriptors = Array.isArray(readyState.tools) ? readyState.tools : []
+  const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
   const grantedScopes = Array.isArray(readyState.scopes) ? readyState.scopes : []
 
   const server = new Server(
@@ -160,7 +207,14 @@ async function main() {
       capabilities: {
         tools: { listChanged: false },
         resources: { listChanged: false, subscribe: false },
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: { tools: { call: {} } },
+        },
       },
+      taskStore: new InMemoryTaskStore(),
+      defaultTaskPollInterval: DEFAULT_TASK_POLL_INTERVAL_MS,
       instructions: [
         'NovelForge exposes stable, schema-validated novel creation tools.',
         'Start by listing projects or reading the capabilities resource.',
@@ -175,7 +229,13 @@ async function main() {
     tools: descriptors.map(mapToolDescriptor),
   }))
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const descriptor = descriptorById.get(request.params.name)
+    const taskRequested = Boolean(request.params.task)
+    if (taskRequested && (!descriptor || (descriptor.taskMode !== 'app_async' && descriptor.taskMode !== 'mcp_task_optional'))) {
+      throw new Error(`Tool ${request.params.name} does not support task execution.`)
+    }
+
     const client = server.getClientVersion()
     const input = request.params.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments
@@ -186,7 +246,7 @@ async function main() {
     const approvalToken = typeof requestMeta['novelforge/approvalToken'] === 'string'
       ? requestMeta['novelforge/approvalToken']
       : undefined
-    const result = await runtime.call('call', {
+    const runtimePayload = {
       request: {
         toolId: request.params.name,
         input,
@@ -194,7 +254,7 @@ async function main() {
       },
       context: {
         actor: {
-          type: inferActorType(client && client.name),
+          type: 'api_client',
           actorId: client && client.name ? `${client.name}:${client.version || 'unknown'}` : 'mcp-client',
           clientId: client && client.name ? client.name : 'mcp-client',
           sessionId: `stdio-${process.pid}`,
@@ -202,21 +262,28 @@ async function main() {
         requestId: `mcp-${randomUUID()}`,
         locale: Intl.DateTimeFormat().resolvedOptions().locale || 'zh-CN',
       },
-    })
-
-    if (!result.ok) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: result.error, meta: result.meta }, null, 2) }],
-        isError: true,
-        _meta: { 'novelforge/run': result.meta },
-      }
     }
 
-    return {
-      content: [{ type: 'text', text: JSON.stringify({ data: result.data, meta: result.meta }, null, 2) }],
-      structuredContent: result.data,
-      _meta: { 'novelforge/run': result.meta },
+    if (taskRequested) {
+      if (!extra.taskStore) throw new Error('MCP task store is not available.')
+      const taskStore = extra.taskStore
+      const task = await taskStore.createTask(taskCreationOptions(request.params.task))
+      void runtime.call('call', runtimePayload)
+        .then(async (result) => {
+          const current = await taskStore.getTask(task.taskId)
+          if (!current || current.status === 'cancelled') return
+          await taskStore.storeTaskResult(task.taskId, 'completed', toMcpToolResult(result))
+        })
+        .catch(async (error) => {
+          const current = await taskStore.getTask(task.taskId)
+          if (!current || current.status === 'cancelled') return
+          await taskStore.storeTaskResult(task.taskId, 'failed', toMcpInfrastructureError(error))
+        })
+      return { task }
     }
+
+    const result = await runtime.call('call', runtimePayload)
+    return toMcpToolResult(result)
   })
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({

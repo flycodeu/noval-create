@@ -188,7 +188,11 @@ function scopeMetrics(
   const selectedChapters = scope.type === 'novel'
     ? dashboard.chapterDetails
     : dashboard.chapterDetails.filter((chapter) => scope.chapterNums.includes(chapter.chapterNum))
-  const scoredChapters = selectedChapters.filter((entry) => entry.overallScore > 0)
+  // A chapter gate can expose a normalized score even when no AI score
+  // snapshot exists. That score is useful for the gate dashboard, but it is
+  // not an analyzed chapter and must not inflate quality coverage or the
+  // average AI review score in this report.
+  const scoredChapters = selectedChapters.filter((entry) => entry.dimensions.length > 0 && entry.overallScore > 0)
   const volume = scope.type === 'volume'
     ? dashboard.volumeQualityMetrics.find((entry) => entry.volumeId === scope.volumeId)
     : undefined
@@ -201,15 +205,15 @@ function scopeMetrics(
   const analyzedChapterCount = scope.type === 'novel'
     ? dashboard.novelQualityMetrics.analyzedChapterCount
     : scope.type === 'volume'
-      ? volume?.analyzedChapterCount || scoredChapters.length
-      : chapter && chapter.overallScore > 0 ? 1 : 0
+      ? typeof volume?.analyzedChapterCount === 'number' ? volume.analyzedChapterCount : scoredChapters.length
+      : chapter && chapter.dimensions.length > 0 && chapter.overallScore > 0 ? 1 : 0
   const coverageRate = totalChapterCount > 0 ? clampScore((analyzedChapterCount / totalChapterCount) * 100) : 0
   const averageOverallScore = scoredChapters.length > 0
     ? clampScore(scoredChapters.reduce((sum, entry) => sum + entry.overallScore, 0) / scoredChapters.length)
-    : scope.type === 'novel' ? clampScore(dashboard.averageOverallScore) : 0
+    : 0
   const averageAiLikeRate = scoredChapters.length > 0
     ? clampScore(scoredChapters.reduce((sum, entry) => sum + entry.aiLikeRate, 0) / scoredChapters.length)
-    : scope.type === 'novel' ? clampScore(dashboard.averageAiLikeRate) : 0
+    : 0
   const scopeRisks = collectScopeRisks(dashboard, scope)
   return {
     healthScore: scope.type === 'novel'

@@ -51,8 +51,8 @@ const candidate: RecommendationCandidate = {
   contextVersion: 4,
   contentHash: hash,
   snapshot: { version: 'v1' },
-  actorType: 'codex',
-  actorId: 'codex-test',
+  actorType: 'api_client',
+  actorId: 'api-test',
   clientId: 'vitest',
   approvalId: 'approved-1',
   lockedAt: '2026-07-11T00:01:00.000Z',
@@ -60,7 +60,7 @@ const candidate: RecommendationCandidate = {
 }
 
 const allScopes = Object.values(AGENT_TOOL_SCOPES)
-const actor = { type: 'codex' as const, actorId: 'codex-test', clientId: 'vitest' }
+const actor = { type: 'api_client' as const, actorId: 'api-test', clientId: 'vitest' }
 
 function dependencies() {
   return {
@@ -80,8 +80,8 @@ function dependencies() {
         evidenceCompleteness: 'complete' as const,
         evidence: {},
         policy: RECOMMENDATION_POLICY,
-        actorType: 'codex',
-        actorId: 'codex-test',
+        actorType: 'api_client',
+        actorId: 'api-test',
         clientId: 'vitest',
         approvalId: 'approved-1',
         confirmedBy: 'editor-1',

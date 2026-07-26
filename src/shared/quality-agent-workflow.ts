@@ -228,6 +228,7 @@ export interface AgentQualityRepairDraftChapter {
   warnings: string[]
   factGuard: ChapterOptimizationFactGuard
   qualityGate: ChapterOptimizationQualityGate
+  structuralGate?: import('../types').ChapterStructuralRepairGate
   taskId: number | null
 }
 
@@ -254,6 +255,7 @@ export interface ApplyAgentQualityRepairDraftInput {
   novelId: number
   repairPlanArtifactId: string
   repairItemIds?: string[]
+  chapterNums?: number[]
   maxChapters?: number
   executionMode?: 'fast' | 'balanced' | 'premium' | 'review_first' | 'cost_saver'
   extraRequirements?: string

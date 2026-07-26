@@ -4736,6 +4736,8 @@ export interface ChapterOptimizationFactGuard {
   introducedTrackedEntities: string[]
   removedTrackedEntities: string[]
   changedNumbers: string[]
+  /** Structural-repair-only signals for newly introduced material facts. */
+  unsupportedNarrativeFacts?: string[]
   endingHookChanged: boolean
   aiProcessLeakCount: number
 }
@@ -4755,6 +4757,20 @@ export interface ChapterOptimizationQualityGate {
   languageDriftAfter: LanguageDriftMetrics
 }
 
+export interface ChapterStructuralRepairGate {
+  required: boolean
+  safeToApply: boolean
+  warnings: string[]
+  stateChangeSignals: string[]
+  payoffSignals: string[]
+  costSignals: string[]
+  choiceSignals: string[]
+  supportingAgencySignals: string[]
+  misjudgmentSignals: string[]
+  changedSentenceRate: number
+  scopeExpansionRatio: number
+}
+
 export interface ChapterOptimizeResult {
   originalContent: string
   optimizedContent: string
@@ -4764,6 +4780,7 @@ export interface ChapterOptimizeResult {
   warnings: string[]
   factGuard: ChapterOptimizationFactGuard
   qualityGate: ChapterOptimizationQualityGate
+  structuralGate?: ChapterStructuralRepairGate
   taskId?: number
   optimizationPasses?: number
 }

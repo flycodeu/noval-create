@@ -27,7 +27,7 @@ const artifact: AgentArtifact = {
 }
 
 const context = {
-  actor: { type: 'codex' as const, actorId: 'codex-test', clientId: 'vitest' },
+  actor: { type: 'api_client' as const, actorId: 'api-test', clientId: 'vitest' },
   scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.contextRead],
 }
 

@@ -39,7 +39,7 @@ function dashboard(options: {
     overallScore: options.average ?? 88,
     aiLikeRate: options.aiLike ?? 12,
     weakDimensions: [],
-    dimensions: [],
+    dimensions: [{ name: 'continuity', score: options.average ?? 88 }],
   }))
   return {
     totalChaptersScored: analyzed,
@@ -144,5 +144,29 @@ describe('agent quality evaluation', () => {
 
     expect(report.findings.filter((finding) => finding.title === '本卷风险')).toHaveLength(1)
     expect(report.findings.some((finding) => finding.title === '外卷风险')).toBe(false)
+  })
+
+  it('does not count chapter-gate fallback scores as AI quality coverage', () => {
+    const source = dashboard({ total: 2, analyzed: 0, average: 0 })
+    source.chapterDetails = source.chapterDetails.map((chapter) => ({
+      ...chapter,
+      overallScore: 4,
+      dimensions: [],
+    }))
+
+    const report = buildAgentQualityReport({
+      requestFingerprint: `sha256:${'d'.repeat(64)}`,
+      profile: 'longform_health_v1',
+      scope: { type: 'novel', label: '整书', chapterNums: [1, 2] },
+      dashboard: source,
+      contextVersion: 2,
+      maxFindings: 20,
+    })
+
+    expect(report.metrics.averageOverallScore).toBe(0)
+    expect(report.metrics.coverageRate).toBe(0)
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'quality_coverage', blocking: true }),
+    ]))
   })
 })

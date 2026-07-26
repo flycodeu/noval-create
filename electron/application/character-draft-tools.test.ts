@@ -75,7 +75,7 @@ const commitArtifact = baseArtifact<CharacterCommitDiffContent>({
 })
 
 const allScopes = Object.values(AGENT_TOOL_SCOPES)
-const actor = { type: 'codex' as const, actorId: 'codex-test', clientId: 'vitest' }
+const actor = { type: 'api_client' as const, actorId: 'api-test', clientId: 'vitest' }
 
 function dependencies() {
   return {

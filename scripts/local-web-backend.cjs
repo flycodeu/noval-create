@@ -176,7 +176,7 @@ function createRuntime() {
         extraParamsJson: modelService.normalizeModelExtraParamsJson(config.extraParamsJson, provider),
         apiKey: config.apiKey ? MASKED_KEY : '',
       }
-    })
+    }).filter((config) => modelService.isSupportedModelProvider(config.provider))
   }
 
   function createModel(data) {
@@ -186,9 +186,10 @@ function createRuntime() {
     if (!modelService.isSupportedModelProvider(provider)) {
       throwUserFacingError('model.unknownProvider', { provider })
     }
-    if (provider !== 'custom' && (!payload.apiKey || payload.apiKey === MASKED_KEY)) {
+    if (modelService.providerRequiresApiKey(provider) && (!payload.apiKey || payload.apiKey === MASKED_KEY)) {
       throwUserFacingError('model.apiKeyRequired')
     }
+    if (modelService.isNativeAgentProvider(provider)) payload.apiKey = null
     delete payload.kimiThinking
     const encryptedKey = payload.apiKey ? modelService.encryptApiKey(String(payload.apiKey)) : null
     const result = db.insert(schema.modelConfigs).values({
@@ -222,9 +223,10 @@ function createRuntime() {
     if (providerChanged && payload.apiKey === MASKED_KEY) {
       throwUserFacingError('model.providerChangeNeedsApiKey')
     }
-    if (providerChanged && provider !== 'custom' && !payload.apiKey) {
+    if (providerChanged && modelService.providerRequiresApiKey(provider) && !payload.apiKey) {
       throwUserFacingError('model.apiKeyRequired')
     }
+    if (modelService.isNativeAgentProvider(provider)) payload.apiKey = null
     if ('provider' in payload || (existing && existing.provider)) {
       payload.provider = provider
     }
@@ -364,8 +366,13 @@ function createRuntime() {
       delete: (id) => getDb().delete(schema.modelConfigs).where(eq(schema.modelConfigs.id, requireId(id))).run(),
       setDefault: (id) => {
         const modelId = requireId(id)
-        getDb().update(schema.modelConfigs).set({ isDefault: 0 }).run()
-        getDb().update(schema.modelConfigs).set({ isDefault: 1 }).where(eq(schema.modelConfigs.id, modelId)).run()
+        const db = getDb()
+        const config = db.select().from(schema.modelConfigs).where(eq(schema.modelConfigs.id, modelId)).all()[0]
+        if (!config || !modelService.isSupportedModelProvider(config.provider)) {
+          throwUserFacingError('model.unknownProvider', { provider: (config && config.provider) || 'unknown' })
+        }
+        db.update(schema.modelConfigs).set({ isDefault: 0 }).run()
+        db.update(schema.modelConfigs).set({ isDefault: 1 }).where(eq(schema.modelConfigs.id, modelId)).run()
       },
       test: (id) => modelService.testAdapter(requireId(id)),
     },

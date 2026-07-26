@@ -50,6 +50,24 @@ describe('content guardrail repair threshold', () => {
     expect(findings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(false)
   })
 
+  it('does not treat two negative facts as a not-but definition', () => {
+    const findings = collectQualityGuardrailFindings('笔迹不是她母亲的，不是护士刚才当面写字的那种力度。', '历史正剧')
+
+    expect(findings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(false)
+  })
+
+  it('does not cross a sentence boundary when detecting not-but definitions', () => {
+    const findings = collectQualityGuardrailFindings('我不是第一次被联系过。但今天是第一次有人提前到了。', '历史正剧')
+
+    expect(findings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(false)
+  })
+
+  it('flags the split “并非……实际是……” definition pattern', () => {
+    const findings = collectQualityGuardrailFindings('她并非来取原件。实际是来确认谁动过档案。', '历史正剧')
+
+    expect(findings.some((finding) => finding.code === 'not_but_definition_pattern')).toBe(true)
+  })
+
   it('does not treat tracked character names as descriptive repetition', () => {
     const content = Array.from({ length: 20 }, (_, index) => `第${index + 1}次点名时，郭大桩都站在炉门旁，手里还攥着当班记录。`).join('\n')
 

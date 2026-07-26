@@ -930,6 +930,45 @@ function validateGoldenThreeOpening(paragraphs: string[], context: ContractValid
   })
 }
 
+function validateGoldenThreeStateDelivery(paragraphs: string[], context: ContractValidationContext): ContractValidationItem | null {
+  if (context.currentChapterNum < 2 || context.currentChapterNum > 3) return null
+  const text = paragraphs.join('\n')
+  const stateMarkers = ['改为', '不再', '拿走', '带走', '交出', '离开', '进入', '切断', '暴露', '关系', '失去', '破裂', '被扣', '改变', '决定']
+  const payoffMarkers = ['确认', '证实', '查明', '承认', '签名', '签字', '收到', '拿到', '交出', '打开', '兑现', '回答', '不是']
+  const costMarkers = ['代价', '失去', '错过', '暴露', '跟踪', '受伤', '扣留', '泄露', '来不及', '烧掉', '失联', '风险', '危险', '有人先', '先到了']
+  const choiceMarkers = ['选择', '决定', '拒绝', '隐瞒', '改口', '坚持', '主动', '临时改', '要求', '交换', '阻止', '不肯']
+  const stateHits = [...new Set(stateMarkers.filter((marker) => text.includes(marker)))]
+  const payoffHits = [...new Set(payoffMarkers.filter((marker) => text.includes(marker)))]
+  const costHits = [...new Set(costMarkers.filter((marker) => text.includes(marker)))]
+  const choiceHits = [...new Set(choiceMarkers.filter((marker) => text.includes(marker)))]
+  const chapterTwoPass = stateHits.length >= 2 && choiceHits.length > 0 && costHits.length > 0
+  const chapterThreePass = payoffHits.length > 0 && stateHits.length >= 2 && costHits.length > 0
+  const passed = context.currentChapterNum === 2 ? chapterTwoPass : chapterThreePass
+  const partial = context.currentChapterNum === 2
+    ? stateHits.length > 0 || choiceHits.length > 0 || costHits.length > 0
+    : payoffHits.length > 0 || stateHits.length > 0 || costHits.length > 0
+  const verdict: ContractValidationVerdict = passed ? 'pass' : partial ? 'weak' : 'missing'
+  const expected = context.currentChapterNum === 2
+    ? '第 2 章必须把上章疑问落到现实状态变化、配角主动选择和持续代价。'
+    : '第 3 章必须先兑现一条局部问题，再让兑现带来损失、关系后果或暴露风险。'
+  return makeItem({
+    contractItemType: 'golden_three_state_delivery',
+    expected,
+    verdict,
+    evidenceExcerpt: clipExcerpt([
+      `状态=${stateHits.join('、') || '无'}`,
+      `回收=${payoffHits.join('、') || '无'}`,
+      `代价=${costHits.join('、') || '无'}`,
+      `主动选择=${choiceHits.join('、') || '无'}`,
+    ].join('；'), 180),
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : context.currentChapterNum === 2
+        ? '补出一个不可逆的现实变化、一名配角基于自身利益做出的主动决定，以及该决定带来的持续代价；不要只追加解释或新线索。'
+        : '先回收上一章已经建立的问题或证据，再让回收造成关系、资源、位置或暴露风险的真实后果；不要用新谜团代替阶段性回报。',
+  })
+}
+
 function matchExecutionChainSteps(text: string, stepMarkers: string[][]): boolean[] {
   return stepMarkers.map((markers) => countMarkers(text, markers) > 0)
 }
@@ -1297,6 +1336,9 @@ export function validateChapterContractDelivery(input: {
 
   const goldenThreeOpeningItem = validateGoldenThreeOpening(paragraphs, context)
   if (goldenThreeOpeningItem) items.push(goldenThreeOpeningItem)
+
+  const goldenThreeStateItem = validateGoldenThreeStateDelivery(paragraphs, context)
+  if (goldenThreeStateItem) items.push(goldenThreeStateItem)
 
   const themeItem = validateThemeResponse(paragraphs, context)
   if (themeItem) items.push(themeItem)
