@@ -19,6 +19,7 @@ import ActionBar from '../../../components/novel/common/ActionBar'
 import SectionHeader from '../../../components/novel/common/SectionHeader'
 import ContractPanel, { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
+import ReviewNotesPanel from '../../../components/novel/writing/ReviewNotesPanel'
 import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
   AI_EXECUTION_MODE_OPTIONS,
@@ -2441,6 +2442,9 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
       </div>
       <div className="novel-writing-shell__insight-stack">
+        <InsightCard title="审校意见分层" eyebrow="必须处理 / 建议处理 / 仅参考" tone="soft">
+          <ReviewNotesPanel notes={reviewNotes as Record<string, unknown> | null} />
+        </InsightCard>
         <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
           {publishCheck ? (
             <div className="novel-gate-report">
