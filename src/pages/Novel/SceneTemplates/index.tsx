@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, List, Modal, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -182,20 +182,29 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!selectedItem || selectedIsBuiltin) return
-    try {
-      await window.electron.sceneTemplate.delete(selectedItem.id)
-      creatingRef.current = false
-      message.success(getUserFacingMessage('sceneTemplate.deleted'))
-      setSelectedId(null)
-      form.setFieldsValue(EMPTY_VALUES)
-      notifyWorkspaceMutation()
-      await refresh()
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.deleteFailed'))
-    }
+    Modal.confirm({
+      title: `删除场景模板「${selectedItem.name}」？`,
+      content: '删除后无法恢复；已使用该模板的章节不会自动改写。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.sceneTemplate.delete(selectedItem.id)
+          creatingRef.current = false
+          message.success(getUserFacingMessage('sceneTemplate.deleted'))
+          setSelectedId(null)
+          form.setFieldsValue(EMPTY_VALUES)
+          notifyWorkspaceMutation()
+          await refresh()
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
   }
 
   return (

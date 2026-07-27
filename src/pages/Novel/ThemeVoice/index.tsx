@@ -499,7 +499,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <>
           <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" hint="阅读预期、主题、情感核心、视角、时态、风格、对白。" />
           <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} hint="母题、叙事调度、叙述距离、口吻词、描写规则、禁用表达。" />
-          <WorkspaceMetric label="修订任务" value={stats.revisionTaskCount} hint="显示当前修订任务数量。" />
+          <WorkspaceMetric label="修订任务" value={stats.revisionTaskCount} />
         </>
       )}
     >
@@ -855,12 +855,24 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
     }
   }
 
-  const handleDelete = async (id: number) => {
-    try {
-      await window.electron.style.delete(id)
-      void loadFingerprints()
-      message.success(getUserFacingMessage('themeVoice.deleted'))
-    } catch { /* ignore */ }
+  const handleDelete = (id: number, name: string) => {
+    Modal.confirm({
+      title: `删除风格指纹「${name}」？`,
+      content: '删除后无法恢复；如果它正在生效，系统会回退到兜底顺序。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.style.delete(id)
+          await loadFingerprints()
+          message.success(getUserFacingMessage('themeVoice.deleted'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
   }
 
   return (
@@ -921,7 +933,7 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
                         size="small"
                         danger
                         icon={<DeleteOutlined />}
-                        onClick={() => void handleDelete(fp.id)}
+                        onClick={() => handleDelete(fp.id, fp.name)}
                       />,
                     ]}
                   >

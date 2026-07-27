@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, List, Modal, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -180,20 +180,29 @@ export default function GlossaryPage({ novelId }: Props) {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!selectedItem) return
-    try {
-      await window.electron.glossary.delete(selectedItem.id)
-      creatingRef.current = false
-      message.success(getUserFacingMessage('glossary.deleted'))
-      setSelectedId(null)
-      form.setFieldsValue(EMPTY_VALUES)
-      notifyWorkspaceMutation()
-      await refresh()
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.deleteFailed'))
-    }
+    Modal.confirm({
+      title: `删除术语「${selectedItem.term}」？`,
+      content: '删除后无法恢复；正文中的历史引用不会自动改写。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.glossary.delete(selectedItem.id)
+          creatingRef.current = false
+          message.success(getUserFacingMessage('glossary.deleted'))
+          setSelectedId(null)
+          form.setFieldsValue(EMPTY_VALUES)
+          notifyWorkspaceMutation()
+          await refresh()
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
   }
 
   const handleCreate = () => {

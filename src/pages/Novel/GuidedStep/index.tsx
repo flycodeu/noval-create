@@ -338,7 +338,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="书名、简介、原始背景、扩展背景" />
-            <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} hint="显示当前累计字数。" />
+            <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} />
           </>
         )}
         aside={(
@@ -422,7 +422,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${projectBrief.readyCount}/${progress.totalCount}`} tone="warm" hint="平台模式、赛道、读者、承诺、卖点、参考系" />
-            <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} hint="显示基础信息状态。" />
+            <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} />
           </>
         )}
       >
@@ -476,7 +476,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="定位、核心信息、主角起点、约束" />
-            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} hint="显示背景信息状态。" />
+            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} />
           </>
         )}
       >
@@ -530,7 +530,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" hint="主题、情感核心、视角、时态、风格规则、对白规则" />
-            <WorkspaceMetric label="立项状态" value={isProjectBriefReady(currentNovel) ? '已完成' : '待补齐'} hint="显示项目立项状态。" />
+            <WorkspaceMetric label="立项状态" value={isProjectBriefReady(currentNovel) ? '已完成' : '待补齐'} />
           </>
         )}
       >
@@ -584,7 +584,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="规则状态" value={isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'} tone="warm" hint="时间、势力、种族、等级和语言边界" />
-            <WorkspaceMetric label="准备状态" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '基础设定未完成'} hint="显示基础设定状态。" />
+            <WorkspaceMetric label="准备状态" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '基础设定未完成'} />
           </>
         )}
       >

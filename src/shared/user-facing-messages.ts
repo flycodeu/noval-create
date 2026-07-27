@@ -490,6 +490,7 @@ export const USER_FACING_MESSAGES = {
   'growthSystem.trackTitleRequired': '请填写轨道标题。',
   'growthSystem.poolNameRequired': '请填写资源池名称。',
   'growthSystem.writebackTitleRequired': '请填写回写标题。',
+  'growthSystem.deleted': '成长系统记录已删除。',
   'growthSystem.chapterBound': '章节合同已绑定成长约束。',
   'growthSystem.volumeBound': '卷级节奏已绑定成长约束。',
   'infoGapBoard.titleRequired': '请先填写信息点标题。',

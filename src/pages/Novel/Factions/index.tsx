@@ -331,20 +331,29 @@ export default function FactionsPage({ novelId }: Props) {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!selectedItem) return
-    try {
-      await window.electron.faction.delete(selectedItem.id)
-      creatingRef.current = false
-      setSelectedId(null)
-      form.setFieldsValue(EMPTY_VALUES)
-      notifyWorkspaceMutation()
-      await Promise.all([refresh(), refreshGraph()])
-      message.success(getUserFacingMessage('faction.deleted'))
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.deleteFailed'))
-    }
+    Modal.confirm({
+      title: `删除势力「${selectedItem.name}」？`,
+      content: '删除后不会自动清理其他模块中的引用，请确认这个势力已不再使用。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.faction.delete(selectedItem.id)
+          creatingRef.current = false
+          setSelectedId(null)
+          form.setFieldsValue(EMPTY_VALUES)
+          notifyWorkspaceMutation()
+          await Promise.all([refresh(), refreshGraph()])
+          message.success(getUserFacingMessage('faction.deleted'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
   }
 
   const handleClear = useCallback(() => {

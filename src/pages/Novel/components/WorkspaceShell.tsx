@@ -192,6 +192,7 @@ export function WorkspaceStepGuide({
             <div className="novel-step-guide__index">{String(index + 1).padStart(2, '0')}</div>
             <div className="novel-step-guide__copy">
               <strong>{step.title}</strong>
+              {step.description ? <span>{step.description}</span> : null}
             </div>
           </article>
         ))}

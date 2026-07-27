@@ -292,16 +292,25 @@ export default function RevisionCenterPage({ novelId }: Props) {
     }
   }
 
-  const handleDelete = useCallback(async (task: RevisionTask) => {
+  const handleDelete = useCallback((task: RevisionTask) => {
     if (task.taskSource !== 'manual') return
-    try {
-      await window.electron.revision.delete(task.id)
-      message.success(getUserFacingMessage('revisionCenter.deleted'))
-      await refresh()
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'revisionCenter.deleteFailed'))
-    }
+    Modal.confirm({
+      title: `删除修订任务「${task.title}」？`,
+      content: '删除后无法恢复；如果问题仍存在，请重新创建修订任务。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.revision.delete(task.id)
+          message.success(getUserFacingMessage('revisionCenter.deleted'))
+          await refresh()
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'revisionCenter.deleteFailed'))
+        }
+      },
+    })
   }, [refresh])
 
   const handleQuickStatus = useCallback(async (task: RevisionTask, status: RevisionTask['status']) => {

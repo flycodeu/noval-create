@@ -17,6 +17,15 @@ const characterCss = read('src/pages/Novel/Characters/character-workspace.css')
 const factionCss = read('src/pages/Novel/Factions/index.css')
 const writingCss = read('src/pages/Novel/Writing/index.css')
 const outlinePage = read('src/pages/Novel/Outline/index.tsx')
+const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
+const destructiveActionPages = [
+  read('src/pages/Novel/Factions/index.tsx'),
+  read('src/pages/Novel/Glossary/index.tsx'),
+  read('src/pages/Novel/GrowthSystem/index.tsx'),
+  read('src/pages/Novel/RevisionCenter/index.tsx'),
+  read('src/pages/Novel/SceneTemplates/index.tsx'),
+  read('src/pages/Novel/ThemeVoice/index.tsx'),
+]
 
 assertPass(
   'writing editor uses viewport-aware minimum height',
@@ -46,6 +55,22 @@ assertPass(
     && outlinePage.includes('const destinationIndex = expandedChapterPageStart + result.destination.index')
     && outlinePage.includes('index={index}')
     && !outlinePage.includes('index={expandedChapterPageStart + index}'),
+)
+assertPass(
+  'workspace step guide renders supplied descriptions',
+  workspaceShell.includes('{step.description ? <span>{step.description}</span> : null}'),
+)
+assertPass(
+  'destructive workspace actions require confirmation',
+  destructiveActionPages.every((page) => page.includes('Modal.confirm(') && page.includes("okType: 'danger'")),
+)
+assertPass(
+  'tautological guided metrics do not carry redundant hints',
+  !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示当前累计字数。"')
+    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础信息状态。"')
+    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示背景信息状态。"')
+    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示项目立项状态。"')
+    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础设定状态。"'),
 )
 
 console.log('layout governance tests passed')

@@ -250,6 +250,45 @@ export default function GrowthSystemPage({ novelId }: Props) {
     setEventOpen(true)
   }
 
+  const confirmDelete = useCallback((title: string, content: string, action: () => Promise<unknown>) => {
+    Modal.confirm({
+      title,
+      content,
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await action()
+          await refresh()
+          notifyWorkspaceMutation()
+          message.success(getUserFacingMessage('growthSystem.deleted'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
+  }, [notifyWorkspaceMutation, refresh])
+
+  const handleDeleteTrack = useCallback((track: GrowthTrack) => {
+    confirmDelete(`删除成长轨道「${track.title}」？`, '删除后相关绑定不会自动改写，请确认这条轨道已经不再使用。', () => (
+      window.electron.growthSystem.deleteTrack(novelId, track.id)
+    ))
+  }, [confirmDelete, novelId])
+
+  const handleDeletePool = useCallback((pool: ResourcePool) => {
+    confirmDelete(`删除资源池「${pool.name}」？`, '删除后相关章节合同和卷级绑定不会自动改写，请确认这条资源池已经不再使用。', () => (
+      window.electron.growthSystem.deletePool(novelId, pool.id)
+    ))
+  }, [confirmDelete, novelId])
+
+  const handleDeleteEvent = useCallback((event: RewardCostEvent) => {
+    confirmDelete(`删除章节回写「${event.title}」？`, '删除后相关章节合同和卷级绑定不会自动改写，请确认这条回写记录已经不再使用。', () => (
+      window.electron.growthSystem.deleteEvent(novelId, event.id)
+    ))
+  }, [confirmDelete, novelId])
+
   const saveTrack = useCallback(async () => {
     if (saveActionRef.current) return
     saveActionRef.current = true
@@ -359,9 +398,9 @@ export default function GrowthSystemPage({ novelId }: Props) {
       metrics={<><WorkspaceMetric label="收益循环健康度" value={`${health}/100`} tone={health < 60 ? 'warm' : 'cool'} /><WorkspaceMetric label="成长轨道" value={summary.trackCount} /><WorkspaceMetric label="临界资源池" value={summary.criticalPoolCount} tone={summary.criticalPoolCount > 0 ? 'warm' : 'default'} /><WorkspaceMetric label="未解代价链" value={summary.unresolvedCostCount} tone={summary.unresolvedCostCount > 0 ? 'warm' : 'default'} /></>}
     >
       {summary.criticalPoolCount > 0 ? <Alert showIcon type="warning" message="存在稀缺/临界资源池" description="建议优先绑定到卷级节奏和章节合同，避免正文资源无限化。" /> : null}
-      <WorkspacePanel title="统一推进引擎" description="人物/组织/关系成长共用同一轨道面板。"><Table<GrowthTrack> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={tracks} columns={[{ title: '轨道', dataIndex: 'title', width: 220 }, { title: '类型', dataIndex: 'trackType', width: 110, render: (v) => <Tag color={v === 'organization' ? 'purple' : v === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(v)}</Tag> }, { title: '阶段目标', dataIndex: 'stageGoal', render: (v) => v || '未设置' }, { title: '瓶颈', dataIndex: 'bottleneck', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openTrack(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteTrack(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
-      <WorkspacePanel title="跨章资源池与稀缺度管理"><Table<ResourcePool> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={pools} columns={[{ title: '资源池', dataIndex: 'name', width: 220 }, { title: '类型', dataIndex: 'poolType', width: 110 }, { title: '稀缺度', dataIndex: 'scarcityLevel', width: 110, render: (v) => <Tag color={scarcityTone(v)}>{v}</Tag> }, { title: '补给路径', dataIndex: 'replenishPath', render: (v) => v || '未设置' }, { title: '消耗机制', dataIndex: 'consumptionRule', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openPool(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deletePool(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
-      <WorkspacePanel title="章节回写（获得/失去/下一阶段卡点）"><Table<RewardCostEvent> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={events} columns={[{ title: '章节', width: 110, render: (_v, r) => `第${r.chapterNumSnapshot || '?'}章` }, { title: '类型', dataIndex: 'eventType', width: 90, render: (v) => <Tag color={v === 'cost' ? 'volcano' : v === 'bottleneck' ? 'orange' : 'green'}>{v}</Tag> }, { title: '标题', dataIndex: 'title', width: 220 }, { title: '说明', dataIndex: 'summary', render: (v) => v || '无' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openEvent(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteEvent(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="统一推进引擎" description="人物/组织/关系成长共用同一轨道面板。"><Table<GrowthTrack> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={tracks} columns={[{ title: '轨道', dataIndex: 'title', width: 220 }, { title: '类型', dataIndex: 'trackType', width: 110, render: (v) => <Tag color={v === 'organization' ? 'purple' : v === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(v)}</Tag> }, { title: '阶段目标', dataIndex: 'stageGoal', render: (v) => v || '未设置' }, { title: '瓶颈', dataIndex: 'bottleneck', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openTrack(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteTrack(r)}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="跨章资源池与稀缺度管理"><Table<ResourcePool> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={pools} columns={[{ title: '资源池', dataIndex: 'name', width: 220 }, { title: '类型', dataIndex: 'poolType', width: 110 }, { title: '稀缺度', dataIndex: 'scarcityLevel', width: 110, render: (v) => <Tag color={scarcityTone(v)}>{v}</Tag> }, { title: '补给路径', dataIndex: 'replenishPath', render: (v) => v || '未设置' }, { title: '消耗机制', dataIndex: 'consumptionRule', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openPool(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeletePool(r)}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="章节回写（获得/失去/下一阶段卡点）"><Table<RewardCostEvent> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={events} columns={[{ title: '章节', width: 110, render: (_v, r) => `第${r.chapterNumSnapshot || '?'}章` }, { title: '类型', dataIndex: 'eventType', width: 90, render: (v) => <Tag color={v === 'cost' ? 'volcano' : v === 'bottleneck' ? 'orange' : 'green'}>{v}</Tag> }, { title: '标题', dataIndex: 'title', width: 220 }, { title: '说明', dataIndex: 'summary', render: (v) => v || '无' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openEvent(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteEvent(r)}>删除</Button></Space> }]} /></WorkspacePanel>
       <WorkspacePanel title="合同与卷级绑定" description="直接把奖励/代价约束挂到章节合同和卷级节奏。">
         <div className="guided-step__field-grid">
           <div className="guided-step__field-card"><div className="workspace-field-heading">绑定章节合同</div><Space direction="vertical" className="workspace-full-width"><Select value={bindChapterId || undefined} onChange={(v) => setBindChapterId(v || null)} options={chapters.map((c) => ({ value: c.id, label: `第${c.chapterNum}章 · ${c.title || '未命名章节'}` }))} /><Select mode="multiple" value={bindTrackIds} onChange={(v) => setBindTrackIds(v as number[])} options={tracks.map((t) => ({ value: t.id, label: t.title }))} placeholder="成长轨道" /><Select mode="multiple" value={bindPoolIds} onChange={(v) => setBindPoolIds(v as number[])} options={pools.map((p) => ({ value: p.id, label: `${p.name}[${p.scarcityLevel}]` }))} placeholder="资源池" /><Select mode="multiple" value={bindEventIds} onChange={(v) => setBindEventIds(v as number[])} options={events.map((e) => ({ value: e.id, label: `第${e.chapterNumSnapshot || '?'}章·${e.title}` }))} placeholder="回写事件" /><Button type="primary" icon={<SaveOutlined />} disabled={!bindChapterId} onClick={() => bindChapterId && void window.electron.growthSystem.bindChapterContract(novelId, { chapterId: bindChapterId, trackIds: bindTrackIds, poolIds: bindPoolIds, eventIds: bindEventIds }).then(() => message.success(getUserFacingMessage('growthSystem.chapterBound'))).catch((error) => message.error(getErrorMessage(error, 'common.saveFailed')))}>绑定章节合同</Button></Space></div>
