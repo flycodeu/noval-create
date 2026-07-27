@@ -642,11 +642,16 @@ const FALLBACK_ADAPTERS: Partial<Record<WorkspaceQualityRouteKey, FallbackWorksp
       await window.electron.chapter.update(context.currentChapter.id, {
         title: cleanText(fields.title) || context.currentChapter.title,
         outline: cleanText(fields.outline),
-        summary: cleanText(fields.summary),
         content: cleanText(fields.content),
         emotionTone: cleanText(fields.emotionTone),
         targetWords: typeof fields.targetWords === 'number' ? fields.targetWords : context.currentChapter.targetWords,
       })
+      // 正文变更会主动清空摘要，快照恢复需要在正文提交后单独恢复与正文匹配的摘要。
+      if (typeof fields.summary === 'string') {
+        await window.electron.chapter.update(context.currentChapter.id, {
+          summary: cleanText(fields.summary),
+        })
+      }
     },
   },
   revision: {

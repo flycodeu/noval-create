@@ -5770,6 +5770,7 @@ declare global {
         batchUpdate: (ids: number[], data: Partial<Pick<Chapter, 'status' | 'arcId'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
+        reorder: (ids: number[], startChapterNum: number) => Promise<number>
         getContextPreview: (chapterId: number, options?: {
           executionMode?: AiExecutionMode
           preserveConstraintLabels?: HardConstraintSourceLabel[]

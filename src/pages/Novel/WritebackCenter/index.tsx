@@ -337,13 +337,13 @@ export default function WritebackCenterPage({ novelId }: Props) {
       width: 220,
       render: (_value: unknown, row: ChapterWritebackDiff) => (
         <Space wrap>
-          <Button size="small" icon={<CheckOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'accepted' }), '候选已接受。')}>
+          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<CheckOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'accepted' }), '候选已接受。')}>
             接受
           </Button>
-          <Button size="small" icon={<StopOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'rejected' }), '候选已拒绝。')}>
+          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<StopOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'rejected' }), '候选已拒绝。')}>
             拒绝
           </Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(row)}>
+          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<EditOutlined />} onClick={() => openEditModal(row)}>
             编辑
           </Button>
         </Space>

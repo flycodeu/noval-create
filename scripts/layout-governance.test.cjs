@@ -16,6 +16,7 @@ const mapCss = read('src/pages/Novel/MapExplorer/map-explorer.css')
 const characterCss = read('src/pages/Novel/Characters/character-workspace.css')
 const factionCss = read('src/pages/Novel/Factions/index.css')
 const writingCss = read('src/pages/Novel/Writing/index.css')
+const outlinePage = read('src/pages/Novel/Outline/index.tsx')
 
 assertPass(
   'writing editor uses viewport-aware minimum height',
@@ -38,6 +39,13 @@ assertPass(
 assertPass(
   'faction graph canvas avoids a fixed desktop height',
   !factionCss.includes('min-height: 560px') && factionCss.includes('min-height: clamp('),
+)
+assertPass(
+  'outline pagination keeps drag indices local to the rendered page',
+  outlinePage.includes('const sourceIndex = expandedChapterPageStart + result.source.index')
+    && outlinePage.includes('const destinationIndex = expandedChapterPageStart + result.destination.index')
+    && outlinePage.includes('index={index}')
+    && !outlinePage.includes('index={expandedChapterPageStart + index}'),
 )
 
 console.log('layout governance tests passed')

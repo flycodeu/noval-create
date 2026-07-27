@@ -233,6 +233,7 @@ const api = {
     batchUpdate: (ids: number[], data: unknown) => invokeIpc('chapter:batchUpdate', ids, data),
     batchDelete: (ids: number[]) => invokeIpc('chapter:batchDelete', ids),
     batchRenumber: (ids: number[], startChapterNum: number) => invokeIpc('chapter:batchRenumber', ids, startChapterNum),
+    reorder: (ids: number[], startChapterNum: number) => invokeIpc('chapter:reorder', ids, startChapterNum),
     getContextPreview: (chapterId: number, options?: {
       executionMode?: import('../src/shared/ai-execution').AiExecutionMode
       preserveConstraintLabels?: import('../src/types').HardConstraintSourceLabel[]

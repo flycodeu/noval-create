@@ -3,8 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
 
-// Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码
-// （如 "涓婁笅鏂?"）。启动时把当前控制台切到 UTF-8，仅影响显示。
+// Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码。
+// 启动时把当前控制台切到 UTF-8，仅影响显示。
 if (process.platform === 'win32') {
   try {
     execSync('chcp 65001', { stdio: 'ignore' })
@@ -562,18 +562,30 @@ function registerIpcHandlers() {
 
   handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
   handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))
-  handle('chapter:create', (_, novelId, data) => chapterService.createChapter(requireId(novelId, 'novelId'), data))
-  handle('chapter:update', (_, id, data, options) => chapterService.updateChapter(requireId(id), data, options))
+  handle('chapter:create', (_, novelId, data) => chapterService.createChapter(requireId(novelId, 'novelId'), parseObjectPayload(data, 'data')))
+  handle('chapter:update', (_, id, data, options) => chapterService.updateChapter(
+    requireId(id),
+    chapterService.sanitizeChapterUpdatePayload(parseObjectPayload(data, 'data')),
+    chapterService.sanitizeChapterUpdateOptions(options),
+  ))
   handle('chapter:delete', (_, id) => chapterService.deleteChapter(requireId(id)))
   handle('chapter:listVersions', (_, chapterId) => chapterService.listChapterVersions(requireId(chapterId, 'chapterId')))
   handle('chapter:restoreVersion', (_, versionId) => chapterService.restoreChapterVersion(requireId(versionId, 'versionId')))
-  handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), data))
+  handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), parseObjectPayload(data, 'data')))
   handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(requireIds(ids)))
   handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(requireIds(ids), startChapterNum))
+  handle('chapter:reorder', (_, ids, startChapterNum) => chapterService.reorderChapters(requireIds(ids), startChapterNum))
   handle('chapter:getContextPreview', (_, chapterId, options) =>
-    chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId'), options))
+    chapterService.getChapterContextPreview(
+      requireId(chapterId, 'chapterId'),
+      chapterService.sanitizeChapterGenerationOptions(options),
+    ))
   handle('chapter:generateContent', (event, chapterId, options) =>
-    chapterService.generateChapterContent(chapterId, event.sender, options))
+    chapterService.generateChapterContent(
+      requireId(chapterId, 'chapterId'),
+      event.sender,
+      chapterService.sanitizeChapterGenerationOptions(options),
+    ))
   handle('chapter:resumeContent', (event, taskId) =>
     chapterService.resumeChapterPipeline(taskId, event.sender))
   handle('chapter:generateSummary', (_, chapterId) =>

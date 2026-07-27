@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import {
   type Chapter as ChapterRow,
@@ -8,6 +8,7 @@ import {
   chapterContracts,
   chapterSegments,
   chapters,
+  chapterWritebackRuns,
   novels,
   sceneContracts,
   storyMemoryCheckpoints,
@@ -86,6 +87,23 @@ function countWords(text: string): number {
   const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
   const numbers = (text.match(/\d+/g) || []).length
   return chinese + english + numbers
+}
+
+function appendChapterStaleReason(raw: string | null | undefined, reason: string): string {
+  return mergeStoredReasons(raw, [reason])
+}
+
+function buildIdleWritebackStatusJson(contextVersion: number): string {
+  return JSON.stringify({
+    phase: 'idle',
+    retryCount: 0,
+    candidateReady: false,
+    canonApplied: true,
+    blockedGeneration: false,
+    readyForNextChapter: true,
+    contextVersion,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 function asText(value: unknown): string {
@@ -324,7 +342,7 @@ function normalizePartNumbers(novelId: number) {
   }
 }
 
-function normalizeChapterNumbers(novelId: number) {
+export function normalizeChapterNumbers(novelId: number) {
   const db = getDb()
   const now = new Date().toISOString()
   const volumeRows = getVolumeRows(novelId)
@@ -882,7 +900,8 @@ export function ensureStoryStructure(novelId: number): { volumeId: number; partI
     }
   }
 
-  normalizeChapterNumbers(novelId)
+  // 读取/补齐结构不应悄悄改写作者明确设置的章节编号；编号重排由结构批处理或
+  // chapter.reorder 显式完成，并在那里同步所有按章节号保存的引用。
   syncChapterSegmentMetadata(novelId)
   syncPartRanges(novelId)
   return fallback
@@ -1233,14 +1252,43 @@ export function compileChapterFromSegments(
     .map((segment) => segment.content || '')
     .filter((content) => content.trim().length > 0)
     .join('\n\n')
-
-  db.update(chapters).set({
+  const contentChanged = compiledContent !== (chapter.content || '')
+  const now = new Date().toISOString()
+  const nextValues: Partial<typeof chapters.$inferInsert> = {
     content: compiledContent,
     wordCount: countWords(compiledContent),
     compiledFromSegments: 1,
     segmentCount: segments.length,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapters.id, chapterId)).run()
+    updatedAt: now,
+  }
+  if (contentChanged) {
+    const staleReason = '场景编译更新了正文，章节派生审校结果需要刷新'
+    Object.assign(nextValues, {
+      status: 'draft',
+      summary: '',
+      nextChapterSeed: '',
+      continuityStateJson: '',
+      summaryHealthJson: '',
+      contractAuditJson: '',
+      expressionDedupJson: '',
+      hookContinuityJson: '',
+      aiScoreJson: '',
+      reviewNotesJson: '',
+      staleReasonJson: appendChapterStaleReason(chapter.staleReasonJson, staleReason),
+      writebackStatusJson: buildIdleWritebackStatusJson(chapter.contextVersion || 1),
+    })
+    db.update(chapterWritebackRuns).set({
+      status: 'failed',
+      failedAt: now,
+      errorMessage: staleReason,
+      updatedAt: now,
+    }).where(and(
+      eq(chapterWritebackRuns.chapterId, chapterId),
+      inArray(chapterWritebackRuns.status, ['draft', 'ready', 'applying']),
+    ))
+      .run()
+  }
+  db.update(chapters).set(nextValues).where(eq(chapters.id, chapterId)).run()
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(chapter.novelId, 'Chapter segments compiled')

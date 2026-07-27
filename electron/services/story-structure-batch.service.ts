@@ -9,6 +9,7 @@ import {
   timelineEvents,
 } from '../database/schema'
 import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
+import { remapChapterNumberReferences } from './data-cascade.service'
 import type {
   StoryPart,
   StoryPartReorderOperation,
@@ -274,9 +275,24 @@ function markNovelContextChangedInline(novelId: number, reason: string) {
 
 function runStructureTransaction(novelId: number, mutate: () => void) {
   getSqlite().transaction(() => {
+    const beforeChapters = getChapterRows(novelId)
     mutate()
     syncChapterSegmentMetadata(novelId)
     syncPartRanges(novelId)
+
+    const afterChapters = getChapterRows(novelId)
+    const afterById = new Map(afterChapters.map((chapter) => [chapter.id, chapter]))
+    const chapterNumberRemap = new Map<number, number | null>()
+    beforeChapters.forEach((chapter) => {
+      const nextChapter = afterById.get(chapter.id)
+      const nextChapterNum = nextChapter?.chapterNum ?? null
+      if (!nextChapter || nextChapterNum !== chapter.chapterNum) {
+        chapterNumberRemap.set(chapter.chapterNum, nextChapterNum)
+      }
+    })
+    if (chapterNumberRemap.size > 0) {
+      remapChapterNumberReferences(novelId, chapterNumberRemap)
+    }
     syncTimelineStructureAnchors(novelId)
     markNovelContextChangedInline(novelId, 'Story structure changed')
   })()

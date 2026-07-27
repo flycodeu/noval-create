@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, revisionTasks, storyArcs, storyThreads, worldMap } from '../database/schema'
+import { chapters, revisionTasks, storyArcs, worldMap } from '../database/schema'
 import type { ChapterGateLevel, RevisionAutoFixResult, RevisionTask, RewritePlan } from '../../src/types'
 import { buildNovelConsistencyReport } from './consistency.service'
 import { getNovelContextStatus, markNovelContextChanged, runChapterPublishCheck } from './context-impact.service'
@@ -341,18 +341,6 @@ function buildFallbackChapterOutline(chapter: typeof chapters.$inferSelect): str
   ].filter(Boolean).join('\n')
 }
 
-function remapChapterStart(existingNumbers: number[], value?: number | null): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || existingNumbers.length === 0) return null
-  const priorCount = existingNumbers.filter((num) => num < value).length
-  return Math.max(1, Math.min(existingNumbers.length, priorCount + 1))
-}
-
-function remapChapterEnd(existingNumbers: number[], value?: number | null): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || existingNumbers.length === 0) return null
-  const inclusiveCount = existingNumbers.filter((num) => num <= value).length
-  return Math.max(1, Math.min(existingNumbers.length, inclusiveCount || 1))
-}
-
 function renumberNovelChapters(novelId: number): void {
   const db = getDb()
   const chapterRows = db.select().from(chapters)
@@ -361,52 +349,9 @@ function renumberNovelChapters(novelId: number): void {
     .all()
 
   if (chapterRows.length === 0) return
-
-  const existingNumbers = chapterRows.map((chapter) => chapter.chapterNum)
-  let changed = false
-
-  chapterRows.forEach((chapter, index) => {
-    const nextChapterNum = index + 1
-    if (chapter.chapterNum === nextChapterNum) return
-    db.update(chapters).set({
-      chapterNum: nextChapterNum,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.id, chapter.id)).run()
-    changed = true
-  })
-
-  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-  arcRows.forEach((arc) => {
-    const nextStart = remapChapterStart(existingNumbers, arc.chapterStart)
-    const nextEnd = remapChapterEnd(existingNumbers, arc.chapterEnd)
-    if ((arc.chapterStart ?? null) === nextStart && (arc.chapterEnd ?? null) === nextEnd) return
-    db.update(storyArcs).set({
-      chapterStart: nextStart,
-      chapterEnd: nextEnd,
-    }).where(eq(storyArcs.id, arc.id)).run()
-  })
-
-  const threadRows = db.select().from(storyThreads).where(eq(storyThreads.novelId, novelId)).all()
-  threadRows.forEach((thread) => {
-    const nextStart = remapChapterStart(existingNumbers, thread.startChapter)
-    const nextPayoff = remapChapterEnd(existingNumbers, thread.targetPayoffChapter)
-    const nextResolved = remapChapterEnd(existingNumbers, thread.resolvedChapter)
-    if (
-      (thread.startChapter ?? null) === nextStart
-      && (thread.targetPayoffChapter ?? null) === nextPayoff
-      && (thread.resolvedChapter ?? null) === nextResolved
-    ) return
-    db.update(storyThreads).set({
-      startChapter: nextStart,
-      targetPayoffChapter: nextPayoff,
-      resolvedChapter: nextResolved,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyThreads.id, thread.id)).run()
-  })
-
-  if (changed) {
-    markNovelContextChanged(novelId, 'Chapter numbering normalized')
-  }
+  // 统一使用章节服务的事务与完整引用重映射，避免这里只修 storyArc/thread
+  // 而遗漏人物首次出现、词条、记忆检查点和对白指纹等章节号引用。
+  chapterService.batchRenumberChapters(chapterRows.map((chapter) => chapter.id), 1)
 }
 
 async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promise<void> {

@@ -2,12 +2,13 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, chapterWritebackRuns, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { cleanAiFieldText } from '../../src/utils/text'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
 import { assessHistoricalGrounding } from '../../src/shared/genre-system'
 import { countUnresolvedTypedRefs, hasTypedRefOverlay } from '../../src/shared/typed-ref'
 import { getOperatingModeRuntimePolicy, getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
@@ -83,6 +84,7 @@ import {
 import { refreshStoryMemoryCheckpoints } from './story-memory.service'
 import {
   ensureStoryStructure,
+  normalizeChapterNumbers,
   resolveDefaultStructure,
   syncChapterToSegments,
 } from './story-structure.service'
@@ -90,6 +92,7 @@ import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { prepareChapterWritebackRun, prepareChapterWritebackRunWithRetry } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
+import { captureChapterNumberReferenceSnapshot } from './chapter-number-remap.service'
 import { listActiveImpactsForChapter } from './asset-impact.service'
 import { enhanceAiScoreResult, toChapterAiCheckResult } from './ai-score.service'
 import {
@@ -2037,6 +2040,239 @@ export function getChapter(id: number) {
   return chapter
 }
 
+const CHAPTER_STATUS_VALUES = ['outline', 'writing', 'draft', 'reviewing', 'final'] as const
+type ChapterStatusValue = typeof CHAPTER_STATUS_VALUES[number]
+
+const CHAPTER_CREATE_FIELDS = [
+  'chapterNum', 'title', 'outline', 'targetWords', 'emotionTone', 'arcId', 'volumeId', 'partId',
+  'allowedFactIdsJson', 'revealedFactIdsJson', 'status',
+] as const
+
+const CHAPTER_UPDATE_FIELDS = [
+  'title', 'outline', 'scenePlanJson', 'content', 'wordCount', 'summary', 'nextChapterSeed',
+  'bridgePlanJson', 'continuityStateJson', 'reviewNotesJson', 'status', 'aiScoreJson', 'targetWords',
+  'emotionTone', 'chapterNum', 'arcId', 'volumeId', 'partId', 'compiledFromSegments', 'segmentCount',
+  'contextVersion', 'staleReasonJson', 'allowedFactIdsJson', 'revealedFactIdsJson', 'contractAuditJson',
+  'summaryHealthJson', 'expressionDedupJson', 'hookContinuityJson', 'writebackStatusJson',
+] as const
+
+const CHAPTER_EXTERNAL_UPDATE_FIELDS = [
+  // 正文、标题和结构归属是编辑器输入；字数、连续性、评分、审校和上下文等
+  // 派生字段必须由对应 service 重新计算，不能从 IPC/Web 直接覆盖。摘要保留为
+  // 可恢复的工作区字段，但正文发生变化时 updateChapter 会先将其清空。
+  'title', 'outline', 'content', 'summary', 'status', 'targetWords', 'emotionTone',
+  'arcId', 'volumeId', 'partId', 'allowedFactIdsJson', 'revealedFactIdsJson',
+] as const
+
+function pickChapterFields(data: unknown, fields: readonly string[]): Record<string, unknown> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throwUserFacingError('ipc.invalidObject', { name: 'data' })
+  }
+  const source = data as Record<string, unknown>
+  return fields.reduce<Record<string, unknown>>((result, field) => {
+    if (Object.prototype.hasOwnProperty.call(source, field)) result[field] = source[field]
+    return result
+  }, {})
+}
+
+/** IPC/Web 只允许修改编辑器字段；上下文版本、写回状态和审计快照由 service 内部维护。 */
+export function sanitizeChapterUpdatePayload(data: unknown): Record<string, unknown> {
+  return pickChapterFields(data, CHAPTER_EXTERNAL_UPDATE_FIELDS)
+}
+
+/** IPC/Web 只允许选择编辑器版本来源，不能传入内部事务和失效跟踪开关。 */
+export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 'manual-save' | 'ai-rewrite' } {
+  if (value === undefined || value === null) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options' })
+  }
+  const source = (value as Record<string, unknown>).versionSource
+  if (source === undefined) return {}
+  if (source !== 'manual-save' && source !== 'ai-rewrite') {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.versionSource' })
+  }
+  return { versionSource: source }
+}
+
+const CHAPTER_GENERATION_CONSTRAINT_LABELS = [
+  'chapterGoal',
+  'characterStates',
+  'worldStates',
+  'writingContractSummary',
+  'relationSummary',
+  'itemSummary',
+  'openLoops',
+  'continuityNotes',
+  'feedbackRecurrence',
+  'antiAiRules',
+  'styleHardGuard',
+  'genrePacing',
+] as const satisfies readonly HardConstraintSourceLabel[]
+
+/** IPC/Web 只允许章节生成选择已知路由和硬约束来源，避免 malformed options 进入流水线。 */
+export function sanitizeChapterGenerationOptions(value: unknown): {
+  executionMode?: AiExecutionMode
+  preserveConstraintLabels?: HardConstraintSourceLabel[]
+} {
+  if (value === undefined || value === null) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options' })
+  }
+  const source = value as Record<string, unknown>
+  const executionMode = source.executionMode
+  const normalizedMode = normalizeAiExecutionMode(executionMode)
+  if (executionMode !== undefined && !normalizedMode) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.executionMode' })
+  }
+
+  const labels = source.preserveConstraintLabels
+  if (labels === undefined) return normalizedMode ? { executionMode: normalizedMode } : {}
+  if (!Array.isArray(labels)) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.preserveConstraintLabels' })
+  }
+  const invalidLabel = labels.find((label) => !(CHAPTER_GENERATION_CONSTRAINT_LABELS as readonly unknown[]).includes(label))
+  if (invalidLabel !== undefined) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.preserveConstraintLabels' })
+  }
+  return {
+    ...(normalizedMode ? { executionMode: normalizedMode } : {}),
+    preserveConstraintLabels: Array.from(new Set(labels)) as HardConstraintSourceLabel[],
+  }
+}
+
+function normalizeChapterStatus(value: unknown): ChapterStatusValue | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'string' && (CHAPTER_STATUS_VALUES as readonly string[]).includes(value)) return value as ChapterStatusValue
+  throwUserFacingError('ipc.invalidObject', { name: 'data' })
+}
+
+function normalizeChapterRelationId(value: unknown, name: string): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const normalized = typeof value === 'number' ? value : Number(value)
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throwUserFacingError('ipc.invalidPositiveInteger', { name, value: String(value) })
+  }
+  return normalized
+}
+
+function normalizePositiveChapterNumber(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  const normalized = typeof value === 'number' ? value : Number(value)
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throwUserFacingError('ipc.invalidPositiveInteger', { name: 'chapterNum', value: String(value) })
+  }
+  return normalized
+}
+
+function normalizeChapterIds(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throwUserFacingError('ipc.invalidNonEmptyArray', { name: 'ids' })
+  }
+  const ids = value.map((item, index) => {
+    const normalized = typeof item === 'number' ? item : Number(item)
+    if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+      throwUserFacingError('ipc.invalidPositiveInteger', { name: `ids[${index}]`, value: String(item) })
+    }
+    return normalized
+  })
+  return [...new Set(ids)]
+}
+
+function assertChapterNumberAvailable(novelId: number, chapterNum: number, excludeChapterId?: number) {
+  const db = getDb()
+  const matches = db.select({ id: chapters.id })
+    .from(chapters)
+    .where(and(eq(chapters.novelId, novelId), eq(chapters.chapterNum, chapterNum)))
+    .all()
+  if (matches.some((row) => row.id !== excludeChapterId)) {
+    throwUserFacingError('chapter.renumberConflict')
+  }
+}
+
+function loadChapterBatch(ids: unknown): { ids: number[]; rows: Array<typeof chapters.$inferSelect>; novelId: number } {
+  const chapterIds = normalizeChapterIds(ids)
+  const db = getDb()
+  const rows = db.select().from(chapters)
+    .where(inArray(chapters.id, chapterIds))
+    .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+    .all()
+  if (rows.length !== chapterIds.length || new Set(rows.map((row) => row.novelId)).size !== 1) {
+    throwUserFacingError('structure.invalidChapterIds')
+  }
+  return { ids: chapterIds, rows, novelId: rows[0].novelId }
+}
+
+function syncChapterPartRanges(novelId: number) {
+  const db = getDb()
+  db.select().from(storyParts).where(eq(storyParts.novelId, novelId)).all().forEach((part) => {
+    const nums = db.select({ chapterNum: chapters.chapterNum })
+      .from(chapters)
+      .where(eq(chapters.partId, part.id))
+      .all()
+      .map((row) => row.chapterNum)
+      .sort((left, right) => left - right)
+    db.update(storyParts).set({
+      startChapterNum: nums[0] ?? null,
+      endChapterNum: nums.at(-1) ?? null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(storyParts.id, part.id)).run()
+  })
+}
+
+function appendChapterStaleReason(raw: unknown, reason: string): string {
+  const current = typeof raw === 'string' ? raw : ''
+  let values: string[] = []
+  try {
+    const parsed = JSON.parse(current)
+    if (Array.isArray(parsed)) values = parsed.filter((item): item is string => typeof item === 'string')
+  } catch {
+    // Corrupt stale metadata is replaced by a valid, actionable reason.
+  }
+  return JSON.stringify([...new Set([...values, reason].map((item) => item.trim()).filter(Boolean))])
+}
+
+function buildIdleWritebackStatusJson(contextVersion: number): string {
+  return JSON.stringify({
+    phase: 'idle',
+    retryCount: 0,
+    candidateReady: false,
+    canonApplied: true,
+    blockedGeneration: false,
+    readyForNextChapter: true,
+    contextVersion,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function assertChapterRelationsBelongToNovel(
+  novelId: number,
+  relationIds: { volumeId?: number | null; partId?: number | null; arcId?: number | null },
+) {
+  const db = getDb()
+  let volume: typeof storyVolumes.$inferSelect | undefined
+  if (relationIds.volumeId != null) {
+    volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, relationIds.volumeId)).all()[0]
+    if (!volume || volume.novelId !== novelId) throwUserFacingError('volume.notFound')
+  }
+
+  let part: typeof storyParts.$inferSelect | undefined
+  if (relationIds.partId != null) {
+    part = db.select().from(storyParts).where(eq(storyParts.id, relationIds.partId)).all()[0]
+    if (!part || part.novelId !== novelId) throwUserFacingError('part.notFound')
+    if (volume && part.volumeId !== volume.id) throwUserFacingError('chapter.structureConflict')
+  }
+
+  if (relationIds.arcId != null) {
+    const arc = db.select().from(storyArcs).where(eq(storyArcs.id, relationIds.arcId)).all()[0]
+    if (!arc || arc.novelId !== novelId) throwUserFacingError('storyArc.notFound')
+  }
+
+  if (part && relationIds.volumeId !== undefined && relationIds.volumeId !== part.volumeId) {
+    throwUserFacingError('chapter.structureConflict')
+  }
+}
+
 export function createChapter(novelId: number, data: Partial<{
   chapterNum: number
   title: string
@@ -2048,21 +2284,73 @@ export function createChapter(novelId: number, data: Partial<{
   partId: number
   allowedFactIdsJson: string
   revealedFactIdsJson: string
+  status: ChapterStatusValue
 }>) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+  const safeData = pickChapterFields(data, CHAPTER_CREATE_FIELDS) as typeof data & { status?: unknown }
+  const volumeId = normalizeChapterRelationId(safeData.volumeId, 'volumeId')
+  const partId = normalizeChapterRelationId(safeData.partId, 'partId')
+  const arcId = normalizeChapterRelationId(safeData.arcId, 'arcId')
   const defaults = resolveDefaultStructure(novelId)
-  const chapterNum = data.chapterNum ?? (db.select().from(chapters).where(eq(chapters.novelId, novelId)).all().length + 1)
-  const result = db.insert(chapters).values({
+  const explicitPart = partId != null
+    ? db.select().from(storyParts).where(eq(storyParts.id, partId)).all()[0]
+    : undefined
+  const volumePart = partId == null && volumeId != null
+    ? db.select().from(storyParts)
+      .where(eq(storyParts.volumeId, volumeId))
+      .orderBy(asc(storyParts.partNumber), asc(storyParts.id))
+      .all()[0]
+    : undefined
+  let resolvedPartId = partId ?? volumePart?.id ?? (volumeId == null ? defaults.partId : null)
+  const resolvedVolumeId = volumeId ?? explicitPart?.volumeId ?? defaults.volumeId
+  // 先验证显式结构 ID，再决定是否需要为目标卷补建分册，避免无效卷 ID
+  // 触发底层外键异常而不是返回可理解的用户错误。
+  assertChapterRelationsBelongToNovel(novelId, { volumeId, partId, arcId })
+  const chapterNum = normalizePositiveChapterNumber(safeData.chapterNum)
+    ?? ((db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+      .reduce((max, chapter) => Math.max(max, chapter.chapterNum || 0), 0)) + 1)
+  assertChapterNumberAvailable(novelId, chapterNum)
+  const status = normalizeChapterStatus(safeData.status) || 'outline'
+  if (status === 'final') {
+    throwUserFacingError('chapter.publishBlocked', { summary: '新章节必须先完成正文和发布前检查。' })
+  }
+  const result = getSqlite().transaction(() => {
+    if (resolvedPartId == null && volumeId != null) {
+      const nextPartNumber = db.select().from(storyParts)
+        .where(eq(storyParts.volumeId, volumeId))
+        .all()
+        .reduce((max, item) => Math.max(max, item.partNumber || 0), 0) + 1
+      const insertedPart = db.insert(storyParts).values({
+        novelId,
+        volumeId,
+        partNumber: nextPartNumber,
+        title: `第${nextPartNumber}部`,
+        status: 'planning',
+      }).run()
+      resolvedPartId = Number(insertedPart.lastInsertRowid)
+    }
+    assertChapterRelationsBelongToNovel(novelId, {
+      volumeId: resolvedVolumeId,
+      partId: resolvedPartId,
+      arcId,
+    })
+    return db.insert(chapters).values({
     novelId,
-    ...data,
-    volumeId: data.volumeId ?? defaults.volumeId,
-    partId: data.partId ?? defaults.partId,
+    title: typeof safeData.title === 'string' ? safeData.title : undefined,
+    outline: typeof safeData.outline === 'string' ? safeData.outline : undefined,
+    targetWords: typeof safeData.targetWords === 'number' ? safeData.targetWords : undefined,
+    emotionTone: typeof safeData.emotionTone === 'string' ? safeData.emotionTone : undefined,
+    arcId: arcId ?? null,
+    volumeId: resolvedVolumeId,
+    partId: resolvedPartId,
     chapterNum,
+    status,
     compiledFromSegments: 0,
     segmentCount: 0,
-    allowedFactIdsJson: data.allowedFactIdsJson || '[]',
-    revealedFactIdsJson: data.revealedFactIdsJson || '[]',
+    allowedFactIdsJson: typeof safeData.allowedFactIdsJson === 'string' && safeData.allowedFactIdsJson ? safeData.allowedFactIdsJson : '[]',
+    revealedFactIdsJson: typeof safeData.revealedFactIdsJson === 'string' && safeData.revealedFactIdsJson ? safeData.revealedFactIdsJson : '[]',
     contextVersion: novel?.contextVersion || 1,
     staleReasonJson: JSON.stringify([]),
     writebackStatusJson: JSON.stringify({
@@ -2075,7 +2363,8 @@ export function createChapter(novelId: number, data: Partial<{
       contextVersion: novel?.contextVersion || 1,
       updatedAt: new Date().toISOString(),
     }),
-  }).run()
+    }).run()
+  })()
   ensureStoryStructure(novelId)
   syncNovelLifecycleStatus(novelId)
   return Number(result.lastInsertRowid)
@@ -2111,19 +2400,85 @@ export function updateChapter(id: number, data: Partial<{
   expressionDedupJson: string
   hookContinuityJson: string
   writebackStatusJson: string
-}>, options: { skipStaleTracking?: boolean; versionSource?: ChapterVersionSource | false } = {}) {
+}>, options: {
+  skipStaleTracking?: boolean
+  versionSource?: ChapterVersionSource | false
+  allowChapterNumberChange?: boolean
+} = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
+  if (!previous) throwUserFacingError('chapter.notFound')
+  const safeData = pickChapterFields(data, CHAPTER_UPDATE_FIELDS) as typeof data
+  const normalizedStatus = normalizeChapterStatus(safeData.status)
+  if (normalizedStatus !== undefined) safeData.status = normalizedStatus
+  const volumeId = normalizeChapterRelationId(safeData.volumeId, 'volumeId')
+  const partId = normalizeChapterRelationId(safeData.partId, 'partId')
+  const arcId = normalizeChapterRelationId(safeData.arcId, 'arcId')
+  const nextVolumeId = volumeId !== undefined ? volumeId : previous.volumeId
+  const nextPartId = partId !== undefined ? partId : previous.partId
+  assertChapterRelationsBelongToNovel(previous.novelId, {
+    volumeId: nextVolumeId,
+    partId: nextPartId,
+    arcId,
+  })
+
+  if (safeData.chapterNum !== undefined) {
+    const nextChapterNum = normalizePositiveChapterNumber(safeData.chapterNum)
+    if (nextChapterNum !== undefined && nextChapterNum !== previous.chapterNum) {
+      assertChapterNumberAvailable(previous.novelId, nextChapterNum, id)
+      if (!options.allowChapterNumberChange) throwUserFacingError('chapter.renumberConflict')
+    }
+    safeData.chapterNum = nextChapterNum
+  }
+
+  const hasContentChange = safeData.content !== undefined
+  if (hasContentChange && typeof safeData.content !== 'string') {
+    throwUserFacingError('ipc.invalidObject', { name: 'data' })
+  }
+  const contentChanged = hasContentChange && safeData.content !== previous.content
+  if (contentChanged) {
+    // 正文变化后，所有依赖正文的结果必须重新生成；即使调用方携带 final，也不能
+    // 把未经重新验收的新正文继续标记为已完成。
+    safeData.wordCount = countChineseWords(safeData.content as string)
+    safeData.status = 'draft'
+    safeData.summary = ''
+    safeData.nextChapterSeed = ''
+    safeData.continuityStateJson = ''
+    safeData.summaryHealthJson = ''
+    safeData.contractAuditJson = ''
+    safeData.expressionDedupJson = ''
+    safeData.hookContinuityJson = ''
+    safeData.aiScoreJson = ''
+    // 内部流水线可能在提交新正文的同一调用中携带“新一轮”审校结果；
+    // 外部 IPC/Web 已将 reviewNotesJson 排除在白名单之外，因此不会复用旧备注。
+    if (safeData.reviewNotesJson === undefined) safeData.reviewNotesJson = ''
+    safeData.writebackStatusJson = buildIdleWritebackStatusJson(previous.contextVersion || 1)
+    const staleReason = '正文已更新，章节派生审校结果需要刷新'
+    safeData.staleReasonJson = appendChapterStaleReason(safeData.staleReasonJson ?? previous.staleReasonJson, staleReason)
+    const invalidatedAt = new Date().toISOString()
+    db.update(chapterWritebackRuns).set({
+      status: 'failed',
+      failedAt: invalidatedAt,
+      errorMessage: staleReason,
+      updatedAt: invalidatedAt,
+    }).where(and(
+      eq(chapterWritebackRuns.chapterId, id),
+      inArray(chapterWritebackRuns.status, ['draft', 'ready', 'applying']),
+    )).run()
+  }
+
+  if (safeData.status === 'final' && previous.status !== 'final') {
+    const publishCheck = runChapterPublishCheck(id, { phase: 'final' })
+    if (!publishCheck.ready) {
+      throwUserFacingError('chapter.publishBlocked', { summary: publishCheck.summary })
+    }
+  }
   const versionSource = data.content !== undefined
     ? normalizeChapterVersionSource(options.versionSource)
     : null
 
-  if (data.content !== undefined) {
-    data.wordCount = countChineseWords(data.content)
-  }
-
   db.update(chapters).set({
-    ...data,
+    ...safeData,
     updatedAt: new Date().toISOString(),
   }).where(eq(chapters.id, id)).run()
 
@@ -2138,15 +2493,15 @@ export function updateChapter(id: number, data: Partial<{
     syncNovelLifecycleStatus(chapter.novelId)
   }
 
-  if (data.content !== undefined && chapter) {
-    syncChapterToSegments(id, data.content, { createIfMissing: true })
+  if (hasContentChange && chapter) {
+    syncChapterToSegments(id, safeData.content as string, { createIfMissing: true })
   }
 
   if (chapter && versionSource) {
     createChapterVersionSnapshot(id, versionSource)
   }
 
-  if (!options.skipStaleTracking && previous && data.content !== undefined) {
+  if (!options.skipStaleTracking && previous && contentChanged) {
     markSubsequentChaptersStale(
       previous.novelId,
       previous.chapterNum,
@@ -2170,6 +2525,10 @@ export function deleteChapter(id: number) {
         .all()
       deleteChapterSegmentsCascade(id)
       db.delete(chapters).where(eq(chapters.id, id)).run()
+      ensureStoryStructure(current.novelId)
+      // 删除后显式压缩章节编号；ensureStoryStructure 只补齐结构，不再在读取时
+      // 静默改号，因此这里必须在同一事务中完成编号与引用同步。
+      normalizeChapterNumbers(current.novelId)
       ensureStoryStructure(current.novelId)
       const afterRows = db.select().from(chapters)
         .where(eq(chapters.novelId, current.novelId))
@@ -2259,39 +2618,54 @@ export function batchUpdateChapters(
     arcId?: number | null
   },
 ) {
-  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
-  if (chapterIds.length === 0) return 0
-
+  if (!Array.isArray(ids) || ids.length === 0) return 0
+  const { rows, novelId } = loadChapterBatch(ids)
   const db = getDb()
-  const rows = db.select().from(chapters)
-    .where(inArray(chapters.id, chapterIds))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  if (rows.length === 0) return 0
 
-  rows.forEach((row) => {
-    const nextStatus = typeof data.status === 'string' ? data.status : undefined
-    updateChapter(row.id, {
-      ...(nextStatus !== undefined ? { status: nextStatus } : {}),
-      ...(data.arcId !== undefined ? { arcId: data.arcId ?? null } : {}),
-    }, {
-      skipStaleTracking: true,
-      versionSource: false,
+  const safeData = pickChapterFields(data, ['status', 'arcId']) as typeof data
+  const nextStatus = normalizeChapterStatus(safeData.status)
+  const nextArcId = normalizeChapterRelationId(safeData.arcId, 'arcId')
+  assertChapterRelationsBelongToNovel(novelId, { arcId: nextArcId })
+
+  // 批量定稿必须先对全部章节预检，避免前几章已经写入 final、后面的章节才失败，
+  // 形成半批次状态。
+  if (nextStatus === 'final') {
+    const blocked = rows
+      .map((row) => ({ row, publishCheck: runChapterPublishCheck(row.id, { phase: 'final' }) }))
+      .filter(({ publishCheck }) => !publishCheck.ready)
+    if (blocked.length > 0) {
+      const summary = blocked
+        .slice(0, 3)
+        .map(({ row, publishCheck }) => `第${row.chapterNum}章：${publishCheck.summary}`)
+        .join('；')
+      throwUserFacingError('chapter.publishBlocked', { summary })
+    }
+  }
+
+  getSqlite().transaction(() => {
+    rows.forEach((row) => {
+      updateChapter(row.id, {
+        ...(nextStatus !== undefined ? { status: nextStatus } : {}),
+        ...(nextArcId !== undefined ? { arcId: nextArcId } : {}),
+      }, {
+        skipStaleTracking: true,
+        versionSource: false,
+      })
     })
-  })
+  })()
 
   createOperationLog({
-    novelId: rows[0].novelId,
+    novelId,
     entityType: 'chapter',
     entityIds: rows.map((row) => row.id),
     operationType: 'batch_update',
     summary: `批量更新 ${rows.length} 章`,
     batchKey: buildBatchKey('chapter-batch-update'),
     before: rows,
-    after: data,
+    after: safeData,
     undoPayload: {
       kind: 'chapter.batch_update',
-      novelId: rows[0].novelId,
+      novelId,
       chapters: rows,
       reason: '已撤销章节批量更新',
     },
@@ -2301,28 +2675,28 @@ export function batchUpdateChapters(
 }
 
 export function batchDeleteChapters(ids: number[]) {
-  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
-  if (chapterIds.length === 0) return 0
+  if (!Array.isArray(ids) || ids.length === 0) return 0
+  const { rows, novelId } = loadChapterBatch(ids)
 
   const db = getDb()
-  const rows = db.select().from(chapters)
-    .where(inArray(chapters.id, chapterIds))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  if (rows.length === 0) return 0
 
   const segments = db.select().from(chapterSegments)
     .where(inArray(chapterSegments.chapterId, rows.map((row) => row.id)))
     .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder))
     .all()
   const timelineAnchors = captureTimelineAnchorsForChapterIds(rows.map((row) => row.id))
+  const chapterNumberReferences = captureChapterNumberReferenceSnapshot(novelId)
+  const chapterNumbers = db.select({ id: chapters.id, chapterNum: chapters.chapterNum })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
 
   rows.forEach((row) => {
     deleteChapter(row.id)
   })
 
   createOperationLog({
-    novelId: rows[0].novelId,
+    novelId,
     entityType: 'chapter',
     entityIds: rows.map((row) => row.id),
     operationType: 'batch_delete',
@@ -2332,10 +2706,12 @@ export function batchDeleteChapters(ids: number[]) {
     after: [],
     undoPayload: {
       kind: 'chapter.batch_delete',
-      novelId: rows[0].novelId,
+      novelId,
       chapters: rows,
       segments,
       timelineAnchors,
+      chapterNumbers,
+      chapterNumberReferences,
       reason: '已撤销章节批量删除',
     },
   })
@@ -2344,34 +2720,61 @@ export function batchDeleteChapters(ids: number[]) {
 }
 
 export function batchRenumberChapters(ids: number[], startChapterNum: number) {
-  const normalizedStart = Math.max(1, Math.round(startChapterNum || 1))
-  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
-  if (chapterIds.length === 0) return 0
-
+  if (!Array.isArray(ids) || ids.length === 0) return 0
+  const normalizedStart = normalizePositiveChapterNumber(startChapterNum) ?? 1
+  const { rows, novelId } = loadChapterBatch(ids)
   const db = getDb()
-  const rows = db.select().from(chapters)
-    .where(inArray(chapters.id, chapterIds))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  if (rows.length === 0) return 0
 
-  rows.forEach((row, index) => {
-    updateChapter(row.id, {
-      chapterNum: normalizedStart + index,
-    }, {
-      skipStaleTracking: true,
-      versionSource: false,
+  const allNovelChapters = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+  const targetChapterNums = rows.map((_row, index) => normalizedStart + index)
+  const selectedIds = new Set(rows.map((row) => row.id))
+  const targetConflict = allNovelChapters.some((row) => !selectedIds.has(row.id) && targetChapterNums.includes(row.chapterNum))
+  const duplicateSourceNums = new Set(rows.map((row) => row.chapterNum)).size !== rows.length
+  if (targetConflict || duplicateSourceNums || new Set(targetChapterNums).size !== targetChapterNums.length) {
+    throwUserFacingError('chapter.renumberConflict')
+  }
+
+  const chapterNumberRemap = new Map<number, number>(rows.map((row, index) => [row.chapterNum, targetChapterNums[index]]))
+  const temporaryOffset = Math.max(
+    1000000,
+    ...allNovelChapters.map((row) => Math.abs(row.chapterNum || 0) + rows.length + 1),
+  )
+
+  getSqlite().transaction(() => {
+    // 先移到临时编号，避免数据库未来增加 chapter_num 唯一约束时发生中间冲突。
+    rows.forEach((row, index) => {
+      updateChapter(row.id, {
+        chapterNum: temporaryOffset + index,
+      }, {
+        skipStaleTracking: true,
+        versionSource: false,
+        allowChapterNumberChange: true,
+      })
     })
-  })
+    rows.forEach((row, index) => {
+      updateChapter(row.id, {
+        chapterNum: targetChapterNums[index],
+      }, {
+        skipStaleTracking: true,
+        versionSource: false,
+        allowChapterNumberChange: true,
+      })
+    })
+    remapChapterNumberReferences(novelId, chapterNumberRemap)
+    syncChapterPartRanges(novelId)
+    syncTimelineStructureAnchors(novelId)
+  })()
 
   markSubsequentChaptersStale(
-    rows[0].novelId,
+    novelId,
     Math.max(0, normalizedStart - 1),
     '章节顺序已批量调整',
   )
 
   createOperationLog({
-    novelId: rows[0].novelId,
+    novelId,
     entityType: 'chapter',
     entityIds: rows.map((row) => row.id),
     operationType: 'batch_reindex',
@@ -2381,13 +2784,84 @@ export function batchRenumberChapters(ids: number[], startChapterNum: number) {
     after: { startChapterNum: normalizedStart },
     undoPayload: {
       kind: 'chapter.batch_reindex',
-      novelId: rows[0].novelId,
+      novelId,
       chapters: rows,
       reason: '已撤销章节顺序调整',
     },
   })
 
   return rows.length
+}
+
+/** 按调用方提供的顺序重排章节，供大纲拖拽使用；不会逐章暴露中间编号状态。 */
+export function reorderChapters(ids: number[], startChapterNum: number) {
+  if (!Array.isArray(ids) || ids.length === 0) return 0
+  const normalizedStart = normalizePositiveChapterNumber(startChapterNum) ?? 1
+  const batch = loadChapterBatch(ids)
+  const db = getDb()
+  const rowsById = new Map(batch.rows.map((row) => [row.id, row]))
+  const orderedRows = batch.ids
+    .map((id) => rowsById.get(id))
+    .filter((row): row is NonNullable<typeof batch.rows[number]> => Boolean(row))
+  const allNovelChapters = db.select().from(chapters)
+    .where(eq(chapters.novelId, batch.novelId))
+    .all()
+  const targetChapterNums = orderedRows.map((_row, index) => normalizedStart + index)
+  const selectedIds = new Set(orderedRows.map((row) => row.id))
+  if (allNovelChapters.some((row) => !selectedIds.has(row.id) && targetChapterNums.includes(row.chapterNum))) {
+    throwUserFacingError('chapter.renumberConflict')
+  }
+
+  const chapterNumberRemap = new Map<number, number>(orderedRows.map((row, index) => [row.chapterNum, targetChapterNums[index]]))
+  const temporaryOffset = Math.max(
+    1000000,
+    ...allNovelChapters.map((row) => Math.abs(row.chapterNum || 0) + orderedRows.length + 1),
+  )
+
+  getSqlite().transaction(() => {
+    orderedRows.forEach((row, index) => {
+      updateChapter(row.id, { chapterNum: temporaryOffset + index }, {
+        skipStaleTracking: true,
+        versionSource: false,
+        allowChapterNumberChange: true,
+      })
+    })
+    orderedRows.forEach((row, index) => {
+      updateChapter(row.id, { chapterNum: targetChapterNums[index] }, {
+        skipStaleTracking: true,
+        versionSource: false,
+        allowChapterNumberChange: true,
+      })
+    })
+    remapChapterNumberReferences(batch.novelId, chapterNumberRemap)
+    syncChapterPartRanges(batch.novelId)
+    syncTimelineStructureAnchors(batch.novelId)
+  })()
+
+  markSubsequentChaptersStale(
+    batch.novelId,
+    Math.max(0, normalizedStart - 1),
+    '章节顺序已调整',
+  )
+
+  createOperationLog({
+    novelId: batch.novelId,
+    entityType: 'chapter',
+    entityIds: orderedRows.map((row) => row.id),
+    operationType: 'batch_reindex',
+    summary: `拖拽重排 ${orderedRows.length} 章`,
+    batchKey: buildBatchKey('chapter-reorder'),
+    before: batch.rows,
+    after: { startChapterNum: normalizedStart, orderedIds: orderedRows.map((row) => row.id) },
+    undoPayload: {
+      kind: 'chapter.batch_reindex',
+      novelId: batch.novelId,
+      chapters: batch.rows,
+      reason: '已撤销章节拖拽重排',
+    },
+  })
+
+  return orderedRows.length
 }
 
 type ChapterComplexity = 'simple' | 'standard' | 'key'
@@ -5731,7 +6205,7 @@ async function generateChapterContentInternal(
         if (goldenGateRun.degraded) {
           if (semanticGatePolicy.fallbackMode === 'heuristic') {
             // 语义终验缺席：恢复关键词门原始 blocker 行为重新验收，交由下方既有阻断逻辑处理。
-            publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+            publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: 'off' })
             console.warn(`[semantic-gate] golden_final 语义评审失败，已回退启发式验收 chapter=${chapterId}`)
           } else {
             finalReviewNotesWithRewriteDelta = {

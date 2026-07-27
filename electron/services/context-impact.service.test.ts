@@ -82,6 +82,7 @@ import {
   novels,
   revisionTasks,
   sceneContracts,
+  semanticGateReviews,
   storyArcs,
   storyThreads,
   storyVolumes,
@@ -265,6 +266,7 @@ function createBaseRows() {
       phaseTargetsJson: JSON.stringify([]),
     }]],
     [chapterGateRuns, []],
+    [semanticGateReviews, []],
     [revisionTasks, []],
   ])
 }
@@ -272,6 +274,40 @@ function createBaseRows() {
 describe('runChapterPublishCheck', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('读取小说的 enforce 策略，并阻止没有当前语义评审的人工定稿', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(novels) || [])[0], {
+      settingsJson: JSON.stringify({ qualityGates: { semanticGate: 'enforce' } }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+    expect(result.checklist.find((item) => item.key === 'semantic_gate')?.status).toBe('blocker')
+    expect(result.ready).toBe(false)
+  })
+
+  it('接受当前正文对应的 enforce 语义评审结果', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(novels) || [])[0], {
+      settingsJson: JSON.stringify({ qualityGates: { semanticGate: 'enforce' } }),
+    })
+    const chapter = (rows.get(chapters) || [])[0]
+    const reviewNotes = JSON.parse(String(chapter.reviewNotesJson))
+    chapter.reviewNotesJson = JSON.stringify({
+      ...reviewNotes,
+      semantic_verdicts: [{ status: 'pass', summary: '正文兑现了当前合同。' }],
+    })
+    rows.set(semanticGateReviews, [{ id: 1, chapterId: 10, mode: 'enforce', failed: 0 }])
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+    expect(result.checklist.find((item) => item.key === 'semantic_gate')?.status).toBe('pass')
   })
 
   it('returns warning when only hook-related acceptance risks remain', () => {

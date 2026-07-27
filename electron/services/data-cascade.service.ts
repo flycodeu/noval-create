@@ -2,13 +2,9 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import {
   chapterSegments,
-  characterDialogueFingerprints,
   characters,
   factions,
-  glossary,
-  storyArcs,
   storyItems,
-  storyMemoryCheckpoints,
   storyThreads,
   timelineEvents,
 } from '../database/schema'
@@ -33,49 +29,6 @@ function stringifyNumberArray(values: number[]): string {
 
 function removeNumberFromArray(raw: string | null | undefined, targetId: number): string {
   return stringifyNumberArray(parseNumberArray(raw).filter((item) => item !== targetId))
-}
-
-function remapChapterNumber(
-  value: number | null | undefined,
-  chapterNumberRemap: Map<number, number | null>,
-): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return value ?? null
-  if (!chapterNumberRemap.has(value)) return value
-  return chapterNumberRemap.get(value) ?? null
-}
-
-function remapChapterRange(
-  start: number | null | undefined,
-  end: number | null | undefined,
-  chapterNumberRemap: Map<number, number | null>,
-): { start: number | null; end: number | null } {
-  if (typeof start !== 'number' || !Number.isFinite(start) || typeof end !== 'number' || !Number.isFinite(end)) {
-    return {
-      start: remapChapterNumber(start, chapterNumberRemap),
-      end: remapChapterNumber(end, chapterNumberRemap),
-    }
-  }
-
-  const min = Math.min(start, end)
-  const max = Math.max(start, end)
-  const mappedValues = [...chapterNumberRemap.entries()]
-    .filter(([oldChapterNum, newChapterNum]) => (
-      oldChapterNum >= min
-      && oldChapterNum <= max
-      && typeof newChapterNum === 'number'
-      && Number.isFinite(newChapterNum)
-    ))
-    .map(([, newChapterNum]) => Number(newChapterNum))
-    .sort((left, right) => left - right)
-
-  if (mappedValues.length === 0) {
-    return { start: null, end: null }
-  }
-
-  return {
-    start: mappedValues[0],
-    end: mappedValues[mappedValues.length - 1],
-  }
 }
 
 export function cleanupCharacterSoftReferences(novelId: number, characterId: number): void {
@@ -213,107 +166,4 @@ export function deleteChapterSegmentsCascade(chapterId: number): void {
   })
 }
 
-export function remapChapterNumberReferences(
-  novelId: number,
-  chapterNumberRemap: Map<number, number | null>,
-): void {
-  const db = getDb()
-  const now = new Date().toISOString()
-
-  db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all().forEach((arc) => {
-    const nextChapterStart = remapChapterNumber(arc.chapterStart, chapterNumberRemap)
-    const nextChapterEnd = remapChapterNumber(arc.chapterEnd, chapterNumberRemap)
-    const nextLastProgressChapterNum = remapChapterNumber(arc.lastProgressChapterNum, chapterNumberRemap)
-    if (
-      nextChapterStart === arc.chapterStart
-      && nextChapterEnd === arc.chapterEnd
-      && nextLastProgressChapterNum === arc.lastProgressChapterNum
-    ) return
-    db.update(storyArcs).set({
-      chapterStart: nextChapterStart,
-      chapterEnd: nextChapterEnd,
-      lastProgressChapterNum: nextLastProgressChapterNum,
-    }).where(eq(storyArcs.id, arc.id)).run()
-  })
-
-  db.select().from(storyThreads).where(eq(storyThreads.novelId, novelId)).all().forEach((thread) => {
-    const nextStartChapter = remapChapterNumber(thread.startChapter, chapterNumberRemap)
-    const nextTargetPayoffChapter = remapChapterNumber(thread.targetPayoffChapter, chapterNumberRemap)
-    const nextPlantedChapter = remapChapterNumber(thread.plantedChapter, chapterNumberRemap)
-    const nextLastReferencedChapter = remapChapterNumber(thread.lastReferencedChapter, chapterNumberRemap)
-    const nextResolvedChapter = remapChapterNumber(thread.resolvedChapter, chapterNumberRemap)
-    if (
-      nextStartChapter === thread.startChapter
-      && nextTargetPayoffChapter === thread.targetPayoffChapter
-      && nextPlantedChapter === thread.plantedChapter
-      && nextLastReferencedChapter === thread.lastReferencedChapter
-      && nextResolvedChapter === thread.resolvedChapter
-    ) return
-    db.update(storyThreads).set({
-      startChapter: nextStartChapter,
-      targetPayoffChapter: nextTargetPayoffChapter,
-      plantedChapter: nextPlantedChapter,
-      lastReferencedChapter: nextLastReferencedChapter,
-      resolvedChapter: nextResolvedChapter,
-      updatedAt: now,
-    }).where(eq(storyThreads.id, thread.id)).run()
-  })
-
-  db.select().from(characters).where(eq(characters.novelId, novelId)).all().forEach((character) => {
-    const nextAppearChapter = remapChapterNumber(character.appearChapter, chapterNumberRemap)
-    if (nextAppearChapter === character.appearChapter) return
-    db.update(characters).set({
-      appearChapter: nextAppearChapter,
-      updatedAt: now,
-    }).where(eq(characters.id, character.id)).run()
-  })
-
-  db.select().from(glossary).where(eq(glossary.novelId, novelId)).all().forEach((entry) => {
-    const nextFirstAppearChapter = remapChapterNumber(entry.firstAppearChapter, chapterNumberRemap)
-    if (nextFirstAppearChapter === entry.firstAppearChapter) return
-    db.update(glossary).set({
-      firstAppearChapter: nextFirstAppearChapter,
-      updatedAt: now,
-    }).where(eq(glossary.id, entry.id)).run()
-  })
-
-  db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all().forEach((checkpoint) => {
-    const nextSourceRange = remapChapterRange(
-      checkpoint.sourceRangeStart,
-      checkpoint.sourceRangeEnd,
-      chapterNumberRemap,
-    )
-    const nextLastRefreshedChapterNum = remapChapterNumber(checkpoint.lastRefreshedChapterNum, chapterNumberRemap)
-    if (
-      nextSourceRange.start === checkpoint.sourceRangeStart
-      && nextSourceRange.end === checkpoint.sourceRangeEnd
-      && nextLastRefreshedChapterNum === checkpoint.lastRefreshedChapterNum
-    ) return
-    db.update(storyMemoryCheckpoints).set({
-      sourceRangeStart: nextSourceRange.start,
-      sourceRangeEnd: nextSourceRange.end,
-      lastRefreshedChapterNum: nextLastRefreshedChapterNum ?? 0,
-      stale: 1,
-      updatedAt: now,
-    }).where(eq(storyMemoryCheckpoints.id, checkpoint.id)).run()
-  })
-
-  db.select().from(characterDialogueFingerprints).where(eq(characterDialogueFingerprints.novelId, novelId)).all().forEach((fingerprint) => {
-    const nextSampleRange = remapChapterRange(
-      fingerprint.sampleChapterStart,
-      fingerprint.sampleChapterEnd,
-      chapterNumberRemap,
-    )
-    const nextSampleChapterStart = nextSampleRange.start
-    const nextSampleChapterEnd = nextSampleRange.end
-    if (
-      nextSampleChapterStart === fingerprint.sampleChapterStart
-      && nextSampleChapterEnd === fingerprint.sampleChapterEnd
-    ) return
-    db.update(characterDialogueFingerprints).set({
-      sampleChapterStart: nextSampleChapterStart,
-      sampleChapterEnd: nextSampleChapterEnd,
-      updatedAt: now,
-    }).where(eq(characterDialogueFingerprints.id, fingerprint.id)).run()
-  })
-}
+export { remapChapterNumberReferences } from './chapter-number-remap.service'

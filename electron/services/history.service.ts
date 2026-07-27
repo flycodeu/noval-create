@@ -15,6 +15,12 @@ import {
 } from '../database/schema'
 import { removeTimelineEventFromItems, syncChapterTimelineStatuses, syncTimelineEventItemLinks } from './link-sync.service'
 import { markNovelContextChanged, markSubsequentChaptersStale } from './context-impact.service'
+import {
+  captureChapterNumberReferenceSnapshot,
+  remapChapterNumberReferences,
+  restoreChapterNumberReferenceSnapshot,
+  type ChapterNumberReferenceSnapshot,
+} from './chapter-number-remap.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 type OperationEntityType = 'chapter' | 'thread' | 'timeline'
@@ -25,6 +31,11 @@ interface TimelineAnchorSnapshot {
   chapterStartId: number | null
   chapterEndId: number | null
   segmentId: number | null
+}
+
+interface ChapterNumberSnapshot {
+  id: number
+  chapterNum: number
 }
 
 type OperationUndoPayload =
@@ -40,6 +51,8 @@ type OperationUndoPayload =
     chapters: Chapter[]
     segments: ChapterSegment[]
     timelineAnchors: TimelineAnchorSnapshot[]
+    chapterNumbers?: ChapterNumberSnapshot[]
+    chapterNumberReferences?: ChapterNumberReferenceSnapshot
     reason: string
   }
   | {
@@ -262,11 +275,55 @@ function upsertTimelineEventSnapshot(snapshot: TimelineEvent) {
   syncTimelineEventItemLinks(snapshot.id)
 }
 
+function remapChapterReferencesForSnapshots(novelId: number, snapshots: Chapter[]) {
+  const db = getDb()
+  const targetChapterNumById = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot.chapterNum] as const))
+  if (targetChapterNumById.size === 0) return
+  const currentRows = db.select({ id: chapters.id, chapterNum: chapters.chapterNum })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+  const remap = new Map<number, number | null>()
+  currentRows.forEach((row) => {
+    const targetChapterNum = targetChapterNumById.get(row.id)
+    if (typeof targetChapterNum === 'number' && targetChapterNum !== row.chapterNum) {
+      remap.set(row.chapterNum, targetChapterNum)
+    }
+  })
+  if (remap.size > 0) remapChapterNumberReferences(novelId, remap)
+}
+
+function restoreChapterNumbers(snapshots: ChapterNumberSnapshot[], novelId: number) {
+  const db = getDb()
+  const currentRows = db.select({ id: chapters.id, chapterNum: chapters.chapterNum })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+  const snapshotById = new Map(snapshots.map((item) => [item.id, item.chapterNum] as const))
+  const targetNumbers = new Set(snapshots.map((item) => item.chapterNum))
+  if (currentRows.some((row) => !snapshotById.has(row.id) && targetNumbers.has(row.chapterNum))) {
+    throwUserFacingError('history.undoUnsupported')
+  }
+  const affectedRows = currentRows.filter((row) => snapshotById.has(row.id))
+  const temporaryOffset = Math.max(
+    1000000,
+    ...currentRows.map((row) => Math.abs(row.chapterNum || 0) + snapshots.length + 1),
+  )
+  affectedRows.forEach((row, index) => {
+    db.update(chapters).set({ chapterNum: temporaryOffset + index }).where(eq(chapters.id, row.id)).run()
+  })
+  affectedRows.forEach((row) => {
+    db.update(chapters).set({ chapterNum: snapshotById.get(row.id)! }).where(eq(chapters.id, row.id)).run()
+  })
+}
+
 function restoreChapterDeletePayload(payload: Extract<OperationUndoPayload, { kind: 'chapter.batch_delete' }>) {
   const db = getDb()
   const sortedChapters = payload.chapters.slice().sort((left, right) => left.chapterNum - right.chapterNum)
   const sortedSegments = payload.segments.slice().sort((left, right) => left.segmentOrder - right.segmentOrder)
 
+  if (payload.chapterNumbers) restoreChapterNumbers(payload.chapterNumbers, payload.novelId)
+  if (!payload.chapterNumberReferences) remapChapterReferencesForSnapshots(payload.novelId, sortedChapters)
   sortedChapters.forEach((snapshot) => {
     upsertChapterSnapshot(snapshot)
   })
@@ -283,6 +340,7 @@ function restoreChapterDeletePayload(payload: Extract<OperationUndoPayload, { ki
       updatedAt: nowIso(),
     }).where(eq(timelineEvents.id, snapshot.id)).run()
   })
+  if (payload.chapterNumberReferences) restoreChapterNumberReferenceSnapshot(payload.chapterNumberReferences)
 
   recalculateNovelWordCount(payload.novelId)
   const minChapterNum = sortedChapters[0]?.chapterNum
@@ -297,6 +355,7 @@ function restoreChapterUpdatePayload(
   payload: Extract<OperationUndoPayload, { kind: 'chapter.batch_update' | 'chapter.batch_reindex' }>,
 ) {
   const sortedChapters = payload.chapters.slice().sort((left, right) => left.chapterNum - right.chapterNum)
+  remapChapterReferencesForSnapshots(payload.novelId, sortedChapters)
   sortedChapters.forEach((snapshot) => {
     upsertChapterSnapshot(snapshot)
   })

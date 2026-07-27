@@ -1508,6 +1508,16 @@ function applySingleDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): num
 function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const db = getDb()
   const transaction = getSqlite().transaction(() => {
+    // 正文编辑会把运行标记为 failed。再次检查运行状态，避免已经拿到
+    // applying claim 的旧调用在正文变更后继续写入后续候选资产。
+    const activeRun = db.select({ status: chapterWritebackRuns.status })
+      .from(chapterWritebackRuns)
+      .where(and(
+        eq(chapterWritebackRuns.id, row.runId),
+        eq(chapterWritebackRuns.status, 'applying'),
+      ))
+      .all()[0]
+    if (!activeRun) throwUserFacingError('chapterWriteback.runInvalidated')
     const entityId = applySingleDiff(row, chapter)
     const result = db.update(chapterWritebackDiffs).set({
       entityId: entityId ?? row.entityId,
@@ -1526,29 +1536,42 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
   const chapter = getChapterRow(chapterId)
   const now = new Date().toISOString()
   const currentSyncStatus = parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
-  updateChapterWritebackSyncStatus(chapterId, {
-    phase: 'preparing',
-    runId: undefined,
-    blockedGeneration: true,
-    readyForNextChapter: false,
-    lastError: undefined,
-    lastAttemptAt: now,
-    retryCount: currentSyncStatus.retryCount,
-    contextVersion: chapter.contextVersion || 1,
-  })
-  const insert = db.insert(chapterWritebackRuns).values({
-    novelId: chapter.novelId,
-    chapterId: chapter.id,
-    status: 'draft',
-    triggerSource: asText(triggerSource) || 'manual',
-    retryCount: currentSyncStatus.retryCount,
-    lastAttemptAt: now,
-    sourceChapterVersion: chapter.contextVersion || 1,
-    startedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  }).run()
-  const runId = Number(insert.lastInsertRowid)
+  const reservation = getSqlite().transaction(() => {
+    // Desktop 与 Web 端可能同时触发抽取。以“同一章 + 同一正文上下文版本”的
+    // draft/ready/applying 运行作为 single-flight 结果，避免并行运行互相覆盖章级状态。
+    const reusableRun = loadRunRowsByChapter(chapterId).find((run) => (
+      ['draft', 'ready', 'applying'].includes(run.status)
+      && (run.sourceChapterVersion || 1) === (chapter.contextVersion || 1)
+    ))
+    if (reusableRun) return { existing: reusableRun, runId: null as number | null }
+
+    updateChapterWritebackSyncStatus(chapterId, {
+      phase: 'preparing',
+      runId: undefined,
+      blockedGeneration: true,
+      readyForNextChapter: false,
+      lastError: undefined,
+      lastAttemptAt: now,
+      retryCount: currentSyncStatus.retryCount,
+      contextVersion: chapter.contextVersion || 1,
+    })
+    const insert = db.insert(chapterWritebackRuns).values({
+      novelId: chapter.novelId,
+      chapterId: chapter.id,
+      status: 'draft',
+      triggerSource: asText(triggerSource) || 'manual',
+      retryCount: currentSyncStatus.retryCount,
+      lastAttemptAt: now,
+      sourceChapterVersion: chapter.contextVersion || 1,
+      startedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    return { existing: null, runId: Number(insert.lastInsertRowid) }
+  })()
+  if (reservation.existing) return mapRunRow(reservation.existing)
+  const runId = reservation.runId
+  if (runId == null) throwUserFacingError('chapterWriteback.runReservationFailed')
 
   try {
     const deterministic = buildDeterministicStateDraft(chapter)
@@ -1707,6 +1730,9 @@ export async function updateChapterWritebackDecision(
   const db = getDb()
   const current = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
   if (!current) throwUserFacingError('common.notFound')
+  if (current.writebackStatus === 'applied') {
+    throwUserFacingError('chapterWriteback.appliedImmutable')
+  }
   let nextAfterStateJson = current.afterStateJson
   if (patch.afterStateJson !== undefined) {
     if (!parseJsonObject(patch.afterStateJson)) throwUserFacingError('chapterWriteback.afterStateJsonObjectRequired')

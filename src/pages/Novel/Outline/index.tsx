@@ -403,13 +403,17 @@ export default function Outline({ novelId }: Props) {
     const arc = arcs.find((item) => item.id === arcId)
     if (!arc) return
     const arcChapters = [...getArcChapters(arc)]
-    const [moved] = arcChapters.splice(result.source.index, 1)
-    arcChapters.splice(result.destination.index, 0, moved)
-    for (let index = 0; index < arcChapters.length; index += 1) {
-      const chapter = arcChapters[index]
-      const nextNum = (arc.chapterStart || 1) + index
-      if (chapter.chapterNum !== nextNum) await window.electron.chapter.update(chapter.id, { chapterNum: nextNum })
-    }
+    // Droppable 只渲染当前分页；Draggable 的 index 必须从 0 连续计数，
+    // 这里再把页内位置换算回完整故事弧的位置。
+    const sourceIndex = expandedChapterPageStart + result.source.index
+    const destinationIndex = expandedChapterPageStart + result.destination.index
+    const [moved] = arcChapters.splice(sourceIndex, 1)
+    if (!moved) return
+    arcChapters.splice(destinationIndex, 0, moved)
+    await window.electron.chapter.reorder(
+      arcChapters.map((chapter) => chapter.id),
+      arc.chapterStart || 1,
+    )
     await loadData()
   }
 
@@ -856,7 +860,7 @@ export default function Outline({ novelId }: Props) {
                           <Draggable
                             key={chapter.id}
                             draggableId={`${expandedArc.id}-${chapter.id}`}
-                            index={expandedChapterPageStart + index}
+                            index={index}
                           >
                             {(prov, snapshot) => (
                               <div ref={prov.innerRef} {...prov.draggableProps} style={{ ...prov.draggableProps.style, opacity: snapshot.isDragging ? 0.82 : 1 }}>

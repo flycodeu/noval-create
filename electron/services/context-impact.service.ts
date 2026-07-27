@@ -24,6 +24,7 @@ import {
   resistanceBeats,
   resistanceTracks,
   sceneContracts,
+  semanticGateReviews,
   storyItems,
   storyMemoryCheckpoints,
   storyThreads,
@@ -58,7 +59,10 @@ import {
 import { analyzeNarrativeControls } from './narrative-control.service'
 import { getNovelAssetImpactSummary } from './asset-impact.service'
 import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
-import type { SemanticGateMode } from '../../src/shared/semantic-gate-policy'
+import {
+  resolveSemanticGatePolicy,
+  type SemanticGateMode,
+} from '../../src/shared/semantic-gate-policy'
 
 /** enforce 模式下被语义门接管的启发式门项，其 blocker/rewrite 降级为 warning 时追加的后缀。 */
 const HEURISTIC_TAKEOVER_SUFFIX = '（启发式，已由语义门接管）'
@@ -258,56 +262,10 @@ interface ReviewStateSnapshot {
   rewriteRecheckPerformed: boolean
   rewriteDeltaStatus?: 'pass' | 'weak' | 'fail'
   rewriteDeltaFindings: string[]
+  semanticVerdicts: Array<{ status: string; summary: string }>
 }
 
-function parseReviewState(raw?: string | null): {
-  severity?: string
-  rewriteRequired: boolean
-  costEvaporation: boolean
-  forcedReversal: boolean
-  tooSmooth: boolean
-  highPressureNoReward: boolean
-  criticalFixes: string[]
-  continuityRisks: string[]
-  contextDriftRisks: string[]
-  realismRisks: string[]
-  coherenceRisks: string[]
-  readerHookRisks: string[]
-  stepMemoryRisks: string[]
-  openingHookRisks: string[]
-  titleAlignmentRisks: string[]
-  hallucinationRisks: string[]
-  arcProgressRisks: string[]
-  languageRisks: string[]
-  humanLanguageRepairs: string[]
-  genreHollowingRisks: string[]
-  typedRefRisks: string[]
-  sourceGroundingRisks: string[]
-  operatingModeRisks: string[]
-  longWindowHumanizationRisks: string[]
-  genreRegisterRisks: string[]
-  dialogueSeparabilityRisks: string[]
-  missingPayoffs: string[]
-  dialogueHomogenizationRisks: string[]
-  dialogueDriftAlerts: string[]
-  crossCharacterSimilarity: string[]
-  dialogueFillerRisks: string[]
-  dialogueInfoDensityRisks: string[]
-  dialogueVoiceLockSummary: string
-  chapterFunctionPrimary: string
-  chapterFunctionTags: string[]
-  revisionBrief: string
-  paceMarker: string
-  styleComplianceChecked: boolean
-  styleComplianceStatus: 'pass' | 'warning' | 'rewrite'
-  styleComplianceScore?: number
-  styleComplianceSummary: string
-  styleComplianceDeviations: string[]
-  styleComplianceForbiddenPatterns: string[]
-  rewriteRecheckPerformed: boolean
-  rewriteDeltaStatus?: 'pass' | 'weak' | 'fail'
-  rewriteDeltaFindings: string[]
-} {
+function parseReviewState(raw?: string | null): ReviewStateSnapshot {
   const fallback: ReviewStateSnapshot = {
     rewriteRequired: false,
     costEvaporation: false,
@@ -354,6 +312,7 @@ function parseReviewState(raw?: string | null): {
     rewriteRecheckPerformed: false,
     rewriteDeltaStatus: undefined,
     rewriteDeltaFindings: [],
+    semanticVerdicts: [],
   }
   if (!raw) {
     return fallback
@@ -445,6 +404,14 @@ function parseReviewState(raw?: string | null): {
         && typeof parsed.rewrite_delta === 'object'
         && !Array.isArray(parsed.rewrite_delta)
         ? parseUnknownStringArray((parsed.rewrite_delta as Record<string, unknown>).findings)
+        : [],
+      semanticVerdicts: Array.isArray(parsed.semantic_verdicts)
+        ? parsed.semantic_verdicts
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+          .map((item) => ({
+            status: typeof item.status === 'string' ? item.status : 'uncertain',
+            summary: typeof item.summary === 'string' ? item.summary : '',
+          }))
         : [],
     }
   } catch {
@@ -2325,7 +2292,8 @@ export function runChapterPublishCheck(
   const phase = options.phase || 'final'
   // off/shadow 保持原行为；enforce 时关键词/计数类启发式门的 blocker 一律降级为
   // warning（文本保留并加接管后缀），由语义门 verdict 接管阻断职责。
-  const semanticGateMode = options.semanticGateMode || 'off'
+  // 未显式传入时必须读取小说自己的 qualityGates 配置，避免人工发布路径绕过策略。
+  const requestedSemanticGateMode = options.semanticGateMode
   const degradedHeuristicGateKeys = new Set<string>()
   const degradeHeuristicStatus = (gateKey: string, status: ChapterGateLevel): ChapterGateLevel => {
     if (semanticGateMode !== 'enforce') return status
@@ -2343,6 +2311,9 @@ export function runChapterPublishCheck(
   if (!novel) {
     throwUserFacingError('novel.notFound')
   }
+
+  const semanticGatePolicy = resolveSemanticGatePolicy(novel.settingsJson)
+  let semanticGateMode = requestedSemanticGateMode || semanticGatePolicy.mode
 
   const staleReasons = translateContextChangeReasons(parseStringArray(chapter.staleReasonJson))
   const consistencyIssues = collectChapterRelatedIssues(chapter.novelId, chapter.id, chapter.chapterNum)
@@ -2374,6 +2345,35 @@ export function runChapterPublishCheck(
       dialogueVoiceLockSummary: currentDialogueAnalysis.voiceLockSummary || '',
     }
   }
+  const latestSemanticGateReview = semanticGateMode === 'enforce'
+    ? db.select().from(semanticGateReviews)
+      .where(eq(semanticGateReviews.chapterId, chapterId))
+      .orderBy(desc(semanticGateReviews.id))
+      .all()[0]
+    : null
+  // enforce + heuristic fallback 必须恢复启发式门的原始阻断语义；否则失败的
+  // 语义调用会因为“降级后仍是 enforce”而错误放行。
+  if (latestSemanticGateReview?.failed === 1 && semanticGatePolicy.fallbackMode === 'heuristic') {
+    semanticGateMode = 'off'
+  }
+  const semanticGateStatus: ChapterGateLevel | null = semanticGateMode === 'enforce'
+    ? latestSemanticGateReview?.failed === 1
+      ? 'warning'
+      : latestSemanticGateReview?.mode !== 'enforce' || reviewState.semanticVerdicts.length === 0
+        ? 'blocker'
+        : reviewState.semanticVerdicts.some((item) => item.status === 'blocker')
+          ? 'blocker'
+          : reviewState.semanticVerdicts.some((item) => item.status === 'warning')
+            ? 'warning'
+            : 'pass'
+    : null
+  const semanticGateDetail = semanticGateStatus === 'pass'
+    ? '当前正文已有 enforce 语义评审结果。'
+    : latestSemanticGateReview?.failed === 1
+      ? '语义评审调用失败，当前按 warn-pass 策略记录预警。'
+      : latestSemanticGateReview?.mode !== 'enforce' || reviewState.semanticVerdicts.length === 0
+        ? '当前正文尚未完成 enforce 语义评审，不能直接定稿。'
+        : `语义评审仍有 ${reviewState.semanticVerdicts.filter((item) => item.status === 'blocker').length} 项阻断。`
   const contractContext = loadChapterContractAuditContext(chapterId)
   const narrativeControlCharacterNames = db.select({ name: characters.fullName })
     .from(characters)
@@ -2612,6 +2612,17 @@ export function runChapterPublishCheck(
       relatedPage: 'writing',
       fixHint: '回到正文页先刷新摘要、连续性记忆和相关上下文。',
     }),
+    ...(semanticGateStatus
+      ? [makePublishCheckItem({
+          key: 'semantic_gate',
+          label: '语义质量门已完成',
+          status: semanticGateStatus,
+          detail: semanticGateDetail,
+          source: 'review',
+          relatedPage: 'writing',
+          fixHint: '请通过章节流水线完成当前正文版本的 enforce 语义评审。',
+        })]
+      : []),
     makePublishCheckItem({
       key: 'consistency',
       label: '无高优先级结构风险',
