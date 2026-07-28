@@ -411,6 +411,7 @@
   }
 
   .project-topbar__mode-switch {
+    flex: 0 0 auto;
     max-width: 100%;
     overflow-x: auto;
   }

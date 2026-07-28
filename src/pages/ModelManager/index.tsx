@@ -665,7 +665,7 @@ export default function ModelManager() {
         width={760}
         maskClosable={!saving}
         onCancel={() => setEditorOpen(false)}
-        destroyOnClose={false}
+        destroyOnHidden={false}
         footer={(
           <Space wrap>
             {!isNew && selected ? (
@@ -859,7 +859,7 @@ export default function ModelManager() {
         width={720}
         maskClosable={!sourceSaving}
         onCancel={() => setSourceEditorOpen(false)}
-        destroyOnClose={false}
+        destroyOnHidden={false}
         footer={(
           <Space wrap>
             <Button onClick={() => setSourceEditorOpen(false)}>取消</Button>

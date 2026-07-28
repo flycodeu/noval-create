@@ -35,8 +35,6 @@ import {
   qualityRepairMetricLabel,
   qualityRiskKindLabel,
   readinessStatusColor,
-  recallSnapshotSourceColor,
-  recallSnapshotSourceLabel,
   runtimePressureLevelLabel,
   scoreColor,
   signedDashboardDelta,

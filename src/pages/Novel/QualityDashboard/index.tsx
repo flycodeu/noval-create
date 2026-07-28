@@ -21,7 +21,7 @@ import {
   runtimePressureLevelLabel,
   sourceCoverageLabel,
 } from './quality-dashboard-presentation'
-import type { QualityChapterEntry, QualityDashboardFilters, QualityRiskEntry } from './quality-dashboard-presentation'
+import type { QualityChapterEntry, QualityDashboardFilters } from './quality-dashboard-presentation'
 import ChapterDetailModal from './sections/ChapterDetailModal'
 import QualityFilterBar from './sections/QualityFilterBar'
 
@@ -315,4 +315,3 @@ export default function QualityDashboard({ novelId }: Props) {
     </WorkspacePage>
   )
 }
-

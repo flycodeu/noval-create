@@ -81,11 +81,10 @@ import InsightPanel, {
   StringList,
   WorldStateHealthCard,
   WriterToolsTraceCard,
-  computeVolumeTruthRevealStats,
-  normalizeIdArray,
   type WritingRouteKey,
 } from './components/InsightPanel'
 import StreamingOutput from './components/StreamingOutput'
+import { computeVolumeTruthRevealStats, normalizeIdArray } from './components/InsightPanel/insight-utils'
 import RewriteSelectionModal from './components/modals/RewriteSelectionModal'
 import OptimizeCandidateModal from './components/modals/OptimizeCandidateModal'
 import ParallelGenerationModal from './components/modals/ParallelGenerationModal'
@@ -106,7 +105,6 @@ import {
   parseSummaryHealth,
   parseWritebackStatus,
   type AiCheckPayload,
-  type ReviewNotes,
   type WritingPipelineRole,
   type WritingPipelineRoleState,
   type WritingPipelineSnapshot,

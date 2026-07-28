@@ -4332,7 +4332,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-workspace--wide .novel-workspace__body--aside-below .novel-workspace__aside {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
 }
 
 .novel-workspace--wide .novel-hero__copy {
@@ -12534,7 +12534,7 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 
   .app-layout .novel-workspace__body--aside-below .novel-workspace__aside {
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   }
 
   .app-layout .novel-panel__header {
@@ -13304,6 +13304,8 @@ html[data-runtime="web"] .project-topbar__main-row {
 .novel-workspace__body,
 .novel-workspace__main,
 .novel-workspace__aside,
+.novel-workspace__main > *,
+.novel-workspace__aside > *,
 .novel-panel,
 .novel-panel__body,
 .novel-hero,

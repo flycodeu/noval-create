@@ -659,6 +659,11 @@
   margin-bottom: 12px;
 }
 
+.app-layout .novel-workspace .quality-dashboard-page__filter-bar .ant-input-number {
+  width: 96px;
+  min-width: 0;
+}
+
 .quality-dashboard-page__filter-bar-label {
   font-size: 12px;
   opacity: 0.75;

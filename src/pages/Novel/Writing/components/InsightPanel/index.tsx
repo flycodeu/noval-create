@@ -28,13 +28,6 @@ export {
   ChapterForeshadowWritebackCard,
   ChapterRevealConstraintCard,
 } from './writeback-cards'
-export {
-  computeVolumeTruthRevealStats,
-  formatRatioPercent,
-  getCurrentVolumeNumber,
-  normalizeIdArray,
-} from './insight-utils'
-
 const UTILITY_TABS: Array<{ key: WritingRouteKey; label: string }> = [
   { key: 'editor', label: '焦点 / 合同' },
   { key: 'context', label: '上下文' },

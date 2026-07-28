@@ -16,6 +16,10 @@ const mapCss = read('src/pages/Novel/MapExplorer/map-explorer.css')
 const characterCss = read('src/pages/Novel/Characters/character-workspace.css')
 const factionCss = read('src/pages/Novel/Factions/index.css')
 const writingCss = read('src/pages/Novel/Writing/index.css')
+const projectTopbarCss = read('src/components/novel/layout/ProjectTopbar.css')
+const globalCss = read('src/styles/global.css')
+const qualityDashboardCss = read('src/pages/Novel/QualityDashboard/index.css')
+const foreshadowLedgerCss = read('src/pages/Novel/ForeshadowLedger/index.css')
 const outlinePage = read('src/pages/Novel/Outline/index.tsx')
 const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
 const destructiveActionPages = [
@@ -48,6 +52,23 @@ assertPass(
 assertPass(
   'faction graph canvas avoids a fixed desktop height',
   !factionCss.includes('min-height: 560px') && factionCss.includes('min-height: clamp('),
+)
+assertPass(
+  'project topbar mode switch keeps its width on narrow screens',
+  /@media \(max-width: 767px\)[\s\S]*?\.project-topbar__mode-switch\s*\{[\s\S]*?flex:\s*0 0 auto;/.test(projectTopbarCss),
+)
+assertPass(
+  'workspace child content can shrink below its min-content width',
+  globalCss.includes('.novel-workspace__main > *') && globalCss.includes('.novel-workspace__aside > *'),
+)
+assertPass(
+  'quality filter number inputs stay compact on narrow screens',
+  qualityDashboardCss.includes('.app-layout .novel-workspace .quality-dashboard-page__filter-bar .ant-input-number')
+    && qualityDashboardCss.includes('width: 96px'),
+)
+assertPass(
+  'foreshadow board cards fit the available narrow width',
+  foreshadowLedgerCss.includes('minmax(min(100%, 280px), 1fr)'),
 )
 assertPass(
   'outline pagination keeps drag indices local to the rendered page',
