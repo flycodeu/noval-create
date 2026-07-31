@@ -234,7 +234,6 @@ export default function Overview({ novelId }: Props) {
     [authorWorkflow, stats],
   )
   const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
-  const keyGapCount = GUIDED_STEP_ORDER.length - workflowStepReadyCount
   const hasContextLag = stats.staleChapterCount > 0 || stats.staleCheckpointCount > 0 || stats.staleAssetCount > 0
   const writingStageValue = displayState.isZeroState
     ? '未开写'
@@ -460,28 +459,20 @@ export default function Overview({ novelId }: Props) {
             label="正文阶段"
             value={writingStageValue}
             tone="warm"
-            hint={displayState.isZeroState ? '当前优先进入首章启动动作。' : `累计 ${stats.totalWords.toLocaleString()} 字`}
           />
           <WorkspaceMetric
             label="流程完成"
             value={`${workflowStepReadyCount}/${GUIDED_STEP_ORDER.length}`}
-            hint={keyGapCount > 0 ? `仍有 ${keyGapCount} 个关键步骤待补齐` : '关键创作链路已基本闭合'}
           />
           <WorkspaceMetric
             label="上下文状态"
             value={contextStatusValue}
             tone="cool"
-            hint={displayState.isZeroState
-              ? '正文与长程记忆尚未建立，不展示连续性噪音。'
-              : hasContextLag
-                ? '存在待同步章节、检查点或资产。'
-                : '当前正文与上下文状态保持一致。'}
           />
           {displayState.showRevisionMetric ? (
             <WorkspaceMetric
               label="修订风险"
               value={revisionRiskValue}
-              hint={stats.revisionTaskCount > 0 ? `当前有 ${stats.revisionTaskCount} 条修订任务待处理` : '当前链路稳定，可继续推进正文或结构收口'}
             />
           ) : null}
         </>

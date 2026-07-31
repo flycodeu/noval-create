@@ -575,9 +575,9 @@ export default function PremisePage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="基础字段" value={`${premiseFilledCount}/5`} tone="warm" hint="定位、核心信息、主角起点、约束、语言边界" />
-          <WorkspaceMetric label="写作约束" value={`${writingRuleCount}/3`} hint="去 AI 腔、常识约束、禁用表达" />
-          <WorkspaceMetric label="世界资产" value={`${assetReadiness}/4`} hint="世界、地图、人物、物品就绪度" />
+          <WorkspaceMetric label="基础字段" value={`${premiseFilledCount}/5`} tone="warm" />
+          <WorkspaceMetric label="写作约束" value={`${writingRuleCount}/3`} />
+          <WorkspaceMetric label="世界资产" value={`${assetReadiness}/4`} />
         </>
       )}
     >

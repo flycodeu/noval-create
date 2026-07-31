@@ -250,9 +250,6 @@ export default function WorldRules({ novelId }: Props) {
   }, [autoTask?.id, autoTask?.status, loadAutoStatus])
 
   const tokenCount = useMemo(() => estimateTokens(JSON.stringify(liveRules)), [liveRules])
-  const tokenStatusText = tokenCount > 1400
-    ? '规则体量较大，建议优先按分区生成'
-    : `约 ${tokenCount}`
   const activeLanguageRules = [
     liveRules.writingConstraints.antiQuoteEmphasis,
     liveRules.writingConstraints.antiConceptSlogans,
@@ -937,11 +934,11 @@ export default function WorldRules({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="力量体系" value={liveRules.powerSystems.length} tone="warm" hint="成长规则与限制条件" />
-          <WorkspaceMetric label="种族实体" value={liveRules.speciesSystem.length} hint="可与人物系统联动的种族 / 实体" />
-          <WorkspaceMetric label="组织势力" value={liveRules.factionSystem.length} tone="cool" hint="可与地图、人物、剧情挂接的势力" />
-          <WorkspaceMetric label="地图层级" value={liveRules.mapBlueprint.levels.length} hint={tokenStatusText} />
-          <WorkspaceMetric label="动态系统" value={liveRules.worldDynamics.climateCycles.length + liveRules.worldDynamics.economyLoops.length} tone="cool" hint="气候周期与经济循环" />
+          <WorkspaceMetric label="力量体系" value={liveRules.powerSystems.length} tone="warm" />
+          <WorkspaceMetric label="种族实体" value={liveRules.speciesSystem.length} />
+          <WorkspaceMetric label="组织势力" value={liveRules.factionSystem.length} tone="cool" />
+          <WorkspaceMetric label="地图层级" value={liveRules.mapBlueprint.levels.length} />
+          <WorkspaceMetric label="动态系统" value={liveRules.worldDynamics.climateCycles.length + liveRules.worldDynamics.economyLoops.length} tone="cool" />
         </>
       )}
       contextSummary={<WorkspaceContextSummary items={[{ label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' }, { label: '当前分区', value: activeSectionMeta.label }, { label: '时间制度', value: calendarLabel }, { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` }]} />}

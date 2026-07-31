@@ -338,12 +338,12 @@ export default function StyleLabPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="本书指纹数" value={fingerprints.length} hint="含粘贴样本与章节自动采样。" />
+          <WorkspaceMetric label="本书指纹数" value={fingerprints.length} />
           <WorkspaceMetric
             label="生效方式"
             value={resolved ? RESOLVE_SOURCE_LABEL[resolved.source] : '未生效'}
             tone={resolved?.source === 'active' ? 'warm' : 'default'}
-            hint="兜底顺序：手动激活 → 最新指纹 → 题材默认声线。"
+
           />
         </>
       )}

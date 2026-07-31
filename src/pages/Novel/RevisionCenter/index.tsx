@@ -490,10 +490,10 @@ export default function RevisionCenterPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="阻塞项" value={stats.blockerCount} tone="warm" hint="高优先且仍未解决的问题，会直接影响后续章节稳定性。" />
-          <WorkspaceMetric label="待处理" value={stats.openCount} hint="还没有开始处理的任务。" />
-          <WorkspaceMetric label="处理中" value={stats.inProgressCount} hint="正在回查和修正的任务。" />
-          <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} hint="系统任务支持忽略、恢复和 AI 修复；人工任务支持自由编辑。" />
+          <WorkspaceMetric label="阻塞项" value={stats.blockerCount} tone="warm" />
+          <WorkspaceMetric label="待处理" value={stats.openCount} />
+          <WorkspaceMetric label="处理中" value={stats.inProgressCount} />
+          <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} />
         </>
       )}
       aside={(

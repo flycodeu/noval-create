@@ -521,10 +521,10 @@ export default function FactionsPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="势力总数" value={stats.total} tone="warm" hint="建议让真正影响主线的主体先入场。" />
-          <WorkspaceMetric label="已绑领袖" value={stats.withLeaderCount} hint="领袖越明确，人物归属越稳定。" />
-          <WorkspaceMetric label="已绑地盘" value={stats.territoryBoundCount} hint="地图绑定后，冲突空间才会更具体。" />
-          <WorkspaceMetric label="势力关系" value={stats.relationCount} hint="联盟、操控、交易、渗透都算有效关系。" />
+          <WorkspaceMetric label="势力总数" value={stats.total} tone="warm" />
+          <WorkspaceMetric label="已绑领袖" value={stats.withLeaderCount} />
+          <WorkspaceMetric label="已绑地盘" value={stats.territoryBoundCount} />
+          <WorkspaceMetric label="势力关系" value={stats.relationCount} />
         </>
       )}
     >

@@ -621,7 +621,7 @@ export default function Outline({ novelId }: Props) {
           <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
         </div>
       )}
-      metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" hint="按阶段组织长篇结构" /><WorkspaceMetric label="章节数" value={chapters.length} hint="当前小说全部章节" /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" hint="状态为 final 的章节" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} hint="展开后查看章节细纲" /></>}
+      metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" /><WorkspaceMetric label="章节数" value={chapters.length} /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} /></>}
     >
       {outlineBatch.progress.phase !== 'idle' ? (
         <WorkspacePanel title="细纲批量生成">

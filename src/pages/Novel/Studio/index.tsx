@@ -324,31 +324,24 @@ export default function StudioPage({ novelId }: Props) {
         <MetricCard
           label="当前阶段"
           value={workspaceSnapshot.stage.label}
-          hint={workspaceSnapshot.stage.description}
           tone="warm"
         />
         <MetricCard
           label="模块完成度"
           value={`${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`}
-          hint={currentNovel?.launchMode === 'fast_launch' ? '快速模式 8 个关键步骤' : '专业模式完整链路'}
         />
         <MetricCard
           label="高优先风险"
           value={visibleBlockers.length}
-          hint={visibleBlockers.length > 0 ? '建议先清阻塞项再推进正文' : '当前没有阻塞项'}
           tone={visibleBlockers.length > 0 ? 'danger' : 'success'}
         />
         <MetricCard
           label="上下文版本"
           value={contextStatus ? `v${contextStatus.contextVersion}` : '未建立'}
-          hint={contextStatus?.staleChapterCount ? `${contextStatus.staleChapterCount} 章待同步` : '当前上下文稳定'}
         />
         <MetricCard
           label="待回写"
           value={qualitySummary?.productionReadiness.writebackPendingCount || 0}
-          hint={qualitySummary?.productionReadiness.writebackFailedCount
-            ? `${qualitySummary.productionReadiness.writebackFailedCount} 章回写失败`
-            : '资产总账闭环情况'}
           tone={(qualitySummary?.productionReadiness.writebackPendingCount || 0) > 0 ? 'warm' : 'default'}
         />
       </div>

@@ -252,10 +252,10 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label={TIMELINE_TEXT.metricTotal} value={workspace.stats.total} tone="warm" hint={TIMELINE_TEXT.metricTotalHint} />
-          <WorkspaceMetric label={TIMELINE_TEXT.metricMajor} value={workspace.stats.majorCount} tone="cool" hint={TIMELINE_TEXT.metricMajorHint} />
-          <WorkspaceMetric label={TIMELINE_TEXT.metricResolved} value={workspace.stats.resolvedCount} hint={TIMELINE_TEXT.metricResolvedHint} />
-          <WorkspaceMetric label={TIMELINE_TEXT.metricOpenThreads} value={workspace.stats.openThreadCount} hint={TIMELINE_TEXT.metricOpenThreadsHint} />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricTotal} value={workspace.stats.total} tone="warm" />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricMajor} value={workspace.stats.majorCount} tone="cool" />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricResolved} value={workspace.stats.resolvedCount} />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricOpenThreads} value={workspace.stats.openThreadCount} />
         </>
       )}
     >

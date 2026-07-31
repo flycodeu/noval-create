@@ -586,10 +586,10 @@ export default function PromptManager() {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" hint="基础模板 + 运行时链路" />
-          <WorkspaceMetric label="运行时覆盖" value={overrideCount} hint={overrideCount > 0 ? '这些模板已被本地覆盖并实时生效' : '当前全部使用默认模板'} />
-          <WorkspaceMetric label="中文底板接入" value={chineseBaseCount} tone="cool" hint="已接入自然中文、真实度和输出质量公共护栏的模板数" />
-          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" hint="负责 AI 检测、读者感受和修订反馈" />
+          <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" />
+          <WorkspaceMetric label="运行时覆盖" value={overrideCount} />
+          <WorkspaceMetric label="中文底板接入" value={chineseBaseCount} tone="cool" />
+          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" />
         </>
       )}
     >

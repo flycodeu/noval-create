@@ -1240,8 +1240,8 @@ export default function MapExplorerPage({ novelId }: Props) {
           <WorkspaceMetric label="根节点" value={stats.rootCount} tone="warm" />
           <WorkspaceMetric label="第二层" value={stats.secondLevelCount} />
           <WorkspaceMetric label="叶子节点" value={stats.leafCount} tone="cool" />
-          <WorkspaceMetric label="显式关系" value={allRelations.length} hint="手工维护的地图关系条目" />
-          <WorkspaceMetric label="总节点" value={stats.total} hint={`最大深度 ${stats.maxDepth || 0} 层`} />
+          <WorkspaceMetric label="显式关系" value={allRelations.length} />
+          <WorkspaceMetric label="总节点" value={stats.total} />
         </>
       )}
     >

@@ -106,19 +106,16 @@ export function WorkspacePage({
 export function WorkspaceMetric({
   label,
   value,
-  hint,
   tone = 'default',
 }: {
   label: string
   value: React.ReactNode
-  hint?: React.ReactNode
   tone?: 'default' | 'warm' | 'cool'
 }) {
   return (
     <div className={`novel-metric novel-metric--${tone}`}>
       <div className="novel-metric__label">{label}</div>
       <div className="novel-metric__value">{value}</div>
-      {hint ? <div className="novel-metric__hint">{hint}</div> : null}
     </div>
   )
 }

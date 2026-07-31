@@ -302,10 +302,10 @@ export default function GlossaryPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="术语总数" value={stats.total} tone="warm" hint="优先录入会重复出现的专有名词。" />
-          <WorkspaceMetric label="规范用法" value={stats.canonicalCount} hint="默认只把规范词注入写作上下文。" />
-          <WorkspaceMetric label="废弃用法" value={stats.deprecatedCount} hint="可把旧称、错称和历史别名沉到这里。" />
-          <WorkspaceMetric label="分类数" value={stats.categoryCount} hint="分类越稳，后面越方便筛选和复用。" />
+          <WorkspaceMetric label="术语总数" value={stats.total} tone="warm" />
+          <WorkspaceMetric label="规范用法" value={stats.canonicalCount} />
+          <WorkspaceMetric label="废弃用法" value={stats.deprecatedCount} />
+          <WorkspaceMetric label="分类数" value={stats.categoryCount} />
         </>
       )}
     >

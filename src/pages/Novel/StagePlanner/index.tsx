@@ -212,8 +212,8 @@ export default function StagePlanner({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="当前工作段" value={activeCount} hint="建议始终只保持一个" tone="warm" />
-          <WorkspaceMetric label="待推进阶段" value={plannedCount} hint="先做章节窗口" tone="cool" />
+          <WorkspaceMetric label="当前工作段" value={activeCount} tone="warm" />
+          <WorkspaceMetric label="待推进阶段" value={plannedCount} tone="cool" />
         </>
       )}
       guide={(

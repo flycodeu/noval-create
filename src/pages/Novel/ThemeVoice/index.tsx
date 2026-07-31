@@ -497,8 +497,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" hint="阅读预期、主题、情感核心、视角、时态、风格、对白。" />
-          <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} hint="母题、叙事调度、叙述距离、口吻词、描写规则、禁用表达。" />
+          <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" />
+          <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} />
           <WorkspaceMetric label="修订任务" value={stats.revisionTaskCount} />
         </>
       )}

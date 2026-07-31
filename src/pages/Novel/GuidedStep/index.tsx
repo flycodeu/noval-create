@@ -36,7 +36,6 @@ import {
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
-  isStoryThreadsReady,
   isWorldFoundationReady,
   loadWorkflowStats,
   parseStorySettings,
@@ -337,7 +336,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="书名、简介、原始背景、扩展背景" />
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" />
             <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} />
           </>
         )}
@@ -421,7 +420,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${projectBrief.readyCount}/${progress.totalCount}`} tone="warm" hint="平台模式、赛道、读者、承诺、卖点、参考系" />
+            <WorkspaceMetric label="完成度" value={`${projectBrief.readyCount}/${progress.totalCount}`} tone="warm" />
             <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} />
           </>
         )}
@@ -475,7 +474,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="定位、核心信息、主角起点、约束" />
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" />
             <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} />
           </>
         )}
@@ -529,7 +528,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" hint="主题、情感核心、视角、时态、风格规则、对白规则" />
+            <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" />
             <WorkspaceMetric label="立项状态" value={isProjectBriefReady(currentNovel) ? '已完成' : '待补齐'} />
           </>
         )}
@@ -583,7 +582,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="规则状态" value={isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'} tone="warm" hint="时间、势力、种族、等级和语言边界" />
+            <WorkspaceMetric label="规则状态" value={isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'} tone="warm" />
             <WorkspaceMetric label="准备状态" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '基础设定未完成'} />
           </>
         )}
@@ -623,8 +622,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="结局类型、最终冲突、主题答案、兑现承诺、回收清单、留白、意象、最后一幕" />
-            <WorkspaceMetric label="世界规则" value={isWorldFoundationReady(currentNovel) ? '已完成' : '待完成'} hint="终局设计最好建立在已明确的世界口径之上。" />
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" />
+            <WorkspaceMetric label="世界规则" value={isWorldFoundationReady(currentNovel) ? '已完成' : '待完成'} />
           </>
         )}
       >
@@ -677,8 +676,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="节点数" value={stats.mapCount} tone="warm" hint={stats.mapCount > 0 ? '地点骨架已经存在。' : '还没有任何地图节点。'} />
-            <WorkspaceMetric label="规则前置" value={isWorldFoundationReady(currentNovel) ? '已完成' : '待完成'} hint="先统一世界规则，再建地图。" />
+            <WorkspaceMetric label="节点数" value={stats.mapCount} tone="warm" />
+            <WorkspaceMetric label="规则前置" value={isWorldFoundationReady(currentNovel) ? '已完成' : '待完成'} />
           </>
         )}
       >
@@ -710,8 +709,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="主角" value={stats.hasProtagonist ? '已建立' : '未建立'} tone="warm" hint="没有主角时，后续长线会失焦。" />
-            <WorkspaceMetric label="角色数" value={stats.characterCount} hint="先够用，再扩充枝末细节。" />
+            <WorkspaceMetric label="主角" value={stats.hasProtagonist ? '已建立' : '未建立'} tone="warm" />
+            <WorkspaceMetric label="角色数" value={stats.characterCount} />
           </>
         )}
       >
@@ -743,8 +742,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="物品数" value={stats.itemCount} tone="warm" hint={stats.itemCount > 0 ? '已有可挂到人物和事件的物品。' : '还没有关键物品。'} />
-            <WorkspaceMetric label="人物前置" value={isCharacterRosterReady(stats) ? '已完成' : '待完成'} hint="人物和地图越完整，物品越不容易空转。" />
+            <WorkspaceMetric label="物品数" value={stats.itemCount} tone="warm" />
+            <WorkspaceMetric label="人物前置" value={isCharacterRosterReady(stats) ? '已完成' : '待完成'} />
           </>
         )}
       >
@@ -776,8 +775,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="线程数" value={stats.threadCount} tone="warm" hint={stats.threadCount > 0 ? '已经有可追踪的长线。' : '还没有任何线程，后续最容易丢伏笔和关系线。'} />
-            <WorkspaceMetric label="前置资产" value={isItemsEquipmentReady(stats) ? '已完成' : '待完成'} hint="人物、物品和地点越完整，线程越不会写成空话。" />
+            <WorkspaceMetric label="线程数" value={stats.threadCount} tone="warm" />
+            <WorkspaceMetric label="前置资产" value={isItemsEquipmentReady(stats) ? '已完成' : '待完成'} />
           </>
         )}
       >
@@ -820,8 +819,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="目标、冲突、推进链、结局" />
-            <WorkspaceMetric label="资产准备" value={isItemsEquipmentReady(stats) ? '基本齐备' : '仍待补齐'} hint="世界、地图、人物、物品越完整，故事设计越稳。" />
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" />
+            <WorkspaceMetric label="资产准备" value={isItemsEquipmentReady(stats) ? '基本齐备' : '仍待补齐'} />
           </>
         )}
       >
@@ -870,9 +869,9 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         contextSummary={contextSummary}
         metrics={(
           <>
-            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="至少拆出一卷" />
-            <WorkspaceMetric label="已有卷数" value={stats.volumeCount} hint="百万字建议 3-8 卷，每卷 15-40 万字。" />
-            <WorkspaceMetric label="目标字数" value={`${(currentNovel?.targetWords || 0).toLocaleString()} 字`} hint="总字数预算，拆卷时按比例分配。" />
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" />
+            <WorkspaceMetric label="已有卷数" value={stats.volumeCount} />
+            <WorkspaceMetric label="目标字数" value={`${(currentNovel?.targetWords || 0).toLocaleString()} 字`} />
           </>
         )}
       >
@@ -929,10 +928,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
       contextSummary={contextSummary}
       metrics={(
         <>
-          <WorkspaceMetric label="大纲" value={stats.outlineCount} tone="warm" hint="先把故事弧和结构分层压稳。" />
-          <WorkspaceMetric label="时间轴" value={stats.timelineCount} hint="记清谁在何时何地做了什么。" />
-            <WorkspaceMetric label="线程" value={stats.threadCount} hint={isStoryThreadsReady(stats) ? '主线、支线和回收线已经有统一挂点。' : '当前还没有故事线程。'} />
-          <WorkspaceMetric label="章节" value={stats.chapterCount} hint={stats.chapterCount > 0 ? '已经可以继续写正文。' : '还没有首章。'} />
+          <WorkspaceMetric label="大纲" value={stats.outlineCount} tone="warm" />
+          <WorkspaceMetric label="时间轴" value={stats.timelineCount} />
+            <WorkspaceMetric label="线程" value={stats.threadCount} />
+          <WorkspaceMetric label="章节" value={stats.chapterCount} />
         </>
       )}
     >

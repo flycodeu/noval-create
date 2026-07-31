@@ -385,10 +385,10 @@ export default function EndgamePage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="终局清晰度" value={`${readyCount}/8`} tone="warm" hint="结局类型、最终冲突、主题答案、兑现承诺、回收清单、留白、意象、最后一幕。" />
-          <WorkspaceMetric label="兑现承诺" value={promiseCount} hint="建议每行一条，写清必须兑现的读者承诺或前文承诺。" />
-          <WorkspaceMetric label="回收清单" value={payoffCount} tone="cool" hint="建议每行一条，优先记录必须回收的长线伏笔或终章债务。" />
-          <WorkspaceMetric label="未绑定终局承诺" value={assetSummary?.unboundCount ?? 0} hint="尚未进入卷级设计、章节合同、场景合同或伏笔账本的终局项。" />
+          <WorkspaceMetric label="终局清晰度" value={`${readyCount}/8`} tone="warm" />
+          <WorkspaceMetric label="兑现承诺" value={promiseCount} />
+          <WorkspaceMetric label="回收清单" value={payoffCount} tone="cool" />
+          <WorkspaceMetric label="未绑定终局承诺" value={assetSummary?.unboundCount ?? 0} />
         </>
       )}
     >

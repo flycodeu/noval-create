@@ -1024,24 +1024,24 @@ export default function GuidePage({ novelId }: Props) {
             label="推荐人物配额"
             value={recommendedCharacterCount}
             tone="warm"
-            hint="主角之外的主要人物、反派、功能角色和次要人物总和"
+
           />
           <WorkspaceMetric
             label="主题与文风"
             value={`${themeVoice.readyCount}/6`}
-            hint="先把视角、时态、风格规则和对白边界压稳"
+
           />
           <WorkspaceMetric
             label="写作类型"
             value={writingContractLabel}
             tone="cool"
-            hint="先钉整本书的阅读预期，再让节奏和对白跟着走"
+
           />
           <WorkspaceMetric
             label="故事线程"
             value={stats.threadCount}
             tone="cool"
-            hint="后续结构页、时间轴和正文都应回查这些线程"
+
           />
           <WorkspaceMetric
             label="下一章状态"
@@ -1051,7 +1051,7 @@ export default function GuidePage({ novelId }: Props) {
           <WorkspaceMetric
             label="修订任务"
             value={stats.revisionTaskCount}
-            hint={stats.revisionTaskCount > 0 ? '建议开写前先处理未闭环问题' : '当前链路没有待修订阻塞'}
+
           />
         </>
       )}

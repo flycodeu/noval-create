@@ -529,10 +529,10 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="信息点总数" value={facts.length} tone="warm" hint="谜题/线索/真相/假线索总量。" />
-          <WorkspaceMetric label="真相条目" value={facts.filter((item) => item.kind === 'truth').length} hint="可参与卷级揭示比例控制。" />
-          <WorkspaceMetric label="超限卷数" value={overLimitCount} tone={overLimitCount > 0 ? 'warm' : 'cool'} hint="超出卷级真相揭示比例上限的卷。" />
-          <WorkspaceMetric label="当前卷比例" value={currentVolumeMetrics ? `${toPercent(currentVolumeMetrics.ratio)}` : '未选择'} hint={currentVolumeMetrics?.limit != null ? `上限 ${toPercent(currentVolumeMetrics.limit)}` : '当前卷未设置上限'} />
+          <WorkspaceMetric label="信息点总数" value={facts.length} tone="warm" />
+          <WorkspaceMetric label="真相条目" value={facts.filter((item) => item.kind === 'truth').length} />
+          <WorkspaceMetric label="超限卷数" value={overLimitCount} tone={overLimitCount > 0 ? 'warm' : 'cool'} />
+          <WorkspaceMetric label="当前卷比例" value={currentVolumeMetrics ? `${toPercent(currentVolumeMetrics.ratio)}` : '未选择'} />
         </>
       )}
     >

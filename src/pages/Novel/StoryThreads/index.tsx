@@ -682,10 +682,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="推进中" value={stats.activeCount} tone="warm" hint="仍在施压主线或人物关系的线程。" />
-          <WorkspaceMetric label="已回收" value={stats.resolvedCount} hint="已经完成回收或兑现代价的线程。" />
-          <WorkspaceMetric label="卡住" value={stats.stalledCount} hint="最容易拖累后续章节推进的线程。" />
-          <WorkspaceMetric label="过期" value={stats.overdueCount} hint="目标回收章位已过但仍未处理的线程。" />
+          <WorkspaceMetric label="推进中" value={stats.activeCount} tone="warm" />
+          <WorkspaceMetric label="已回收" value={stats.resolvedCount} />
+          <WorkspaceMetric label="卡住" value={stats.stalledCount} />
+          <WorkspaceMetric label="过期" value={stats.overdueCount} />
         </>
       )}
     >

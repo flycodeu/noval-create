@@ -360,10 +360,10 @@ export default function ProjectBriefPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="核心字段" value={`${coreFilledCount}/6`} tone="warm" hint="模式、赛道、读者、承诺、卖点、参考。" />
-          <WorkspaceMetric label="边界约束" value={`${guardrailCount}/2`} hint="禁区和交付节奏决定后续是否容易跑偏。" />
-          <WorkspaceMetric label="故事线程" value={stats.threadCount} hint="线索页应服从立项表里的产品承诺。" />
-          <WorkspaceMetric label="结构资产" value={structureAssetCount} hint="结构越多，越需要先把 Brief 写稳。" />
+          <WorkspaceMetric label="核心字段" value={`${coreFilledCount}/6`} tone="warm" />
+          <WorkspaceMetric label="边界约束" value={`${guardrailCount}/2`} />
+          <WorkspaceMetric label="故事线程" value={stats.threadCount} />
+          <WorkspaceMetric label="结构资产" value={structureAssetCount} />
         </>
       )}
     >

@@ -651,10 +651,10 @@ export default function TaskCenter() {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" hint="当前仍在执行或收尾中的 AI 任务" />
-          <WorkspaceMetric label="等待中" value={pendingCount} hint="已入队但尚未开始的任务" />
-          <WorkspaceMetric label="已成功" value={successCount} tone="warm" hint="最近已经完成的任务" />
-          <WorkspaceMetric label="已失败" value={failedCount} hint="需要重试或回查提示词的任务" />
+          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" />
+          <WorkspaceMetric label="等待中" value={pendingCount} />
+          <WorkspaceMetric label="已成功" value={successCount} tone="warm" />
+          <WorkspaceMetric label="已失败" value={failedCount} />
         </>
       )}
     >

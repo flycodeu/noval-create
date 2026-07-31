@@ -833,11 +833,11 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="卷数" value={volumes.length} tone="warm" hint="按阶段组织长篇。" />
-          <WorkspaceMetric label="当前部章节" value={chapters.total} hint="当前窗口内的章节数。" />
-          <WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" hint="当前章节的最小结构单元。" />
-          <WorkspaceMetric label="关联事件" value={linked.total} hint="当前路径上的时间轴事件。" />
-          <WorkspaceMetric label="联动缺口" value={linkageSummary?.totalGapCount ?? 0} hint="缺合同、缺时间锚点或锚点失效。" />
+          <WorkspaceMetric label="卷数" value={volumes.length} tone="warm" />
+          <WorkspaceMetric label="当前部章节" value={chapters.total} />
+          <WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" />
+          <WorkspaceMetric label="关联事件" value={linked.total} />
+          <WorkspaceMetric label="联动缺口" value={linkageSummary?.totalGapCount ?? 0} />
         </>
       )}
       contextSummary={(

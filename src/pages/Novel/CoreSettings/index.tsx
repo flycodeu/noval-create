@@ -981,10 +981,10 @@ export default function CoreSettings({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="剧情锚点" value={`${anchorReadyCount}/4`} tone="warm" hint="目标、冲突、推进链、结局" />
-          <WorkspaceMetric label="支线数量" value={subplots.length} hint="只保留对主线有因果作用的支线" />
-          <WorkspaceMetric label="节奏比例" value={`${formValues.rhythm_setup ?? 30}/${formValues.rhythm_conflict ?? 50}/${formValues.rhythm_ending ?? 20}`} hint="铺垫 / 冲突 / 回收" />
-          <WorkspaceMetric label="已保存版本" value={storyReady ? '存在' : '未保存'} hint="保存后会进入全书上下文。" />
+          <WorkspaceMetric label="剧情锚点" value={`${anchorReadyCount}/4`} tone="warm" />
+          <WorkspaceMetric label="支线数量" value={subplots.length} />
+          <WorkspaceMetric label="节奏比例" value={`${formValues.rhythm_setup ?? 30}/${formValues.rhythm_conflict ?? 50}/${formValues.rhythm_ending ?? 20}`} />
+          <WorkspaceMetric label="已保存版本" value={storyReady ? '存在' : '未保存'} />
         </>
       )}
       aside={(

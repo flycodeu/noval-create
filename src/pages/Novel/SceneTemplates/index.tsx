@@ -237,10 +237,10 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="模板总数" value={stats.total} tone="warm" hint="包含全局内置、题材内置和当前小说自定义。" />
-          <WorkspaceMetric label="内置模板" value={stats.builtinCount} hint="内置模板只读，用于快速开局。" />
-          <WorkspaceMetric label="自定义模板" value={stats.customCount} hint="真正适配本书节奏的模板应优先落在这里。" />
-          <WorkspaceMetric label="题材作用域" value={stats.genreScopedCount} hint="按题材筛出的模板更适合复用。" />
+          <WorkspaceMetric label="模板总数" value={stats.total} tone="warm" />
+          <WorkspaceMetric label="内置模板" value={stats.builtinCount} />
+          <WorkspaceMetric label="自定义模板" value={stats.customCount} />
+          <WorkspaceMetric label="题材作用域" value={stats.genreScopedCount} />
         </>
       )}
     >

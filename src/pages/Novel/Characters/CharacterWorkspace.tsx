@@ -1099,10 +1099,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="筛选后角色" value={pageData.total} tone="warm" hint={`第 ${pageData.page} 页`} />
-          <WorkspaceMetric label="关系条数" value={stats.relationCount} hint="人物网络中的有效关系。" />
-          <WorkspaceMetric label="图谱节点" value={graphCharacterCount} tone="cool" hint="当前关系看板中的可视角色。" />
-          <WorkspaceMetric label="草稿队列" value={stats.draftCount || 0} hint="来自大纲或正文的新实体候选。" />
+          <WorkspaceMetric label="筛选后角色" value={pageData.total} tone="warm" />
+          <WorkspaceMetric label="关系条数" value={stats.relationCount} />
+          <WorkspaceMetric label="图谱节点" value={graphCharacterCount} tone="cool" />
+          <WorkspaceMetric label="草稿队列" value={stats.draftCount || 0} />
         </>
       )}
     >
