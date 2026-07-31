@@ -17,6 +17,7 @@ import type { CharacterNeedsAnalysisResult } from '../../../shared/character-cas
 import type { CharacterDraftReviewContent } from '../../../shared/character-draft-workflow'
 import type { AgentToolCallRequest, AgentToolCallResult } from '../../../shared/tool-contracts'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 import DramaticEnginePanel from '../../../components/novel/characters/DramaticEnginePanel'
 import {
   formatCharacterBatchProgress,
@@ -33,6 +34,7 @@ import type {
   CharacterFilterOptions,
   CharacterGenerationOptions,
   CharacterGraphPayload,
+  CreativeStageContext,
   CharacterQueryInput,
   CharacterStats,
   PagedResult,
@@ -321,7 +323,7 @@ function buildRelationBody(relation: CharacterRelation) {
 export default function CharacterWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { currentNovel, setCharacters } = useNovelStore()
   const [form] = Form.useForm<CharacterFormValues>()
   const [batchForm] = Form.useForm<CharacterBatchFormValues>()
@@ -358,6 +360,9 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const pageRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
   const routeCharacterId = useMemo(() => parseRouteId(searchParams.get('characterId')), [searchParams])
+  const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
+  const [creativeStageContext, setCreativeStageContext] = useState<CreativeStageContext | null>(null)
+  const activeStageContext = creativeStageContext?.stage.id === creativeStageId ? creativeStageContext : null
   const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null)
   const [relationSaving, setRelationSaving] = useState(false)
   const [relationCharacterOptions, setRelationCharacterOptions] = useState<Character[]>([])
@@ -370,6 +375,30 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [graphScope, setGraphScope] = useState<'all' | 'focus'>('all')
   const [graphRelationFilter, setGraphRelationFilter] = useState<string>('all')
   const [workspaceView, setWorkspaceView] = useState<'list' | 'graph'>(() => (searchParams.get('view') === 'graph' ? 'graph' : 'list'))
+
+  const handleCreativeStageChange = useCallback((stageId: number | null) => {
+    const nextParams = new URLSearchParams(searchParams)
+    if (stageId) nextParams.set('stageId', String(stageId))
+    else nextParams.delete('stageId')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!creativeStageId) {
+      setCreativeStageContext(null)
+      return
+    }
+    let disposed = false
+    void window.electron.creativeStage.getContext(novelId, creativeStageId).then((context) => {
+      if (!disposed) setCreativeStageContext(context)
+    }).catch((error) => {
+      if (disposed) return
+      setCreativeStageContext(null)
+      console.error(error)
+      message.error(getErrorMessage(error, 'creativeStage.notFound'))
+    })
+    return () => { disposed = true }
+  }, [creativeStageId, novelId])
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
@@ -430,11 +459,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
     page: targetPage,
     pageSize: PAGE_SIZE,
     recordStatus: recordStatusFilter,
+    ...(creativeStageId && activeStageContext ? { characterIds: activeStageContext.activeCharacterIds } : {}),
     ...(roleFilter !== 'all' ? { roleType: roleFilter as Character['roleType'] } : {}),
     ...(entityTypeFilter !== 'all' ? { entityType: entityTypeFilter } : {}),
     ...(speciesFilter !== 'all' ? { species: speciesFilter } : {}),
     ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
-  }), [entityTypeFilter, keyword, novelId, recordStatusFilter, roleFilter, speciesFilter])
+  }), [activeStageContext, creativeStageId, entityTypeFilter, keyword, novelId, recordStatusFilter, roleFilter, speciesFilter])
 
   const searchItems = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'instance', 24)
@@ -483,10 +513,15 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const loadGraph = useCallback(async () => {
     setGraphLoading(true)
     try {
+      if (creativeStageId && activeStageContext && activeStageContext.activeCharacterIds.length === 0) {
+        setGraphData(EMPTY_GRAPH)
+        return
+      }
       const graph = await window.electron.character.getGraph({
         novelId,
         limit: graphScope === 'focus' ? 24 : 60,
         recordStatus: recordStatusFilter,
+        ...(creativeStageId && activeStageContext ? { characterIds: activeStageContext.activeCharacterIds } : {}),
         ...(graphScope === 'focus' && selectedId ? { focusCharacterId: selectedId } : {}),
         ...(roleFilter !== 'all' ? { roleTypes: [roleFilter] } : {}),
         ...(graphRelationFilter !== 'all' ? { relationTypes: [graphRelationFilter] } : {}),
@@ -495,7 +530,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     } finally {
       setGraphLoading(false)
     }
-  }, [graphRelationFilter, graphScope, novelId, recordStatusFilter, roleFilter, selectedId])
+  }, [activeStageContext, creativeStageId, graphRelationFilter, graphScope, novelId, recordStatusFilter, roleFilter, selectedId])
 
   const loadPage = useCallback(async (
     preferredId: number | null | undefined,
@@ -555,7 +590,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
   }, [loadPage, page])
-  useEffect(() => { setPage(1) }, [entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter])
+  useEffect(() => { setPage(1) }, [creativeStageId, entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter])
   useEffect(() => { void loadGraph() }, [loadGraph])
   useEffect(() => {
     if (!routeCharacterId || routeFocusRef.current === routeCharacterId) return
@@ -724,6 +759,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     try {
       const nextId = await window.electron.character.generateProtagonist(novelId, {
         ...values,
+        stageId: creativeStageId || undefined,
         itemPreferences: values.itemPreferenceText,
         forbiddenNames: values.forbiddenNameText,
       })
@@ -748,7 +784,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
     setGenerating(true)
     setBatchProgress(null)
     try {
-      await window.electron.character.batchGenerate(novelId, values)
+      await window.electron.character.batchGenerate(novelId, {
+        ...values,
+        stageId: creativeStageId || undefined,
+      })
       setBatchOpen(false)
       await loadPage(null, 1)
       await loadGraph()
@@ -781,7 +820,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
         input: {
           novelId,
           scope: { type: 'novel', lookaheadChapters: 30 },
-          goals: ['补足叙事功能缺口', '降低同质角色与认知负担', '让新增人物能直接进入未来章节'],
+          goals: [
+            '补足叙事功能缺口',
+            '降低同质角色与认知负担',
+            '让新增人物能直接进入未来章节',
+            ...(activeStageContext ? [`只为当前阶段服务，不提前展开后续阶段：${activeStageContext.promptSummary}`] : []),
+          ],
           constraints: {
             maxNewCharacters: 12,
             allowMergeExisting: true,
@@ -815,7 +859,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
           planId: plan.planId,
           idempotencyKey: createWorkflowKey('character-draft'),
           maxCharacters: 12,
-          specialRequirements: '保持人物姓名自然可读；优先形成能被章节合同直接引用的行动、资源与关系钩子。',
+          specialRequirements: [
+            '保持人物姓名自然可读；优先形成能被章节合同直接引用的行动、资源与关系钩子。',
+            activeStageContext ? `当前阶段边界：${activeStageContext.promptSummary}` : '',
+          ].filter(Boolean).join('\n'),
         },
       }))
       setAgentDraft(draft)
@@ -863,6 +910,21 @@ export default function CharacterWorkspace({ novelId }: Props) {
         ...request,
         approvalId: approval.approvalId,
       }))
+      if (creativeStageId) {
+        const committedIds = [...committed.createdCharacterIds, ...committed.updatedCharacterIds]
+        await Promise.all(committedIds.map(async (characterId) => {
+          const character = await window.electron.character.get(characterId)
+          await window.electron.creativeStage.upsertAsset({
+            stageId: creativeStageId,
+            assetType: 'character',
+            assetId: characterId,
+            placeholderName: character?.fullName,
+            role: character?.roleType === 'protagonist' || character?.roleType === 'major' ? 'core' : 'supporting',
+            detailLevel: 'canonical',
+            status: 'active',
+          })
+        }))
+      }
       setAgentCommit(committed)
       setAgentWorkflowStage('committed')
       const refreshedCharacterId = committed.createdCharacterIds[0] || committed.updatedCharacterIds[0] || null
@@ -1006,6 +1068,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       title="角色系统"
       actions={(
         <Space wrap>
+          <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
           <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
           <Button className="character-agent-workflow-trigger" icon={<SafetyCertificateOutlined />} loading={agentWorkflowLoading} onClick={() => void handleAgentWorkflowStart()}>
             智能规划·审校后生成
@@ -1027,6 +1090,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '当前窗口', value: activeStageContext?.stage.name || '全项目' },
             { label: '正式角色', value: stats.confirmedCount || 0 },
             { label: '草稿待审', value: stats.draftCount || 0 },
             { label: '图谱范围', value: graphScope === 'focus' ? '当前人物关系圈' : '全角色网络' },

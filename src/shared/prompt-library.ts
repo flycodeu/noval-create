@@ -131,6 +131,8 @@ export interface ChapterOutlinePromptInput {
   designGateDirective?: string
   /** 弧上挂载的节奏模板换算成本弧章节区间后的节拍约束段。 */
   rhythmSection?: string
+  /** 当前创作阶段的目标、边界和最小资产范围。 */
+  creativeStageSummary?: string
 }
 
 export interface TimelineEventPromptInput {
@@ -1455,6 +1457,10 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       params.arcTargetWords ? '本弧字数预算：' + params.arcTargetWords + '字，章节数量和单章篇幅要匹配这个预算。' : '',
       '章节范围：第' + params.chapterStart + '章到第' + params.chapterEnd + '章',
     ]),
+    params.creativeStageSummary ? section('当前创作阶段（本批硬边界）', [
+      params.creativeStageSummary,
+      '本批章节只展开当前阶段真正需要的资产；未登记的新资产先以占位或待规划状态处理，不要提前扩写成全书设定。',
+    ].join('\n')) : '',
     section('节奏模板约束（本弧已选定，必须执行）', params.rhythmSection),
     sectionLines('连续性上下文', [
       params.previousSummary ? '前情摘要：\n' + params.previousSummary : '',

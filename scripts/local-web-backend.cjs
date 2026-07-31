@@ -135,6 +135,7 @@ function createRuntime() {
   const chapterService = requireProject('electron/services/chapter.service.ts')
   const characterService = requireProject('electron/services/character.service.ts')
   const mapService = requireProject('electron/services/map.service.ts')
+  const creativeStageService = requireProject('electron/services/creative-stage.service.ts')
   const itemService = requireProject('electron/services/item.service.ts')
   const storyThreadService = requireProject('electron/services/story-thread.service.ts')
   const factionService = requireProject('electron/services/faction.service.ts')
@@ -547,6 +548,17 @@ function createRuntime() {
       getLatestAutoGenerateTask: (novelId) => workflowTaskService.getLatestMapAutoGenerateTask(requireId(novelId, 'novelId')),
       resumeAutoGenerate: (taskId) => workflowTaskService.resumeWorkflowTask(requireId(taskId, 'taskId'), webEventSender),
       clear: (novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')),
+    },
+    creativeStage: {
+      list: (novelId, includeArchived) => creativeStageService.listCreativeStages(requireId(novelId, 'novelId'), includeArchived === true),
+      get: (stageId) => creativeStageService.getCreativeStage(requireId(stageId, 'stageId')),
+      create: (novelId, input) => creativeStageService.createCreativeStage(requireId(novelId, 'novelId'), requireObject(input, 'input')),
+      update: (input) => creativeStageService.updateCreativeStage(requireObject(input, 'input')),
+      archive: (stageId) => creativeStageService.archiveCreativeStage(requireId(stageId, 'stageId')),
+      listAssets: (stageId) => creativeStageService.listCreativeStageAssets(requireId(stageId, 'stageId')),
+      upsertAsset: (input) => creativeStageService.upsertCreativeStageAsset(requireObject(input, 'input')),
+      removeAsset: (assetId) => creativeStageService.removeCreativeStageAsset(requireId(assetId, 'assetId')),
+      getContext: (novelId, stageId) => creativeStageService.getCreativeStageContext(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')),
     },
     item: {
       list: (novelId) => itemService.listStoryItems(novelId),

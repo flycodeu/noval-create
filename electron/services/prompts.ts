@@ -36,6 +36,7 @@ type StoryArcsPromptParams = Parameters<typeof rawStoryArcsPrompt>[0]
 type ChapterOutlinePromptParams = Parameters<typeof rawChapterOutlinePrompt>[0]
 type ChapterWritingPromptParams = Parameters<typeof rawChapterWritingPrompt>[0]
 type ExtendedProtagonistPromptInput = ProtagonistPromptInput & {
+  stageSummary?: string
   ageRange?: string
   speciesPreference?: string
   occupationHint?: string
@@ -524,6 +525,7 @@ export function protagonistPrompt(params: ExtendedProtagonistPromptInput): strin
     [
       buildAvoidanceSection(params.rejectedDigests || []),
       params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
+      params.stageSummary ? `创作阶段边界\n- 本次只服务当前阶段，不要提前展开后续阶段：${params.stageSummary}` : '',
     ].filter(Boolean).join('\n\n'),
   )
   return applyPromptOverride('protagonist', fallback, params as unknown as Record<string, unknown>)

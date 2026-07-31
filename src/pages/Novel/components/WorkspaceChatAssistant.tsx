@@ -86,6 +86,7 @@ const QUALITY_ROUTE_KEYS: WorkspaceQualityRouteKey[] = [
   'story-design',
   'outline',
   'volume-design',
+  'stage-planner',
   'contracts',
   'structure',
   'timeline',

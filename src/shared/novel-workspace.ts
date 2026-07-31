@@ -40,6 +40,7 @@ export type WorkspaceRouteKey =
   | 'story-design'
   | 'outline'
   | 'volume-design'
+  | 'stage-planner'
   | 'structure'
   | 'timeline'
   | 'info-gap-board'
@@ -169,6 +170,7 @@ export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
   { key: 'foreshadow-ledger', label: '伏笔账本', description: '伏笔埋设、到期与回收。', groupKey: 'plot-architecture', groupTitle: '剧情与伏笔', quickMode: false },
   { key: 'growth-system', label: '成长/代价', description: '能力成长与资源消耗曲线。', groupKey: 'plot-architecture', groupTitle: '剧情与伏笔', quickMode: false },
   { key: 'volume-design', label: '卷级设计', description: '每卷目标、卷末爆点和阶段代价。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: true },
+  { key: 'stage-planner', label: '阶段计划', description: '按章节窗口增量扩展人物、地点和世界资产。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: true },
   { key: 'outline', label: '故事大纲', description: '故事弧、章节承接和推进骨架。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: true },
   { key: 'structure', label: '卷章结构', description: '卷、部、章与场景节奏拆分。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: false },
   { key: 'timeline', label: '事件时间轴', description: '事件先后、因果锚点与状态变化。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: true },
@@ -213,6 +215,7 @@ const WORKSPACE_ROUTE_ALIASES: Record<string, string> = {
   'story-threads': 'threads',
   'story-plot': 'story-design',
   'volume-planning': 'volume-design',
+  'stage-plan': 'stage-planner',
   'outline-structure': 'outline',
   'timeline-causality': 'timeline',
   'write-start': 'writing',
@@ -571,6 +574,14 @@ function buildBaseProgressMap(
       optionalTotal: 3,
       optionalDone: Math.min(stats.volumeCount, 3),
       status: stats.volumeCount > 0 ? (stats.volumeCount >= 3 ? 'done' : 'ready') : 'not_started',
+      blockers: [],
+    }),
+    'stage-planner': buildProgress('stage-planner', {
+      requiredTotal: 0,
+      requiredDone: 0,
+      optionalTotal: 1,
+      optionalDone: 0,
+      status: 'ready',
       blockers: [],
     }),
     structure: buildProgress('structure', {

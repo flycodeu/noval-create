@@ -30,6 +30,7 @@ const IDLE_STATE: OutlineBatchProgress = {
 export interface OutlineBatchOptions {
   batchSize: number
   targetCount: number
+  stageId?: number
 }
 
 /**
@@ -72,7 +73,10 @@ export function useChapterOutlineBatch(onRunFinished?: () => Promise<void> | voi
       while (generated < safeTargetCount && !cancelRef.current) {
         batchIndex += 1
         const currentBatchSize = Math.min(safeBatchSize, safeTargetCount - generated)
-        const result = await window.electron.outline.generateChapterOutlines(arcId, { batchSize: currentBatchSize }) as OutlineChapterBatchGenerationResult
+        const result = await window.electron.outline.generateChapterOutlines(arcId, {
+          batchSize: currentBatchSize,
+          stageId: options.stageId,
+        }) as OutlineChapterBatchGenerationResult
         lastResult = result
         generated += result.generatedCount || 0
         if (result.designGate) designGate = result.designGate

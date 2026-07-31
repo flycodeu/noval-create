@@ -92,6 +92,7 @@ import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { prepareChapterWritebackRun, prepareChapterWritebackRunWithRetry } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
+import { upsertCreativeStageAsset } from './creative-stage.service'
 import { captureChapterNumberReferenceSnapshot } from './chapter-number-remap.service'
 import { listActiveImpactsForChapter } from './asset-impact.service'
 import { enhanceAiScoreResult, toChapterAiCheckResult } from './ai-score.service'
@@ -2113,12 +2114,17 @@ const CHAPTER_GENERATION_CONSTRAINT_LABELS = [
 export function sanitizeChapterGenerationOptions(value: unknown): {
   executionMode?: AiExecutionMode
   preserveConstraintLabels?: HardConstraintSourceLabel[]
+  stageId?: number
 } {
   if (value === undefined || value === null) return {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throwUserFacingError('ipc.invalidObject', { name: 'options' })
   }
   const source = value as Record<string, unknown>
+  const stageId = source.stageId
+  if (stageId !== undefined && !(typeof stageId === 'number' && Number.isSafeInteger(stageId) && stageId > 0)) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.stageId' })
+  }
   const executionMode = source.executionMode
   const normalizedMode = normalizeAiExecutionMode(executionMode)
   if (executionMode !== undefined && !normalizedMode) {
@@ -2126,7 +2132,12 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
   }
 
   const labels = source.preserveConstraintLabels
-  if (labels === undefined) return normalizedMode ? { executionMode: normalizedMode } : {}
+  if (labels === undefined) {
+    return {
+      ...(normalizedMode ? { executionMode: normalizedMode } : {}),
+      ...(stageId !== undefined ? { stageId } : {}),
+    }
+  }
   if (!Array.isArray(labels)) {
     throwUserFacingError('ipc.invalidObject', { name: 'options.preserveConstraintLabels' })
   }
@@ -2136,6 +2147,7 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
   }
   return {
     ...(normalizedMode ? { executionMode: normalizedMode } : {}),
+    ...(stageId !== undefined ? { stageId } : {}),
     preserveConstraintLabels: Array.from(new Set(labels)) as HardConstraintSourceLabel[],
   }
 }
@@ -3700,7 +3712,7 @@ async function continueChapterContent(
   chapterId: number,
   partialContent: string,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode; sourceTaskId?: number } = {},
+  options: { executionMode?: AiExecutionMode; sourceTaskId?: number; stageId?: number } = {},
 ): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -3713,7 +3725,7 @@ async function continueChapterContent(
     throwUserFacingError('workflow.resumeUnsupported')
   }
 
-  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
   const novel = rawContext.novel
   const profile = rawContext.profile
   const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
@@ -4007,12 +4019,13 @@ async function continueChapterContent(
 
 const chapterGenerationLocks = new Map<number, Promise<number>>()
 
-function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect): string {
+function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect, stageId?: number): string {
   const source = [
     chapter.id,
     chapter.contextVersion || 1,
     chapter.updatedAt || '',
     chapter.status || 'outline',
+    stageId || 'auto-stage',
   ].join('|')
   return `chapter-write:${chapter.id}:${createHash('sha256').update(source).digest('hex').slice(0, 24)}`
 }
@@ -4039,7 +4052,7 @@ function findExistingChapterGenerationTask(chapterId: number, idempotencyKey: st
 export async function generateChapterContent(
   chapterId: number,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
 ): Promise<number> {
   const inFlight = chapterGenerationLocks.get(chapterId)
   if (inFlight) return inFlight
@@ -4047,7 +4060,7 @@ export async function generateChapterContent(
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
-  const idempotencyKey = buildChapterGenerationIdempotencyKey(chapter)
+  const idempotencyKey = buildChapterGenerationIdempotencyKey(chapter, options.stageId)
   const existing = findExistingChapterGenerationTask(chapterId, idempotencyKey)
   if (existing && !isRetryableChapterGenerationStatus(existing.status)) return Number(existing.id)
 
@@ -4071,14 +4084,14 @@ export async function generateChapterContent(
 async function generateChapterContentInternal(
   chapterId: number,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
   idempotencyKey?: string,
 ): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
-  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
   const novel = rawContext.novel
   const profile = rawContext.profile
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
@@ -4109,7 +4122,7 @@ async function generateChapterContentInternal(
     pipelineRole: 'planner',
     pipelineStage: 'pending',
     contractVersion: undefined,
-    controlJson: JSON.stringify({ cancelRequested: false }),
+    controlJson: JSON.stringify({ cancelRequested: false, ...(options.stageId ? { stageId: options.stageId } : {}) }),
     progressJson: '{}',
     retryable: false,
     status: 'pending',
@@ -6375,6 +6388,22 @@ async function generateChapterContentInternal(
       canonRunId: canonRun.id,
     })
     const result = await finalizeGeneratedChapterContent(chapterId, repairedContent)
+    if (rawContext.creativeStageContext) {
+      try {
+        upsertCreativeStageAsset({
+          stageId: rawContext.creativeStageContext.stage.id,
+          assetType: 'outline',
+          assetId: chapterId,
+          placeholderName: `第${chapter.chapterNum}章 ${chapter.title || '正文'}`,
+          role: 'handoff',
+          detailLevel: 'canonical',
+          status: 'active',
+          notes: '正文已完成，章后 Canon / 连续性回写已进入阶段交接。',
+        })
+      } catch (error) {
+        console.warn('[creative-stage] 正文阶段交接绑定失败', error)
+      }
+    }
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
 
     const chapterRecord = getChapter(chapterId)
@@ -6461,24 +6490,27 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
     throwUserFacingError('workflow.taskRunningCannotResume', { taskId: rootTask.id })
   }
   const snapshot = rootTask.progressJson ? JSON.parse(rootTask.progressJson) as Partial<ChapterPipelineSnapshot> : null
+  const control = parseTaskControl(rootTask)
+  const stageId = typeof control.stageId === 'number' ? control.stageId : undefined
   const partialContent = typeof snapshot?.partialContent === 'string' ? snapshot.partialContent.trim() : ''
   if (partialContent) {
     return continueChapterContent(rootTask.relatedEntityId, partialContent, sender, {
       sourceTaskId: rootTask.id,
+      stageId,
     })
   }
-  return generateChapterContent(rootTask.relatedEntityId, sender)
+  return generateChapterContent(rootTask.relatedEntityId, sender, { stageId })
 }
 
 export async function getChapterContextPreview(
   chapterId: number,
-  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
 ): Promise<import('../../src/types').ChapterContextPreview> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
-  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
   const contractVersion = buildChapterContractVersion(chapterId, { allowMissing: true })
   const contractGate = getChapterContractPreviewGate(chapterId)
   const executionModeResolution = resolveAiExecutionMode({
@@ -6618,6 +6650,7 @@ export async function getChapterContextPreview(
   return {
     chapterId: chapter.id,
     chapterNum: chapter.chapterNum,
+    creativeStage: rawContext.creativeStageContext?.stage,
     contractVersion,
     contractReady: contractGate.ready,
     contractBlockers: contractGate.blockers,

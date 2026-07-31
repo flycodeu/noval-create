@@ -101,6 +101,7 @@ export interface TaskRecoveryHint {
 
 export interface TaskControlState {
   cancelRequested?: boolean
+  stageId?: number
   maxRetries?: number
   retryCount?: number
   batchKey?: string

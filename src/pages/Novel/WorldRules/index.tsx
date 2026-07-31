@@ -52,6 +52,7 @@ import {
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
+import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 
 interface Props {
   novelId: number
@@ -160,6 +161,10 @@ export default function WorldRules({ novelId }: Props) {
   const [autoStatus, setAutoStatus] = useState<WorldRulesAutoGenerateStatus>(EMPTY_AUTO_STATUS)
   const [autoLoading, setAutoLoading] = useState(false)
   const [autoStopping, setAutoStopping] = useState(false)
+  const [creativeStageId, setCreativeStageId] = useState<number | null>(() => {
+    const value = new URLSearchParams(window.location.hash.split('?')[1] || '').get('stageId')
+    return value && Number.isSafeInteger(Number(value)) ? Number(value) : null
+  })
 
   const parsedRules = useMemo(
     () => parseWorldRulesDraftJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
@@ -356,6 +361,7 @@ export default function WorldRules({ novelId }: Props) {
     try {
       const result = await window.electron.ai.generateWorldRules({
         novelId,
+        stageId: creativeStageId || undefined,
         mode,
         action,
         section: mode === 'section' ? activeTab : undefined,
@@ -388,7 +394,7 @@ export default function WorldRules({ novelId }: Props) {
       manualGenerationRef.current = false
       setRunningAction(null)
     }
-  }, [activeSectionMeta.label, activeTab, form, hasRunningAutoTask, liveRules, novelId])
+  }, [activeSectionMeta.label, activeTab, creativeStageId, form, hasRunningAutoTask, liveRules, novelId])
 
   const handleStartAutoGenerate = useCallback(async () => {
     if (isGenerating || autoActionRef.current) return
@@ -399,6 +405,7 @@ export default function WorldRules({ novelId }: Props) {
     try {
       await window.electron.worldRules.startAutoGenerate(novelId, {
         currentRules: liveRules,
+        stageId: creativeStageId || undefined,
         sectionOrder: WORLD_RULE_SECTION_ORDER,
       })
       await loadAutoStatus(true)
@@ -409,7 +416,7 @@ export default function WorldRules({ novelId }: Props) {
       autoActionRef.current = false
       setAutoLoading(false)
     }
-  }, [isGenerating, liveRules, loadAutoStatus, novelId])
+  }, [creativeStageId, isGenerating, liveRules, loadAutoStatus, novelId])
 
   const handleStopAutoGenerate = useCallback(async () => {
     if (!autoTask?.id || autoActionRef.current) return
@@ -901,6 +908,15 @@ export default function WorldRules({ novelId }: Props) {
         title="世界规则"
         actions={(
         <Space wrap>
+          <CreativeStageScope
+            novelId={novelId}
+            value={creativeStageId}
+            onChange={(stageId) => {
+              setCreativeStageId(stageId)
+              const route = window.location.hash.split('?')[0]
+              window.location.hash = `${route}${stageId ? `?stageId=${stageId}` : ''}`
+            }}
+          />
           <Button icon={<RobotOutlined />} loading={runningAction === 'all-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('all', 'generate')}>
             {'生成全部分区'}
           </Button>

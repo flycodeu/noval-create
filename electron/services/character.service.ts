@@ -5,6 +5,7 @@ import { chapters, characters, characterRelations, novels, storyItems, timelineE
 import type { CharacterAiPatchResult, CharacterBatchGenerationOptions } from '../../src/types'
 import { safeParseJson, salvageAiJsonArrayItems } from '../utils/json'
 import { buildStoryProfile } from './context.service'
+import { getCreativeStageContext, upsertCreativeStageAsset } from './creative-stage.service'
 import {
   buildCharacterEcologySummary,
   getFactionNameOptions,
@@ -664,6 +665,7 @@ function buildCharacterPayload(
 
 interface CharacterQueryFilters {
   novelId: number
+  characterIds?: number[]
   roleType?: typeof characters.$inferSelect['roleType']
   recordStatus?: 'draft' | 'confirmed' | 'all'
   entityType?: string
@@ -811,6 +813,16 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
 function buildCharacterWhere(filters: CharacterQueryFilters) {
   const whereClauses = ['c.novel_id = ?']
   const params: Array<number | string> = [filters.novelId]
+
+  if (Array.isArray(filters.characterIds)) {
+    const characterIds = uniqueNumberArray(filters.characterIds)
+    if (characterIds.length === 0) {
+      whereClauses.push('1 = 0')
+    } else {
+      whereClauses.push(`c.id IN (${characterIds.map(() => '?').join(', ')})`)
+      params.push(...characterIds)
+    }
+  }
 
   if (filters.roleType) {
     whereClauses.push('c.role_type = ?')
@@ -1334,6 +1346,7 @@ function hasReservedCharacterName(name: string, reservedNames: string[]) {
 }
 
 export async function generateProtagonist(novelId: number, opts: {
+  stageId?: number
   gender?: string
   surnameHint?: string
   ageRange?: string
@@ -1350,6 +1363,7 @@ export async function generateProtagonist(novelId: number, opts: {
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  const stageContext = opts.stageId ? getCreativeStageContext(novelId, opts.stageId) : null
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
@@ -1388,6 +1402,7 @@ export async function generateProtagonist(novelId: number, opts: {
       personalitySeed: opts.personalitySeed,
       forbiddenNames: reservedNames.join('、'),
       forceDifferentFromExisting: opts.forceDifferentFromExisting,
+      stageSummary: stageContext?.promptSummary,
       attemptNumber,
       rejectedDigests,
     })
@@ -1415,6 +1430,7 @@ export async function generateProtagonist(novelId: number, opts: {
             itemSummary,
             extraLines: [
               opts.itemPreferences && opts.itemPreferences.length > 0 ? `偏好线索：${opts.itemPreferences.join('、')}` : '',
+              stageContext ? `阶段边界：${stageContext.promptSummary}` : '',
             ],
           }),
           generatedOutput: rawOutput,
@@ -1481,6 +1497,17 @@ export async function generateProtagonist(novelId: number, opts: {
   const charId = createCharacter(novelId, payload, {
     skipContextTracking: true,
   })
+  if (opts.stageId) {
+    upsertCreativeStageAsset({
+      stageId: opts.stageId,
+      assetType: 'character',
+      assetId: charId,
+      placeholderName: payload.fullName,
+      role: 'core',
+      detailLevel: 'canonical',
+      status: 'active',
+    })
+  }
   markNovelContextChanged(novelId, 'Character profiles changed')
   refreshWorldStateVersionsForNovel(novelId)
   return charId
@@ -1503,6 +1530,7 @@ export async function generateCharacterBatchChunk(
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  const stageContext = opts.stageId ? getCreativeStageContext(novelId, opts.stageId) : null
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
@@ -1544,6 +1572,7 @@ export async function generateCharacterBatchChunk(
     chunkOptions.factionBias && chunkOptions.factionBias.length > 0 ? `优先势力来源：${chunkOptions.factionBias.join('、')}。` : '',
     chunkOptions.helperRoles && chunkOptions.helperRoles.length > 0 ? `优先补齐这些角色功能位：${chunkOptions.helperRoles.join('、')}。` : '',
     itemSummary ? `优先与这些现有物品/资源发生绑定：\n${itemSummary}` : '',
+    stageContext ? `本次只服务当前创作阶段，不要提前展开后续阶段：\n${stageContext.promptSummary}` : '',
     '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
   ].filter(Boolean).join('\n')
   const reviewContext = buildCharacterReviewContext({
@@ -1555,6 +1584,7 @@ export async function generateCharacterBatchChunk(
     extraLines: [
       roleBlueprint ? `角色蓝图：${roleBlueprint}` : '',
       specialRequirements ? `额外要求：${specialRequirements}` : '',
+      stageContext ? `阶段边界：${stageContext.promptSummary}` : '',
     ],
   })
   const historyEntityType = 'character'
@@ -1729,6 +1759,17 @@ export async function generateCharacterBatchChunk(
           if (runtime.commit !== false) {
             const id = createCharacter(novelId, payload, { skipContextTracking: true })
             createdIds.push(id)
+            if (opts.stageId) {
+              upsertCreativeStageAsset({
+                stageId: opts.stageId,
+                assetType: 'character',
+                assetId: id,
+                placeholderName: candidateName,
+                role: payload.roleType === 'protagonist' || payload.roleType === 'major' ? 'core' : 'supporting',
+                detailLevel: 'canonical',
+                status: 'active',
+              })
+            }
           }
           reservedNames.push(candidateName)
           createdNames.push(candidateName)
@@ -1789,6 +1830,7 @@ export async function generateCharacterBatchChunk(
 }
 
 export async function batchGenerateCharacters(novelId: number, opts: {
+  stageId?: number
   majorCount: number
   minorCount: number
   antagonistCount?: number
@@ -1808,6 +1850,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  const stageContext = opts.stageId ? getCreativeStageContext(novelId, opts.stageId) : null
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
@@ -1826,6 +1869,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
     extraLines: [
       roleBlueprint ? `角色蓝图：${roleBlueprint}` : '',
       opts.specialRequirements ? `额外要求：${opts.specialRequirements}` : '',
+      stageContext ? `阶段边界：${stageContext.promptSummary}` : '',
     ],
   })
 
@@ -1837,6 +1881,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
     opts.factionBias && opts.factionBias.length > 0 ? `优先势力来源：${opts.factionBias.join('、')}。` : '',
     opts.helperRoles && opts.helperRoles.length > 0 ? `优先补齐这些角色功能位：${opts.helperRoles.join('、')}。` : '',
     itemSummary ? `优先与这些现有物品/资源发生绑定：\n${itemSummary}` : '',
+    stageContext ? `本次只服务当前创作阶段，不要提前展开后续阶段：\n${stageContext.promptSummary}` : '',
     '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
   ].filter(Boolean).join('\n')
 
@@ -1973,6 +2018,17 @@ export async function batchGenerateCharacters(novelId: number, opts: {
           payload.contextHooksJson = jsonStringifyArray(itemRows.slice(0, 2).map((item) => `${item.itemName}相关`))
         }
         const id = createCharacter(novelId, payload, { skipContextTracking: true })
+        if (opts.stageId) {
+          upsertCreativeStageAsset({
+            stageId: opts.stageId,
+            assetType: 'character',
+            assetId: id,
+            placeholderName: candidateName,
+            role: payload.roleType === 'protagonist' || payload.roleType === 'major' ? 'core' : 'supporting',
+            detailLevel: 'canonical',
+            status: 'active',
+          })
+        }
         reservedNames.push(candidateName)
         newIds.push(id)
         if (newIds.length >= totalCount) break

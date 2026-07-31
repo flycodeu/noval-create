@@ -38,6 +38,14 @@ import type { FactionRelationType, FactionType } from '../shared/factions'
 import type { GlossaryCategory } from '../shared/glossary'
 import type { SceneTemplateCategory } from '../shared/scene-templates'
 import type {
+  CreativeStage,
+  CreativeStageAssetBinding,
+  CreativeStageAssetInput,
+  CreativeStageContext,
+  CreativeStageCreateInput,
+  CreativeStageUpdateInput,
+} from '../shared/creative-stages'
+import type {
   AiExecutionMode,
   AiTaskKind,
 } from '../shared/ai-execution'
@@ -63,6 +71,14 @@ export type {
 } from '../shared/factions'
 export type { GlossaryCategory } from '../shared/glossary'
 export type { SceneTemplateCategory } from '../shared/scene-templates'
+export type {
+  CreativeStage,
+  CreativeStageAssetBinding,
+  CreativeStageAssetInput,
+  CreativeStageContext,
+  CreativeStageCreateInput,
+  CreativeStageUpdateInput,
+} from '../shared/creative-stages'
 export type {
   PremiseGenerationMode,
   PremiseGenerationProgressEvent,
@@ -728,6 +744,7 @@ export interface ResistanceBeatInput {
 
 export interface CharacterQueryInput {
   novelId: number
+  characterIds?: number[]
   roleType?: Character['roleType']
   recordStatus?: 'draft' | 'confirmed' | 'all'
   entityType?: string
@@ -770,6 +787,7 @@ export interface CharacterGraphPayload {
 }
 
 export interface CharacterGenerationOptions {
+  stageId?: number
   gender?: string
   surnameHint?: string
   ageRange?: string
@@ -783,6 +801,7 @@ export interface CharacterGenerationOptions {
 }
 
 export interface CharacterBatchGenerationOptions {
+  stageId?: number
   majorCount: number
   minorCount: number
   antagonistCount?: number
@@ -1105,6 +1124,7 @@ export interface MapRelationInput {
 
 export interface MapGraphQueryInput {
   novelId: number
+  stageId?: number
   focusNodeId?: number
   relationDepth?: number
   includeSiblingNodes?: boolean
@@ -1158,6 +1178,7 @@ export interface MapStats {
 }
 
 export interface MapBatchGenerateOptions {
+  stageId?: number
   layerCounts?: number[] | Array<{ depth: number; count: number }>
   namedPlaces?: string
   parentBatchSize?: number
@@ -1659,6 +1680,7 @@ export interface StoryThreadAutoGenerateStatus extends BatchAutoGenerateStatusBa
 export interface ChapterBatchGenerateOptions {
   chapterIds: number[]
   batchSize?: number
+  stageId?: number
 }
 
 export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusBase {
@@ -2345,6 +2367,7 @@ export interface ChapterContextPreviewStage {
 export interface ChapterContextPreview {
   chapterId: number
   chapterNum: number
+  creativeStage?: CreativeStage
   contractVersion?: string
   contractReady?: boolean
   contractBlockers?: string[]
@@ -3922,6 +3945,7 @@ export interface TimelineFilterOptions {
 
 export interface OutlineChapterBatchGenerateOptions {
   batchSize?: number
+  stageId?: number
 }
 
 export interface OutlineDesignGateSummary {
@@ -5774,10 +5798,12 @@ declare global {
         getContextPreview: (chapterId: number, options?: {
           executionMode?: AiExecutionMode
           preserveConstraintLabels?: HardConstraintSourceLabel[]
+          stageId?: number
         }) => Promise<ChapterContextPreview>
         generateContent: (chapterId: number, options?: {
           executionMode?: AiExecutionMode
           preserveConstraintLabels?: HardConstraintSourceLabel[]
+          stageId?: number
         }) => Promise<number>
         resumeContent: (taskId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
@@ -5860,6 +5886,17 @@ declare global {
         getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
         resumeAutoGenerate: (taskId: number) => Promise<number>
         clear: (novelId: number) => Promise<void>
+      }
+      creativeStage: {
+        list: (novelId: number, includeArchived?: boolean) => Promise<CreativeStage[]>
+        get: (stageId: number) => Promise<CreativeStage | null>
+        create: (novelId: number, input: CreativeStageCreateInput) => Promise<CreativeStage>
+        update: (input: CreativeStageUpdateInput) => Promise<CreativeStage>
+        archive: (stageId: number) => Promise<CreativeStage>
+        listAssets: (stageId: number) => Promise<CreativeStageAssetBinding[]>
+        upsertAsset: (input: CreativeStageAssetInput) => Promise<CreativeStageAssetBinding>
+        removeAsset: (assetId: number) => Promise<void>
+        getContext: (novelId: number, stageId: number) => Promise<CreativeStageContext>
       }
       worldRules: {
         startAutoGenerate: (novelId: number, options: WorldRulesAutoGenerateOptions) => Promise<number>

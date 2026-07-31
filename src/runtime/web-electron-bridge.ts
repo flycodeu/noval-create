@@ -1222,6 +1222,17 @@ export function installWebElectronBridge(): void {
       getLatestAutoGenerateTask: async (novelId?: unknown) => withLocalBackend('map', 'getLatestAutoGenerateTask', [novelId], async () => null),
       getAutoGenerateStatus: async (taskId?: unknown) => withLocalBackend('map', 'getAutoGenerateStatus', [taskId], async () => null),
     }),
+    creativeStage: createService('creativeStage', {
+      list: async (novelId?: unknown, includeArchived?: unknown) => withLocalBackend('creativeStage', 'list', [novelId, includeArchived], async () => []),
+      get: async (stageId?: unknown) => withLocalBackend('creativeStage', 'get', [stageId], async () => null),
+      listAssets: async (stageId?: unknown) => withLocalBackend('creativeStage', 'listAssets', [stageId], async () => []),
+      getContext: async (novelId?: unknown, stageId?: unknown) => withLocalBackend('creativeStage', 'getContext', [novelId, stageId], async () => null),
+      create: (...args) => withLocalBackend('creativeStage', 'create', args, async () => readOnlyMutation('creativeStage.create')),
+      update: (...args) => withLocalBackend('creativeStage', 'update', args, async () => readOnlyMutation('creativeStage.update')),
+      archive: (...args) => withLocalBackend('creativeStage', 'archive', args, async () => readOnlyMutation('creativeStage.archive')),
+      upsertAsset: (...args) => withLocalBackend('creativeStage', 'upsertAsset', args, async () => readOnlyMutation('creativeStage.upsertAsset')),
+      removeAsset: (...args) => withLocalBackend('creativeStage', 'removeAsset', args, async () => readOnlyMutation('creativeStage.removeAsset')),
+    }),
     faction: createService('faction', {
       list: async (novelId?: unknown) => withLocalBackend('faction', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('faction', 'query', [filters], async () => emptyPagedResult),

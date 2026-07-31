@@ -379,6 +379,7 @@ function parseChapterBatchOptions(raw?: string | null): ChapterBatchGenerateOpti
   return {
     chapterIds,
     batchSize: 1,
+    stageId: typeof record.stageId === 'number' && Number.isSafeInteger(record.stageId) && record.stageId > 0 ? record.stageId : undefined,
   }
 }
 
@@ -1403,7 +1404,9 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
         message: `正在生成第 ${currentBatch}/${progress.totalBatches} 章（第 ${chapterNum} 章）。`,
       }, sender)
 
-      const childTaskId = await generateChapterContent(chapterId, sender)
+      const childTaskId = await generateChapterContent(chapterId, sender, {
+        stageId: options.stageId,
+      })
       updateTask(taskId, { currentChildTaskId: childTaskId })
       const childTask = await waitForWorkflowTask(childTaskId)
       const childSignals = readChapterPipelineSignals(childTask)

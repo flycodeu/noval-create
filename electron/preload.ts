@@ -14,7 +14,14 @@ import type {
   AgentToolDescriptor,
   AgentToolListQuery,
 } from '../src/shared/tool-contracts'
-import type { CharacterRelationInput, MapRelationInput, NovelCreateInput } from '../src/types'
+import type {
+  CharacterRelationInput,
+  CreativeStageAssetInput,
+  CreativeStageCreateInput,
+  CreativeStageUpdateInput,
+  MapRelationInput,
+  NovelCreateInput,
+} from '../src/types'
 
 interface IpcBridgeErrorPayload {
   code: string
@@ -237,10 +244,12 @@ const api = {
     getContextPreview: (chapterId: number, options?: {
       executionMode?: import('../src/shared/ai-execution').AiExecutionMode
       preserveConstraintLabels?: import('../src/types').HardConstraintSourceLabel[]
+      stageId?: number
     }) => invokeIpc('chapter:getContextPreview', chapterId, options),
     generateContent: (chapterId: number, options?: {
       executionMode?: import('../src/shared/ai-execution').AiExecutionMode
       preserveConstraintLabels?: import('../src/types').HardConstraintSourceLabel[]
+      stageId?: number
     }) => invokeIpc('chapter:generateContent', chapterId, options),
     resumeContent: (taskId: number) => invokeIpc('chapter:resumeContent', taskId),
     generateSummary: (chapterId: number) => invokeIpc('chapter:generateSummary', chapterId),
@@ -329,6 +338,17 @@ const api = {
     resumeAutoGenerate: (taskId: number) => invokeIpc('map:resumeAutoGenerate', taskId),
     clear: (novelId: number) => invokeIpc('map:clear', novelId),
   },
+  creativeStage: {
+    list: (novelId: number, includeArchived?: boolean) => invokeIpc('creativeStage:list', novelId, includeArchived),
+    get: (stageId: number) => invokeIpc('creativeStage:get', stageId),
+    create: (novelId: number, input: CreativeStageCreateInput) => invokeIpc('creativeStage:create', novelId, input),
+    update: (input: CreativeStageUpdateInput) => invokeIpc('creativeStage:update', input),
+    archive: (stageId: number) => invokeIpc('creativeStage:archive', stageId),
+    listAssets: (stageId: number) => invokeIpc('creativeStage:listAssets', stageId),
+    upsertAsset: (input: CreativeStageAssetInput) => invokeIpc('creativeStage:upsertAsset', input),
+    removeAsset: (assetId: number) => invokeIpc('creativeStage:removeAsset', assetId),
+    getContext: (novelId: number, stageId: number) => invokeIpc('creativeStage:getContext', novelId, stageId),
+  },
 
   worldRules: {
     startAutoGenerate: (novelId: number, options: unknown) => invokeIpc('worldRules:startAutoGenerate', novelId, options),
@@ -390,7 +410,7 @@ const api = {
     updateArc: (id: number, data: unknown) => invokeIpc('outline:updateArc', id, data),
     deleteArc: (id: number) => invokeIpc('outline:deleteArc', id),
     generateArcs: (novelId: number) => invokeIpc('outline:generateArcs', novelId),
-    generateChapterOutlines: (arcId: number, options?: unknown) => invokeIpc('outline:generateChapterOutlines', arcId, options),
+    generateChapterOutlines: (arcId: number, options?: import('../src/types').OutlineChapterBatchGenerateOptions) => invokeIpc('outline:generateChapterOutlines', arcId, options),
     clear: (novelId: number) => invokeIpc('outline:clear', novelId),
   },
   rhythm: {

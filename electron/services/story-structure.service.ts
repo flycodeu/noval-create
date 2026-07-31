@@ -19,6 +19,7 @@ import {
 import { markNovelContextChanged, markStoryMemoryCheckpointsDirty } from './context-impact.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { syncTimelineEventItemLinks } from './link-sync.service'
+import { resolveCreativeStageContextForChapter } from './creative-stage.service'
 import {
   applyStructureBatchEdit as applyStructureBatchEditTransactional,
   applyStructureBatchPlan as applyStructureBatchPlanTransactional,
@@ -568,7 +569,32 @@ export function syncStructureLinkage(novelId: number): StructureLinkageSyncResul
     })
 
     chapterRows.forEach((chapter) => {
-      if (chapterContractIds.has(chapter.id)) return
+      const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapter.chapterNum)
+      const stageAcceptance = creativeStageContext
+        ? [
+            creativeStageContext.stage.objective ? `阶段目标：${creativeStageContext.stage.objective}` : '',
+            creativeStageContext.stage.handoffSummary ? `阶段交接：${creativeStageContext.stage.handoffSummary}` : '',
+          ].filter(Boolean)
+        : []
+      const stageRefs = creativeStageContext
+        ? [`creative-stage:${creativeStageContext.stage.id}`, `stage-name:${creativeStageContext.stage.name}`]
+        : []
+      if (chapterContractIds.has(chapter.id)) {
+        const currentContract = chapterContractRows.find((row) => row.chapterId === chapter.id)
+        if (currentContract && (stageAcceptance.length > 0 || stageRefs.length > 0)) {
+          db.update(chapterContracts).set({
+            requiredAssetRefsJson: stringifyStringArray([
+              ...parseStoredStringArray(currentContract.requiredAssetRefsJson),
+              ...stageRefs,
+            ]),
+            acceptanceNotesJson: stringifyStringArray([
+              ...parseStoredStringArray(currentContract.acceptanceNotesJson),
+              ...stageAcceptance,
+            ]),
+          }).where(eq(chapterContracts.id, currentContract.id)).run()
+        }
+        return
+      }
       db.insert(chapterContracts).values({
         novelId,
         chapterId: chapter.id,
@@ -579,13 +605,14 @@ export function syncStructureLinkage(novelId: number): StructureLinkageSyncResul
         requiredRelationshipArcIdsJson: JSON.stringify([]),
         requiredResistanceTrackIdsJson: JSON.stringify([]),
         requiredResistanceActionsJson: stringifyStringArray([]),
-        requiredAssetRefsJson: stringifyStringArray([]),
+        requiredAssetRefsJson: stringifyStringArray(stageRefs),
         requiredEndgameCommitmentIdsJson: JSON.stringify([]),
         requiredForeshadowIdsJson: JSON.stringify([]),
         hookType: buildHookType(chapter),
         forbiddenActionsJson: stringifyStringArray([]),
         acceptanceNotesJson: stringifyStringArray([
           asText(chapter.outline) || '先把本章推进目标、章尾承接和兑现标准补全。',
+          ...stageAcceptance,
         ]),
         status: 'draft',
       }).run()

@@ -1124,6 +1124,42 @@ export const artifacts = sqliteTable('artifacts', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const creativeStages = sqliteTable('creative_stages', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull().default(1),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('chapter-window'),
+  status: text('status').notNull().default('planned'),
+  volumeId: integer('volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  partId: integer('part_id').references(() => storyParts.id, { onDelete: 'set null' }),
+  chapterStart: integer('chapter_start'),
+  chapterEnd: integer('chapter_end'),
+  objective: text('objective'),
+  storySummary: text('story_summary'),
+  handoffSummary: text('handoff_summary'),
+  constraintsJson: text('constraints_json'),
+  contextVersion: integer('context_version').notNull().default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const creativeStageAssets = sqliteTable('creative_stage_assets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  stageId: integer('stage_id').notNull().references(() => creativeStages.id, { onDelete: 'cascade' }),
+  assetType: text('asset_type').notNull(),
+  assetId: integer('asset_id'),
+  placeholderName: text('placeholder_name'),
+  role: text('role').notNull().default('supporting'),
+  detailLevel: text('detail_level').notNull().default('outline'),
+  status: text('status').notNull().default('planned'),
+  requestedFieldsJson: text('requested_fields_json'),
+  notes: text('notes'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const approvalGrants = sqliteTable('approval_grants', {
   id: text('id').primaryKey(),
   novelId: integer('novel_id').references(() => novels.id, { onDelete: 'cascade' }),
@@ -1245,6 +1281,10 @@ export type ExternalEvaluationAttemptRow = typeof externalEvaluationAttempts.$in
 export type NewExternalEvaluationAttemptRow = typeof externalEvaluationAttempts.$inferInsert
 export type ArtifactRow = typeof artifacts.$inferSelect
 export type NewArtifactRow = typeof artifacts.$inferInsert
+export type CreativeStageRow = typeof creativeStages.$inferSelect
+export type NewCreativeStageRow = typeof creativeStages.$inferInsert
+export type CreativeStageAssetRow = typeof creativeStageAssets.$inferSelect
+export type NewCreativeStageAssetRow = typeof creativeStageAssets.$inferInsert
 export type ApprovalGrantRow = typeof approvalGrants.$inferSelect
 export type NewApprovalGrantRow = typeof approvalGrants.$inferInsert
 export type ToolInvocationRow = typeof toolInvocations.$inferSelect

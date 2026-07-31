@@ -4,6 +4,7 @@ import { getDb, getSqlite } from '../database/db'
 import { mapRelations, novels, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
+import { getCreativeStageContext, upsertCreativeStageAsset } from './creative-stage.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import {
   buildMapBlueprintSummary,
@@ -673,7 +674,19 @@ export function getMapRelations(novelId: number, focusNodeId?: number): MapRelat
 }
 
 export function getMapGraph(filters: MapGraphQueryInput): MapGraphPayload {
-  const rows = listMapRows(filters.novelId)
+  const allRows = listMapRows(filters.novelId)
+  const stageContext = filters.stageId ? getCreativeStageContext(filters.novelId, filters.stageId) : null
+  if (stageContext && stageContext.activeMapIds.length === 0) {
+    return { nodes: [], edges: [], focusNodeId: filters.focusNodeId, relationNodeIds: [], rootNodeIds: [] }
+  }
+  const allRowById = new Map(allRows.map((row) => [row.id, row]))
+  const stageVisibleIds = stageContext ? new Set(stageContext.activeMapIds) : null
+  if (stageVisibleIds) {
+    stageVisibleIds.forEach((id) => {
+      getAncestorIds(allRowById, id).forEach((ancestorId) => stageVisibleIds.add(ancestorId))
+    })
+  }
+  const rows = stageVisibleIds ? allRows.filter((row) => stageVisibleIds.has(row.id)) : allRows
   if (rows.length === 0) {
     return { nodes: [], edges: [], focusNodeId: filters.focusNodeId, relationNodeIds: [], rootNodeIds: [] }
   }
@@ -1050,7 +1063,7 @@ function buildMapBatchPreview(nextBatch: NextMapBatchPlan, parentBatchSize: numb
   }
 }
 
-function buildRootBatchPrompt(params: { novelTitle: string; genre: string; worldSummary: string; mapStructure: string; rootLabel: string; batchCount: number; existingRootNames: string[]; factionSummary?: string; mapSummary?: string; namedPlaces?: string; writingConstraints?: string }) {
+function buildRootBatchPrompt(params: { novelTitle: string; genre: string; worldSummary: string; mapStructure: string; rootLabel: string; batchCount: number; existingRootNames: string[]; factionSummary?: string; mapSummary?: string; namedPlaces?: string; writingConstraints?: string; stageSummary?: string }) {
   return [
     `请为小说《${params.novelTitle}》补充 ${params.batchCount} 个根层地图节点。`,
     `题材：${params.genre}`,
@@ -1060,6 +1073,7 @@ function buildRootBatchPrompt(params: { novelTitle: string; genre: string; world
     params.factionSummary ? `势力：${params.factionSummary}` : '',
     params.namedPlaces ? `已知地点：${params.namedPlaces}` : '',
     params.writingConstraints ? `写作约束：${params.writingConstraints}` : '',
+    params.stageSummary ? `当前创作阶段边界：\n${params.stageSummary}` : '',
     params.existingRootNames.length > 0 ? `已有根节点：${params.existingRootNames.join('、')}` : '当前还没有根节点。',
     `只生成 ${params.batchCount} 个第 1 层“${params.rootLabel}”节点，不要生成 children，不要跨层。`,
     '名称必须与已有根节点区分开，description/plot_relevance 至少一个有实质内容，children 返回空数组。',
@@ -1069,7 +1083,7 @@ function buildRootBatchPrompt(params: { novelTitle: string; genre: string; world
   ].filter(Boolean).join('\n')
 }
 
-function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worldSummary: string; mapStructure: string; targetLabel: string; batchCount: number; parent: MapRow; parentPath: string; existingChildNames: string[]; factionSummary?: string; mapSummary?: string; namedPlaces?: string; writingConstraints?: string }) {
+function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worldSummary: string; mapStructure: string; targetLabel: string; batchCount: number; parent: MapRow; parentPath: string; existingChildNames: string[]; factionSummary?: string; mapSummary?: string; namedPlaces?: string; writingConstraints?: string; stageSummary?: string }) {
   return [
     `请为小说《${params.novelTitle}》补充 ${params.batchCount} 个直属子节点。`,
     `题材：${params.genre}`,
@@ -1081,6 +1095,7 @@ function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worl
     params.parent.structureRole ? `父节点职责：${params.parent.structureRole}` : '',
     params.parent.description ? `父节点描述：${params.parent.description}` : '',
     params.parent.plotRelevance ? `父节点剧情作用：${params.parent.plotRelevance}` : '',
+    params.stageSummary ? `当前创作阶段边界：\n${params.stageSummary}` : '',
     params.existingChildNames.length > 0 ? `已有直属子节点：${params.existingChildNames.join('、')}` : '当前还没有直属子节点。',
     `只生成这个父节点下 ${params.batchCount} 个直属“${params.targetLabel}”节点，不要返回 grandchildren。`,
     '名称不能与已有直属子节点重名，description/plot_relevance 至少一个有实质内容，children 返回空数组。',
@@ -1146,14 +1161,14 @@ async function runMapPromptTask(params: { novelId: number; modelConfigId?: numbe
   }
 }
 
-function createNodesAtDepth(novelId: number, nodes: GeneratedMapNode[], depth: number, parent: MapRow | undefined, rulesRaw: ParsedWorldRules) {
+function createNodesAtDepth(novelId: number, nodes: GeneratedMapNode[], depth: number, parent: MapRow | undefined, rulesRaw: ParsedWorldRules): Array<{ id: number; name: string }> {
   const defaultNodeType = getBlueprintLevelByDepth(rulesRaw, depth)?.nodeTypes[0] || (depth === 1 ? '区域' : '地点')
-  let createdCount = 0
+  const createdNodes: Array<{ id: number; name: string }> = []
   for (const rawNode of nodes) {
     const node = cleanAiValue(rawNode)
     const name = asText(node.name)
     if (!name) continue
-    createMapItem(novelId, {
+    const id = createMapItem(novelId, {
       level: depth,
       parentId: parent?.id,
       name,
@@ -1168,9 +1183,9 @@ function createNodesAtDepth(novelId: number, nodes: GeneratedMapNode[], depth: n
       affiliatedFactionIdsJson: JSON.stringify(toStringArray(node.affiliated_factions)),
       dangerLevel: asText(node.danger_level),
     }, { skipContextTracking: true })
-    createdCount += 1
+    createdNodes.push({ id, name })
   }
-  return createdCount
+  return createdNodes
 }
 
 export async function batchGenerateMap(novelId: number, structure: MapBatchGenerateOptions, runtime: MapBatchGenerateRuntimeOptions = {}): Promise<MapBatchGenerationResult> {
@@ -1179,6 +1194,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
   if (!novel) throwUserFacingError('novel.notFound')
   const expectedContextVersion = novel.contextVersion || 1
   const profile = await buildStoryProfile(novelId)
+  const stageContext = structure.stageId ? getCreativeStageContext(novelId, structure.stageId) : null
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const layerPlans = getLayerPlans(structure, rules)
   const structureSummary = buildMapStructureSummary(layerPlans)
@@ -1200,7 +1216,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
       const rows = listMapRows(novelId)
       const existingRootNames = rows.filter((row) => row.level === 1).map((row) => row.name).filter(Boolean)
       const batchCount = Math.min(parentBatchSize, nextBatch.rootMissingCount || rootPlan.count)
-      const prompt = buildRootBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, rootLabel: rootPlan.label, batchCount, existingRootNames, factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints })
+      const prompt = buildRootBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, rootLabel: rootPlan.label, batchCount, existingRootNames, factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints, stageSummary: stageContext?.promptSummary })
       const nodes = await runBatchWithRetries(async () => {
         const context = {
           label: '根层节点',
@@ -1224,6 +1240,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
             structure.namedPlaces ? `已知地点：${structure.namedPlaces}` : '',
             `本批目标：根层 ${rootPlan.label} 节点 ${batchCount} 个，禁止跨层。`,
             existingRootNames.length > 0 ? `已有根节点：${existingRootNames.join('、')}` : '当前还没有根节点。',
+            stageContext ? `阶段边界：${stageContext.promptSummary}` : '',
           ].filter(Boolean).join('\n\n'),
           reviewFocus: [
             '地点职责、层级和剧情作用必须具体，不能只是空泛地名模板。',
@@ -1258,8 +1275,22 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
         return parsed
       }, inlineBatchRetryLimit, 'map root batch')
       assertMapContextVersion(novelId, expectedContextVersion)
-      generatedNodeCount += createNodesAtDepth(novelId, nodes, 1, undefined, rules)
-      processedParentNames.push(...nodes.map((node) => asText(node.name)).filter(Boolean))
+      const createdRootNodes = createNodesAtDepth(novelId, nodes, 1, undefined, rules)
+      generatedNodeCount += createdRootNodes.length
+      if (structure.stageId) {
+        createdRootNodes.forEach(({ id, name }) => {
+          upsertCreativeStageAsset({
+            stageId: structure.stageId as number,
+            assetType: 'map',
+            assetId: id,
+            placeholderName: name,
+            role: 'core',
+            detailLevel: 'canonical',
+            status: 'active',
+          })
+        })
+      }
+      processedParentNames.push(...createdRootNodes.map((node) => node.name))
     } else {
       const targetDepth = nextBatch.targetDepth
       const targetPlan = targetDepth ? getBlueprintLevelByDepth(rules, targetDepth) : undefined
@@ -1275,7 +1306,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
         const existingChildren = getChildrenOf(rows, currentParent.id)
         const missingCount = targetLayerPlan.count - existingChildren.length
         if (missingCount <= 0) continue
-        const prompt = buildChildBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, targetLabel: targetPlan.label, batchCount: missingCount, parent: currentParent, parentPath: buildNodePath(currentParent, rows), existingChildNames: existingChildren.map((row) => row.name).filter(Boolean), factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints })
+        const prompt = buildChildBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, targetLabel: targetPlan.label, batchCount: missingCount, parent: currentParent, parentPath: buildNodePath(currentParent, rows), existingChildNames: existingChildren.map((row) => row.name).filter(Boolean), factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints, stageSummary: stageContext?.promptSummary })
         const nodes = await runBatchWithRetries(async () => {
           const context = {
             label: `${targetPlan.label} 节点`,
@@ -1304,6 +1335,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
               currentParent.plotRelevance ? `父节点剧情作用：${currentParent.plotRelevance}` : '',
               `本批目标：为该父节点补 ${missingCount} 个 ${targetPlan.label} 直属子节点，禁止跨层。`,
               existingChildren.length > 0 ? `已有直属子节点：${existingChildren.map((row) => row.name).filter(Boolean).join('、')}` : '当前还没有直属子节点。',
+              stageContext ? `阶段边界：${stageContext.promptSummary}` : '',
             ].filter(Boolean).join('\n\n'),
             reviewFocus: [
               '子节点必须紧扣父节点职责和层级，不能跳层扩世界设定。',
@@ -1341,7 +1373,21 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
           return parsed
         }, inlineBatchRetryLimit, `map child batch ${currentParent.id}`)
         assertMapContextVersion(novelId, expectedContextVersion)
-        generatedNodeCount += createNodesAtDepth(novelId, nodes, targetDepth, currentParent, rules)
+        const createdChildNodes = createNodesAtDepth(novelId, nodes, targetDepth, currentParent, rules)
+        generatedNodeCount += createdChildNodes.length
+        if (structure.stageId) {
+          createdChildNodes.forEach(({ id, name }) => {
+            upsertCreativeStageAsset({
+              stageId: structure.stageId as number,
+              assetType: 'map',
+              assetId: id,
+              placeholderName: name,
+              role: 'supporting',
+              detailLevel: 'canonical',
+              status: 'active',
+            })
+          })
+        }
         processedParentNames.push(currentParent.name)
       }
     }

@@ -2334,6 +2334,56 @@ export function runMigrations(sqlite: Database.Database) {
         ON glossary_term_references(chapter_id);
     `)
   })
+
+  runMigrationStep(sqlite, '0052_creative_stages', () => {
+    // 分阶段创作只记录“当前窗口需要哪些资产”，不复制角色、地点或世界规则正典。
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS creative_stages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL DEFAULT 1,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'chapter-window',
+        status TEXT NOT NULL DEFAULT 'planned',
+        volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        part_id INTEGER REFERENCES story_parts(id) ON DELETE SET NULL,
+        chapter_start INTEGER,
+        chapter_end INTEGER,
+        objective TEXT,
+        story_summary TEXT,
+        handoff_summary TEXT,
+        constraints_json TEXT,
+        context_version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS creative_stage_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        stage_id INTEGER NOT NULL REFERENCES creative_stages(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL,
+        asset_id INTEGER,
+        placeholder_name TEXT,
+        role TEXT NOT NULL DEFAULT 'supporting',
+        detail_level TEXT NOT NULL DEFAULT 'outline',
+        status TEXT NOT NULL DEFAULT 'planned',
+        requested_fields_json TEXT,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_creative_stages_novel_sequence
+        ON creative_stages(novel_id, sequence, id);
+      CREATE INDEX IF NOT EXISTS idx_creative_stages_novel_status
+        ON creative_stages(novel_id, status, sequence, id);
+      CREATE INDEX IF NOT EXISTS idx_creative_stage_assets_stage
+        ON creative_stage_assets(stage_id, status, role, asset_type, id);
+      CREATE INDEX IF NOT EXISTS idx_creative_stage_assets_asset
+        ON creative_stage_assets(novel_id, asset_type, asset_id, id);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

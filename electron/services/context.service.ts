@@ -61,6 +61,10 @@ import { getWorldStateContextSnapshot } from './world-state.service'
 import { getChapterContractContext, listForeshadowLedger } from './endgame-asset.service'
 import { buildGlobalLockContext } from './batch-workbench.service'
 import { buildChapterBridgePlan, formatChapterBridgePlan } from './generation-integrity.service'
+import {
+  resolveCreativeStageContextForChapter,
+} from './creative-stage.service'
+import type { CreativeStageContext } from '../../src/shared/creative-stages'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -276,6 +280,7 @@ export interface OutlineGenerationContext {
   continuitySummary: string
   openLoops: string
   worldRulesSummary: string
+  creativeStageContext?: CreativeStageContext
 }
 
 export interface ChapterContextParts {
@@ -454,6 +459,7 @@ export interface ChapterContextRawData {
   recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
+  creativeStageContext?: CreativeStageContext
 }
 
 interface ChapterWithContinuity {
@@ -4144,7 +4150,7 @@ export async function buildStoryProfile(
   }
 }
 
-export async function buildOutlineGenerationContext(arcId: number): Promise<OutlineGenerationContext> {
+export async function buildOutlineGenerationContext(arcId: number, stageId?: number): Promise<OutlineGenerationContext> {
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
   if (arc) ensureStoryStructure(arc.novelId)
@@ -4152,6 +4158,11 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
   const novel = db.select().from(novels).where(eq(novels.id, arc.novelId)).all()[0]
 
   const profile = await buildStoryProfile(arc.novelId)
+  const creativeStageContext = resolveCreativeStageContextForChapter(
+    arc.novelId,
+    arc.chapterStart || 1,
+    stageId,
+  )
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, arc.novelId)).all()
   const previousRows = db.select().from(chapters)
     .where(eq(chapters.novelId, arc.novelId))
@@ -4188,12 +4199,14 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
     continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
     openLoops: collectOpenLoops(continuityChapters),
     worldRulesSummary: profile.worldRulesSummary,
+    creativeStageContext: creativeStageContext || undefined,
   }
 }
 
 export async function collectChapterContextRawData(
   novelId: number,
   chapterNum: number,
+  stageId?: number,
 ): Promise<ChapterContextRawData> {
   const db = getDb()
   ensureStoryStructure(novelId)
@@ -4208,6 +4221,7 @@ export async function collectChapterContextRawData(
   const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum)
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentArc = resolveArcForChapter(chapterNum, currentChapter?.arcId, arcs)
+  const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapterNum, stageId)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
   const targetWords = Number(novel.targetWords || 0)
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
@@ -4450,6 +4464,7 @@ export async function collectChapterContextRawData(
       chapterGoal,
       storyCore: buildStoryCoreText(profile),
       writingContractSummary: [
+        creativeStageContext?.promptSummary ? `当前创作阶段硬边界：\n${creativeStageContext.promptSummary}` : '',
         profile.writingContractSummary,
         chapterContractRules.length > 0 ? `章节合同：${chapterContractRules.join('；')}` : '',
         globalLockContext.canonFactSummary,
@@ -4458,6 +4473,7 @@ export async function collectChapterContextRawData(
       currentArc: formatArcContext(currentArc),
       continuityNotes: [
         collectContinuityNotes(continuityChapters),
+        creativeStageContext?.stage.handoffSummary ? `阶段交接：${creativeStageContext.stage.handoffSummary}` : '',
         ...chapterContractRules,
         ...sceneContractLines,
         globalLockContext.lockedParagraphSummary,
@@ -4570,6 +4586,7 @@ export async function collectChapterContextRawData(
     recallSnapshot: recallAugmentation.recallSnapshot,
     recallDiagnostics: recallAugmentation.recallDiagnostics,
     recalledMemorySources: recallAugmentation.recalledMemorySources,
+    creativeStageContext: creativeStageContext || undefined,
   }
 }
 

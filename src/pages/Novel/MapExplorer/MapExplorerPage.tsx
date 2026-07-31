@@ -3,7 +3,9 @@ import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Prog
 import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 import type { MapAutoGenerateStatus, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
+import type { CreativeStageContext } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { parseTaskEventId, parseTaskStatusEvent } from '../../../shared/task-stream-events'
@@ -167,7 +169,7 @@ function TaskStrip({
 
 export default function MapExplorerPage({ novelId }: Props) {
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [detailForm] = Form.useForm<DetailFormValues>()
   const [batchForm] = Form.useForm()
@@ -245,7 +247,19 @@ export default function MapExplorerPage({ novelId }: Props) {
   const factionOptions = useMemo(() => getFactionNameOptions(worldRules), [worldRules])
   const nodeTypeOptions = useMemo(() => getMapNodeTypeOptions(worldRules), [worldRules])
   const initialBatchValues = useMemo(() => buildInitialBatchFormValues(scaledBlueprintLevels), [scaledBlueprintLevels])
-  const flattenedTree = useMemo(() => flattenTree(treeData), [treeData])
+  const routeNodeId = useMemo(() => parseRouteId(searchParams.get('nodeId')), [searchParams])
+  const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
+  const [creativeStageContext, setCreativeStageContext] = useState<CreativeStageContext | null>(null)
+  const activeStageContext = creativeStageContext?.stage.id === creativeStageId ? creativeStageContext : null
+  const scopedTreeData = useMemo(() => {
+    if (!activeStageContext) return treeData
+    const allowedIds = new Set(activeStageContext.activeMapIds)
+    const keepBranch = (items: WorldMapItem[]): WorldMapItem[] => items
+      .map((item) => ({ ...item, children: keepBranch(item.children || []) }))
+      .filter((item) => allowedIds.has(item.id) || (item.children || []).length > 0)
+    return keepBranch(treeData)
+  }, [activeStageContext, treeData])
+  const flattenedTree = useMemo(() => flattenTree(scopedTreeData), [scopedTreeData])
   const currentParent = branchPath[branchPath.length - 1] || null
   const currentDisplayPath = useMemo(() => {
     if (selectedNode?.id && flattenedTree.pathById.has(selectedNode.id)) return flattenedTree.pathById.get(selectedNode.id) || []
@@ -277,7 +291,30 @@ export default function MapExplorerPage({ novelId }: Props) {
     value: item.value,
     label: RELATION_INTENSITY_TEXT[item.value] || item.label,
   })), [])
-  const routeNodeId = useMemo(() => parseRouteId(searchParams.get('nodeId')), [searchParams])
+
+  const handleCreativeStageChange = useCallback((stageId: number | null) => {
+    const nextParams = new URLSearchParams(searchParams)
+    if (stageId) nextParams.set('stageId', String(stageId))
+    else nextParams.delete('stageId')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!creativeStageId) {
+      setCreativeStageContext(null)
+      return
+    }
+    let disposed = false
+    void window.electron.creativeStage.getContext(novelId, creativeStageId).then((context) => {
+      if (!disposed) setCreativeStageContext(context)
+    }).catch((error) => {
+      if (disposed) return
+      setCreativeStageContext(null)
+      console.error(error)
+      message.error(getErrorMessage(error, 'creativeStage.notFound'))
+    })
+    return () => { disposed = true }
+  }, [creativeStageId, novelId])
 
   const loadRoots = useCallback(async (targetPage = rootPage, keyword = searchKeyword) => {
     const requestId = ++rootsRequestRef.current
@@ -367,6 +404,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       const [graph, relations] = await Promise.all([
         window.electron.map.getGraph({
           novelId,
+          stageId: creativeStageId || undefined,
           includeRelationEdges: graphFilters.includeRelationEdges,
         }),
         window.electron.map.getRelations(novelId),
@@ -380,7 +418,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     } finally {
       if (graphRequestRef.current === requestId) setGraphLoading(false)
     }
-  }, [graphFilters.includeRelationEdges, novelId])
+  }, [creativeStageId, graphFilters.includeRelationEdges, novelId])
 
   const resetBatchForm = useCallback(() => {
     batchForm.resetFields()
@@ -717,6 +755,17 @@ export default function MapExplorerPage({ novelId }: Props) {
       nodeType: levelRule?.nodeTypes?.[0] || '区域',
       structureRole: levelRule?.relationHint || '',
     })
+    if (creativeStageId) {
+      await window.electron.creativeStage.upsertAsset({
+        stageId: creativeStageId,
+        assetType: 'map',
+        assetId: nextId,
+        placeholderName: levelRule?.examples?.[0] || '新根节点',
+        role: 'core',
+        detailLevel: 'working',
+        status: 'active',
+      })
+    }
     await refreshVisible({ preferredId: nextId })
     message.success(getUserFacingMessage('map.rootCreated'))
   }
@@ -738,6 +787,17 @@ export default function MapExplorerPage({ novelId }: Props) {
       parentRuleType: selectedNode.nodeType || selectedNode.locationType || '',
       structureRole: levelRule?.relationHint || '',
     })
+    if (creativeStageId) {
+      await window.electron.creativeStage.upsertAsset({
+        stageId: creativeStageId,
+        assetType: 'map',
+        assetId: nextId,
+        placeholderName: levelRule?.examples?.[0] || `新${levelRule?.label || '节点'}`,
+        role: 'supporting',
+        detailLevel: 'working',
+        status: 'active',
+      })
+    }
 
     if (currentParent?.id !== selectedNode.id) {
       setBranchPath((current) => [...current, selectedNode])
@@ -787,7 +847,10 @@ export default function MapExplorerPage({ novelId }: Props) {
     setAutoLoading(true)
     try {
       const values = batchForm.getFieldsValue()
-      await window.electron.map.startAutoGenerate(novelId, buildGenerateOptions(values, blueprintLevels))
+      await window.electron.map.startAutoGenerate(novelId, {
+        ...buildGenerateOptions(values, blueprintLevels),
+        stageId: creativeStageId || undefined,
+      })
       await loadAutoStatus()
       setBatchOpen(false)
       setAutoTaskCardExpanded(true)
@@ -1152,6 +1215,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       )}
       actions={(
         <Space wrap>
+          <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
           <Button type={workspaceMode === 'list' ? 'primary' : 'default'} icon={<UnorderedListOutlined />} onClick={() => setWorkspaceMode('list')}>列表模式</Button>
           <Button type={workspaceMode === 'graph' ? 'primary' : 'default'} icon={<ShareAltOutlined />} onClick={() => setWorkspaceMode('graph')}>图谱模式</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void refreshVisible({ preferredId: selectedNode?.id || null })}>刷新</Button>
@@ -1164,6 +1228,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '当前窗口', value: activeStageContext?.stage.name || '全项目' },
             { label: '蓝图层级', value: `${blueprintLevels.length} 层` },
             { label: '当前路径', value: pathLabel },
             { label: '当前焦点', value: selectedNode?.name || '未选中节点' },

@@ -113,6 +113,7 @@ const WORKSPACE_STAGE_LOADERS = {
   'story-design': () => import('./CoreSettings'),
   outline: () => import('./Outline'),
   'volume-design': () => import('./VolumeDesign'),
+  'stage-planner': () => import('./StagePlanner'),
   contracts: () => import('./Contracts'),
   structure: () => import('./Structure'),
   timeline: () => import('./Timeline'),

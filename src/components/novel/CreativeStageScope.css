@@ -1,0 +1,34 @@
+.creative-stage-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid rgba(189, 100, 63, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 250, 243, 0.82);
+}
+
+.creative-stage-scope__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #80604f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.creative-stage-scope__select {
+  min-width: 220px;
+}
+
+@media (max-width: 900px) {
+  .creative-stage-scope {
+    width: 100%;
+  }
+
+  .creative-stage-scope__select {
+    flex: 1;
+    min-width: 0;
+  }
+}

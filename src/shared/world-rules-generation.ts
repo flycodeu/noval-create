@@ -14,6 +14,7 @@ export type WorldRulesGenerationAction = 'generate' | 'expand'
 
 export interface WorldRulesGenerationRequest {
   novelId: number
+  stageId?: number
   mode: 'all' | 'section'
   action: WorldRulesGenerationAction
   section?: WorldRuleSectionKey
@@ -52,6 +53,7 @@ export interface WorldRulesGenerationResult {
 
 export interface WorldRulesAutoGenerateOptions {
   currentRules: GenreWorldRules
+  stageId?: number
   requirements?: string
   sectionOrder?: WorldRuleSectionKey[]
   maxRetries?: number

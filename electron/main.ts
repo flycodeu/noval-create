@@ -72,6 +72,7 @@ import * as parallelGenerationService from './services/parallel-generation.servi
 import * as batchWorkflowService from './services/batch-workflow.service'
 import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
+import * as creativeStageService from './services/creative-stage.service'
 import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
 import * as sourceSearchSettingsService from './services/source-search-settings.service'
@@ -764,6 +765,15 @@ function registerIpcHandlers() {
   handle('map:resumeAutoGenerate', (event, taskId) =>
     workflowTaskService.resumeWorkflowTask(taskId, event.sender))
   handle('map:clear', (_, novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')))
+  handle('creativeStage:list', (_, novelId, includeArchived) => creativeStageService.listCreativeStages(requireId(novelId, 'novelId'), includeArchived === true))
+  handle('creativeStage:get', (_, stageId) => creativeStageService.getCreativeStage(requireId(stageId, 'stageId')))
+  handle('creativeStage:create', (_, novelId, input) => creativeStageService.createCreativeStage(requireId(novelId, 'novelId'), input))
+  handle('creativeStage:update', (_, input) => creativeStageService.updateCreativeStage(input))
+  handle('creativeStage:archive', (_, stageId) => creativeStageService.archiveCreativeStage(requireId(stageId, 'stageId')))
+  handle('creativeStage:listAssets', (_, stageId) => creativeStageService.listCreativeStageAssets(requireId(stageId, 'stageId')))
+  handle('creativeStage:upsertAsset', (_, input) => creativeStageService.upsertCreativeStageAsset(input))
+  handle('creativeStage:removeAsset', (_, assetId) => creativeStageService.removeCreativeStageAsset(requireId(assetId, 'assetId')))
+  handle('creativeStage:getContext', (_, novelId, stageId) => creativeStageService.getCreativeStageContext(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')))
 
   handle('worldRules:startAutoGenerate', (event, novelId, options) =>
     workflowTaskService.startWorldRulesAutoGenerateWorkflow(novelId, options, event.sender))
@@ -905,7 +915,7 @@ function registerIpcHandlers() {
   })
 
   handle('outline:generateArcs', (_, novelId) => outlineGenerationService.generateStoryArcs(novelId))
-  handle('outline:generateChapterOutlines', (_, arcId, options?: { batchSize?: number }) =>
+  handle('outline:generateChapterOutlines', (_, arcId, options?: { batchSize?: number; stageId?: number }) =>
     outlineGenerationService.generateChapterOutlines(arcId, options))
 
   // Rhythm Templates（内置节奏模板，纯 TS 常量）

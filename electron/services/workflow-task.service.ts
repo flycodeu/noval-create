@@ -98,6 +98,7 @@ function parseWorldRulesOptions(raw?: string | null): WorldRulesAutoGenerateOpti
     const currentRules = normalizeWorldRulesDraft(record.currentRules, undefined)
     return {
       currentRules,
+      stageId: typeof record.stageId === 'number' && Number.isSafeInteger(record.stageId) && record.stageId > 0 ? record.stageId : undefined,
       requirements: typeof record.requirements === 'string' ? record.requirements : undefined,
       sectionOrder: sanitizeWorldRuleSectionOrder(record.sectionOrder as WorldRuleSectionKey[] | undefined),
       maxRetries: typeof record.maxRetries === 'number' ? record.maxRetries : undefined,
@@ -607,7 +608,7 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
     })
     updateTaskStatus(taskId, 'running', sender)
 
-    const context = await loadWorldRulesGenerationContext(task.novelId)
+    const context = await loadWorldRulesGenerationContext(task.novelId, options.stageId)
 
     while (true) {
       const latestTask = getTaskRecord(taskId)
@@ -826,6 +827,7 @@ export async function startWorldRulesAutoGenerateWorkflow(
 ) {
   const safeOptions: WorldRulesAutoGenerateOptions = {
     currentRules: normalizeWorldRulesDraft(options.currentRules, options.currentRules?.genreProfile?.name),
+    stageId: typeof options.stageId === 'number' && Number.isSafeInteger(options.stageId) && options.stageId > 0 ? options.stageId : undefined,
     requirements: options.requirements,
     sectionOrder: sanitizeWorldRuleSectionOrder(options.sectionOrder),
     maxRetries: typeof options.maxRetries === 'number' ? options.maxRetries : undefined,

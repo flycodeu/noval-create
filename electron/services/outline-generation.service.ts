@@ -21,6 +21,7 @@ import { syncStructureLinkage } from './story-structure.service'
 import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import { listRhythmTemplatesForGenre } from '../../src/shared/rhythm-templates'
 import { buildArcRhythmSection } from './rhythm-template.service'
+import { upsertCreativeStageAsset } from './creative-stage.service'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -332,7 +333,7 @@ function syncDesignAlignmentRevisionTasks(input: {
   }
 }
 
-export async function generateChapterOutlines(arcId: number, options: { batchSize?: number } = {}) {
+export async function generateChapterOutlines(arcId: number, options: { batchSize?: number; stageId?: number } = {}) {
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
   if (!arc) throwUserFacingError('storyArc.notFound')
@@ -380,7 +381,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
     slotCount += 1
   }
 
-  const context = await buildOutlineGenerationContext(arcId)
+  const context = await buildOutlineGenerationContext(arcId, options.stageId)
   const existingOutlines = chapterRows
     .filter((chapter) => outlinedNums.has(chapter.chapterNum) && chapter.outline)
     .sort((a, b) => a.chapterNum - b.chapterNum)
@@ -421,6 +422,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
           protagonistRule: context.profile.protagonistRule,
           designGateDirective,
           rhythmSection: arcRhythmSection || undefined,
+          creativeStageSummary: context.creativeStageContext?.promptSummary,
         }),
       }],
       modelConfigId: novel.modelConfigId || undefined,
@@ -527,6 +529,22 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
         sourceEntityId: chapterId,
         content: outlineText,
       }).catch(console.error)
+    }
+    if (context.creativeStageContext && chapterId) {
+      try {
+        upsertCreativeStageAsset({
+          stageId: context.creativeStageContext.stage.id,
+          assetType: 'outline',
+          assetId: chapterId,
+          placeholderName: `第${chapterNum}章 ${title}`,
+          role: 'core',
+          detailLevel: 'canonical',
+          status: 'active',
+          notes: '章节细纲已生成，作为当前阶段的交接节点。',
+        })
+      } catch (error) {
+        console.warn('[creative-stage] 章节细纲阶段绑定失败', error)
+      }
     }
     generatedCount += 1
   }

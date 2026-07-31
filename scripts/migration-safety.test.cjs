@@ -225,6 +225,10 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'relationship_arcs').has('char_a_id'))
   assert.ok(getColumns(db, 'resistance_tracks').has('resistance_kind'))
   assert.ok(getColumns(db, 'resistance_beats').has('track_id'))
+  assert.ok(getColumns(db, 'creative_stages').has('chapter_start'))
+  assert.ok(getColumns(db, 'creative_stages').has('handoff_summary'))
+  assert.ok(getColumns(db, 'creative_stage_assets').has('detail_level'))
+  assert.ok(getColumns(db, 'creative_stage_assets').has('requested_fields_json'))
 }
 
 function testFreshDbIsIdempotent() {
@@ -286,6 +290,7 @@ function testFreshDbIsIdempotent() {
       '0049_outline_design_gate_results',
       '0050_story_arc_rhythm',
       '0051_glossary_lore',
+      '0052_creative_stages',
     ])
 
     runMigrations(db)
@@ -416,6 +421,7 @@ function testPartialSchemaCanResume() {
       '0049_outline_design_gate_results',
       '0050_story_arc_rhythm',
       '0051_glossary_lore',
+      '0052_creative_stages',
     ])
 
     const configs = db.prepare(`

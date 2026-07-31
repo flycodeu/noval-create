@@ -18,6 +18,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { useChapterOutlineBatch } from './useChapterOutlineBatch'
+import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 import './index.css'
 
 interface Props { novelId: number }
@@ -152,6 +153,10 @@ export default function Outline({ novelId }: Props) {
   const [batchStartChapterNum, setBatchStartChapterNum] = useState(1)
   const [reorderMode, setReorderMode] = useState(false)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
+  const [creativeStageId, setCreativeStageId] = useState<number | null>(() => {
+    const value = new URLSearchParams(window.location.hash.split('?')[1] || '').get('stageId')
+    return value && Number.isSafeInteger(Number(value)) ? Number(value) : null
+  })
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const loadRequestRef = React.useRef(0)
@@ -288,6 +293,7 @@ export default function Outline({ novelId }: Props) {
     const finished = await outlineBatch.start(arcId, {
       batchSize: outlineBatchSize,
       targetCount: outlineTargetCount,
+      stageId: creativeStageId || undefined,
     })
     if (finished.phase !== 'done') return
     const linkage = finished.lastResult?.structureLinkage
@@ -597,6 +603,15 @@ export default function Outline({ novelId }: Props) {
         <div className="novel-outline-page__toolbar">
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建故事弧</Button>
+          <CreativeStageScope
+            novelId={novelId}
+            value={creativeStageId}
+            onChange={(stageId) => {
+              setCreativeStageId(stageId)
+              const route = window.location.hash.split('?')[0]
+              window.location.hash = `${route}${stageId ? `?stageId=${stageId}` : ''}`
+            }}
+          />
           <div className="novel-outline-page__toolbar-group">
             <span className="novel-outline-page__toolbar-label">单批</span>
             <InputNumber min={1} max={6} value={outlineBatchSize} onChange={(value) => setOutlineBatchSize(Number(value) || 4)} className="novel-outline-page__count-input novel-outline-page__count-input--sm" />

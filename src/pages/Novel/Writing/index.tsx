@@ -14,6 +14,7 @@ import AIScorePanel from '../../../components/AIScorePanel'
 import ActionErrorAlert from '../../../components/common/ActionErrorAlert'
 import TruncatedList from '../../../components/common/TruncatedList'
 import ActionBar from '../../../components/novel/common/ActionBar'
+import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 import SectionHeader from '../../../components/novel/common/SectionHeader'
 import { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
@@ -282,7 +283,7 @@ function chapterVersionSourceLabel(source: ChapterVersion['versionSource']) {
 }
 
 export default function Writing({ novelId }: Props) {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const location = useLocation()
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
@@ -364,6 +365,7 @@ export default function Writing({ novelId }: Props) {
   const generateRetryRef = useRef<() => void>(() => {})
   const resumeRetryRef = useRef<() => void>(() => {})
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
+  const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
     const routeKey = location.pathname.split('/').filter(Boolean)[3]
     return routeKey === 'context' || routeKey === 'review' || routeKey === 'history' ? routeKey : 'editor'
@@ -578,13 +580,14 @@ export default function Writing({ novelId }: Props) {
       const preview = await window.electron.chapter.getContextPreview(chapter.id, {
         executionMode: effectiveAiExecutionMode,
         preserveConstraintLabels,
+        stageId: creativeStageId || undefined,
       })
       if (isCurrent()) setChapterContextPreview(preview)
     } catch (error) {
       console.error('Failed to load chapter context preview', error)
       if (isCurrent()) setChapterContextPreview(null)
     }
-  }, [effectiveAiExecutionMode, preserveConstraintLabels])
+  }, [creativeStageId, effectiveAiExecutionMode, preserveConstraintLabels])
 
   const refreshPublishCheck = useCallback(async (
     chapterId: number,
@@ -1176,6 +1179,7 @@ export default function Writing({ novelId }: Props) {
       const taskId = await window.electron.chapter.generateContent(currentChapter.id, {
         executionMode: effectiveAiExecutionMode,
         preserveConstraintLabels,
+        stageId: creativeStageId || undefined,
       })
       updateGenerationTask({ chapterId: currentChapter.id, taskId })
     } catch (error: unknown) {
@@ -1201,6 +1205,7 @@ export default function Writing({ novelId }: Props) {
     completeGeneration,
     content,
     currentChapter,
+    creativeStageId,
     effectiveAiExecutionMode,
     preserveConstraintLabels,
     startGeneration,
@@ -2708,6 +2713,16 @@ export default function Writing({ novelId }: Props) {
                   />
                   <ActionBar align="between">
                     <div className="chapter-console-page__editor-status">
+                      <CreativeStageScope
+                        novelId={novelId}
+                        value={creativeStageId || null}
+                        onChange={(stageId) => {
+                          const next = new URLSearchParams(searchParams)
+                          if (stageId) next.set('stageId', String(stageId))
+                          else next.delete('stageId')
+                          setSearchParams(next)
+                        }}
+                      />
                       <Select
                         size="small"
                         className="writing-layout-select-default"
