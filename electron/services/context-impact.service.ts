@@ -40,6 +40,10 @@ import {
   isContractValidationWarningVerdict as isContractValidationWarningVerdictValue,
   isHardContractValidationItem,
 } from '../../src/shared/contract-validation'
+import {
+  normalizeSemanticGateReview,
+  type SemanticGateDimension,
+} from '../../src/shared/semantic-gate'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   buildChapterGateDriftSummary,
@@ -60,6 +64,7 @@ import { analyzeNarrativeControls } from './narrative-control.service'
 import { getNovelAssetImpactSummary } from './asset-impact.service'
 import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.service'
 import {
+  CORE_SEMANTIC_GATE_DIMENSIONS,
   resolveSemanticGatePolicy,
   type SemanticGateMode,
 } from '../../src/shared/semantic-gate-policy'
@@ -152,6 +157,17 @@ function getRecallFallbackStreak(
     streak += 1
   }
   return streak
+}
+
+function isHardRecallFallbackReason(reason?: RecallFallbackReason): boolean {
+  // Keyword/no-hit fallback is an observable warning, not proof that the
+  // chapter is inconsistent: hard constraints and structured state remain the
+  // source of truth. Block only repeated infrastructure/budget/staleness
+  // failures that can actively prevent continuity evidence from being used.
+  return reason === 'embedding_service_failed'
+    || reason === 'query_embedding_failed'
+    || reason === 'budget_trimmed'
+    || reason === 'only_stale_hits'
 }
 
 function parseNumberArray(raw?: string | null): number[] {
@@ -1168,9 +1184,26 @@ function getContractValidationIssuesByType(
 
 function buildHardContractValidationResult(
   result: ChapterContractValidationResult | null,
+  options: { verifiedSemanticPassDimensions?: Set<SemanticGateDimension> } = {},
 ): ChapterContractValidationResult | null {
   if (!result) return null
-  const hardItems = result.itemResults.filter((item) => !isSoftContractValidationItem(item))
+  const verifiedSemanticPassDimensions = options.verifiedSemanticPassDimensions || new Set<SemanticGateDimension>()
+  const semanticReconciledItems = result.itemResults.filter((item) => (
+    !isSoftContractValidationItem(item)
+    && isContractValidationBlockingVerdict(item)
+    && item.contractItemType !== 'chapter_hook'
+    && (
+      verifiedSemanticPassDimensions.has('contract_delivery')
+      || (
+        verifiedSemanticPassDimensions.has('structural_beat')
+        && (item.contractItemType === 'scene_conflict' || item.contractItemType === 'scene_result_state')
+      )
+    )
+  ))
+  const hardItems = result.itemResults.filter((item) => (
+    !isSoftContractValidationItem(item)
+    && !semanticReconciledItems.includes(item)
+  ))
   const hardBlockerCount = hardItems.filter(isContractValidationBlockingVerdict).length
   const hardWarningCount = hardItems.filter(isContractValidationWarningVerdict).length
   const status = deriveChapterContractValidationStatus(hardItems)
@@ -1181,6 +1214,8 @@ function buildHardContractValidationResult(
     ? `正文合同硬性验证命中 ${hardBlockerCount} 项阻塞，${hardWarningCount} 项预警。`
     : status === 'warning'
       ? `正文合同硬性验证仍有 ${hardWarningCount} 项预警。`
+      : semanticReconciledItems.length > 0
+        ? `正文合同硬性验证已通过；语义门已用正文证据复核并接管 ${semanticReconciledItems.length} 项关键词阻塞。`
       : softIssueCount > 0
         ? `正文合同硬性验证已通过；标题贴合与黄金三章开篇由专项门禁处理。`
         : result.summary
@@ -1195,6 +1230,41 @@ function buildHardContractValidationResult(
       .map((item) => item.rewriteHint)
       .filter(Boolean),
   }
+}
+
+/**
+ * 只允许真实的 enforce 语义评审接管启发式合同 blocker：
+ * - 评审本身必须成功且 mode=enforce；
+ * - verdict 必须是 pass；
+ * - 至少保留一条经过 normalizeSemanticGateReview 回指正文的证据。
+ *
+ * 这样 shadow/off 仍保留关键词门原行为；没有证据的模型 pass 也不会放行。
+ */
+function getVerifiedSemanticPassDimensions(
+  review: {
+    mode?: string | null
+    failed?: number | null
+    verdictsJson?: string | null
+  } | null | undefined,
+  chapterContent: string,
+): Set<SemanticGateDimension> {
+  if (!review || review.mode !== 'enforce' || review.failed !== 0 || !chapterContent.trim()) {
+    return new Set<SemanticGateDimension>()
+  }
+  let verdicts: unknown
+  try {
+    verdicts = JSON.parse(review.verdictsJson || '[]')
+  } catch {
+    return new Set<SemanticGateDimension>()
+  }
+  const normalized = normalizeSemanticGateReview({
+    chapterContent,
+    dimensions: CORE_SEMANTIC_GATE_DIMENSIONS,
+    parsedPayload: { verdicts },
+  })
+  return new Set(normalized.verdicts
+    .filter((verdict) => verdict.status === 'pass' && verdict.evidence.length > 0 && verdict.confidence > 0)
+    .map((verdict) => verdict.dimension))
 }
 
 function getPublishContractValidationScore(
@@ -2392,6 +2462,8 @@ export function runChapterPublishCheck(
   })
   const recallFallbackStreak = getRecallFallbackStreak(chapter.novelId, chapter.chapterNum, recallRuntimeByChapterId)
   const recallSnapshot = recallRuntime?.recallSnapshot
+  const recallFallbackIsHardFailure = recallFallbackStreak >= 3
+    && isHardRecallFallbackReason(recallSnapshot?.fallbackReason)
   const contractAudit = buildChapterContractAudit(chapterId)
   const contractValidation = chapter.content?.trim()
     ? validateChapterContractDelivery({
@@ -2400,7 +2472,13 @@ export function runChapterPublishCheck(
       reviewNotes: chapter.reviewNotesJson,
     }, { advisoryOnly: semanticGateMode === 'enforce' })
     : null
-  const publishContractValidation = buildHardContractValidationResult(contractValidation)
+  const verifiedSemanticPassDimensions = getVerifiedSemanticPassDimensions(
+    semanticGateMode === 'enforce' ? latestSemanticGateReview : null,
+    chapter.content || '',
+  )
+  const publishContractValidation = buildHardContractValidationResult(contractValidation, {
+    verifiedSemanticPassDimensions,
+  })
   const openingHookIssues = dedupeTextList([
     ...reviewState.openingHookRisks,
     ...getContractValidationIssuesByType(contractValidation, 'golden_three_opening'),
@@ -2859,12 +2937,12 @@ export function runChapterPublishCheck(
     makePublishCheckItem({
       key: 'recall',
       label: '召回补充未依赖过期片段',
-      status: recallFallbackStreak >= 3
+      status: recallFallbackIsHardFailure
         ? 'blocker'
         : (recallDiagnostics.staleRecallCount > 0 || recallSnapshot?.degraded)
             ? 'warning'
             : 'pass',
-      detail: recallFallbackStreak >= 3
+      detail: recallFallbackIsHardFailure
         ? `最近已连续 ${recallFallbackStreak} 章发生召回降级，本章继续生成会放大连续性风险。当前原因：${formatRecallFallbackReason(recallSnapshot?.fallbackReason)}。`
         : recallSnapshot?.degraded
           ? `本章召回已降级：${formatRecallFallbackReason(recallSnapshot.fallbackReason)}。${recallSnapshot.retrievalUsed ? '当前仅保留降级后的背景补充。' : '当前 prompt 未实际使用召回补充。'}`

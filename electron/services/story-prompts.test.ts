@@ -23,6 +23,7 @@ describe('story-prompts narrative control guidance', () => {
       targetWords: 3000,
       storyCore: '药箱失踪',
       writingContractSummary: '第三人称限知',
+      themeChapterTest: '每章都要让角色在秩序压力与个人代价之间做出可见选择。',
       relationSummary: '林远与赵临互相试探',
       currentArc: '主线推进',
       worldRules: '没有超能力',
@@ -65,6 +66,8 @@ describe('story-prompts narrative control guidance', () => {
     expect(prompt).toContain('根据本章场景和收束位置自然决定长度')
     expect(prompt).toContain('【运行时接力断言】')
     expect(prompt).toContain('【黄金三章开篇约束】')
+    expect(prompt).toContain('【章节级主题验证】')
+    expect(prompt).toContain('theme_question / theme_choice / theme_cost / theme_consequence')
     expect(prompt).toContain('第 2 章职责')
     expect(prompt).toContain('【避免方向】')
     expect(prompt).toContain('【创意方向提示】')

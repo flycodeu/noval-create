@@ -229,6 +229,16 @@ describe('quality tool adapter', () => {
       toolId: 'novelforge.quality.run_evaluation',
       input: { novelId: 5, profile: 'longform_health_v1', idempotencyKey: 'quality-run-001' },
     }, { actor, scopes: allScopes })
+    const stageEvaluation = await registry.invoke({
+      toolId: 'novelforge.quality.run_evaluation',
+      input: {
+        novelId: 5,
+        scopeType: 'stage',
+        stageId: 17,
+        profile: 'longform_health_v1',
+        idempotencyKey: 'quality-stage-001',
+      },
+    }, { actor, scopes: allScopes })
     const semanticEvaluation = await registry.invoke({
       toolId: 'novelforge.quality.run_semantic_evaluation',
       input: { novelId: 5, reportArtifactId: 'quality-report-1', idempotencyKey: 'semantic-quality-run-001' },
@@ -253,6 +263,8 @@ describe('quality tool adapter', () => {
     }, { actor, scopes: allScopes })
 
     expect(evaluation).toMatchObject({ ok: true, data: { report: { status: 'needs_revision' } } })
+    expect(stageEvaluation).toMatchObject({ ok: true, data: { report: { status: 'needs_revision' } } })
+    expect(deps.runEvaluation).toHaveBeenCalledWith(expect.objectContaining({ scopeType: 'stage', stageId: 17 }))
     expect(semanticEvaluation).toMatchObject({ ok: true, data: { sourceReportArtifact: { id: 'quality-report-1' } } })
     expect(compared).toMatchObject({ ok: true, data: { status: 'improved', readyForHumanReview: true } })
     expect(repairDraftCall).toMatchObject({ ok: true, data: { draft: { canonicalWriteAllowed: false } } })

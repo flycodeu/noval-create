@@ -310,6 +310,67 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.find((item) => item.key === 'semantic_gate')?.status).toBe('pass')
   })
 
+  it('enforce 语义 pass 有正文证据时，接管对应合同关键词 blocker，但保留章尾钩子门', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      content: '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，两人几乎动手。林远确认药箱转去旧仓，主线因此向前推进一步。\n\n门外传来急促脚步声，像是有人已经知道了他的发现。',
+    })
+    rows.set(semanticGateReviews, [{
+      id: 1,
+      chapterId: 10,
+      mode: 'enforce',
+      failed: 0,
+      verdictsJson: JSON.stringify([{
+        dimension: 'contract_delivery',
+        status: 'pass',
+        summary: '药箱去向已在正文中落地。',
+        evidence: [{ excerpt: '林远确认药箱转去旧仓', explanation: '正文直接写出线索去向。' }],
+      }]),
+    }])
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const heuristic = runChapterPublishCheck(10, { semanticGateMode: 'off' })
+    expect(heuristic.contractValidation?.itemResults.some((item) => (
+      item.contractItemType === 'scene_result_state' && item.verdict === 'missing'
+    ))).toBe(true)
+
+    const enforced = runChapterPublishCheck(10, { semanticGateMode: 'enforce' })
+    expect(enforced.contractValidation?.itemResults.some((item) => (
+      item.contractItemType === 'scene_result_state' && item.verdict === 'missing'
+    ))).toBe(false)
+    expect(enforced.contractValidation?.summary).toContain('语义门已用正文证据复核')
+    expect(enforced.contractValidation?.itemResults.some((item) => item.contractItemType === 'chapter_hook')).toBe(true)
+  })
+
+  it('enforce 语义 pass 没有可回指正文的证据时，不得接管合同 blocker', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      content: '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，两人几乎动手。林远确认药箱转去旧仓，主线因此向前推进一步。\n\n门外传来急促脚步声，像是有人已经知道了他的发现。',
+    })
+    rows.set(semanticGateReviews, [{
+      id: 1,
+      chapterId: 10,
+      mode: 'enforce',
+      failed: 0,
+      verdictsJson: JSON.stringify([{
+        dimension: 'contract_delivery',
+        status: 'pass',
+        summary: '模型声称已兑现，但证据不在正文。',
+        evidence: [{ excerpt: '正文没有出现的虚构证据', explanation: 'invalid' }],
+      }]),
+    }])
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10, { semanticGateMode: 'enforce' })
+    expect(result.contractValidation?.itemResults.some((item) => (
+      item.contractItemType === 'scene_result_state' && item.verdict === 'missing'
+    ))).toBe(true)
+  })
+
   it('returns warning when only hook-related acceptance risks remain', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapterContracts) || [])[0], {
@@ -817,6 +878,43 @@ describe('runChapterPublishCheck', () => {
 
     expect(result.gateLevel).toBe('blocker')
     expect(result.checklist.find((item) => item.key === 'recall')?.status).toBe('blocker')
+  })
+
+  it('keeps repeated no-hit fallback observable without treating it as a continuity blocker', () => {
+    const rows = createBaseRows()
+    const chapterRows = rows.get(chapters) || []
+    chapterRows.push(
+      { ...chapterRows[0], id: 9, chapterNum: 11, title: '第十一章' },
+      { ...chapterRows[0], id: 8, chapterNum: 10, title: '第十章' },
+    )
+
+    const noHitSnapshot = {
+      retrievalUsed: false,
+      degraded: true,
+      hitCount: 0,
+      selectedHitCount: 0,
+      staleRecallCount: 0,
+      fallbackHitCount: 0,
+      fallbackReason: 'no_hits' as const,
+      bucketStats: {
+        character: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0, fallbackReason: 'no_hits' as const },
+        rule: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0, fallbackReason: 'no_hits' as const },
+        thread: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0, fallbackReason: 'no_hits' as const },
+      },
+    }
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+    vi.mocked(listChapterRecallRuntimeMap).mockReturnValue(new Map([
+      [10, { chapterId: 10, novelId: 1, recallSnapshot: noHitSnapshot }],
+      [9, { chapterId: 9, novelId: 1, recallSnapshot: noHitSnapshot }],
+      [8, { chapterId: 8, novelId: 1, recallSnapshot: noHitSnapshot }],
+    ]))
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.checklist.find((item) => item.key === 'recall')?.status).toBe('warning')
+    expect(result.gateLevel).not.toBe('blocker')
   })
 
   it('uses persisted chapter recall runtime snapshots before heuristic fallback', () => {

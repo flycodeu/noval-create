@@ -57,6 +57,33 @@ function keywordScore(text: string, keywords: string[]): number {
   return score
 }
 
+function clipFallbackText(text: string, maxLength = 900): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function buildContentFallbackExcerpt(content: string, keywords: string[]): string {
+  const paragraphs = content
+    .split(/\r?\n\s*\r?\n+/)
+    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  if (paragraphs.length === 0) return ''
+
+  const ranked = paragraphs
+    .map((paragraph, index) => ({
+      paragraph,
+      index,
+      score: keywordScore(paragraph, keywords),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, 3)
+    .sort((left, right) => left.index - right.index)
+
+  return clipFallbackText((ranked.length > 0 ? ranked.map((item) => item.paragraph) : paragraphs.slice(0, 2)).join('\n'))
+}
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -232,9 +259,10 @@ export async function searchSimilarFragments(
   )
 
   if (allEmbeddings.length === 0) {
+    const hits = fallbackKeywordSearch(novelId, queryText, topK)
     return {
-      hits: [],
-      fallbackReason: 'no_hits',
+      hits,
+      fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
     }
   }
 
@@ -320,32 +348,6 @@ export function fallbackKeywordSearch(
     .where(eq(chapterEmbeddings.novelId, novelId))
     .all()
 
-  if (allEmbeddings.length === 0) {
-    // Fallback to chapter summaries
-    const chapterRows = db.select({
-      id: chapters.id,
-      chapterNum: chapters.chapterNum,
-      summary: chapters.summary,
-    })
-      .from(chapters)
-      .where(eq(chapters.novelId, novelId))
-      .all()
-      .filter((c) => c.summary)
-
-    const keywords = extractKeywords(queryText)
-    return chapterRows
-      .map((c) => ({
-        chapterId: c.id,
-        chapterNum: c.chapterNum || 0,
-        fragmentType: 'summary' as const,
-        fragmentText: c.summary!,
-        similarity: keywordScore(c.summary!, keywords) / Math.max(keywords.length, 1),
-        searchMode: 'keyword' as const,
-      }))
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK)
-  }
-
   const chapterNumById = new Map(
     db.select({
       id: chapters.id,
@@ -356,8 +358,8 @@ export function fallbackKeywordSearch(
       .map((row) => [row.id, row.chapterNum] as const),
   )
   const keywords = extractKeywords(queryText)
-  return allEmbeddings
-    .map((e) => ({
+
+  const candidates: SimilarFragmentHit[] = allEmbeddings.map((e) => ({
       chapterId: e.chapterId,
       chapterNum: chapterNumById.get(e.chapterId) || 0,
       fragmentType: e.fragmentType,
@@ -365,6 +367,54 @@ export function fallbackKeywordSearch(
       similarity: keywordScore(e.fragmentText, keywords) / Math.max(keywords.length, 1),
       searchMode: 'keyword' as const,
     }))
+
+  // Embedding rows are normally created after chapter finalization. During
+  // resume/import/repair flows a chapter can already have usable正文 but no
+  // summary or embedding row yet. Keep keyword recall useful in that window by
+  // deriving bounded fragments from the chapter itself; this is background
+  // evidence only and does not replace hard constraints or structured state.
+  const chapterRows = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    summary: chapters.summary,
+    nextChapterSeed: chapters.nextChapterSeed,
+    continuityStateJson: chapters.continuityStateJson,
+    outline: chapters.outline,
+    content: chapters.content,
+  })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+
+  const existingKeys = new Set(candidates.map((item) => `${item.chapterId}:${item.fragmentType}:${item.fragmentText}`))
+  chapterRows.forEach((chapter) => {
+    const derived: Array<{ type: string; text: string }> = [
+      { type: 'summary', text: asText(chapter.summary) },
+      { type: 'seed', text: asText(chapter.nextChapterSeed) },
+      { type: 'outline', text: asText(chapter.outline) },
+      { type: 'continuity', text: buildContinuityFragmentText(chapter.continuityStateJson) },
+      {
+        type: 'content_excerpt',
+        text: buildContentFallbackExcerpt(asText(chapter.content), keywords),
+      },
+    ]
+    derived.forEach((fragment) => {
+      if (!fragment.text) return
+      const key = `${chapter.id}:${fragment.type}:${fragment.text}`
+      if (existingKeys.has(key)) return
+      existingKeys.add(key)
+      candidates.push({
+        chapterId: chapter.id,
+        chapterNum: chapter.chapterNum || 0,
+        fragmentType: fragment.type,
+        fragmentText: fragment.text,
+        similarity: keywordScore(fragment.text, keywords) / Math.max(keywords.length, 1),
+        searchMode: 'keyword',
+      })
+    })
+  })
+
+  return candidates
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK)
 }

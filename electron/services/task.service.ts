@@ -36,6 +36,7 @@ export type TaskType =
   | 'chapter_write'
   | 'summary'
   | 'continuity'
+  | 'creative_stage_handoff'
   | 'review'
   | 'ai_check'
   | 'expand_background'

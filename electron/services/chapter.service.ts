@@ -92,7 +92,8 @@ import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { prepareChapterWritebackRun, prepareChapterWritebackRunWithRetry } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
-import { upsertCreativeStageAsset } from './creative-stage.service'
+import { assertCreativeStageContextReadyForGeneration, upsertCreativeStageAsset } from './creative-stage.service'
+import { createChapterEndCreativeStageHandoffDraft } from './creative-stage-handoff.service'
 import { captureChapterNumberReferenceSnapshot } from './chapter-number-remap.service'
 import { listActiveImpactsForChapter } from './asset-impact.service'
 import { enhanceAiScoreResult, toChapterAiCheckResult } from './ai-score.service'
@@ -3726,8 +3727,12 @@ async function continueChapterContent(
   }
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
+  if (options.stageId && rawContext.creativeStageContext) {
+    assertCreativeStageContextReadyForGeneration(rawContext.creativeStageContext)
+  }
   const novel = rawContext.novel
   const profile = rawContext.profile
+  const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
   const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
   const writerContextResolutionPayload = await resolveWriterContextForStage(
     chapter,
@@ -3834,6 +3839,7 @@ async function continueChapterContent(
     targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
     storyCore,
     writingContractSummary: draftContext.writingContractSummary,
+    themeChapterTest: themeVoice.themeChapterTest,
     relationSummary: draftContext.relationSummary,
     currentArc: draftContext.currentArc,
     worldRules: draftContext.worldRules,
@@ -4092,6 +4098,9 @@ async function generateChapterContentInternal(
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
+  if (options.stageId && rawContext.creativeStageContext) {
+    assertCreativeStageContextReadyForGeneration(rawContext.creativeStageContext)
+  }
   const novel = rawContext.novel
   const profile = rawContext.profile
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
@@ -4871,6 +4880,7 @@ async function generateChapterContentInternal(
         targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
         storyCore,
         writingContractSummary: draftContext.writingContractSummary,
+        themeChapterTest: themeVoice.themeChapterTest,
         relationSummary: draftContext.relationSummary,
         currentArc: draftContext.currentArc,
         worldRules: draftContext.worldRules,
@@ -5033,6 +5043,7 @@ async function generateChapterContentInternal(
         dialogueVoiceLocks: reviewContext.dialogueVoiceLocks,
         storyCore,
         writingContractSummary: reviewContext.writingContractSummary,
+        themeChapterTest: themeVoice.themeChapterTest,
         relationSummary: reviewContext.relationSummary,
         currentArc: reviewContext.currentArc,
         worldRules: reviewContext.worldRules,
@@ -5375,6 +5386,7 @@ async function generateChapterContentInternal(
         targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
         storyCore,
         writingContractSummary: rewriteContext.writingContractSummary,
+        themeChapterTest: themeVoice.themeChapterTest,
         relationSummary: rewriteContext.relationSummary,
         currentArc: rewriteContext.currentArc,
         worldRules: rewriteContext.worldRules,
@@ -6403,6 +6415,25 @@ async function generateChapterContentInternal(
       } catch (error) {
         console.warn('[creative-stage] 正文阶段交接绑定失败', error)
       }
+      if (rawContext.creativeStageContext.stage.chapterEnd === chapter.chapterNum) {
+        try {
+          const handoffDraft = await createChapterEndCreativeStageHandoffDraft({
+            novelId: chapter.novelId,
+            stageId: rawContext.creativeStageContext.stage.id,
+            chapterId,
+            chapterNum: chapter.chapterNum,
+            chapterTitle: chapter.title,
+            chapterContent: repairedContent,
+            summary: result.summary,
+            nextChapterSeed: result.nextChapterSeed,
+            continuitySummary: '',
+            modelConfigId: novel?.modelConfigId,
+          })
+          console.info(`[creative-stage] 章末交接草稿已生成 mode=${handoffDraft.extractionMode} chapter=${chapter.chapterNum}`)
+        } catch (error) {
+          console.warn('[creative-stage] 阶段交接草稿种子创建失败', error)
+        }
+      }
     }
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
 
@@ -6468,6 +6499,12 @@ export async function generateChapterSummary(chapterId: number): Promise<void> {
   void prepareChapterWritebackRun(chapterId, 'summary-refresh').catch((error) => {
     console.warn(`[chapter:warn] writeback-draft chapter=${chapterId}`, error)
   })
+}
+
+// 供评测/恢复流程只补齐正文派生状态使用。与用户主动点击“生成摘要”不同，
+// 该入口不额外创建异步写回审校任务，避免批量回填时让模型队列与评测互相等待。
+export async function refreshChapterDerivedState(chapterId: number): Promise<void> {
+  await refreshChapterMemory(chapterId)
 }
 
 export async function resumeChapterPipeline(taskId: number, sender?: WebContents): Promise<number> {

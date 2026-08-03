@@ -160,8 +160,8 @@ function syntheticFinding(input: {
 
 function appliesToScope(risk: QualityDashboardRiskItem, scope: AgentQualityScope): boolean {
   if (scope.type === 'novel') return true
-  if (scope.type === 'volume') {
-    return risk.volumeId === scope.volumeId
+  if (scope.type === 'volume' || scope.type === 'stage') {
+    return (typeof scope.volumeId === 'number' && risk.volumeId === scope.volumeId)
       || (risk.chapterNums.length > 0 && risk.chapterNums.some((chapterNum) => scope.chapterNums.includes(chapterNum)))
   }
   return risk.chapterNums.includes(scope.chapterNums[0] || -1)
@@ -201,12 +201,16 @@ function scopeMetrics(
     ? dashboard.novelQualityMetrics.totalChapterCount
     : scope.type === 'volume'
       ? volume?.chapterCount || scope.chapterNums.length
-      : 1
+      : scope.type === 'stage'
+        ? scope.chapterNums.length
+        : 1
   const analyzedChapterCount = scope.type === 'novel'
     ? dashboard.novelQualityMetrics.analyzedChapterCount
     : scope.type === 'volume'
       ? typeof volume?.analyzedChapterCount === 'number' ? volume.analyzedChapterCount : scoredChapters.length
-      : chapter && chapter.dimensions.length > 0 && chapter.overallScore > 0 ? 1 : 0
+      : scope.type === 'stage'
+        ? scoredChapters.length
+        : chapter && chapter.dimensions.length > 0 && chapter.overallScore > 0 ? 1 : 0
   const coverageRate = totalChapterCount > 0 ? clampScore((analyzedChapterCount / totalChapterCount) * 100) : 0
   const averageOverallScore = scoredChapters.length > 0
     ? clampScore(scoredChapters.reduce((sum, entry) => sum + entry.overallScore, 0) / scoredChapters.length)

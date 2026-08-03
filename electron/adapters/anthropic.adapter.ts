@@ -43,7 +43,7 @@ export class AnthropicAdapter extends BaseAdapter {
       if (parsed?.type === 'content_block_delta' && parsed.delta?.text) {
         opts?.onStream?.(parsed.delta.text)
       }
-    })
+    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
   }
 
   private async requestMessages(body: Record<string, unknown>, opts?: ChatOptions): Promise<Response> {

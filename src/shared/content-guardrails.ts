@@ -353,8 +353,8 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
   {
     code: 'not_but_definition_pattern',
     bucket: 'sentence',
-    avoid: '不要反复使用“不是……而是/是……”式定义句。',
-    prefer: '让角色通过行动、误判和后果呈现变化。',
+    avoid: '叙述正文不要使用“不是……而是/是……”或“并非……实际是……”式定义句；不要用一次对照句替代现场辨认、行动和结果。对白中确有辨认或纠正语义时可以保留。',
+    prefer: '把判断拆成动作、物证和后果：先写人物看见或听见什么，再写他如何确认、误判或承担结果；不要用“不是A，是B”替代过程。',
   },
   {
     code: 'double_metaphor_or_simile_stack',
@@ -513,10 +513,15 @@ function findRelevantPatternMatch(
       && /不是[^。！？\n]{0,28}(?:而是|只是|(?<!不)是)/u.test(match[0])
       && /(?:往|朝|向|去|来)/u.test(match[0])
       && /(?:往|朝|向|去|来)/u.test(match[0].split(/(?:，|,)/u).slice(1).join(''))
+    // 现场辨认也常用“不是 A，是 B”，例如机器噪声中确认喊声，
+    // 或把坠落物认作支护柱。这是信息落地，不是旁白抽象下定义。
+    const concreteSceneReclassification = code === 'not_but_definition_pattern'
+      && /不是[^。！？\n,，]{1,12}[,，]\s*是(?:有人|声音|脚步|风|雨|光|火|石|支护|绞车|机器|工具|门|路|纸|布|手电|一阵|一声|个|一名|一位|名)/u.test(match[0])
     if (code !== 'not_but_definition_pattern') return match
     if (
       definitionPattern.test(match[0])
       && !movementCorrection
+      && !concreteSceneReclassification
       && (!isInsideDialogueQuote(text, match.index)
         || !/不是(?:我|你|他|她|这|那|一个人|我们|你们|他们)/u.test(match[0]))
     ) {

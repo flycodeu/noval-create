@@ -146,6 +146,32 @@ describe('agent quality evaluation', () => {
     expect(report.findings.some((finding) => finding.title === '外卷风险')).toBe(false)
   })
 
+  it('evaluates a stage by its chapter window and does not import unrelated risks', () => {
+    const selected = risk({ chapterNums: [2], title: '阶段内风险' })
+    const outside = risk({ chapterNums: [9], title: '阶段外风险' })
+    const source = dashboard({ total: 2, analyzed: 2, risks: [selected, outside] })
+    const report = buildAgentQualityReport({
+      requestFingerprint: `sha256:${'e'.repeat(64)}`,
+      profile: 'longform_health_v1',
+      scope: { type: 'stage', label: '阶段一', stageId: 17, chapterNums: [1, 2, 3] },
+      dashboard: source,
+      contextVersion: 3,
+      maxFindings: 20,
+      createdAt: '2026-07-11T00:00:00.000Z',
+    })
+
+    expect(report.metrics).toMatchObject({
+      totalChapterCount: 3,
+      analyzedChapterCount: 2,
+      coverageRate: 67,
+    })
+    expect(report.findings.some((finding) => finding.title === '阶段内风险')).toBe(true)
+    expect(report.findings.some((finding) => finding.title === '阶段外风险')).toBe(false)
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'quality_coverage', blocking: true }),
+    ]))
+  })
+
   it('does not count chapter-gate fallback scores as AI quality coverage', () => {
     const source = dashboard({ total: 2, analyzed: 0, average: 0 })
     source.chapterDetails = source.chapterDetails.map((chapter) => ({

@@ -10,6 +10,8 @@ export type AgentArtifactKind =
   | 'quality_repair_draft'
   | 'quality_repair_review'
   | 'quality_comparison'
+  | 'creative_stage_handoff'
+  | 'creative_stage_handoff_review'
   | 'generic_draft'
 
 export interface AgentArtifact<T = unknown> {

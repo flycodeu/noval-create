@@ -18,6 +18,8 @@ import type {
   CharacterRelationInput,
   CreativeStageAssetInput,
   CreativeStageCreateInput,
+  CreativeStageHandoffArtifact,
+  CreativeStageHandoffInput,
   CreativeStageUpdateInput,
   MapRelationInput,
   NovelCreateInput,
@@ -347,7 +349,11 @@ const api = {
     listAssets: (stageId: number) => invokeIpc('creativeStage:listAssets', stageId),
     upsertAsset: (input: CreativeStageAssetInput) => invokeIpc('creativeStage:upsertAsset', input),
     removeAsset: (assetId: number) => invokeIpc('creativeStage:removeAsset', assetId),
-    getContext: (novelId: number, stageId: number) => invokeIpc('creativeStage:getContext', novelId, stageId),
+    getContext: (novelId: number, stageId: number, chapterNum?: number) => invokeIpc('creativeStage:getContext', novelId, stageId, chapterNum),
+    listHandoffs: (novelId: number, stageId: number) => invokeIpc<CreativeStageHandoffArtifact[]>('creativeStage:listHandoffs', novelId, stageId),
+    createHandoff: (input: CreativeStageHandoffInput) => invokeIpc<CreativeStageHandoffArtifact>('creativeStage:createHandoff', input),
+    reviewHandoff: (artifactId: string) => invokeIpc<{ handoff: CreativeStageHandoffArtifact; review: unknown }>('creativeStage:reviewHandoff', artifactId),
+    approveHandoff: (artifactId: string) => invokeIpc<CreativeStageHandoffArtifact>('creativeStage:approveHandoff', artifactId),
   },
 
   worldRules: {

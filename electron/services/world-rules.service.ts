@@ -33,7 +33,11 @@ import { buildStoryProfile } from './context.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
-import { resolveActiveCreativeStageContext, upsertCreativeStageAsset } from './creative-stage.service'
+import {
+  assertCreativeStageContextReadyForGeneration,
+  resolveActiveCreativeStageContext,
+  upsertCreativeStageAsset,
+} from './creative-stage.service'
 import type { CreativeStageContext } from '../../src/shared/creative-stages'
 
 const SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
@@ -752,6 +756,9 @@ export async function generateWorldRules(
   }
 
   const context = await loadWorldRulesGenerationContext(data.novelId, data.stageId)
+  if (data.stageId && context.creativeStageContext) {
+    assertCreativeStageContextReadyForGeneration(context.creativeStageContext)
+  }
   const requestedSections = data.mode === 'section'
     ? [data.section as WorldRuleSectionKey]
     : [...WORLD_RULE_SECTION_ORDER]

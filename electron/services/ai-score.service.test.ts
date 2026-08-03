@@ -11,6 +11,12 @@ describe('ai-score.service', () => {
     }, '方大炉把检修钳夹上法兰。')
 
     expect(enhanced.overall_score).toBe(70)
+    expect(enhanced.dimensions).toEqual([{
+      name: '综合质量',
+      score: 70,
+      feedback: '文本整体自然。',
+      suggestion: '减少解释性句子。',
+    }])
     const chapterResult = toChapterAiCheckResult({
       ai_like_rate: 30,
       overall_feedback: '文本整体自然。',

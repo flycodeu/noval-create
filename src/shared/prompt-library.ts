@@ -171,6 +171,8 @@ export interface ChapterWritingPromptInput {
   targetWords: number
   storyCore: string
   writingContractSummary?: string
+  /** 本章必须被事件、选择与代价证明的主题命题。 */
+  themeChapterTest?: string
   relationSummary?: string
   currentArc: string
   worldRules: string
@@ -226,6 +228,8 @@ export interface ScenePlanPromptInput {
   targetWords: number
   storyCore: string
   writingContractSummary?: string
+  /** 本章必须被事件、选择与代价证明的主题命题。 */
+  themeChapterTest?: string
   relationSummary?: string
   currentArc: string
   worldRules: string
@@ -275,6 +279,8 @@ export interface ChapterReviewPromptInput {
   dialogueVoiceLocks?: string
   storyCore: string
   writingContractSummary?: string
+  /** Critic 必须逐字核对的章节级主题命题。 */
+  themeChapterTest?: string
   relationSummary?: string
   currentArc: string
   worldRules: string
@@ -333,6 +339,8 @@ export interface ChapterRewritePromptInput {
   targetWords: number
   storyCore: string
   writingContractSummary?: string
+  /** Rewriter 必须修复到正文中的章节级主题命题。 */
+  themeChapterTest?: string
   relationSummary?: string
   currentArc: string
   worldRules: string
@@ -1653,6 +1661,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('写作类型', params.writingContractSummary),
+    section('章节级主题验证', params.themeChapterTest),
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
@@ -1705,6 +1714,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '- hidden_agendas（必填）：在场每一方此刻真正想要什么（可能和嘴上说的不一样），逐方写。一场戏若只有一方有诉求、其余人只是接话，就是单向量陈述，必须补出对方的算盘。每个场景都必须输出非空数组；空数组视为未完成设计，会被打回。',
       '- irony_gap（必填）：读者已经知道、但场上某个角色还不知道的事（戏剧反讽）。优先设计一处，让读者比角色多知道一点；确实没有信息差时必须显式写“无”，留空视为未完成设计。',
       '- audience：这场戏其实是演给谁看的——在场的第三方、场外的势力、还是角色在给自己一个交代。对白和动作要考虑“被谁听见/看见”。',
+      '- 章节级主题验证（如果已提供）：先把命题拆成可观察的主题问题、角色选择、即时代价和后果；至少一个场景必须填写 theme_question / theme_choice / theme_cost / theme_consequence，不能只写“体现主题”或“人物成长”。',
       '',
       '可执行性检查（每个场景必须同时满足）：',
       '1. 开场钩子：场景开头 50 字内必须有一个动作、悬念或感官冲击，不能以描写天气/环境/心理活动开头。',
@@ -1725,7 +1735,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
     '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前章节的具体内容：',
-    '[{"scene_order":1,"scene_title":"","purpose":"","location":"","time_anchor":"","present_characters":[],"key_items":[],"conflict":"","hidden_agendas":[],"irony_gap":"","audience":"","beat":"","must_cover":[],"climax_variant":"","exit_hook":""}]',
+    '[{"scene_order":1,"scene_title":"","purpose":"","location":"","time_anchor":"","present_characters":[],"key_items":[],"conflict":"","hidden_agendas":[],"irony_gap":"","audience":"","beat":"","must_cover":[],"climax_variant":"","exit_hook":"","theme_question":"","theme_choice":"","theme_cost":"","theme_consequence":""}]',
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
@@ -1756,6 +1766,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('已定章节大纲', params.plotPoints),
     section('写作类型', params.writingContractSummary),
+    section('章节级主题验证', params.themeChapterTest),
     section('关键人物关系', params.relationSummary),
     section('本章必须承接', params.continuityNotes),
     section('当前未回收事项', params.openLoops),
@@ -1802,6 +1813,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '能直接写事实时，不要用“不是……而是……”做解释性对照；对白语气不要靠“声音很轻/很低/压得很低”标签交代。',
       '如果上下文给了关系摘要，就把亲疏、权力差、潜台词和说话习惯写进对白。',
       '主角在本章里可以害怕、迟疑、失望、心软或犯错，但这些反应必须推动后续选择。',
+      '如果提供了章节级主题验证，至少让一个具体场景逼出角色对命题的可见判断，并写清选择付出的即时代价与留下的关系、制度、资源或身份后果；不要用旁白总结代替事件。',
       '每个场景要么推进本章任务，要么承担关系、伏笔、质感或喘息的次级功能；允许有节制的闲笔与日常，但不写无信息增量的注水段落。',
       '每完成一个场景或一段自然叙事单元，都要出现可感知的变化：军令、账册、物资、关系、态度、位置、伤亡、线索或选择至少有一项发生改变；不要用固定字数切段。',
       '段落节奏要参差：不要每段都三五句、不要每段都用动作或总结收尾；允许被打断的句子、答非所问、未说完的命令和留白。',
@@ -1844,6 +1856,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('写作类型', params.writingContractSummary),
+    section('章节级主题验证', params.themeChapterTest),
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
@@ -1890,6 +1903,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '每个主要场景都要包含可观察动作、可感知环境细节、人物选择和场景结束后的状态变化，不能只写心理总结。',
       '人物情绪必须通过停顿、动作、措辞变化、错误判断、资源消耗或关系反应体现，禁止用“他心中一震”“命运的齿轮”“某种情绪蔓延”这类模板句替代刻画。',
       '冲突不能只靠外部口号推进：至少写出一处具体阻力、一处主角判断成本、一处后续仍会持续的代价或未解决问题。',
+      '如果提供了章节级主题验证，初稿必须把主题问题、角色选择、即时代价和后果落进至少一个场景；正文中要能找到动作、对白或结果证据。',
       '初稿允许有人的不整齐：场景中可以有犹豫、误读、答非所问、账目没对上、传令迟到、官文措辞被改，不要把所有信息处理得过度干净。',
       '每个场景或关键叙事单元至少推进一个可追踪变量：人物立场、资源余量、伤亡压力、地理位置、支线状态、伏笔状态或下一章压力；不要用固定字数切段。',
       '同一类感官意象一章最多保留两组，多余篇幅改写成行为、制度、物资、路线或对白博弈。',
@@ -1931,6 +1945,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('场景计划摘要', params.scenePlanSummary),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
+    section('章节级主题验证', params.themeChapterTest),
     section('合同版本摘要', params.contractVersionSummary),
     section('关键人物关系', params.relationSummary),
     section('当前故事弧', params.currentArc),
@@ -1997,6 +2012,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'dialogue_voice_lock_summary 用一句话概括本章生成前要锁哪些角色的声音。',
       'required_voice_lock_character_ids 只保留本章生成前必须启用 voice lock 的角色 id。',
       '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
+      '如果提供了章节级主题验证，必须逐项判断正文是否出现主题问题、角色选择、即时代价和后果证据；缺少任一环节就写入 critical_fixes 或 reader_hook_risks，并引用正文短证据。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
       '志怪治妖如果没有“妖病-人事-诊疗选择-病后余味”的闭环，历史正剧如果没有“劳动/制度-组织反馈-受挫-重塑”的链条，都必须写进 genre_hollowing_risks 或 critical_fixes。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
@@ -2060,6 +2076,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('当前故事弧', params.currentArc),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
+    section('章节级主题验证', params.themeChapterTest),
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
@@ -2114,6 +2131,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '如果原稿每段都用结论收束，把至少三处结尾改成未完成动作、具体数字、未答复问题或继续存在的代价。',
       '把关系温度、权力差和潜台词写回称呼、打断、停顿和回避方式，不要让所有对白一个基调。',
       '把成长变化写回事件、关系、资源和代价，不要只靠总结句宣告人物成长。',
+      '如果提供了章节级主题验证，必须补齐主题问题、角色选择、即时代价和后果四个证据环节；主题缺口属于结构修复，不得只润色措辞。',
       '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
       '删除或泛化无来源的地点、房间、楼梯、方位、设备构造、数字和背景细节；只有能从硬约束、章节合同、场景计划、既有正文或可观察物件追溯的细节才能保留为事实。',
       '如果近期结构告警提示主角太顺，就补出真实受挫、失误或代价；如果提示代价蒸发，就把后果延续到本章；如果提示反转硬塞，就补足前文呼应和触发链；如果提示高潮过密或过疏，就主动收束或蓄力。',
@@ -2254,6 +2272,7 @@ export function chapterWritingPrompt(params: {
   genre?: string
   storyCore?: string
   currentArc?: string
+  themeChapterTest?: string
   continuitySummary?: string
   openLoops?: string
   continuityNotes?: string
@@ -2276,6 +2295,7 @@ export function chapterWritingPrompt(params: {
     genre: params.genre || '',
     storyCore: params.storyCore || '',
     currentArc: params.currentArc || '',
+    themeChapterTest: params.themeChapterTest || '',
     worldRules: params.worldRules,
     characterStates: params.characterStates,
     worldStates: params.worldStates || '',

@@ -87,7 +87,7 @@ export async function executeManagedRequest<T>(
     } catch (error) {
       if (managedSignal.didExternalAbort()) throw buildAbortError()
       const normalizedError = managedSignal.didTimeout()
-        ? buildError(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`, 'REQUEST_TIMEOUT', error)
+        ? buildRequestTimeoutError(timeoutMs, error)
         : error
 
       if (!isRetryableNetworkError(normalizedError)) throw normalizedError
@@ -235,6 +235,10 @@ function buildError(message: string, code?: string, cause?: unknown): Error {
   if (code) error.code = code
   if (cause !== undefined) error.cause = cause
   return error
+}
+
+export function buildRequestTimeoutError(timeoutMs: number, cause?: unknown): Error {
+  return buildError(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`, 'REQUEST_TIMEOUT', cause)
 }
 
 function isAbortError(error: unknown): boolean {

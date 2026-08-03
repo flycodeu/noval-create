@@ -56,6 +56,7 @@ import {
 import { getQualityDashboardData } from './quality-dashboard.service'
 import { getNovel } from './novel.service'
 import { listChapters, optimizeChapterContent } from './chapter.service'
+import { getCreativeStage } from './creative-stage.service'
 import { runChatTask } from './task.service'
 import { safeParseJson } from '../utils/json'
 
@@ -165,8 +166,8 @@ function resolveScope(
 ): AgentQualityScope {
   const scopeType = input.scopeType || 'novel'
   if (scopeType === 'novel') {
-    if (input.volumeId || input.chapterId) {
-      throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', '整书评审不能同时指定 volumeId 或 chapterId。')
+    if (input.stageId || input.volumeId || input.chapterId) {
+      throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', '整书评审不能同时指定 stageId、volumeId 或 chapterId。')
     }
     return {
       type: 'novel',
@@ -175,7 +176,7 @@ function resolveScope(
     }
   }
   if (scopeType === 'volume') {
-    if (!input.volumeId || input.chapterId) {
+    if (!input.volumeId || input.stageId || input.chapterId) {
       throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', '分卷评审必须且只能指定 volumeId。')
     }
     const volume = dashboard.volumeQualityMetrics.find((entry) => entry.volumeId === input.volumeId)
@@ -190,7 +191,36 @@ function resolveScope(
         .sort((left, right) => left - right),
     }
   }
-  if (!input.chapterId || input.volumeId) {
+  if (scopeType === 'stage') {
+    if (!input.stageId || input.volumeId || input.chapterId) {
+      throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', '阶段评审必须且只能指定 stageId。')
+    }
+    const stage = getCreativeStage(input.stageId)
+    if (!stage || stage.novelId !== input.novelId) {
+      throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', `找不到项目 ${input.novelId} 下的阶段 ${input.stageId}。`)
+    }
+    const hasChapterRange = typeof stage.chapterStart === 'number' || typeof stage.chapterEnd === 'number'
+    const chapterNums = hasChapterRange
+      ? typeof stage.chapterStart === 'number' && typeof stage.chapterEnd === 'number'
+        ? Array.from(
+          { length: Math.max(0, stage.chapterEnd - stage.chapterStart + 1) },
+          (_, index) => stage.chapterStart as number + index,
+        )
+        : dashboard.chapterDetails
+          .filter((chapter) => (typeof stage.chapterStart !== 'number' || chapter.chapterNum >= stage.chapterStart)
+            && (typeof stage.chapterEnd !== 'number' || chapter.chapterNum <= stage.chapterEnd))
+          .map((chapter) => chapter.chapterNum)
+          .sort((left, right) => left - right)
+      : []
+    return {
+      type: 'stage',
+      label: `阶段「${stage.name}」`,
+      stageId: stage.id,
+      ...(stage.volumeId ? { volumeId: stage.volumeId } : {}),
+      chapterNums,
+    }
+  }
+  if (!input.chapterId || input.stageId || input.volumeId) {
     throw new QualityWorkflowError('QUALITY_SCOPE_INVALID', '单章评审必须且只能指定 chapterId。')
   }
   const chapter = dashboard.chapterDetails.find((entry) => entry.chapterId === input.chapterId)
@@ -205,13 +235,14 @@ function resolveScope(
 }
 
 function scopeKey(scope: AgentQualityScope): string {
-  return `${scope.type}:${scope.volumeId || 0}:${scope.chapterId || 0}`
+  return `${scope.type}:${scope.stageId || 0}:${scope.volumeId || 0}:${scope.chapterId || 0}`
 }
 
 function evaluationFingerprint(input: RunAgentQualityEvaluationInput): string {
   return hashArtifactContent({
     novelId: input.novelId,
     scopeType: input.scopeType || 'novel',
+    stageId: input.stageId || null,
     volumeId: input.volumeId || null,
     chapterId: input.chapterId || null,
     profile: input.profile || 'longform_health_v1',

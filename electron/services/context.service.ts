@@ -799,8 +799,13 @@ const MIN_HARD_CONSTRAINT_TOKENS = 28
 const MIN_PINNED_HARD_CONSTRAINT_TOKENS = 18
 const MIN_VECTOR_RECALL_SIMILARITY = 0.6
 const PREFERRED_VECTOR_RECALL_SIMILARITY = 0.72
-const MIN_KEYWORD_RECALL_SIMILARITY = 0.5
-const PREFERRED_KEYWORD_RECALL_SIMILARITY = 0.6
+// Chinese keyword fallback uses sparse 2-4 character n-grams over a bounded
+// query, so a 0.50 ratio is unrealistically strict for long chapter queries
+// and rejects every useful fallback before entity validation can run. Vector
+// recall keeps the higher bar; keyword recall remains background-only and is
+// accepted at a lower, explicit threshold.
+const MIN_KEYWORD_RECALL_SIMILARITY = 0.08
+const PREFERRED_KEYWORD_RECALL_SIMILARITY = 0.16
 
 function selectConstraintLines(
   text: string,
@@ -2365,6 +2370,16 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
     writingContractSummary: 260,
     mapSummary: 220,
     itemSummary: 220,
+    // 跨章接力不是可有可无的“历史摘要”：即使本阶段预算紧张，也要
+    // 给上一章的关键先验和章尾留下一个可执行的压缩窗口。
+    previousChapterContext: 260,
+    lastChapterEnding: 180,
+    // 连续性摘要承载更长程的因果链；保留一个压缩窗口，避免只记住
+    // 上一章的局部动作，却丢失前面已经建立的伏笔、代价和关系变化。
+    continuitySummary: 520,
+    // 长篇进入中段后，结构化长期记忆至少保留一个可执行窗口；否则
+    // recent summary 会把所有历史预算吃完，角色/线程的跨阶段状态反而消失。
+    longTermMemory: 220,
     previousSummaries: 320,
     dialogueVoiceLocks: 160,
     scenePlanSummary: 220,
@@ -2709,7 +2724,7 @@ function createStagePriorityMap(
           mapSummary: 1,
           itemSummary: 1,
           previousChapterContext: 1,
-          lastChapterEnding: 2,
+          lastChapterEnding: 1,
           chapterBridgePlan: 0,
           stepMemorySummary: 0,
           continuitySummary: 0,
@@ -2798,6 +2813,16 @@ function createStagePriorityMap(
   }
 
   if (targetWords >= 350000 || chapterCount >= 80) {
+    const currentLongTermPriority = priorities.longTermMemory
+    if (typeof currentLongTermPriority === 'number') {
+      priorities.longTermMemory = Math.min(currentLongTermPriority, 1) as ContextPart['priority']
+    }
+  }
+
+  // 20 章以上的中长篇已经需要跨章节 checkpoint；让 draft/review/rewrite
+  // 看见一个压缩后的长期记忆窗口。scenePlan 仍优先当前章合同与场景桥，
+  // 不强行抢占它的结构设计预算。
+  if (promptProfile !== 'scenePlan' && (targetWords >= 180000 || chapterCount >= 12)) {
     const currentLongTermPriority = priorities.longTermMemory
     if (typeof currentLongTermPriority === 'number') {
       priorities.longTermMemory = Math.min(currentLongTermPriority, 1) as ContextPart['priority']
@@ -3296,16 +3321,223 @@ function hasContinuityContent(state: ContinuityState): boolean {
   )
 }
 
-function formatContinuityEntry(chapter: ChapterWithContinuity): string {
+export function formatContinuityEntry(chapter: ChapterWithContinuity): string {
+  const compactList = (values: string[], maxItems: number, maxLength = 88) => dedupe(
+    values
+      .map((value) => compactRecallLine(value, maxLength))
+      .filter(Boolean),
+    maxItems,
+  ).join('；')
+
   const parts = [
-    chapter.summary ? `摘要：${chapter.summary}` : '',
-    chapter.continuityState.plotProgress.length > 0 ? `推进：${chapter.continuityState.plotProgress.join('；')}` : '',
-    chapter.continuityState.characterStateChanges.length > 0 ? `人物变化：${chapter.continuityState.characterStateChanges.join('；')}` : '',
-    chapter.continuityState.worldStateChanges.length > 0 ? `世界变化：${chapter.continuityState.worldStateChanges.join('；')}` : '',
-    chapter.continuityState.arcProgress ? `故事弧推进：${chapter.continuityState.arcProgress}` : '',
+    chapter.summary ? `摘要：${compactRecallLine(chapter.summary, 220)}` : '',
+    compactList(chapter.continuityState.plotProgress, 3) ? `推进：${compactList(chapter.continuityState.plotProgress, 3)}` : '',
+    compactList(chapter.continuityState.characterStateChanges, 2) ? `人物变化：${compactList(chapter.continuityState.characterStateChanges, 2)}` : '',
+    compactList(chapter.continuityState.worldStateChanges, 2) ? `世界变化：${compactList(chapter.continuityState.worldStateChanges, 2)}` : '',
+    compactList(chapter.continuityState.openLoops, 3) ? `未回收：${compactList(chapter.continuityState.openLoops, 3)}` : '',
+    compactList(chapter.continuityState.continuityNotes, 2) ? `承接提醒：${compactList(chapter.continuityState.continuityNotes, 2)}` : '',
+    chapter.continuityState.arcProgress
+      ? `故事弧推进：${compactRecallLine(chapter.continuityState.arcProgress, 120)}`
+      : '',
   ].filter(Boolean)
 
   return `第${chapter.chapterNum}章：${parts.join(' | ')}`
+}
+
+export interface ContinuityRetrievalOptions {
+  signalText?: string
+  mentionedCharacters?: string[]
+  mentionedItems?: string[]
+  mentionedLocations?: string[]
+  mentionedFactions?: string[]
+  maxEntries?: number
+  maxChars?: number
+}
+
+function scoreContinuityRetrievalEntry(
+  chapter: ChapterWithContinuity,
+  options: ContinuityRetrievalOptions,
+  latestChapterNum: number,
+): number {
+  const continuity = chapter.continuityState
+  const chapterText = [
+    chapter.summary,
+    chapter.nextChapterSeed,
+    continuity.plotProgress.join('\n'),
+    continuity.characterStateChanges.join('\n'),
+    continuity.worldStateChanges.join('\n'),
+    continuity.openLoops.join('\n'),
+    continuity.continuityNotes.join('\n'),
+    continuity.arcProgress,
+  ].filter(Boolean).join('\n')
+  const signalLines = splitRecallLines(options.signalText || '', 8, 28)
+  const entityTerms = [
+    ...(options.mentionedCharacters || []),
+    ...(options.mentionedItems || []),
+    ...(options.mentionedLocations || []),
+    ...(options.mentionedFactions || []),
+  ]
+
+  return (
+    // Keep the latest continuity state in the candidate set even when it has
+    // fewer explicit open loops than an older chapter.
+    Math.max(0, 6 - Math.max(latestChapterNum - chapter.chapterNum, 0))
+    + Math.min(continuity.openLoops.length, 3) * 8
+    + Math.min(continuity.continuityNotes.length, 3) * 6
+    + Math.min(continuity.arcProgress ? 1 : 0, 1) * 4
+    + Math.min(signalLines.filter((line) => chapterText.includes(line)).length, 4) * 12
+    + Math.min(entityTerms.filter((term) => term.length >= 2 && chapterText.includes(term)).length, 4) * 8
+  )
+}
+
+function formatCompactContinuityRetrievalEntry(
+  chapter: ChapterWithContinuity,
+  maxChars: number,
+): string {
+  const compactList = (values: string[], maxItems: number, maxLength: number) => dedupe(
+    values
+      .map((value) => compactRecallLine(value, maxLength))
+      .filter(Boolean),
+    maxItems,
+  ).join('；')
+
+  const prefix = `第${chapter.chapterNum}章：`
+  const sections = [
+    compactList(chapter.continuityState.openLoops, 2, 58)
+      ? `未回收=${compactList(chapter.continuityState.openLoops, 2, 58)}`
+      : '',
+    compactList(chapter.continuityState.continuityNotes, 1, 58)
+      ? `承接=${compactList(chapter.continuityState.continuityNotes, 1, 58)}`
+      : '',
+    chapter.continuityState.arcProgress
+      ? `弧=${compactRecallLine(chapter.continuityState.arcProgress, 64)}`
+      : '',
+    compactList(chapter.continuityState.plotProgress, 1, 58)
+      ? `推进=${compactList(chapter.continuityState.plotProgress, 1, 58)}`
+      : '',
+    compactList(chapter.continuityState.characterStateChanges, 1, 48)
+      ? `人物=${compactList(chapter.continuityState.characterStateChanges, 1, 48)}`
+      : '',
+    compactList(chapter.continuityState.worldStateChanges, 1, 48)
+      ? `世界=${compactList(chapter.continuityState.worldStateChanges, 1, 48)}`
+      : '',
+    chapter.summary ? `摘要=${compactRecallLine(chapter.summary, 76)}` : '',
+  ].filter(Boolean)
+
+  if (sections.length === 0) return ''
+  let result = prefix
+  for (const section of sections) {
+    const candidate = `${result}${result === prefix ? '' : ' | '}${section}`
+    if (candidate.length <= maxChars) {
+      result = candidate
+      continue
+    }
+    // The first sections are the high-value handoff signals. If the entry is
+    // very small, keep at least one bounded fact instead of emitting a bare
+    // chapter number.
+    if (result === prefix && maxChars > prefix.length + 12) {
+      result = `${prefix}${compactRecallLine(section, maxChars - prefix.length)}`
+    }
+    break
+  }
+  return result
+}
+
+/**
+ * Build a bounded, signal-aware continuity index for the prompt. The full
+ * entry formatter remains useful for author-facing summaries, while the
+ * generation prompt needs a smaller retrieval view so one long history block
+ * cannot consume the budget before chapter-specific constraints are injected.
+ */
+export function buildContinuityRetrievalSummary(
+  chapters: ChapterWithContinuity[],
+  options: ContinuityRetrievalOptions = {},
+): string {
+  if (chapters.length === 0) return ''
+
+  const latestChapterNum = chapters[chapters.length - 1]?.chapterNum || 0
+  const maxEntries = Math.max(1, Math.min(
+    options.maxEntries ?? 8,
+    chapters.length,
+  ))
+  const maxChars = Math.max(240, options.maxChars ?? 1800)
+  const budgetedMaxEntries = Math.max(1, Math.min(
+    maxEntries,
+    Math.floor((maxChars + 1) / 81),
+  ))
+  const ranked = chapters
+    .map((chapter) => ({
+      chapter,
+      score: scoreContinuityRetrievalEntry(chapter, options, latestChapterNum),
+    }))
+    .sort((left, right) => right.score - left.score || right.chapter.chapterNum - left.chapter.chapterNum)
+    .slice(0, budgetedMaxEntries)
+    .sort((left, right) => left.chapter.chapterNum - right.chapter.chapterNum)
+
+  const selected: string[] = []
+  let usedChars = 0
+  for (let index = 0; index < ranked.length; index += 1) {
+    const remainingEntries = ranked.length - index
+    const remainingChars = maxChars - usedChars - (selected.length > 0 ? 1 : 0)
+    if (remainingChars <= 0) break
+    const entryMaxChars = Math.max(80, Math.floor(remainingChars / remainingEntries))
+    const entry = formatCompactContinuityRetrievalEntry(ranked[index].chapter, entryMaxChars)
+    if (!entry) continue
+    selected.push(entry)
+    usedChars += entry.length + (selected.length > 1 ? 1 : 0)
+  }
+
+  return selected.join('\n')
+}
+
+export interface PreviousSummaryRetrievalOptions {
+  signalText?: string
+  maxEntries?: number
+  maxChars?: number
+}
+
+export function buildPreviousSummaryRetrievalSummary(
+  chapters: Array<Pick<ChapterWithContinuity, 'chapterNum' | 'summary'>>,
+  options: PreviousSummaryRetrievalOptions = {},
+): string {
+  const candidates = chapters.filter((chapter) => chapter.summary)
+  if (candidates.length === 0) return ''
+
+  const latestChapterNum = candidates[candidates.length - 1]?.chapterNum || 0
+  const signalLines = splitRecallLines(options.signalText || '', 8, 28)
+  const maxEntries = Math.max(1, Math.min(options.maxEntries ?? 8, candidates.length))
+  const maxChars = Math.max(240, options.maxChars ?? 1800)
+  const budgetedMaxEntries = Math.max(1, Math.min(
+    maxEntries,
+    Math.floor((maxChars + 1) / 81),
+  ))
+  const ranked = candidates
+    .map((chapter) => ({
+      chapter,
+      score: Math.max(0, 6 - Math.max(latestChapterNum - chapter.chapterNum, 0))
+        + Math.min(signalLines.filter((line) => chapter.summary.includes(line)).length, 4) * 12,
+    }))
+    .sort((left, right) => right.score - left.score || right.chapter.chapterNum - left.chapter.chapterNum)
+    .slice(0, budgetedMaxEntries)
+    .sort((left, right) => left.chapter.chapterNum - right.chapter.chapterNum)
+
+  const selected: string[] = []
+  let usedChars = 0
+  for (let index = 0; index < ranked.length; index += 1) {
+    const remainingEntries = ranked.length - index
+    const remainingChars = maxChars - usedChars - (selected.length > 0 ? 1 : 0)
+    if (remainingChars <= 0) break
+    const entryMaxChars = Math.max(80, Math.floor(remainingChars / remainingEntries))
+    const prefix = `第${ranked[index].chapter.chapterNum}章：`
+    const summary = compactRecallLine(
+      ranked[index].chapter.summary,
+      Math.max(12, entryMaxChars - prefix.length),
+    )
+    const entry = `${prefix}${summary}`
+    selected.push(entry)
+    usedChars += entry.length + (selected.length > 1 ? 1 : 0)
+  }
+  return selected.join('\n')
 }
 
 export function buildStoryRelationSummary(
@@ -4076,7 +4308,10 @@ export async function buildStoryProfile(
   const settings = parseStorySettings(novel.settingsJson)
   const projectBrief = parseProjectBriefDocument(novel.projectBriefJson)
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
-  const writingContractSummary = buildWritingContractSummary(themeVoice.writingContractTags)
+  const writingContractSummary = [
+    buildWritingContractSummary(themeVoice.writingContractTags),
+    themeVoice.themeChapterTest ? `章节级主题验证：${themeVoice.themeChapterTest}` : '',
+  ].filter(Boolean).join('\n')
   const protagonistPolicy = buildProtagonistPolicy(allCharacters)
   const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
     .where(eq(glossary.novelId, novelId))
@@ -4180,10 +4415,9 @@ export async function buildOutlineGenerationContext(arcId: number, stageId?: num
       signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
     },
   ).map(toChapterWithContinuity)
-  const previousSummary = recentChapters
-    .filter((chapter) => chapter.summary)
-    .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
-    .join('\n')
+  const previousSummary = buildPreviousSummaryRetrievalSummary(recentChapters, {
+    signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
+  })
 
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
 
@@ -4196,7 +4430,9 @@ export async function buildOutlineGenerationContext(arcId: number, stageId?: num
       upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
       limit: 10,
     }).worldStatesText,
-    continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
+    continuitySummary: buildContinuityRetrievalSummary(continuityChapters, {
+      signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
+    }),
     openLoops: collectOpenLoops(continuityChapters),
     worldRulesSummary: profile.worldRulesSummary,
     creativeStageContext: creativeStageContext || undefined,
@@ -4409,10 +4645,9 @@ export async function collectChapterContextRawData(
     mentionedEntityLimits.characters,
   ).length
 
-  const previousSummaries = recentChapters
-    .filter((chapter) => chapter.summary)
-    .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
-    .join('\n')
+  const previousSummaries = buildPreviousSummaryRetrievalSummary(recentChapters, {
+    signalText: chapterSignalText,
+  })
 
   const matchedCharacterRows = allCharacters.filter((character) =>
     character.fullName && mentionedCharacterNames.has(character.fullName))
@@ -4497,7 +4732,13 @@ export async function collectChapterContextRawData(
       longTermMemory,
       characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
       worldStates: worldStateSnapshot.worldStatesText,
-      continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
+      continuitySummary: buildContinuityRetrievalSummary(continuityChapters, {
+        signalText: chapterSignalText,
+        mentionedCharacters: [...mentionedCharacterNames],
+        mentionedItems: mentionedItemNames,
+        mentionedLocations: mentionedLocationNames,
+        mentionedFactions: mentionedFactionNames,
+      }),
       timelineSummary: timelineContext.timelineSummary,
       relationSummary,
       dialogueVoiceLocks: [
@@ -4791,7 +5032,13 @@ export function allocateChapterContext(
     timelineOpenThreads: softAllocation.allocated.timelineOpenThreads || '',
     longTermMemory: softAllocation.allocated.longTermMemory || '',
     activeThreads: softAllocation.allocated.activeThreads || '',
-    writingContractSummary: softAllocation.allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
+    // 写作合同同时承担“软上下文摘要”和“硬约束注入”两条路径。
+    // 当分配器判定它已被硬约束覆盖时，softAllocation 不会再分配该字段；
+    // 此时必须保留章节级 contextParts（其中包含阶段/章节合同），不能只回退到 profile。
+    writingContractSummary: softAllocation.allocated.writingContractSummary
+      || rawData.contextParts.writingContractSummary
+      || rawData.profile.writingContractSummary
+      || '',
     relationSummary: softAllocation.allocated.relationSummary || rawData.contextParts.relationSummary || '',
     dialogueVoiceLocks: softAllocation.allocated.dialogueVoiceLocks || rawData.contextParts.dialogueVoiceLocks || '',
     recalledMemory: softAllocation.allocated.recalledMemory || '',

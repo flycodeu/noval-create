@@ -67,8 +67,9 @@ const findingSchema: AgentToolJsonSchema = objectSchema({
 ])
 
 const scopeSchema: AgentToolJsonSchema = objectSchema({
-  type: { enum: ['novel', 'volume', 'chapter'] },
+  type: { enum: ['novel', 'volume', 'stage', 'chapter'] },
   label: { type: 'string' },
+  stageId: { type: 'integer', minimum: 1 },
   volumeId: { type: 'integer', minimum: 1 },
   chapterId: { type: 'integer', minimum: 1 },
   chapterNums: { type: 'array', items: { type: 'integer', minimum: 1 } },
@@ -201,10 +202,11 @@ export function registerQualityTools(
       version: '1.0.0',
       domain: 'quality',
       title: '运行证据化小说质量评审',
-      description: '把现有章节模型评分、长窗口规则、生产门禁与修复指标聚合为不可变质量报告工件。支持整书、分卷、单章和推荐前严格档案；不会改正文，也不会计入真实平台评估次数。',
+      description: '把现有章节模型评分、长窗口规则、生产门禁与修复指标聚合为不可变质量报告工件。支持整书、分卷、阶段、单章和推荐前严格档案；不会改正文，也不会计入真实平台评估次数。',
       inputSchema: objectSchema({
         novelId: { type: 'integer', minimum: 1 },
-        scopeType: { enum: ['novel', 'volume', 'chapter'] },
+        scopeType: { enum: ['novel', 'volume', 'stage', 'chapter'] },
+        stageId: { type: 'integer', minimum: 1 },
         volumeId: { type: 'integer', minimum: 1 },
         chapterId: { type: 'integer', minimum: 1 },
         profile: { enum: ['longform_health_v1', 'recommendation_ready_v1'] },

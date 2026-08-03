@@ -107,6 +107,9 @@ import {
   buildRecallSnapshot,
   buildWritingContextUsageSnapshot,
   buildPreviousChapterContextFeed,
+  buildContinuityRetrievalSummary,
+  buildPreviousSummaryRetrievalSummary,
+  formatContinuityEntry,
   collectChapterContextRawData,
   ContextOverflowError,
   HardConstraintOverflowError,
@@ -363,6 +366,22 @@ describe('allocateChapterContext', () => {
     const usageSnapshot = buildWritingContextUsageSnapshot(rawData, context)
     expect(usageSnapshot.usedAssets).toContain('步骤接力记忆')
     expect(usageSnapshot.recentStateChanges.some((item) => item.includes('Writer 不得改成新地点'))).toBe(true)
+  })
+
+  it('keeps chapter-level contract summary when the allocator covers it as a hard constraint', () => {
+    const context = allocateChapterContext(createRawData({
+      profile: { writingContractSummary: '' },
+      contextParts: {
+        writingContractSummary: '章节合同：本章必须兑现出口追兵，并以主角的明确选择收束。',
+      },
+    }), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.constraintInjectionStatus.injectedLabels).toContain('writingContractSummary')
+    expect(context.writingContractSummary).toContain('本章必须兑现出口追兵')
   })
 
   it('tracks explicit preserved hard-constraint labels in allocation metadata', () => {
@@ -1057,6 +1076,40 @@ describe('allocateChapterContext', () => {
     }
   })
 
+  it('keeps a bounded long-term memory window for middle longform chapters', () => {
+    const rawData = createRawData({
+      chapterRows: Array.from({ length: 20 }, (_, index) => ({ id: index + 1, chapterNum: index + 1 })),
+      contextParts: {
+        previousChapterContext: '上一章关键先验：队伍带着伤员撤离，出口仍有追兵。'.repeat(120),
+        lastChapterEnding: '上章结尾：通信器再次亮起，来源未确认。'.repeat(80),
+        longTermMemory: '长期锚点：团队曾因误判失去补给车，这次必须先核对来源。'.repeat(220),
+        continuitySummary: '连续性链：副手的失信、补给车的旧债和矿区坐标仍需回收。'.repeat(700),
+        previousSummaries: '旧章摘要'.repeat(1800),
+        recalledMemory: '召回片段'.repeat(1600),
+      },
+    })
+
+    let context: ReturnType<typeof allocateChapterContext> | undefined
+    try {
+      context = allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'draft',
+        chapterComplexity: 'standard',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      context = (error as ContextOverflowError).context
+    }
+
+    expect(context).toBeDefined()
+    if (!context) return
+    const memoryDecision = context.softContextDecisions.find((entry) => entry.label === 'longTermMemory')
+    const previousChapterDecision = context.softContextDecisions.find((entry) => entry.label === 'previousChapterContext')
+    expect(context.longTermMemory).toContain('长期锚点')
+    expect(memoryDecision?.status).not.toBe('dropped')
+    expect(previousChapterDecision?.status).not.toBe('dropped')
+  })
+
   it('keeps chapter bridge plan ahead of summary memory under a tight draft budget', () => {
     const rawData = createRawData({
       contextParts: {
@@ -1085,6 +1138,143 @@ describe('allocateChapterContext', () => {
       expect(bridgeDecision?.status).not.toBe('dropped')
       expect(previousSummaryDecision?.status).not.toBe('kept')
     }
+  })
+
+  it('keeps compressed previous-chapter facts during review allocation', () => {
+    const rawData = createRawData({
+      contextParts: {
+        previousChapterContext: '上一章关键先验：队伍撤离时副手负伤，出口外仍有追兵。'.repeat(180),
+        lastChapterEnding: '上章结尾：地下层传来三次敲击，主角尚未确认来源。'.repeat(120),
+        previousSummaries: '摘要'.repeat(3000),
+        longTermMemory: '长期'.repeat(2600),
+        recalledMemory: '召回'.repeat(2200),
+      },
+    })
+
+    let context: ReturnType<typeof allocateChapterContext> | undefined
+    try {
+      context = allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'review',
+        chapterComplexity: 'standard',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      context = (error as ContextOverflowError).context
+    }
+    expect(context).toBeDefined()
+    if (!context) return
+    const previousChapterDecision = context.softContextDecisions.find((entry) => entry.label === 'previousChapterContext')
+    const endingDecision = context.softContextDecisions.find((entry) => entry.label === 'lastChapterEnding')
+
+    expect(context.previousChapterContext.length).toBeGreaterThan(0)
+    expect(context.lastChapterEnding.length).toBeGreaterThan(0)
+    expect(previousChapterDecision?.status).not.toBe('dropped')
+    expect(endingDecision?.status).not.toBe('dropped')
+  })
+
+  it('keeps a compressed continuity window when long-term recall competes for budget', () => {
+    const rawData = createRawData({
+      contextParts: {
+        continuitySummary: '连续性链：'.repeat(2200),
+        previousChapterContext: '上一章先验：撤离队伍带走了伤员。'.repeat(180),
+        lastChapterEnding: '上章结尾：门后的三次敲击尚未解释。'.repeat(120),
+        previousSummaries: '旧摘要'.repeat(3000),
+        longTermMemory: '长期记忆'.repeat(2600),
+        recalledMemory: '召回片段'.repeat(2200),
+      },
+    })
+
+    let context: ReturnType<typeof allocateChapterContext> | undefined
+    try {
+      context = allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'draft',
+        chapterComplexity: 'standard',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      context = (error as ContextOverflowError).context
+    }
+    expect(context).toBeDefined()
+    if (!context) return
+
+    const continuityDecision = context.softContextDecisions.find((entry) => entry.label === 'continuitySummary')
+    expect(context.continuitySummary.length).toBeGreaterThan(0)
+    expect(continuityDecision?.status).not.toBe('dropped')
+    expect(continuityDecision?.allocatedTokens || 0).toBeGreaterThanOrEqual(400)
+  })
+
+  it('compacts continuity entries without dropping long-term handoff signals', () => {
+    const formatted = formatContinuityEntry({
+      chapterNum: 12,
+      summary: '摘要'.repeat(600),
+      nextChapterSeed: '下一章种子',
+      content: '正文',
+      continuityState: {
+        plotProgress: ['推进'.repeat(180), '第二条推进'],
+        characterStateChanges: ['人物变化'.repeat(180)],
+        worldStateChanges: ['世界变化'.repeat(180)],
+        openLoops: ['未回收线索'.repeat(180)],
+        continuityNotes: ['承接提醒'.repeat(180)],
+        arcProgress: '故事弧'.repeat(180),
+      },
+    })
+
+    expect(formatted.length).toBeLessThan(1800)
+    expect(formatted).toContain('未回收：')
+    expect(formatted).toContain('承接提醒：')
+    expect(formatted).toContain('故事弧推进：')
+  })
+
+  it('retrieves a bounded continuity index by current signals instead of concatenating every entry', () => {
+    const chapters = Array.from({ length: 8 }, (_, index) => ({
+      chapterNum: index + 1,
+      summary: `第${index + 1}章摘要`.repeat(40),
+      nextChapterSeed: '',
+      content: '',
+      continuityState: {
+        plotProgress: [`第${index + 1}章推进`],
+        characterStateChanges: [`第${index + 1}章人物变化`],
+        worldStateChanges: [`第${index + 1}章世界变化`],
+        openLoops: index === 1 ? ['药箱下落未明'] : [`第${index + 1}章未回收`],
+        continuityNotes: index === 1 ? ['副手记住旧仓库坐标'] : [`第${index + 1}章承接提醒`],
+        arcProgress: `第${index + 1}章弧推进`,
+      },
+    }))
+
+    const summary = buildContinuityRetrievalSummary(chapters as never, {
+      signalText: '药箱\n旧仓库\n副手',
+      mentionedItems: ['药箱'],
+      mentionedCharacters: ['副手'],
+      maxChars: 1200,
+    })
+
+    expect(summary.length).toBeLessThanOrEqual(1200)
+    expect(summary).toContain('第2章')
+    expect(summary).toContain('药箱')
+    expect(summary).toContain('未回收=')
+    expect(summary).toContain('承接=')
+    expect(summary).toContain('第8章')
+  })
+
+  it('bounds recent chapter summaries while retaining signal and latest chapter coverage', () => {
+    const chapters = Array.from({ length: 8 }, (_, index) => ({
+      chapterNum: index + 1,
+      summary: index === 1
+        ? '药箱下落未明，副手记住旧仓库坐标。'.repeat(40)
+        : `第${index + 1}章推进摘要。`.repeat(40),
+    }))
+
+    const summary = buildPreviousSummaryRetrievalSummary(chapters, {
+      signalText: '药箱\n旧仓库\n副手',
+      maxChars: 1200,
+    })
+
+    expect(summary.length).toBeLessThanOrEqual(1200)
+    expect(summary).toContain('第2章')
+    expect(summary).toContain('药箱')
+    expect(summary).toContain('第8章')
   })
 
   it('marks recall as budget-trimmed when selected recall is dropped from final context', () => {
@@ -1217,7 +1407,10 @@ describe('buildStoryProfile source/canon grounding', () => {
           targetWords: 180000,
           projectBriefJson: '{}',
           settingsJson: '{}',
-          themeVoiceJson: '{}',
+          themeVoiceJson: JSON.stringify({
+            theme: '劳动与责任',
+            theme_chapter_test: '每章都要让角色在制度压力与个人代价之间做出可见选择。',
+          }),
           worldRulesJson: '{}',
           historicalProfileJson: JSON.stringify({
             mode: 'historical_realist',
@@ -1259,6 +1452,7 @@ describe('buildStoryProfile source/canon grounding', () => {
     expect(profile.worldRulesSummary).toContain('ming_qing')
     expect(profile.worldRulesSummary).toContain('驿递制度')
     expect(profile.worldRulesSummary).toContain('官道驿递优先')
+    expect(profile.writingContractSummary).toContain('章节级主题验证：每章都要让角色在制度压力与个人代价之间做出可见选择。')
   })
 
   it('can build a read-only profile without bootstrapping canonical structure rows', async () => {

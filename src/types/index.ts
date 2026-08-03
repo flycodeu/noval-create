@@ -42,7 +42,21 @@ import type {
   CreativeStageAssetBinding,
   CreativeStageAssetInput,
   CreativeStageContext,
+  CreativeStageContextHealth,
+  CreativeStageContextPacket,
+  CreativeStageChapterQualityInput,
+  CreativeStageGateLevel,
+  CreativeStageQualityTrend,
+  CreativeStageQualityTrendPoint,
+  CreativeStageQualityTrendStatus,
+  CreativeStageQualitySnapshot,
+  CreativeStageQualityStatus,
   CreativeStageCreateInput,
+  CreativeStageHandoffArtifact,
+  CreativeStageHandoffContent,
+  CreativeStageHandoffInput,
+  CreativeStageHandoffPacket,
+  CreativeStageHandoffReviewContent,
   CreativeStageUpdateInput,
 } from '../shared/creative-stages'
 import type {
@@ -76,7 +90,21 @@ export type {
   CreativeStageAssetBinding,
   CreativeStageAssetInput,
   CreativeStageContext,
+  CreativeStageContextHealth,
+  CreativeStageContextPacket,
+  CreativeStageChapterQualityInput,
+  CreativeStageGateLevel,
+  CreativeStageQualityTrend,
+  CreativeStageQualityTrendPoint,
+  CreativeStageQualityTrendStatus,
+  CreativeStageQualitySnapshot,
+  CreativeStageQualityStatus,
   CreativeStageCreateInput,
+  CreativeStageHandoffArtifact,
+  CreativeStageHandoffContent,
+  CreativeStageHandoffInput,
+  CreativeStageHandoffPacket,
+  CreativeStageHandoffReviewContent,
   CreativeStageUpdateInput,
 } from '../shared/creative-stages'
 export type {
@@ -5896,7 +5924,11 @@ declare global {
         listAssets: (stageId: number) => Promise<CreativeStageAssetBinding[]>
         upsertAsset: (input: CreativeStageAssetInput) => Promise<CreativeStageAssetBinding>
         removeAsset: (assetId: number) => Promise<void>
-        getContext: (novelId: number, stageId: number) => Promise<CreativeStageContext>
+        getContext: (novelId: number, stageId: number, chapterNum?: number) => Promise<CreativeStageContext>
+        listHandoffs: (novelId: number, stageId: number) => Promise<CreativeStageHandoffArtifact[]>
+        createHandoff: (input: CreativeStageHandoffInput) => Promise<CreativeStageHandoffArtifact>
+        reviewHandoff: (artifactId: string) => Promise<{ handoff: CreativeStageHandoffArtifact; review: unknown }>
+        approveHandoff: (artifactId: string) => Promise<CreativeStageHandoffArtifact>
       }
       worldRules: {
         startAutoGenerate: (novelId: number, options: WorldRulesAutoGenerateOptions) => Promise<number>

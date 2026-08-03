@@ -30,6 +30,11 @@ export interface ScenePlanStep {
   hidden_agendas: string[]
   irony_gap: string
   audience: string
+  /** 章节级主题验证的可执行拆解；只在承担主题响应的场景填写。 */
+  theme_question?: string
+  theme_choice?: string
+  theme_cost?: string
+  theme_consequence?: string
 }
 
 export function getDefaultChapterTitle(chapterNum: number): string {
@@ -50,7 +55,7 @@ export function normalizeScenePlan(raw: unknown, fallback: ScenePlanStep[]): Sce
 
   const normalized = raw
     .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-    .map((item, index) => {
+    .map((item, index): ScenePlanStep | null => {
       const record = item as Record<string, unknown>
       const purpose = asText(record.purpose)
       const beat = asText(record.beat)
@@ -73,6 +78,10 @@ export function normalizeScenePlan(raw: unknown, fallback: ScenePlanStep[]): Sce
         hidden_agendas: toStringArray(record.hidden_agendas),
         irony_gap: asText(record.irony_gap),
         audience: asText(record.audience),
+        theme_question: asText(record.theme_question),
+        theme_choice: asText(record.theme_choice),
+        theme_cost: asText(record.theme_cost),
+        theme_consequence: asText(record.theme_consequence),
       }
     })
     .filter((item): item is ScenePlanStep => Boolean(item))
@@ -299,6 +308,10 @@ export function formatScenePlan(scenePlan: ScenePlanStep[]): string {
         step.hidden_agendas.length > 0 ? `各方心思=${step.hidden_agendas.join('；')}` : '',
         step.irony_gap ? `信息差(读者知/角色不知)=${step.irony_gap}` : '',
         step.audience ? `这场戏演给谁看=${step.audience}` : '',
+        step.theme_question ? `主题问题=${step.theme_question}` : '',
+        step.theme_choice ? `主题选择=${step.theme_choice}` : '',
+        step.theme_cost ? `主题代价=${step.theme_cost}` : '',
+        step.theme_consequence ? `主题后果=${step.theme_consequence}` : '',
         step.beat ? `动作=${step.beat}` : '',
         step.must_cover.length > 0 ? `必须交代=${step.must_cover.join('；')}` : '',
         step.climax_variant ? `高潮变体=${step.climax_variant}` : '',

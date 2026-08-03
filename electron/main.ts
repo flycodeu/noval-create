@@ -30,6 +30,7 @@ import type {
   CharacterArcBeatInput,
   CharacterArcInput,
   CharacterRelationInput,
+  CreativeStageHandoffInput,
   MapRelationInput,
   NovelCreateInput,
   PlanningDraftPageKey,
@@ -773,7 +774,15 @@ function registerIpcHandlers() {
   handle('creativeStage:listAssets', (_, stageId) => creativeStageService.listCreativeStageAssets(requireId(stageId, 'stageId')))
   handle('creativeStage:upsertAsset', (_, input) => creativeStageService.upsertCreativeStageAsset(input))
   handle('creativeStage:removeAsset', (_, assetId) => creativeStageService.removeCreativeStageAsset(requireId(assetId, 'assetId')))
-  handle('creativeStage:getContext', (_, novelId, stageId) => creativeStageService.getCreativeStageContext(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')))
+  handle('creativeStage:getContext', (_, novelId, stageId, chapterNum) => creativeStageService.getCreativeStageContext(
+    requireId(novelId, 'novelId'),
+    requireId(stageId, 'stageId'),
+    chapterNum === undefined || chapterNum === null ? undefined : requireId(chapterNum, 'chapterNum'),
+  ))
+  handle('creativeStage:listHandoffs', (_, novelId, stageId) => creativeStageService.listCreativeStageHandoffs(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')))
+  handle('creativeStage:createHandoff', (_, input) => creativeStageService.createCreativeStageHandoff(parseObjectPayload<CreativeStageHandoffInput>(input, 'input')))
+  handle('creativeStage:reviewHandoff', (_, artifactId) => creativeStageService.reviewCreativeStageHandoff(requireString(artifactId, 'artifactId')))
+  handle('creativeStage:approveHandoff', (_, artifactId) => creativeStageService.approveCreativeStageHandoff(requireString(artifactId, 'artifactId')))
 
   handle('worldRules:startAutoGenerate', (event, novelId, options) =>
     workflowTaskService.startWorldRulesAutoGenerateWorkflow(novelId, options, event.sender))

@@ -95,7 +95,7 @@ export function enhanceAiScoreResult(raw: unknown, content: string): EnhancedAIS
     ? raw as Record<string, unknown>
     : {}
 
-  const dimensions = normalizeDimensions(record.dimensions)
+  const parsedDimensions = normalizeDimensions(record.dimensions)
   const rawAiLikeRate = asOptionalNumber(record.ai_like_rate)
   const aiLikeRate = rawAiLikeRate !== null && rawAiLikeRate > 0 && rawAiLikeRate <= 1
     ? rawAiLikeRate * 100
@@ -108,14 +108,27 @@ export function enhanceAiScoreResult(raw: unknown, content: string): EnhancedAIS
   const overallScore = rawOverallScore > 0 && rawOverallScore <= 10
     ? rawOverallScore * 10
     : Math.max(0, Math.min(100, rawOverallScore))
+  const overallFeedback = asText(record.overall_feedback)
+  const topFixes = toStringArray(record.top_fixes)
+  const hasScoreSignal = explicitOverallScore !== null || legacyScore !== null || rawAiLikeRate !== null
+  // ai_check 的旧 JSON 合同只要求 score/issues，不要求 dimensions；补一个综合维度，
+  // 让质量看板能够使用已存在的综合分，同时不伪造模型没有返回的分维度判断。
+  const dimensions = parsedDimensions.length > 0 || !hasScoreSignal
+    ? parsedDimensions
+    : [{
+      name: '综合质量',
+      score: overallScore,
+      feedback: overallFeedback || '模型仅返回综合评分，未提供分维度反馈。',
+      suggestion: topFixes[0] || '',
+    }]
 
   return {
     dimensions,
     ai_like_rate: aiLikeRate,
     repetition_risk: normalizeRepetitionRisk(record.repetition_risk),
     overall_score: overallScore,
-    overall_feedback: asText(record.overall_feedback),
-    top_fixes: toStringArray(record.top_fixes),
+    overall_feedback: overallFeedback,
+    top_fixes: topFixes,
     weak_dimensions: toStringArray(record.weak_dimensions),
     language_drift_metrics: analyzeLanguageDrift(content),
   }

@@ -48,7 +48,7 @@ export class OpenAIAdapter extends BaseAdapter {
       if (chunk && opts?.onStream) {
         opts.onStream(chunk)
       }
-    })
+    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
   }
 
   private async requestChatCompletions(body: Record<string, unknown>, opts?: ChatOptions): Promise<Response> {

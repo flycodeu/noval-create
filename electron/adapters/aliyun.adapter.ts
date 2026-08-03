@@ -51,7 +51,7 @@ export class AliyunAdapter extends BaseAdapter {
       } else if (fullContent.length > previousContent.length) {
         previousContent = fullContent
       }
-    })
+    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
   }
 
   private async requestGeneration(

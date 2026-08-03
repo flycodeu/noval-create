@@ -8,13 +8,14 @@ import type {
 } from '../types'
 
 export type AgentQualityProfile = 'longform_health_v1' | 'recommendation_ready_v1'
-export type AgentQualityScopeType = 'novel' | 'volume' | 'chapter'
+export type AgentQualityScopeType = 'novel' | 'volume' | 'stage' | 'chapter'
 export type AgentQualityStatus = 'passed' | 'needs_revision' | 'blocked'
 export type AgentQualityFindingSeverity = 'info' | 'warning' | 'critical'
 
 export interface AgentQualityScope {
   type: AgentQualityScopeType
   label: string
+  stageId?: number
   volumeId?: number
   chapterId?: number
   chapterNums: number[]
@@ -137,6 +138,7 @@ export interface AgentQualitySemanticReviewSnapshot {
 export interface RunAgentQualityEvaluationInput {
   novelId: number
   scopeType?: AgentQualityScopeType
+  stageId?: number
   volumeId?: number
   chapterId?: number
   profile?: AgentQualityProfile

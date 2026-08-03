@@ -1,18 +1,37 @@
 import { and, asc, desc, eq, not } from 'drizzle-orm'
-import { creativeStageAssets, creativeStages, novels } from '../database/schema'
+import { chapterGateRuns, characters, chapters, creativeStageAssets, creativeStages, novels, worldMap } from '../database/schema'
 import { getDb } from '../database/db'
 import { markNovelContextChanged } from './context-impact.service'
 import {
+  assessCreativeStageHandoff,
+  normalizeCreativeStageHandoffList,
+  type CreativeStageHandoffArtifact,
+  type CreativeStageHandoffContent,
+  type CreativeStageHandoffInput,
+  type CreativeStageHandoffPacket,
+  type CreativeStageHandoffReviewContent,
+} from '../../src/shared/creative-stages'
+import { createArtifact, listArtifacts, requireArtifact, updateArtifactLifecycle } from './artifact.service'
+import {
   buildCreativeStagePromptSummary,
+  buildCreativeStageQualitySnapshot,
+  assessCreativeStageContext,
+  buildCreativeStageContextPacket,
+  creativeStageAssetKey,
+  getCreativeStageContextGenerationBlockers,
   clampChapterRange,
+  formatCreativeStageRange,
   type CreativeStage,
   type CreativeStageAssetBinding,
   type CreativeStageAssetInput,
   type CreativeStageCreateInput,
   type CreativeStageContext,
+  type CreativeStageGateLevel,
   type CreativeStageStatus,
 } from '../../src/shared/creative-stages'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { resolveCreativeStageAssetBriefs, selectCreativeStageAssetBindings } from './creative-stage-retrieval.service'
+import { safeParseChapterGateScoreBreakdown } from './chapter-gate-utils'
 
 function asText(value?: string | null): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -20,6 +39,22 @@ function asText(value?: string | null): string {
 
 function asOptionalId(value?: number | null): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
+function normalizeStageGateLevel(value?: string | null): CreativeStageGateLevel | undefined {
+  return value === 'pass' || value === 'warning' || value === 'blocker' || value === 'rewrite' ? value : undefined
+}
+
+function parseStageGateIssueKeys(value?: string | null): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 8)
+      : []
+  } catch {
+    return []
+  }
 }
 
 function stageView(row: typeof creativeStages.$inferSelect, counts: { active: number; planned: number; core: number }): CreativeStage {
@@ -80,6 +115,179 @@ function getStageCounts(stageId: number) {
   }
 }
 
+function markStageContextChanged(stageId: number, novelId: number, reason: string): number {
+  const nextVersion = markNovelContextChanged(novelId, reason)
+  getDb().update(creativeStages)
+    .set({ contextVersion: nextVersion, updatedAt: new Date().toISOString() })
+    .where(eq(creativeStages.id, stageId))
+    .run()
+  return nextVersion
+}
+
+function assertStageAssetBelongsToNovel(
+  novelId: number,
+  assetType: CreativeStageAssetBinding['assetType'],
+  assetId: number | null,
+): void {
+  if (!assetId) return
+  const db = getDb()
+  if (assetType === 'character') {
+    const exists = db.select({ id: characters.id }).from(characters)
+      .where(and(eq(characters.id, assetId), eq(characters.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'map') {
+    const exists = db.select({ id: worldMap.id }).from(worldMap)
+      .where(and(eq(worldMap.id, assetId), eq(worldMap.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+}
+
+function getHandoffContent(artifact: CreativeStageHandoffArtifact): CreativeStageHandoffContent {
+  return artifact.content
+}
+
+function assertHandoffBelongsToStage(artifact: CreativeStageHandoffArtifact, stage: typeof creativeStages.$inferSelect): void {
+  if (artifact.novelId !== stage.novelId || getHandoffContent(artifact).stageId !== stage.id) {
+    throwUserFacingError('creativeStage.handoffNotFound')
+  }
+}
+
+function toHandoffPacket(artifact: CreativeStageHandoffArtifact): CreativeStageHandoffPacket {
+  return {
+    artifactId: artifact.id,
+    status: 'approved',
+    version: artifact.version,
+    contextVersion: artifact.contextVersion,
+    content: getHandoffContent(artifact),
+  }
+}
+
+export function listCreativeStageHandoffs(novelId: number, stageId: number): CreativeStageHandoffArtifact[] {
+  const stage = getStageRow(stageId)
+  if (stage.novelId !== novelId) throwUserFacingError('creativeStage.notFound')
+  return listArtifacts({ novelId, kind: 'creative_stage_handoff', limit: 200 })
+    .filter((artifact): artifact is CreativeStageHandoffArtifact => (
+      typeof artifact.content === 'object'
+      && artifact.content !== null
+      && Number((artifact.content as { stageId?: unknown }).stageId) === stageId
+    ))
+}
+
+export function createCreativeStageHandoff(input: CreativeStageHandoffInput): CreativeStageHandoffArtifact {
+  const stage = getStageRow(input.stageId)
+  const novel = getDb().select().from(novels).where(eq(novels.id, stage.novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+  const content: CreativeStageHandoffContent = {
+    schemaVersion: 'creative-stage-handoff-v1',
+    stageId: stage.id,
+    stageName: stage.name,
+    chapterRange: formatCreativeStageRange({
+      chapterStart: stage.chapterStart ?? undefined,
+      chapterEnd: stage.chapterEnd ?? undefined,
+    }),
+    changes: normalizeCreativeStageHandoffList(input.changes),
+    costs: normalizeCreativeStageHandoffList(input.costs),
+    openQuestions: normalizeCreativeStageHandoffList(input.openQuestions),
+    nextPressure: asText(input.nextPressure),
+    assetContinuity: (input.assetContinuity || [])
+      .filter((item) => item && asText(item.name))
+      .slice(0, 30)
+      .map((item) => ({
+        assetType: item.assetType,
+        name: asText(item.name),
+        change: item.change,
+        note: asText(item.note),
+      })),
+  }
+  return createArtifact({
+    novelId: stage.novelId,
+    kind: 'creative_stage_handoff',
+    status: 'draft',
+    parentArtifactId: input.parentArtifactId || null,
+    content,
+    contextVersion: novel.contextVersion || 1,
+    producerType: input.producerType || 'human',
+    producerId: input.producerId || 'stage-planner',
+    producerClient: input.producerClient || 'novelforge-stage-planner',
+    modelConfigId: input.modelConfigId,
+    taskId: input.taskId,
+    idempotencyKey: input.idempotencyKey || undefined,
+  }) as CreativeStageHandoffArtifact
+}
+
+export function reviewCreativeStageHandoff(artifactId: string): {
+  handoff: CreativeStageHandoffArtifact
+  review: ReturnType<typeof requireArtifact<CreativeStageHandoffReviewContent>>
+} {
+  const handoff = requireArtifact<CreativeStageHandoffContent>(artifactId) as CreativeStageHandoffArtifact
+  if (handoff.kind !== 'creative_stage_handoff') throwUserFacingError('creativeStage.handoffNotFound')
+  const stage = getStageRow(handoff.content.stageId)
+  assertHandoffBelongsToStage(handoff, stage)
+  const assessment = assessCreativeStageHandoff(handoff.content)
+  const review = createArtifact<CreativeStageHandoffReviewContent>({
+    novelId: handoff.novelId,
+    kind: 'creative_stage_handoff_review',
+    status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
+    parentArtifactId: handoff.id,
+    content: {
+      schemaVersion: 'creative-stage-handoff-review-v1',
+      sourceArtifactId: handoff.id,
+      status: assessment.hardBlockers.length > 0 ? 'blocked' : 'pass',
+      hardBlockers: assessment.hardBlockers,
+      warnings: assessment.warnings,
+      checkedAt: new Date().toISOString(),
+    },
+    contextVersion: handoff.contextVersion,
+    producerType: 'system',
+    producerId: 'creative-stage-handoff-reviewer-v1',
+    producerClient: 'novelforge-stage-planner',
+  })
+  const updated = updateArtifactLifecycle(handoff.id, {
+    status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
+    reviewArtifactId: review.id,
+  }) as CreativeStageHandoffArtifact
+  return { handoff: updated, review }
+}
+
+export function approveCreativeStageHandoff(artifactId: string): CreativeStageHandoffArtifact {
+  const handoff = requireArtifact<CreativeStageHandoffContent>(artifactId) as CreativeStageHandoffArtifact
+  if (handoff.kind !== 'creative_stage_handoff') throwUserFacingError('creativeStage.handoffNotFound')
+  if (handoff.status !== 'reviewed') throwUserFacingError('creativeStage.handoffReviewRequired')
+  const stage = getStageRow(handoff.content.stageId)
+  assertHandoffBelongsToStage(handoff, stage)
+  const novel = getDb().select().from(novels).where(eq(novels.id, stage.novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+  if (handoff.contextVersion !== (novel.contextVersion || 1)) {
+    throwUserFacingError('creativeStage.handoffContextStale', {
+      artifactVersion: handoff.contextVersion,
+      currentVersion: novel.contextVersion || 1,
+    })
+  }
+  listCreativeStageHandoffs(stage.novelId, stage.id)
+    .filter((item) => item.id !== handoff.id && item.status === 'approved')
+    .forEach((item) => updateArtifactLifecycle(item.id, { status: 'superseded' }))
+  const approved = updateArtifactLifecycle(handoff.id, { status: 'approved' }) as CreativeStageHandoffArtifact
+  getDb().update(creativeStages)
+    .set({ contextVersion: novel.contextVersion || 1, updatedAt: new Date().toISOString() })
+    .where(eq(creativeStages.id, stage.id))
+    .run()
+  return approved
+}
+
+/**
+ * A caller that explicitly pins a generation to a stage must not silently use
+ * a stale or incomplete stage snapshot. Calls without stageId keep the legacy
+ * auto-resolution path and are intentionally not blocked here.
+ */
+export function assertCreativeStageContextReadyForGeneration(context: CreativeStageContext): void {
+  if (context.health.status === 'ready') return
+  const details = getCreativeStageContextGenerationBlockers(context.health)
+  throwUserFacingError('creativeStage.contextNotReady', {
+    detail: details.join('；') || '请先在阶段计划中确认当前窗口。',
+  })
+}
+
 export function listCreativeStages(novelId: number, includeArchived = false): CreativeStage[] {
   const rows = getDb().select().from(creativeStages)
     .where(includeArchived ? eq(creativeStages.novelId, novelId) : and(eq(creativeStages.novelId, novelId), not(eq(creativeStages.status, 'archived'))))
@@ -122,7 +330,7 @@ export function createCreativeStage(novelId: number, input: CreativeStageCreateI
     createdAt: now,
     updatedAt: now,
   }).run()
-  markNovelContextChanged(novelId, 'Creative stage created')
+  markStageContextChanged(Number(result.lastInsertRowid), novelId, 'Creative stage created')
   return getCreativeStage(Number(result.lastInsertRowid)) as CreativeStage
 }
 
@@ -147,7 +355,7 @@ export function updateCreativeStage(input: { id: number } & Partial<CreativeStag
   if (input.handoffSummary !== undefined) patch.handoffSummary = asText(input.handoffSummary)
   if (input.constraintsJson !== undefined) patch.constraintsJson = asText(input.constraintsJson) || null
   db.update(creativeStages).set(patch).where(eq(creativeStages.id, input.id)).run()
-  markNovelContextChanged(current.novelId, 'Creative stage updated')
+  markStageContextChanged(current.id, current.novelId, 'Creative stage updated')
   return getCreativeStage(input.id) as CreativeStage
 }
 
@@ -181,6 +389,7 @@ export function upsertCreativeStageAsset(input: CreativeStageAssetInput): Creati
     notes: asText(input.notes) || null,
     updatedAt: now,
   }
+  assertStageAssetBelongsToNovel(stage.novelId, input.assetType, values.assetId)
   if (values.assetId) {
     const existing = db.select().from(creativeStageAssets)
       .where(and(
@@ -191,7 +400,7 @@ export function upsertCreativeStageAsset(input: CreativeStageAssetInput): Creati
       .all()[0]
     if (existing) {
       db.update(creativeStageAssets).set(values).where(eq(creativeStageAssets.id, existing.id)).run()
-      markNovelContextChanged(stage.novelId, 'Creative stage asset updated')
+      markStageContextChanged(stage.id, stage.novelId, 'Creative stage asset updated')
       return assetView(db.select().from(creativeStageAssets).where(eq(creativeStageAssets.id, existing.id)).all()[0])
     }
   } else if (values.placeholderName) {
@@ -204,7 +413,7 @@ export function upsertCreativeStageAsset(input: CreativeStageAssetInput): Creati
       .all()[0]
     if (existing) {
       db.update(creativeStageAssets).set(values).where(eq(creativeStageAssets.id, existing.id)).run()
-      markNovelContextChanged(stage.novelId, 'Creative stage asset updated')
+      markStageContextChanged(stage.id, stage.novelId, 'Creative stage asset updated')
       return assetView(db.select().from(creativeStageAssets).where(eq(creativeStageAssets.id, existing.id)).all()[0])
     }
   }
@@ -212,11 +421,11 @@ export function upsertCreativeStageAsset(input: CreativeStageAssetInput): Creati
     const current = db.select().from(creativeStageAssets).where(and(eq(creativeStageAssets.id, input.id), eq(creativeStageAssets.stageId, stage.id))).all()[0]
     if (!current) throwUserFacingError('creativeStage.assetNotFound')
     db.update(creativeStageAssets).set(values).where(eq(creativeStageAssets.id, input.id)).run()
-    markNovelContextChanged(stage.novelId, 'Creative stage asset updated')
+    markStageContextChanged(stage.id, stage.novelId, 'Creative stage asset updated')
     return assetView(db.select().from(creativeStageAssets).where(eq(creativeStageAssets.id, input.id)).all()[0])
   }
   const result = db.insert(creativeStageAssets).values({ ...values, createdAt: now }).run()
-  markNovelContextChanged(stage.novelId, 'Creative stage asset bound')
+  markStageContextChanged(stage.id, stage.novelId, 'Creative stage asset bound')
   return assetView(db.select().from(creativeStageAssets).where(eq(creativeStageAssets.id, Number(result.lastInsertRowid))).all()[0])
 }
 
@@ -225,20 +434,103 @@ export function removeCreativeStageAsset(assetId: number): void {
   const current = db.select().from(creativeStageAssets).where(eq(creativeStageAssets.id, assetId)).all()[0]
   if (!current) return
   db.delete(creativeStageAssets).where(eq(creativeStageAssets.id, assetId)).run()
-  markNovelContextChanged(current.novelId, 'Creative stage asset unbound')
+  markStageContextChanged(current.stageId, current.novelId, 'Creative stage asset unbound')
 }
 
-export function getCreativeStageContext(novelId: number, stageId: number): CreativeStageContext {
+export function getCreativeStageContext(novelId: number, stageId: number, chapterNum?: number): CreativeStageContext {
   const stage = getStageRow(stageId)
   if (stage.novelId !== novelId) throwUserFacingError('creativeStage.notFound')
+  const novel = getDb().select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
   const view = stageView(stage, getStageCounts(stage.id))
   const assets = listCreativeStageAssets(stage.id)
+  const assetBriefs = resolveCreativeStageAssetBriefs(novelId, assets)
+  const chapter = typeof chapterNum === 'number'
+    ? getDb().select().from(chapters).where(and(eq(chapters.novelId, novelId), eq(chapters.chapterNum, chapterNum))).all()[0]
+    : undefined
+  const chapterSignal = chapterNum === undefined
+    ? undefined
+    : [
+        view.name,
+        view.objective,
+        view.storySummary,
+        chapter?.title,
+        chapter?.outline,
+        chapter?.scenePlanJson,
+      ].filter(Boolean).join('\n')
+  const promptAssets = selectCreativeStageAssetBindings(assets, assetBriefs, chapterSignal)
+  const promptAssetKeys = new Set(promptAssets.map((asset) => creativeStageAssetKey(asset)))
+  const promptAssetBriefs = assetBriefs.filter((brief) => promptAssetKeys.has(creativeStageAssetKey(brief)))
+  const handoffs = listCreativeStageHandoffs(novelId, stageId)
+  const latestArtifact = handoffs[0]
+  const latestApproved = handoffs.find((artifact) => artifact.status === 'approved')
+  const projectContextVersion = novel.contextVersion || 1
+  const approvedHandoff = latestApproved && latestApproved.contextVersion === projectContextVersion
+    ? toHandoffPacket(latestApproved)
+    : undefined
+  const handoffStatus = latestApproved && latestApproved.contextVersion !== projectContextVersion
+    ? 'stale'
+    : latestArtifact?.status || (view.handoffSummary ? 'legacy' : 'missing')
+  const health = assessCreativeStageContext(
+    { ...view, handoffSummary: approvedHandoff ? '结构化交接已确认' : view.handoffSummary },
+    assets.length,
+    projectContextVersion,
+    latestApproved?.contextVersion,
+  )
+  if (latestArtifact && latestArtifact.status !== 'approved') {
+    health.warnings.push(`阶段存在${latestArtifact.status === 'reviewed' ? '待作者确认' : '未审阅'}的交接工件，当前不会进入正文召回。`)
+  }
+  const stageChapters = getDb().select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()
+    .filter((chapter) => stageContainsChapter(view, chapter.chapterNum))
+  const stageChapterIds = new Set(stageChapters.map((chapter) => chapter.id))
+  const latestGateByChapterId = new Map<number, typeof chapterGateRuns.$inferSelect>()
+  getDb().select().from(chapterGateRuns)
+    .where(eq(chapterGateRuns.novelId, novelId))
+    .all()
+    .filter((row) => stageChapterIds.has(row.chapterId))
+    .sort((left, right) => right.id - left.id)
+    .forEach((row) => {
+      if (!latestGateByChapterId.has(row.chapterId)) latestGateByChapterId.set(row.chapterId, row)
+    })
+  const stageEnd = view.chapterEnd
+  const quality = buildCreativeStageQualitySnapshot(
+    stageChapters.map((chapter) => {
+      const gate = latestGateByChapterId.get(chapter.id)
+      const scoreBreakdown = safeParseChapterGateScoreBreakdown(gate?.scoreBreakdownJson)
+      return {
+        chapterNum: chapter.chapterNum,
+        hasContent: Boolean(chapter.content?.trim()),
+        hasSummary: Boolean(chapter.summary?.trim()),
+        hasContinuity: Boolean(chapter.continuityStateJson?.trim()),
+        ...(gate ? {
+          gateLevel: normalizeStageGateLevel(gate.gateLevel),
+          gateReady: gate.ready === 1,
+          gateScore: scoreBreakdown?.totalScore,
+          gateBlockerCount: gate.blockerCount || 0,
+          gateWarningCount: gate.warningCount || 0,
+          gateIssueKeys: parseStageGateIssueKeys(gate.topIssueKeysJson),
+        } : {}),
+      }
+    }),
+    {
+      handoffRequired: view.status === 'completed'
+        || (typeof stageEnd === 'number' && stageChapters.some((chapter) => chapter.chapterNum >= stageEnd && Boolean(chapter.content?.trim()))),
+      handoffStatus,
+      approvedHandoff: approvedHandoff?.content,
+    },
+  )
+  const packet = buildCreativeStageContextPacket(view, promptAssets, projectContextVersion, approvedHandoff, handoffStatus, promptAssetBriefs)
   return {
     stage: view,
     assets,
     activeCharacterIds: assets.filter((asset) => asset.assetType === 'character' && asset.assetId && asset.status !== 'retired').map((asset) => asset.assetId as number),
     activeMapIds: assets.filter((asset) => asset.assetType === 'map' && asset.assetId && asset.status !== 'retired').map((asset) => asset.assetId as number),
-    promptSummary: buildCreativeStagePromptSummary({ stage: view, assets }),
+    promptSummary: buildCreativeStagePromptSummary({ stage: view, assets: promptAssets, handoff: approvedHandoff, assetBriefs: promptAssetBriefs }),
+    health,
+    quality,
+    packet,
   }
 }
 
@@ -262,7 +554,7 @@ export function resolveCreativeStageContextForChapter(
   chapterNum: number,
   stageId?: number,
 ): CreativeStageContext | null {
-  if (stageId) return getCreativeStageContext(novelId, stageId)
+  if (stageId) return getCreativeStageContext(novelId, stageId, chapterNum)
 
   const candidates = listCreativeStages(novelId)
     .filter((stage) => stageContainsChapter(stage, chapterNum))
@@ -274,7 +566,7 @@ export function resolveCreativeStageContextForChapter(
       return leftSpan - rightSpan || left.sequence - right.sequence || left.id - right.id
     })
 
-  return candidates[0] ? getCreativeStageContext(novelId, candidates[0].id) : null
+  return candidates[0] ? getCreativeStageContext(novelId, candidates[0].id, chapterNum) : null
 }
 
 /** Resolve the active authoring stage for workflows that are not chapter-bound. */

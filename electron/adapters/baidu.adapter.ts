@@ -125,7 +125,7 @@ export class BaiduAdapter extends BaseAdapter {
       if (parsed?.result) {
         opts?.onStream?.(parsed.result)
       }
-    })
+    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
   }
 
   private async requestChat(

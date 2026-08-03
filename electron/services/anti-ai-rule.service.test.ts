@@ -33,6 +33,9 @@ describe('anti-ai-rule.service', () => {
     expect(text).toContain('本书近章复现：不要用“而这一切才刚刚开始”这类总结式句子收尾。')
     expect(text).toContain('【正向替代表达】')
     expect(text).toContain('让悬念停在未完成动作或线索余波上。')
+    expect(text).toContain('叙述正文不要使用“不是……而是/是……”或“并非……实际是……”式定义句')
+    expect(text).toContain('把判断拆成动作、物证和后果')
+    expect(text).toContain('用动作、对白和正常句群承接补充信息。')
   })
 
   it('collects runtime hits from existing guardrails', () => {
@@ -71,6 +74,9 @@ describe('anti-ai-rule.service', () => {
   it('does not flag ordinary negation or useful body action as strong AI flavor', () => {
     const text = [
       '他不是今天值班，所以把钥匙交给门卫。',
+      '不是绞车，是有人在喊他的名字。',
+      '不是塌下来的石头，是支护柱。',
+      '不是矿工，是个家属妇女。',
       '她用指尖按住伤口，确认纱布没有继续渗血。',
       '他说话压低了音量，避开走廊外的脚步声。',
     ].join('\n')

@@ -761,8 +761,25 @@ export function buildAntiAiHardConstraintContext(options: {
 
   const customAntiAiLines = splitRules(settings.writingRules.antiAiFlavor, 'line')
   const customBannedTerms = splitRules(settings.writingRules.bannedTerms, 'token')
+  // The avoid list is useful as a detector, but a writer needs a concrete
+  // replacement strategy. Keep the strongest recurring sentence rules in the
+  // positive section before the compact prompt budget is applied; otherwise a
+  // rule can be present as a prohibition while its actionable repair guidance
+  // is silently truncated.
+  const priorityPositiveRuleCodes = new Set([
+    'not_but_definition_pattern',
+    'dash_abuse',
+    'double_metaphor_or_simile_stack',
+    'ai_transition_cliche',
+    'ai_ending_summary',
+  ])
+  const priorityPositiveLines = promptRules
+    .filter((rule) => priorityPositiveRuleCodes.has(rule.code))
+    .map((rule) => rule.prefer || '')
+    .filter(Boolean)
   const positiveLines = limitUnique([
     ...promotedRules.map((rule) => rule.prefer || '').filter(Boolean),
+    ...priorityPositiveLines,
     ...promptRules.map((rule) => rule.prefer || '').filter(Boolean),
     '优先写角色当下在做什么、承受什么、误判什么，而不是替角色总结感悟。',
     '优先用动作、感官、对话潜台词和现实后果承接情绪。',

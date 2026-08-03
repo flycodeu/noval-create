@@ -1,5 +1,5 @@
 // 真实流水线版小说 AI 生成评测：
-// 1. 大纲拆两批生成（1-5 / 6-10 章），避免长 JSON 后段偷懒
+// 1. 大纲按 5 章窗口滚动生成，避免长 JSON 后段偷懒
 // 2. scenePlan 空缺定向补全
 // 3. 前 N 章正文走生产链路 generateChapterContent（含合同校验、审校、anti-ai 强制修复、发布门）
 // 4. 章节长度只做结果观察，不按目标值自动扩写
@@ -11,7 +11,11 @@
 // 环境变量：
 //   NOVELFORGE_EVAL_PROJECTS=steel,doupo   只跑指定项目
 //   NOVELFORGE_EVAL_RUN_STAMP=xxx          指定输出目录
-//   NOVELFORGE_EVAL_CONTENT_CHAPTERS=2     生成正文的章数
+//   NOVELFORGE_EVAL_CONTENT_CHAPTERS=2     走真实正文生产链路的章数（1-100）
+//   NOVELFORGE_EVAL_SCAFFOLD_CHAPTERS=20   生成结构化大纲的章数（1-100，至少覆盖正文章数）
+//   NOVELFORGE_EVAL_REHYDRATE_EXISTING=1   对已有正文补跑摘要/连续性/索引回写（默认不调用模型）
+//   NOVELFORGE_EVAL_MODEL_TIMEOUT_MS=180000 评测内每次模型请求上限；默认 180 秒
+//   NOVELFORGE_EVAL_MODEL_RETRY_COUNT=0     评测内单次模型请求的网络重试次数；默认 0，避免超时重复拖住整章
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -66,8 +70,36 @@ function requireProject(relativePath) {
 }
 
 const OUT_ROOT = path.resolve(workspaceRoot, 'out', 'novel-ai-eval-pipeline')
-const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(10, Number(process.env.NOVELFORGE_EVAL_CONTENT_CHAPTERS) || 2))
+const rawEvalModelTimeoutMs = Number(process.env.NOVELFORGE_EVAL_MODEL_TIMEOUT_MS || 180_000)
+const EVAL_MODEL_TIMEOUT_MS = Number.isFinite(rawEvalModelTimeoutMs)
+  ? Math.max(5_000, Math.min(1_200_000, Math.round(rawEvalModelTimeoutMs)))
+  : 180_000
+const rawEvalModelRetryCount = Number(process.env.NOVELFORGE_EVAL_MODEL_RETRY_COUNT || 0)
+const EVAL_MODEL_RETRY_COUNT = Number.isFinite(rawEvalModelRetryCount)
+  ? Math.max(0, Math.min(5, Math.round(rawEvalModelRetryCount)))
+  : 0
+// 评测必须在模型异常或 premium 重试卡住时留下可恢复的检查点。
+// 显式传入的全局值优先，避免脚本覆盖调用者正在进行的诊断配置。
+if (!process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS) {
+  process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = String(Math.min(EVAL_MODEL_TIMEOUT_MS, 300_000))
+}
+if (!process.env.NOVELFORGE_NATIVE_MODEL_TIMEOUT_MS) {
+  process.env.NOVELFORGE_NATIVE_MODEL_TIMEOUT_MS = String(EVAL_MODEL_TIMEOUT_MS)
+}
+if (!process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT) {
+  process.env.NOVELFORGE_MODEL_REQUEST_RETRY_COUNT = String(EVAL_MODEL_RETRY_COUNT)
+}
+const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(100, Number(process.env.NOVELFORGE_EVAL_CONTENT_CHAPTERS) || 2))
+const SCAFFOLD_CHAPTER_COUNT = Math.max(
+  CONTENT_CHAPTER_COUNT,
+  Math.min(100, Number(process.env.NOVELFORGE_EVAL_SCAFFOLD_CHAPTERS) || 10),
+)
+const SCAFFOLD_WINDOW_SIZE = 5
 const CHAPTER_TARGET_WORDS = 1200
+const RUN_AI_CHECKS = process.env.NOVELFORGE_EVAL_RUN_AI_CHECKS !== '0'
+const FORCE_AI_CHECKS = process.env.NOVELFORGE_EVAL_FORCE_AI_CHECKS === '1'
+const EXISTING_CONTENT_ONLY = process.env.NOVELFORGE_EVAL_EXISTING_ONLY === '1'
+const REHYDRATE_EXISTING = process.env.NOVELFORGE_EVAL_REHYDRATE_EXISTING === '1'
 const PROJECT_FILTER = new Set(
   String(process.env.NOVELFORGE_EVAL_PROJECTS || '')
     .split(',')
@@ -228,19 +260,23 @@ function buildScaffoldSystemPrompt() {
   ].join('\n')
 }
 
-function buildScaffoldPromptA(project) {
+function formatChapterRange(start, end) {
+  return `第 ${start}-${end} 章`
+}
+
+function buildScaffoldPromptA(project, startChapterNum = 1, endChapterNum = SCAFFOLD_WINDOW_SIZE) {
   return [
     { role: 'system', content: buildScaffoldSystemPrompt() },
     {
       role: 'user',
       content: JSON.stringify({
-        task: '基于对照作品的主题/类型压力，生成一个原创小说项目底盘和第 1-5 章设计。',
+        task: `基于对照作品的主题/类型压力，生成一个原创小说项目底盘和${formatChapterRange(startChapterNum, endChapterNum)}设计。`,
         sourceTitleForComparisonOnly: project.baseTitle,
         benchmark: project.benchmark,
         input: project.input,
         requirements: [
           '项目标题必须体现是 AI 原创对照测试版。',
-          '本次只生成第 1 到 5 章，每章都必须有 2-4 个 scenePlan 场景，一个都不能省略。',
+          `本次只生成${formatChapterRange(startChapterNum, endChapterNum)}，每章都必须有 2-4 个 scenePlan 场景，一个都不能省略。`,
           '每章大纲必须包含目标、冲突、转折、退出钩子。',
           `严格遵守违禁约束：${project.input.tabooRules}`,
         ],
@@ -259,21 +295,21 @@ function buildScaffoldPromptA(project) {
           characters: [{ fullName: 'string', roleType: 'protagonist|antagonist|major|supporting', background: 'string', goals: 'string', flaws: ['string'], traits: ['string'], arc: 'string' }],
           arc: { name: 'string', goal: 'string', summary: 'string' },
           volume: { title: 'string', summary: 'string' },
-          chapters: [CHAPTER_SCHEMA],
+          chapters: [{ ...CHAPTER_SCHEMA, chapterNum: startChapterNum }],
         },
       }, null, 2),
     },
   ]
 }
 
-function buildScaffoldPromptB(project, phase1) {
+function buildScaffoldPromptB(project, previousPhase, startChapterNum, endChapterNum) {
   const context = {
-    title: phase1.project.title,
-    synopsis: phase1.project.synopsis,
-    storyGoal: phase1.settings?.storyGoal || '',
-    coreConflict: phase1.settings?.coreConflict || '',
-    characters: asArray(phase1.characters).map((item) => `${item.fullName}（${item.roleType}）：${item.goals || ''}`),
-    previousChapters: asArray(phase1.chapters).map((chapter) => ({
+    title: previousPhase.project?.title || project.savedTitlePrefix,
+    synopsis: previousPhase.project?.synopsis || project.input.coreHook,
+    storyGoal: previousPhase.settings?.storyGoal || '',
+    coreConflict: previousPhase.settings?.coreConflict || project.input.coreConflict,
+    characters: asArray(previousPhase.characters).map((item) => `${item.fullName}（${item.roleType}）：${item.goals || ''}`),
+    previousChapters: asArray(previousPhase.chapters).slice(-10).map((chapter) => ({
       chapterNum: chapter.chapterNum,
       title: chapter.title,
       outline: chapter.outline,
@@ -285,15 +321,15 @@ function buildScaffoldPromptB(project, phase1) {
     {
       role: 'user',
       content: JSON.stringify({
-        task: '继续为同一个原创小说项目生成第 6-10 章设计，保持与前 5 章连续。',
+        task: `继续为同一个原创小说项目生成${formatChapterRange(startChapterNum, endChapterNum)}设计，保持与前面章节连续。`,
         projectContext: context,
         requirements: [
-          '只生成第 6 到 10 章，每章都必须有 2-4 个 scenePlan 场景，一个都不能省略。',
+          `只生成${formatChapterRange(startChapterNum, endChapterNum)}，每章都必须有 2-4 个 scenePlan 场景，一个都不能省略。`,
           '每章大纲必须包含目标、冲突、转折、退出钩子。',
-          '第 6 章必须自然承接第 5 章的 nextSeed。',
+          `第 ${startChapterNum} 章必须自然承接上一窗口最后一章的 nextSeed。`,
           `严格遵守违禁约束：${project.input.tabooRules}`,
         ],
-        outputSchema: { chapters: [{ ...CHAPTER_SCHEMA, chapterNum: 6 }] },
+        outputSchema: { chapters: [{ ...CHAPTER_SCHEMA, chapterNum: startChapterNum }] },
       }, null, 2),
     },
   ]
@@ -409,17 +445,29 @@ function insertScaffold(db, project, generated, modelConfigId, runStamp) {
     ts2, ts2,
   ).lastInsertRowid)
 
+  const scaffoldChapterCount = generated.chapters.length
+
   const partId = Number(db.prepare(`
     INSERT INTO story_parts (novel_id, volume_id, part_number, title, summary, target_words, status, start_chapter_num, end_chapter_num, created_at, updated_at)
-    VALUES (?, ?, 1, '前十章验证段', '流水线评测用前十章。', ?, 'planning', 1, 10, ?, ?)
-  `).run(novelId, volumeId, Math.round(project.targetWords * 0.08), ts2, ts2).lastInsertRowid)
+    VALUES (?, ?, 1, ?, ?, ?, 'planning', 1, ?, ?, ?)
+  `).run(
+    novelId,
+    volumeId,
+    `前${scaffoldChapterCount}章验证段`,
+    `流水线评测用前${scaffoldChapterCount}章。`,
+    Math.round(project.targetWords * 0.08),
+    scaffoldChapterCount,
+    ts2,
+    ts2,
+  ).lastInsertRowid)
 
   const arcId = Number(db.prepare(`
     INSERT INTO story_arcs (novel_id, arc_name, arc_order, chapter_start, chapter_end, arc_goal, arc_summary, target_words, progress_percent, stalled_chapter_count)
-    VALUES (?, ?, 1, 1, 10, ?, ?, ?, 0, 0)
+    VALUES (?, ?, 1, 1, ?, ?, ?, ?, 0, 0)
   `).run(
     novelId,
     requiredString(generated.arc.name, '开局验证弧'),
+    scaffoldChapterCount,
     requiredString(generated.arc.goal, '建立主角压力、目标与长期承诺。'),
     requiredString(generated.arc.summary, generated.project.synopsis),
     Math.round(project.targetWords * 0.08),
@@ -572,6 +620,130 @@ function insertScaffold(db, project, generated, modelConfigId, runStamp) {
   return { novelId, title: savedTitle, volumeId, partId, arcId, chapterIds }
 }
 
+function findExistingScaffold(db, project, generated, runStamp) {
+  const savedTitle = `${project.savedTitlePrefix}（流水线版 ${runStamp}）`
+  const novel = db.prepare(`
+    SELECT id, title FROM novels WHERE title = ? ORDER BY id DESC LIMIT 1
+  `).get(savedTitle)
+  if (!novel?.id) return null
+
+  const rows = db.prepare(`
+    SELECT id, volume_id AS volumeId, part_id AS partId, arc_id AS arcId, chapter_num AS chapterNum
+    FROM chapters
+    WHERE novel_id = ?
+    ORDER BY chapter_num ASC, id ASC
+  `).all(novel.id)
+  if (rows.length < generated.chapters.length) {
+    throw new Error(`Existing eval scaffold is incomplete for ${savedTitle}: ${rows.length}/${generated.chapters.length} chapters`)
+  }
+  const selectedRows = rows.slice(0, generated.chapters.length)
+  return {
+    novelId: Number(novel.id),
+    title: savedTitle,
+    volumeId: Number(selectedRows[0].volumeId),
+    partId: Number(selectedRows[0].partId),
+    arcId: Number(selectedRows[0].arcId),
+    chapterIds: selectedRows.map((row) => Number(row.id)),
+    resumed: true,
+  }
+}
+
+function appendChapterGateReport(report, chapterService, chapterId) {
+  try {
+    const gate = chapterService.runChapterPublishCheck(chapterId, { phase: 'pipeline' })
+    report.gateLevel = gate.gateLevel
+    report.gateReady = Boolean(gate.ready)
+    report.gateBlockerCount = Number(gate.blockerCount || 0)
+    report.gateRewriteCount = Number(gate.rewriteCount || 0)
+    report.gateWarningCount = Number(gate.warningCount || 0)
+    report.gateTopIssueKeys = Array.isArray(gate.checklist)
+      ? gate.checklist
+        .filter((item) => item.status === 'blocker' || item.status === 'rewrite')
+        .map((item) => item.key)
+        .slice(0, 10)
+      : []
+  } catch (error) {
+    report.gateLevel = 'unverified'
+    report.gateError = String(error && error.message || error).slice(0, 300)
+  }
+}
+
+function writeProgressCheckpoint(outDir, project, generated, saved, chapterReports) {
+  fs.writeFileSync(path.join(outDir, `${project.key}.progress.json`), JSON.stringify({
+    baseTitle: project.baseTitle,
+    key: project.key,
+    pipelineStatus: chapterReports.length >= CONTENT_CHAPTER_COUNT ? 'complete' : 'running',
+    contentChapterCount: CONTENT_CHAPTER_COUNT,
+    scaffoldChapterCount: SCAFFOLD_CHAPTER_COUNT,
+    modelRequestTimeoutMs: EVAL_MODEL_TIMEOUT_MS,
+    modelRequestRetryCount: EVAL_MODEL_RETRY_COUNT,
+    input: project.input,
+    tabooPatterns: project.tabooPatterns,
+    saved,
+    chapters: generated.chapters,
+    chapterReports,
+    updatedAt: nowIso(),
+  }, null, 2), 'utf8')
+}
+
+function writeRuntimeCheckpoint(outDir, project, state) {
+  fs.writeFileSync(path.join(outDir, `${project.key}.runtime.json`), JSON.stringify({
+    key: project.key,
+    runStamp: process.env.NOVELFORGE_EVAL_RUN_STAMP || '',
+    modelRequestTimeoutMs: EVAL_MODEL_TIMEOUT_MS,
+    modelRequestRetryCount: EVAL_MODEL_RETRY_COUNT,
+    ...state,
+    updatedAt: nowIso(),
+  }, null, 2), 'utf8')
+}
+
+function ensureEvaluationStage(creativeStageService, db, project, saved, scaffoldChapterCount, runStamp) {
+  const stages = creativeStageService.listCreativeStages(saved.novelId, true)
+  const existing = stages.find((stage) => (
+    stage.chapterStart === 1
+    && stage.chapterEnd === scaffoldChapterCount
+    && stage.volumeId === saved.volumeId
+    && stage.name.includes('评测阶段')
+  ))
+  const stage = existing || creativeStageService.createCreativeStage(saved.novelId, {
+    name: `评测阶段｜${project.key}｜${runStamp}`,
+    kind: 'chapter-window',
+    status: 'active',
+    chapterStart: 1,
+    chapterEnd: scaffoldChapterCount,
+    volumeId: saved.volumeId,
+    partId: saved.partId,
+    objective: `验证前 ${Math.min(6, scaffoldChapterCount)} 章正文生产、上下文连续性与阶段性交接。`,
+    storySummary: project.input.coreHook,
+    handoffSummary: `阶段结束需交接 ${project.input.coreConflict}，并保留下一阶段可执行压力。`,
+    constraintsJson: JSON.stringify({ evaluation: runStamp, doNotCopySource: true }),
+  })
+  const existingAssets = new Set(creativeStageService.listCreativeStageAssets(stage.id)
+    .map((asset) => `${asset.assetType}:${asset.assetId || asset.placeholderName || ''}`))
+  const characters = db.prepare(`
+    SELECT id, full_name AS fullName, role_type AS roleType
+    FROM characters
+    WHERE novel_id = ?
+    ORDER BY sort_order ASC, id ASC
+    LIMIT 8
+  `).all(saved.novelId)
+  characters.forEach((character, index) => {
+    const key = `character:${character.id}`
+    if (existingAssets.has(key)) return
+    creativeStageService.upsertCreativeStageAsset({
+      stageId: stage.id,
+      assetType: 'character',
+      assetId: Number(character.id),
+      placeholderName: character.fullName,
+      role: character.roleType === 'protagonist' || index === 0 ? 'core' : 'supporting',
+      detailLevel: character.roleType === 'protagonist' || index === 0 ? 'canonical' : 'working',
+      status: 'active',
+      notes: '评测脚手架登记：仅召回当前阶段章节真正需要的角色事实。',
+    })
+  })
+  return creativeStageService.getCreativeStage(stage.id) || stage
+}
+
 async function main() {
   await app.whenReady()
 
@@ -581,7 +753,9 @@ async function main() {
 
   const taskService = requireProject('electron/services/task.service.ts')
   const chapterService = requireProject('electron/services/chapter.service.ts')
+  const embeddingService = requireProject('electron/services/embedding.service.ts')
   const antiAiService = requireProject('electron/services/anti-ai-rule.service.ts')
+  const creativeStageService = requireProject('electron/services/creative-stage.service.ts')
 
   const databasePath = path.join(app.getPath('userData'), 'novelforge.db')
   const drizzleDb = getDb()
@@ -604,7 +778,21 @@ async function main() {
       retryable: true,
       messages,
       modelConfigId: modelConfig.id,
+      chatOpts: {
+        timeoutMs: EVAL_MODEL_TIMEOUT_MS,
+        requestRetryCount: EVAL_MODEL_RETRY_COUNT,
+      },
     })
+  }
+
+  async function callModelWithRawCheckpoint(messages, label, rawPath) {
+    if (fs.existsSync(rawPath)) {
+      console.log(`[eval-pipeline] reuse raw checkpoint: ${path.basename(rawPath)}`)
+      return fs.readFileSync(rawPath, 'utf8')
+    }
+    const raw = await callModel(messages, label)
+    fs.writeFileSync(rawPath, String(raw || ''), 'utf8')
+    return raw
   }
 
   const runInfo = {
@@ -613,7 +801,11 @@ async function main() {
     mode: 'real-pipeline',
     modelLabel: `${modelConfig.provider}:${modelConfig.modelId}#${modelConfig.id}`,
     contentChapterCount: CONTENT_CHAPTER_COUNT,
+    scaffoldChapterCount: SCAFFOLD_CHAPTER_COUNT,
+    scaffoldWindowSize: SCAFFOLD_WINDOW_SIZE,
     chapterTargetWords: CHAPTER_TARGET_WORDS,
+    modelRequestTimeoutMs: EVAL_MODEL_TIMEOUT_MS,
+    modelRequestRetryCount: EVAL_MODEL_RETRY_COUNT,
     projects: [],
   }
 
@@ -623,24 +815,36 @@ async function main() {
 
   try {
     for (const project of selectedProjects) {
-      console.log(`[eval-pipeline] ${project.key}: scaffold phase A (ch1-5)`)
-      const rawA = await callModel(buildScaffoldPromptA(project), `${project.key} scaffold A`)
-      fs.writeFileSync(path.join(outDir, `${project.key}.scaffold-a.raw.txt`), String(rawA || ''), 'utf8')
-      const phase1 = extractJson(rawA)
-
-      console.log(`[eval-pipeline] ${project.key}: scaffold phase B (ch6-10)`)
-      const rawB = await callModel(buildScaffoldPromptB(project, phase1), `${project.key} scaffold B`)
-      fs.writeFileSync(path.join(outDir, `${project.key}.scaffold-b.raw.txt`), String(rawB || ''), 'utf8')
-      const phase2 = extractJson(rawB)
-
-      const chaptersA = asArray(phase1.chapters).slice(0, 5).map((chapter, index) => normalizeChapter(chapter, index, 1))
-      const chaptersB = asArray(phase2.chapters).slice(0, 5).map((chapter, index) => normalizeChapter(chapter, index, 6))
-      let chapters = [...chaptersA, ...chaptersB]
-      while (chapters.length < 10) {
-        const num = chapters.length + 1
-        chapters.push(normalizeChapter({}, 0, num))
+      let foundation = null
+      let previousPhase = null
+      let chapters = []
+      for (let startChapterNum = 1; startChapterNum <= SCAFFOLD_CHAPTER_COUNT; startChapterNum += SCAFFOLD_WINDOW_SIZE) {
+        const endChapterNum = Math.min(SCAFFOLD_CHAPTER_COUNT, startChapterNum + SCAFFOLD_WINDOW_SIZE - 1)
+        const phaseLabel = `${startChapterNum}-${endChapterNum}`
+        console.log(`[eval-pipeline] ${project.key}: scaffold window ${phaseLabel}`)
+        const rawPath = path.join(outDir, `${project.key}.scaffold-${startChapterNum}-${endChapterNum}.raw.txt`)
+        const raw = startChapterNum === 1
+          ? await callModelWithRawCheckpoint(
+            buildScaffoldPromptA(project, startChapterNum, endChapterNum),
+            `${project.key} scaffold ${phaseLabel}`,
+            rawPath,
+          )
+          : await callModelWithRawCheckpoint(
+            buildScaffoldPromptB(project, { ...foundation, ...previousPhase, chapters: chapters.slice(-10) }, startChapterNum, endChapterNum),
+            `${project.key} scaffold ${phaseLabel}`,
+            rawPath,
+          )
+        const phase = extractJson(raw)
+        if (startChapterNum === 1) foundation = phase
+        previousPhase = phase
+        const windowChapters = asArray(phase.chapters).slice(0, endChapterNum - startChapterNum + 1)
+          .map((chapter, index) => ({ ...normalizeChapter(chapter, index, startChapterNum), chapterNum: startChapterNum + index }))
+        while (windowChapters.length < endChapterNum - startChapterNum + 1) {
+          const num = startChapterNum + windowChapters.length
+          windowChapters.push(normalizeChapter({}, 0, num))
+        }
+        chapters.push(...windowChapters)
       }
-      chapters = chapters.slice(0, 10).map((chapter, index) => ({ ...chapter, chapterNum: index + 1 }))
 
       // scenePlan 空缺定向补全
       const missingScenePlan = chapters.filter((chapter) => chapter.scenePlan.length === 0)
@@ -648,7 +852,7 @@ async function main() {
         console.log(`[eval-pipeline] ${project.key}: backfilling scenePlan for ${missingScenePlan.length} chapters`)
         try {
           const rawBackfill = await callModel(
-            buildScenePlanBackfillPrompt(project, phase1, missingScenePlan),
+            buildScenePlanBackfillPrompt(project, foundation, missingScenePlan),
             `${project.key} scenePlan backfill`,
           )
           const backfill = extractJson(rawBackfill)
@@ -663,30 +867,44 @@ async function main() {
 
       const generated = {
         project: {
-          title: requiredString(phase1.project?.title, `${project.savedTitlePrefix}（流水线版）`),
-          synopsis: requiredString(phase1.project?.synopsis, project.input.coreHook),
-          userBackground: requiredString(phase1.project?.userBackground, project.input.coreConflict),
-          expandedBackground: requiredString(phase1.project?.expandedBackground, project.input.theme),
+          title: requiredString(foundation.project?.title, `${project.savedTitlePrefix}（流水线版）`),
+          synopsis: requiredString(foundation.project?.synopsis, project.input.coreHook),
+          userBackground: requiredString(foundation.project?.userBackground, project.input.coreConflict),
+          expandedBackground: requiredString(foundation.project?.expandedBackground, project.input.theme),
         },
-        projectBrief: phase1.projectBrief || {},
-        settings: phase1.settings || {},
-        themeVoice: phase1.themeVoice || {},
-        worldRules: phase1.worldRules || {},
-        characters: asArray(phase1.characters).slice(0, 8),
-        arc: phase1.arc || {},
-        volume: phase1.volume || {},
+        projectBrief: foundation.projectBrief || {},
+        settings: foundation.settings || {},
+        themeVoice: foundation.themeVoice || {},
+        worldRules: foundation.worldRules || {},
+        characters: asArray(foundation.characters).slice(0, 8),
+        arc: foundation.arc || {},
+        volume: foundation.volume || {},
         chapters,
       }
 
-      console.log(`[eval-pipeline] ${project.key}: inserting scaffold`)
-      const saved = rawDb.transaction(() => insertScaffold(rawDb, project, generated, modelConfig.id, runStamp))()
-      console.log(`[eval-pipeline] ${project.key}: saved ${saved.title} -> novelId ${saved.novelId}`)
+      const existing = findExistingScaffold(rawDb, project, generated, runStamp)
+      const saved = existing || rawDb.transaction(() => insertScaffold(rawDb, project, generated, modelConfig.id, runStamp))()
+      const evaluationStage = ensureEvaluationStage(creativeStageService, rawDb, project, saved, SCAFFOLD_CHAPTER_COUNT, runStamp)
+      saved.stageId = evaluationStage.id
+      console.log(`[eval-pipeline] ${project.key}: ${saved.resumed ? 'resuming' : 'saved'} ${saved.title} -> novelId ${saved.novelId}`)
 
       // 前 N 章正文走真实生产流水线
       const chapterReports = []
       for (let chapterIndex = 0; chapterIndex < CONTENT_CHAPTER_COUNT; chapterIndex += 1) {
         const chapterId = saved.chapterIds[chapterIndex]
         const chapterNum = chapterIndex + 1
+        const currentChapterBeforeRun = chapterService.getChapter(chapterId)
+        if (EXISTING_CONTENT_ONLY && !String(currentChapterBeforeRun?.content || '').trim()) {
+          writeRuntimeCheckpoint(outDir, project, {
+            novelId: saved.novelId,
+            chapterNum,
+            chapterId,
+            phase: 'existing-content-only-stop',
+            hasContent: false,
+          })
+          console.log(`[eval-pipeline] ${project.key}: existing-content-only stopped before chapter ${chapterNum}`)
+          break
+        }
         const report = {
           chapterNum,
           chapterId,
@@ -696,15 +914,86 @@ async function main() {
           repetitionRewrites: 0,
           finalWords: 0,
           targetWords: CHAPTER_TARGET_WORDS,
+          aiCheckStatus: 'pending',
+          aiCheckError: '',
           antiAiHits: [],
           tabooHits: [],
         }
+        const markChapterRuntime = (phase, extra = {}) => writeRuntimeCheckpoint(outDir, project, {
+          novelId: saved.novelId,
+          chapterNum,
+          chapterId,
+          phase,
+          hasContent: Boolean(String(chapterService.getChapter(chapterId)?.content || '').trim()),
+          ...extra,
+        })
+        markChapterRuntime('started', { existingContent: Boolean(String(currentChapterBeforeRun?.content || '').trim()) })
         console.log(`[eval-pipeline] ${project.key}: real pipeline for chapter ${chapterNum} (id ${chapterId})`)
         try {
-          await chapterService.generateChapterContent(chapterId, undefined, { executionMode: 'cost_saver' })
+          const existingChapter = chapterService.getChapter(chapterId)
+          if (String(existingChapter?.content || '').trim()) {
+            report.pipelineStatus = REHYDRATE_EXISTING ? 'resumed_rehydrated' : 'resumed'
+            if (REHYDRATE_EXISTING && (!String(existingChapter.summary || '').trim() || !String(existingChapter.continuityStateJson || '').trim())) {
+              markChapterRuntime('rehydrate-derived-state')
+              try {
+                // Existing-content resume used to skip the derived-state chain
+                // entirely, leaving every later chapter without summary,
+                // continuity state, or keyword/embedding recall evidence.
+                // This is opt-in because summary + continuity each may call the
+                // configured model and therefore incur real evaluation cost.
+                await chapterService.refreshChapterDerivedState(chapterId)
+                const refreshed = chapterService.getChapter(chapterId)
+                await embeddingService.generateChapterEmbeddings(
+                  refreshed.novelId,
+                  chapterId,
+                  modelConfig.id,
+                )
+                report.rehydrated = true
+              } catch (error) {
+                report.rehydrated = false
+                report.rehydrateError = String(error && error.message || error).slice(0, 300)
+                console.warn(`[eval-pipeline] ${project.key} ch${chapterNum}: existing-content rehydrate failed: ${report.rehydrateError}`)
+              }
+            } else if (REHYDRATE_EXISTING) {
+              report.pipelineStatus = 'resumed_derived_state'
+              report.rehydrated = false
+              report.rehydrateSkipped = 'derived_state_present'
+            }
+            if (RUN_AI_CHECKS && (FORCE_AI_CHECKS || !String(existingChapter.aiScoreJson || '').trim())) {
+              try {
+                await chapterService.aiCheckChapter(chapterId)
+                report.aiCheckStatus = 'ok'
+              } catch (error) {
+                report.aiCheckStatus = 'error'
+                report.aiCheckError = String(error && error.message || error).slice(0, 300)
+              }
+            } else {
+              report.aiCheckStatus = String(existingChapter.aiScoreJson || '').trim() ? 'existing' : 'disabled'
+            }
+            report.finalWords = countHanzi(existingChapter.content)
+            report.antiAiHits = antiAiService.collectAntiAiRuntimeHits(existingChapter.content, project.genreName)
+              .map((hit) => ({ rule: hit.ruleCode, severity: hit.severity, excerpt: (hit.excerpt || '').slice(0, 60) }))
+            report.tabooHits = scanTaboo(existingChapter.content, project.tabooPatterns)
+            appendChapterGateReport(report, chapterService, chapterId)
+            chapterReports.push(report)
+            writeProgressCheckpoint(outDir, project, generated, saved, chapterReports)
+            markChapterRuntime('chapter-reported', {
+              pipelineStatus: report.pipelineStatus,
+              gateLevel: report.gateLevel,
+              gateReady: report.gateReady,
+            })
+            continue
+          } else {
+            markChapterRuntime('generate-content')
+            await chapterService.generateChapterContent(chapterId, undefined, {
+              executionMode: 'cost_saver',
+              stageId: evaluationStage.id,
+            })
+          }
         } catch (error) {
           report.pipelineStatus = 'error'
           report.pipelineError = String(error && error.message || error).slice(0, 400)
+          markChapterRuntime('generation-error', { error: report.pipelineError })
           console.warn(`[eval-pipeline] ${project.key} ch${chapterNum}: pipeline error: ${report.pipelineError}`)
         }
 
@@ -718,6 +1007,7 @@ async function main() {
         const highHits = hits.filter((hit) => hit.severity === 'high')
         if (content && highHits.length > 0) {
           report.repetitionRewrites += 1
+          markChapterRuntime('anti-ai-corrective-rewrite', { highAntiAiHitCount: highHits.length })
           console.log(`[eval-pipeline] ${project.key} ch${chapterNum}: ${highHits.length} high anti-ai hits, corrective rewrite`)
           try {
             const rewritten = await callModel([
@@ -748,9 +1038,29 @@ async function main() {
 
         chapterRow = chapterService.getChapter(chapterId)
         report.finalWords = countHanzi(chapterRow?.content || '')
+        if (chapterRow?.content && RUN_AI_CHECKS && (FORCE_AI_CHECKS || !String(chapterRow.aiScoreJson || '').trim())) {
+          try {
+            await chapterService.aiCheckChapter(chapterId)
+            report.aiCheckStatus = 'ok'
+          } catch (error) {
+            report.aiCheckStatus = 'error'
+            report.aiCheckError = String(error && error.message || error).slice(0, 300)
+          }
+        } else {
+          report.aiCheckStatus = chapterRow?.aiScoreJson ? 'existing' : 'disabled'
+        }
+        chapterRow = chapterService.getChapter(chapterId)
+        report.finalWords = countHanzi(chapterRow?.content || '')
         report.antiAiHits = hits.map((hit) => ({ rule: hit.ruleCode, severity: hit.severity, excerpt: (hit.excerpt || '').slice(0, 60) }))
         report.tabooHits = scanTaboo(chapterRow?.content || '', project.tabooPatterns)
+        appendChapterGateReport(report, chapterService, chapterId)
         chapterReports.push(report)
+        writeProgressCheckpoint(outDir, project, generated, saved, chapterReports)
+        markChapterRuntime('chapter-reported', {
+          pipelineStatus: report.pipelineStatus,
+          gateLevel: report.gateLevel,
+          gateReady: report.gateReady,
+        })
       }
 
       // 大纲层违禁扫描
@@ -770,6 +1080,12 @@ async function main() {
         outlineTabooHits,
       }
       fs.writeFileSync(path.join(outDir, `${project.key}.json`), JSON.stringify(artifact, null, 2), 'utf8')
+      writeRuntimeCheckpoint(outDir, project, {
+        novelId: saved.novelId,
+        phase: 'project-complete',
+        chapterReportCount: chapterReports.length,
+        contentChapterCount: CONTENT_CHAPTER_COUNT,
+      })
       runInfo.projects.push(artifact)
     }
 
@@ -779,6 +1095,7 @@ async function main() {
     for (const item of runInfo.projects) {
       reportLines.push(`## ${item.saved.title}`, '')
       reportLines.push(`- novelId：${item.saved.novelId}`)
+      reportLines.push(`- 评测阶段：${item.saved.stageId || '未创建'}（窗口 1-${item.chapters.length}）`)
       reportLines.push(`- 章节：${item.chapters.length}（scenePlan 缺失 ${item.chapters.filter((chapter) => chapter.scenePlan.length === 0).length} 章）`)
       reportLines.push(`- 大纲违禁命中：${item.outlineTabooHits.length === 0 ? '无' : item.outlineTabooHits.map((hit) => hit.matches.join('/')).join('；')}`)
       for (const chapterReport of item.chapterReports) {
@@ -786,6 +1103,8 @@ async function main() {
           `- 第 ${chapterReport.chapterNum} 章：${chapterReport.finalWords} 字（目标 ${chapterReport.targetWords}）`
           + `，流水线 ${chapterReport.pipelineStatus}${chapterReport.pipelineError ? `（${chapterReport.pipelineError.slice(0, 120)}）` : ''}`
           + `，扩写 ${chapterReport.expandAttempts} 次，AI味补救 ${chapterReport.repetitionRewrites} 次`
+          + `，AI 体检 ${chapterReport.aiCheckStatus}`
+          + `，章节门 ${chapterReport.gateLevel || 'unverified'}（阻塞 ${chapterReport.gateBlockerCount ?? '-'}、重写 ${chapterReport.gateRewriteCount ?? '-'}、预警 ${chapterReport.gateWarningCount ?? '-'}）`
           + `，残留命中 ${chapterReport.antiAiHits.length} 条`
           + `，正文违禁命中 ${chapterReport.tabooHits.length} 条`,
         )

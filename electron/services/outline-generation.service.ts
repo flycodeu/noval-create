@@ -21,7 +21,7 @@ import { syncStructureLinkage } from './story-structure.service'
 import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import { listRhythmTemplatesForGenre } from '../../src/shared/rhythm-templates'
 import { buildArcRhythmSection } from './rhythm-template.service'
-import { upsertCreativeStageAsset } from './creative-stage.service'
+import { assertCreativeStageContextReadyForGeneration, upsertCreativeStageAsset } from './creative-stage.service'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -382,6 +382,9 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
   }
 
   const context = await buildOutlineGenerationContext(arcId, options.stageId)
+  if (options.stageId && context.creativeStageContext) {
+    assertCreativeStageContextReadyForGeneration(context.creativeStageContext)
+  }
   const existingOutlines = chapterRows
     .filter((chapter) => outlinedNums.has(chapter.chapterNum) && chapter.outline)
     .sort((a, b) => a.chapterNum - b.chapterNum)

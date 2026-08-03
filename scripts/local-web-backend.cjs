@@ -558,7 +558,15 @@ function createRuntime() {
       listAssets: (stageId) => creativeStageService.listCreativeStageAssets(requireId(stageId, 'stageId')),
       upsertAsset: (input) => creativeStageService.upsertCreativeStageAsset(requireObject(input, 'input')),
       removeAsset: (assetId) => creativeStageService.removeCreativeStageAsset(requireId(assetId, 'assetId')),
-      getContext: (novelId, stageId) => creativeStageService.getCreativeStageContext(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')),
+      getContext: (novelId, stageId, chapterNum) => creativeStageService.getCreativeStageContext(
+        requireId(novelId, 'novelId'),
+        requireId(stageId, 'stageId'),
+        chapterNum === undefined || chapterNum === null ? undefined : requireId(chapterNum, 'chapterNum'),
+      ),
+      listHandoffs: (novelId, stageId) => creativeStageService.listCreativeStageHandoffs(requireId(novelId, 'novelId'), requireId(stageId, 'stageId')),
+      createHandoff: () => readOnlyMutation('creativeStage.createHandoff'),
+      reviewHandoff: () => readOnlyMutation('creativeStage.reviewHandoff'),
+      approveHandoff: () => readOnlyMutation('creativeStage.approveHandoff'),
     },
     item: {
       list: (novelId) => itemService.listStoryItems(novelId),
