@@ -43,13 +43,31 @@ async function run() {
   const chapterService = project('electron/services/chapter.service.ts')
   const historyService = project('electron/services/history.service.ts')
   const storyStructureService = project('electron/services/story-structure.service.ts')
+  const storyStructureBatchService = project('electron/services/story-structure-batch.service.ts')
   const writebackService = project('electron/services/chapter-writeback.service.ts')
   initDb()
 
   try {
-    const novelA = novelService.createNovel({ title: '章节完整性测试 A', targetWords: 10000 })
-    const novelB = novelService.createNovel({ title: '章节完整性测试 B', targetWords: 10000 })
+    const novelA = novelService.createNovel({ title: '章节完整性测试 A', targetWords: 10000, operatingMode: 'shortform' })
+    const novelB = novelService.createNovel({ title: '章节完整性测试 B', targetWords: 10000, operatingMode: 'shortform' })
     chapterService.createChapter(novelB, { chapterNum: 1, title: '外部小说章节' })
+
+    const batchLengthNovel = novelService.createNovel({ title: '结构批量参考长度测试', targetWords: 10000, operatingMode: 'shortform' })
+    storyStructureBatchService.applyStructureBatchPlan(batchLengthNovel, {
+      volumes: [{
+        title: '第一卷',
+        parts: [{
+          title: '第一部',
+          chapters: [{ title: '批量新增章节', segments: [] }],
+        }],
+      }],
+    })
+    const batchLengthRow = getSqlite().prepare('SELECT target_words FROM chapters WHERE novel_id = ? LIMIT 1').get(batchLengthNovel)
+    assert.equal(
+      batchLengthRow.target_words,
+      2400,
+      `structure batch append must derive the operating-mode reference length when the plan omits targetWords (actual=${batchLengthRow.target_words})`,
+    )
 
     const firstChapter = chapterService.createChapter(novelA, {
       chapterNum: 1,
@@ -65,9 +83,10 @@ async function run() {
       writebackStatusJson: '{"phase":"applied"}',
       novelId: novelB,
     })
-    const firstRow = getSqlite().prepare('SELECT novel_id, status FROM chapters WHERE id = ?').get(firstChapter)
+    const firstRow = getSqlite().prepare('SELECT novel_id, status, target_words FROM chapters WHERE id = ?').get(firstChapter)
     assert.equal(firstRow.novel_id, novelA, 'chapter:create must pin the owner novelId')
     assert.equal(firstRow.status, 'outline')
+    assert.equal(firstRow.target_words, 2400, 'chapter:create must derive the flexible reference length from the novel operating mode')
     assert.deepEqual(clientPayload, { title: '允许更新', summary: '允许恢复摘要' }, 'IPC chapter updates must retain editable snapshot fields but drop internal state')
     assert.deepEqual(
       chapterService.sanitizeChapterUpdateOptions({ versionSource: 'ai-rewrite', allowChapterNumberChange: true, skipStaleTracking: true }),
@@ -158,6 +177,33 @@ async function run() {
       'structure.invalidChapterIds',
     )
     assert.equal(getSqlite().prepare('SELECT id FROM chapters WHERE id = ?').get(foreignChapter).id, foreignChapter)
+
+    const atomicNovel = novelService.createNovel({ title: '章节批量删除原子性测试', targetWords: 5000 })
+    const atomicFirst = chapterService.createChapter(atomicNovel, { chapterNum: 1, title: '原子删除第一章' })
+    const atomicSecond = chapterService.createChapter(atomicNovel, { chapterNum: 2, title: '原子删除第二章' })
+    getSqlite().exec(`
+      CREATE TRIGGER fail_atomic_batch_second_delete
+      BEFORE DELETE ON chapters
+      WHEN OLD.id = ${atomicSecond}
+      BEGIN
+        SELECT RAISE(ABORT, 'forced batch delete failure');
+      END;
+    `)
+    assert.throws(
+      () => chapterService.batchDeleteChapters([atomicFirst, atomicSecond]),
+      /forced batch delete failure/u,
+    )
+    getSqlite().exec('DROP TRIGGER fail_atomic_batch_second_delete')
+    assert.deepEqual(
+      getSqlite().prepare('SELECT id, chapter_num FROM chapters WHERE novel_id = ? ORDER BY chapter_num').all(atomicNovel),
+      [{ id: atomicFirst, chapter_num: 1 }, { id: atomicSecond, chapter_num: 2 }],
+      'failed batch delete must roll back chapters deleted earlier in the same batch',
+    )
+    assert.equal(
+      getSqlite().prepare("SELECT COUNT(*) AS count FROM operation_logs WHERE novel_id = ? AND operation_type = 'batch_delete'").get(atomicNovel).count,
+      0,
+      'failed batch delete must not leave an undo log for a mutation that rolled back',
+    )
 
     expectCode(() => chapterService.updateChapter(firstChapter, { status: 'final' }), 'chapter.publishBlocked')
     expectCode(
@@ -279,7 +325,7 @@ async function run() {
       emptyVolumeId,
     )
 
-    const historyNovel = novelService.createNovel({ title: '章节撤销测试', targetWords: 5000 })
+    const historyNovel = novelService.createNovel({ title: '章节撤销测试', targetWords: 5000, operatingMode: 'shortform' })
     const historyFirst = chapterService.createChapter(historyNovel, { chapterNum: 1, title: '撤销第一章' })
     const historySecond = chapterService.createChapter(historyNovel, { chapterNum: 2, title: '撤销第二章' })
     const historyArc = getSqlite().prepare(`
@@ -316,10 +362,19 @@ async function run() {
     chapterService.batchDeleteChapters([historySecond])
     const deleteLog = historyService.getLatestUndoableOperation(historyNovel)
     assert.equal(deleteLog.operationType, 'batch_delete')
+    const legacyUndoPayload = JSON.parse(deleteLog.undoPayloadJson)
+    delete legacyUndoPayload.chapters[0].targetWords
+    getSqlite().prepare('UPDATE operation_logs SET undo_payload_json = ? WHERE id = ?')
+      .run(JSON.stringify(legacyUndoPayload), deleteLog.id)
     historyService.undoOperation(deleteLog.id)
     assert.deepEqual(
       getSqlite().prepare('SELECT id, chapter_num FROM chapters WHERE novel_id = ? ORDER BY chapter_num').all(historyNovel),
       [{ id: historyFirst, chapter_num: 1 }, { id: historySecond, chapter_num: 2 }, { id: historyThird, chapter_num: 3 }],
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT target_words FROM chapters WHERE id = ?').get(historySecond).target_words,
+      2400,
+      'legacy undo snapshots without targetWords must use the novel operating-mode reference length',
     )
     assert.deepEqual(
       getSqlite().prepare('SELECT chapter_start, chapter_end FROM story_arcs WHERE id = ?').get(Number(historyArc.lastInsertRowid)),
@@ -329,6 +384,22 @@ async function run() {
       getSqlite().prepare('SELECT start_chapter, target_payoff_chapter, planted_chapter, last_referenced_chapter FROM story_threads WHERE id = ?').get(Number(historyThread.lastInsertRowid)),
       { start_chapter: 1, target_payoff_chapter: 3, planted_chapter: 1, last_referenced_chapter: 3 },
     )
+
+    const contentBeforeGenerationLock = getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(firstChapter).content
+    const activeGenerationTask = getSqlite().prepare(`
+      INSERT INTO tasks
+        (novel_id, type, status, related_entity_type, related_entity_id, runner_type, created_at, updated_at)
+      VALUES (?, 'chapter_write', 'running', 'chapter', ?, 'workflow', ?, ?)
+    `).run(novelA, firstChapter, new Date().toISOString(), new Date().toISOString())
+    await expectCodeAsync(
+      () => Promise.resolve().then(() => chapterService.updateChapter(firstChapter, { content: '不应覆盖的人工编辑' })),
+      'chapter.generationActiveContentLocked',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(firstChapter).content,
+      contentBeforeGenerationLock,
+    )
+    getSqlite().prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(Number(activeGenerationTask.lastInsertRowid))
 
     const now = new Date().toISOString()
     const contextVersion = getSqlite().prepare('SELECT context_version FROM chapters WHERE id = ?').get(firstChapter).context_version || 1
@@ -348,7 +419,28 @@ async function run() {
       'chapterWriteback.appliedImmutable',
     )
 
-    console.log('PASS chapter integrity: final gate, invalidation, ownership, cross-novel isolation, reorder remap and immutable writeback')
+    const applyingRun = getSqlite().prepare(`
+      INSERT INTO chapter_writeback_runs
+        (novel_id, chapter_id, status, trigger_source, source_chapter_version, created_at, updated_at)
+      VALUES (?, ?, 'applying', 'integrity-lock-test', ?, ?, ?)
+    `).run(novelA, firstChapter, contextVersion, now, now)
+    const applyingRunId = Number(applyingRun.lastInsertRowid)
+    const lockedDiff = getSqlite().prepare(`
+      INSERT INTO chapter_writeback_diffs
+        (run_id, asset_type, entity_type, after_state_json, canon_decision, writeback_status, sort_order, created_at, updated_at)
+      VALUES (?, 'thread', 'story-thread', '{}', 'accepted', 'pending', 1, ?, ?)
+    `).run(applyingRunId, now, now)
+    const lockedDiffId = Number(lockedDiff.lastInsertRowid)
+    await expectCodeAsync(
+      () => writebackService.updateChapterWritebackDecision(lockedDiffId, { canonDecision: 'rejected' }),
+      'chapterWriteback.decisionLocked',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT canon_decision FROM chapter_writeback_diffs WHERE id = ?').get(lockedDiffId).canon_decision,
+      'accepted',
+    )
+
+    console.log('PASS chapter integrity: final gate, generation edit lock, invalidation, ownership, cross-novel isolation, reorder remap and locked writeback decisions')
   } finally {
     closeDb()
     fs.rmSync(tempRoot, { recursive: true, force: true })

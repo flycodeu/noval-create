@@ -381,7 +381,7 @@ export function useStructureWorkspace(novelId: number) {
     chapterForm.setFieldsValue({
       title: chapterDetail.title || '',
       outline: chapterDetail.outline || '',
-      targetWords: chapterDetail.targetWords || 3000,
+      targetWords: chapterDetail.targetWords || undefined,
       partId: chapterDetail.partId,
     })
   }, [chapterDetail, chapterForm, loading])
@@ -513,7 +513,6 @@ export function useStructureWorkspace(novelId: number) {
 
     const chapterId = await window.electron.chapter.create(novelId, {
       status: 'outline',
-      targetWords: 3000,
       partId: selection.partId,
       volumeId: selection.volumeId,
     })
@@ -539,7 +538,6 @@ export function useStructureWorkspace(novelId: number) {
     for (let index = 0; index < safeCount; index += 1) {
       lastChapterId = await window.electron.chapter.create(novelId, {
         status: 'outline',
-        targetWords: 3000,
         partId: selection.partId,
         volumeId: selection.volumeId,
       })
@@ -717,7 +715,9 @@ export function useStructureWorkspace(novelId: number) {
       await window.electron.chapter.update(chapterDetail.id, {
         title: values.title?.trim() || chapterDetail.title,
         outline: values.outline?.trim() || '',
-        targetWords: values.targetWords || 3000,
+        ...(typeof values.targetWords === 'number' && values.targetWords > 0
+          ? { targetWords: values.targetWords }
+          : {}),
       })
 
       clearCaches()

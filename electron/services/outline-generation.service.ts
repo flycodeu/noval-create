@@ -18,7 +18,10 @@ import {
   type OutlineDesignGateResult,
 } from './outline-design-gate.service'
 import { syncStructureLinkage } from './story-structure.service'
-import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
+import {
+  estimateChapterCountFromOperatingMode,
+  getRecommendedChapterWordsForOperatingMode,
+} from '../../src/shared/operating-mode'
 import { listRhythmTemplatesForGenre } from '../../src/shared/rhythm-templates'
 import { buildArcRhythmSection } from './rhythm-template.service'
 import { assertCreativeStageContextReadyForGeneration, upsertCreativeStageAsset } from './creative-stage.service'
@@ -169,7 +172,11 @@ export async function generateStoryArcs(novelId: number): Promise<Record<string,
         mainPlot: profile.mainPlot,
         subPlots: profile.subPlots,
         ending: profile.ending,
-        totalChapters: Math.ceil((novel.targetWords || 200000) / 3000),
+        totalChapters: estimateChapterCountFromOperatingMode({
+          launchMode: novel.launchMode,
+          targetWords: novel.targetWords,
+          settingsJson: novel.settingsJson,
+        }),
         rhythmSummary: profile.rhythmSummary,
         background: profile.background,
         protagonistReference: profile.protagonistReference,
@@ -518,7 +525,11 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
         emotionTone,
         arcId,
         status: 'outline',
-        targetWords: getRecommendedChapterWordsForOperatingMode({ targetWords: novel.targetWords }),
+        targetWords: getRecommendedChapterWordsForOperatingMode({
+          launchMode: novel.launchMode,
+          targetWords: novel.targetWords,
+          settingsJson: novel.settingsJson,
+        }),
         contextVersion: novel.contextVersion || 1,
         staleReasonJson: JSON.stringify([]),
       }).run()

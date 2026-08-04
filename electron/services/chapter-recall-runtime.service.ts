@@ -205,7 +205,11 @@ async function buildBackfilledRecallRuntimeRecord(chapterId: number): Promise<Ch
   const complexity = classifyBackfillComplexity(rawContext)
   const chapterReferenceWords = chapter.targetWords > 0
     ? chapter.targetWords
-    : getRecommendedChapterWordsForOperatingMode({ targetWords: rawContext.novel.targetWords })
+    : getRecommendedChapterWordsForOperatingMode({
+        launchMode: rawContext.novel.launchMode,
+        targetWords: rawContext.novel.targetWords,
+        settingsJson: rawContext.novel.settingsJson,
+      })
   const budget = resolveDraftBudget(complexity, chapterReferenceWords, rawContext.novel.targetWords || 0)
 
   try {

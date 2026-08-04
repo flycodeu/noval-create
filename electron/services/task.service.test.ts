@@ -166,4 +166,45 @@ describe('task service recovery and cancellation', () => {
     expect(fake.updates[0].controlJson).toContain('"cancelRequested":true')
     expect(fake.updates[1].errorMessage).toBe('用户已取消')
   })
+
+  it('cascades cancellation through a resumed workflow into its active role task', () => {
+    const resumedWriterWorkflow = {
+      id: 31,
+      type: 'chapter_write',
+      runnerType: 'workflow',
+      status: 'running',
+      currentChildTaskId: 32,
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    }
+    const downstreamChapterWorkflow = {
+      id: 32,
+      type: 'chapter_write',
+      runnerType: 'workflow',
+      status: 'running',
+      currentChildTaskId: 33,
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    }
+    const activeCriticTask = {
+      id: 33,
+      type: 'chapter_critic',
+      runnerType: 'chat',
+      status: 'pending',
+      currentChildTaskId: null,
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    }
+    const fake = buildFakeDb([], [
+      [resumedWriterWorkflow],
+      [downstreamChapterWorkflow],
+      [activeCriticTask],
+    ])
+    vi.mocked(getDb).mockReturnValue(fake.db as never)
+
+    expect(cancelTask(resumedWriterWorkflow.id)).toBe(true)
+    expect(fake.updates.map((update) => update.status)).toEqual([
+      'cancel_requested',
+      'cancel_requested',
+      'cancelled',
+    ])
+    expect(fake.updates.every((update) => String(update.controlJson).includes('"cancelRequested":true'))).toBe(true)
+  })
 })

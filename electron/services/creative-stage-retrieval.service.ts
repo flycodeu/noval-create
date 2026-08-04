@@ -82,7 +82,10 @@ export function selectCreativeStageAssetBindings(
   maxAssets = 18,
 ): CreativeStageAssetBinding[] {
   const normalizedSignal = text(signalText).toLocaleLowerCase()
-  if (!normalizedSignal) return assets
+  const boundedLimit = Math.max(
+    1,
+    Math.min(Number.isFinite(maxAssets) ? Math.floor(maxAssets) : 18, 50),
+  )
   const briefByKey = new Map(briefs.map((brief) => [creativeStageAssetKey(brief), brief]))
   const ranked = assets
     .filter((asset) => !['retired', 'deferred'].includes(asset.status))
@@ -90,14 +93,17 @@ export function selectCreativeStageAssetBindings(
       const brief = briefByKey.get(creativeStageAssetKey(asset))
       const names = [asset.placeholderName, brief?.name].map(text).filter(Boolean)
       const matched = names.some((name) => normalizedSignal.includes(name.toLocaleLowerCase()))
-      const score = (asset.role === 'core' ? 1000 : asset.role === 'handoff' ? 800 : 0)
-        + (matched ? 400 : 0)
+      // A chapter-mentioned support asset must not be crowded out by dozens
+      // of historical handoff/outline bindings in a long stage. Core remains
+      // the stable floor; explicit chapter relevance wins the current window.
+      const score = (matched ? 2000 : 0)
+        + (asset.role === 'core' ? 1000 : asset.role === 'handoff' ? 300 : 0)
         + (asset.detailLevel === 'canonical' ? 20 : asset.detailLevel === 'working' ? 10 : 0)
         - index / 100
       return { asset, score, index }
     })
     .sort((left, right) => right.score - left.score || left.index - right.index)
-  const selected = ranked.slice(0, Math.max(1, maxAssets)).sort((left, right) => left.index - right.index)
+  const selected = ranked.slice(0, boundedLimit).sort((left, right) => left.index - right.index)
   return selected.map((entry) => entry.asset)
 }
 

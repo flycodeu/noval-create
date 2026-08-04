@@ -1,6 +1,18 @@
 import { and, asc, desc, eq, not } from 'drizzle-orm'
-import { chapterGateRuns, characters, chapters, creativeStageAssets, creativeStages, novels, worldMap } from '../database/schema'
-import { getDb } from '../database/db'
+import {
+  chapterGateRuns,
+  characters,
+  chapters,
+  creativeStageAssets,
+  creativeStages,
+  factions,
+  novels,
+  storyItems,
+  storyThreads,
+  timelineEvents,
+  worldMap,
+} from '../database/schema'
+import { getDb, getSqlite } from '../database/db'
 import { markNovelContextChanged } from './context-impact.service'
 import {
   assessCreativeStageHandoff,
@@ -27,6 +39,7 @@ import {
   type CreativeStageCreateInput,
   type CreativeStageContext,
   type CreativeStageGateLevel,
+  type CreativeStageHandoffStatus,
   type CreativeStageStatus,
 } from '../../src/shared/creative-stages'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -141,6 +154,36 @@ function assertStageAssetBelongsToNovel(
       .where(and(eq(worldMap.id, assetId), eq(worldMap.novelId, novelId))).all()[0]
     if (!exists) throwUserFacingError('creativeStage.assetNotFound')
   }
+  if (assetType === 'faction') {
+    const exists = db.select({ id: factions.id }).from(factions)
+      .where(and(eq(factions.id, assetId), eq(factions.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'item') {
+    const exists = db.select({ id: storyItems.id }).from(storyItems)
+      .where(and(eq(storyItems.id, assetId), eq(storyItems.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'thread') {
+    const exists = db.select({ id: storyThreads.id }).from(storyThreads)
+      .where(and(eq(storyThreads.id, assetId), eq(storyThreads.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'timeline') {
+    const exists = db.select({ id: timelineEvents.id }).from(timelineEvents)
+      .where(and(eq(timelineEvents.id, assetId), eq(timelineEvents.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'outline') {
+    const exists = db.select({ id: chapters.id }).from(chapters)
+      .where(and(eq(chapters.id, assetId), eq(chapters.novelId, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
+  if (assetType === 'world') {
+    const exists = db.select({ id: novels.id }).from(novels)
+      .where(and(eq(novels.id, assetId), eq(novels.id, novelId))).all()[0]
+    if (!exists) throwUserFacingError('creativeStage.assetNotFound')
+  }
 }
 
 function getHandoffContent(artifact: CreativeStageHandoffArtifact): CreativeStageHandoffContent {
@@ -161,6 +204,21 @@ function toHandoffPacket(artifact: CreativeStageHandoffArtifact): CreativeStageH
     contextVersion: artifact.contextVersion,
     content: getHandoffContent(artifact),
   }
+}
+
+export function resolveCreativeStageHandoffStatus(input: {
+  hasCurrentApprovedHandoff: boolean
+  latestApprovedContextVersion?: number
+  projectContextVersion: number
+  latestArtifactStatus?: CreativeStageHandoffStatus
+  hasLegacyHandoff: boolean
+}): CreativeStageHandoffStatus {
+  if (input.hasCurrentApprovedHandoff) return 'approved'
+  if (
+    input.latestApprovedContextVersion !== undefined
+    && input.latestApprovedContextVersion !== input.projectContextVersion
+  ) return 'stale'
+  return input.latestArtifactStatus || (input.hasLegacyHandoff ? 'legacy' : 'missing')
 }
 
 export function listCreativeStageHandoffs(novelId: number, stageId: number): CreativeStageHandoffArtifact[] {
@@ -225,29 +283,31 @@ export function reviewCreativeStageHandoff(artifactId: string): {
   const stage = getStageRow(handoff.content.stageId)
   assertHandoffBelongsToStage(handoff, stage)
   const assessment = assessCreativeStageHandoff(handoff.content)
-  const review = createArtifact<CreativeStageHandoffReviewContent>({
-    novelId: handoff.novelId,
-    kind: 'creative_stage_handoff_review',
-    status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
-    parentArtifactId: handoff.id,
-    content: {
-      schemaVersion: 'creative-stage-handoff-review-v1',
-      sourceArtifactId: handoff.id,
-      status: assessment.hardBlockers.length > 0 ? 'blocked' : 'pass',
-      hardBlockers: assessment.hardBlockers,
-      warnings: assessment.warnings,
-      checkedAt: new Date().toISOString(),
-    },
-    contextVersion: handoff.contextVersion,
-    producerType: 'system',
-    producerId: 'creative-stage-handoff-reviewer-v1',
-    producerClient: 'novelforge-stage-planner',
-  })
-  const updated = updateArtifactLifecycle(handoff.id, {
-    status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
-    reviewArtifactId: review.id,
-  }) as CreativeStageHandoffArtifact
-  return { handoff: updated, review }
+  return getSqlite().transaction(() => {
+    const review = createArtifact<CreativeStageHandoffReviewContent>({
+      novelId: handoff.novelId,
+      kind: 'creative_stage_handoff_review',
+      status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
+      parentArtifactId: handoff.id,
+      content: {
+        schemaVersion: 'creative-stage-handoff-review-v1',
+        sourceArtifactId: handoff.id,
+        status: assessment.hardBlockers.length > 0 ? 'blocked' : 'pass',
+        hardBlockers: assessment.hardBlockers,
+        warnings: assessment.warnings,
+        checkedAt: new Date().toISOString(),
+      },
+      contextVersion: handoff.contextVersion,
+      producerType: 'system',
+      producerId: 'creative-stage-handoff-reviewer-v1',
+      producerClient: 'novelforge-stage-planner',
+    })
+    const updated = updateArtifactLifecycle(handoff.id, {
+      status: assessment.hardBlockers.length > 0 ? 'rejected' : 'reviewed',
+      reviewArtifactId: review.id,
+    }) as CreativeStageHandoffArtifact
+    return { handoff: updated, review }
+  })()
 }
 
 export function approveCreativeStageHandoff(artifactId: string): CreativeStageHandoffArtifact {
@@ -264,15 +324,17 @@ export function approveCreativeStageHandoff(artifactId: string): CreativeStageHa
       currentVersion: novel.contextVersion || 1,
     })
   }
-  listCreativeStageHandoffs(stage.novelId, stage.id)
-    .filter((item) => item.id !== handoff.id && item.status === 'approved')
-    .forEach((item) => updateArtifactLifecycle(item.id, { status: 'superseded' }))
-  const approved = updateArtifactLifecycle(handoff.id, { status: 'approved' }) as CreativeStageHandoffArtifact
-  getDb().update(creativeStages)
-    .set({ contextVersion: novel.contextVersion || 1, updatedAt: new Date().toISOString() })
-    .where(eq(creativeStages.id, stage.id))
-    .run()
-  return approved
+  return getSqlite().transaction(() => {
+    listCreativeStageHandoffs(stage.novelId, stage.id)
+      .filter((item) => item.id !== handoff.id && item.status === 'approved')
+      .forEach((item) => updateArtifactLifecycle(item.id, { status: 'superseded' }))
+    const approved = updateArtifactLifecycle(handoff.id, { status: 'approved' }) as CreativeStageHandoffArtifact
+    getDb().update(creativeStages)
+      .set({ contextVersion: novel.contextVersion || 1, updatedAt: new Date().toISOString() })
+      .where(eq(creativeStages.id, stage.id))
+      .run()
+    return approved
+  })()
 }
 
 /**
@@ -468,12 +530,16 @@ export function getCreativeStageContext(novelId: number, stageId: number, chapte
   const approvedHandoff = latestApproved && latestApproved.contextVersion === projectContextVersion
     ? toHandoffPacket(latestApproved)
     : undefined
-  const handoffStatus = latestApproved && latestApproved.contextVersion !== projectContextVersion
-    ? 'stale'
-    : latestArtifact?.status || (view.handoffSummary ? 'legacy' : 'missing')
+  const handoffStatus = resolveCreativeStageHandoffStatus({
+    hasCurrentApprovedHandoff: Boolean(approvedHandoff),
+    latestApprovedContextVersion: latestApproved?.contextVersion,
+    projectContextVersion,
+    latestArtifactStatus: latestArtifact?.status,
+    hasLegacyHandoff: Boolean(view.handoffSummary),
+  })
   const health = assessCreativeStageContext(
     { ...view, handoffSummary: approvedHandoff ? '结构化交接已确认' : view.handoffSummary },
-    assets.length,
+    promptAssets.length,
     projectContextVersion,
     latestApproved?.contextVersion,
   )
@@ -525,8 +591,12 @@ export function getCreativeStageContext(novelId: number, stageId: number, chapte
   return {
     stage: view,
     assets,
-    activeCharacterIds: assets.filter((asset) => asset.assetType === 'character' && asset.assetId && asset.status !== 'retired').map((asset) => asset.assetId as number),
-    activeMapIds: assets.filter((asset) => asset.assetType === 'map' && asset.assetId && asset.status !== 'retired').map((asset) => asset.assetId as number),
+    activeCharacterIds: assets
+      .filter((asset) => asset.assetType === 'character' && asset.assetId && !['retired', 'deferred'].includes(asset.status))
+      .map((asset) => asset.assetId as number),
+    activeMapIds: assets
+      .filter((asset) => asset.assetType === 'map' && asset.assetId && !['retired', 'deferred'].includes(asset.status))
+      .map((asset) => asset.assetId as number),
     promptSummary: buildCreativeStagePromptSummary({ stage: view, assets: promptAssets, handoff: approvedHandoff, assetBriefs: promptAssetBriefs }),
     health,
     quality,

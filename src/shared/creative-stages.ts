@@ -466,15 +466,25 @@ export function buildCreativeStageQualitySnapshot(
       ...(typeof chapter.gateWarningCount === 'number' ? { gateWarningCount: Math.max(0, Math.round(chapter.gateWarningCount)) } : {}),
     }))
   const gatePoints = chapters
-    .filter((chapter) => typeof chapter.gateScore === 'number' && Number.isFinite(chapter.gateScore))
+    .filter((chapter) => (
+      chapter.gateLevel !== undefined
+      || typeof chapter.gateReady === 'boolean'
+      || (typeof chapter.gateScore === 'number' && Number.isFinite(chapter.gateScore))
+      || typeof chapter.gateBlockerCount === 'number'
+      || typeof chapter.gateWarningCount === 'number'
+      || Boolean(chapter.gateIssueKeys?.length)
+    ))
     .sort((left, right) => left.chapterNum - right.chapterNum)
-  const gateScores = gatePoints.map((chapter) => Math.max(0, Math.min(100, Math.round(chapter.gateScore as number))))
+  const scoredGatePoints = gatePoints
+    .filter((chapter) => typeof chapter.gateScore === 'number' && Number.isFinite(chapter.gateScore))
+  const gateScores = scoredGatePoints.map((chapter) => Math.max(0, Math.min(100, Math.round(chapter.gateScore as number))))
   const firstGateScore = gateScores[0]
   const latestGateScore = gateScores[gateScores.length - 1]
   const scoreDelta = firstGateScore !== undefined && latestGateScore !== undefined
     ? latestGateScore - firstGateScore
     : undefined
   const readyCount = gatePoints.filter((chapter) => chapter.gateReady === true).length
+  const notReadyCount = gatePoints.length - readyCount
   const repeatedIssueKeys = [...gatePoints.reduce((counts, chapter) => {
     ;(chapter.gateIssueKeys || []).forEach((key) => {
       const normalized = key.trim()
@@ -493,27 +503,31 @@ export function buildCreativeStageQualitySnapshot(
       : (scoreDelta || 0) <= -8
         ? 'worsening'
         : 'stable'
-  const trendSummary = gateScores.length === 0
+  const trendSummary = gatePoints.length === 0
     ? '当前阶段还没有章节验收门快照，不能用摘要覆盖率替代 20/100 章质量证据。'
-    : `已覆盖 ${gateScores.length}/${chapterCount} 个章节验收门，平均门分 ${Math.round(gateScores.reduce((sum, score) => sum + score, 0) / gateScores.length)}；${scoreDelta === undefined ? '暂无趋势基线' : `相对首个快照${scoreDelta >= 0 ? '+' : ''}${scoreDelta}分`}。`
+    : gateScores.length === 0
+      ? `已覆盖 ${gatePoints.length}/${chapterCount} 个章节验收门，但这些快照缺少可用门分，不能计算趋势。`
+      : `已覆盖 ${gatePoints.length}/${chapterCount} 个章节验收门，${gateScores.length} 个含可用门分，平均门分 ${Math.round(gateScores.reduce((sum, score) => sum + score, 0) / gateScores.length)}；${scoreDelta === undefined ? '暂无趋势基线' : `相对首个快照${scoreDelta >= 0 ? '+' : ''}${scoreDelta}分`}。`
   const trend: CreativeStageQualityTrend = {
     status: trendStatus,
     points: trendPoints,
-    gateCoveredChapterCount: gateScores.length,
+    gateCoveredChapterCount: gatePoints.length,
     ...(gateScores.length > 0 ? {
       averageGateScore: Math.round(gateScores.reduce((sum, score) => sum + score, 0) / gateScores.length),
       firstGateScore,
       latestGateScore,
     } : {}),
     ...(scoreDelta !== undefined ? { scoreDelta } : {}),
-    ...(gateScores.length > 0 ? { readyRate: Math.round((readyCount / gateScores.length) * 100) } : {}),
+    ...(gatePoints.length > 0 ? { readyRate: Math.round((readyCount / gatePoints.length) * 100) } : {}),
     blockerChapterCount,
     repeatedIssueKeys,
     summary: trendSummary,
   }
   if (chapterCount === 0) warnings.push('当前阶段还没有可评估的章节。')
   if (chapterCount > 0 && completedChapterCount < chapterCount) warnings.push(`${chapterCount - completedChapterCount} 个章节还没有正文。`)
-  if (completedChapterCount > 0 && gateScores.length < completedChapterCount) warnings.push(`${completedChapterCount - gateScores.length} 个已完成章节尚未有验收门快照，不能把摘要覆盖当作质量通过。`)
+  if (completedChapterCount > 0 && gatePoints.length < completedChapterCount) warnings.push(`${completedChapterCount - gatePoints.length} 个已完成章节尚未有验收门快照，不能把摘要覆盖当作质量通过。`)
+  if (gatePoints.length > gateScores.length) warnings.push(`${gatePoints.length - gateScores.length} 个章节验收门缺少可用门分，阶段趋势证据不完整。`)
+  if (notReadyCount > 0) warnings.push(`${notReadyCount} 个章节验收门尚未就绪（gateReady=false 或缺少就绪证据），阶段不能标记为健康。`)
   if (blockerChapterCount > 0) warnings.push(`${blockerChapterCount} 个章节验收门处于阻塞或重写状态，阶段不应直接扩展。`)
   if (chapterCount > 0 && rate(chapters.filter((chapter) => chapter.hasSummary).length) < 100) warnings.push('部分章节缺少章后摘要，长篇召回会变薄。')
   if (chapterCount > 0 && rate(chapters.filter((chapter) => chapter.hasContinuity).length) < 100) warnings.push('部分章节缺少连续性状态，人物和线程交接不完整。')

@@ -23,6 +23,10 @@ const FAILURE_LABELS: Record<string, FailureLabel> = {
     title: '模型返回了空结果',
     action: '可能是网络或模型波动，请重试；连续失败请检查模型配置。',
   },
+  invalid_output: {
+    title: '模型结果无法验证',
+    action: '结构化结果为空或格式错误，当前草稿已保留；请重试对应流水线阶段。',
+  },
   anti_ai_failed: {
     title: '未通过 AI 味质量门',
     action: '候选稿仍含高风险 AI 句式，请查看审校意见后重新生成或人工修订。',

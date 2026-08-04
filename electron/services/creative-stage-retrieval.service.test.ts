@@ -101,6 +101,42 @@ describe('creative stage retrieval', () => {
       .toEqual([301, 401])
   })
 
+  it('keeps no-signal generation bounded and excludes retired or deferred assets', () => {
+    const assets = [
+      { id: 1, novelId: 200, stageId: 2, assetType: 'character' as const, assetId: 301, role: 'core' as const, detailLevel: 'canonical' as const, status: 'active' as const, createdAt: '', updatedAt: '' },
+      { id: 2, novelId: 200, stageId: 2, assetType: 'map' as const, assetId: 401, role: 'supporting' as const, detailLevel: 'working' as const, status: 'retired' as const, createdAt: '', updatedAt: '' },
+      { id: 3, novelId: 200, stageId: 2, assetType: 'character' as const, assetId: 302, role: 'supporting' as const, detailLevel: 'working' as const, status: 'deferred' as const, createdAt: '', updatedAt: '' },
+      { id: 4, novelId: 200, stageId: 2, assetType: 'thread' as const, assetId: 501, role: 'handoff' as const, detailLevel: 'outline' as const, status: 'planned' as const, createdAt: '', updatedAt: '' },
+      { id: 5, novelId: 200, stageId: 2, assetType: 'item' as const, assetId: 601, role: 'supporting' as const, detailLevel: 'outline' as const, status: 'active' as const, createdAt: '', updatedAt: '' },
+    ]
+
+    expect(selectCreativeStageAssetBindings(assets, [], undefined, 2).map((asset) => asset.id))
+      .toEqual([1, 4])
+  })
+
+  it('does not let historical handoff assets crowd out a chapter-mentioned support asset', () => {
+    const assets = [
+      { id: 1, novelId: 200, stageId: 2, assetType: 'character' as const, assetId: 301, placeholderName: '叶振', role: 'core' as const, detailLevel: 'canonical' as const, status: 'active' as const, createdAt: '', updatedAt: '' },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: index + 2,
+        novelId: 200,
+        stageId: 2,
+        assetType: 'outline' as const,
+        assetId: index + 500,
+        placeholderName: `历史第${index + 1}章`,
+        role: 'handoff' as const,
+        detailLevel: 'canonical' as const,
+        status: 'active' as const,
+        createdAt: '',
+        updatedAt: '',
+      })),
+      { id: 30, novelId: 200, stageId: 2, assetType: 'map' as const, assetId: 401, placeholderName: '三号炉区', role: 'supporting' as const, detailLevel: 'working' as const, status: 'active' as const, createdAt: '', updatedAt: '' },
+    ]
+
+    expect(selectCreativeStageAssetBindings(assets, [], '本章叶振进入三号炉区', 2).map((asset) => asset.id))
+      .toEqual([1, 30])
+  })
+
   it('does not leak canonical character arc through a working-level binding', () => {
     const [brief] = resolveCreativeStageAssetBriefs(200, [{
       id: 3,

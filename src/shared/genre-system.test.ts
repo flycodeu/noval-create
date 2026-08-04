@@ -54,4 +54,20 @@ describe('genre-system historical packs', () => {
       'canon_fact_cards',
     ]))
   })
+
+  it('does not treat an unapproved chapter extract as a grounding source', () => {
+    const assessment = assessHistoricalGrounding({
+      genreName: '历史正剧',
+      sourceLedgerJson: JSON.stringify([{
+        sourceKey: 'chapter:11:thread:pending',
+        chapterId: 11,
+        runId: 21,
+        assetType: 'thread',
+        sourceText: '尚未审批的章节猜测。',
+        supportingDiffIds: [],
+      }]),
+    })
+
+    expect(assessment.sourceSignals).not.toContain('source_ledger')
+  })
 })

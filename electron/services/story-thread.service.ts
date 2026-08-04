@@ -16,6 +16,7 @@ import {
   buildOutputQualityRules,
 } from '../../src/shared/prompt-library'
 import { getStoryThreadGenerationPreset } from '../../src/shared/creation-tools'
+import { estimateChapterCountFromOperatingMode } from '../../src/shared/operating-mode'
 import { parseWorldRulesJson } from '../../src/shared/genre-system'
 import type { EntityRegenerateOptions } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
@@ -48,6 +49,20 @@ type StoryThreadPriority = 'high' | 'medium' | 'low'
 type ForeshadowStatus = 'pending' | 'due' | 'overdue' | 'paid_off'
 
 const FORESHADOW_DUE_WINDOW = 3
+
+function estimateNovelChapterTotal(
+  novel: Pick<typeof novels.$inferSelect, 'launchMode' | 'targetWords' | 'settingsJson'>,
+  latestChapterNum: number,
+): number {
+  return Math.max(
+    latestChapterNum,
+    estimateChapterCountFromOperatingMode({
+      launchMode: novel.launchMode,
+      targetWords: novel.targetWords,
+      settingsJson: novel.settingsJson,
+    }),
+  )
+}
 
 interface StoryThreadQueryFilters {
   novelId: number
@@ -1082,11 +1097,7 @@ export async function generateStoryThreadBatchChunk(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const existingRows = listStoryThreads(novelId)
   const latestChapterNum = getLatestChapterNum(novelId)
-  const estimatedChapterTotal = Math.max(
-    12,
-    latestChapterNum,
-    Math.ceil((novel.targetWords || 200000) / 3000),
-  )
+  const estimatedChapterTotal = estimateNovelChapterTotal(novel, latestChapterNum)
   const generationPreset = getStoryThreadGenerationPreset(profile.genre, {
     launchMode: novel.launchMode,
     targetWords: novel.targetWords,
@@ -1285,11 +1296,7 @@ export async function generateStoryThreads(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const existingRows = listStoryThreads(novelId)
   const latestChapterNum = getLatestChapterNum(novelId)
-  const estimatedChapterTotal = Math.max(
-    12,
-    latestChapterNum,
-    Math.ceil((novel.targetWords || 200000) / 3000),
-  )
+  const estimatedChapterTotal = estimateNovelChapterTotal(novel, latestChapterNum)
   const generationPreset = getStoryThreadGenerationPreset(profile.genre, {
     launchMode: novel.launchMode,
     targetWords: novel.targetWords,
@@ -1468,11 +1475,7 @@ export async function regenerateStoryThread(
   const mode = options.mode === 'replace' ? 'replace' : 'repair'
   const profile = await buildStoryProfile(current.novelId)
   const latestChapterNum = getLatestChapterNum(current.novelId)
-  const estimatedChapterTotal = Math.max(
-    12,
-    latestChapterNum,
-    Math.ceil((novel.targetWords || 200000) / 3000),
-  )
+  const estimatedChapterTotal = estimateNovelChapterTotal(novel, latestChapterNum)
   const historyEntityType = 'thread'
   const historyTaskType = 'story_thread_regenerate'
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1

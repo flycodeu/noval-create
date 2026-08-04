@@ -538,7 +538,20 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
   const committedAt = new Date().toISOString()
   let commitArtifact
   let contextVersionAfter = currentVersion
-  getSqlite().transaction(() => {
+  const sqlite = getSqlite()
+  const commitTransaction = sqlite.transaction(() => {
+    const latestNovel = requireNovel(input.novelId)
+    if ((latestNovel.contextVersion || 1) !== currentVersion) {
+      throw new CharacterDraftWorkflowError('CONTEXT_VERSION_CONFLICT', '项目上下文在提交锁定前已变化，请重新分析并生成草稿。')
+    }
+    const latestNames = new Set(characterService.listCharacters(input.novelId)
+      .map((character) => character.fullName.replace(/\s+/gu, '').toLowerCase()))
+    const latestConflict = draftArtifact.content.characters
+      .find((character) => latestNames.has(character.fullName.replace(/\s+/gu, '').toLowerCase()))
+    if (latestConflict) {
+      throw new CharacterDraftWorkflowError('CONTEXT_VERSION_CONFLICT', `正式人物库中已存在同名人物「${latestConflict.fullName}」。`)
+    }
+
     draftArtifact.content.characters.forEach((character) => {
       const id = characterService.createCharacter(input.novelId, {
         ...character,
@@ -625,7 +638,9 @@ export function commitCharacterDraft(input: CommitCharacterDraftInput): CommitCh
         payload: character,
       })
     })
-  })()
+  })
+  if (sqlite.inTransaction || typeof commitTransaction.immediate !== 'function') commitTransaction()
+  else commitTransaction.immediate()
 
   refreshWorldStateVersionsForNovel(input.novelId)
 

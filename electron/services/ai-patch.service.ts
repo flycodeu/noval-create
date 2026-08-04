@@ -367,7 +367,11 @@ async function suggestStructureChapterPatch(target: AiPatchTarget, instruction: 
           title: current.title || '',
           outline: current.outline || '',
           summary: current.summary || '',
-          targetWords: current.targetWords || getRecommendedChapterWordsForOperatingMode({ targetWords: novel.targetWords }),
+          targetWords: current.targetWords || getRecommendedChapterWordsForOperatingMode({
+            launchMode: novel.launchMode,
+            targetWords: novel.targetWords,
+            settingsJson: novel.settingsJson,
+          }),
         },
         instruction,
         extraRules: ['不要修改章节编号、所属卷部和正文 content。'],

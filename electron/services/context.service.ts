@@ -1,7 +1,7 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
-import { assessHistoricalGrounding, buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
+import { assessHistoricalGrounding, buildWorldRulesSummary, getGroundingSourceLedgerEntries, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
 import { parseGlossaryAliases } from '../../src/shared/glossary'
@@ -82,12 +82,24 @@ function estimateTokens(text: string): number {
 }
 
 function truncateToTokens(text: string, maxTokens: number): string {
-  // 保守估算：按反向计算最大字符数
-  // 假设平均每个字符约 0.6 token（中英混合平均值）
-  const avgTokenPerChar = 0.6
-  const maxChars = Math.max(Math.floor(maxTokens / avgTokenPerChar), 0)
-  if (text.length <= maxChars) return text
-  return `${text.slice(0, maxChars)}...`
+  const safeMaxTokens = Math.max(0, Math.floor(maxTokens))
+  if (!text || safeMaxTokens <= 0) return ''
+  if (estimateTokens(text) <= safeMaxTokens) return text
+
+  // 中文接近 1 token/字，不能再用固定的 0.6 token/字符反推长度；
+  // 那会让“截断后”的中文片段仍然明显超过分配预算。二分查找直接
+  // 复用同一估算器，确保返回值满足 estimateTokens(result) <= budget。
+  const suffix = '…'
+  if (estimateTokens(suffix) > safeMaxTokens) return ''
+  let low = 0
+  let high = text.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    const candidate = `${text.slice(0, middle)}${suffix}`
+    if (estimateTokens(candidate) <= safeMaxTokens) low = middle
+    else high = middle - 1
+  }
+  return low > 0 ? `${text.slice(0, low)}${suffix}` : suffix
 }
 
 function resolveRecentContextWindow(
@@ -3089,10 +3101,7 @@ function buildSourceCanonGroundingSummary(input: {
   const historicalProfile = parseJsonRecord(input.historicalProfileJson)
   const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
-  const sourceLedgerEntries = [
-    ...parseJsonRecordArray(input.sourceLedgerJson),
-    ...parseJsonRecordArray(input.canonSourceLedgerJson),
-  ]
+  const sourceLedgerEntries = getGroundingSourceLedgerEntries(input)
   const canonFactCards = parseJsonRecordArray(input.canonFactCardsJson)
 
   const historicalProfilePieces = [
@@ -4852,24 +4861,22 @@ export function allocateChapterContext(
     Math.floor(rawModelContextLimit * (1 - tokenSafetyMarginPct / 100)),
   )
   const modelContextLimit = rawModelContextLimit
-  const totalBudget = Math.min(requestedBudget, safeModelContextLimit)
-  const modelBudgetLimited = safeModelContextLimit < requestedBudget
-  const effectiveBudget = Math.min(safeModelContextLimit, resolveChapterBudgetFloor(targetWords, totalBudget))
+  const desiredBudget = resolveChapterBudgetFloor(targetWords, requestedBudget)
+  const effectiveBudget = Math.min(safeModelContextLimit, desiredBudget)
   const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
   const requestedOutputReserve = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
   const configuredOutputLimit = modelRuntimeBudget.maxTokens && modelRuntimeBudget.maxTokens > 0
     ? modelRuntimeBudget.maxTokens
     : requestedOutputReserve
-  const reservedForOutput = modelBudgetLimited
-    ? Math.max(0, Math.min(
-      Math.max(requestedOutputReserve, configuredOutputLimit),
-      Math.max(0, effectiveBudget - promptFixedOverhead),
-    ))
-    : requestedOutputReserve
+  // Adapter 的 maxTokens 是本次请求真实可能占用的输出上限。即使调用方
+  // 请求的上下文预算尚未碰到模型窗口，也必须预留两者较大值；否则长篇
+  // 模式抬高 effectiveBudget 后可能出现 prompt + output 超过模型窗口。
+  const reservedForOutput = Math.max(0, Math.min(
+    Math.max(requestedOutputReserve, configuredOutputLimit),
+    Math.max(0, effectiveBudget - promptFixedOverhead),
+  ))
   const remainingContextBudget = effectiveBudget - promptFixedOverhead - reservedForOutput
-  const contextBudget = modelBudgetLimited
-    ? Math.max(0, remainingContextBudget)
-    : Math.max(3600, remainingContextBudget)
+  const contextBudget = Math.max(0, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
   const preservedConstraintSet = buildPreservedConstraintSet(normalizedOptions.preserveConstraintLabels)
   const hardConstraintDrafts = buildHardConstraintDrafts(rawData, preservedConstraintSet)
@@ -5023,10 +5030,12 @@ export function allocateChapterContext(
     lastChapterEnding: softAllocation.allocated.lastChapterEnding || '',
     chapterBridgePlan: softAllocation.allocated.chapterBridgePlan || '',
     styleTemplate: softAllocation.allocated.styleTemplate || '',
-    chapterGoal: softAllocation.allocated.chapterGoal || rawData.contextParts.chapterGoal || '',
+    chapterGoal: softAllocation.allocated.chapterGoal
+      || hardConstraintAllocation.entries.find((entry) => entry.label === 'chapterGoal')?.content
+      || '',
     continuitySummary: softAllocation.allocated.continuitySummary || '',
     openLoops: softAllocation.allocated.openLoops || '',
-    dueForeshadows: softAllocation.allocated.dueForeshadows || rawData.contextParts.dueForeshadows || '',
+    dueForeshadows: softAllocation.allocated.dueForeshadows || '',
     continuityNotes: softAllocation.allocated.continuityNotes || '',
     timelineSummary: softAllocation.allocated.timelineSummary || '',
     timelineOpenThreads: softAllocation.allocated.timelineOpenThreads || '',
@@ -5036,19 +5045,20 @@ export function allocateChapterContext(
     // 当分配器判定它已被硬约束覆盖时，softAllocation 不会再分配该字段；
     // 此时必须保留章节级 contextParts（其中包含阶段/章节合同），不能只回退到 profile。
     writingContractSummary: softAllocation.allocated.writingContractSummary
-      || rawData.contextParts.writingContractSummary
-      || rawData.profile.writingContractSummary
+      || hardConstraintAllocation.entries.find((entry) => entry.label === 'writingContractSummary')?.content
       || '',
-    relationSummary: softAllocation.allocated.relationSummary || rawData.contextParts.relationSummary || '',
-    dialogueVoiceLocks: softAllocation.allocated.dialogueVoiceLocks || rawData.contextParts.dialogueVoiceLocks || '',
+    relationSummary: softAllocation.allocated.relationSummary
+      || hardConstraintAllocation.entries.find((entry) => entry.label === 'relationSummary')?.content
+      || '',
+    dialogueVoiceLocks: softAllocation.allocated.dialogueVoiceLocks || '',
     recalledMemory: softAllocation.allocated.recalledMemory || '',
-    scenePlanSummary: softAllocation.allocated.scenePlanSummary || rawData.contextParts.scenePlanSummary || '',
-    draftTextSummary: softAllocation.allocated.draftTextSummary || rawData.contextParts.draftTextSummary || '',
-    contractVersionSummary: softAllocation.allocated.contractVersionSummary || rawData.contextParts.contractVersionSummary || '',
-    reviewRiskSummary: softAllocation.allocated.reviewRiskSummary || rawData.contextParts.reviewRiskSummary || '',
-    reviewProofSummary: softAllocation.allocated.reviewProofSummary || rawData.contextParts.reviewProofSummary || '',
-    rewriteDeltaSummary: softAllocation.allocated.rewriteDeltaSummary || rawData.contextParts.rewriteDeltaSummary || '',
-    publishGateRiskSummary: softAllocation.allocated.publishGateRiskSummary || rawData.contextParts.publishGateRiskSummary || '',
+    scenePlanSummary: softAllocation.allocated.scenePlanSummary || '',
+    draftTextSummary: softAllocation.allocated.draftTextSummary || '',
+    contractVersionSummary: softAllocation.allocated.contractVersionSummary || '',
+    reviewRiskSummary: softAllocation.allocated.reviewRiskSummary || '',
+    reviewProofSummary: softAllocation.allocated.reviewProofSummary || '',
+    rewriteDeltaSummary: softAllocation.allocated.rewriteDeltaSummary || '',
+    publishGateRiskSummary: softAllocation.allocated.publishGateRiskSummary || '',
     stepMemorySummary: softAllocation.allocated.stepMemorySummary || '',
     hardConstraintContext: hardConstraintAllocation.text,
     hardConstraintSummary,

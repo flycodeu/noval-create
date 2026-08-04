@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
+  getSqlite: vi.fn(),
 }))
 vi.mock('./artifact.service', () => ({
   createArtifact: mocks.createArtifact,
@@ -21,12 +22,14 @@ vi.mock('./context-impact.service', () => ({
   markNovelContextChanged: mocks.markNovelContextChanged,
 }))
 
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { creativeStages, novels } from '../database/schema'
 import {
   approveCreativeStageHandoff,
   createCreativeStageHandoff,
+  resolveCreativeStageHandoffStatus,
   reviewCreativeStageHandoff,
+  upsertCreativeStageAsset,
 } from './creative-stage.service'
 
 const stage = {
@@ -71,6 +74,9 @@ function installDbMock() {
     })),
   }
   vi.mocked(getDb).mockReturnValue(db as never)
+  vi.mocked(getSqlite).mockReturnValue({
+    transaction: vi.fn((run: () => unknown) => () => run()),
+  } as never)
 }
 
 const handoff = {
@@ -145,5 +151,35 @@ describe('creative stage handoff artifacts', () => {
     mocks.updateArtifactLifecycle.mockReturnValue(approved)
     expect(approveCreativeStageHandoff(handoff.id).status).toBe('approved')
     expect(mocks.updateArtifactLifecycle).toHaveBeenLastCalledWith(handoff.id, { status: 'approved' })
+    expect(vi.mocked(getSqlite).mock.results[0]?.value.transaction).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a bound canonical asset that does not belong to the stage novel', () => {
+    expect(() => upsertCreativeStageAsset({
+      stageId: 11,
+      assetType: 'outline',
+      assetId: 999,
+      placeholderName: '其他项目的章节',
+      role: 'handoff',
+      detailLevel: 'canonical',
+      status: 'active',
+    })).toThrow('阶段资产不存在')
+  })
+
+  it('keeps the effective handoff approved while a newer draft waits for review', () => {
+    expect(resolveCreativeStageHandoffStatus({
+      hasCurrentApprovedHandoff: true,
+      latestApprovedContextVersion: 7,
+      projectContextVersion: 7,
+      latestArtifactStatus: 'draft',
+      hasLegacyHandoff: false,
+    })).toBe('approved')
+    expect(resolveCreativeStageHandoffStatus({
+      hasCurrentApprovedHandoff: false,
+      latestApprovedContextVersion: 6,
+      projectContextVersion: 7,
+      latestArtifactStatus: 'draft',
+      hasLegacyHandoff: false,
+    })).toBe('stale')
   })
 })

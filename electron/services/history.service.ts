@@ -22,6 +22,7 @@ import {
   type ChapterNumberReferenceSnapshot,
 } from './chapter-number-remap.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 
 type OperationEntityType = 'chapter' | 'thread' | 'timeline'
 type OperationType = 'batch_update' | 'batch_delete' | 'batch_reindex'
@@ -103,7 +104,7 @@ function stringifyPayload(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function toChapterMutation(snapshot: Chapter) {
+function toChapterMutation(snapshot: Chapter, fallbackTargetWords: number) {
   return {
     novelId: snapshot.novelId,
     volumeId: snapshot.volumeId ?? null,
@@ -121,7 +122,9 @@ function toChapterMutation(snapshot: Chapter) {
     status: snapshot.status,
     aiScoreJson: snapshot.aiScoreJson ?? null,
     arcId: snapshot.arcId ?? null,
-    targetWords: snapshot.targetWords ?? 3000,
+    targetWords: typeof snapshot.targetWords === 'number' && Number.isFinite(snapshot.targetWords) && snapshot.targetWords > 0
+      ? Math.round(snapshot.targetWords)
+      : fallbackTargetWords,
     emotionTone: snapshot.emotionTone ?? null,
     compiledFromSegments: snapshot.compiledFromSegments ?? 0,
     segmentCount: snapshot.segmentCount ?? 0,
@@ -234,15 +237,22 @@ function recalculateNovelWordCount(novelId: number) {
 
 function upsertChapterSnapshot(snapshot: Chapter) {
   const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, snapshot.novelId)).all()[0] || null
+  const fallbackTargetWords = getRecommendedChapterWordsForOperatingMode({
+    launchMode: novel?.launchMode,
+    targetWords: novel?.targetWords,
+    settingsJson: novel?.settingsJson,
+  })
+  const mutation = toChapterMutation(snapshot, fallbackTargetWords)
   const current = db.select().from(chapters).where(eq(chapters.id, snapshot.id)).all()[0] || null
   if (current) {
-    db.update(chapters).set(toChapterMutation(snapshot)).where(eq(chapters.id, snapshot.id)).run()
+    db.update(chapters).set(mutation).where(eq(chapters.id, snapshot.id)).run()
     return
   }
 
   db.insert(chapters).values({
     id: snapshot.id,
-    ...toChapterMutation(snapshot),
+    ...mutation,
   }).run()
 }
 

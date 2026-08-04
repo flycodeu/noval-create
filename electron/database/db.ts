@@ -38,6 +38,7 @@ export function initDb(): AppDatabase {
 
   _sqlite = new Database(dbPath)
   _sqlite.pragma('journal_mode = WAL')
+  _sqlite.pragma('busy_timeout = 5000')
   _sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(_sqlite, { schema })

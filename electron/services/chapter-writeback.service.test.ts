@@ -55,7 +55,12 @@ import {
   chapters,
   novels,
 } from '../database/schema'
-import { applyChapterWritebackRun, prepareChapterWritebackRun } from './chapter-writeback.service'
+import {
+  applyChapterWritebackRun,
+  bulkUpdateChapterWritebackDecisions,
+  prepareChapterWritebackRun,
+  updateChapterWritebackDecision,
+} from './chapter-writeback.service'
 import * as storyThreadService from './story-thread.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -295,7 +300,7 @@ describe('applyChapterWritebackRun', () => {
     expect(String(novel.canonSourceLedgerJson || '[]')).toContain('林远记得旧仓暗格的位置。')
   })
 
-  it('syncs extract-only source usage back into novel-level ledger fields even when no diff is applied', async () => {
+  it('keeps extract-only source usage out of the canonical ledger when no diff is applied', async () => {
     const rows = createRows()
     const run = rows.get(chapterWritebackRuns)?.[0]
     const diff = rows.get(chapterWritebackDiffs)?.[0]
@@ -355,7 +360,70 @@ describe('applyChapterWritebackRun', () => {
     ]))
     expect(factProvenance).toEqual([])
     expect(canonCards).toEqual([])
-    expect(String(novel.canonSourceLedgerJson || '[]')).toContain('旧仓库药箱线再次被提起。')
+    expect(JSON.parse(String(novel.canonSourceLedgerJson || '[]'))).toEqual([])
+  })
+
+  it('does not attach multiple unmatched extracts to one accepted diff', async () => {
+    const rows = createRows()
+    const run = rows.get(chapterWritebackRuns)?.[0]
+    const diff = rows.get(chapterWritebackDiffs)?.[0]
+    const novel = rows.get(novels)?.[0]
+
+    if (!run || !diff || !novel) {
+      throw new Error('test fixture missing run, diff, or novel row')
+    }
+
+    Object.assign(run, { sourceChapterVersion: 4 })
+    Object.assign(diff, {
+      afterStateJson: '{"title":"尚未对应的第三条线索"}',
+      canonDecision: 'accepted',
+      writebackStatus: 'pending',
+    })
+    rows.set(chapterFactExtracts, [
+      {
+        id: 43,
+        runId: 21,
+        assetType: 'thread',
+        sourceText: '旧仓甲线索被再次提及。',
+        factJson: '{"title":"旧仓甲线索"}',
+        confidence: 0.8,
+        verificationStatus: 'auto_ready',
+        sortOrder: 0,
+        createdAt: '2026-05-04T00:00:00.000Z',
+        updatedAt: '2026-05-04T00:00:00.000Z',
+      },
+      {
+        id: 44,
+        runId: 21,
+        assetType: 'thread',
+        sourceText: '旧仓乙线索被再次提及。',
+        factJson: '{"title":"旧仓乙线索"}',
+        confidence: 0.79,
+        verificationStatus: 'auto_ready',
+        sortOrder: 1,
+        createdAt: '2026-05-04T00:00:00.000Z',
+        updatedAt: '2026-05-04T00:00:00.000Z',
+      },
+    ])
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = await applyChapterWritebackRun(21)
+    const sourceLedger = JSON.parse(String(novel.sourceLedgerJson || '[]'))
+    const canonicalSourceLedger = JSON.parse(String(novel.canonSourceLedgerJson || '[]'))
+    const factProvenance = JSON.parse(String(novel.factProvenanceJson || '[]'))
+
+    expect(result.activeRun?.status).toBe('applied')
+    expect(sourceLedger).toHaveLength(2)
+    expect(sourceLedger.every((entry: { supportingDiffIds: number[] }) => entry.supportingDiffIds.length === 0)).toBe(true)
+    expect(canonicalSourceLedger).toEqual([])
+    expect(factProvenance).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        diffId: 31,
+        supportingExtractIds: [],
+        sourceTexts: [],
+      }),
+    ]))
   })
 
   it('does not update an entity id that belongs to another novel', async () => {
@@ -387,6 +455,55 @@ describe('applyChapterWritebackRun', () => {
       expect.objectContaining({ title: '跨小说候选线' }),
       { skipContextTracking: true },
     )
+  })
+})
+
+describe('chapter writeback decision locking', () => {
+  beforeEach(() => {
+    vi.mocked(getDb).mockReset()
+    vi.mocked(getSqlite).mockReset()
+    vi.mocked(getSqlite).mockImplementation(() => ({
+      transaction: (callback: () => unknown) => callback,
+    }) as never)
+  })
+
+  it('blocks a decision change after the run enters applying', async () => {
+    const rows = createRows()
+    const run = rows.get(chapterWritebackRuns)?.[0]
+    const diff = rows.get(chapterWritebackDiffs)?.[0]
+    if (!run || !diff) throw new Error('test fixture missing run or diff')
+    Object.assign(run, { status: 'applying' })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    await expect(updateChapterWritebackDecision(31, { canonDecision: 'rejected' }))
+      .rejects.toMatchObject({ code: 'chapterWriteback.decisionLocked' })
+    expect(diff.canonDecision).toBe('accepted')
+  })
+
+  it('marks an edited payload as edited inside the decision transaction', async () => {
+    const rows = createRows()
+    const run = rows.get(chapterWritebackRuns)?.[0]
+    const diff = rows.get(chapterWritebackDiffs)?.[0]
+    if (!run || !diff) throw new Error('test fixture missing run or diff')
+    Object.assign(run, { status: 'ready' })
+    Object.assign(diff, { canonDecision: 'pending' })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const updated = await updateChapterWritebackDecision(31, {
+      afterStateJson: '{"title":"人工修订后的线索"}',
+    })
+
+    expect(updated.canonDecision).toBe('edited')
+    expect(updated.afterStateJson).toBe('{"title":"人工修订后的线索"}')
+  })
+
+  it('rejects an invalid bulk decision at the service boundary', async () => {
+    const rows = createRows()
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    await expect(bulkUpdateChapterWritebackDecisions(21, {
+      canonDecision: 'pending',
+    } as never)).rejects.toMatchObject({ code: 'chapterWriteback.decisionInvalid' })
   })
 })
 

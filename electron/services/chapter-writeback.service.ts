@@ -368,6 +368,12 @@ function normalizeDecision(value: unknown): ChapterWritebackDecision {
   return 'pending'
 }
 
+function parseDecision(value: unknown): ChapterWritebackDecision | null {
+  const text = asText(value)
+  if (text === 'pending' || text === 'accepted' || text === 'rejected' || text === 'edited') return text
+  return null
+}
+
 function parseWritebackSyncStatus(raw: string | null | undefined, contextVersion = 1): WritebackSyncStatus {
   let parsed: unknown
   try {
@@ -442,6 +448,14 @@ function mapRunRow(row: ChapterWritebackRunRow): AppChapterWritebackRun {
 }
 
 const WRITEBACK_APPLY_STALE_MS = 5 * 60 * 1000
+
+function runImmediateTransaction<T>(work: () => T): T {
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(work)
+  return sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
+}
 
 function buildDefaultWritebackApplyKey(runId: number, retryFailedOnly: boolean): string {
   return `chapter-writeback-${retryFailedOnly ? 'retry' : 'apply'}:${runId}`
@@ -1255,13 +1269,18 @@ function findSupportingExtracts(
 
   const afterState = parseJsonObject(diff.afterStateJson)
   const targetKey = normalizeKey(resolveFactTitle(afterState))
-  if (!targetKey) return sameAssetExtracts
+  if (!targetKey) return sameAssetExtracts.length === 1 ? sameAssetExtracts : []
 
   const exactMatches = sameAssetExtracts.filter((entry) => {
     const fact = parseJsonObject(entry.factJson)
     return normalizeKey(resolveFactTitle(fact)) === targetKey
   })
-  return exactMatches.length > 0 ? exactMatches : sameAssetExtracts
+  if (exactMatches.length > 0) return exactMatches
+
+  // Do not let one accepted diff canonize every extract of the same asset type.
+  // A single extract is an unambiguous fallback; multiple unmatched extracts
+  // must remain observational source evidence until one is explicitly approved.
+  return sameAssetExtracts.length === 1 ? sameAssetExtracts : []
 }
 
 function buildNovelSourceLedgerEntries(
@@ -1370,68 +1389,74 @@ function buildNovelCanonFactCardEntries(
 }
 
 function syncNovelSourceCanonWriteback(chapter: ChapterRow, run: ChapterWritebackRunRow): void {
-  const db = getDb()
-  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0] || null
-  if (!novel) return
+  runImmediateTransaction(() => {
+    const db = getDb()
+    // Re-read inside a write-reserved transaction. Concurrent chapter applies
+    // for the same novel must merge with the latest ledger instead of both
+    // reading an old snapshot and letting the last writer erase prior entries.
+    const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0] || null
+    if (!novel) return
 
-  const extracts = loadExtractRows(run.id).map(mapExtractRow)
-  const appliedDiffs = loadDiffRows(run.id)
-    .map(mapDiffRow)
-    .filter((row) => (row.canonDecision === 'accepted' || row.canonDecision === 'edited') && row.writebackStatus === 'applied')
+    const extracts = loadExtractRows(run.id).map(mapExtractRow)
+    const appliedDiffs = loadDiffRows(run.id)
+      .map(mapDiffRow)
+      .filter((row) => (row.canonDecision === 'accepted' || row.canonDecision === 'edited') && row.writebackStatus === 'applied')
 
-  if (extracts.length === 0 && appliedDiffs.length === 0) return
+    if (extracts.length === 0 && appliedDiffs.length === 0) return
 
-  const recordedAt = new Date().toISOString()
-  const sourceLedgerEntries = buildNovelSourceLedgerEntries(chapter, run, extracts, appliedDiffs, recordedAt)
-  const provenanceEntries = buildNovelFactProvenanceEntries(chapter, run, extracts, appliedDiffs, recordedAt)
-  const canonFactCards = buildNovelCanonFactCardEntries(chapter, run, provenanceEntries)
-  const chapterUsage: NovelChapterSourceUsageEntry = {
-    usageKey: `chapter:${chapter.id}`,
-    chapterId: chapter.id,
-    chapterNum: chapter.chapterNum,
-    runId: run.id,
-    extractedCount: extracts.length,
-    appliedDiffCount: appliedDiffs.length,
-    assetTypes: [...new Set([...extracts.map((entry) => entry.assetType), ...appliedDiffs.map((entry) => entry.assetType)])],
-    sourceKeys: sourceLedgerEntries.map((entry) => entry.sourceKey),
-    canonFactCardKeys: canonFactCards.map((entry) => entry.cardKey),
-    diffIds: appliedDiffs.map((entry) => entry.id),
-    recordedAt,
-  }
+    const recordedAt = new Date().toISOString()
+    const sourceLedgerEntries = buildNovelSourceLedgerEntries(chapter, run, extracts, appliedDiffs, recordedAt)
+    const canonicalSourceLedgerEntries = sourceLedgerEntries.filter((entry) => entry.supportingDiffIds.length > 0)
+    const provenanceEntries = buildNovelFactProvenanceEntries(chapter, run, extracts, appliedDiffs, recordedAt)
+    const canonFactCards = buildNovelCanonFactCardEntries(chapter, run, provenanceEntries)
+    const chapterUsage: NovelChapterSourceUsageEntry = {
+      usageKey: `chapter:${chapter.id}`,
+      chapterId: chapter.id,
+      chapterNum: chapter.chapterNum,
+      runId: run.id,
+      extractedCount: extracts.length,
+      appliedDiffCount: appliedDiffs.length,
+      assetTypes: [...new Set([...extracts.map((entry) => entry.assetType), ...appliedDiffs.map((entry) => entry.assetType)])],
+      sourceKeys: sourceLedgerEntries.map((entry) => entry.sourceKey),
+      canonFactCardKeys: canonFactCards.map((entry) => entry.cardKey),
+      diffIds: appliedDiffs.map((entry) => entry.id),
+      recordedAt,
+    }
 
-  db.update(novels).set({
-    sourceLedgerJson: upsertJsonRecordArray(
-      novel.sourceLedgerJson,
-      sourceLedgerEntries as unknown as Record<string, unknown>[],
-      'sourceKey',
-      400,
-    ),
-    chapterSourceUsageJson: upsertJsonRecordArray(
-      novel.chapterSourceUsageJson,
-      [chapterUsage as unknown as Record<string, unknown>],
-      'usageKey',
-      160,
-    ),
-    factProvenanceJson: upsertJsonRecordArray(
-      novel.factProvenanceJson,
-      provenanceEntries as unknown as Record<string, unknown>[],
-      'provenanceKey',
-      600,
-    ),
-    canonSourceLedgerJson: upsertJsonRecordArray(
-      novel.canonSourceLedgerJson,
-      sourceLedgerEntries as unknown as Record<string, unknown>[],
-      'sourceKey',
-      400,
-    ),
-    canonFactCardsJson: upsertJsonRecordArray(
-      novel.canonFactCardsJson,
-      canonFactCards as unknown as Record<string, unknown>[],
-      'cardKey',
-      400,
-    ),
-    updatedAt: recordedAt,
-  }).where(eq(novels.id, chapter.novelId)).run()
+    db.update(novels).set({
+      sourceLedgerJson: upsertJsonRecordArray(
+        novel.sourceLedgerJson,
+        sourceLedgerEntries as unknown as Record<string, unknown>[],
+        'sourceKey',
+        400,
+      ),
+      chapterSourceUsageJson: upsertJsonRecordArray(
+        novel.chapterSourceUsageJson,
+        [chapterUsage as unknown as Record<string, unknown>],
+        'usageKey',
+        160,
+      ),
+      factProvenanceJson: upsertJsonRecordArray(
+        novel.factProvenanceJson,
+        provenanceEntries as unknown as Record<string, unknown>[],
+        'provenanceKey',
+        600,
+      ),
+      canonSourceLedgerJson: upsertJsonRecordArray(
+        novel.canonSourceLedgerJson,
+        canonicalSourceLedgerEntries as unknown as Record<string, unknown>[],
+        'sourceKey',
+        400,
+      ),
+      canonFactCardsJson: upsertJsonRecordArray(
+        novel.canonFactCardsJson,
+        canonFactCards as unknown as Record<string, unknown>[],
+        'cardKey',
+        400,
+      ),
+      updatedAt: recordedAt,
+    }).where(eq(novels.id, chapter.novelId)).run()
+  })
 }
 
 function hasNovelSourceCanonWritebackPayload(runId: number): boolean {
@@ -1518,9 +1543,19 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
       ))
       .all()[0]
     if (!activeRun) throwUserFacingError('chapterWriteback.runInvalidated')
-    const entityId = applySingleDiff(row, chapter)
+    const current = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, row.id)).all()[0]
+    const currentDecision = current ? normalizeDecision(current.canonDecision) : 'pending'
+    if (
+      !current
+      || current.runId !== row.runId
+      || (currentDecision !== 'accepted' && currentDecision !== 'edited')
+      || current.writebackStatus === 'applied'
+    ) {
+      throwUserFacingError('chapterWriteback.decisionLocked')
+    }
+    const entityId = applySingleDiff(current, chapter)
     const result = db.update(chapterWritebackDiffs).set({
-      entityId: entityId ?? row.entityId,
+      entityId: entityId ?? current.entityId,
       writebackStatus: 'applied',
       writebackError: null,
       updatedAt: new Date().toISOString(),
@@ -1727,48 +1762,66 @@ export async function updateChapterWritebackDecision(
   diffId: number,
   patch: { canonDecision?: ChapterWritebackDecision; afterStateJson?: string; diffReason?: string },
 ): Promise<AppChapterWritebackDiff> {
-  const db = getDb()
-  const current = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
-  if (!current) throwUserFacingError('common.notFound')
-  if (current.writebackStatus === 'applied') {
-    throwUserFacingError('chapterWriteback.appliedImmutable')
-  }
-  let nextAfterStateJson = current.afterStateJson
   if (patch.afterStateJson !== undefined) {
     if (!parseJsonObject(patch.afterStateJson)) throwUserFacingError('chapterWriteback.afterStateJsonObjectRequired')
-    nextAfterStateJson = patch.afterStateJson
   }
-  db.update(chapterWritebackDiffs).set({
-    canonDecision: patch.canonDecision !== undefined ? normalizeDecision(patch.canonDecision) : (patch.afterStateJson !== undefined ? 'edited' : current.canonDecision),
-    afterStateJson: nextAfterStateJson,
-    diffReason: patch.diffReason !== undefined ? asText(patch.diffReason) : current.diffReason,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterWritebackDiffs.id, diffId)).run()
-  if (patch.canonDecision && patch.canonDecision !== 'pending') {
-    resolveVerificationTask(current.runId, current.id)
-  }
-  refreshRunSummary(current.runId)
-  const updated = getDb().select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
-  if (!updated) throwUserFacingError('common.notFound')
-  return mapDiffRow(updated)
+  const explicitDecision = patch.canonDecision === undefined ? undefined : parseDecision(patch.canonDecision)
+  if (patch.canonDecision !== undefined && !explicitDecision) throwUserFacingError('chapterWriteback.decisionInvalid')
+
+  return runImmediateTransaction(() => {
+    const db = getDb()
+    const current = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
+    if (!current) throwUserFacingError('common.notFound')
+    if (current.writebackStatus === 'applied') throwUserFacingError('chapterWriteback.appliedImmutable')
+    const run = db.select({ status: chapterWritebackRuns.status })
+      .from(chapterWritebackRuns)
+      .where(eq(chapterWritebackRuns.id, current.runId))
+      .all()[0]
+    if (!run) throwUserFacingError('common.notFound')
+    if (run.status === 'applying' || run.status === 'applied') throwUserFacingError('chapterWriteback.decisionLocked')
+
+    const nextDecision = explicitDecision
+      ?? (patch.afterStateJson !== undefined ? 'edited' : normalizeDecision(current.canonDecision))
+    db.update(chapterWritebackDiffs).set({
+      canonDecision: nextDecision,
+      afterStateJson: patch.afterStateJson ?? current.afterStateJson,
+      diffReason: patch.diffReason !== undefined ? asText(patch.diffReason) : current.diffReason,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapterWritebackDiffs.id, diffId)).run()
+    if (nextDecision !== 'pending') resolveVerificationTask(current.runId, current.id)
+    refreshRunSummary(current.runId)
+    const updated = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
+    if (!updated) throwUserFacingError('common.notFound')
+    return mapDiffRow(updated)
+  })
 }
 
 export async function bulkUpdateChapterWritebackDecisions(
   runId: number,
   patch: { canonDecision: Exclude<ChapterWritebackDecision, 'pending'>; assetType?: ChapterWritebackAssetType },
 ): Promise<AppChapterWritebackDiff[]> {
-  const rows = loadDiffRows(getRunRow(runId).id)
-    .filter((item) => !patch.assetType || item.assetType === patch.assetType)
-    .filter((item) => item.writebackStatus !== 'applied')
-  rows.forEach((row) => {
-    getDb().update(chapterWritebackDiffs).set({
-      canonDecision: patch.canonDecision,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapterWritebackDiffs.id, row.id)).run()
-    resolveVerificationTask(row.runId, row.id)
+  const decision = parseDecision(patch.canonDecision)
+  if (!decision || decision === 'pending') throwUserFacingError('chapterWriteback.decisionInvalid')
+  const assetType = patch.assetType === undefined ? undefined : normalizeAssetType(patch.assetType)
+  if (patch.assetType !== undefined && !assetType) throwUserFacingError('chapterWriteback.assetTypeInvalid')
+
+  return runImmediateTransaction(() => {
+    const run = getRunRow(runId)
+    if (run.status === 'applying' || run.status === 'applied') throwUserFacingError('chapterWriteback.decisionLocked')
+    const rows = loadDiffRows(run.id)
+      .filter((item) => !assetType || item.assetType === assetType)
+      .filter((item) => item.writebackStatus !== 'applied')
+    const updatedAt = new Date().toISOString()
+    rows.forEach((row) => {
+      getDb().update(chapterWritebackDiffs).set({
+        canonDecision: decision,
+        updatedAt,
+      }).where(eq(chapterWritebackDiffs.id, row.id)).run()
+      resolveVerificationTask(row.runId, row.id)
+    })
+    refreshRunSummary(run.id)
+    return loadDiffRows(run.id).map(mapDiffRow)
   })
-  refreshRunSummary(runId)
-  return loadDiffRows(runId).map(mapDiffRow)
 }
 
 async function executeRunApply(
@@ -1870,7 +1923,6 @@ async function executeRunApply(
   }
 
   let appliedCount = 0
-  let failedCount = 0
   targetRows.forEach((row) => {
     try {
       applySingleDiffAtomically(row, chapter)
@@ -1883,40 +1935,57 @@ async function executeRunApply(
         updatedAt: new Date().toISOString(),
       }).where(eq(chapterWritebackDiffs.id, row.id)).run()
       createWritebackFailureTask(run, row, chapter, rendererError)
-      failedCount += 1
     }
   })
 
-  // Source/provenance ledgers are idempotent upserts. Finish them while the
-  // run is still in `applying`, so stale-run recovery can safely repeat the
-  // sync if the process dies before the final run status is persisted.
-  if (hasNovelSourceCanonWritebackPayload(run.id)) {
-    syncNovelSourceCanonWriteback(chapter, run)
-  }
-  db.update(chapterWritebackRuns).set({
-    status: failedCount === 0 ? 'applied' : appliedCount > 0 ? 'partially_failed' : 'failed',
-    retryCount: run.retryCount || 0,
-    lastAttemptAt: new Date().toISOString(),
-    completedAt: new Date().toISOString(),
-    failedAt: failedCount > 0 ? new Date().toISOString() : null,
-    errorMessage: failedCount > 0 ? `共有 ${failedCount} 条回写失败` : null,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterWritebackRuns.id, run.id)).run()
-  updateChapterWritebackSyncStatus(chapter.id, {
-    phase: failedCount === 0 ? 'applied' : 'failed',
-    runId: run.id,
-    blockedGeneration: failedCount > 0,
-    readyForNextChapter: failedCount === 0,
-    lastError: failedCount > 0 ? `共有 ${failedCount} 条回写失败` : undefined,
-    lastAttemptAt: new Date().toISOString(),
-    retryCount: run.retryCount || 0,
-    contextVersion: chapter.contextVersion || 1,
+  const finalDiffs = loadDiffRows(run.id).map(mapDiffRow)
+  const totalAppliedCount = finalDiffs.filter((row) => row.writebackStatus === 'applied').length
+  const totalFailedCount = finalDiffs.filter((row) => row.writebackStatus === 'failed').length
+  const finalStatus = totalFailedCount === 0
+    ? 'applied'
+    : totalAppliedCount > 0
+      ? 'partially_failed'
+      : 'failed'
+  const errorMessage = totalFailedCount > 0 ? `共有 ${totalFailedCount} 条回写失败` : null
+  // A stale `applying` run may have committed diff rows just before its process
+  // died. In that recovery path appliedCount is zero, but the context bump was
+  // never committed; use the durable diff state to finish it exactly once.
+  const shouldMarkContextChanged = appliedCount > 0
+    || (run.status === 'applying' && totalAppliedCount > 0)
+
+  // Ledger merge, terminal status, chapter unlock and context invalidation form
+  // one recoverable commit. If any part fails the run stays `applying`; stale
+  // recovery can safely finish it without losing a context-version increment.
+  runImmediateTransaction(() => {
+    if (hasNovelSourceCanonWritebackPayload(run.id)) {
+      syncNovelSourceCanonWriteback(chapter, run)
+    }
+    const finalizedAt = new Date().toISOString()
+    db.update(chapterWritebackRuns).set({
+      status: finalStatus,
+      retryCount: run.retryCount || 0,
+      lastAttemptAt: finalizedAt,
+      completedAt: finalizedAt,
+      failedAt: totalFailedCount > 0 ? finalizedAt : null,
+      errorMessage,
+      updatedAt: finalizedAt,
+    }).where(eq(chapterWritebackRuns.id, run.id)).run()
+    updateChapterWritebackSyncStatus(chapter.id, {
+      phase: totalFailedCount === 0 ? 'applied' : 'failed',
+      runId: run.id,
+      blockedGeneration: totalFailedCount > 0,
+      readyForNextChapter: totalFailedCount === 0,
+      lastError: errorMessage || undefined,
+      lastAttemptAt: finalizedAt,
+      retryCount: run.retryCount || 0,
+      contextVersion: chapter.contextVersion || 1,
+    })
+    if (shouldMarkContextChanged) {
+      markNovelContextChanged(chapter.novelId, 'Chapter writeback applied')
+      resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
+    }
+    refreshRunSummary(run.id)
   })
-  if (appliedCount > 0) {
-    markNovelContextChanged(chapter.novelId, 'Chapter writeback applied')
-    resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
-  }
-  refreshRunSummary(run.id)
   return getChapterWritebackCenterData(run.chapterId, run.id)
 }
 

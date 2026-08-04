@@ -162,7 +162,35 @@ async function runMain() {
     `).get(novelId, '幂等测试线索')
     assert.equal(replayRun.apply_lock_version, 1)
     assert.equal(replayThreads.count, 1)
-    console.log('PASS chapter writeback idempotency: concurrent apply is one-shot and replay does not mutate again')
+
+    const retryChapterVersion = sqlite.prepare('SELECT context_version FROM chapters WHERE id = ?').get(chapterId).context_version || 1
+    const retryRunResult = sqlite.prepare(`
+      INSERT INTO chapter_writeback_runs
+        (novel_id, chapter_id, status, trigger_source, retry_count, source_chapter_version, started_at, created_at, updated_at)
+      VALUES (?, ?, 'partially_failed', 'retry-state-test', 1, ?, ?, ?, ?)
+    `).run(novelId, chapterId, retryChapterVersion, now, now, now)
+    const retryRunId = Number(retryRunResult.lastInsertRowid)
+    sqlite.prepare(`
+      INSERT INTO chapter_writeback_diffs
+        (run_id, asset_type, entity_type, after_state_json, diff_reason, confidence, verification_status, canon_decision, writeback_status, sort_order, created_at, updated_at)
+      VALUES (?, 'thread', 'story-thread', ?, '此前已成功', 0.95, 'auto_ready', 'accepted', 'applied', 1, ?, ?)
+    `).run(retryRunId, JSON.stringify({ title: '此前成功的线索' }), now, now)
+    sqlite.prepare(`
+      INSERT INTO chapter_writeback_diffs
+        (run_id, asset_type, entity_type, after_state_json, diff_reason, confidence, verification_status, canon_decision, writeback_status, writeback_error, sort_order, created_at, updated_at)
+      VALUES (?, 'thread', 'story-thread', '{}', '故意缺少标题', 0.95, 'auto_ready', 'accepted', 'failed', '首次失败', 2, ?, ?)
+    `).run(retryRunId, now, now)
+
+    const retryResult = await writebackService.retryFailedWritebackItems(retryRunId, {
+      idempotencyKey: 'chapter-writeback-retry-state-test-1',
+    })
+    assert.equal(retryResult.activeRun.status, 'partially_failed')
+    assert.equal(
+      sqlite.prepare('SELECT status FROM chapter_writeback_runs WHERE id = ?').get(retryRunId).status,
+      'partially_failed',
+    )
+
+    console.log('PASS chapter writeback idempotency: concurrent apply is one-shot, replay is stable, and retry preserves partial failure state')
   } finally {
     closeDb()
     fs.rmSync(tempRoot, { recursive: true, force: true })

@@ -396,10 +396,10 @@ export default function StagePlanner({ novelId }: Props) {
       })
       if (!result.ok) throw new Error(result.error.message)
       const data = result.data as { report?: StageQualityReportView }
-      if (!data.report) throw new Error('质量工具没有返回阶段报告。')
+      if (!data.report) throw new Error(getUserFacingMessage('creativeStage.qualityReportMissing'))
       setStageQualityReport(data.report)
       await loadStageQualityHistory(selectedStage.id)
-      message.success('阶段质量评审报告已生成；正文未被修改。')
+      message.success(getUserFacingMessage('creativeStage.qualityReportGenerated'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {

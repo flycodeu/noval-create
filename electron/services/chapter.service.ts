@@ -12,6 +12,7 @@ import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
 import { assessHistoricalGrounding } from '../../src/shared/genre-system'
 import { countUnresolvedTypedRefs, hasTypedRefOverlay } from '../../src/shared/typed-ref'
 import { getOperatingModeRuntimePolicy, getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
+import { resolveChapterPipelineResumeMode } from '../../src/shared/chapter-resume-policy'
 import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
@@ -38,6 +39,7 @@ import { getQualityDashboardData } from './quality-dashboard.service'
 import { syncNovelLifecycleStatus } from './novel-lifecycle.service'
 import { buildChapterGenerationRequestKey, isRetryableChapterGenerationStatus } from './chapter-generation-idempotency'
 import {
+  cancelTask,
   createTask,
   executeChatTask,
   executeStreamTask,
@@ -174,7 +176,10 @@ import {
   isCandidateTooSimilar,
 } from './variation-control.service'
 import { resolveWriterOrchestratedContext } from './writer-context-orchestrator.service'
-import { enrichSourceGroundingFromWeb } from './source-grounding-search.service'
+import {
+  enrichSourceGroundingFromWeb,
+  mergeSourceGroundingEnrichmentIntoCurrent,
+} from './source-grounding-search.service'
 import type {
   AiContextAssemblyReport,
   AiExecutionMode,
@@ -322,11 +327,18 @@ interface ChapterSummaryData {
   nextChapterSeed: string
 }
 
-function resolveChapterReferenceWords(chapterWords?: number | null, novelWords?: number | null): number {
+function resolveChapterReferenceWords(
+  chapterWords: number | null | undefined,
+  novel: { launchMode?: string | null; targetWords?: number | null; settingsJson?: string | null },
+): number {
   const explicit = typeof chapterWords === 'number' && Number.isFinite(chapterWords) && chapterWords > 0
     ? Math.round(chapterWords)
     : 0
-  return explicit || getRecommendedChapterWordsForOperatingMode({ targetWords: novelWords })
+  return explicit || getRecommendedChapterWordsForOperatingMode({
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+  })
 }
 
 type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
@@ -336,6 +348,7 @@ type ChapterPipelineFailureCode =
   | 'contract_blocked'
   | 'context_overflow'
   | 'empty_output'
+  | 'invalid_output'
   | 'anti_ai_failed'
   | 'gate_rewrite_required'
   | 'canon_pending'
@@ -397,6 +410,18 @@ interface ChapterPipelineSnapshot {
   resumeReason?: 'failed' | 'cancelled' | 'timeout' | 'network' | 'unknown'
   resumeSourceTaskId?: number
   roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
+}
+
+function parseChapterPipelineSnapshot(value: string | null | undefined): Partial<ChapterPipelineSnapshot> | null {
+  if (!value?.trim()) return null
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object'
+      ? parsed as Partial<ChapterPipelineSnapshot>
+      : null
+  } catch {
+    return null
+  }
 }
 
 interface ChapterGenerationProgressEvent {
@@ -560,6 +585,7 @@ function buildChapterPipelineRecoveryHint(
   if (
     failureCode === 'context_overflow'
     || failureCode === 'empty_output'
+    || failureCode === 'invalid_output'
     || failureCode === 'anti_ai_failed'
     || failureCode === 'gate_rewrite_required'
     || failureCode === 'human_review_required'
@@ -1623,7 +1649,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           hardConstraintContext: input.context.hardConstraintContext,
           dialogueVoiceLocks: input.context.dialogueVoiceLocks,
           emotionTone: input.chapter.emotionTone || '平稳',
-          targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel.targetWords),
+          targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel),
           storyCore: input.storyCore,
           writingContractSummary: input.context.writingContractSummary,
           relationSummary: input.context.relationSummary,
@@ -1717,7 +1743,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               hardConstraintContext: input.context.hardConstraintContext,
               dialogueVoiceLocks: input.context.dialogueVoiceLocks,
               emotionTone: input.chapter.emotionTone || '平稳',
-              targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel.targetWords),
+              targetWords: resolveChapterReferenceWords(input.chapter.targetWords, input.novel),
               storyCore: input.storyCore,
               writingContractSummary: input.context.writingContractSummary,
               relationSummary: input.context.relationSummary,
@@ -1974,14 +2000,57 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   return { summary, continuity, summaryHealth }
 }
 
-async function finalizeGeneratedChapterContent(chapterId: number, content: string) {
-  updateChapter(chapterId, {
+function updatePipelineChapterContent(
+  chapterId: number,
+  expectedContent: string,
+  expectedNovelContextVersion: number,
+  data: {
+    content: string
+    status: string
+    reviewNotesJson?: string
+  },
+  versionSource: ChapterVersionSource | false = false,
+): string {
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    const current = getDb().select({ content: chapters.content, novelId: chapters.novelId })
+      .from(chapters)
+      .where(eq(chapters.id, chapterId))
+      .all()[0]
+    if (!current) throwUserFacingError('chapter.notFound')
+    if ((current.content || '') !== expectedContent) {
+      throwUserFacingError('chapter.pipelineContentConflict')
+    }
+    const currentNovel = getDb().select({ contextVersion: novels.contextVersion })
+      .from(novels)
+      .where(eq(novels.id, current.novelId))
+      .all()[0]
+    if (!currentNovel) throwUserFacingError('novel.notFound')
+    if ((currentNovel.contextVersion || 1) !== expectedNovelContextVersion) {
+      throwUserFacingError('chapter.pipelineContextConflict')
+    }
+    updateChapter(chapterId, data, {
+      skipStaleTracking: true,
+      versionSource,
+      allowDuringGeneration: true,
+    })
+    return data.content
+  })
+  return sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
+}
+
+async function finalizeGeneratedChapterContent(
+  chapterId: number,
+  content: string,
+  expectedContent: string,
+  expectedNovelContextVersion: number,
+) {
+  updatePipelineChapterContent(chapterId, expectedContent, expectedNovelContextVersion, {
     content,
     status: 'draft',
-  }, {
-    skipStaleTracking: true,
-    versionSource: 'pipeline-generate',
-  })
+  }, 'pipeline-generate')
 
   const { summary } = await refreshChapterMemory(chapterId)
   const chapter = getChapter(chapterId)
@@ -2065,6 +2134,17 @@ const CHAPTER_EXTERNAL_UPDATE_FIELDS = [
   'title', 'outline', 'content', 'summary', 'status', 'targetWords', 'emotionTone',
   'arcId', 'volumeId', 'partId', 'allowedFactIdsJson', 'revealedFactIdsJson',
 ] as const
+
+const CHAPTER_GENERATION_INPUT_FIELDS = [
+  'title', 'outline', 'content', 'targetWords', 'emotionTone', 'chapterNum',
+  'arcId', 'volumeId', 'partId', 'allowedFactIdsJson', 'revealedFactIdsJson',
+] as const
+
+function buildChapterGenerationInputFingerprint(chapter: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(CHAPTER_GENERATION_INPUT_FIELDS.map((field) => (
+    Object.prototype.hasOwnProperty.call(chapter, field) ? chapter[field] ?? null : null
+  )))).digest('hex')
+}
 
 function pickChapterFields(data: unknown, fields: readonly string[]): Record<string, unknown> {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -2353,7 +2433,7 @@ export function createChapter(novelId: number, data: Partial<{
     novelId,
     title: typeof safeData.title === 'string' ? safeData.title : undefined,
     outline: typeof safeData.outline === 'string' ? safeData.outline : undefined,
-    targetWords: typeof safeData.targetWords === 'number' ? safeData.targetWords : undefined,
+    targetWords: resolveChapterReferenceWords(safeData.targetWords, novel),
     emotionTone: typeof safeData.emotionTone === 'string' ? safeData.emotionTone : undefined,
     arcId: arcId ?? null,
     volumeId: resolvedVolumeId,
@@ -2417,6 +2497,8 @@ export function updateChapter(id: number, data: Partial<{
   skipStaleTracking?: boolean
   versionSource?: ChapterVersionSource | false
   allowChapterNumberChange?: boolean
+  /** Internal pipeline writes must still use content CAS before setting this. */
+  allowDuringGeneration?: boolean
 } = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
@@ -2449,6 +2531,24 @@ export function updateChapter(id: number, data: Partial<{
     throwUserFacingError('ipc.invalidObject', { name: 'data' })
   }
   const contentChanged = hasContentChange && safeData.content !== previous.content
+  const generationInputChanged = CHAPTER_GENERATION_INPUT_FIELDS.some((field) => (
+    Object.prototype.hasOwnProperty.call(safeData, field)
+    && safeData[field] !== previous[field]
+  ))
+  if (generationInputChanged && !options.allowDuringGeneration) {
+    const activeGeneration = db.select({ id: tasks.id }).from(tasks).where(and(
+      eq(tasks.type, 'chapter_write'),
+      eq(tasks.runnerType, 'workflow'),
+      eq(tasks.relatedEntityType, 'chapter'),
+      eq(tasks.relatedEntityId, id),
+      inArray(tasks.status, ['pending', 'running', 'cancel_requested']),
+    )).all()[0]
+    if (activeGeneration) {
+      throwUserFacingError(contentChanged
+        ? 'chapter.generationActiveContentLocked'
+        : 'chapter.generationActiveInputLocked')
+    }
+  }
   if (contentChanged) {
     // 正文变化后，所有依赖正文的结果必须重新生成；即使调用方携带 final，也不能
     // 把未经重新验收的新正文继续标记为已完成。
@@ -2704,30 +2804,35 @@ export function batchDeleteChapters(ids: number[]) {
     .where(eq(chapters.novelId, novelId))
     .all()
 
-  rows.forEach((row) => {
-    deleteChapter(row.id)
-  })
+  // A batch is one author action. Keep every chapter deletion and its undo
+  // checkpoint in the same outer transaction so a failure on a later chapter
+  // cannot leave an unlogged half-deleted batch.
+  getSqlite().transaction(() => {
+    rows.forEach((row) => {
+      deleteChapter(row.id)
+    })
 
-  createOperationLog({
-    novelId,
-    entityType: 'chapter',
-    entityIds: rows.map((row) => row.id),
-    operationType: 'batch_delete',
-    summary: `批量删除 ${rows.length} 章`,
-    batchKey: buildBatchKey('chapter-batch-delete'),
-    before: rows,
-    after: [],
-    undoPayload: {
-      kind: 'chapter.batch_delete',
+    createOperationLog({
       novelId,
-      chapters: rows,
-      segments,
-      timelineAnchors,
-      chapterNumbers,
-      chapterNumberReferences,
-      reason: '已撤销章节批量删除',
-    },
-  })
+      entityType: 'chapter',
+      entityIds: rows.map((row) => row.id),
+      operationType: 'batch_delete',
+      summary: `批量删除 ${rows.length} 章`,
+      batchKey: buildBatchKey('chapter-batch-delete'),
+      before: rows,
+      after: [],
+      undoPayload: {
+        kind: 'chapter.batch_delete',
+        novelId,
+        chapters: rows,
+        segments,
+        timelineAnchors,
+        chapterNumbers,
+        chapterNumberReferences,
+        reason: '已撤销章节批量删除',
+      },
+    })
+  })()
 
   return rows.length
 }
@@ -3239,21 +3344,16 @@ function allocateStageContextForPipeline(
       totalBudget: totalBudget || resolveContextBudgetForStage(
         promptProfile,
         complexity,
-        resolveChapterReferenceWords(chapter.targetWords, rawContext.novel.targetWords),
+        resolveChapterReferenceWords(chapter.targetWords, rawContext.novel),
         novelTargetWords,
       ),
       preserveConstraintLabels,
     })
   } catch (error) {
     if (error instanceof HardConstraintOverflowError) {
-      // review/rewrite 阶段发生在初稿已生成之后；此时上下文放不下应降级续跑，
-      // 中断只会丢掉已经花钱生成的正文。draft/scenePlan 阶段仍然中断，让用户拆章。
-      if (promptProfile === 'review' || promptProfile === 'rewrite') {
-        console.warn(
-          `[chapter:context] stage=${promptProfile} 硬约束超预算，已降级为截断注入继续执行：${error.message}`,
-        )
-        return error.context
-      }
+      // 任一阶段丢失硬约束都必须失败关闭。Writer 已生成的草稿会由
+      // failRoleTask/preserveUsableDraftForReview 保存，不能为了节省一次调用
+      // 让 Critic/Rewriter 在事实、合同或人物状态缺失时继续并最终自动过门。
       throw error
     }
     if (error instanceof ContextOverflowError) {
@@ -3510,22 +3610,33 @@ async function resolveWriterContextForStage(
     let writerRawContext = rawContext
     if (sourceGrounding.updated) {
       const recordedAt = sourceGrounding.recordedAt || new Date().toISOString()
-      db.update(novels).set({
-        sourceLedgerJson: sourceGrounding.sourceLedgerJson,
-        canonSourceLedgerJson: sourceGrounding.canonSourceLedgerJson,
-        canonFactCardsJson: sourceGrounding.canonFactCardsJson,
-        updatedAt: recordedAt,
-      }).where(eq(novels.id, chapter.novelId)).run()
-      const nextContextVersion = markNovelContextChanged(chapter.novelId, 'External source grounding updated')
+      const sqlite = getSqlite()
+      const commit = sqlite.transaction(() => {
+        // Web search is asynchronous. Merge its delta into the latest row under
+        // a write reservation so it cannot overwrite chapter writeback/source
+        // entries committed while the provider request was in flight.
+        const latestNovel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+        if (!latestNovel) throwUserFacingError('novel.notFound')
+        const merged = mergeSourceGroundingEnrichmentIntoCurrent(latestNovel, sourceGrounding)
+        db.update(novels).set({
+          ...merged,
+          updatedAt: recordedAt,
+        }).where(eq(novels.id, chapter.novelId)).run()
+        const nextContextVersion = markNovelContextChanged(chapter.novelId, 'External source grounding updated')
+        const committedNovel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+        if (!committedNovel) throwUserFacingError('novel.notFound')
+        return { merged, nextContextVersion, updatedAt: committedNovel.updatedAt || recordedAt }
+      })
+      const committed = sqlite.inTransaction || typeof commit.immediate !== 'function'
+        ? commit()
+        : commit.immediate()
       writerRawContext = {
         ...rawContext,
         novel: {
           ...rawContext.novel,
-          sourceLedgerJson: sourceGrounding.sourceLedgerJson,
-          canonSourceLedgerJson: sourceGrounding.canonSourceLedgerJson,
-          canonFactCardsJson: sourceGrounding.canonFactCardsJson,
-          contextVersion: nextContextVersion,
-          updatedAt: recordedAt,
+          ...committed.merged,
+          contextVersion: committed.nextContextVersion,
+          updatedAt: committed.updatedAt,
         },
       }
     } else if (sourceGrounding.attempted && sourceGrounding.diagnostics.length > 0) {
@@ -3836,7 +3947,7 @@ async function continueChapterContent(
     dialogueVoiceLocks: draftContext.dialogueVoiceLocks,
     plotPoints: chapter.outline || '',
     emotionTone: chapter.emotionTone || '平稳',
-    targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
+    targetWords: resolveChapterReferenceWords(chapter.targetWords, novel),
     storyCore,
     writingContractSummary: draftContext.writingContractSummary,
     themeChapterTest: themeVoice.themeChapterTest,
@@ -3916,6 +4027,8 @@ async function continueChapterContent(
     role: 'writer',
   })
 
+  let downstreamWorkflowTaskId: number | undefined
+  let writerContinuationCompleted = false
   try {
     const continuationResult = await executeStreamTask(writerTaskId, {
       type: 'chapter_writer',
@@ -3939,18 +4052,63 @@ async function continueChapterContent(
     const combinedContent = `${normalizedPartial}\n\n${continuationResult.output}`.trim()
     updateChapter(chapterId, {
       content: combinedContent,
-      status: 'draft',
+      status: 'reviewing',
     }, {
       skipStaleTracking: true,
       versionSource: false,
     })
-    const finalizeResult = await finalizeGeneratedChapterContent(chapterId, combinedContent)
+    snapshot = {
+      ...snapshot,
+      currentRole: 'writer',
+      currentStage: 'reviewing',
+      status: 'running',
+      message: '断点续写已补齐，正在交回完整章节流水线复审。',
+      partialContent: combinedContent,
+      streamTaskId: undefined,
+      lastFailureRole: undefined,
+      roles: {
+        ...snapshot.roles,
+        writer: {
+          ...snapshot.roles.writer,
+          status: 'success',
+          detail: '断点续写完成，合并稿已交回完整审校链。',
+          finishedAt: new Date().toISOString(),
+          recoveryHint: undefined,
+        },
+      },
+    }
+    writerContinuationCompleted = true
+    syncWorkflowTask({
+      currentChildTaskId: null,
+      outputText: 'Writer 断点续写已完成，正在启动完整审校、门禁与 Canon 流水线。',
+      errorMessage: null,
+    })
+    // 断点续写只负责补齐 Writer 输出，不能直接调用 finalize 绕过 Critic、
+    // Rewriter、发布门和 Canonizer。把合并稿交回完整流水线，并以内置
+    // resumeDraft 跳过重复写作步骤，继续执行所有后续门禁。
+    const resumedWorkflowTaskId = await generateChapterContent(chapterId, sender, {
+      executionMode: options.executionMode,
+      stageId: options.stageId,
+      resumeDraft: combinedContent,
+      resumeSourceTaskId: workflowTaskId,
+      onWorkflowTaskCreated: (taskId) => {
+        downstreamWorkflowTaskId = taskId
+        // 让取消动作沿“恢复任务 -> 完整流水线 -> 当前角色任务”递归传播。
+        syncWorkflowTask({ currentChildTaskId: taskId })
+        const resumeTask = getTaskRecord(workflowTaskId)
+        if (resumeTask && parseTaskControl(resumeTask).cancelRequested) {
+          // 用户可能在下游 workflow 建立前的上下文装配窗口点击取消。
+          // 子任务一旦出现就立刻补传取消，避免恢复任务显示已停止但模型仍继续跑。
+          cancelTask(taskId, sender)
+        }
+      },
+    })
     snapshot = {
       ...snapshot,
       status: 'success',
-      currentRole: 'finalize',
+      currentRole: 'writer',
       currentStage: 'completed',
-      message: '断点续写已完成并重新入稿。',
+      message: '断点续写稿已交回完整章节流水线并通过后续门禁。',
       partialContent: combinedContent,
       streamTaskId: undefined,
       roles: {
@@ -3958,54 +4116,60 @@ async function continueChapterContent(
         writer: {
           ...snapshot.roles.writer,
           status: 'success',
-          detail: '断点续写完成，正文已补齐。',
-          finishedAt: new Date().toISOString(),
-        },
-        finalize: {
-          ...snapshot.roles.finalize,
-          status: 'success',
-          detail: finalizeResult.nextChapterSeed
-            ? `已完成断点续写，并刷新摘要与下一章接力：${finalizeResult.nextChapterSeed}`
-            : '已完成断点续写，并刷新摘要与连续性状态。',
-          taskId: workflowTaskId,
-          startedAt: snapshot.roles.finalize.startedAt || new Date().toISOString(),
+          detail: '断点续写完成，合并稿已交回完整审校链。',
           finishedAt: new Date().toISOString(),
         },
       },
     }
     setWorkflowTaskStatus('success', {
       currentChildTaskId: null,
-      outputText: `断点续写已完成，第${chapter.chapterNum}章已重新入稿。`,
+      outputText: `断点续写已完成，并已由完整流水线任务 #${resumedWorkflowTaskId} 继续审校、门禁与 Canon 草案生成。`,
       errorMessage: null,
     })
     sendPipelineProgress(sender, snapshot, {
       stage: 'completed',
-      label: '断点续写完成',
-      detail: '系统已基于保留正文补齐后续内容，并刷新摘要与连续性状态。',
+      label: '断点续写与完整复审完成',
+      detail: '系统已补齐保留正文，并由完整流水线重新执行 Critic、Rewriter、发布门、Canonizer 与 Finalize。',
       status: 'success',
-      role: 'finalize',
+      role: 'writer',
     })
-    return workflowTaskId
+    return resumedWorkflowTaskId
   } catch (error) {
+    const downstreamTask = downstreamWorkflowTaskId
+      ? getTaskRecord(downstreamWorkflowTaskId)
+      : null
+    const downstreamSnapshot = parseChapterPipelineSnapshot(downstreamTask?.progressJson)
+    const downstreamRole = downstreamSnapshot?.lastFailureRole || downstreamSnapshot?.currentRole || undefined
+    const failedAfterWriterHandoff = writerContinuationCompleted
+    const aborted = isChapterPipelineAbortError(workflowTaskId, error)
+      || (downstreamWorkflowTaskId ? isChapterPipelineAbortError(downstreamWorkflowTaskId, error) : false)
+    const fallbackRecoveryRole = downstreamRole || 'writer'
     snapshot = {
       ...snapshot,
-      status: error instanceof Error && error.message.toLowerCase().includes('cancel')
-        ? 'cancelled'
-        : 'failed',
+      status: aborted ? 'cancelled' : 'failed',
+      currentRole: downstreamRole || 'writer',
+      currentStage: downstreamSnapshot?.currentStage || (failedAfterWriterHandoff ? 'reviewing' : 'drafting'),
       message: error instanceof Error ? error.message : '断点续写失败',
       resumeReason: inferResumeReason(error),
-      resumeSourceTaskId: writerTaskId,
-      recoveryHint: buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'writer'),
-      roles: {
-        ...snapshot.roles,
-        writer: {
-          ...snapshot.roles.writer,
-          status: 'failed',
-          detail: error instanceof Error ? error.message : '断点续写失败',
-          finishedAt: new Date().toISOString(),
-          recoveryHint: buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'writer'),
-        },
-      },
+      resumeSourceTaskId: downstreamWorkflowTaskId || writerTaskId,
+      recoveryHint: downstreamSnapshot?.recoveryHint
+        || buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, fallbackRecoveryRole),
+      lastFailureRole: downstreamSnapshot?.lastFailureRole || (failedAfterWriterHandoff ? undefined : 'writer'),
+      partialContent: downstreamSnapshot?.partialContent?.trim() || snapshot.partialContent || normalizedPartial,
+      roles: downstreamSnapshot?.roles
+        ? { ...snapshot.roles, ...downstreamSnapshot.roles }
+        : failedAfterWriterHandoff
+          ? snapshot.roles
+          : {
+              ...snapshot.roles,
+              writer: {
+                ...snapshot.roles.writer,
+                status: 'failed',
+                detail: error instanceof Error ? error.message : '断点续写失败',
+                finishedAt: new Date().toISOString(),
+                recoveryHint: buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'writer'),
+              },
+            },
     }
     setWorkflowTaskStatus(snapshot.status === 'cancelled' ? 'cancelled' : 'failed', {
       currentChildTaskId: null,
@@ -4014,16 +4178,57 @@ async function continueChapterContent(
     })
     sendPipelineProgress(sender, snapshot, {
       stage: 'drafting',
-      label: snapshot.status === 'cancelled' ? '断点续写已取消' : '断点续写失败',
+      label: snapshot.status === 'cancelled'
+        ? '章节恢复流水线已取消'
+        : failedAfterWriterHandoff
+          ? '断点续写已完成，但后续完整流水线失败'
+          : '断点续写失败',
       detail: error instanceof Error ? error.message : '断点续写失败',
       status: snapshot.status === 'cancelled' ? 'cancelled' : 'failed',
-      role: 'writer',
+      role: downstreamRole || 'writer',
     })
     throw error
   }
 }
 
 const chapterGenerationLocks = new Map<number, Promise<number>>()
+const chapterGenerationTaskIds = new Map<number, number>()
+const chapterGenerationTaskObservers = new Map<number, Set<(taskId: number) => void>>()
+
+function observeChapterGenerationTask(chapterId: number, observer: (taskId: number) => void) {
+  const taskId = chapterGenerationTaskIds.get(chapterId)
+  if (taskId) {
+    observer(taskId)
+    return
+  }
+  const observers = chapterGenerationTaskObservers.get(chapterId) || new Set<(taskId: number) => void>()
+  observers.add(observer)
+  chapterGenerationTaskObservers.set(chapterId, observers)
+}
+
+function publishChapterGenerationTaskId(chapterId: number, taskId: number) {
+  chapterGenerationTaskIds.set(chapterId, taskId)
+  for (const observer of chapterGenerationTaskObservers.get(chapterId) || []) {
+    try {
+      observer(taskId)
+    } catch (error) {
+      console.warn(`[chapter:warn] 章节流水线任务关联回调失败 chapter=${chapterId} task=${taskId}`, error)
+    }
+  }
+  chapterGenerationTaskObservers.delete(chapterId)
+}
+
+interface ChapterGenerationOptions {
+  executionMode?: AiExecutionMode
+  preserveConstraintLabels?: HardConstraintSourceLabel[]
+  stageId?: number
+  /** Internal-only recovery input. IPC/Web sanitizers never expose this field. */
+  resumeDraft?: string
+  /** Failed workflow that supplied resumeDraft, retained for audit lineage. */
+  resumeSourceTaskId?: number
+  /** Internal-only hook used to link a resumed Writer task to its downstream workflow. */
+  onWorkflowTaskCreated?: (taskId: number) => void
+}
 
 function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect, stageId?: number): string {
   const source = [
@@ -4058,17 +4263,25 @@ function findExistingChapterGenerationTask(chapterId: number, idempotencyKey: st
 export async function generateChapterContent(
   chapterId: number,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
+  options: ChapterGenerationOptions = {},
 ): Promise<number> {
   const inFlight = chapterGenerationLocks.get(chapterId)
-  if (inFlight) return inFlight
+  if (inFlight) {
+    if (options.onWorkflowTaskCreated) {
+      observeChapterGenerationTask(chapterId, options.onWorkflowTaskCreated)
+    }
+    return inFlight
+  }
 
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
   const idempotencyKey = buildChapterGenerationIdempotencyKey(chapter, options.stageId)
   const existing = findExistingChapterGenerationTask(chapterId, idempotencyKey)
-  if (existing && !isRetryableChapterGenerationStatus(existing.status)) return Number(existing.id)
+  if (existing && !isRetryableChapterGenerationStatus(existing.status)) {
+    options.onWorkflowTaskCreated?.(Number(existing.id))
+    return Number(existing.id)
+  }
 
   // A failed/cancelled run must not permanently consume the deterministic key.
   // Keep active/successful calls idempotent, while allowing the visible retry
@@ -4078,24 +4291,35 @@ export async function generateChapterContent(
     retryToken: randomUUID(),
   })
 
-  const run = generateChapterContentInternal(chapterId, sender, options, nextIdempotencyKey)
+  if (options.onWorkflowTaskCreated) {
+    observeChapterGenerationTask(chapterId, options.onWorkflowTaskCreated)
+  }
+  const run = generateChapterContentInternal(chapterId, sender, {
+    ...options,
+    onWorkflowTaskCreated: (taskId) => publishChapterGenerationTaskId(chapterId, taskId),
+  }, nextIdempotencyKey)
   chapterGenerationLocks.set(chapterId, run)
   try {
     return await run
   } finally {
-    if (chapterGenerationLocks.get(chapterId) === run) chapterGenerationLocks.delete(chapterId)
+    if (chapterGenerationLocks.get(chapterId) === run) {
+      chapterGenerationLocks.delete(chapterId)
+      chapterGenerationTaskIds.delete(chapterId)
+      chapterGenerationTaskObservers.delete(chapterId)
+    }
   }
 }
 
 async function generateChapterContentInternal(
   chapterId: number,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
+  options: ChapterGenerationOptions = {},
   idempotencyKey?: string,
 ): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  const initialGenerationInputFingerprint = buildChapterGenerationInputFingerprint(chapter as unknown as Record<string, unknown>)
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
   if (options.stageId && rawContext.creativeStageContext) {
@@ -4131,20 +4355,33 @@ async function generateChapterContentInternal(
     pipelineRole: 'planner',
     pipelineStage: 'pending',
     contractVersion: undefined,
-    controlJson: JSON.stringify({ cancelRequested: false, ...(options.stageId ? { stageId: options.stageId } : {}) }),
+    controlJson: JSON.stringify({
+      cancelRequested: false,
+      ...(options.stageId ? { stageId: options.stageId } : {}),
+      ...(options.resumeSourceTaskId ? { resumeSourceTaskId: options.resumeSourceTaskId } : {}),
+    }),
     progressJson: '{}',
     retryable: false,
     status: 'pending',
   })
+  options.onWorkflowTaskCreated?.(workflowTaskId)
   let snapshot = createInitialChapterPipelineSnapshot(chapterId, workflowTaskId, contractVersion)
   snapshot = {
     ...snapshot,
     executionMode: executionModeResolution.mode,
+    ...(options.resumeDraft?.trim()
+      ? {
+          partialContent: options.resumeDraft.trim(),
+          resumeSourceTaskId: options.resumeSourceTaskId,
+        }
+      : {}),
   }
   let previousRoleTaskId: number | undefined
   let hasCommittedContent = false
   let latestUsableDraft = ''
   let latestReviewNotesJson = chapter.reviewNotesJson || ''
+  let expectedPipelineContent = chapter.content || ''
+  let expectedPipelineNovelContextVersion = rawContext.novel.contextVersion || 1
 
   const buildPipelineHoldReviewNotesJson = (
     role: ChapterPipelineRole,
@@ -4175,14 +4412,16 @@ async function generateChapterContentInternal(
     const usableDraft = latestUsableDraft.trim()
     if (!usableDraft) return false
     const resumableContent = snapshot.partialContent?.trim() || usableDraft
-    updateChapter(chapterId, {
+    expectedPipelineContent = updatePipelineChapterContent(
+      chapterId,
+      expectedPipelineContent,
+      expectedPipelineNovelContextVersion,
+      {
       content: usableDraft,
       reviewNotesJson: buildPipelineHoldReviewNotesJson(role, detail, failureCode),
       status: 'reviewing',
-    }, {
-      skipStaleTracking: true,
-      versionSource: false,
-    })
+      },
+    )
     hasCommittedContent = true
     snapshot = {
       ...snapshot,
@@ -4360,6 +4599,13 @@ async function generateChapterContentInternal(
     const detail = error instanceof Error ? error.message : `${getPipelineRoleLabel(role)} 执行失败`
     const failure = classifyChapterPipelineFailure(role, error)
     const blocked = options.blocked || failure.blocked
+    const pipelineStateConflict = Boolean(error && typeof error === 'object'
+      && 'code' in error
+      && [
+        'chapter.pipelineContentConflict',
+        'chapter.pipelineInputConflict',
+        'chapter.pipelineContextConflict',
+      ].includes(String((error as { code?: unknown }).code || '')))
     const recoveryHint = buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role, failure.code)
     const outputText = failure.outputText || (failure.code
       ? buildPipelineFailureOutput(failure.code, detail, {
@@ -4409,10 +4655,10 @@ async function generateChapterContentInternal(
       },
     }
 
-    const preservedDraft = !aborted && preserveUsableDraftForReview(role, detail, failure.code)
-    if (!preservedDraft && !hasCommittedContent) {
+    const preservedDraft = !aborted && !pipelineStateConflict && preserveUsableDraftForReview(role, detail, failure.code)
+    if (!pipelineStateConflict && !preservedDraft && !hasCommittedContent) {
       updateChapter(chapterId, { status: previousStatus }, { versionSource: false })
-    } else if (!preservedDraft) {
+    } else if (!pipelineStateConflict && !preservedDraft) {
       updateChapter(chapterId, { status: blocked ? 'reviewing' : 'draft' }, { skipStaleTracking: true, versionSource: false })
     }
 
@@ -4433,6 +4679,11 @@ async function generateChapterContentInternal(
   }
 
   try {
+    const currentGenerationInput = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    if (!currentGenerationInput) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+    if (buildChapterGenerationInputFingerprint(currentGenerationInput as unknown as Record<string, unknown>) !== initialGenerationInputFingerprint) {
+      throwUserFacingError('chapter.pipelineInputConflict')
+    }
     const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
     const complexity = classifyChapterComplexity({
       chapter,
@@ -4470,6 +4721,7 @@ async function generateChapterContentInternal(
     )
     let scenePlanContext = scenePlanResolution.context
     let draftContext = draftResolution.context
+    expectedPipelineNovelContextVersion = draftResolution.effectiveRawContext.novel.contextVersion || 1
     let reviewContext = (await resolveStageContextForPipeline(
       'review',
       chapter,
@@ -4719,7 +4971,7 @@ async function generateChapterContentInternal(
         rhythmSection: chapterRhythmSection || undefined,
         plotPoints: chapter.outline || '',
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel),
         storyCore,
         writingContractSummary: scenePlanContext.writingContractSummary,
         relationSummary: scenePlanContext.relationSummary,
@@ -4877,7 +5129,7 @@ async function generateChapterContentInternal(
         hardConstraintContext: draftContext.hardConstraintContext,
         dialogueVoiceLocks: draftContext.dialogueVoiceLocks,
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel),
         storyCore,
         writingContractSummary: draftContext.writingContractSummary,
         themeChapterTest: themeVoice.themeChapterTest,
@@ -4920,9 +5172,15 @@ async function generateChapterContentInternal(
         promptTier: complexity,
       }),
     }]
-    const writerTaskId = await startRoleTask('writer', 'chapter_writer', 'Writer 正在按章节合同与场景计划生成正文初稿。', {
+    const resumedDraft = options.resumeDraft?.trim() || ''
+    const writerTaskId = await startRoleTask(
+      'writer',
+      'chapter_writer',
+      resumedDraft
+        ? 'Writer 已接收失败流程保留稿，将直接进入 Critic 与后续质量门。'
+        : 'Writer 正在按章节合同与场景计划生成正文初稿。', {
       inputJson: JSON.stringify(writerMessages),
-      runnerType: 'chat',
+      runnerType: resumedDraft ? 'workflow' : 'chat',
     })
     try {
       assertContractDrivenWriterInputs('writer', contractVersion, draftContext.writingContractSummary, scenePlanText)
@@ -4934,7 +5192,7 @@ async function generateChapterContentInternal(
       })
       failRoleTask('writer', writerTaskId, error, { blocked: true })
     }
-    const draftContentRaw = await executeChatTask(writerTaskId, {
+    const draftContentRaw = resumedDraft || await executeChatTask(writerTaskId, {
       type: 'chapter_writer',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
@@ -4946,11 +5204,18 @@ async function generateChapterContentInternal(
       retryable: true,
       sender,
     })
+    if (resumedDraft) {
+      updateTaskStatus(writerTaskId, 'success', sender, {
+        pipelineStage: 'success',
+        contractVersion,
+        outputText: '已复用失败流程保留稿；未跳过 Critic、Rewriter、发布门、Canonizer 或 Finalize。',
+      })
+    }
     const chapterTitleForCheck = chapter.title || getDefaultChapterTitle(chapter.chapterNum)
     const draftHeading = stripChapterHeadingNoise(draftContentRaw, chapter.chapterNum, chapterTitleForCheck)
     const draftContent = draftHeading.content
     const draftTitleMismatchRisk = buildTitleMismatchRisk(draftHeading.detectedTitle, chapterTitleForCheck, chapter.chapterNum)
-    const chapterWordTarget = resolveChapterReferenceWords(chapter.targetWords, novel.targetWords)
+    const chapterWordTarget = resolveChapterReferenceWords(chapter.targetWords, novel)
     latestUsableDraft = draftContent.trim()
     if (!latestUsableDraft) {
       failRoleTask('writer', writerTaskId, new ChapterPipelineStageError(
@@ -4965,12 +5230,9 @@ async function generateChapterContentInternal(
       ))
     }
     if (latestUsableDraft) {
-      updateChapter(chapterId, {
+      expectedPipelineContent = updatePipelineChapterContent(chapterId, expectedPipelineContent, expectedPipelineNovelContextVersion, {
         content: latestUsableDraft,
         status: 'reviewing',
-      }, {
-        skipStaleTracking: true,
-        versionSource: false,
       })
       hasCommittedContent = true
       snapshot = {
@@ -4982,7 +5244,11 @@ async function generateChapterContentInternal(
         outputText: 'Writer 初稿已保存为待人工审核/可重试草稿。',
       })
     }
-    finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
+    finishRoleTask(
+      'writer',
+      writerTaskId,
+      resumedDraft ? '保留稿已重新进入完整审校链。' : '正文初稿已生成，等待 Critic 审校。',
+    )
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
     const criticStepMemory = buildStepMemorySummary({
       chapterBridgePlan: chapterBridgePlanText,
@@ -5114,7 +5380,7 @@ async function generateChapterContentInternal(
     })
     const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
       channel: 'chapter',
-      message: '章节审校 JSON 解析失败，已回退到后备审校意见继续生成。',
+      message: '章节审校 JSON 无法解析，已阻断自动入稿并保留 Writer 初稿。',
       consoleSummary: `[chapter:warn] review-json-fallback chapter=${chapterId}`,
       context: {
         chapterId,
@@ -5122,10 +5388,32 @@ async function generateChapterContentInternal(
         stage: 'review',
       },
     })
-    if (reviewParse.success) {
-      const normalizedNotes = normalizeReviewNotes(reviewParse.data, { chapterContent: draftContent })
-      reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
+    if (!reviewParse.success) {
+      failRoleTask('critic', criticTaskId, new ChapterPipelineStageError(
+        'invalid_output',
+        'Critic 未返回可验证的结构化审校结果，Writer 初稿已保留；请重试审校流水线。',
+        {
+          outputText: buildPipelineFailureOutput(
+            'invalid_output',
+            'Critic 审校结果不是有效 JSON，缺少自动发布所需的质量证据。',
+          ),
+        },
+      ))
     }
+    const normalizedNotes = normalizeReviewNotes(reviewParse.data, { chapterContent: draftContent })
+    if (!hasReviewNotes(normalizedNotes)) {
+      failRoleTask('critic', criticTaskId, new ChapterPipelineStageError(
+        'invalid_output',
+        'Critic 返回了空审校结果，Writer 初稿已保留；请重试审校流水线。',
+        {
+          outputText: buildPipelineFailureOutput(
+            'invalid_output',
+            'Critic 结构化结果未包含摘要、风险或修订证据。',
+          ),
+        },
+      ))
+    }
+    reviewNotes = normalizedNotes
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
     reviewNotes = applyHumanizationAnalysisToReviewNotes(reviewNotes, draftContent, {
@@ -5304,7 +5592,7 @@ async function generateChapterContentInternal(
           ? Math.round(resolveContextBudgetForStage(
             'rewrite',
             complexity,
-            resolveChapterReferenceWords(chapter.targetWords, rawContext.novel.targetWords),
+            resolveChapterReferenceWords(chapter.targetWords, rawContext.novel),
             rawContext.novel.targetWords || 0,
           ) * rewritePolicy.contextBudgetMultiplier)
           : undefined,
@@ -5383,7 +5671,7 @@ async function generateChapterContentInternal(
         hardConstraintContext: rewriteContext.hardConstraintContext,
         dialogueVoiceLocks: rewriteContext.dialogueVoiceLocks,
         emotionTone: chapter.emotionTone || '平稳',
-        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel.targetWords),
+        targetWords: resolveChapterReferenceWords(chapter.targetWords, novel),
         storyCore,
         writingContractSummary: rewriteContext.writingContractSummary,
         themeChapterTest: themeVoice.themeChapterTest,
@@ -6083,13 +6371,10 @@ async function generateChapterContentInternal(
       ))
     }
 
-    updateChapter(chapterId, {
+    expectedPipelineContent = updatePipelineChapterContent(chapterId, expectedPipelineContent, expectedPipelineNovelContextVersion, {
       content: repairedContent,
       reviewNotesJson: latestReviewNotesJson,
       status: 'draft',
-    }, {
-      skipStaleTracking: true,
-      versionSource: false,
     })
     hasCommittedContent = true
     let publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
@@ -6160,13 +6445,10 @@ async function generateChapterContentInternal(
             genre: profile.genre,
             knownTerms: guardrailKnownTerms,
           })
-          updateChapter(chapterId, {
+          expectedPipelineContent = updatePipelineChapterContent(chapterId, expectedPipelineContent, expectedPipelineNovelContextVersion, {
             content: repairedContent,
             reviewNotesJson: latestReviewNotesJson,
             status: 'draft',
-          }, {
-            skipStaleTracking: true,
-            versionSource: false,
           })
           publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
           console.warn(`[chapter:pipeline] 章节验收门定向重写${publishCheck.ready ? '通过' : '仍有阻塞'} chapter=${chapterId}`)
@@ -6399,7 +6681,12 @@ async function generateChapterContentInternal(
       contractVersion,
       canonRunId: canonRun.id,
     })
-    const result = await finalizeGeneratedChapterContent(chapterId, repairedContent)
+    const result = await finalizeGeneratedChapterContent(
+      chapterId,
+      repairedContent,
+      expectedPipelineContent,
+      expectedPipelineNovelContextVersion,
+    )
     if (rawContext.creativeStageContext) {
       try {
         upsertCreativeStageAsset({
@@ -6507,7 +6794,22 @@ export async function refreshChapterDerivedState(chapterId: number): Promise<voi
   await refreshChapterMemory(chapterId)
 }
 
+const chapterResumeLocks = new Map<number, Promise<number>>()
+
 export async function resumeChapterPipeline(taskId: number, sender?: WebContents): Promise<number> {
+  const inFlight = chapterResumeLocks.get(taskId)
+  if (inFlight) return inFlight
+
+  const run = resumeChapterPipelineInternal(taskId, sender)
+  chapterResumeLocks.set(taskId, run)
+  try {
+    return await run
+  } finally {
+    if (chapterResumeLocks.get(taskId) === run) chapterResumeLocks.delete(taskId)
+  }
+}
+
+async function resumeChapterPipelineInternal(taskId: number, sender?: WebContents): Promise<number> {
   const task = getTaskRecord(taskId)
   if (!task) throwUserFacingError('task.notFound', { id: taskId })
 
@@ -6526,14 +6828,30 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
   if (['pending', 'running', 'cancel_requested'].includes(rootTask.status || '')) {
     throwUserFacingError('workflow.taskRunningCannotResume', { taskId: rootTask.id })
   }
-  const snapshot = rootTask.progressJson ? JSON.parse(rootTask.progressJson) as Partial<ChapterPipelineSnapshot> : null
+  const snapshot = parseChapterPipelineSnapshot(rootTask.progressJson)
   const control = parseTaskControl(rootTask)
   const stageId = typeof control.stageId === 'number' ? control.stageId : undefined
   const partialContent = typeof snapshot?.partialContent === 'string' ? snapshot.partialContent.trim() : ''
+  const resumeMode = resolveChapterPipelineResumeMode({
+    hasPartialContent: Boolean(partialContent),
+    lastFailureRole: snapshot?.lastFailureRole,
+  })
   if (partialContent) {
-    return continueChapterContent(rootTask.relatedEntityId, partialContent, sender, {
-      sourceTaskId: rootTask.id,
+    if (resumeMode === 'continue_writer') {
+      return continueChapterContent(rootTask.relatedEntityId, partialContent, sender, {
+        executionMode: snapshot?.executionMode,
+        sourceTaskId: rootTask.id,
+        stageId,
+      })
+    }
+    // Critic/Rewriter/Canonizer 失败时，partialContent 已经是一份完整候选稿。
+    // 再调用“续写”会无端追加内容并可能把章节越写越长；应直接把保留稿
+    // 重新送入 Planner -> Critic -> Rewriter -> Gate -> Canonizer -> Finalize。
+    return generateChapterContent(rootTask.relatedEntityId, sender, {
+      executionMode: snapshot?.executionMode,
       stageId,
+      resumeDraft: partialContent,
+      resumeSourceTaskId: rootTask.id,
     })
   }
   return generateChapterContent(rootTask.relatedEntityId, sender, { stageId })
@@ -6927,6 +7245,22 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     modelConfigId: novel?.modelConfigId || undefined,
   })
 
+  const persistAiCheckResult = (
+    enhancedScore: ReturnType<typeof enhanceAiScoreResult>,
+    chapterResult: ReturnType<typeof toChapterAiCheckResult>,
+  ) => {
+    db.update(chapters).set({
+      // 即使模型 JSON 解析失败，也要持久化本轮确定性降级结果；否则页面
+      // 当次显示新结果，刷新后却重新出现旧评分或空评分。
+      aiScoreJson: JSON.stringify({
+        ...enhancedScore,
+        score: chapterResult.score,
+        issues: chapterResult.issues,
+      }),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.id, chapterId)).run()
+  }
+
   try {
     const parsedResult = parseAiJsonResult<Record<string, unknown>>(result, 'object', {
       channel: 'chapter',
@@ -6940,21 +7274,15 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     })
     const enhancedScore = enhanceAiScoreResult(parsedResult.success ? parsedResult.data : {}, content)
     const chapterResult = toChapterAiCheckResult(parsedResult.success ? parsedResult.data : {}, enhancedScore)
-    db.update(chapters).set({
-      // 持久化页面兼容字段，确保刷新章节后仍能恢复评分与具体问题。
-      aiScoreJson: JSON.stringify({
-        ...enhancedScore,
-        score: chapterResult.score,
-        issues: chapterResult.issues,
-      }),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.id, chapterId)).run()
+    persistAiCheckResult(enhancedScore, chapterResult)
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
     return chapterResult
   } catch {
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
     const enhancedScore = enhanceAiScoreResult({}, content)
-    return toChapterAiCheckResult({}, enhancedScore)
+    const chapterResult = toChapterAiCheckResult({}, enhancedScore)
+    persistAiCheckResult(enhancedScore, chapterResult)
+    return chapterResult
   }
 }
 

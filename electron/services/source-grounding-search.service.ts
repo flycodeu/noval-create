@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto'
-import { assessHistoricalGrounding } from '../../src/shared/genre-system'
+import {
+  assessHistoricalGrounding,
+  getGroundingSourceLedgerEntries,
+  isChapterWritebackSourceLedgerEntry,
+} from '../../src/shared/genre-system'
 import { getSourceSearchRuntimeConfig } from './source-search-settings.service'
 
 interface WebSearchResult {
@@ -44,7 +48,35 @@ export interface SourceGroundingEnrichmentResult {
   sourceLedgerJson: string
   canonSourceLedgerJson: string
   canonFactCardsJson: string
+  discoveredSourceLedgerEntries: Record<string, unknown>[]
+  discoveredCanonFactCards: Record<string, unknown>[]
   recordedAt?: string
+}
+
+export function mergeSourceGroundingEnrichmentIntoCurrent(
+  current: Pick<SourceGroundingEnrichmentInput, 'sourceLedgerJson' | 'canonSourceLedgerJson' | 'canonFactCardsJson'>,
+  enrichment: Pick<SourceGroundingEnrichmentResult, 'discoveredSourceLedgerEntries' | 'discoveredCanonFactCards'>,
+): Pick<SourceGroundingEnrichmentResult, 'sourceLedgerJson' | 'canonSourceLedgerJson' | 'canonFactCardsJson'> {
+  return {
+    sourceLedgerJson: upsertJsonRecordArray(
+      current.sourceLedgerJson,
+      enrichment.discoveredSourceLedgerEntries,
+      'sourceKey',
+      400,
+    ),
+    canonSourceLedgerJson: upsertJsonRecordArray(
+      current.canonSourceLedgerJson,
+      enrichment.discoveredSourceLedgerEntries,
+      'sourceKey',
+      400,
+    ),
+    canonFactCardsJson: upsertJsonRecordArray(
+      current.canonFactCardsJson,
+      enrichment.discoveredCanonFactCards,
+      'cardKey',
+      400,
+    ),
+  }
 }
 
 interface ProviderBundle {
@@ -83,8 +115,7 @@ function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
 }
 
 function hasSourceGroundingEntries(input: SourceGroundingEnrichmentInput): boolean {
-  return parseJsonRecordArray(input.sourceLedgerJson).length > 0
-    || parseJsonRecordArray(input.canonSourceLedgerJson).length > 0
+  return getGroundingSourceLedgerEntries(input).some((entry) => !isChapterWritebackSourceLedgerEntry(entry))
     || parseJsonRecordArray(input.canonFactCardsJson).length > 0
 }
 
@@ -395,6 +426,8 @@ export async function enrichSourceGroundingFromWeb(
       sourceLedgerJson,
       canonSourceLedgerJson,
       canonFactCardsJson,
+      discoveredSourceLedgerEntries: [],
+      discoveredCanonFactCards: [],
     }
   }
 
@@ -410,6 +443,8 @@ export async function enrichSourceGroundingFromWeb(
       sourceLedgerJson,
       canonSourceLedgerJson,
       canonFactCardsJson,
+      discoveredSourceLedgerEntries: [],
+      discoveredCanonFactCards: [],
     }
   }
 
@@ -445,6 +480,8 @@ export async function enrichSourceGroundingFromWeb(
       sourceLedgerJson,
       canonSourceLedgerJson,
       canonFactCardsJson,
+      discoveredSourceLedgerEntries: [],
+      discoveredCanonFactCards: [],
       recordedAt,
     }
   }
@@ -459,6 +496,8 @@ export async function enrichSourceGroundingFromWeb(
     sourceLedgerJson: nextSourceLedgerJson,
     canonSourceLedgerJson: upsertJsonRecordArray(canonSourceLedgerJson, sourceLedgerEntries, 'sourceKey', 400),
     canonFactCardsJson: upsertJsonRecordArray(canonFactCardsJson, canonFactCards, 'cardKey', 400),
+    discoveredSourceLedgerEntries: sourceLedgerEntries,
+    discoveredCanonFactCards: canonFactCards,
     recordedAt,
   }
 }

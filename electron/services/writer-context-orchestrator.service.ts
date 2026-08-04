@@ -24,7 +24,7 @@ import type {
   WriterOrchestratedTimelinePackEntry,
   WriterOrchestratedWorldStatePack,
 } from '../../src/types'
-import { assessHistoricalGrounding } from '../../src/shared/genre-system'
+import { assessHistoricalGrounding, getGroundingSourceLedgerEntries } from '../../src/shared/genre-system'
 import { getCharacterDetailContext, listCharacters } from './character.service'
 import type { CharacterStateSummary as ServiceCharacterStateSummary } from './character-state.service'
 import { searchSimilarFragments } from './embedding.service'
@@ -339,12 +339,12 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const timelineOpenThreads = asText(signals.timelineOpenThreads)
   const genre = asText(signals.genre)
   const worldRules = asText(signals.worldRules || input.baseContextParts?.worldRules)
+  const usableSourceLedgerEntries = getGroundingSourceLedgerEntries(signals)
   const sourceText = [
     signals.historicalProfileJson,
     signals.projectCanonProfileJson,
     signals.canonConstraintSetJson,
-    signals.sourceLedgerJson,
-    signals.canonSourceLedgerJson,
+    usableSourceLedgerEntries.length > 0 ? JSON.stringify(usableSourceLedgerEntries) : '',
     signals.canonFactCardsJson,
   ].map(asText).filter(Boolean).join('\n')
 
@@ -601,10 +601,7 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
   const historicalProfile = parseJsonRecord(signals.historicalProfileJson)
   const projectCanonProfile = parseJsonRecord(signals.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(signals.canonConstraintSetJson)
-  const sourceLedgerEntries = [
-    ...parseJsonRecordArray(signals.sourceLedgerJson),
-    ...parseJsonRecordArray(signals.canonSourceLedgerJson),
-  ]
+  const sourceLedgerEntries = getGroundingSourceLedgerEntries(signals)
   const canonFactCards = parseJsonRecordArray(signals.canonFactCardsJson)
 
   const profileLines = [

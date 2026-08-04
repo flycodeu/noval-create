@@ -16,7 +16,7 @@ import {
   storyVolumes,
   timelineEvents,
 } from '../database/schema'
-import { markNovelContextChanged, markStoryMemoryCheckpointsDirty } from './context-impact.service'
+import { markNovelContextChanged } from './context-impact.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { syncTimelineEventItemLinks } from './link-sync.service'
 import { resolveCreativeStageContextForChapter } from './creative-stage.service'
@@ -34,7 +34,6 @@ import {
   reorderStoryVolumesTransactional,
 } from './story-structure-batch.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
-import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
 import type {
   StructureLinkageSummary,
   StructureLinkageSyncResult,
@@ -414,32 +413,7 @@ function normalizeSegmentOrders(chapterId: number) {
 }
 
 function markNovelContextChangedInline(novelId: number, reasons: string | string[]) {
-  const db = getDb()
-  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throwUserFacingError('novel.notFound')
-
-  const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
-
-  if (normalizedReasons.length === 0) return novel.contextVersion || 1
-
-  const nextVersion = (novel.contextVersion || 1) + 1
-  const now = new Date().toISOString()
-  db.update(novels).set({
-    contextVersion: nextVersion,
-    updatedAt: now,
-  }).where(eq(novels.id, novelId)).run()
-
-  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
-  for (const chapter of chapterRows) {
-    db.update(chapters).set({
-      staleReasonJson: mergeStoredReasons(chapter.staleReasonJson, normalizedReasons),
-      updatedAt: now,
-    }).where(eq(chapters.id, chapter.id)).run()
-  }
-
-  markStoryMemoryCheckpointsDirty(novelId, now)
-
-  return nextVersion
+  return markNovelContextChanged(novelId, reasons)
 }
 
 function runStructureTransaction(

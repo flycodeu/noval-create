@@ -514,6 +514,29 @@ describe('writer context orchestrator', () => {
       bucket.bucket === 'source_grounding' && bucket.renderedLabels.includes('worldRules'))).toBe(true)
   })
 
+  it('keeps an unapproved chapter extract out of the writer source-grounding bucket', () => {
+    const input = createInput({
+      signals: {
+        sourceLedgerJson: JSON.stringify([{
+          sourceKey: 'chapter:101:thread:pending',
+          chapterId: 101,
+          runId: 21,
+          assetType: 'thread',
+          sourceText: '尚未审批的章节猜测。',
+          supportingDiffIds: [],
+        }]),
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+    })
+
+    const plan = __writerOrchestratorTestUtils.buildWriterQueryPlan(input)
+    expect(plan.find((step) => step.bucket === 'source_grounding')).toEqual(expect.objectContaining({
+      enabled: false,
+    }))
+  })
+
   it('honors expanded runtime limits for large-cast scenes', async () => {
     const names = Array.from({ length: 10 }, (_, index) => `角色${index + 1}`)
 

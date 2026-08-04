@@ -116,6 +116,8 @@ export const USER_FACING_MESSAGES = {
   'creativeStage.handoffDraftSaved': '阶段交接草稿已保存。',
   'creativeStage.handoffReviewed': '阶段交接已完成规则审阅。',
   'creativeStage.handoffApproved': '阶段交接已由作者确认，并进入后续召回。',
+  'creativeStage.qualityReportMissing': '质量工具没有返回阶段报告。',
+  'creativeStage.qualityReportGenerated': '阶段质量评审报告已生成；正文未被修改。',
   'faction.saved': '势力已保存。',
   'faction.deleted': '势力已删除。',
   'faction.generated': '势力网络已生成。',
@@ -549,10 +551,18 @@ export const USER_FACING_MESSAGES = {
   'chapterWriteback.relationCandidatePairMissing': '关系候选缺少有效角色对。',
   'chapterWriteback.afterStateJsonObjectRequired': 'afterStateJson 必须是合法 JSON 对象。',
   'chapterWriteback.appliedImmutable': '已写回的候选不可直接修改，请创建新的回写草案。',
+  'chapterWriteback.decisionInvalid': '回写候选的审批决定无效。',
+  'chapterWriteback.assetTypeInvalid': '回写候选的资产类型无效。',
+  'chapterWriteback.decisionLocked': '回写正在应用或已经完成，当前候选不可再修改。',
   'chapter.contractRequiredForPipeline': '当前章节缺少可执行的章节合同，无法启动合同驱动写作。',
   'chapter.pipelineMissingContractVersion': '{{role}} 缺少合同版本，已阻断本次写作。',
   'chapter.pipelineMissingContractSummary': '{{role}} 缺少章节合同摘要，无法继续生成正文。',
   'chapter.pipelineMissingScenePlan': '{{role}} 缺少 Planner 产出的场景计划，无法继续生成正文。',
+  'chapter.generationActiveContentLocked': 'AI 章节流水线仍在运行；请先取消或等待生成结束，再修改正文。',
+  'chapter.generationActiveInputLocked': 'AI 章节流水线仍在运行；请先取消或等待生成结束，再修改标题、大纲或其他生成输入。',
+  'chapter.pipelineContentConflict': '章节正文在生成期间已发生变化，流水线已停止以避免覆盖现有内容。',
+  'chapter.pipelineInputConflict': '章节生成输入在流水线启动时已发生变化，请基于最新内容重新生成。',
+  'chapter.pipelineContextConflict': '项目上下文在章节生成期间已发生变化，流水线已停止以避免提交过期稿件。',
 } as const
 
 export type UserFacingMessageKey = keyof typeof USER_FACING_MESSAGES

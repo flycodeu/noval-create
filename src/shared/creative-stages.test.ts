@@ -333,4 +333,31 @@ describe('creative stages', () => {
       '1 个章节验收门处于阻塞或重写状态，阶段不应直接扩展。',
     ]))
   })
+
+  it('does not call an unscored or not-ready gate snapshot healthy', () => {
+    const quality = buildCreativeStageQualitySnapshot([{
+      chapterNum: 1,
+      hasContent: true,
+      hasSummary: true,
+      hasContinuity: true,
+      gateLevel: 'warning',
+      gateReady: false,
+      gateIssueKeys: ['dialogue_voice'],
+    }], {
+      handoffRequired: false,
+      handoffStatus: 'missing',
+    })
+
+    expect(quality.status).toBe('needs_attention')
+    expect(quality.trend).toMatchObject({
+      gateCoveredChapterCount: 1,
+      readyRate: 0,
+      repeatedIssueKeys: [{ key: 'dialogue_voice', count: 1 }],
+    })
+    expect(quality.trend.averageGateScore).toBeUndefined()
+    expect(quality.warnings).toEqual(expect.arrayContaining([
+      '1 个章节验收门缺少可用门分，阶段趋势证据不完整。',
+      '1 个章节验收门尚未就绪（gateReady=false 或缺少就绪证据），阶段不能标记为健康。',
+    ]))
+  })
 })

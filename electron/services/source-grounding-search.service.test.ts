@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSourceGroundingQueries,
   enrichSourceGroundingFromWeb,
+  mergeSourceGroundingEnrichmentIntoCurrent,
 } from './source-grounding-search.service'
 
 afterEach(() => {
@@ -55,6 +56,72 @@ describe('source-grounding-search service', () => {
     })
 
     expect(queries).toEqual([])
+  })
+
+  it('does not let an unapproved chapter extract suppress required web grounding', () => {
+    const queries = buildSourceGroundingQueries({
+      novelId: 1,
+      chapterId: 10,
+      chapterNum: 3,
+      genre: '现实行业职场',
+      chapterGoal: '写出银行风控、公司流程与监管压力',
+      backgroundText: '主角在银行风控部门处理贷款审核与合规问题。',
+      sourceLedgerJson: JSON.stringify([{
+        sourceKey: 'chapter:10:thread:pending',
+        chapterId: 10,
+        runId: 21,
+        assetType: 'thread',
+        sourceText: '模型抽取但尚未审批的行业猜测。',
+        supportingDiffIds: [],
+      }]),
+    })
+
+    expect(queries.length).toBeGreaterThan(0)
+  })
+
+  it('does not let an approved story fact masquerade as an external grounding reference', () => {
+    const queries = buildSourceGroundingQueries({
+      novelId: 1,
+      chapterId: 10,
+      chapterNum: 3,
+      genre: '现实行业职场',
+      chapterGoal: '写出银行风控、公司流程与监管压力',
+      backgroundText: '主角在银行风控部门处理贷款审核与合规问题。',
+      sourceLedgerJson: JSON.stringify([{
+        sourceKey: 'chapter:9:thread:approved',
+        chapterId: 9,
+        runId: 20,
+        assetType: 'thread',
+        sourceText: '已审批的故事内线程事实。',
+        supportingDiffIds: [31],
+      }]),
+    })
+
+    expect(queries.length).toBeGreaterThan(0)
+  })
+
+  it('merges discovered sources into the latest ledgers without losing concurrent entries', () => {
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({
+      sourceLedgerJson: JSON.stringify([{ sourceKey: 'concurrent-source', sourceText: '并发写回来源' }]),
+      canonSourceLedgerJson: JSON.stringify([{ sourceKey: 'concurrent-canon', sourceText: '并发 Canon 来源' }]),
+      canonFactCardsJson: JSON.stringify([{ cardKey: 'concurrent-card', title: '并发事实卡' }]),
+    }, {
+      discoveredSourceLedgerEntries: [{ sourceKey: 'web:new', sourceText: '新检索来源' }],
+      discoveredCanonFactCards: [{ cardKey: 'web:new', title: '新检索事实卡' }],
+    })
+
+    expect(JSON.parse(merged.sourceLedgerJson)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceKey: 'concurrent-source' }),
+      expect.objectContaining({ sourceKey: 'web:new' }),
+    ]))
+    expect(JSON.parse(merged.canonSourceLedgerJson)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceKey: 'concurrent-canon' }),
+      expect.objectContaining({ sourceKey: 'web:new' }),
+    ]))
+    expect(JSON.parse(merged.canonFactCardsJson)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cardKey: 'concurrent-card' }),
+      expect.objectContaining({ cardKey: 'web:new' }),
+    ]))
   })
 
   it('writes provider results into source ledger and canon fact cards', async () => {

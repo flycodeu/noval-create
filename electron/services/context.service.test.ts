@@ -590,6 +590,29 @@ describe('allocateChapterContext', () => {
     expect(context.contextBudgetReport.reservedForOutput).toBeLessThanOrEqual(7800)
   })
 
+  it('reserves the configured model output limit when longform budget floors reach the context window', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 16000,
+      maxTokens: 6000,
+    } as ReturnType<typeof resolveModelRuntimeBudget>)
+
+    const context = allocateChapterContext(createRawData({
+      novel: { targetWords: 1500000 },
+    }), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.contextBudgetReport.effectiveBudget).toBe(16000)
+    expect(context.contextBudgetReport.reservedForOutput).toBe(6000)
+    expect(
+      context.contextBudgetReport.availableContextBudget
+      + context.contextBudgetReport.promptFixedOverhead
+      + context.contextBudgetReport.reservedForOutput,
+    ).toBeLessThanOrEqual(context.contextBudgetReport.safeModelContextLimit!)
+  })
+
   it('applies provider-level token safety margin before allocating context budget', () => {
     vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
       maxContextTokens: 32000,
@@ -635,6 +658,33 @@ describe('allocateChapterContext', () => {
 
     expect(context.scenePlanSummary.length).toBeGreaterThan(0)
     expect(context.softContextDecisions.find((entry) => entry.label === 'scenePlanSummary')?.status).not.toBe('dropped')
+  })
+
+  it('keeps Chinese truncation inside the reported budget and does not restore a dropped raw field', () => {
+    const publishRisk = '发布门风险：合同证据仍不完整。'.repeat(900)
+    const rawData = createRawData({
+      contextParts: {
+        storyCore: '主线压力持续升级。'.repeat(2600),
+        publishGateRiskSummary: publishRisk,
+      },
+    })
+
+    let context: ReturnType<typeof allocateChapterContext> | undefined
+    try {
+      context = allocateChapterContext(rawData, {
+        totalBudget: 9000,
+        promptProfile: 'rewrite',
+        chapterComplexity: 'standard',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      context = (error as ContextOverflowError).context
+    }
+
+    expect(context).toBeDefined()
+    expect(context!.softContextBudgetUsage.used).toBeLessThanOrEqual(context!.softContextBudgetUsage.budget)
+    expect(context!.softContextDecisions.find((entry) => entry.label === 'publishGateRiskSummary')?.status).toBe('dropped')
+    expect(context!.publishGateRiskSummary).toBe('')
   })
 
   it('throws ContextOverflowError when only soft context must be trimmed', () => {

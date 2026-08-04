@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
 import { parseAiJsonResult } from '../utils/json'
 import { runChatTask } from './task.service'
-import { createCreativeStageHandoff } from './creative-stage.service'
+import { createCreativeStageHandoff, listCreativeStageHandoffs } from './creative-stage.service'
+import { findArtifactByIdempotency } from './artifact.service'
 import {
   normalizeCreativeStageHandoffList,
   type CreativeStageAssetType,
@@ -51,6 +53,8 @@ const ASSET_CHANGES: readonly CreativeStageHandoffAssetContinuity['change'][] = 
   'retired',
   'unchanged',
 ]
+
+const handoffDraftsInFlight = new Map<string, Promise<CreateChapterEndHandoffDraftResult>>()
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -119,9 +123,40 @@ function deterministicInput(input: CreateChapterEndHandoffDraftInput): HandoffDr
   }
 }
 
-export async function createChapterEndCreativeStageHandoffDraft(
+function buildHandoffRevisionFingerprint(input: CreateChapterEndHandoffDraftInput): string {
+  return createHash('sha256').update(JSON.stringify({
+    novelId: input.novelId,
+    stageId: input.stageId,
+    chapterId: input.chapterId,
+    chapterNum: input.chapterNum,
+    chapterTitle: asText(input.chapterTitle),
+    chapterContent: asText(input.chapterContent),
+    summary: asText(input.summary),
+    nextChapterSeed: asText(input.nextChapterSeed),
+    continuitySummary: asText(input.continuitySummary),
+    modelConfigId: input.modelConfigId || null,
+  })).digest('hex').slice(0, 24)
+}
+
+function extractionModeForArtifact(artifact: CreativeStageHandoffArtifact): CreateChapterEndHandoffDraftResult['extractionMode'] {
+  return artifact.producerType === 'novelforge_model' ? 'model' : 'deterministic'
+}
+
+async function createChapterEndCreativeStageHandoffDraftInternal(
   input: CreateChapterEndHandoffDraftInput,
+  revisionFingerprint: string,
 ): Promise<CreateChapterEndHandoffDraftResult> {
+  const artifactIdempotencyKey = `chapter-handoff-seed:${input.chapterId}:${revisionFingerprint}`
+  const existingHandoffs = listCreativeStageHandoffs(input.novelId, input.stageId)
+  const existing = findArtifactByIdempotency<CreativeStageHandoffArtifact['content']>(
+    input.novelId,
+    'creative_stage_handoff',
+    artifactIdempotencyKey,
+  ) as CreativeStageHandoffArtifact | null
+  if (existing?.content?.stageId === input.stageId) {
+    return { artifact: existing, extractionMode: extractionModeForArtifact(existing) }
+  }
+
   const fallback = deterministicInput(input)
   let extracted = fallback
   let extractionMode: CreateChapterEndHandoffDraftResult['extractionMode'] = 'deterministic'
@@ -134,7 +169,7 @@ export async function createChapterEndCreativeStageHandoffDraft(
       relatedEntityId: input.chapterId,
       modelConfigId: input.modelConfigId || undefined,
       retryable: true,
-      idempotencyKey: `chapter-handoff-extraction:${input.chapterId}`,
+      idempotencyKey: `chapter-handoff-extraction:${input.chapterId}:${revisionFingerprint}`,
       messages: [{ role: 'user', content: buildHandoffExtractionPrompt(input) }],
     })
     const parsed = parseAiJsonResult<Record<string, unknown>>(raw, 'object', {
@@ -163,14 +198,44 @@ export async function createChapterEndCreativeStageHandoffDraft(
     // Model extraction is an enhancement; the deterministic seed keeps the chapter finalization path recoverable.
   }
 
-  const artifact = createCreativeStageHandoff({
-    stageId: input.stageId,
-    idempotencyKey: `chapter-handoff-seed:${input.chapterId}`,
-    ...extracted,
-    producerType: extractionMode === 'model' ? 'novelforge_model' : 'system',
-    producerId: extractionMode === 'model' ? 'creative-stage-handoff-extractor-v1' : 'chapter-finalize-fallback',
-    producerClient: 'novelforge-chapter-pipeline',
-    modelConfigId: input.modelConfigId,
-  })
-  return { artifact, extractionMode }
+  try {
+    const artifact = createCreativeStageHandoff({
+      stageId: input.stageId,
+      parentArtifactId: existingHandoffs[0]?.id || null,
+      idempotencyKey: artifactIdempotencyKey,
+      ...extracted,
+      producerType: extractionMode === 'model' ? 'novelforge_model' : 'system',
+      producerId: extractionMode === 'model' ? 'creative-stage-handoff-extractor-v1' : 'chapter-finalize-fallback',
+      producerClient: 'novelforge-chapter-pipeline',
+      modelConfigId: input.modelConfigId,
+    })
+    return { artifact, extractionMode }
+  } catch (error) {
+    // Two finalize requests for the same chapter revision may race after the
+    // model call. Prefer the immutable winner instead of surfacing an
+    // idempotency conflict and silently losing the stage handoff.
+    const raced = findArtifactByIdempotency<CreativeStageHandoffArtifact['content']>(
+      input.novelId,
+      'creative_stage_handoff',
+      artifactIdempotencyKey,
+    ) as CreativeStageHandoffArtifact | null
+    if (raced?.content?.stageId === input.stageId) {
+      return { artifact: raced, extractionMode: extractionModeForArtifact(raced) }
+    }
+    throw error
+  }
+}
+
+export function createChapterEndCreativeStageHandoffDraft(
+  input: CreateChapterEndHandoffDraftInput,
+): Promise<CreateChapterEndHandoffDraftResult> {
+  const revisionFingerprint = buildHandoffRevisionFingerprint(input)
+  const requestKey = `${input.novelId}:${input.stageId}:${input.chapterId}:${revisionFingerprint}`
+  const existing = handoffDraftsInFlight.get(requestKey)
+  if (existing) return existing
+
+  const pending = createChapterEndCreativeStageHandoffDraftInternal(input, revisionFingerprint)
+    .finally(() => handoffDraftsInFlight.delete(requestKey))
+  handoffDraftsInFlight.set(requestKey, pending)
+  return pending
 }

@@ -1,4 +1,4 @@
-import { asc, desc, eq } from 'drizzle-orm'
+import { asc, desc, eq, sql } from 'drizzle-orm'
 import type {
   ChapterContractValidationResult,
   ChapterRewriteScope,
@@ -2230,24 +2230,21 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
 
 export function markNovelContextChanged(novelId: number, reasons: string | string[]): number {
   const db = getDb()
-  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) {
-    throwUserFacingError('novel.notFound')
-  }
-
   const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
   if (normalizedReasons.length === 0) {
+    const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+    if (!novel) throwUserFacingError('novel.notFound')
     return novel.contextVersion || 1
   }
 
-  const nextVersion = (novel.contextVersion || 1) + 1
   const now = new Date().toISOString()
-
-  getSqlite().transaction(() => {
-    db.update(novels).set({
-      contextVersion: nextVersion,
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    const updateResult = db.update(novels).set({
+      contextVersion: sql`COALESCE(${novels.contextVersion}, 1) + 1`,
       updatedAt: now,
     }).where(eq(novels.id, novelId)).run()
+    if (!updateResult.changes) throwUserFacingError('novel.notFound')
 
     const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
     for (const chapter of chapterRows) {
@@ -2258,9 +2255,17 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
     }
 
     markStoryMemoryCheckpointsDirty(novelId, now)
-  })()
+    const updatedNovel = db.select({ contextVersion: novels.contextVersion })
+      .from(novels)
+      .where(eq(novels.id, novelId))
+      .all()[0]
+    if (!updatedNovel) throwUserFacingError('novel.notFound')
+    return updatedNovel.contextVersion || 1
+  })
 
-  return nextVersion
+  return sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
 }
 
 export function markStoryMemoryCheckpointsDirty(novelId: number, updatedAt = new Date().toISOString()): void {

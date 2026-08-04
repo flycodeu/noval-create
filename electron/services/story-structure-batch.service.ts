@@ -22,9 +22,9 @@ import type {
   StructureBatchPreview,
   StructureBatchPreviewItem,
 } from '../../src/types'
-import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
-import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
+import { markNovelContextChanged } from './context-impact.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -40,19 +40,6 @@ function toStringArray(value: unknown): string[] {
 
 function stringifyStringArray(values: string[]): string {
   return JSON.stringify([...new Set(values.map((value) => value.trim()).filter(Boolean))])
-}
-
-function parseStoredStringArray(raw?: string | null): string[] {
-  if (!raw) return []
-  try {
-    return toStringArray(JSON.parse(raw))
-  } catch {
-    return []
-  }
-}
-
-function mergeStoredReasons(raw: string | null | undefined, reasons: string[]): string {
-  return stringifyStringArray([...parseStoredStringArray(raw), ...reasons])
 }
 
 function normalizeIds(values: number[]): number[] {
@@ -251,26 +238,7 @@ function normalizeSegmentOrders(chapterId: number) {
 }
 
 function markNovelContextChangedInline(novelId: number, reason: string) {
-  const db = getDb()
-  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throwUserFacingError('novel.notFound')
-
-  const nextVersion = (novel.contextVersion || 1) + 1
-  const now = new Date().toISOString()
-  db.update(novels).set({
-    contextVersion: nextVersion,
-    updatedAt: now,
-  }).where(eq(novels.id, novelId)).run()
-
-  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
-  for (const chapter of chapterRows) {
-    db.update(chapters).set({
-      staleReasonJson: mergeStoredReasons(chapter.staleReasonJson, translateContextChangeReasons([reason])),
-      updatedAt: now,
-    }).where(eq(chapters.id, chapter.id)).run()
-  }
-
-  markStoryMemoryCheckpointsDirty(novelId, now)
+  return markNovelContextChanged(novelId, reason)
 }
 
 function runStructureTransaction(novelId: number, mutate: () => void) {
@@ -1214,7 +1182,15 @@ export function applyStructureBatchPlan(novelId: number, plan: StructureBatchPla
             status: chapterInput.status || 'outline',
             aiScoreJson: '',
             arcId: null,
-            targetWords: typeof chapterInput.targetWords === 'number' ? chapterInput.targetWords : 0,
+            targetWords: typeof chapterInput.targetWords === 'number'
+              && Number.isFinite(chapterInput.targetWords)
+              && chapterInput.targetWords > 0
+              ? Math.round(chapterInput.targetWords)
+              : getRecommendedChapterWordsForOperatingMode({
+                  launchMode: novel.launchMode,
+                  targetWords: novel.targetWords,
+                  settingsJson: novel.settingsJson,
+                }),
             emotionTone: '',
             compiledFromSegments: 0,
             segmentCount: 0,

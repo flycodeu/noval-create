@@ -240,6 +240,41 @@ function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
   }
 }
 
+/**
+ * The general source ledger contains both external grounding references and
+ * chapter writeback observations. Chapter observations are not canonical until
+ * an accepted/edited diff has actually been applied. Keep that distinction at
+ * every prompt/review consumer so a pending extract cannot become a fact merely
+ * because it was persisted for auditability.
+ */
+export function isChapterWritebackSourceLedgerEntry(entry: Record<string, unknown>): boolean {
+  return Number.isFinite(Number(entry.runId)) && Array.isArray(entry.supportingDiffIds)
+}
+
+export function getGroundingSourceLedgerEntries(input: {
+  sourceLedgerJson?: string | null
+  canonSourceLedgerJson?: string | null
+}): Record<string, unknown>[] {
+  const merged = new Map<string, Record<string, unknown>>()
+  const entries = [
+    ...parseJsonRecordArray(input.sourceLedgerJson),
+    ...parseJsonRecordArray(input.canonSourceLedgerJson),
+  ]
+
+  entries.forEach((entry, index) => {
+    const isChapterWritebackObservation = isChapterWritebackSourceLedgerEntry(entry)
+    const hasAppliedCanonSupport = Array.isArray(entry.supportingDiffIds)
+      && entry.supportingDiffIds.some((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+    if (isChapterWritebackObservation && !hasAppliedCanonSupport) return
+
+    const key = asText(entry.sourceKey) || `unkeyed:${index}:${JSON.stringify(entry)}`
+    if (merged.has(key)) merged.delete(key)
+    merged.set(key, entry)
+  })
+
+  return [...merged.values()]
+}
+
 function collectJsonTextLeaves(value: unknown, depth = 0): string[] {
   if (depth >= 3) return []
   if (typeof value === 'string') {
@@ -2334,10 +2369,7 @@ export function assessHistoricalGrounding(input: {
   const historicalProfile = parseJsonRecord(input.historicalProfileJson)
   const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
-  const sourceLedgerEntries = [
-    ...parseJsonRecordArray(input.sourceLedgerJson),
-    ...parseJsonRecordArray(input.canonSourceLedgerJson),
-  ]
+  const sourceLedgerEntries = getGroundingSourceLedgerEntries(input)
   const canonFactCardEntries = parseJsonRecordArray(input.canonFactCardsJson)
   const historicalProfileText = collectJsonTextLeaves(historicalProfile).join('\n')
   const projectCanonProfileText = collectJsonTextLeaves(projectCanonProfile).join('\n')
