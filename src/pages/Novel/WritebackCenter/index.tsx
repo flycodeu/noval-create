@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Input, Modal, Select, Space, Spin, Table, Tag, message } from 'antd'
 import { CheckOutlined, EditOutlined, ReloadOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
+import { diffJson } from 'diff'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
@@ -132,6 +133,35 @@ function resolveDiffTitle(diff: ChapterWritebackDiff): string {
 function resolveExtractTitle(extract: ChapterFactExtract): string {
   const fact = parseJson(extract.factJson)
   return String(fact?.title || fact?.itemName || fact?.eventTitle || fact?.summary || `${assetLabel(extract.assetType)}事实`)
+}
+
+function JsonDiffViewer({ beforeJson, afterJson }: { beforeJson?: string | null, afterJson?: string | null }) {
+  const beforeObj = parseJson(beforeJson) || {}
+  const afterObj = parseJson(afterJson) || {}
+  const diffResult = diffJson(beforeObj, afterObj)
+
+  return (
+    <div className="novel-writeback-center-page__diff-viewer">
+      {diffResult.map((part, index) => {
+        const bg = part.added ? '#e6ffed' : part.removed ? '#ffeef0' : 'transparent'
+        const color = part.added ? '#22863a' : part.removed ? '#cb2431' : 'inherit'
+        const prefix = part.added ? '+ ' : part.removed ? '- ' : '  '
+
+        return (
+          <div key={index} style={{ backgroundColor: bg, color, whiteSpace: 'pre-wrap', fontFamily: 'monospace', padding: '0 4px' }}>
+            {part.value.split('\n').map((line, i, arr) => (
+              (i === arr.length - 1 && line === '') ? null : (
+                <div key={i} style={{ display: 'flex' }}>
+                  <span style={{ userSelect: 'none', width: '20px', opacity: 0.5 }}>{prefix}</span>
+                  <span>{line}</span>
+                </div>
+              )
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function WritebackCenterPage({ novelId }: Props) {
@@ -522,7 +552,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
         </WorkspacePanel>
 
         <div className="novel-writeback-center-page__content-grid">
-          <WorkspacePanel title={`事实抽取 · ${filteredExtracts.length}`} description="左侧是从本章正文抽出的结构化事实草案。">
+          <WorkspacePanel title={`事实抽取 · ${filteredExtracts.length}`}>
             <div className="novel-writeback-center-page__extract-list">
               {filteredExtracts.length > 0 ? filteredExtracts.map((extract) => (
                 <div key={extract.id} className="novel-note-list__item novel-writeback-center-page__extract-item">
@@ -540,7 +570,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
             </div>
           </WorkspacePanel>
 
-          <WorkspacePanel title={`回写候选 · ${filteredDiffs.length}`} description="右侧先确认或编辑，再执行统一写回。">
+          <WorkspacePanel title={`回写候选 · ${filteredDiffs.length}`}>
             <Table<ChapterWritebackDiff>
               rowKey="id"
               loading={actionLoading}
@@ -549,15 +579,9 @@ export default function WritebackCenterPage({ novelId }: Props) {
               dataSource={filteredDiffs}
               expandable={{
                 expandedRowRender: (row) => (
-                  <div className="novel-writeback-center-page__expanded-grid">
-                    <div>
-                      <strong>回写前</strong>
-                      <pre className="novel-writeback-center-page__json-block novel-writeback-center-page__json-block--spaced">{prettyJson(row.beforeStateJson)}</pre>
-                    </div>
-                    <div>
-                      <strong>回写后</strong>
-                      <pre className="novel-writeback-center-page__json-block novel-writeback-center-page__json-block--spaced">{prettyJson(row.afterStateJson)}</pre>
-                    </div>
+                  <div className="novel-writeback-center-page__expanded-diff">
+                    <strong>变更详情 (Git Diff)</strong>
+                    <JsonDiffViewer beforeJson={row.beforeStateJson} afterJson={row.afterStateJson} />
                   </div>
                 ),
               }}

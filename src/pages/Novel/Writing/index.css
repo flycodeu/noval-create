@@ -377,7 +377,8 @@
 }
 
 .app-layout .novel-writing-console-page .chapter-console-page__grid.has-assist-panel {
-  grid-template-columns: clamp(190px, 14vw, 224px) minmax(0, 1fr);
+  grid-template-columns: clamp(190px, 14vw, 224px) minmax(0, 1fr) 380px;
+  gap: 16px;
 }
 
 .novel-writing-console-page .chapter-console-page__column--left,

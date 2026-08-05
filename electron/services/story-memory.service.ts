@@ -789,10 +789,16 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
     .filter((checkpoint) => checkpoint.scopeType === 'volume' && checkpoint.summary)
     .map((checkpoint) => checkpoint.summary || '')
 
-  // In mega mode, apply thread decay: filter out open loops from chapters older than 150 chapters
-  const threadDecayThreshold = memoryMode === 'mega' ? 150 : Infinity
+  // Hierarchical memory decay: limit detailed chapter events, relying on volume/part digests for the past
+  const threadDecayThreshold = memoryMode === 'mega' ? 150 : memoryMode === 'epic' ? 250 : memoryMode === 'longform' ? 400 : Infinity
+  const detailDecayThreshold = memoryMode === 'mega' ? 80 : memoryMode === 'epic' ? 150 : memoryMode === 'longform' ? 250 : Infinity
+
   const recentContinuityRows = threadDecayThreshold < Infinity
-    ? continuityRows.filter((row) => lastChapterNum - row.chapterNum < threadDecayThreshold)
+    ? continuityRows.filter((row) => lastChapterNum - row.chapterNum <= threadDecayThreshold)
+    : continuityRows
+
+  const detailedContinuityRows = detailDecayThreshold < Infinity
+    ? continuityRows.filter((row) => lastChapterNum - row.chapterNum <= detailDecayThreshold)
     : continuityRows
 
   return {
@@ -803,18 +809,18 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
     coverageSummary: buildCoverageSummary(memoryMode, chapterRows.length, lastChapterNum, targetWords),
     phaseDigest: dedupe([
       ...partDigests.slice(0, 3),
-      ...volumeDigests.slice(0, 2),
-      ...buildPhaseDigest(continuityRows, memoryMode),
+      ...volumeDigests.slice(0, 3),
+      ...buildPhaseDigest(detailedContinuityRows, memoryMode),
     ], getModeLimit(memoryMode, 6, 8, 10, 14)),
     plotMilestones: dedupe([
-      ...continuityRows.map((row) => row.summary ? `Ch.${row.chapterNum}: ${row.summary}` : '').filter(Boolean),
-      ...continuityRows.flatMap((row) => row.continuity.plotProgress.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+      ...detailedContinuityRows.map((row) => row.summary ? `Ch.${row.chapterNum}: ${row.summary}` : '').filter(Boolean),
+      ...detailedContinuityRows.flatMap((row) => row.continuity.plotProgress.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
     ], getModeLimit(memoryMode, 12, 16, 20)),
-      arcSignals: dedupe(continuityRows.map((row) =>
+      arcSignals: dedupe(detailedContinuityRows.map((row) =>
         row.continuity.arcProgress ? `Ch.${row.chapterNum}: ${row.continuity.arcProgress}` : '').filter(Boolean),
       getModeLimit(memoryMode, 10, 14, 18)),
       characterLedger: dedupe(
-        continuityRows.flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+        detailedContinuityRows.flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
         getModeLimit(memoryMode, 12, 16, 20),
       ),
       characterCurrentStates,
@@ -827,7 +833,7 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       worldStateTrendSummary: worldStateLedger.trendSummary,
       worldLedger: dedupe(
         [
-          ...continuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+          ...detailedContinuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
           ...worldCurrentStates.map((item) => `Ch.${item.chapterNum}: ${entityLabel(item)} ${item.entityName} · ${item.summaryText}`),
           ...worldStateLedger.conflictEntities.map((item) => `冲突 ${entityLabel(item)} ${item.entityName} · ${item.reasons.join('；')}`),
         ],
@@ -838,7 +844,7 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       ...eventRows.flatMap((event) => parseStringArray(event.openThreadsJson)),
     ], getModeLimit(memoryMode, 14, 18, 24, 32)),
     continuityDirectives: dedupe(
-      continuityRows.flatMap((row) => row.continuity.continuityNotes),
+      recentContinuityRows.flatMap((row) => row.continuity.continuityNotes),
       getModeLimit(memoryMode, 12, 16, 20),
     ),
     timelineAnchors: dedupe(

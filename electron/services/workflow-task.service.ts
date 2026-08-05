@@ -1,4 +1,4 @@
-﻿import { WebContents } from 'electron'
+import { WebContents } from 'electron'
 import { desc, eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -554,13 +554,13 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
         if (nextRetryCount > maxRetries) {
           const pausedProgress: MapAutoGenerateStatus = {
             ...currentProgress,
-            status: 'paused',
+            status: 'blocked',
             retryCount: nextRetryCount,
             lastError: errorMessage,
-            message: `当前批次连续失败 ${nextRetryCount} 次，任务已暂停。`,
+            message: `当前批次连续失败 ${nextRetryCount} 次，任务已被阻塞，需人工干预。`,
           }
           updateTaskProgress(taskId, pausedProgress, sender)
-          updateTaskStatus(taskId, 'paused', sender, {
+          updateTaskStatus(taskId, 'blocked', sender, {
             errorMessage,
             currentChildTaskId: null,
           })
@@ -751,7 +751,7 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
           const failedLabel = currentProgress.currentSectionLabel || (failedKey ? (WORLD_RULE_SECTION_LABELS.get(failedKey) || failedKey) : '当前分区')
           const pausedProgress: WorldRulesAutoGenerateStatus = {
             ...currentProgress,
-            status: 'paused',
+            status: 'blocked',
             retryCount: nextRetryCount,
             lastError: errorMessage,
             failedSections: failedKey
@@ -761,10 +761,10 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
                   error: errorMessage,
                 })
               : currentProgress.failedSections,
-            message: `${failedLabel} 连续失败 ${nextRetryCount} 次，任务已暂停。`,
+            message: `${failedLabel} 连续失败 ${nextRetryCount} 次，任务已被阻塞，需人工干预。`,
           }
           updateTaskProgress(taskId, pausedProgress, sender)
-          updateTaskStatus(taskId, 'paused', sender, {
+          updateTaskStatus(taskId, 'blocked', sender, {
             errorMessage,
             currentChildTaskId: null,
           })
@@ -875,7 +875,7 @@ export function getLatestMapAutoGenerateTask(novelId: number) {
   const task = getLatestMapWorkflow(novelId)
   if (!task) return null
 
-  if (['pending', 'running', 'cancel_requested', 'paused'].includes(task.status || '')) {
+  if (['pending', 'running', 'cancel_requested', 'paused', 'blocked'].includes(task.status || '')) {
     return task
   }
 
@@ -892,10 +892,10 @@ export function getLatestWorldRulesAutoGenerateTask(novelId: number) {
       status.completedSectionCount > 0
       || status.pendingSections.length > 0
       || status.failedSections.length > 0
-      || ['pending', 'running', 'cancel_requested', 'paused'].includes(task.status || '')
+      || ['pending', 'running', 'cancel_requested', 'paused', 'blocked'].includes(task.status || '')
     )
 
-  if (['pending', 'running', 'cancel_requested', 'paused'].includes(task.status || '') || hasDraft) {
+  if (['pending', 'running', 'cancel_requested', 'paused', 'blocked'].includes(task.status || '') || hasDraft) {
     return task
   }
 
@@ -968,7 +968,7 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
   if (!task || task.runnerType !== 'workflow' || task.type !== 'world_rules_auto_generate') {
     throwUserFacingError('workflow.taskNotFound', { taskId })
   }
-  if (task.status !== 'paused' || !hasResumableWorkflowCheckpoint(task)) {
+  if (!['paused', 'blocked'].includes(task.status || '') || !hasResumableWorkflowCheckpoint(task)) {
     throwUserFacingError('workflow.resumeUnsupported')
   }
 
@@ -1011,7 +1011,7 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
   if (!RESUMABLE_WORKFLOW_TYPES.has(task.type)) {
     throwUserFacingError('workflow.resumeUnsupported')
   }
-  if (task.status !== 'paused' || !hasResumableWorkflowCheckpoint(task)) {
+  if (!['paused', 'blocked'].includes(task.status || '') || !hasResumableWorkflowCheckpoint(task)) {
     throwUserFacingError('workflow.resumeUnsupported')
   }
 

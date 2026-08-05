@@ -86,7 +86,7 @@ export interface ReviewNotes {
   contract_validation?: ChapterContractValidationResult
 }
 
-export type WritingPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
+export type WritingPipelineRole = 'planner' | 'writer' | 'critic' | 'enforcer' | 'rewriter' | 'canonizer' | 'finalize'
 
 export interface WritingPipelineRoleState {
   role: WritingPipelineRole

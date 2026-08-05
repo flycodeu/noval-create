@@ -1429,7 +1429,7 @@ export interface Task {
   id: number
   novelId?: number
   type: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'paused' | 'cancel_requested'
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'paused' | 'cancel_requested' | 'blocked'
   inputJson?: string
   outputText?: string
   modelConfigId?: number
@@ -1459,6 +1459,7 @@ export type TaskPipelineRole =
   | 'planner'
   | 'writer'
   | 'critic'
+  | 'enforcer'
   | 'rewriter'
   | 'canonizer'
   | 'finalize'

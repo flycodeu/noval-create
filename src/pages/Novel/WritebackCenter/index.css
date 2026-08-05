@@ -44,3 +44,16 @@
   font-size: 12px;
   color: var(--workspace-ink-soft);
 }
+
+.novel-writeback-center-page__diff-viewer {
+  border: 1px solid var(--workspace-border);
+  border-radius: 6px;
+  overflow: auto;
+  margin-top: 8px;
+  font-size: 13px;
+  background-color: var(--workspace-bg-elevated);
+  line-height: 1.5;
+}
+.novel-writeback-center-page__expanded-diff {
+  padding: 12px;
+}

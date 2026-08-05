@@ -6,6 +6,7 @@ export type TaskEventStatus =
   | 'cancelled'
   | 'paused'
   | 'cancel_requested'
+  | 'blocked'
 
 const TASK_EVENT_STATUSES = new Set<TaskEventStatus>([
   'pending',
@@ -15,6 +16,7 @@ const TASK_EVENT_STATUSES = new Set<TaskEventStatus>([
   'cancelled',
   'paused',
   'cancel_requested',
+  'blocked',
 ])
 
 function readTaskId(data: unknown): number | null {

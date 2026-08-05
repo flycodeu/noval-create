@@ -109,6 +109,7 @@ const PIPELINE_ROLE_LABELS: Record<string, string> = {
   planner: 'Planner',
   writer: 'Writer',
   critic: 'Critic',
+  enforcer: 'Enforcer',
   rewriter: 'Rewriter',
   canonizer: 'Canonizer',
   finalize: 'Finalize',
@@ -470,10 +471,10 @@ export default function TaskCenter() {
 
   const handleResume = async (task: Task, recoveryAction?: ReturnType<typeof buildTaskRecoveryAction> | null) => {
     try {
-      if (task.runnerType === 'workflow' && task.status === 'paused' && isWorkflowResumable(task)) {
-        await window.electron.workflow.resume(task.id)
-      } else if (isChapterPipelineResumeSupported(task, recoveryAction || null)) {
+      if (isChapterPipelineResumeSupported(task, recoveryAction || null)) {
         await window.electron.chapter.resumeContent(task.id)
+      } else if (task.runnerType === 'workflow' && (task.status === 'paused' || task.status === 'blocked') && isWorkflowResumable(task)) {
+        await window.electron.workflow.resume(task.id)
       } else {
         return
       }
@@ -796,7 +797,7 @@ export default function TaskCenter() {
                   取消
                 </Button>
               ) : null}
-              {(selectedTask.status === 'paused' && isWorkflowResumable(selectedTask))
+              {((selectedTask.status === 'paused' || selectedTask.status === 'blocked') && isWorkflowResumable(selectedTask))
                 || isChapterPipelineResumeSupported(selectedTask, selectedRecoveryAction) ? (
                 <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask, selectedRecoveryAction)}>
                   继续

@@ -9,6 +9,7 @@ export const RESUMABLE_WORKFLOW_TYPES = [
   'subplot_auto_generate',
   'chapter_batch_generate',
   'chapter_quality_analysis',
+  'chapter_write',
 ] as const
 
 export type ResumableWorkflowType = typeof RESUMABLE_WORKFLOW_TYPES[number]
@@ -88,6 +89,12 @@ export function hasResumableWorkflowCheckpoint(task: WorkflowResumeTaskLike): bo
   if (task.type === 'chapter_quality_analysis') {
     return hasNumericCheckpoint(progress, 'resumeCursor', 'totalBatches', 'requestedCount', 'generatedCount')
       || hasArrayCheckpoint(progress, 'chapterIds', 'completedChapterIds', 'failedChapterIds', 'warnings')
+  }
+
+  if (task.type === 'chapter_write') {
+    return progress.kind === 'chapter_pipeline'
+      || typeof progress.currentRole === 'string'
+      || hasObjectCheckpoint(progress, 'roles')
   }
 
   return hasNumericCheckpoint(progress, 'resumeCursor', 'totalBatches', 'requestedCount', 'generatedCount')

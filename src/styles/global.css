@@ -7411,10 +7411,6 @@ html[data-theme="dark"] .ant-card-actions > li {
 .novel-context-summary__item dd {
   min-width: 0;
   word-break: break-word;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .novel-hero__metrics {
@@ -7440,6 +7436,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-panel__desc {
+  min-width: 0;
   max-width: 72ch;
   word-break: break-word;
 }
@@ -7504,6 +7501,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-resource-workspace__desc {
+  min-width: 0;
   color: var(--workspace-ink-soft);
   font-size: 13px;
   line-height: 1.65;

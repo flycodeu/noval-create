@@ -1916,7 +1916,7 @@ export default function Writing({ novelId }: Props) {
   const currentChapterGenerating = currentChapterGeneration?.status === 'running'
     && activeGeneration.chapterId === currentChapter?.id
   const pipelineRoleItems = useMemo(() => {
-    const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
+    const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'enforcer', 'rewriter', 'canonizer', 'finalize']
     return order.map((role) => currentPipelineSnapshot?.roles[role]).filter(Boolean) as WritingPipelineRoleState[]
   }, [currentPipelineSnapshot])
 
@@ -2472,11 +2472,12 @@ export default function Writing({ novelId }: Props) {
   ]), [aiResult?.issues, chapterIssues, publishCheck?.checklist])
 
   const pipelineItems = useMemo<PipelineBarItem[]>(() => {
-    const roleKeyOrder: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
+    const roleKeyOrder: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'enforcer', 'rewriter', 'canonizer', 'finalize']
     const roleLabelMap: Record<WritingPipelineRole, string> = {
       planner: '规划',
       writer: '写作',
       critic: '审校',
+      enforcer: '一致性守卫',
       rewriter: '重写',
       canonizer: '回写',
       finalize: '定稿',

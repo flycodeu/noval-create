@@ -8,6 +8,7 @@ import RecommendationGovernancePanel from '../RecommendationGovernancePanel'
 import TruncatedList from '../../../../components/common/TruncatedList'
 import { getQualityRiskSeverityColor, getQualityRiskSeverityLabel } from '../../shared/revision-quality'
 import RepairRiskCard from './RepairRiskCard'
+import QualityCharts from './QualityCharts'
 import {
   agentArtifactKindLabel,
   agentArtifactStatusColor,
@@ -194,6 +195,10 @@ export default function OverviewSection({
             </div>
           </div>
         </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="趋势与脱轨警告分布">
+        <QualityCharts data={data} />
       </WorkspacePanel>
 
       <WorkspacePanel title="全书健康总览">

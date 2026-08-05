@@ -9,10 +9,12 @@ import {
   EllipsisOutlined,
   ExportOutlined,
   HighlightOutlined,
+  LeftOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MoonOutlined,
   QuestionCircleOutlined,
+  RightOutlined,
   RobotOutlined,
   RollbackOutlined,
   SearchOutlined,
@@ -50,6 +52,12 @@ interface ProjectTopbarProps {
   exportMenu: MenuProps
   showQuality?: boolean
   showNextStep?: boolean
+  onPrevPage?: () => void
+  prevPageLabel?: string
+  canPrevPage?: boolean
+  onNextPage?: () => void
+  nextPageLabel?: string
+  canNextPage?: boolean
   moreMenu: MenuProps
   showWindowControls?: boolean
   sidebarToggleActive?: boolean
@@ -78,6 +86,12 @@ export default function ProjectTopbar({
   exportMenu,
   showQuality = true,
   showNextStep = true,
+  onPrevPage,
+  prevPageLabel,
+  canPrevPage = false,
+  onNextPage,
+  nextPageLabel,
+  canNextPage = false,
   moreMenu,
   showWindowControls = true,
   sidebarToggleActive = false,
@@ -275,6 +289,30 @@ export default function ProjectTopbar({
                 aria-pressed={assistantToggleActive}
                 title="AI 助手"
               />
+            ) : null}
+            {onPrevPage ? (
+              <Button
+                className="project-topbar__control project-topbar__control--ghost"
+                icon={<LeftOutlined />}
+                onClick={onPrevPage}
+                disabled={!canPrevPage}
+                aria-label={prevPageLabel || '上一步'}
+                title={prevPageLabel || '上一步'}
+              >
+                上一步
+              </Button>
+            ) : null}
+            {onNextPage ? (
+              <Button
+                className="project-topbar__control project-topbar__control--ghost"
+                icon={<RightOutlined />}
+                onClick={onNextPage}
+                disabled={!canNextPage}
+                aria-label={nextPageLabel || '下一步'}
+                title={nextPageLabel || '下一步'}
+              >
+                下一步
+              </Button>
             ) : null}
             {showNextStep && onNextStep ? (
               <Button

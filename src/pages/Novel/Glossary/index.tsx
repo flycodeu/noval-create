@@ -318,7 +318,7 @@ export default function GlossaryPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="词典清单" description="左侧筛选，右侧编辑定义与别名。">
+      <WorkspacePanel title="词典清单">
         <div className="novel-resource-workspace__layout">
           <div className="novel-resource-workspace__sidebar">
             <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索术语、定义或别名" allowClear />

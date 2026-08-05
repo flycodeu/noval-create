@@ -1062,6 +1062,12 @@ export default function NovelRouter() {
             }
           : undefined}
         canUndo={Boolean(latestUndoable)}
+        onPrevPage={previousPageMeta ? () => navigateWithinWorkspace(previousPageMeta.route) : undefined}
+        prevPageLabel={previousPageMeta?.label}
+        canPrevPage={Boolean(previousPageMeta)}
+        onNextPage={nextPageMeta ? () => navigateWithinWorkspace(nextPageMeta.route) : undefined}
+        nextPageLabel={nextPageMeta?.label}
+        canNextPage={Boolean(nextPageMeta)}
         onNextStep={() => navigateWithinWorkspace(recommendedRoute)}
         nextStepLabel="推荐下一步"
         exportMenu={{
@@ -1145,21 +1151,6 @@ export default function NovelRouter() {
               label: batchAnalyzingChapters ? '逐章分析中...' : '逐章 AI 体检队列',
               disabled: batchAnalyzingChapters,
               onClick: () => void handleSequentialChapterAnalysis(),
-            },
-            { type: 'divider' as const },
-            {
-              key: 'prev',
-              icon: <LeftOutlined />,
-              label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
-              disabled: !previousPageMeta,
-              onClick: () => previousPageMeta && navigateWithinWorkspace(previousPageMeta.route),
-            },
-            {
-              key: 'next',
-              icon: <RightOutlined />,
-              label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
-              disabled: !nextPageMeta,
-              onClick: () => nextPageMeta && navigateWithinWorkspace(nextPageMeta.route),
             },
           ].filter(Boolean) as MenuProps['items'],
         }}

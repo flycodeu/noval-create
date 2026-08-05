@@ -2,6 +2,25 @@ import { eq, and } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
+let embeddingPipeline: any = null;
+
+async function getLocalEmbeddingPipeline() {
+  if (!embeddingPipeline) {
+    const { pipeline, env } = await import('@xenova/transformers');
+    env.allowLocalModels = true;
+    env.useBrowserCache = false;
+    embeddingPipeline = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
+      quantized: true,
+    });
+  }
+  return embeddingPipeline;
+}
+
+async function getLocalEmbeddings(texts: string[]): Promise<number[][]> {
+  const extractor = await getLocalEmbeddingPipeline();
+  const results = await extractor(texts, { pooling: 'mean', normalize: true });
+  return results.tolist();
+}
 
 export interface SimilarFragmentHit {
   chapterId: number
@@ -157,15 +176,30 @@ export async function generateChapterEmbeddings(
 
   if (fragments.length === 0) return
 
-  // Try to use adapter's embed method
-  let adapter
+  const texts = fragments.map((f) => f.text)
+  let embeddings: number[][] | undefined = undefined;
+  let usedModelId: string | null = null;
+
   try {
-    adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
+    const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
+    if (adapter && adapter.embed) {
+      embeddings = await adapter.embed(texts)
+      usedModelId = adapter.id
+    }
   } catch {
-    return // No adapter available
+    // Ignore remote adapter failure
   }
 
-  if (!adapter.embed) {
+  if (!embeddings) {
+    try {
+      embeddings = await getLocalEmbeddings(texts)
+      usedModelId = 'local_bge_small_zh'
+    } catch (e) {
+      console.error('Local embedding failed:', e)
+    }
+  }
+
+  if (!embeddings) {
     // Fallback: store fragments without embeddings for keyword search
     for (const frag of fragments) {
       db.delete(chapterEmbeddings)
@@ -182,33 +216,6 @@ export async function generateChapterEmbeddings(
         fragmentText: frag.text,
         embeddingJson: null,
         modelId: null,
-        dimensions: null,
-      }).run()
-    }
-    return
-  }
-
-  const texts = fragments.map((f) => f.text)
-  let embeddings: number[][]
-  try {
-    embeddings = await adapter.embed(texts)
-  } catch {
-    // Embedding failed, still store text for keyword fallback
-    for (const frag of fragments) {
-      db.delete(chapterEmbeddings)
-        .where(and(
-          eq(chapterEmbeddings.chapterId, chapterId),
-          eq(chapterEmbeddings.fragmentType, frag.type),
-        ))
-        .run()
-
-      db.insert(chapterEmbeddings).values({
-        novelId,
-        chapterId,
-        fragmentType: frag.type,
-        fragmentText: frag.text,
-        embeddingJson: null,
-        modelId: adapter.id,
         dimensions: null,
       }).run()
     }
@@ -232,7 +239,7 @@ export async function generateChapterEmbeddings(
       fragmentType: frag.type,
       fragmentText: frag.text,
       embeddingJson: JSON.stringify(embedding),
-      modelId: adapter.id,
+      modelId: usedModelId,
       dimensions: embedding.length,
     }).run()
   }
@@ -277,33 +284,33 @@ export async function searchSimilarFragments(
     }
   }
 
-  // Get query embedding
-  let adapter
+  let queryEmbedding: number[] | undefined = undefined;
+
   try {
-    adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
+    const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
+    if (adapter && adapter.embed) {
+      const result = await adapter.embed([queryText])
+      queryEmbedding = result[0]
+    }
   } catch {
-    return {
-      hits: fallbackKeywordSearch(novelId, queryText, topK),
-      fallbackReason: 'embedding_service_failed',
+    // Ignore remote adapter failure
+  }
+
+  if (!queryEmbedding) {
+    try {
+      const result = await getLocalEmbeddings([queryText])
+      queryEmbedding = result[0]
+    } catch (e) {
+      // Ignore local embedding failure
+      console.error('Local embedding failed during search:', e)
     }
   }
 
-  if (!adapter.embed) {
+  if (!queryEmbedding) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK)
     return {
       hits,
-      fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
-    }
-  }
-
-  let queryEmbedding: number[]
-  try {
-    const result = await adapter.embed([queryText])
-    queryEmbedding = result[0]
-  } catch {
-    return {
-      hits: fallbackKeywordSearch(novelId, queryText, topK),
-      fallbackReason: 'query_embedding_failed',
+      fallbackReason: 'embedding_service_failed',
     }
   }
 

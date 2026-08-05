@@ -1,4 +1,4 @@
-﻿import { WebContents } from 'electron'
+import { WebContents } from 'electron'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
@@ -76,11 +76,13 @@ export type TaskStatus =
   | 'cancelled'
   | 'paused'
   | 'cancel_requested'
+  | 'blocked'
 
 export type TaskPipelineRole =
   | 'planner'
   | 'writer'
   | 'critic'
+  | 'enforcer'
   | 'rewriter'
   | 'canonizer'
   | 'finalize'
@@ -229,7 +231,7 @@ const TRANSIENT_MODEL_TASK_RETRY_BASE_DELAY_MS = 2_000
 const TRANSIENT_MODEL_TASK_RETRY_MAX_DELAY_MS = 8_000
 const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
 const MAX_STREAM_OUTPUT_LENGTH = 524_288 // ~512K 字符安全上限
-const CHAPTER_PIPELINE_ROLES: TaskPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
+const CHAPTER_PIPELINE_ROLES: TaskPipelineRole[] = ['planner', 'writer', 'critic', 'enforcer', 'rewriter', 'canonizer', 'finalize']
 
 function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 10) {
   const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))

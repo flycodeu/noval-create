@@ -1,4 +1,4 @@
-﻿import { WebContents } from 'electron'
+import { WebContents } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
@@ -341,7 +341,7 @@ function resolveChapterReferenceWords(
   })
 }
 
-type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
+type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'enforcer' | 'rewriter' | 'canonizer' | 'finalize'
 type ChapterPipelineRoleStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'canonizing' | 'completed' | 'failed'
 type ChapterPipelineFailureCode =
@@ -784,6 +784,8 @@ function getPipelineRoleLabel(role: ChapterPipelineRole): string {
       return 'Writer'
     case 'critic':
       return 'Critic'
+    case 'enforcer':
+      return 'Enforcer'
     case 'rewriter':
       return 'Rewriter'
     case 'canonizer':
@@ -803,6 +805,8 @@ function getPipelineRoleSummary(role: ChapterPipelineRole): string {
       return '只按合同与场景计划写正文。'
     case 'critic':
       return '检查连续性、节奏、口吻与 AI 味。'
+    case 'enforcer':
+      return '强制执行对话指纹和反 AI 味拦截，不达标自动要求重写。'
     case 'rewriter':
       return '按审校结论修正文稿。'
     case 'canonizer':
@@ -821,6 +825,8 @@ function getPipelineRoleStage(role: ChapterPipelineRole): ChapterGenerationStage
     case 'writer':
       return 'drafting'
     case 'critic':
+      return 'reviewing'
+    case 'enforcer':
       return 'reviewing'
     case 'rewriter':
       return 'rewriting'
@@ -872,6 +878,7 @@ function createInitialChapterPipelineSnapshot(
       planner: createPipelineRoleState('planner'),
       writer: createPipelineRoleState('writer'),
       critic: createPipelineRoleState('critic'),
+      enforcer: createPipelineRoleState('enforcer'),
       rewriter: createPipelineRoleState('rewriter'),
       canonizer: createPipelineRoleState('canonizer'),
       finalize: createPipelineRoleState('finalize'),
@@ -5566,6 +5573,36 @@ async function generateChapterContentInternal(
     latestReviewNotesJson = JSON.stringify(reviewNotes)
     updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
+
+    // === Enforcer 环节 ===
+    const enforcerTaskId = await startRoleTask('enforcer', 'chapter_critic', 'Enforcer 强制防 AI 味和对话指纹拦截。', {
+      inputJson: JSON.stringify({ draftContent, novelId: chapter.novelId, chapterId }),
+    })
+    try {
+      const antiAiResult = persistAntiAiRuleHits({
+        novelId: chapter.novelId,
+        chapterId,
+        chapterNum: chapter.chapterNum,
+        content: draftContent,
+        genre: profile.genre,
+        knownTerms: guardrailKnownTerms,
+      })
+      if (antiAiResult.hits.length > 0) {
+        reviewNotes.critical_fixes.push(`【反 AI 味护栏拦截】存在典型 AI 常见违规表达：${antiAiResult.hits.map((hit) => hit.ruleCode).join('、')}，必须在改写环节清理！`)
+      }
+
+      const dialogueReview = analyzeChapterDialogueAgainstNovel(chapter.novelId, chapter.chapterNum, draftContent)
+      if (dialogueReview.risks.length > 0 || dialogueReview.drifts.length > 0 || dialogueReview.similarities.length > 0) {
+        reviewNotes.critical_fixes.push('【对话指纹护栏拦截】角色对白存在口吻漂移、角色同质化或对白风险，必须基于角色性格重写！')
+      }
+
+      latestReviewNotesJson = JSON.stringify(reviewNotes)
+      updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson })
+      finishRoleTask('enforcer', enforcerTaskId, 'Enforcer 校验完成。')
+    } catch (error) {
+      failRoleTask('enforcer', enforcerTaskId, error instanceof Error ? error : new Error('Enforcer 环节异常'), { blocked: true })
+      throw error
+    }
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
     const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
     const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)

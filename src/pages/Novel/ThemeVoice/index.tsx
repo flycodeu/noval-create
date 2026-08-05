@@ -615,7 +615,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <div className="guided-step__field-card guided-step__field-card--full">
                   <Form.Item
                     name="writingContractTags"
-                    label="写作类型"
+                    label="写作契约"
                     extra="内置标签会触发强规则；自定义标签只作为弱提示。核心阅读预期“爽文 / 写实”只能选一个。"
                     rules={[{
                       validator: async (_, value?: string[]) => {
