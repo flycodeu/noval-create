@@ -4,15 +4,19 @@ import type { MenuProps } from 'antd'
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
+  BulbOutlined,
   DeleteOutlined,
   EllipsisOutlined,
   ExportOutlined,
+  HighlightOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MoonOutlined,
   QuestionCircleOutlined,
   RobotOutlined,
   RollbackOutlined,
   SearchOutlined,
+  SunOutlined,
   SwapOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
@@ -22,10 +26,10 @@ import WindowControls from '../../Layout/WindowControls'
 import TaskIndicator from '../../TaskIndicator'
 import './ProjectTopbar.css'
 
-const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: string }> = [
-  { value: 'dark', label: '深色', icon: '🌙' },
-  { value: 'light', label: '浅色', icon: '☀️' },
-  { value: 'soft', label: '柔和', icon: '🍵' },
+const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
+  { value: 'dark', label: '深色', icon: <MoonOutlined /> },
+  { value: 'light', label: '浅色', icon: <SunOutlined /> },
+  { value: 'soft', label: '柔和', icon: <HighlightOutlined /> },
 ]
 
 interface ProjectTopbarProps {
@@ -85,15 +89,6 @@ export default function ProjectTopbar({
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
   const { theme, setTheme } = useThemeStore()
-  const themeMenu = useMemo<MenuProps>(() => ({
-    selectedKeys: [theme],
-    items: THEME_OPTIONS.map((option) => ({
-      key: option.value,
-      label: `${option.icon} ${option.label}`,
-      onClick: () => setTheme(option.value),
-    })),
-  }), [theme, setTheme])
-  const activeThemeIcon = THEME_OPTIONS.find((option) => option.value === theme)?.icon || '🌙'
   const overflowMenu = useMemo<MenuProps>(() => {
     const items: NonNullable<MenuProps['items']> = []
     const appendDivider = () => {
@@ -116,6 +111,33 @@ export default function ProjectTopbar({
       icon: <QuestionCircleOutlined />,
       label: '快捷键',
       onClick: onShortcuts,
+    })
+
+    items.push({
+      key: 'workspace-jump-chapter',
+      icon: <SwapOutlined />,
+      label: '章节跳转',
+      onClick: onJumpChapter,
+    })
+
+    items.push({
+      key: 'workspace-undo',
+      icon: <RollbackOutlined />,
+      label: '撤销最近操作',
+      disabled: !canUndo,
+      onClick: onUndo,
+    })
+
+    items.push({
+      key: 'workspace-theme',
+      icon: <BulbOutlined />,
+      label: `主题：${THEME_OPTIONS.find((option) => option.value === theme)?.label || '跟随当前设置'}`,
+      children: THEME_OPTIONS.map((option) => ({
+        key: `workspace-theme-${option.value}`,
+        icon: option.icon,
+        label: option.label,
+        onClick: () => setTheme(option.value),
+      })),
     })
 
     if (exportMenu.items && exportMenu.items.length > 0) {
@@ -156,7 +178,19 @@ export default function ProjectTopbar({
     }
 
     return { items }
-  }, [exportMenu.items, moreMenu.items, onClear, onQuality, onShortcuts, showQuality])
+  }, [
+    canUndo,
+    exportMenu.items,
+    moreMenu.items,
+    onClear,
+    onJumpChapter,
+    onQuality,
+    onShortcuts,
+    onUndo,
+    setTheme,
+    showQuality,
+    theme,
+  ])
 
   return (
     <header className={`project-topbar${showWindowControls ? '' : ' project-topbar--windowless'}`}>
@@ -202,26 +236,16 @@ export default function ProjectTopbar({
               <div className="project-topbar__workspace-line">
                 <strong className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</strong>
               </div>
+              <div className={`project-topbar__status-line project-topbar__status-line--${statusTone}`}>
+                <span className="project-topbar__status-dot" aria-hidden="true" />
+                <span>{statusText || '工作区已就绪'}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="project-topbar__toolbar">
-          <Dropdown menu={themeMenu} trigger={['click']} placement="bottomRight">
-            <button
-              type="button"
-              className="project-topbar__theme-toggle"
-              aria-label="切换主题"
-              title="切换主题"
-            >
-              {activeThemeIcon}
-            </button>
-          </Dropdown>
           <TaskIndicator className="project-topbar__task-indicator" />
-          <div className={`project-topbar__status-badge project-topbar__status-badge--${statusTone}`}>
-            <span className="project-topbar__status-dot" aria-hidden="true" />
-            <span>{statusText || '工作区已就绪'}</span>
-          </div>
 
           <div className="project-topbar__action-cluster">
             <div className="project-topbar__mode-switch" role="tablist" aria-label="工作模式切换">
@@ -242,7 +266,6 @@ export default function ProjectTopbar({
               })}
             </div>
             <Button className="project-topbar__control project-topbar__control--icon" icon={<SearchOutlined />} onClick={onSearch} aria-label="搜索工作区" title="搜索工作区" />
-            <Button className="project-topbar__control project-topbar__control--icon" icon={<SwapOutlined />} onClick={onJumpChapter} aria-label="章节跳转" title="章节跳转" />
             {onToggleAssistant ? (
               <Button
                 className={`project-topbar__control project-topbar__control--icon${assistantToggleActive ? ' is-active' : ''}`}
@@ -253,7 +276,6 @@ export default function ProjectTopbar({
                 title="AI 助手"
               />
             ) : null}
-            <Button className="project-topbar__control project-topbar__control--icon" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo} aria-label="撤销最近操作" title="撤销最近操作" />
             {showNextStep && onNextStep ? (
               <Button
                 className="project-topbar__control project-topbar__control--accent"

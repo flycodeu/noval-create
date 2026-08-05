@@ -14588,3 +14588,72 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 }
 
+/* Progressive disclosure keeps repeated page instructions available without
+   competing with the current writing task. */
+.app-layout .novel-step-guide {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+.app-layout .novel-step-guide__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.app-layout .novel-step-guide__head::-webkit-details-marker {
+  display: none;
+}
+
+.app-layout .novel-step-guide__head::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  transition: transform 180ms ease;
+}
+
+.app-layout .novel-step-guide[open] .novel-step-guide__head::after {
+  transform: rotate(225deg);
+}
+
+.app-layout .novel-step-guide__head-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-layout .novel-step-guide__head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout .novel-step-guide__progress {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-layout .novel-step-guide__grid {
+  padding: 0 12px 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-layout .novel-step-guide__head::after {
+    transition: none;
+  }
+}
+

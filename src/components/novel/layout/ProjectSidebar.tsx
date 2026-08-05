@@ -44,15 +44,13 @@ export default function ProjectSidebar({
     <div className="project-sidebar">
       <div className="project-sidebar__summary">
         <div className="project-sidebar__summary-copy">
-          <span className="project-sidebar__eyebrow">工作区导航</span>
           <strong className="project-sidebar__summary-title">{stageLabel}</strong>
           <span className="project-sidebar__summary-meta">{`已完成 ${progressText}`}</span>
+          <div className="project-sidebar__current-task">
+            <ClockCircleOutlined />
+            <span>{currentTask}</span>
+          </div>
         </div>
-      </div>
-
-      <div className="project-sidebar__task-strip">
-        <ClockCircleOutlined />
-        <span>{currentTask}</span>
       </div>
 
       <div className="project-sidebar__groups">

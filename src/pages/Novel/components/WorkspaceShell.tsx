@@ -165,18 +165,23 @@ export function WorkspacePanel({
 }
 
 export function WorkspaceStepGuide({
-  title = '进入本页先做什么',
+  title = '本页流程',
   steps,
 }: {
   title?: string
   steps: Array<{ title: string; description: string; status?: 'todo' | 'focus' | 'done' }>
 }) {
+  const completedCount = steps.filter((step) => step.status === 'done').length
+
   return (
-    <section className="novel-step-guide">
-      <div className="novel-step-guide__head">
-        <div className="novel-step-guide__eyebrow">步骤指引</div>
-        <strong>{title}</strong>
-      </div>
+    <details className="novel-step-guide">
+      <summary className="novel-step-guide__head">
+        <div className="novel-step-guide__head-copy">
+          <div className="novel-step-guide__eyebrow">按需展开</div>
+          <strong>{title}</strong>
+        </div>
+        <span className="novel-step-guide__progress">{`${completedCount}/${steps.length}`}</span>
+      </summary>
       <div className="novel-step-guide__grid">
         {steps.map((step, index) => (
           <article
@@ -194,7 +199,7 @@ export function WorkspaceStepGuide({
           </article>
         ))}
       </div>
-    </section>
+    </details>
   )
 }
 

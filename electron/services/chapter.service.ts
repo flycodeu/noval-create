@@ -407,6 +407,8 @@ interface ChapterPipelineSnapshot {
   targetSegmentId?: number | null
   lastFailureRole?: ChapterPipelineRole
   partialContent?: string
+  baseContentHash?: string
+  baseContextVersion?: number
   resumeReason?: 'failed' | 'cancelled' | 'timeout' | 'network' | 'unknown'
   resumeSourceTaskId?: number
   roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
@@ -844,6 +846,7 @@ function createInitialChapterPipelineSnapshot(
   chapterId: number,
   workflowTaskId: number,
   contractVersion?: string,
+  base?: { content: string; contextVersion: number },
 ): ChapterPipelineSnapshot {
   return {
     kind: 'chapter_pipeline',
@@ -853,6 +856,12 @@ function createInitialChapterPipelineSnapshot(
     currentStage: 'planning',
     status: 'pending',
     contractVersion,
+    ...(base
+      ? {
+          baseContentHash: buildChapterContentHash(base.content),
+          baseContextVersion: base.contextVersion,
+        }
+      : {}),
     totalTokensUsed: 0,
     totalDurationMs: 0,
     stepMemory: {
@@ -868,6 +877,10 @@ function createInitialChapterPipelineSnapshot(
       finalize: createPipelineRoleState('finalize'),
     },
   }
+}
+
+function buildChapterContentHash(content: string): string {
+  return `sha256:${createHash('sha256').update(content || '', 'utf8').digest('hex')}`
 }
 
 function buildChapterContextAssemblyReport(
@@ -3900,7 +3913,12 @@ async function continueChapterContent(
     retryable: false,
     status: 'pending',
   })
-  let snapshot = createInitialChapterPipelineSnapshot(chapterId, workflowTaskId, buildChapterContractVersion(chapterId))
+  let snapshot = createInitialChapterPipelineSnapshot(
+    chapterId,
+    workflowTaskId,
+    buildChapterContractVersion(chapterId),
+    { content: chapter.content || '', contextVersion: novel.contextVersion || 1 },
+  )
   snapshot = {
     ...snapshot,
     executionMode: executionModeResolution.mode,
@@ -4050,12 +4068,9 @@ async function continueChapterContent(
       },
     })
     const combinedContent = `${normalizedPartial}\n\n${continuationResult.output}`.trim()
-    updateChapter(chapterId, {
+    updatePipelineChapterContent(chapterId, chapter.content || '', novel.contextVersion || 1, {
       content: combinedContent,
       status: 'reviewing',
-    }, {
-      skipStaleTracking: true,
-      versionSource: false,
     })
     snapshot = {
       ...snapshot,
@@ -4365,7 +4380,12 @@ async function generateChapterContentInternal(
     status: 'pending',
   })
   options.onWorkflowTaskCreated?.(workflowTaskId)
-  let snapshot = createInitialChapterPipelineSnapshot(chapterId, workflowTaskId, contractVersion)
+  let snapshot = createInitialChapterPipelineSnapshot(
+    chapterId,
+    workflowTaskId,
+    contractVersion,
+    { content: chapter.content || '', contextVersion: rawContext.novel.contextVersion || 1 },
+  )
   snapshot = {
     ...snapshot,
     executionMode: executionModeResolution.mode,
@@ -6796,6 +6816,34 @@ export async function refreshChapterDerivedState(chapterId: number): Promise<voi
 
 const chapterResumeLocks = new Map<number, Promise<number>>()
 
+function assertChapterResumeBaseCurrent(
+  chapterId: number,
+  snapshot: Partial<ChapterPipelineSnapshot> | null,
+): void {
+  if (!snapshot?.baseContentHash || !Number.isInteger(snapshot.baseContextVersion)) {
+    // Older tasks did not persist a canonical base snapshot. Reusing their
+    // partial model output could overwrite later author edits, so fail closed
+    // and let the author start a fresh generation from the current chapter.
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
+  const currentChapter = getDb().select({ content: chapters.content, novelId: chapters.novelId })
+    .from(chapters)
+    .where(eq(chapters.id, chapterId))
+    .all()[0]
+  if (!currentChapter) throwUserFacingError('chapter.notFound')
+  if (buildChapterContentHash(currentChapter.content || '') !== snapshot.baseContentHash) {
+    throwUserFacingError('chapter.pipelineContentConflict')
+  }
+  const currentNovel = getDb().select({ contextVersion: novels.contextVersion })
+    .from(novels)
+    .where(eq(novels.id, currentChapter.novelId))
+    .all()[0]
+  if (!currentNovel) throwUserFacingError('novel.notFound')
+  if ((currentNovel.contextVersion || 1) !== snapshot.baseContextVersion) {
+    throwUserFacingError('chapter.pipelineContextConflict')
+  }
+}
+
 export async function resumeChapterPipeline(taskId: number, sender?: WebContents): Promise<number> {
   const inFlight = chapterResumeLocks.get(taskId)
   if (inFlight) return inFlight
@@ -6837,6 +6885,7 @@ async function resumeChapterPipelineInternal(taskId: number, sender?: WebContent
     lastFailureRole: snapshot?.lastFailureRole,
   })
   if (partialContent) {
+    assertChapterResumeBaseCurrent(rootTask.relatedEntityId, snapshot)
     if (resumeMode === 'continue_writer') {
       return continueChapterContent(rootTask.relatedEntityId, partialContent, sender, {
         executionMode: snapshot?.executionMode,
@@ -7293,6 +7342,8 @@ export const __testing = {
   extractNarrativeNumbers,
   applyDialogueAnalysisToReviewNotes,
   parseStoredReviewNotes,
+  buildChapterContentHash,
+  updatePipelineChapterContent,
 }
 
 export { runChapterPublishCheck }

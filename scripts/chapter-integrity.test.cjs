@@ -401,6 +401,122 @@ async function run() {
     )
     getSqlite().prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(Number(activeGenerationTask.lastInsertRowid))
 
+    const resumeNovel = novelService.createNovel({ title: '断点续写 CAS 测试', targetWords: 10000, operatingMode: 'shortform' })
+    const resumeChapter = chapterService.createChapter(resumeNovel, { chapterNum: 1, title: '恢复章节' })
+    chapterService.updateChapter(resumeChapter, { content: '已保留正文' })
+    const resumeContextVersion = getSqlite().prepare('SELECT context_version FROM novels WHERE id = ?').get(resumeNovel).context_version || 1
+    const resumeTask = getSqlite().prepare(`
+      INSERT INTO tasks
+        (novel_id, type, status, related_entity_type, related_entity_id, runner_type, created_at, updated_at)
+      VALUES (?, 'chapter_write', 'running', 'chapter', ?, 'workflow', ?, ?)
+    `).run(resumeNovel, resumeChapter, new Date().toISOString(), new Date().toISOString())
+    chapterService.__testing.updatePipelineChapterContent(
+      resumeChapter,
+      '已保留正文',
+      resumeContextVersion,
+      { content: '已保留正文\n\n安全续写', status: 'reviewing' },
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(resumeChapter).content,
+      '已保留正文\n\n安全续写',
+      'resume pipeline write must pass its own active-generation lock through the CAS-only path',
+    )
+    getSqlite().prepare('UPDATE chapters SET content = ? WHERE id = ?').run('并发人工编辑', resumeChapter)
+    expectCode(
+      () => chapterService.__testing.updatePipelineChapterContent(
+        resumeChapter,
+        '已保留正文\n\n安全续写',
+        resumeContextVersion,
+        { content: '不应覆盖人工编辑', status: 'reviewing' },
+      ),
+      'chapter.pipelineContentConflict',
+    )
+    getSqlite().prepare('UPDATE chapters SET content = ? WHERE id = ?').run('已保留正文\n\n安全续写', resumeChapter)
+    getSqlite().prepare('UPDATE novels SET context_version = context_version + 1 WHERE id = ?').run(resumeNovel)
+    expectCode(
+      () => chapterService.__testing.updatePipelineChapterContent(
+        resumeChapter,
+        '已保留正文\n\n安全续写',
+        resumeContextVersion,
+        { content: '不应跨上下文写入', status: 'reviewing' },
+      ),
+      'chapter.pipelineContextConflict',
+    )
+    getSqlite().prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?").run(Number(resumeTask.lastInsertRowid))
+
+    const staleResumeNovel = novelService.createNovel({ title: '陈旧断点拒绝测试', targetWords: 10000, operatingMode: 'shortform' })
+    const staleResumeChapter = chapterService.createChapter(staleResumeNovel, { chapterNum: 1, title: '不能覆盖人工稿' })
+    chapterService.updateChapter(staleResumeChapter, { content: '生成开始时正文' })
+    const staleBaseContextVersion = getSqlite().prepare('SELECT context_version FROM novels WHERE id = ?').get(staleResumeNovel).context_version || 1
+    const staleResumeTask = getSqlite().prepare(`
+      INSERT INTO tasks
+        (novel_id, type, status, related_entity_type, related_entity_id, runner_type, progress_json, created_at, updated_at)
+      VALUES (?, 'chapter_write', 'failed', 'chapter', ?, 'workflow', ?, ?, ?)
+    `).run(
+      staleResumeNovel,
+      staleResumeChapter,
+      JSON.stringify({
+        kind: 'chapter_pipeline',
+        chapterId: staleResumeChapter,
+        workflowTaskId: 0,
+        status: 'failed',
+        currentRole: 'writer',
+        currentStage: 'drafting',
+        totalTokensUsed: 0,
+        totalDurationMs: 0,
+        roles: {},
+        lastFailureRole: 'writer',
+        partialContent: '旧任务保留的模型断点',
+        baseContentHash: chapterService.__testing.buildChapterContentHash('生成开始时正文'),
+        baseContextVersion: staleBaseContextVersion,
+      }),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    getSqlite().prepare('UPDATE chapters SET content = ? WHERE id = ?').run('作者后来保存的新正文', staleResumeChapter)
+    await expectCodeAsync(
+      () => chapterService.resumeChapterPipeline(Number(staleResumeTask.lastInsertRowid)),
+      'chapter.pipelineContentConflict',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(staleResumeChapter).content,
+      '作者后来保存的新正文',
+      'resuming an old partial must not overwrite a newer author edit',
+    )
+
+    const staleContextContent = '上下文变化前正文'
+    getSqlite().prepare('UPDATE chapters SET content = ? WHERE id = ?').run(staleContextContent, staleResumeChapter)
+    const contextResumeTask = getSqlite().prepare(`
+      INSERT INTO tasks
+        (novel_id, type, status, related_entity_type, related_entity_id, runner_type, progress_json, created_at, updated_at)
+      VALUES (?, 'chapter_write', 'failed', 'chapter', ?, 'workflow', ?, ?, ?)
+    `).run(
+      staleResumeNovel,
+      staleResumeChapter,
+      JSON.stringify({
+        kind: 'chapter_pipeline',
+        chapterId: staleResumeChapter,
+        workflowTaskId: 0,
+        status: 'failed',
+        currentRole: 'writer',
+        currentStage: 'drafting',
+        totalTokensUsed: 0,
+        totalDurationMs: 0,
+        roles: {},
+        lastFailureRole: 'writer',
+        partialContent: '上下文变化前的模型断点',
+        baseContentHash: chapterService.__testing.buildChapterContentHash(staleContextContent),
+        baseContextVersion: staleBaseContextVersion,
+      }),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    getSqlite().prepare('UPDATE novels SET context_version = context_version + 1 WHERE id = ?').run(staleResumeNovel)
+    await expectCodeAsync(
+      () => chapterService.resumeChapterPipeline(Number(contextResumeTask.lastInsertRowid)),
+      'chapter.pipelineContextConflict',
+    )
+
     const now = new Date().toISOString()
     const contextVersion = getSqlite().prepare('SELECT context_version FROM chapters WHERE id = ?').get(firstChapter).context_version || 1
     const run = getSqlite().prepare(`

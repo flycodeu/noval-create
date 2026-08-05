@@ -132,34 +132,29 @@
   flex-wrap: nowrap;
 }
 
-.project-topbar__status-badge {
+.project-topbar__status-line {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  max-width: 240px;
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--project-topbar-border) 88%, transparent 12%);
-  background: var(--project-topbar-surface-strong);
+  max-width: min(420px, 48vw);
   color: var(--project-topbar-text-soft);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.35;
   white-space: nowrap;
 }
 
-.project-topbar__status-badge > span:last-child {
+.project-topbar__status-line > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.project-topbar__status-badge--processing {
+.project-topbar__status-line--processing {
   color: var(--project-topbar-text);
 }
 
-.project-topbar__status-badge--warning {
+.project-topbar__status-line--warning {
   color: color-mix(in srgb, var(--warning) 82%, var(--project-topbar-text) 18%);
 }
 
@@ -171,13 +166,13 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 14%, transparent 86%);
 }
 
-.project-topbar__status-badge--processing .project-topbar__status-dot {
+.project-topbar__status-line--processing .project-topbar__status-dot {
   background: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-soft) 86%, transparent 14%);
   animation: project-topbar-pulse 1.4s ease-in-out infinite;
 }
 
-.project-topbar__status-badge--warning .project-topbar__status-dot {
+.project-topbar__status-line--warning .project-topbar__status-dot {
   background: var(--warning);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 16%, transparent 84%);
 }
@@ -317,10 +312,6 @@
 }
 
 @media (max-width: 1320px) {
-  .project-topbar__status-badge {
-    max-width: 190px;
-  }
-
   .project-topbar__control:not(.project-topbar__control--accent).ant-btn {
     width: 34px;
     padding-inline: 0;
@@ -354,11 +345,6 @@
     flex: 0 0 auto;
     justify-content: flex-start;
     flex-wrap: nowrap;
-  }
-
-  .project-topbar__status-badge {
-    flex: 0 0 auto;
-    max-width: 220px;
   }
 
   .project-topbar__mode-button {
@@ -450,31 +436,12 @@
     min-width: 150px;
   }
 
-  .project-topbar__status-badge {
-    max-width: 100%;
-    min-height: 36px;
+  .project-topbar__status-line {
+    max-width: min(100%, 360px);
   }
 
   .project-topbar__mode-button {
     min-height: 34px;
     padding-inline: 12px;
   }
-}
-
-.project-topbar__theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font-size: 15px;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.project-topbar__theme-toggle:hover {
-  background: var(--bg-hover, rgba(125, 125, 125, 0.12));
 }

@@ -81,7 +81,6 @@ export default function ProjectCard({
               {status.label}
             </Tag>
             <Tag className="novel-project-card__tag">{novel.genreName || '未分类'}</Tag>
-            <Tag className="novel-project-card__tag">{novel.launchMode === 'fast_launch' ? '快速模式' : '专业模式'}</Tag>
             {snapshot.blockers.length > 0 ? (
               <Tag color="volcano" className="novel-project-card__tag">{`${snapshot.blockers.length} 个阻塞项`}</Tag>
             ) : null}
@@ -95,13 +94,10 @@ export default function ProjectCard({
       </div>
 
       <div className="novel-project-card__summary">
-        <div title={novel.lifecycle?.reason || undefined}>生命周期：<strong>{novel.lifecycle?.label || status.label}</strong>{novel.lifecycle?.automatic ? ' · 自动同步' : ' · 手动管理'}</div>
-        <div>当前阶段：<strong>{snapshot.stage.label}</strong></div>
-        <div>主任务：<strong>{snapshot.nextStep.title}</strong></div>
-        <div>字数：<strong>{formatWordCount(novel.totalWords)}</strong></div>
-        <div>目标：<strong>{targetWords > 0 ? formatWordCount(targetWords) : '未设置'}</strong></div>
-        <div>模块完成：<strong>{`${snapshot.moduleDoneCount}/${snapshot.moduleTotalCount}`}</strong></div>
-        <div>最近修改：<strong>{dayjs(novel.updatedAt).fromNow()}</strong></div>
+        <div>阶段 <strong>{snapshot.stage.label}</strong></div>
+        <div>字数 <strong>{targetWords > 0 ? `${formatWordCount(novel.totalWords)} / ${formatWordCount(targetWords)}` : formatWordCount(novel.totalWords)}</strong></div>
+        <div>模块 <strong>{`${snapshot.moduleDoneCount}/${snapshot.moduleTotalCount}`}</strong></div>
+        <div>更新 <strong>{dayjs(novel.updatedAt).fromNow()}</strong></div>
       </div>
 
       <div className="novel-project-card__progress">
@@ -113,7 +109,7 @@ export default function ProjectCard({
       </div>
 
       <div className="novel-project-card__next-step">
-        <span className="novel-project-card__next-step-label">推荐下一步</span>
+        <span className="novel-project-card__next-step-label">下一步</span>
         <strong className="novel-project-card__next-step-title">{snapshot.nextStep.title}</strong>
         <span className="novel-project-card__next-step-copy">{snapshot.nextStep.reason}</span>
       </div>
