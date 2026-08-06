@@ -49,6 +49,10 @@ const reviewCheckSchema = objectSchema({
 
 const reviewSchema = objectSchema({
   schemaVersion: { const: 'generic-asset-review-v1' },
+  // The workflow stores this fingerprint for idempotent review replays. Keep
+  // it in the public contract so a valid service result is not rejected by
+  // the strict output validator.
+  requestFingerprint: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
   draftArtifactId: { type: 'string' },
   draftContentHash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
   effectiveArtifactId: { type: 'string' },

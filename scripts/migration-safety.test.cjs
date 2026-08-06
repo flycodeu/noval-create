@@ -229,6 +229,25 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'creative_stages').has('handoff_summary'))
   assert.ok(getColumns(db, 'creative_stage_assets').has('detail_level'))
   assert.ok(getColumns(db, 'creative_stage_assets').has('requested_fields_json'))
+  assert.ok(getColumns(db, 'canon_commits').has('input_hash'))
+  assert.ok(getColumns(db, 'canon_commits').has('context_version_after'))
+  assert.ok(getColumns(db, 'canon_ledger_entries').has('evidence_json'))
+  assert.ok(getColumns(db, 'canon_ledger_entries').has('idempotency_key'))
+  assert.ok(db.prepare('PRAGMA index_list(canon_commits)').all().some((row) => row.name === 'idx_canon_commits_novel_idempotency'))
+  assert.ok(db.prepare('PRAGMA index_list(canon_ledger_entries)').all().some((row) => row.name === 'idx_canon_ledger_entries_commit_key'))
+  assert.ok(getColumns(db, 'workflow_node_runs').has('lease_token'))
+  assert.ok(getColumns(db, 'workflow_node_runs').has('snapshot_id'))
+  assert.ok(getColumns(db, 'workflow_node_runs').has('retry_of_node_run_id'))
+  assert.ok(getColumns(db, 'workflow_node_runs').has('retry_reason'))
+  assert.ok(getColumns(db, 'workflow_node_snapshots').has('output_hash'))
+  assert.ok(db.prepare('PRAGMA index_list(workflow_node_runs)').all().some((row) => row.name === 'idx_workflow_node_runs_attempt'))
+  assert.ok(db.prepare('PRAGMA index_list(workflow_node_snapshots)').all().some((row) => row.name === 'idx_workflow_node_snapshots_node_run'))
+  assert.ok(db.prepare('PRAGMA index_list(workflow_node_runs)').all().some((row) => row.name === 'idx_workflow_node_runs_retry_source'))
+  assert.ok(getColumns(db, 'chapter_embeddings').has('embedding_profile'))
+  assert.ok(getColumns(db, 'chapter_embeddings').has('source_hash'))
+  assert.ok(getColumns(db, 'chapter_embeddings').has('context_version'))
+  assert.ok(getColumns(db, 'chapter_embeddings').has('visibility'))
+  assert.ok(db.prepare('PRAGMA index_list(chapter_embeddings)').all().some((row) => row.name === 'idx_chapter_embeddings_profile'))
 }
 
 function testFreshDbIsIdempotent() {
@@ -291,6 +310,10 @@ function testFreshDbIsIdempotent() {
       '0050_story_arc_rhythm',
       '0051_glossary_lore',
       '0052_creative_stages',
+      '0053_canon_ledger',
+      '0054_workflow_node_snapshots',
+      '0055_embedding_provenance',
+      '0056_workflow_node_retry_lineage',
     ])
 
     runMigrations(db)
@@ -422,6 +445,10 @@ function testPartialSchemaCanResume() {
       '0050_story_arc_rhythm',
       '0051_glossary_lore',
       '0052_creative_stages',
+      '0053_canon_ledger',
+      '0054_workflow_node_snapshots',
+      '0055_embedding_provenance',
+      '0056_workflow_node_retry_lineage',
     ])
 
     const configs = db.prepare(`

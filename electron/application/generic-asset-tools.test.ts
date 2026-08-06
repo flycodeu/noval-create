@@ -126,6 +126,7 @@ describe('generic asset tools', () => {
     const descriptor = registry.get('novelforge.assets.generate_draft')
     expect(descriptor?.inputSchema.properties?.assetType.enum).toContain('chapter')
     expect(descriptor?.inputSchema.properties?.assetType.enum).toContain('theme_voice')
+    expect(descriptor?.outputSchema.properties?.review.properties).toHaveProperty('requestFingerprint')
 
     const result = await registry.invoke({
       toolId: 'novelforge.assets.generate_draft',

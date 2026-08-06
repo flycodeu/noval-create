@@ -2385,6 +2385,144 @@ export function runMigrations(sqlite: Database.Database) {
         ON creative_stage_assets(novel_id, asset_type, asset_id, id);
     `)
   })
+
+  runMigrationStep(sqlite, '0053_canon_ledger', () => {
+    // 正典提交与状态投影分离：事件和状态变化保留来源、哈希和上下文版本，
+    // 允许后续重建投影，而不把模型候选直接当成事实。
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS canon_commits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        segment_id INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL,
+        source_run_id INTEGER REFERENCES chapter_writeback_runs(id) ON DELETE SET NULL,
+        source_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        input_hash TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        context_version_before INTEGER NOT NULL,
+        context_version_after INTEGER,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        entry_count INTEGER NOT NULL DEFAULT 0,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        error_message TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        committed_at TEXT,
+        rejected_at TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_canon_commits_novel_idempotency
+        ON canon_commits(novel_id, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_canon_commits_novel_chapter
+        ON canon_commits(novel_id, chapter_id, id);
+      CREATE INDEX IF NOT EXISTS idx_canon_commits_novel_status
+        ON canon_commits(novel_id, status, id);
+
+      CREATE TABLE IF NOT EXISTS canon_ledger_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        commit_id INTEGER NOT NULL REFERENCES canon_commits(id) ON DELETE CASCADE,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        segment_id INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL,
+        entry_type TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER,
+        state_key TEXT,
+        event_type TEXT,
+        summary TEXT,
+        before_json TEXT,
+        after_json TEXT,
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        confidence REAL NOT NULL DEFAULT 0,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_canon_ledger_entries_commit_key
+        ON canon_ledger_entries(commit_id, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_canon_ledger_entries_novel_chapter
+        ON canon_ledger_entries(novel_id, chapter_id, id);
+      CREATE INDEX IF NOT EXISTS idx_canon_ledger_entries_novel_entity
+        ON canon_ledger_entries(novel_id, entity_type, entity_id, id);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0054_workflow_node_snapshots', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS workflow_node_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        node_key TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'pending',
+        input_hash TEXT NOT NULL,
+        upstream_snapshot_id TEXT,
+        context_version INTEGER NOT NULL,
+        snapshot_id TEXT,
+        lease_owner TEXT,
+        lease_token TEXT,
+        lease_expires_at TEXT,
+        error_class TEXT,
+        error_message TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_node_runs_attempt
+        ON workflow_node_runs(workflow_task_id, node_key, attempt);
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_workflow_node
+        ON workflow_node_runs(workflow_task_id, node_key, attempt DESC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_lease
+        ON workflow_node_runs(status, lease_expires_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_node_snapshots (
+        id TEXT PRIMARY KEY,
+        node_run_id INTEGER NOT NULL REFERENCES workflow_node_runs(id) ON DELETE CASCADE,
+        workflow_task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        node_key TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        input_hash TEXT NOT NULL,
+        output_hash TEXT NOT NULL,
+        context_version INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_node_snapshots_node_run
+        ON workflow_node_snapshots(node_run_id);
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_snapshots_workflow_node
+        ON workflow_node_snapshots(workflow_task_id, node_key, attempt DESC);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0055_embedding_provenance', () => {
+    if (hasTable(sqlite, 'chapter_embeddings')) {
+      ensureColumn(sqlite, 'chapter_embeddings', 'embedding_profile', 'TEXT')
+      ensureColumn(sqlite, 'chapter_embeddings', 'source_hash', 'TEXT')
+      ensureColumn(sqlite, 'chapter_embeddings', 'context_version', 'INTEGER DEFAULT 1')
+      ensureColumn(sqlite, 'chapter_embeddings', 'stage_id', 'INTEGER')
+      ensureColumn(sqlite, 'chapter_embeddings', 'entity_ids_json', 'TEXT')
+      ensureColumn(sqlite, 'chapter_embeddings', 'visibility', "TEXT NOT NULL DEFAULT 'canon'")
+    }
+    if (hasTable(sqlite, 'chapter_embeddings')) {
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chapter_embeddings_profile
+          ON chapter_embeddings(novel_id, embedding_profile, dimensions, chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_embeddings_context
+          ON chapter_embeddings(novel_id, context_version, visibility, chapter_id);
+      `)
+    }
+  })
+
+  runMigrationStep(sqlite, '0056_workflow_node_retry_lineage', () => {
+    ensureColumn(sqlite, 'workflow_node_runs', 'retry_of_node_run_id', 'INTEGER')
+    ensureColumn(sqlite, 'workflow_node_runs', 'retry_reason', 'TEXT')
+    sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_retry_source
+        ON workflow_node_runs(retry_of_node_run_id, attempt DESC);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

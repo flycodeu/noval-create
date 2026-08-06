@@ -1712,6 +1712,57 @@ export interface ChapterBatchGenerateOptions {
   stageId?: number
 }
 
+export type WorkflowNodeStatus =
+  | 'pending'
+  | 'leased'
+  | 'running'
+  | 'produced'
+  | 'validated'
+  | 'approved'
+  | 'committed'
+  | 'failed'
+  | 'blocked'
+  | 'cancelled'
+
+export interface WorkflowNodeRunView {
+  id: number
+  workflowTaskId: number
+  novelId: number
+  chapterId: number | null
+  nodeKey: string
+  attempt: number
+  status: WorkflowNodeStatus
+  inputHash: string
+  upstreamSnapshotId: string | null
+  contextVersion: number
+  snapshotId: string | null
+  retryOfNodeRunId: number | null
+  retryReason: string | null
+  leaseOwner: string | null
+  leaseExpiresAt: string | null
+  errorClass: string | null
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowNodeSnapshotView {
+  id: string
+  nodeRunId: number
+  workflowTaskId: number
+  novelId: number
+  chapterId: number | null
+  nodeKey: string
+  attempt: number
+  inputHash: string
+  outputHash: string
+  contextVersion: number
+  payload: unknown
+  createdAt: string
+}
+
 export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusBase {
   chapterIds: number[]
   completedChapterIds: number[]
@@ -2343,6 +2394,7 @@ export interface RecallDiagnostics {
 export type RecallFallbackReason =
   | 'embedding_service_failed'
   | 'query_embedding_failed'
+  | 'embedding_profile_mismatch'
   | 'no_hits'
   | 'only_stale_hits'
   | 'budget_trimmed'
@@ -6119,6 +6171,18 @@ declare global {
         get: (id: number) => Promise<Task | null>
         cancel: (id: number) => Promise<boolean>
         resume: (id: number) => Promise<number>
+      }
+      workflowNode: {
+        list: (filters?: {
+          workflowTaskId?: number
+          novelId?: number
+          chapterId?: number
+          nodeKey?: string
+          limit?: number
+        }) => Promise<WorkflowNodeRunView[]>
+        get: (nodeRunId: number) => Promise<WorkflowNodeRunView | null>
+        getSnapshot: (snapshotId: string) => Promise<WorkflowNodeSnapshotView | null>
+        retry: (nodeRunId: number) => Promise<number>
       }
       premiseDraft: {
         getLatest: (novelId: number) => Promise<PremiseDraftRecord | null>

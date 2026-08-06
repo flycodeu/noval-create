@@ -108,6 +108,7 @@ export const fallbackReasonLabel = (reason?: string) => {
   if (!reason) return ''
   if (reason === 'embedding_service_failed') return '向量服务失败'
   if (reason === 'query_embedding_failed') return '查询向量失败'
+  if (reason === 'embedding_profile_mismatch') return '向量空间不匹配'
   if (reason === 'no_hits') return '无命中'
   if (reason === 'only_stale_hits') return '仅命中过期片段'
   if (reason === 'budget_trimmed') return '预算裁剪'

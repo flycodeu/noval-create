@@ -46,6 +46,12 @@ import * as revisionTaskService from './revision-task.service'
 import { resolveChapterAssetImpacts } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { mergeWritebackSyncStatus, normalizeWritebackSyncStatus } from '../../src/shared/writeback-status'
+import {
+  buildWritebackCanonIdempotencyKey,
+  hashCanonInput,
+  recordCommittedCanonLedger,
+  type CanonLedgerEntryInput,
+} from './canon-ledger.service'
 
 type ChapterRow = typeof chapters.$inferSelect
 type NovelRow = typeof novels.$inferSelect
@@ -1468,6 +1474,38 @@ function hasNovelSourceCanonWritebackPayload(runId: number): boolean {
   })
 }
 
+function buildCanonLedgerEntries(
+  chapter: ChapterRow,
+  run: ChapterWritebackRunRow,
+  diffs: AppChapterWritebackDiff[],
+): CanonLedgerEntryInput[] {
+  return diffs
+    .filter((diff) => diff.writebackStatus === 'applied')
+    .map((diff) => ({
+      entryType: diff.assetType === 'timeline'
+        ? 'event'
+        : diff.assetType === 'puzzle'
+          ? 'knowledge'
+          : 'state_delta',
+      entityType: diff.entityType || diff.assetType,
+      entityId: diff.entityId || null,
+      stateKey: diff.assetType,
+      eventType: diff.assetType,
+      summary: diff.diffReason || null,
+      beforeState: parseJsonObject(diff.beforeStateJson),
+      afterState: parseJsonObject(diff.afterStateJson),
+      evidence: {
+        source: 'chapter_writeback_diff',
+        chapterId: chapter.id,
+        chapterNum: chapter.chapterNum,
+        runId: run.id,
+        diffId: diff.id,
+      },
+      confidence: diff.confidence || 0,
+      idempotencyKey: `chapter:${chapter.id}:writeback:${run.id}:diff:${diff.id}`,
+    }))
+}
+
 function createWritebackFailureTask(run: ChapterWritebackRunRow, diff: ChapterWritebackDiffRow, chapter: ChapterRow, error: Error): void {
   revisionTaskService.createRevisionTask(chapter.novelId, {
     taskSource: 'system',
@@ -1980,8 +2018,37 @@ async function executeRunApply(
       retryCount: run.retryCount || 0,
       contextVersion: chapter.contextVersion || 1,
     })
+    let committedContextVersion = currentContextVersion
     if (shouldMarkContextChanged) {
-      markNovelContextChanged(chapter.novelId, 'Chapter writeback applied')
+      const nextContextVersion = markNovelContextChanged(chapter.novelId, 'Chapter writeback applied')
+      committedContextVersion = Number.isInteger(nextContextVersion) && nextContextVersion > 0
+        ? nextContextVersion
+        : currentContextVersion + 1
+      const ledgerEntries = buildCanonLedgerEntries(chapter, run, finalDiffs)
+      if (ledgerEntries.length > 0) {
+        recordCommittedCanonLedger({
+          novelId: chapter.novelId,
+          chapterId: chapter.id,
+          sourceRunId: run.id,
+          inputHash: hashCanonInput({
+            runId: run.id,
+            sourceChapterVersion: run.sourceChapterVersion || 1,
+            entries: ledgerEntries,
+          }),
+          idempotencyKey: buildWritebackCanonIdempotencyKey(run.id),
+          contextVersionBefore: currentContextVersion,
+          contextVersionAfter: committedContextVersion,
+          payload: {
+            source: 'chapter_writeback',
+            runId: run.id,
+            chapterId: chapter.id,
+            appliedDiffIds: finalDiffs
+              .filter((diff) => diff.writebackStatus === 'applied')
+              .map((diff) => diff.id),
+          },
+          entries: ledgerEntries,
+        })
+      }
       resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
     }
     refreshRunSummary(run.id)

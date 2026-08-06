@@ -1,5 +1,6 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
+import { and, desc, gte, lte, lt, or, sql } from 'drizzle-orm'
 import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { assessHistoricalGrounding, buildWorldRulesSummary, getGroundingSourceLedgerEntries, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
@@ -458,6 +459,7 @@ export interface ChapterContextRawData {
   novel: typeof novels.$inferSelect
   profile: StoryProfile
   chapterRows: Array<typeof chapters.$inferSelect>
+  chapterCount?: number
   currentChapter?: typeof chapters.$inferSelect
   currentArc: typeof storyArcs.$inferSelect | null
   outlineMentionedCharacterCount: number
@@ -472,6 +474,76 @@ export interface ChapterContextRawData {
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
   creativeStageContext?: CreativeStageContext
+}
+
+const BOUNDED_CONTEXT_CHAPTER_THRESHOLD = 2000
+const BOUNDED_CONTEXT_MAX_ROWS = 192
+
+function getNovelChapterCount(novelId: number): number {
+  const row = getDb().select({ count: sql<number>`count(*)` })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()[0]
+  return Math.max(0, Number(row?.count || 0))
+}
+
+function mergeChapterRows(rows: Array<typeof chapters.$inferSelect>): Array<typeof chapters.$inferSelect> {
+  const byId = new Map<number, typeof chapters.$inferSelect>()
+  rows.forEach((row) => byId.set(row.id, row))
+  return [...byId.values()].sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id)
+}
+
+function loadBoundedChapterRows(
+  novelId: number,
+  chapterNum: number,
+  novel: typeof novels.$inferSelect,
+  currentArc: typeof storyArcs.$inferSelect | null,
+): Array<typeof chapters.$inferSelect> {
+  const db = getDb()
+  const recentWindow = Math.max(35, resolveRecentContextWindow(
+    Number(novel.targetWords || 0),
+    BOUNDED_CONTEXT_CHAPTER_THRESHOLD,
+    novel.launchMode,
+    novel.settingsJson,
+  ))
+  const recentRows = db.select().from(chapters)
+    .where(and(eq(chapters.novelId, novelId), lt(chapters.chapterNum, chapterNum)))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .limit(Math.min(BOUNDED_CONTEXT_MAX_ROWS, recentWindow * 2))
+    .all()
+  const anchorRows = db.select().from(chapters)
+    .where(and(eq(chapters.novelId, novelId), lte(chapters.chapterNum, 3)))
+    .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+    .limit(6)
+    .all()
+  const arcRows = currentArc && typeof currentArc.chapterStart === 'number' && typeof currentArc.chapterEnd === 'number'
+    ? db.select().from(chapters)
+      .where(and(
+        eq(chapters.novelId, novelId),
+        gte(chapters.chapterNum, currentArc.chapterStart),
+        lte(chapters.chapterNum, currentArc.chapterEnd),
+      ))
+      .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+      .limit(48)
+      .all()
+    : []
+  const keyRows = db.select().from(chapters)
+    .where(and(
+      eq(chapters.novelId, novelId),
+      or(
+        sql`${chapters.summary} IS NOT NULL AND length(trim(${chapters.summary})) > 0`,
+        sql`${chapters.nextChapterSeed} IS NOT NULL AND length(trim(${chapters.nextChapterSeed})) > 0`,
+        sql`${chapters.continuityStateJson} IS NOT NULL AND ${chapters.continuityStateJson} <> '{}'`,
+      ),
+    ))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .limit(48)
+    .all()
+  const currentRow = db.select().from(chapters)
+    .where(and(eq(chapters.novelId, novelId), eq(chapters.chapterNum, chapterNum)))
+    .limit(1)
+    .all()
+  return mergeChapterRows([...currentRow, ...recentRows, ...anchorRows, ...arcRows, ...keyRows])
 }
 
 interface ChapterWithContinuity {
@@ -1465,6 +1537,22 @@ function buildFactionMentionCandidates(rows: Array<typeof factions.$inferSelect>
   }))
 }
 
+function collectExplicitEntityNamesFromReferences(
+  references: string[] | undefined,
+  candidates: EntityMentionCandidate[],
+): string[] {
+  const referenceKeys = new Set((references || [])
+    .map(normalizeMentionAliasKey)
+    .filter(Boolean))
+  if (referenceKeys.size === 0) return []
+
+  return candidates
+    .filter((candidate) => dedupe([candidate.canonicalName, ...(candidate.aliases || [])], 32)
+      .some((alias) => referenceKeys.has(normalizeMentionAliasKey(alias))))
+    .map((candidate) => candidate.canonicalName)
+    .filter(Boolean)
+}
+
 function collectRelationMentionedCharacterNames(
   sourceText: string,
   relationRows: Array<typeof characterRelations.$inferSelect>,
@@ -1944,6 +2032,7 @@ function pickRecallFallbackReason(reasons: Array<RecallFallbackReason | undefine
   const rank: Record<RecallFallbackReason, number> = {
     embedding_service_failed: 6,
     query_embedding_failed: 5,
+    embedding_profile_mismatch: 5,
     disabled_by_config: 4,
     budget_trimmed: 3,
     only_stale_hits: 2,
@@ -4459,13 +4548,20 @@ export async function collectChapterContextRawData(
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
-  const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum)
+  const chapterCount = getNovelChapterCount(novelId)
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-  const currentArc = resolveArcForChapter(chapterNum, currentChapter?.arcId, arcs)
+  const currentChapterBase = db.select().from(chapters)
+    .where(and(eq(chapters.novelId, novelId), eq(chapters.chapterNum, chapterNum)))
+    .limit(1)
+    .all()[0]
+  const currentArc = resolveArcForChapter(chapterNum, currentChapterBase?.arcId, arcs)
+  const chapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
+    ? loadBoundedChapterRows(novelId, chapterNum, novel, currentArc)
+    : db.select().from(chapters)
+      .where(eq(chapters.novelId, novelId))
+      .orderBy(asc(chapters.chapterNum))
+      .all()
+  const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum) || currentChapterBase
   const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapterNum, stageId)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
   const targetWords = Number(novel.targetWords || 0)
@@ -4522,7 +4618,7 @@ export async function collectChapterContextRawData(
   ].filter(Boolean).join('\n')
   const mentionedEntityLimits = resolveMentionedEntityLimits({
     targetWords,
-    chapterCount: chapterRows.length,
+    chapterCount,
     launchMode: novel.launchMode,
     settingsJson: novel.settingsJson,
     mapDepth: maxMapDepth,
@@ -4552,16 +4648,31 @@ export async function collectChapterContextRawData(
   ).forEach((name) => {
     if (mentionedCharacterNames.size < mentionedEntityLimits.characters) mentionedCharacterNames.add(name)
   })
-  const mentionedItemNames = collectMentionedEntityNamesFromCandidates(
-    chapterSignalText,
+  const explicitlyRequiredItemNames = collectExplicitEntityNamesFromReferences(
+    contractContext?.chapterContract.requiredAssetRefs,
     itemMentionCandidates,
-    mentionedEntityLimits.items,
   )
+  const mentionedItemNames = dedupe([
+    ...explicitlyRequiredItemNames,
+    ...collectMentionedEntityNamesFromCandidates(
+      chapterSignalText,
+      itemMentionCandidates,
+      mentionedEntityLimits.items,
+    ),
+  ], Math.max(mentionedEntityLimits.items, explicitlyRequiredItemNames.length))
   const mentionedLocationNames = collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
     locationMentionCandidates,
     mentionedEntityLimits.locations,
   )
+  const explicitlyRequiredLocationNames = collectExplicitEntityNamesFromReferences(
+    (contractContext?.sceneContracts || []).map((scene) => scene.timeLocation || ''),
+    locationMentionCandidates,
+  )
+  const mergedMentionedLocationNames = dedupe([
+    ...explicitlyRequiredLocationNames,
+    ...mentionedLocationNames,
+  ], Math.max(mentionedEntityLimits.locations, explicitlyRequiredLocationNames.length))
   const factionMentionLimit = Math.max(8, Math.ceil(mentionedEntityLimits.characters / 2))
   const mentionedFactionNames = collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
@@ -4573,19 +4684,22 @@ export async function collectChapterContextRawData(
     ...collectRelationMentionValidationTerms(chapterSignalText, relationRowsForMention, characterNameById, mentionedEntityLimits.characters),
   ], mentionedEntityLimits.characters * 3)
   const mentionValidationItems = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, itemMentionCandidates, mentionedEntityLimits.items)
-  const mentionValidationLocations = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, locationMentionCandidates, mentionedEntityLimits.locations)
+  const mentionValidationLocations = dedupe([
+    ...collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, locationMentionCandidates, mentionedEntityLimits.locations),
+    ...explicitlyRequiredLocationNames,
+  ], Math.max(mentionedEntityLimits.locations * 3, explicitlyRequiredLocationNames.length))
   const mentionValidationFactions = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, factionMentionCandidates, factionMentionLimit)
   const recentChapters = selectRecentContextRows(
     previousRows,
     targetWords,
-    chapterRows.length,
+    chapterCount,
     {
       launchMode: novel.launchMode,
       settingsJson: novel.settingsJson,
       signalText: chapterSignalText,
       mentionedCharacters: [...mentionedCharacterNames],
       mentionedItems: mentionedItemNames,
-      mentionedLocations: mentionedLocationNames,
+      mentionedLocations: mergedMentionedLocationNames,
       mentionedFactions: mentionedFactionNames,
     },
   ).map(toChapterWithContinuity)
@@ -4601,7 +4715,7 @@ export async function collectChapterContextRawData(
     launchMode: novel.launchMode,
     targetWords,
     settingsJson: novel.settingsJson,
-    chapterCount: chapterRows.length,
+    chapterCount,
   })
   const storyMemoryPromptPackage = buildStoryMemoryPromptPackage(novelId, {
     chapterId: currentChapter?.id,
@@ -4736,7 +4850,7 @@ export async function collectChapterContextRawData(
       ].filter(Boolean).join('\n'),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       worldRules: worldRulesContext,
-      mapSummary: buildMapContextSummary(allLocations, mentionedLocationNames, mentionedEntityLimits.locations),
+      mapSummary: buildMapContextSummary(allLocations, mergedMentionedLocationNames, mentionedEntityLimits.locations),
       itemSummary,
       longTermMemory,
       characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
@@ -4745,7 +4859,7 @@ export async function collectChapterContextRawData(
         signalText: chapterSignalText,
         mentionedCharacters: [...mentionedCharacterNames],
         mentionedItems: mentionedItemNames,
-        mentionedLocations: mentionedLocationNames,
+        mentionedLocations: mergedMentionedLocationNames,
         mentionedFactions: mentionedFactionNames,
       }),
       timelineSummary: timelineContext.timelineSummary,
@@ -4808,7 +4922,7 @@ export async function collectChapterContextRawData(
     storyThreadsSummary: profile.storyThreadsSummary,
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
-    mentionedLocations: mentionedLocationNames,
+    mentionedLocations: mergedMentionedLocationNames,
     mentionedFactions: mentionedFactionNames,
     mentionValidationCharacters,
     mentionValidationItems,
@@ -4826,7 +4940,7 @@ export async function collectChapterContextRawData(
     activeThreadPressureCount: activeThreadsContext.pressureCount,
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
-    mentionedLocations: mentionedLocationNames,
+    mentionedLocations: mergedMentionedLocationNames,
     mentionedFactions: mentionedFactionNames,
     contextParts: {
       ...baseContext.contextParts,
@@ -4877,7 +4991,7 @@ export function allocateChapterContext(
   ))
   const remainingContextBudget = effectiveBudget - promptFixedOverhead - reservedForOutput
   const contextBudget = Math.max(0, remainingContextBudget)
-  const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
+  const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterCount || rawData.chapterRows.length)
   const preservedConstraintSet = buildPreservedConstraintSet(normalizedOptions.preserveConstraintLabels)
   const hardConstraintDrafts = buildHardConstraintDrafts(rawData, preservedConstraintSet)
   const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)

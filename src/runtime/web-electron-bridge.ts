@@ -1174,6 +1174,14 @@ export function installWebElectronBridge(): void {
       list: async (novelId?: unknown) => withLocalBackend('workflow', 'list', [novelId], async () => []),
       get: async (id?: unknown) => withLocalBackend('workflow', 'get', [id], async () => null),
     }),
+    workflowNode: createService('workflowNode', {
+      list: async (filters?: unknown) => withLocalBackend('workflowNode', 'list', [filters], async () => []),
+      get: async (id?: unknown) => withLocalBackend('workflowNode', 'get', [id], async () => null),
+      getSnapshot: async (id?: unknown) => withLocalBackend('workflowNode', 'getSnapshot', [id], async () => null),
+      retry: async (id?: unknown) => withLocalBackend('workflowNode', 'retry', [id], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
+      }),
+    }),
     structure: createService('structure', {
       getTree: async (novelId?: unknown) => withLocalBackend('structure', 'getTree', [novelId], async () => ({ volumes: [] })),
       listVolumes: async (novelId?: unknown) => withLocalBackend('structure', 'listVolumes', [novelId], async () => []),

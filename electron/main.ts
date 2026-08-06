@@ -105,6 +105,7 @@ import {
 } from './services/ai-engine.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
+import * as workflowNodeService from './services/workflow-node.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
 import { parseObjectPayload, requireId, requireIds, requireObject, requireString } from './utils/ipc-validate'
 import {
@@ -1225,6 +1226,18 @@ function registerIpcHandlers() {
   handle('workflow:get', (_, id) => workflowTaskService.getWorkflowTask(id))
   handle('workflow:cancel', (event, id) => taskService.cancelTask(id, event.sender))
   handle('workflow:resume', (event, id) => workflowTaskService.resumeWorkflowTask(id, event.sender))
+  handle('workflowNode:list', (_, filters) => workflowNodeService.listWorkflowNodeRuns(
+    parseObjectPayload<Record<string, unknown>>(filters || {}, 'filters') as {
+      workflowTaskId?: number
+      novelId?: number
+      chapterId?: number
+      nodeKey?: string
+      limit?: number
+    },
+  ))
+  handle('workflowNode:get', (_, id) => workflowNodeService.getWorkflowNodeRun(requireId(id, 'nodeRunId')))
+  handle('workflowNode:getSnapshot', (_, id) => workflowNodeService.getWorkflowNodeSnapshot(requireString(id, 'snapshotId')))
+  handle('workflowNode:retry', (event, id) => chapterService.retryChapterPipelineNode(requireId(id, 'nodeRunId'), event.sender))
 
   handle('premiseDraft:getLatest', (_, novelId: number) => premiseService.getLatestPremiseDraft(novelId))
   handle('premiseDraft:markApplied', (_, taskId: number, appliedMode: 'replace' | 'fill_blanks') =>

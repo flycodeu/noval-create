@@ -52,6 +52,14 @@ import {
   updateTaskProgress,
   updateTaskStatus,
 } from './task.service'
+import {
+  beginWorkflowNode,
+  failWorkflowNode,
+  hashWorkflowNodeInput,
+  prepareWorkflowNodeRetry,
+  recordWorkflowNodeSnapshot,
+  renewWorkflowNodeLease,
+} from './workflow-node.service'
 import type { Message } from '../adapters/base.adapter'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
@@ -373,6 +381,8 @@ interface ChapterPipelineRoleState {
   failureCode?: ChapterPipelineFailureCode
   rewriteScope?: ChapterRewriteScope
   targetSegmentId?: number | null
+  nodeRunId?: number
+  nodeSnapshotId?: string
 }
 
 interface StepMemoryRuntimeState {
@@ -4250,6 +4260,10 @@ interface ChapterGenerationOptions {
   resumeSourceTaskId?: number
   /** Internal-only hook used to link a resumed Writer task to its downstream workflow. */
   onWorkflowTaskCreated?: (taskId: number) => void
+  retryNodeRole?: ChapterPipelineRole
+  retrySourceNodeRunId?: number
+  retryUpstreamSnapshotId?: string | null
+  retryReason?: string
 }
 
 function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect, stageId?: number): string {
@@ -4404,6 +4418,22 @@ async function generateChapterContentInternal(
       : {}),
   }
   let previousRoleTaskId: number | undefined
+  const retryFromRole = options.retryNodeRole
+  const retrySkipsPlanner = Boolean(retryFromRole && retryFromRole !== 'planner')
+  const retrySkipsWriter = Boolean(retryFromRole && !['planner', 'writer'].includes(retryFromRole))
+  const retrySkipsCritic = Boolean(retryFromRole && ['enforcer', 'rewriter', 'canonizer', 'finalize'].includes(retryFromRole))
+  const retrySkipsEnforcer = Boolean(retryFromRole && ['rewriter', 'canonizer', 'finalize'].includes(retryFromRole))
+  const retrySkipsRewriter = Boolean(retryFromRole && ['canonizer', 'finalize'].includes(retryFromRole))
+  const retrySkipsCanonizer = Boolean(retryFromRole && retryFromRole === 'finalize')
+  const retrySourceWorkflowSnapshot = options.resumeSourceTaskId
+    ? parseChapterPipelineSnapshot(getTaskRecord(options.resumeSourceTaskId)?.progressJson)
+    : null
+  const nodeLeases = new Map<ChapterPipelineRole, {
+    nodeRunId: number
+    leaseToken: string
+    inputJson?: string
+    renewTimer?: ReturnType<typeof setInterval>
+  }>()
   let hasCommittedContent = false
   let latestUsableDraft = ''
   let latestReviewNotesJson = chapter.reviewNotesJson || ''
@@ -4499,6 +4529,8 @@ async function generateChapterContentInternal(
     })
   }
 
+  const generationRetryOptions = options
+
   const startRoleTask = async (
     role: ChapterPipelineRole,
     type: 'chapter_planner' | 'chapter_writer' | 'chapter_critic' | 'chapter_rewriter' | 'chapter_canonizer' | 'chapter_finalize',
@@ -4528,6 +4560,46 @@ async function generateChapterContentInternal(
       recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role)),
       status: 'pending',
     })
+    const nodeLease = beginWorkflowNode({
+      workflowTaskId,
+      novelId: chapter.novelId,
+      chapterId,
+      nodeKey: role,
+      inputHash: hashWorkflowNodeInput({
+        role,
+        contractVersion,
+        contextVersion: snapshot.baseContextVersion || rawContext.novel.contextVersion || 1,
+        upstreamTaskId: previousRoleTaskId || null,
+        inputJson: options.inputJson || null,
+        canonRunId: options.canonRunId || null,
+      }),
+      contextVersion: snapshot.baseContextVersion || rawContext.novel.contextVersion || 1,
+      leaseOwner: `chapter:${chapterId}:task:${childTaskId}`,
+      retryOfNodeRunId: generationRetryOptions.retryNodeRole === role ? generationRetryOptions.retrySourceNodeRunId : undefined,
+      retryReason: generationRetryOptions.retryNodeRole === role ? generationRetryOptions.retryReason : undefined,
+      upstreamSnapshotId: generationRetryOptions.retryNodeRole === role
+        ? generationRetryOptions.retryUpstreamSnapshotId
+        : undefined,
+    })
+    const leaseState: {
+      nodeRunId: number
+      leaseToken: string
+      inputJson?: string
+      renewTimer?: ReturnType<typeof setInterval>
+    } = {
+      nodeRunId: nodeLease.nodeRunId,
+      leaseToken: nodeLease.leaseToken,
+      inputJson: options.inputJson,
+    }
+    leaseState.renewTimer = setInterval(() => {
+      try {
+        renewWorkflowNodeLease(leaseState.nodeRunId, leaseState.leaseToken)
+      } catch {
+        if (leaseState.renewTimer) clearInterval(leaseState.renewTimer)
+      }
+    }, 120_000)
+    leaseState.renewTimer.unref?.()
+    nodeLeases.set(role, leaseState)
     const now = new Date().toISOString()
     snapshot = {
       ...snapshot,
@@ -4544,6 +4616,7 @@ async function generateChapterContentInternal(
           status: 'running',
           detail,
           taskId: childTaskId,
+          nodeRunId: nodeLease.nodeRunId,
           upstreamTaskId: previousRoleTaskId,
           contractVersion,
           canonRunId: options.canonRunId,
@@ -4576,6 +4649,35 @@ async function generateChapterContentInternal(
     detail: string,
     extra: Partial<ChapterPipelineRoleState> = {},
   ) => {
+    const nodeLease = nodeLeases.get(role)
+    let nodeSnapshotId: string | undefined
+    if (nodeLease) {
+      if (nodeLease.renewTimer) clearInterval(nodeLease.renewTimer)
+      const nodeSnapshot = recordWorkflowNodeSnapshot({
+        nodeRunId: nodeLease.nodeRunId,
+        leaseToken: nodeLease.leaseToken,
+        payload: {
+          role,
+          taskId,
+          workflowTaskId,
+          chapterId,
+          status: 'success',
+          detail,
+          contractVersion: snapshot.contractVersion,
+          contextVersion: snapshot.baseContextVersion,
+          inputJson: nodeLease.inputJson,
+          outputRefs: {
+            chapterId,
+            contentHash: buildChapterContentHash(latestUsableDraft || chapter.content || ''),
+            scenePlanHash: hashWorkflowNodeInput(chapter.scenePlanJson || ''),
+            reviewNotesHash: hashWorkflowNodeInput(latestReviewNotesJson || chapter.reviewNotesJson || ''),
+          },
+          roleState: snapshot.roles[role],
+        },
+        outputHash: hashWorkflowNodeInput({ role, taskId, detail, extra }),
+      })
+      nodeSnapshotId = nodeSnapshot.id
+    }
     snapshot = refreshPipelineRoleMetrics(snapshot, role, taskId)
     snapshot = {
       ...snapshot,
@@ -4590,6 +4692,8 @@ async function generateChapterContentInternal(
           status: 'success',
           detail,
           finishedAt: new Date().toISOString(),
+          nodeRunId: nodeLease?.nodeRunId,
+          nodeSnapshotId,
           recoveryHint: undefined,
           failureCode: undefined,
           rewriteScope: undefined,
@@ -4641,6 +4745,22 @@ async function generateChapterContentInternal(
       })
       : undefined)
 
+    const nodeLease = nodeLeases.get(role)
+    if (nodeLease) {
+      if (nodeLease.renewTimer) clearInterval(nodeLease.renewTimer)
+      try {
+        failWorkflowNode({
+          nodeRunId: nodeLease.nodeRunId,
+          leaseToken: nodeLease.leaseToken,
+          status: aborted ? 'cancelled' : blocked ? 'blocked' : 'failed',
+          errorClass: failure.code,
+          errorMessage: detail,
+        })
+      } catch (snapshotError) {
+        console.warn('[workflow-node] 节点失败状态持久化失败', snapshotError)
+      }
+    }
+
     if (typeof taskId === 'number') {
       updateTask(taskId, {
         pipelineStage: blocked ? 'blocked' : 'failed',
@@ -4678,6 +4798,7 @@ async function generateChapterContentInternal(
           failureCode: failure.code,
           rewriteScope: failure.rewriteScope,
           targetSegmentId: failure.targetSegmentId,
+          nodeRunId: nodeLease?.nodeRunId,
         },
       },
     }
@@ -4923,6 +5044,7 @@ async function generateChapterContentInternal(
       chapterBridgePlan: chapterBridgePlanText,
       previousSummary: buildContractVersionArtifactSummary(contractVersion),
     })
+    let writerStepMemory = initialStepMemory
     scenePlanContext = allocateStageContextForPipeline(
       applyUpstreamArtifactsToRawContext(scenePlanResolution.effectiveRawContext, {
         stepMemorySummary: initialStepMemory.summary,
@@ -4959,8 +5081,8 @@ async function generateChapterContentInternal(
 
     updateChapter(chapterId, {
       status: 'writing',
-      scenePlanJson: '',
-      reviewNotesJson: '',
+      ...(retrySkipsPlanner ? {} : { scenePlanJson: '' }),
+      ...(retrySkipsWriter ? {} : { reviewNotesJson: '' }),
       bridgePlanJson: chapterBridgePlan ? JSON.stringify(chapterBridgePlan) : '',
     }, { versionSource: false })
     updateTaskProgress(workflowTaskId, snapshot, sender)
@@ -4984,6 +5106,9 @@ async function generateChapterContentInternal(
     }
     // 弧级节奏模板传导：本章所属弧挂了节奏模板时，把单章节拍段注入 planner prompt（失败静默降级）。
     const chapterRhythmSection = getChapterRhythmSection(chapter.novelId, chapter.chapterNum, chapter.arcId)
+    let scenePlan: ScenePlanStep[] = fallbackScenePlan
+    let scenePlanText = formatScenePlan(scenePlan)
+    let sceneDesignFieldGaps: string[] = []
     const plannerMessages = [{
       role: 'user' as const,
       content: buildScenePlanPrompt({
@@ -5036,6 +5161,7 @@ async function generateChapterContentInternal(
         promptTier: complexity,
       }),
     }]
+    if (!retrySkipsPlanner) {
     const plannerTaskId = await startRoleTask('planner', 'chapter_planner', '先把章节合同落成可执行的场景链。', {
       inputJson: JSON.stringify(plannerMessages),
       runnerType: 'chat',
@@ -5104,7 +5230,7 @@ async function generateChapterContentInternal(
       rawScenePlan,
       loadScenePlanContractSeeds(chapterId),
     )
-    const scenePlan = scenePlanReconciliation.plan
+    scenePlan = scenePlanReconciliation.plan
     if (scenePlanReconciliation.corrections.length > 0) {
       console.warn(
         `[chapter:plan] 已按章节合同收口场景计划 chapter=${chapterId}：${scenePlanReconciliation.corrections.join('；')}`,
@@ -5116,12 +5242,12 @@ async function generateChapterContentInternal(
     // （仅两列，合同行缺失不写），使重生成时设计字段可延续。写回失败不阻断流水线。
     writeBackSceneDesignFields(chapterId, scenePlan)
     // planner 空输出体检：声明冲突却缺设计字段的场景计数，稍后挂到 reviewNotes（提示级）。
-    const sceneDesignFieldGaps = collectSceneDesignFieldGaps(scenePlan)
+    sceneDesignFieldGaps = collectSceneDesignFieldGaps(scenePlan)
     if (sceneDesignFieldGaps.length > 0) {
       console.warn(`[chapter:plan] 场景设计字段缺口 chapter=${chapterId}：${sceneDesignFieldGaps.length} 项`)
     }
-    const scenePlanText = formatScenePlan(scenePlan)
-    const writerStepMemory = buildStepMemorySummary({
+    scenePlanText = formatScenePlan(scenePlan)
+    writerStepMemory = buildStepMemorySummary({
       chapterBridgePlan: chapterBridgePlanText,
       scenePlanText,
       previousSummary: 'Planner 已固化场景计划，下一步 Writer 必须逐场落正文。',
@@ -5144,7 +5270,66 @@ async function generateChapterContentInternal(
     }
     syncWorkflowTask()
     finishRoleTask('planner', plannerTaskId, `场景计划已固化 ${scenePlan.length} 段。`)
+    } else {
+      const persistedScenePlan = chapter.scenePlanJson?.trim()
+        ? normalizeScenePlan(JSON.parse(chapter.scenePlanJson) as unknown, fallbackScenePlan)
+        : []
+      if (persistedScenePlan.length === 0) {
+        throw new ChapterPipelineStageError('contract_blocked', '没有可复用的 Planner 场景快照，无法从当前节点重试。', {
+          blocked: true,
+          rewriteScope: 'contract_replan',
+        })
+      }
+      scenePlan = persistedScenePlan
+      scenePlanText = formatScenePlan(scenePlan)
+      sceneDesignFieldGaps = collectSceneDesignFieldGaps(scenePlan)
+      validateChapterContractsForGeneration(chapterId)
+      contractVersion = buildChapterContractVersion(chapterId)
+      writerStepMemory = buildStepMemorySummary({
+        chapterBridgePlan: chapterBridgePlanText,
+        scenePlanText,
+        previousSummary: '复用已持久化 Planner 快照，直接从指定节点继续。',
+      })
+      draftContext = allocateStageContextForPipeline(
+        applyUpstreamArtifactsToRawContext(draftResolution.effectiveRawContext, {
+          scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+          contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+          stepMemorySummary: writerStepMemory.summary,
+        }),
+        chapter,
+        complexity,
+        'draft',
+        undefined,
+        options.preserveConstraintLabels,
+      )
+      const priorPlannerTaskId = retrySourceWorkflowSnapshot?.roles?.planner?.taskId
+      previousRoleTaskId = priorPlannerTaskId || undefined
+      snapshot = {
+        ...snapshot,
+        contractVersion,
+        stepMemory: writerStepMemory,
+        roles: {
+          ...snapshot.roles,
+          planner: {
+            ...snapshot.roles.planner,
+            status: 'success',
+            detail: '复用不可变 Planner 快照，未重复调用模型。',
+            taskId: priorPlannerTaskId,
+            contractVersion,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      syncWorkflowTask()
+    }
 
+    const chapterTitleForCheck = chapter.title || getDefaultChapterTitle(chapter.chapterNum)
+    const chapterWordTarget = resolveChapterReferenceWords(chapter.targetWords, novel)
+    let draftContent = stripChapterHeadingNoise(chapter.content || '', chapter.chapterNum, chapterTitleForCheck).content
+    let draftTitleMismatchRisk = ''
+    let lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+    let writerTaskId = retrySourceWorkflowSnapshot?.roles?.writer?.taskId || 0
+    if (!retrySkipsWriter) {
     const writerMessages = [{
       role: 'user' as const,
       content: buildChapterDraftPrompt({
@@ -5200,7 +5385,7 @@ async function generateChapterContentInternal(
       }),
     }]
     const resumedDraft = options.resumeDraft?.trim() || ''
-    const writerTaskId = await startRoleTask(
+    writerTaskId = await startRoleTask(
       'writer',
       'chapter_writer',
       resumedDraft
@@ -5238,11 +5423,9 @@ async function generateChapterContentInternal(
         outputText: '已复用失败流程保留稿；未跳过 Critic、Rewriter、发布门、Canonizer 或 Finalize。',
       })
     }
-    const chapterTitleForCheck = chapter.title || getDefaultChapterTitle(chapter.chapterNum)
     const draftHeading = stripChapterHeadingNoise(draftContentRaw, chapter.chapterNum, chapterTitleForCheck)
-    const draftContent = draftHeading.content
-    const draftTitleMismatchRisk = buildTitleMismatchRisk(draftHeading.detectedTitle, chapterTitleForCheck, chapter.chapterNum)
-    const chapterWordTarget = resolveChapterReferenceWords(chapter.targetWords, novel)
+    draftContent = draftHeading.content
+    draftTitleMismatchRisk = buildTitleMismatchRisk(draftHeading.detectedTitle, chapterTitleForCheck, chapter.chapterNum)
     latestUsableDraft = draftContent.trim()
     if (!latestUsableDraft) {
       failRoleTask('writer', writerTaskId, new ChapterPipelineStageError(
@@ -5276,7 +5459,36 @@ async function generateChapterContentInternal(
       writerTaskId,
       resumedDraft ? '保留稿已重新进入完整审校链。' : '正文初稿已生成，等待 Critic 审校。',
     )
-    const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+    } else {
+      if (!draftContent.trim()) {
+        throw new ChapterPipelineStageError('empty_output', '没有可复用的 Writer 正文快照，无法从当前节点重试。', {
+          blocked: true,
+          outputText: buildPipelineFailureOutput('empty_output', '没有可复用的 Writer 正文快照。'),
+        })
+      }
+      latestUsableDraft = draftContent.trim()
+      lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+      snapshot = {
+        ...snapshot,
+        partialContent: latestUsableDraft,
+        resumeSourceTaskId: options.resumeSourceTaskId,
+        roles: {
+          ...snapshot.roles,
+          writer: {
+            ...snapshot.roles.writer,
+            status: 'success',
+            detail: '复用不可变 Writer 快照，未重复生成正文。',
+            taskId: writerTaskId || undefined,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      hasCommittedContent = true
+      expectedPipelineContent = chapter.content || expectedPipelineContent
+      syncWorkflowTask({ outputText: '已复用 Writer 不可变快照，直接进入指定节点。' })
+      previousRoleTaskId = writerTaskId || previousRoleTaskId
+    }
+    lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
     const criticStepMemory = buildStepMemorySummary({
       chapterBridgePlan: chapterBridgePlanText,
       scenePlanText,
@@ -5314,7 +5526,9 @@ async function generateChapterContentInternal(
     logConstraintInjectionStatus('review', reviewContext)
     const reviewNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(reviewContext.chapterGoal, draftContent))
 
-    let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
+    let reviewNotes = retrySkipsCritic
+      ? parseStoredReviewNotes(chapter.reviewNotesJson)
+      : buildFallbackReviewNotes(consistencyNotes)
 
     // 语义评审门策略：off 保持关键词门原始行为；shadow 只落库观察；enforce 由语义
     // verdict 接管阻断，关键词门降级为提示。critic 阶段的语义门调用不计入
@@ -5323,7 +5537,14 @@ async function generateChapterContentInternal(
     let effectiveSemanticGateMode = semanticGatePolicy.mode
     let semanticGateCallsUsed = 0
     let criticSemanticReview: SemanticGateReview | null = null
+    const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
+      .where(eq(glossary.novelId, chapter.novelId))
+      .all()
+      .map((row) => row.term || '')
+      .filter(Boolean)
+    const guardrailKnownTerms = collectTrackedEntityNames(chapter.novelId)
 
+    if (!retrySkipsCritic) {
     const criticMessages = [{
       role: 'user' as const,
       content: buildChapterReviewPrompt({
@@ -5464,15 +5685,9 @@ async function generateChapterContentInternal(
       content: draftContent,
       reviewNotes,
     }, { advisoryOnly: effectiveSemanticGateMode === 'enforce' }))
-    const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
-      .where(eq(glossary.novelId, chapter.novelId))
-      .all()
-      .map((row) => row.term || '')
-      .filter(Boolean)
     // Repetition repair must know which names, items, locations and glossary
     // terms are canonical. Otherwise a legitimate term such as “锅炉” or a
     // three-character character name can be mistaken for AI-style prose.
-    const guardrailKnownTerms = collectTrackedEntityNames(chapter.novelId)
     reviewNotes = applyHistoricalGroundingToReviewNotes(reviewNotes, {
       genreName: profile.genre,
       worldRulesJson: novel.worldRulesJson,
@@ -5573,8 +5788,33 @@ async function generateChapterContentInternal(
     latestReviewNotesJson = JSON.stringify(reviewNotes)
     updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
+    } else {
+      if (!hasReviewNotes(reviewNotes)) {
+        throw new ChapterPipelineStageError('invalid_output', '没有可复用的 Critic 审校快照，无法从当前节点重试。', {
+          blocked: true,
+          outputText: buildPipelineFailureOutput('invalid_output', '没有可复用的 Critic 审校快照。'),
+        })
+      }
+      latestReviewNotesJson = JSON.stringify(reviewNotes)
+      snapshot = {
+        ...snapshot,
+        roles: {
+          ...snapshot.roles,
+          critic: {
+            ...snapshot.roles.critic,
+            status: 'success',
+            detail: '复用不可变 Critic 快照，未重复调用模型。',
+            taskId: retrySourceWorkflowSnapshot?.roles?.critic?.taskId,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      previousRoleTaskId = retrySourceWorkflowSnapshot?.roles?.critic?.taskId || previousRoleTaskId
+      syncWorkflowTask({ outputText: '已复用 Critic 不可变快照，直接进入指定节点。' })
+    }
 
     // === Enforcer 环节 ===
+    if (!retrySkipsEnforcer) {
     const enforcerTaskId = await startRoleTask('enforcer', 'chapter_critic', 'Enforcer 强制防 AI 味和对话指纹拦截。', {
       inputJson: JSON.stringify({ draftContent, novelId: chapter.novelId, chapterId }),
     })
@@ -5603,6 +5843,34 @@ async function generateChapterContentInternal(
       failRoleTask('enforcer', enforcerTaskId, error instanceof Error ? error : new Error('Enforcer 环节异常'), { blocked: true })
       throw error
     }
+    } else {
+      snapshot = {
+        ...snapshot,
+        roles: {
+          ...snapshot.roles,
+          enforcer: {
+            ...snapshot.roles.enforcer,
+            status: 'success',
+            detail: '复用不可变 Enforcer 快照，未重复执行护栏扫描。',
+            taskId: retrySourceWorkflowSnapshot?.roles?.enforcer?.taskId,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      previousRoleTaskId = retrySourceWorkflowSnapshot?.roles?.enforcer?.taskId || previousRoleTaskId
+      syncWorkflowTask({ outputText: '已复用 Enforcer 不可变快照，直接进入指定节点。' })
+    }
+    let repairedContent = draftContent
+    let finalReviewNotesWithRewriteDelta = reviewNotes
+    let rewriteMiniReview = buildRewriteMiniReviewVerdict({
+      originalContent: draftContent,
+      rewrittenContent: draftContent,
+      reviewPrioritySummary: buildReviewPrioritySummary(reviewNotes),
+      reviewNotes,
+    })
+    let rewriterTaskId = retrySourceWorkflowSnapshot?.roles?.rewriter?.taskId || 0
+    let publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
+    if (!retrySkipsRewriter) {
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
     const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
     const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)
@@ -5856,7 +6124,7 @@ async function generateChapterContentInternal(
       rewriteRejectedDigests,
       'Rewriter 正在按 Critic 结论修正文稿。',
     )
-    let rewriterTaskId = rewriteRun.taskId
+    rewriterTaskId = rewriteRun.taskId
     let rewriteResult = rewriteRun.result
     if (
       isCandidateTooSimilar(rewriteResult.output, [draftContent])
@@ -6209,9 +6477,9 @@ async function generateChapterContentInternal(
       }
       structuralRepairDirective = ''
     }
-    let repairedContent = rewriteOutcome.content
-    let finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
-    let rewriteMiniReview = rewriteOutcome.miniReview
+    repairedContent = rewriteOutcome.content
+    finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
+    rewriteMiniReview = rewriteOutcome.miniReview
     // 参考字数只用于读感观察，不自动压缩。章节应在场景自然完成后收束，
     // 关键转折、高潮或回收章可以明显长于参考值，短过渡章也可以明显短于参考值。
     // 重写稿轻量复检：初稿时代的 LLM 审校证据（接力/开篇/幻觉/标题）在最终稿上逐条核对，
@@ -6434,7 +6702,7 @@ async function generateChapterContentInternal(
       status: 'draft',
     })
     hasCommittedContent = true
-    let publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
+    publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
     const finalGateRepairItems = publishCheck.checklist.filter((item) => (
       (item.status === 'blocker' || item.status === 'rewrite')
       && !['summary', 'continuity', 'context'].includes(item.key)
@@ -6692,6 +6960,43 @@ async function generateChapterContentInternal(
       ), { blocked: true })
     }
     finishRoleTask('rewriter', rewriterTaskId, '正文已完成重写，准备生成 Canon 差异草案。')
+    } else {
+      if (!draftContent.trim() || !hasReviewNotes(reviewNotes)) {
+        throw new ChapterPipelineStageError('invalid_output', '没有可复用的 Rewriter 前置快照，无法从当前节点重试。', {
+          blocked: true,
+          outputText: buildPipelineFailureOutput('invalid_output', '缺少可复用的正文或审校快照。'),
+        })
+      }
+      repairedContent = draftContent
+      finalReviewNotesWithRewriteDelta = reviewNotes
+      rewriteMiniReview = buildRewriteMiniReviewVerdict({
+        originalContent: draftContent,
+        rewrittenContent: draftContent,
+        reviewPrioritySummary: buildReviewPrioritySummary(reviewNotes),
+        reviewNotes,
+      })
+      latestUsableDraft = repairedContent.trim()
+      latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
+      publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
+      rewriterTaskId = retrySourceWorkflowSnapshot?.roles?.rewriter?.taskId || rewriterTaskId
+      snapshot = {
+        ...snapshot,
+        partialContent: repairedContent,
+        resumeSourceTaskId: options.resumeSourceTaskId,
+        roles: {
+          ...snapshot.roles,
+          rewriter: {
+            ...snapshot.roles.rewriter,
+            status: 'success',
+            detail: '复用不可变 Rewriter 快照，未重复生成正文。',
+            taskId: rewriterTaskId || undefined,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      previousRoleTaskId = rewriterTaskId || previousRoleTaskId
+      syncWorkflowTask({ outputText: '已复用 Rewriter 不可变快照，直接进入指定节点。' })
+    }
     snapshot = {
       ...snapshot,
       partialContent: repairedContent,
@@ -6700,6 +7005,8 @@ async function generateChapterContentInternal(
     }
     syncWorkflowTask()
 
+    let canonRun: Awaited<ReturnType<typeof prepareChapterWritebackRunWithRetry>> | null = null
+    if (!retrySkipsCanonizer) {
     const canonizerTaskId = await startRoleTask('canonizer', 'chapter_canonizer', 'Canonizer 正在为本章准备可确认的状态差异草案。', {
       runnerType: 'workflow',
     })
@@ -6707,7 +7014,7 @@ async function generateChapterContentInternal(
       pipelineStage: 'running',
       contractVersion,
     })
-    const canonRun = await prepareChapterWritebackRunWithRetry(chapterId, 'pipeline-canonizer', 3)
+    canonRun = await prepareChapterWritebackRunWithRetry(chapterId, 'pipeline-canonizer', 3)
     if (canonRun.status === 'failed') {
       updateTaskStatus(canonizerTaskId, 'failed', sender, {
         pipelineStage: 'failed',
@@ -6728,7 +7035,39 @@ async function generateChapterContentInternal(
       recoveryHintJson: null,
     })
     finishRoleTask('canonizer', canonizerTaskId, canonDetail, { canonRunId: canonRun.id })
+    } else {
+      const reusableCanonRun = db.select().from(chapterWritebackRuns)
+        .where(eq(chapterWritebackRuns.chapterId, chapterId))
+        .orderBy(desc(chapterWritebackRuns.id))
+        .all()
+        .find((run) => ['draft', 'ready', 'applying', 'applied'].includes(run.status || ''))
+      if (!reusableCanonRun) {
+        throw new ChapterPipelineStageError('canon_pending', '没有可复用的 Canon 快照，无法从 Finalize 节点重试。', {
+          blocked: true,
+          outputText: buildPipelineFailureOutput('canon_pending', '没有可复用的 Canon 草案。'),
+        })
+      }
+      canonRun = reusableCanonRun as unknown as Awaited<ReturnType<typeof prepareChapterWritebackRunWithRetry>>
+      snapshot = {
+        ...snapshot,
+        canonRunId: canonRun.id,
+        roles: {
+          ...snapshot.roles,
+          canonizer: {
+            ...snapshot.roles.canonizer,
+            status: 'success',
+            detail: '复用不可变 Canon 快照，未重复抽取状态差异。',
+            taskId: retrySourceWorkflowSnapshot?.roles?.canonizer?.taskId,
+            canonRunId: canonRun.id,
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      }
+      previousRoleTaskId = retrySourceWorkflowSnapshot?.roles?.canonizer?.taskId || previousRoleTaskId
+      syncWorkflowTask({ outputText: '已复用 Canon 不可变快照，直接进入 Finalize。' })
+    }
 
+    if (!canonRun) throw new ChapterPipelineStageError('canon_pending', 'Canon 快照未准备完成，无法进入 Finalize。')
     const finalizeTaskId = await startRoleTask('finalize', 'chapter_finalize', '正在刷新摘要、连续性与故事记忆。', {
       runnerType: 'workflow',
       canonRunId: canonRun.id,
@@ -6892,6 +7231,56 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
   } finally {
     if (chapterResumeLocks.get(taskId) === run) chapterResumeLocks.delete(taskId)
   }
+}
+
+const CHAPTER_PIPELINE_RETRY_ROLES = new Set<ChapterPipelineRole>([
+  'planner',
+  'writer',
+  'critic',
+  'enforcer',
+  'rewriter',
+  'canonizer',
+  'finalize',
+])
+
+export async function retryChapterPipelineNode(nodeRunId: number, sender?: WebContents): Promise<number> {
+  const retryPlan = prepareWorkflowNodeRetry(nodeRunId)
+  if (!CHAPTER_PIPELINE_RETRY_ROLES.has(retryPlan.source.nodeKey as ChapterPipelineRole)) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
+  const sourceTask = getTaskRecord(retryPlan.source.workflowTaskId)
+  if (!sourceTask || sourceTask.type !== 'chapter_write' || sourceTask.relatedEntityType !== 'chapter' || !sourceTask.relatedEntityId) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
+  const sourceSnapshot = parseChapterPipelineSnapshot(sourceTask.progressJson)
+  if (sourceTask.status === 'success') throwUserFacingError('workflow.resumeUnsupported')
+  if (['pending', 'running', 'cancel_requested'].includes(sourceTask.status || '')) {
+    throwUserFacingError('workflow.taskRunningCannotResume', { taskId: sourceTask.id })
+  }
+  const chapterId = Number(sourceTask.relatedEntityId)
+  const currentChapter = getDb().select({ content: chapters.content, novelId: chapters.novelId }).from(chapters)
+    .where(eq(chapters.id, chapterId)).all()[0]
+  if (!currentChapter) throwUserFacingError('chapter.notFound')
+  if (sourceSnapshot) assertChapterResumeBaseCurrent(chapterId, sourceSnapshot)
+
+  const role = retryPlan.source.nodeKey as ChapterPipelineRole
+  const preservedDraft = typeof sourceSnapshot?.partialContent === 'string'
+    ? sourceSnapshot.partialContent.trim()
+    : (currentChapter.content || '').trim()
+  return generateChapterContent(chapterId, sender, {
+    executionMode: sourceSnapshot?.executionMode,
+    stageId: typeof parseTaskControl(sourceTask).stageId === 'number'
+      ? parseTaskControl(sourceTask).stageId
+      : undefined,
+    resumeDraft: ['critic', 'enforcer', 'rewriter', 'canonizer', 'finalize'].includes(role)
+      ? preservedDraft || undefined
+      : undefined,
+    resumeSourceTaskId: sourceTask.id,
+    retryNodeRole: role,
+    retrySourceNodeRunId: retryPlan.source.id,
+    retryUpstreamSnapshotId: retryPlan.source.upstreamSnapshotId,
+    retryReason: `manual_retry:${role}`,
+  })
 }
 
 async function resumeChapterPipelineInternal(taskId: number, sender?: WebContents): Promise<number> {

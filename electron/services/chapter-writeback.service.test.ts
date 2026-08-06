@@ -47,6 +47,12 @@ vi.mock('./character-arc.service', () => ({
   listRelationshipArcs: vi.fn(() => []),
 }))
 
+vi.mock('./canon-ledger.service', () => ({
+  buildWritebackCanonIdempotencyKey: vi.fn((runId: number) => `chapter-writeback:${runId}`),
+  hashCanonInput: vi.fn(() => 'sha256:test'),
+  recordCommittedCanonLedger: vi.fn(),
+}))
+
 import { getDb, getSqlite } from '../database/db'
 import {
   chapterFactExtracts,

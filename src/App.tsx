@@ -110,6 +110,7 @@ export default function App() {
               <Route path="/templates" element={<TemplateManager />} />
               <Route path="/tasks" element={<TaskCenter />} />
               <Route path="/prompts" element={<PromptManager />} />
+              <Route path="*" element={<Navigate to="/novels" replace />} />
             </Routes>
           </Suspense>
         </AppLayout>

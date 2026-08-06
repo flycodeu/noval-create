@@ -505,6 +505,8 @@ function formatRecallFallbackReason(reason?: RecallFallbackReason): string {
       return '嵌入服务失败'
     case 'query_embedding_failed':
       return '查询向量失败'
+    case 'embedding_profile_mismatch':
+      return '向量模型空间不匹配'
     case 'disabled_by_config':
       return '向量能力未启用'
     case 'budget_trimmed':

@@ -559,6 +559,13 @@ const api = {
     resume: (id: number) => invokeIpc('workflow:resume', id),
   },
 
+  workflowNode: {
+    list: (filters?: unknown) => invokeIpc('workflowNode:list', filters || {}),
+    get: (nodeRunId: number) => invokeIpc('workflowNode:get', nodeRunId),
+    getSnapshot: (snapshotId: string) => invokeIpc('workflowNode:getSnapshot', snapshotId),
+    retry: (nodeRunId: number) => invokeIpc('workflowNode:retry', nodeRunId),
+  },
+
   premiseDraft: {
     getLatest: (novelId: number) => invokeIpc('premiseDraft:getLatest', novelId),
     markApplied: (taskId: number, appliedMode: string) => invokeIpc('premiseDraft:markApplied', taskId, appliedMode),

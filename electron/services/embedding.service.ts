@@ -1,4 +1,5 @@
-import { eq, and } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
+import { eq, and, isNotNull } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
@@ -34,6 +35,7 @@ export interface SimilarFragmentHit {
 export type SimilarFragmentFallbackReason =
   | 'embedding_service_failed'
   | 'query_embedding_failed'
+  | 'embedding_profile_mismatch'
   | 'no_hits'
   | 'disabled_by_config'
 
@@ -54,6 +56,29 @@ function cosineSimilarity(a: number[], b: number[]): number {
   }
   const denom = Math.sqrt(normA) * Math.sqrt(normB)
   return denom > 0 ? dot / denom : 0
+}
+
+export function buildEmbeddingProfile(modelId: string | null | undefined, dimensions: number): string {
+  return `${modelId?.trim() || 'unknown'}:${Math.max(0, Math.floor(dimensions))}`
+}
+
+export function hashEmbeddingSource(chapterId: number, contextVersion: number, fragments: Array<{ type: string; text: string }>): string {
+  const payload = JSON.stringify({
+    chapterId,
+    contextVersion,
+    fragments: fragments.map((fragment) => ({ type: fragment.type, text: fragment.text.trim() })),
+  })
+  return `sha256:${createHash('sha256').update(payload).digest('hex')}`
+}
+
+export function isCompatibleEmbeddingRow(
+  row: { embeddingJson?: string | null; embeddingProfile?: string | null; dimensions?: number | null },
+  profile: string,
+  dimensions: number,
+): boolean {
+  return Boolean(row.embeddingJson)
+    && row.embeddingProfile === profile
+    && row.dimensions === dimensions
 }
 
 function extractKeywords(text: string): string[] {
@@ -101,6 +126,19 @@ function buildContentFallbackExcerpt(content: string, keywords: string[]): strin
     .sort((left, right) => left.index - right.index)
 
   return clipFallbackText((ranked.length > 0 ? ranked.map((item) => item.paragraph) : paragraphs.slice(0, 2)).join('\n'))
+}
+
+function buildContentEmbeddingExcerpt(content: string): string {
+  const paragraphs = content
+    .split(/\r?\n\s*\r?\n+/)
+    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  if (paragraphs.length === 0) return ''
+  const selected = paragraphs.length <= 5
+    ? paragraphs
+    : [...paragraphs.slice(0, 3), ...paragraphs.slice(-2)]
+  const text = selected.join('\n')
+  return text.length <= 1800 ? text : `${text.slice(0, 1799)}…`
 }
 
 function asText(value: unknown): string {
@@ -174,7 +212,22 @@ export async function generateChapterEmbeddings(
     fragments.push({ type: 'seed', text: chapter.nextChapterSeed })
   }
 
-  if (fragments.length === 0) return
+  if (chapter.outline) {
+    fragments.push({ type: 'outline', text: chapter.outline })
+  }
+
+  const contentExcerpt = buildContentEmbeddingExcerpt(chapter.content || '')
+  if (contentExcerpt) {
+    fragments.push({ type: 'content_excerpt', text: contentExcerpt })
+  }
+
+  if (fragments.length === 0) {
+    db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
+    return
+  }
+
+  const contextVersion = chapter.contextVersion || 1
+  const sourceHash = hashEmbeddingSource(chapterId, contextVersion, fragments)
 
   const texts = fragments.map((f) => f.text)
   let embeddings: number[][] | undefined = undefined;
@@ -199,16 +252,13 @@ export async function generateChapterEmbeddings(
     }
   }
 
-  if (!embeddings) {
-    // Fallback: store fragments without embeddings for keyword search
-    for (const frag of fragments) {
-      db.delete(chapterEmbeddings)
-        .where(and(
-          eq(chapterEmbeddings.chapterId, chapterId),
-          eq(chapterEmbeddings.fragmentType, frag.type),
-        ))
-        .run()
+  db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
 
+  if (!embeddings || embeddings.length !== fragments.length) {
+    if (embeddings && embeddings.length !== fragments.length) {
+      console.warn(`[embedding] 章节 ${chapterId} 的向量数量与片段数量不一致，降级为关键词索引。`)
+    }
+    for (const frag of fragments) {
       db.insert(chapterEmbeddings).values({
         novelId,
         chapterId,
@@ -217,6 +267,12 @@ export async function generateChapterEmbeddings(
         embeddingJson: null,
         modelId: null,
         dimensions: null,
+        embeddingProfile: null,
+        sourceHash,
+        contextVersion,
+        stageId: null,
+        entityIdsJson: null,
+        visibility: 'canon',
       }).run()
     }
     return
@@ -226,13 +282,6 @@ export async function generateChapterEmbeddings(
     const frag = fragments[i]
     const embedding = embeddings[i]
 
-    db.delete(chapterEmbeddings)
-      .where(and(
-        eq(chapterEmbeddings.chapterId, chapterId),
-        eq(chapterEmbeddings.fragmentType, frag.type),
-      ))
-      .run()
-
     db.insert(chapterEmbeddings).values({
       novelId,
       chapterId,
@@ -241,6 +290,12 @@ export async function generateChapterEmbeddings(
       embeddingJson: JSON.stringify(embedding),
       modelId: usedModelId,
       dimensions: embedding.length,
+      embeddingProfile: buildEmbeddingProfile(usedModelId, embedding.length),
+      sourceHash,
+      contextVersion,
+      stageId: null,
+      entityIdsJson: null,
+      visibility: 'canon',
     }).run()
   }
 }
@@ -252,31 +307,15 @@ export async function searchSimilarFragments(
   modelConfigId?: number,
 ): Promise<SimilarFragmentSearchResult> {
   const db = getDb()
-  const allEmbeddings = db.select().from(chapterEmbeddings)
-    .where(eq(chapterEmbeddings.novelId, novelId))
+  const vectorRows = db.select({ id: chapterEmbeddings.id })
+    .from(chapterEmbeddings)
+    .where(and(
+      eq(chapterEmbeddings.novelId, novelId),
+      isNotNull(chapterEmbeddings.embeddingJson),
+    ))
     .all()
-  const chapterNumById = new Map(
-    db.select({
-      id: chapters.id,
-      chapterNum: chapters.chapterNum,
-    }).from(chapters)
-      .where(eq(chapters.novelId, novelId))
-      .all()
-      .map((row) => [row.id, row.chapterNum] as const),
-  )
 
-  if (allEmbeddings.length === 0) {
-    const hits = fallbackKeywordSearch(novelId, queryText, topK)
-    return {
-      hits,
-      fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
-    }
-  }
-
-  // Check if we have vector embeddings
-  const hasVectors = allEmbeddings.some((e) => e.embeddingJson)
-
-  if (!hasVectors) {
+  if (vectorRows.length === 0) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK)
     return {
       hits,
@@ -285,12 +324,14 @@ export async function searchSimilarFragments(
   }
 
   let queryEmbedding: number[] | undefined = undefined;
+  let queryModelId: string | null = null
 
   try {
     const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
     if (adapter && adapter.embed) {
       const result = await adapter.embed([queryText])
       queryEmbedding = result[0]
+      queryModelId = adapter.id
     }
   } catch {
     // Ignore remote adapter failure
@@ -300,6 +341,7 @@ export async function searchSimilarFragments(
     try {
       const result = await getLocalEmbeddings([queryText])
       queryEmbedding = result[0]
+      queryModelId = 'local_bge_small_zh'
     } catch (e) {
       // Ignore local embedding failure
       console.error('Local embedding failed during search:', e)
@@ -314,17 +356,49 @@ export async function searchSimilarFragments(
     }
   }
 
-  const scored = allEmbeddings
-    .filter((e) => e.embeddingJson)
-    .map((e) => {
-      const embedding = JSON.parse(e.embeddingJson!) as number[]
-      return {
-        chapterId: e.chapterId,
-        chapterNum: chapterNumById.get(e.chapterId) || 0,
-        fragmentType: e.fragmentType,
-        fragmentText: e.fragmentText,
-        similarity: cosineSimilarity(queryEmbedding, embedding),
-        searchMode: 'vector' as const,
+  const queryProfile = buildEmbeddingProfile(queryModelId, queryEmbedding.length)
+  const compatibleRows = db.select().from(chapterEmbeddings)
+    .where(and(
+      eq(chapterEmbeddings.novelId, novelId),
+      eq(chapterEmbeddings.embeddingProfile, queryProfile),
+      eq(chapterEmbeddings.dimensions, queryEmbedding.length),
+      isNotNull(chapterEmbeddings.embeddingJson),
+    ))
+    .all()
+    .filter((row) => isCompatibleEmbeddingRow(row, queryProfile, queryEmbedding.length))
+
+  if (compatibleRows.length === 0) {
+    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    return {
+      hits,
+      fallbackReason: hits.length > 0 ? 'embedding_profile_mismatch' : 'no_hits',
+    }
+  }
+
+  const chapterNumById = new Map(
+    db.select({
+      id: chapters.id,
+      chapterNum: chapters.chapterNum,
+    }).from(chapters)
+      .where(eq(chapters.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row.chapterNum] as const),
+  )
+
+  const scored = compatibleRows.flatMap((e) => {
+      try {
+        const embedding = JSON.parse(e.embeddingJson!) as number[]
+        if (!isCompatibleEmbeddingRow(e, queryProfile, queryEmbedding.length)) return []
+        return [{
+          chapterId: e.chapterId,
+          chapterNum: chapterNumById.get(e.chapterId) || 0,
+          fragmentType: e.fragmentType,
+          fragmentText: e.fragmentText,
+          similarity: cosineSimilarity(queryEmbedding, embedding),
+          searchMode: 'vector' as const,
+        }]
+      } catch {
+        return []
       }
     })
     .sort((a, b) => b.similarity - a.similarity)

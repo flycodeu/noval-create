@@ -26,5 +26,6 @@ yarn-error.log*
 pnpm-debug.log*
 .local-tools/
 release/
-docs/
+# Keep design and implementation records versioned.
+docs/generated/
 todo/**

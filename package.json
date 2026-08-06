@@ -54,6 +54,7 @@
     "test:web-rpc": "node scripts/run-web-rpc-smoke.cjs",
     "test:mcp": "node scripts/mcp-server.test.cjs",
     "test:agent-workflow": "electron scripts/agent-workflow-integration.test.cjs",
+    "test:workflow-node": "electron scripts/workflow-node-integrity.test.cjs",
     "test:longform-soak": "node scripts/longform-soak.cjs",
     "test:chapter-soak": "node scripts/chapter-soak.cjs",
     "soak:export-chapter-report": "electron scripts/export-chapter-soak-report.cjs",

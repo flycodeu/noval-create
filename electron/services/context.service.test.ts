@@ -317,18 +317,23 @@ function createMockSelectDb<T>(responses: T[][]) {
 }
 
 function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
+  const makeQuery = (table: unknown) => {
+    const query: {
+      all: () => unknown[]
+      limit: () => typeof query
+      orderBy: () => typeof query
+    } = {
+      all: () => rowsByTable.get(table) || [],
+      limit: () => query,
+      orderBy: () => query,
+    }
+    return query
+  }
   return {
     select: () => ({
       from: (table: unknown) => ({
-        where: () => ({
-          orderBy: () => ({
-            all: () => rowsByTable.get(table) || [],
-          }),
-          all: () => rowsByTable.get(table) || [],
-        }),
-        orderBy: () => ({
-          all: () => rowsByTable.get(table) || [],
-        }),
+        where: () => makeQuery(table),
+        orderBy: () => makeQuery(table),
         all: () => rowsByTable.get(table) || [],
       }),
     }),

@@ -110,6 +110,7 @@ function createRuntime() {
   const assetImpactService = requireProject('electron/services/asset-impact.service.ts')
   const qualityDashboardService = requireProject('electron/services/quality-dashboard.service.ts')
   const workflowTaskService = requireProject('electron/services/workflow-task.service.ts')
+  const workflowNodeService = requireProject('electron/services/workflow-node.service.ts')
   const batchWorkflowService = requireProject('electron/services/batch-workflow.service.ts')
   const batchWorkbenchService = requireProject('electron/services/batch-workbench.service.ts')
   const chapterWritebackService = requireProject('electron/services/chapter-writeback.service.ts')
@@ -880,6 +881,14 @@ function createRuntime() {
       get: (id) => workflowTaskService.getWorkflowTask(requireId(id)),
       cancel: (id) => taskService.cancelTask(requireId(id), webEventSender),
       resume: (id) => workflowTaskService.resumeWorkflowTask(requireId(id), webEventSender),
+    },
+    workflowNode: {
+      list: (filters) => workflowNodeService.listWorkflowNodeRuns(
+        parseObjectPayload(filters || {}, 'filters'),
+      ),
+      get: (id) => workflowNodeService.getWorkflowNodeRun(requireId(id, 'nodeRunId')),
+      getSnapshot: (id) => workflowNodeService.getWorkflowNodeSnapshot(requireString(id, 'snapshotId')),
+      retry: (id) => chapterService.retryChapterPipelineNode(requireId(id, 'nodeRunId'), webEventSender),
     },
     history: {
       listRecent: (novelId, limit) => historyService.listRecentOperationLogs(requireId(novelId, 'novelId'), limit),

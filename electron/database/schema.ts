@@ -1312,11 +1312,17 @@ export const chapterEmbeddings = sqliteTable('chapter_embeddings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
   chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
-  fragmentType: text('fragment_type').notNull(), // 'summary' | 'continuity' | 'seed'
+  fragmentType: text('fragment_type').notNull(),
   fragmentText: text('fragment_text').notNull(),
-  embeddingJson: text('embedding_json'), // JSON array of floats
+  embeddingJson: text('embedding_json'),
   modelId: text('model_id'),
   dimensions: integer('dimensions'),
+  embeddingProfile: text('embedding_profile'),
+  sourceHash: text('source_hash'),
+  contextVersion: integer('context_version').notNull().default(1),
+  stageId: integer('stage_id').references(() => creativeStages.id, { onDelete: 'set null' }),
+  entityIdsJson: text('entity_ids_json'),
+  visibility: text('visibility').notNull().default('canon'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
@@ -1441,3 +1447,97 @@ export const outlineDesignGateResults = sqliteTable('outline_design_gate_results
 
 export type OutlineDesignGateResultRow = typeof outlineDesignGateResults.$inferSelect
 export type NewOutlineDesignGateResultRow = typeof outlineDesignGateResults.$inferInsert
+
+// --- Longform canonical ledger ---
+// Candidate and committed narrative changes are kept separate from the
+// materialized state tables so projections can be rebuilt without losing
+// provenance.
+export const canonCommits = sqliteTable('canon_commits', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  segmentId: integer('segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
+  sourceRunId: integer('source_run_id').references(() => chapterWritebackRuns.id, { onDelete: 'set null' }),
+  sourceArtifactId: text('source_artifact_id').references(() => artifacts.id, { onDelete: 'set null' }),
+  inputHash: text('input_hash').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  contextVersionBefore: integer('context_version_before').notNull(),
+  contextVersionAfter: integer('context_version_after'),
+  status: text('status').notNull().default('candidate'),
+  entryCount: integer('entry_count').notNull().default(0),
+  payloadJson: text('payload_json').notNull().default('{}'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  committedAt: text('committed_at'),
+  rejectedAt: text('rejected_at'),
+})
+
+export const canonLedgerEntries = sqliteTable('canon_ledger_entries', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  commitId: integer('commit_id').notNull().references(() => canonCommits.id, { onDelete: 'cascade' }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  segmentId: integer('segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
+  entryType: text('entry_type').notNull(),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id'),
+  stateKey: text('state_key'),
+  eventType: text('event_type'),
+  summary: text('summary'),
+  beforeJson: text('before_json'),
+  afterJson: text('after_json'),
+  evidenceJson: text('evidence_json').notNull().default('{}'),
+  confidence: real('confidence').notNull().default(0),
+  idempotencyKey: text('idempotency_key').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type CanonCommitRow = typeof canonCommits.$inferSelect
+export type NewCanonCommitRow = typeof canonCommits.$inferInsert
+export type CanonLedgerEntryRow = typeof canonLedgerEntries.$inferSelect
+export type NewCanonLedgerEntryRow = typeof canonLedgerEntries.$inferInsert
+
+export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  workflowTaskId: integer('workflow_task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  nodeKey: text('node_key').notNull(),
+  attempt: integer('attempt').notNull().default(1),
+  status: text('status').notNull().default('pending'),
+  inputHash: text('input_hash').notNull(),
+  upstreamSnapshotId: text('upstream_snapshot_id'),
+  contextVersion: integer('context_version').notNull(),
+  snapshotId: text('snapshot_id'),
+  retryOfNodeRunId: integer('retry_of_node_run_id'),
+  retryReason: text('retry_reason'),
+  leaseOwner: text('lease_owner'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: text('lease_expires_at'),
+  errorClass: text('error_class'),
+  errorMessage: text('error_message'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const workflowNodeSnapshots = sqliteTable('workflow_node_snapshots', {
+  id: text('id').primaryKey(),
+  nodeRunId: integer('node_run_id').notNull().references(() => workflowNodeRuns.id, { onDelete: 'cascade' }),
+  workflowTaskId: integer('workflow_task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  nodeKey: text('node_key').notNull(),
+  attempt: integer('attempt').notNull(),
+  inputHash: text('input_hash').notNull(),
+  outputHash: text('output_hash').notNull(),
+  contextVersion: integer('context_version').notNull(),
+  payloadJson: text('payload_json').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type WorkflowNodeRunRow = typeof workflowNodeRuns.$inferSelect
+export type NewWorkflowNodeRunRow = typeof workflowNodeRuns.$inferInsert
+export type WorkflowNodeSnapshotRow = typeof workflowNodeSnapshots.$inferSelect
+export type NewWorkflowNodeSnapshotRow = typeof workflowNodeSnapshots.$inferInsert

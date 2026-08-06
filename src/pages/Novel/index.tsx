@@ -497,6 +497,17 @@ export default function NovelRouter() {
     transitionNavigate(buildWorkspaceRoute(novelId, route), options)
   }, [currentPage, novelId, resolveWorkspacePageKey, transitionNavigate, warmWorkspacePage])
 
+  // A professional-only page can remain in the URL after switching to the
+  // compact quick mode. Redirect immediately so the sidebar, progress order,
+  // and current content never disagree about which workspace is active.
+  useEffect(() => {
+    if (loading || !currentNovel || workspaceViewMode !== 'quick' || currentPage === 'guide') return
+    if (orderedPages.includes(currentPage)) return
+
+    const fallbackPage = orderedPages[0] || 'guide'
+    navigateWithinWorkspace(fallbackPage, { replace: true })
+  }, [currentNovel, currentPage, loading, navigateWithinWorkspace, orderedPages, workspaceViewMode])
+
   const notifyWorkspaceMutation = useCallback(() => {
     setWorkspaceMutationToken((current) => current + 1)
     void Promise.all([refreshWorkflowStats(), refreshUndoable()])

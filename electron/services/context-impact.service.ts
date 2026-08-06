@@ -107,6 +107,8 @@ function formatRecallFallbackReason(reason?: RecallFallbackReason): string {
       return '嵌入服务失败'
     case 'query_embedding_failed':
       return '查询向量失败'
+    case 'embedding_profile_mismatch':
+      return '向量模型空间不匹配'
     case 'disabled_by_config':
       return '向量能力未启用'
     case 'budget_trimmed':
@@ -166,6 +168,7 @@ function isHardRecallFallbackReason(reason?: RecallFallbackReason): boolean {
   // failures that can actively prevent continuity evidence from being used.
   return reason === 'embedding_service_failed'
     || reason === 'query_embedding_failed'
+    || reason === 'embedding_profile_mismatch'
     || reason === 'budget_trimmed'
     || reason === 'only_stale_hits'
 }
