@@ -9,7 +9,6 @@ import {
   chapterSegments,
   chapters,
   chapterWritebackRuns,
-  novels,
   sceneContracts,
   storyMemoryCheckpoints,
   storyParts,
@@ -37,16 +36,8 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import type {
   StructureLinkageSummary,
   StructureLinkageSyncResult,
-  StructureBatchApplyResult,
   StructureBatchEditOperation,
-  StructureBatchFocus,
   StructureBatchPlan,
-  StructureBatchPlanChapterInput,
-  StructureBatchPlanPartInput,
-  StructureBatchPlanSegmentInput,
-  StructureBatchPlanVolumeInput,
-  StructureBatchPreview,
-  StructureBatchPreviewItem,
 } from '../../src/types'
 
 type StructureStatus = 'planning' | 'draft' | 'locked'
@@ -308,40 +299,6 @@ function getTimelineRows(novelId: number) {
     .all()
 }
 
-function normalizeVolumeNumbers(novelId: number) {
-  const db = getDb()
-  const now = new Date().toISOString()
-  getVolumeRows(novelId).forEach((volume, index) => {
-    const nextNumber = index + 1
-    if (volume.volumeNumber === nextNumber) return
-    db.update(storyVolumes).set({
-      volumeNumber: nextNumber,
-      updatedAt: now,
-    }).where(eq(storyVolumes.id, volume.id)).run()
-  })
-}
-
-function normalizePartNumbers(novelId: number) {
-  const db = getDb()
-  const now = new Date().toISOString()
-  const partRows = getPartRows(novelId)
-  const volumes = getVolumeRows(novelId)
-
-  for (const volume of volumes) {
-    partRows
-      .filter((part) => part.volumeId === volume.id)
-      .sort((left, right) => left.partNumber - right.partNumber || left.id - right.id)
-      .forEach((part, index) => {
-        const nextNumber = index + 1
-        if (part.partNumber === nextNumber) return
-        db.update(storyParts).set({
-          partNumber: nextNumber,
-          updatedAt: now,
-        }).where(eq(storyParts.id, part.id)).run()
-      })
-  }
-}
-
 export function normalizeChapterNumbers(novelId: number) {
   const db = getDb()
   const now = new Date().toISOString()
@@ -392,24 +349,6 @@ export function normalizeChapterNumbers(novelId: number) {
     }).where(eq(chapters.id, chapter.id)).run()
     nextChapterNum += 1
   }
-}
-
-function normalizeSegmentOrders(chapterId: number) {
-  const db = getDb()
-  const now = new Date().toISOString()
-  db.select().from(chapterSegments)
-    .where(eq(chapterSegments.chapterId, chapterId))
-    .orderBy(asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
-    .all()
-    .sort((left, right) => left.segmentOrder - right.segmentOrder || left.id - right.id)
-    .forEach((segment, index) => {
-      const nextOrder = index + 1
-      if (segment.segmentOrder === nextOrder) return
-      db.update(chapterSegments).set({
-        segmentOrder: nextOrder,
-        updatedAt: now,
-      }).where(eq(chapterSegments.id, segment.id)).run()
-    })
 }
 
 function markNovelContextChangedInline(novelId: number, reasons: string | string[]) {
@@ -1055,21 +994,6 @@ export function updateStoryVolume(
 
 export function reorderStoryVolumes(novelId: number, orderedIds: number[]) {
   reorderStoryVolumesTransactional(novelId, orderedIds)
-}
-
-function ensureFallbackPartForVolume(novelId: number, volumeId: number) {
-  const db = getDb()
-  const partRows = getPartRows(novelId).filter((part) => part.volumeId === volumeId)
-  if (partRows.length > 0) return partRows[0]
-  const nextPartNumber = 1
-  const result = db.insert(storyParts).values({
-    novelId,
-    volumeId,
-    partNumber: nextPartNumber,
-    title: getDefaultPartTitle(nextPartNumber),
-    status: 'planning',
-  }).run()
-  return db.select().from(storyParts).where(eq(storyParts.id, Number(result.lastInsertRowid))).all()[0]
 }
 
 export function deleteStoryVolume(id: number) {

@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import {
   chapterSegments,
-  characters,
   factions,
   storyItems,
   storyThreads,

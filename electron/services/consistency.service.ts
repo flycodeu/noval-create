@@ -75,20 +75,6 @@ function parseNumberArray(raw?: string | null): number[] {
   }
 }
 
-function parseStringArray(raw?: string | null): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((value): value is string => typeof value === 'string')
-      .map((value) => value.trim())
-      .filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
 function normalizeSignaturePart(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, '')
 }

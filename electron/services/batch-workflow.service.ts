@@ -470,10 +470,6 @@ function reconcileStaleBatchWorkflowTask(task: TaskRow | null): TaskRow | null {
   return getTaskRecord(task.id)
 }
 
-function isCancelled(taskId: number): boolean {
-  return Boolean(parseTaskControl(getTaskRecord(taskId))?.cancelRequested)
-}
-
 function createBaseStatus(taskId: number, novelId: number, requestedCount: number, batchSize: number, totalBatches: number) {
   return {
     taskId,

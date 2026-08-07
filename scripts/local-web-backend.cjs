@@ -106,7 +106,6 @@ function createRuntime() {
   const consistencyService = requireProject('electron/services/consistency.service.ts')
   const storyMemoryService = requireProject('electron/services/story-memory.service.ts')
   const contextImpactService = requireProject('electron/services/context-impact.service.ts')
-  const { markNovelContextChanged } = contextImpactService
   const assetImpactService = requireProject('electron/services/asset-impact.service.ts')
   const qualityDashboardService = requireProject('electron/services/quality-dashboard.service.ts')
   const workflowTaskService = requireProject('electron/services/workflow-task.service.ts')
@@ -150,6 +149,7 @@ function createRuntime() {
   const characterArcService = requireProject('electron/services/character-arc.service.ts')
   const storyStructureService = requireProject('electron/services/story-structure.service.ts')
   const outlineGenerationService = requireProject('electron/services/outline-generation.service.ts')
+  const storyArcService = requireProject('electron/services/story-arc.service.ts')
   const storyArcProgressService = requireProject('electron/services/story-arc-progress.service.ts')
   const rhythmTemplateService = requireProject('electron/services/rhythm-template.service.ts')
   const timelineService = requireProject('electron/services/timeline.service.ts')
@@ -719,42 +719,17 @@ function createRuntime() {
       applyBatchEdit: (novelId, operations) => storyStructureService.applyStructureBatchEdit(requireId(novelId, 'novelId'), operations),
     },
     outline: {
-      getArcs: (novelId) => getDb().select().from(schema.storyArcs)
-        .where(eq(schema.storyArcs.novelId, requireId(novelId, 'novelId')))
-        .all(),
+      getArcs: (novelId) => storyArcService.listStoryArcs(requireId(novelId, 'novelId')),
       getArcProgressSnapshot: (novelId) => storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')),
-      createArc: (novelId, data) => {
-        const targetNovelId = requireId(novelId, 'novelId')
-        const result = getDb().insert(schema.storyArcs).values({
-          novelId: targetNovelId,
-          ...requireObject(data, 'data'),
-        }).run()
-        markNovelContextChanged(targetNovelId, 'Story outline changed')
-        return Number(result.lastInsertRowid)
-      },
+      createArc: (novelId, data) => storyArcService.createStoryArc(
+        requireId(novelId, 'novelId'),
+        requireObject(data, 'data'),
+      ),
       updateArc: (id, data) => {
-        const targetId = requireId(id)
-        const current = getDb().select().from(schema.storyArcs).where(eq(schema.storyArcs.id, targetId)).all()[0]
-        getDb().update(schema.storyArcs).set(requireObject(data, 'data')).where(eq(schema.storyArcs.id, targetId)).run()
-        if (current) markNovelContextChanged(current.novelId, 'Story outline changed')
+        storyArcService.updateStoryArc(requireId(id), requireObject(data, 'data'))
       },
-      deleteArc: (id) => {
-        const targetId = requireId(id)
-        const current = getDb().select().from(schema.storyArcs).where(eq(schema.storyArcs.id, targetId)).all()[0]
-        getDb().delete(schema.storyArcs).where(eq(schema.storyArcs.id, targetId)).run()
-        if (current) markNovelContextChanged(current.novelId, 'Story outline changed')
-      },
-      clear: (novelId) => {
-        const targetNovelId = requireId(novelId, 'novelId')
-        getDb().delete(schema.storyArcs).where(eq(schema.storyArcs.novelId, targetNovelId)).run()
-        getDb().update(schema.chapters).set({
-          arcId: null,
-          outline: null,
-          emotionTone: null,
-          updatedAt: new Date().toISOString(),
-        }).where(eq(schema.chapters.novelId, targetNovelId)).run()
-        markNovelContextChanged(targetNovelId, 'Story outline changed')
-      },
+      deleteArc: (id) => storyArcService.deleteStoryArc(requireId(id)),
+      clear: (novelId) => storyArcService.clearStoryArcs(requireId(novelId, 'novelId')),
       generateArcs: (novelId) => outlineGenerationService.generateStoryArcs(requireId(novelId, 'novelId')),
       generateChapterOutlines: (arcId, options) => outlineGenerationService.generateChapterOutlines(
         requireId(arcId, 'arcId'),

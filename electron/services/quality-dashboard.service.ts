@@ -43,7 +43,6 @@ import type {
   VolumeChapterFunctionEntry,
   VolumeQualityMetrics,
   VolumeStoryDynamicsEntry,
-  VoiceEvolutionProfile,
   WorldStateAlert,
 } from '../../src/types'
 import type { QualityAgentDashboardSnapshot } from '../../src/shared/quality-agent-dashboard'

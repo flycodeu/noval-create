@@ -166,19 +166,6 @@ function parseStringArray(raw?: string | null): string[] {
   }
 }
 
-function parseNumberArray(raw?: string | null): number[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((value) => (typeof value === 'number' && Number.isFinite(value) ? value : Number(value)))
-      .filter((value) => Number.isFinite(value))
-  } catch {
-    return []
-  }
-}
-
 function parseContinuityState(raw?: string | null): ContinuityStateLike {
   if (!raw) {
     return {
@@ -333,58 +320,6 @@ function listRelevantEvents(
       if (typeof end === 'number') return end >= chapterStart && end <= chapterEnd
       return false
     })
-}
-
-function buildRelationDigest(novelId: number, limit: number): string {
-  const db = getDb()
-  const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
-  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  const nameById = new Map(characterRows.map((character) => [character.id, character.fullName]))
-  return dedupe(relationRows.map((relation) => {
-    const left = nameById.get(relation.charAId) || `#${relation.charAId}`
-    const right = nameById.get(relation.charBId) || `#${relation.charBId}`
-    const label = relation.relationLabel || relation.relationType || 'linked'
-    return `${left} <-> ${right}: ${label}`
-  }), limit).join('\n')
-}
-
-function buildItemDigest(
-  novelId: number,
-  eventIds: Set<number>,
-  limit: number,
-): string {
-  const db = getDb()
-  const rows = db.select().from(storyItems)
-    .where(eq(storyItems.novelId, novelId))
-    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
-    .all()
-
-  const preferred = rows.filter((item) =>
-    parseNumberArray(item.linkedTimelineEventIdsJson).some((eventId) => eventIds.has(eventId)))
-  const selected = (preferred.length > 0 ? preferred : rows.filter((item) => item.itemKind === 'instance')).slice(0, limit)
-  return dedupe(selected.map((item) => {
-    const parts = [
-      item.status || '',
-      item.ownerCharacterId ? `owner#${item.ownerCharacterId}` : '',
-      item.locationMapId ? `location#${item.locationMapId}` : '',
-      item.plotFunction || item.summary || '',
-    ].filter(Boolean)
-    return `${item.itemName}${parts.length > 0 ? ` | ${parts.join(' | ')}` : ''}`
-  }), limit).join('\n')
-}
-
-function buildTimelineDigest(
-  events: Array<typeof timelineEvents.$inferSelect>,
-  limit: number,
-): string {
-  return dedupe(events.map((event) => {
-    const parts = [
-      event.timeLabel || '',
-      event.eventTitle,
-      event.eventResult || event.eventSummary || '',
-    ].filter(Boolean)
-    return parts.join(' | ')
-  }), limit).join('\n')
 }
 
 function buildScopeSummary(

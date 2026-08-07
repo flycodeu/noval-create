@@ -858,7 +858,7 @@ export function applyContractValidationToReviewNotes(
     .map((item) => `${item.expected}：${item.verdict === 'weak' ? '正文只有提及，没有形成明确推进。' : '正文还没有形成可验证的兑现证据。'}`)
   const hookRisks = failedItems
     .filter((item) => item.contractItemType === 'chapter_hook')
-    .map((item) => '章尾钩子偏弱或缺失，收束过平，追读驱动力不足。')
+    .map(() => '章尾钩子偏弱或缺失，收束过平，追读驱动力不足。')
   const missingPayoffs = failedItems
     .filter((item) => item.contractItemType === 'foreshadow_delivery')
     .map((item) => `${item.expected}：${item.verdict === 'weak' ? '目前只有提及，没有埋设/推进/回收或延期说明。' : '正文未处理该伏笔。'}`)

@@ -228,7 +228,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
   // or an older process. Reconcile before exposing the list so the card status
   // is always the durable lifecycle result rather than a stale cached label.
   syncNovelLifecycleStatuses()
-  let query = db.select({
+  const query = db.select({
     id: novels.id,
     title: novels.title,
     synopsis: novels.synopsis,
@@ -249,7 +249,17 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     .from(novels)
     .leftJoin(genres, eq(novels.genreId, genres.id))
 
-  return query.orderBy(desc(novels.updatedAt)).all().map((row) => decorateNovelRow(row))
+  const normalizedSearch = filters?.search?.trim().toLocaleLowerCase()
+  return query.orderBy(desc(novels.updatedAt)).all()
+    .map((row) => decorateNovelRow(row))
+    .filter((novel) => {
+      if (filters?.status && novel.status !== filters.status) return false
+      if (typeof filters?.genreId === 'number' && novel.genreId !== filters.genreId) return false
+      if (!normalizedSearch) return true
+      return `${novel.title || ''}\n${novel.synopsis || ''}`
+        .toLocaleLowerCase()
+        .includes(normalizedSearch)
+    })
 }
 
 export function getNovel(id: number) {
@@ -319,7 +329,7 @@ export function createNovel(data: {
   const genre = data.genreId
     ? db.select().from(genres).where(eq(genres.id, data.genreId)).all()[0]
     : null
-  const { operatingMode, ...dbData } = data
+  const { operatingMode: _operatingMode, ...dbData } = data
   const explicitOperatingMode = normalizeOperatingMode(data.operatingMode)
 
   const result = db.insert(novels).values({
@@ -383,7 +393,7 @@ export function updateNovel(id: number, data: Partial<{
   const normalizedSettingsJson = explicitOperatingMode
     ? writeOperatingModeSettings(data.settingsJson ?? current.settingsJson, explicitOperatingMode, true)
     : data.settingsJson
-  const { operatingMode, ...dbData } = data
+  const { operatingMode: _operatingMode, ...dbData } = data
   const lifecycleMode = Object.prototype.hasOwnProperty.call(data, 'status') ? 'manual' : current.lifecycleMode || 'automatic'
 
   const changeReasons = deriveNovelChangeReasons(current, data)

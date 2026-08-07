@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { CharacterNeedsAnalysisInput } from '../../src/shared/character-cast-planning'
 import {
   analyzeCharacterNeeds,
   type CharacterCastModelRequest,

@@ -1,4 +1,4 @@
-import { asc, desc, eq, lt } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import type {
   ChapterBridgePlan,
   HookContinuitySnapshot,
@@ -108,10 +108,6 @@ function pickChapterMarker(chapter: ChapterRow): string {
 
 function isHighEnergyMarker(marker: string): boolean {
   return /climax|高潮|决战|爆发|reversal|反转/u.test(marker)
-}
-
-function isBreatherMarker(marker: string): boolean {
-  return /breather|过渡|平缓|收束|日常/u.test(marker)
 }
 
 function roundMetric(value: number): number {

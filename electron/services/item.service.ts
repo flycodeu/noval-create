@@ -531,7 +531,7 @@ function buildMatchTokens(values: Array<string | null | undefined>): string[] {
     const text = cleanAiFieldText(value || '')
     if (!text) return []
     const parts = text
-      .split(/[\s,，。；、\/|（）()：:《》“”"'‘’\[\]【】\n\r\t-]+/)
+      .split(/[\s,，。；、/|（）()：:《》“”"'‘’[\]【】\n\r\t-]+/)
       .map((item) => cleanAiFieldText(item))
       .filter((item) => item.length >= 2)
     return [text, ...parts]
@@ -2423,4 +2423,3 @@ export async function regenerateStoryItem(
   refreshWorldStateVersionsForNovel(current.novelId)
   return getStoryItem(id)
 }
-

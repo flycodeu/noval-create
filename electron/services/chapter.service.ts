@@ -2,18 +2,14 @@ import { WebContents } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, chapterWritebackRuns, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, chapterWritebackRuns, characters, glossary, genres, novels, revisionTasks, sceneContracts, storyArcs, storyParts, storyVolumes, tasks } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
-import { cleanAiFieldText } from '../../src/utils/text'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
-import { assessHistoricalGrounding } from '../../src/shared/genre-system'
-import { countUnresolvedTypedRefs, hasTypedRefOverlay } from '../../src/shared/typed-ref'
 import { getOperatingModeRuntimePolicy, getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import { resolveChapterPipelineResumeMode } from '../../src/shared/chapter-resume-policy'
-import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
   buildChapterContext,
@@ -35,7 +31,6 @@ import {
   buildContinuityStatePrompt,
   buildScenePlanPrompt,
 } from './story-prompts'
-import { getQualityDashboardData } from './quality-dashboard.service'
 import { syncNovelLifecycleStatus } from './novel-lifecycle.service'
 import { buildChapterGenerationRequestKey, isRetryableChapterGenerationStatus } from './chapter-generation-idempotency'
 import {
@@ -73,7 +68,6 @@ import {
 import {
   buildChapterOptimizationQualityGate,
   buildChapterStructuralRepairGate,
-  escapeRegExp,
 } from '../../src/shared/chapter-optimization-quality'
 import {
   markChapterContextCurrent,
@@ -83,14 +77,7 @@ import {
   runChapterPublishCheck,
   validateChapterContractsForGeneration,
 } from './context-impact.service'
-import {
-  normalizeChapterContractValidationResult,
-  validateChapterContractDelivery,
-} from './chapter-contract-validator.service'
-import {
-  isContractValidationBlockerVerdict,
-  isHardContractValidationItem,
-} from '../../src/shared/contract-validation'
+import { validateChapterContractDelivery } from './chapter-contract-validator.service'
 import { refreshStoryMemoryCheckpoints } from './story-memory.service'
 import {
   ensureStoryStructure,
@@ -125,13 +112,8 @@ import {
   formatExpressionDedupGuidance,
 } from './expression-dedup.service'
 import { analyzeSummaryHealthForChapter, refreshSummaryHealthSemantic } from './summary-decay.service'
-import { analyzeNovelStyleCompliance } from './style-compliance.service'
 import { maybeRefreshNovelStyleFingerprint } from './style-analysis.service'
-import {
-  analyzeNarrativeControls,
-  type NarrativeControlSceneSnapshot,
-} from './narrative-control.service'
-import { analyzeWorkspaceAiFlavor } from './workspace-quality.service'
+import { analyzeNarrativeControls } from './narrative-control.service'
 import {
   buildAiExplainabilityReport,
   buildAiModelRouteReport,
@@ -163,20 +145,15 @@ import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
 import {
   reconcileScenePlanForContracts,
-  type SceneContractSeed,
 } from './scene-plan-reconciliation'
 import {
-  analyzeChapterReadingExperience,
   buildAdaptiveRewritePolicy,
   buildDialogueRepairDirective,
   buildReviewPriorityPrompt,
   buildReviewPrioritySummary,
   buildRewriteMiniReviewVerdict,
   buildStructuralRepairDirective,
-  type ChapterReadingExperienceScore,
-  type RewriteDeltaChainScore,
   type RewriteMiniReviewVerdict,
-  type RewriteNarrativeDeltaReport,
 } from './chapter-pipeline-policy.service'
 import { listPromptOverrides } from './prompt-override.service'
 import {
@@ -194,16 +171,11 @@ import type {
   AiExplainabilityReport,
   AiStageExecutionReport,
   AuthorStyleLockSummary,
-  ChapterBridgePlan,
   ChapterOptimizeResult,
   ChapterRewriteScope,
-  ChapterContractValidationResult,
-  ExpressionDedupReport,
   HookContinuitySnapshot,
   PovRotationPlan,
   StoryPacingCurve,
-  StyleComplianceMetricSnapshot,
-  StyleComplianceResult,
   SummaryHealthReport,
   StageRenderSchema,
   UpstreamRuntimeArtifacts,
@@ -225,48 +197,22 @@ import {
   applyWordShapeObservation,
   asText,
   buildFallbackReviewNotes,
-  buildGuardrailCriticalFixes,
   buildStructuralAlertsSummary,
   buildTitleMismatchRisk,
-  buildTypedRefRiskSummary,
   countNarrativeWords,
   dedupeTextList,
   enhanceReviewNotesWithGuardrails,
-  findingSeverityToReviewSeverity,
   formatReviewNotes,
   hasReviewNotes,
-  HUMANIZATION_REVIEW_SIGNAL_TYPES,
-  HUMANIZATION_SIGNAL_TYPES,
   loadNarrativeContractSignals,
   loadNarrativeControlSceneSnapshots,
   mergeSeverity,
-  normalizeBoolean,
-  normalizeBoundedMetric,
-  normalizeBoundedNumber,
-  normalizeChapterFunctionTag,
-  normalizeChapterFunctionTags,
-  normalizeCostResolutionState,
-  normalizePaceMarker,
-  normalizeProtagonistSetback,
-  normalizeReadingExperience,
-  normalizeReversalSupportState,
   normalizeReviewNotes,
-  normalizeReviewSeverity,
-  normalizeRewardState,
-  normalizeRewriteDelta,
-  normalizeRewriteDeltaChain,
-  normalizeStyleComplianceMetrics,
-  normalizeStyleComplianceResult,
-  normalizeStyleComplianceStatus,
   parseStoredReviewNotes,
-  replacePrefixedNotes,
-  STYLE_COMPLIANCE_FIX_PREFIX,
-  STYLE_COMPLIANCE_RISK_PREFIX,
   applyCriticSemanticGateOutcomeToReviewNotes,
   collectSemanticGateHeuristicHints,
   formatSemanticGateBlockerFix,
   stripChapterHeadingNoise,
-  toNumberArray,
   toStringArray,
 } from './chapter-review-notes'
 import {
@@ -301,34 +247,19 @@ import {
   chooseBetterRepairCandidate,
   guardrailRepairScore,
   judgeRepairOutcome,
-  rewriteMiniReviewScore,
   rewriteOutcomeScore,
 } from './chapter-repair-loop'
 import {
   buildChapterOptimizationFactGuard,
   buildChapterOptimizationPrompt,
-  buildNarrativeGuardContext,
   collectNarrativeStateWarnings,
   collectSupportingCastNames,
   collectTrackedEntityNames,
   collectUnsupportedNarrativeFactWarnings,
   extractNarrativeNumbers,
-  findTrackedNamesInText,
-  MAX_STRUCTURAL_REPAIR_EXPANSION_RATIO,
   normalizeOptimizedChapterContent,
-  textOverlapRatio,
-  uniqueNonEmpty,
 } from './chapter-optimization-guards'
-import type {
-  ChapterFunctionTag,
-  ChapterPacingMarker,
-  ChapterReviewNotes,
-  CostResolutionState,
-  ProtagonistSetbackLevel,
-  ReversalSupportState,
-  ReviewSeverity,
-  RewardState,
-} from './chapter-review-notes'
+import type { ChapterReviewNotes } from './chapter-review-notes'
 
 interface ChapterSummaryData {
   summary: string
@@ -2763,8 +2694,6 @@ export function batchUpdateChapters(
 ) {
   if (!Array.isArray(ids) || ids.length === 0) return 0
   const { rows, novelId } = loadChapterBatch(ids)
-  const db = getDb()
-
   const safeData = pickChapterFields(data, ['status', 'arcId']) as typeof data
   const nextStatus = normalizeChapterStatus(safeData.status)
   const nextArcId = normalizeChapterRelationId(safeData.arcId, 'arcId')
@@ -3803,53 +3732,6 @@ function buildStageContextMap(
   }
 }
 
-function buildPreviewStageContextMap(
-  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
-  chapter: typeof chapters.$inferSelect,
-  preserveConstraintLabels?: HardConstraintSourceLabel[],
-  draftRawContext?: Awaited<ReturnType<typeof collectChapterContextRawData>>,
-): {
-  complexity: ChapterComplexity
-  contexts: Record<ChapterContextStage, ChapterContext>
-} {
-  const complexity = classifyChapterComplexity({
-    chapter,
-    currentArc: rawContext.currentArc,
-    chapterRows: rawContext.chapterRows,
-    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
-    activeThreadPressureCount: rawContext.activeThreadPressureCount,
-  })
-  const buildStageContext = (promptProfile: ChapterContextStage) => {
-    try {
-      return allocateStageContextForPipeline(rawContext, chapter, complexity, promptProfile, undefined, preserveConstraintLabels)
-    } catch (error) {
-      if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
-        return error.context
-      }
-      throw error
-    }
-  }
-
-  return {
-    complexity,
-    contexts: {
-      scenePlan: buildStageContext('scenePlan'),
-      draft: (() => {
-        try {
-          return allocateStageContextForPipeline(draftRawContext || rawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels)
-        } catch (error) {
-          if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
-            return error.context
-          }
-          throw error
-        }
-      })(),
-      review: buildStageContext('review'),
-      rewrite: buildStageContext('rewrite'),
-    },
-  }
-}
-
 async function continueChapterContent(
   chapterId: number,
   partialContent: string,
@@ -3892,7 +3774,6 @@ async function continueChapterContent(
     writerContextResolutionPayload.writerContextResolution,
   )
   let draftContext = draftResolution.draftContext
-  const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const storyCore = buildStoryCore(profile, draftContext.storyCore)
   const executionModeResolution = resolveAiExecutionMode({
     explicitMode: options.executionMode,

@@ -69,6 +69,8 @@ const CHUNK_WORD_LIMIT = 300_000
 const CHUNK_CHAPTER_LIMIT = 100
 
 function sanitizeFileName(value: string, fallback: string): string {
+  // Control characters are invalid in Windows filenames and must be normalized with the other reserved characters.
+  // eslint-disable-next-line no-control-regex
   const normalized = (value || '').trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
   const collapsed = normalized.replace(/\s+/g, ' ').trim()
   return collapsed || fallback

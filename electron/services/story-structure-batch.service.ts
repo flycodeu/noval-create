@@ -11,9 +11,7 @@ import {
 import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
 import { remapChapterNumberReferences } from './data-cascade.service'
 import type {
-  StoryPart,
   StoryPartReorderOperation,
-  StoryVolume,
   StructureBatchApplyResult,
   StructureBatchEditOperation,
   StructureBatchFocus,
@@ -28,14 +26,6 @@ import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/ope
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 function stringifyStringArray(values: string[]): string {

@@ -98,6 +98,29 @@ async function main() {
     await assertConcurrentHttpClients(novelId)
     const stats = await rpc('novel', 'stats', [novelId])
     assert.equal(typeof stats.totalChapters, 'number')
+
+    const arcId = Number(await rpc('outline', 'createArc', [novelId, {
+      id: 99999998,
+      novelId: 99999999,
+      arcName: '边界测试故事弧',
+      arcOrder: 1,
+    }]))
+    assert.ok(arcId > 0)
+    let arcs = await rpc('outline', 'getArcs', [novelId])
+    assert.equal(arcs.some((arc) => arc.id === arcId && arc.novelId === novelId), true)
+
+    await rpc('outline', 'updateArc', [arcId, {
+      id: 99999997,
+      novelId: 99999999,
+      arcName: '边界测试故事弧已更新',
+    }])
+    arcs = await rpc('outline', 'getArcs', [novelId])
+    assert.equal(arcs.some((arc) => (
+      arc.id === arcId
+      && arc.novelId === novelId
+      && arc.arcName === '边界测试故事弧已更新'
+    )), true)
+
     await expectRpcError('outline', 'generateArcs', [99999999], 'novel.notFound')
     await expectRpcError('outline', 'generateChapterOutlines', [99999999, { batchSize: 4 }], 'storyArc.notFound')
 

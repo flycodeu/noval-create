@@ -12,7 +12,7 @@ if (process.platform === 'win32') {
     // 无控制台（打包后 GUI 启动）时忽略
   }
 }
-import { desc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
 import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
@@ -44,7 +44,6 @@ import {
   genres as genresTable,
   modelConfigs,
   novels as novelsTable,
-  storyArcs,
   tasks,
   templates,
 } from './database/schema'
@@ -92,6 +91,7 @@ import * as sceneTemplateService from './services/scene-template.service'
 import * as endgameAssetService from './services/endgame-asset.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as outlineGenerationService from './services/outline-generation.service'
+import * as storyArcService from './services/story-arc.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
 import * as growthSystemService from './services/growth-system.service'
@@ -119,7 +119,7 @@ import {
 } from './services/prompts'
 import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
-import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
+import { getNovelContextStatus } from './services/context-impact.service'
 import { enhanceAiScoreResult } from './services/ai-score.service'
 import { wrapIpcHandler } from './utils/ipc-wrapper'
 import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
@@ -851,28 +851,22 @@ function registerIpcHandlers() {
   handle('item:repairCharacterLinks', (_, novelId) => itemService.repairItemCharacterLinks(requireId(novelId, 'novelId')))
   handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(requireId(novelId, 'novelId')))
 
-  handle('outline:getArcs', (_, novelId) => {
-    requireId(novelId, 'novelId')
-    const db = getDb()
-    return db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-  })
+  handle('outline:getArcs', (_, novelId) =>
+    storyArcService.listStoryArcs(requireId(novelId, 'novelId')))
 
   handle('outline:getArcProgressSnapshot', (_, novelId) =>
     storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')))
 
   handle('outline:createArc', (_, novelId, data) => {
-    requireId(novelId, 'novelId')
-    requireObject(data, 'data')
-    const db = getDb()
-    const result = db.insert(storyArcs).values({ novelId, ...data }).run()
-    markNovelContextChanged(novelId, 'Story outline changed')
-    const arcId = Number(result.lastInsertRowid)
-    const content = [data.arcGoal, data.arcSummary, data.growthLedger, data.costLedger].filter(Boolean).join('\n')
+    const targetNovelId = requireId(novelId, 'novelId')
+    const safeData = storyArcService.sanitizeStoryArcPatch(requireObject(data, 'data'))
+    const arcId = storyArcService.createStoryArc(targetNovelId, safeData)
+    const content = [safeData.arcGoal, safeData.arcSummary, safeData.growthLedger, safeData.costLedger].filter(Boolean).join('\n')
     if (content.trim()) {
       void discoverEntitiesFromContent({
-        novelId,
+        novelId: targetNovelId,
         sourcePage: 'outline',
-        sourceLabel: `故事弧 ${data.arcName || arcId}`,
+        sourceLabel: `故事弧 ${safeData.arcName || arcId}`,
         sourceEntityId: arcId,
         content,
       }).catch(console.error)
@@ -881,48 +875,25 @@ function registerIpcHandlers() {
   })
 
   handle('outline:updateArc', (_, id, data) => {
-    requireId(id)
-    requireObject(data, 'data')
-    const db = getDb()
-    const current = db.select().from(storyArcs).where(eq(storyArcs.id, id)).all()[0]
-    db.update(storyArcs).set(data).where(eq(storyArcs.id, id)).run()
-    if (current) {
-      markNovelContextChanged(current.novelId, 'Story outline changed')
-      const content = [data.arcGoal, data.arcSummary, data.growthLedger, data.costLedger].filter(Boolean).join('\n')
-      if (content.trim()) {
-        void discoverEntitiesFromContent({
-          novelId: current.novelId,
-          sourcePage: 'outline',
-          sourceLabel: `故事弧 ${data.arcName || current.arcName || id}`,
-          sourceEntityId: id,
-          content,
-        }).catch(console.error)
-      }
+    const targetId = requireId(id)
+    const safeData = storyArcService.sanitizeStoryArcPatch(requireObject(data, 'data'))
+    const updated = storyArcService.updateStoryArc(targetId, safeData)
+    const content = [safeData.arcGoal, safeData.arcSummary, safeData.growthLedger, safeData.costLedger].filter(Boolean).join('\n')
+    if (content.trim()) {
+      void discoverEntitiesFromContent({
+        novelId: updated.novelId,
+        sourcePage: 'outline',
+        sourceLabel: `故事弧 ${safeData.arcName || updated.arcName || targetId}`,
+        sourceEntityId: targetId,
+        content,
+      }).catch(console.error)
     }
   })
 
-  handle('outline:deleteArc', (_, id) => {
-    requireId(id)
-    const db = getDb()
-    const current = db.select().from(storyArcs).where(eq(storyArcs.id, id)).all()[0]
-    db.delete(storyArcs).where(eq(storyArcs.id, id)).run()
-    if (current) {
-      markNovelContextChanged(current.novelId, 'Story outline changed')
-    }
-  })
+  handle('outline:deleteArc', (_, id) => storyArcService.deleteStoryArc(requireId(id)))
 
-  handle('outline:clear', (_, novelId) => {
-    requireId(novelId, 'novelId')
-    const db = getDb()
-    db.delete(storyArcs).where(eq(storyArcs.novelId, novelId)).run()
-    db.update(chapters).set({
-      arcId: null,
-      outline: null,
-      emotionTone: null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.novelId, novelId)).run()
-    markNovelContextChanged(novelId, 'Story outline changed')
-  })
+  handle('outline:clear', (_, novelId) =>
+    storyArcService.clearStoryArcs(requireId(novelId, 'novelId')))
 
   handle('outline:generateArcs', (_, novelId) => outlineGenerationService.generateStoryArcs(novelId))
   handle('outline:generateChapterOutlines', (_, arcId, options?: { batchSize?: number; stageId?: number }) =>

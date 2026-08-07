@@ -72,7 +72,7 @@ function buildKeywordCandidates(...values: Array<string | null | undefined>): st
     .map((value) => normalizeText(value))
     .filter(Boolean)
   const fragments = pool.flatMap((value) => value
-    .split(/[，。；、,\s/：:（）()\-]+/)
+    .split(/[，。；、,\s/：:（）()-]+/)
     .map((item) => item.trim())
     .filter(Boolean))
   const cjkFragments = [...pool, ...fragments].flatMap((value) => {
@@ -99,7 +99,7 @@ function buildDirectiveKeywords(...values: Array<string | null | undefined>): st
     .map((value) => normalizeText(value))
     .filter(Boolean)
   const fragments = pool.flatMap((value) => value
-    .split(/[，。；、,\s/：:（）()\-]+/)
+    .split(/[，。；、,\s/：:（）()-]+/)
     .map((item) => item.trim())
     .filter(Boolean))
   return [...new Set([

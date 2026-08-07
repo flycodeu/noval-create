@@ -26,7 +26,7 @@
     "package:win": "node scripts/package-win.cjs",
     "rebuild:native": "electron-builder install-app-deps",
     "preview": "electron-vite preview",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "eslint src electron --ext .ts,.tsx --max-warnings 0",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
@@ -95,7 +95,6 @@
     "react-router-dom": "^6.22.0",
     "reactflow": "^11.11.3",
     "recharts": "^3.10.1",
-    "zod": "^4.4.3",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

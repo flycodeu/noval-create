@@ -14,7 +14,7 @@ export default tseslint.config(
     ],
   },
   {
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'electron/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       ...tseslint.configs.recommended,
@@ -24,6 +24,7 @@ export default tseslint.config(
       sourceType: 'module',
       globals: {
         ...globals.browser,
+        ...globals.node,
         ...globals.es2024,
       },
       parserOptions: {

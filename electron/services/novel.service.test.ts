@@ -24,7 +24,7 @@ import { getDb, getSqlite } from '../database/db'
 import { chapters, genres, novels } from '../database/schema'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
-import { createNovel, deleteNovel, getNovel, updateNovel } from './novel.service'
+import { createNovel, deleteNovel, getNovel, listNovels, updateNovel } from './novel.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
@@ -227,6 +227,22 @@ describe('novel source/canon fields', () => {
       automatic: false,
     })
     expect(stored?.lifecycleMode).toBe('manual')
+  })
+
+  it('applies status, genre and text filters when listing projects', () => {
+    const rows = createRows()
+    rows.set(novels, [
+      { id: 1, title: '旧城遗物', synopsis: '悬疑调查', status: 'writing', lifecycleMode: 'manual', genreId: 2 },
+      { id: 2, title: '星海远征', synopsis: '旧城之外的科幻故事', status: 'draft', lifecycleMode: 'manual', genreId: 3 },
+      { id: 3, title: '长安旧案', synopsis: '历史悬疑', status: 'completed', lifecycleMode: 'manual', genreId: 2 },
+    ])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    expect(listNovels({ status: 'writing' }).map((novel) => novel.id)).toEqual([1])
+    expect(listNovels({ genreId: 2 }).map((novel) => novel.id)).toEqual([1, 3])
+    expect(listNovels({ search: '旧城' }).map((novel) => novel.id)).toEqual([1, 2])
+    expect(listNovels({ status: 'completed', genreId: 2, search: '旧案' }).map((novel) => novel.id)).toEqual([3])
+    expect(listNovels({ search: '   ' }).map((novel) => novel.id)).toEqual([1, 2, 3])
   })
 
   it('persists and reads the new source/canon fields through create, update and get', () => {

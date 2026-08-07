@@ -201,10 +201,6 @@ function normalizeNameKey(value: string): string {
   return value.replace(/\s+/g, '').trim().toLowerCase()
 }
 
-function uniqueNumberArray(values: Array<number | null | undefined>): number[] {
-  return [...new Set(values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))]
-}
-
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return cleanAiStringArray(

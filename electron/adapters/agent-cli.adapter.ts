@@ -176,6 +176,11 @@ function runAgentCli(
   opts?: ChatOptions,
   onChunk?: (chunk: string) => void,
 ): Promise<string> {
+  if (opts?.signal?.aborted) {
+    const error = new Error('用户已取消')
+    error.name = 'AbortError'
+    return Promise.reject(error)
+  }
   return new Promise((resolve, reject) => {
     const child = spawnAgentProcess(invocation, {
       cwd: os.tmpdir(),
@@ -187,7 +192,10 @@ function runAgentCli(
     let output = ''
     let stderr = ''
     let settled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
+    const timer = setTimeout(() => {
+      terminateProcess(child)
+      finish(() => reject(new Error(`原生模型请求超时（${Math.ceil(resolveNativeTimeout(opts?.timeoutMs) / 1000)} 秒）`)))
+    }, resolveNativeTimeout(opts?.timeoutMs))
 
     const cleanup = () => {
       if (timer) clearTimeout(timer)
@@ -206,15 +214,7 @@ function runAgentCli(
       finish(() => reject(error))
     }
 
-    if (opts?.signal?.aborted) {
-      onAbort()
-      return
-    }
     opts?.signal?.addEventListener('abort', onAbort, { once: true })
-    timer = setTimeout(() => {
-      terminateProcess(child)
-      finish(() => reject(new Error(`原生模型请求超时（${Math.ceil(resolveNativeTimeout(opts?.timeoutMs) / 1000)} 秒）`)))
-    }, resolveNativeTimeout(opts?.timeoutMs))
 
     child.stdout.on('data', (chunk: Buffer | string) => {
       const text = String(chunk)

@@ -5,8 +5,6 @@ import { chapters, characters, foreshadowLedger, storyThreads } from '../databas
 import { safeParseJson } from '../utils/json'
 import { runChatTask } from './task.service'
 
-type ChapterRow = typeof chapters.$inferSelect
-
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }

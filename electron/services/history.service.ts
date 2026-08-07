@@ -16,7 +16,6 @@ import {
 import { removeTimelineEventFromItems, syncChapterTimelineStatuses, syncTimelineEventItemLinks } from './link-sync.service'
 import { markNovelContextChanged, markSubsequentChaptersStale } from './context-impact.service'
 import {
-  captureChapterNumberReferenceSnapshot,
   remapChapterNumberReferences,
   restoreChapterNumberReferenceSnapshot,
   type ChapterNumberReferenceSnapshot,

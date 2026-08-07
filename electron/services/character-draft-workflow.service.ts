@@ -89,7 +89,6 @@ function reviewDraftContent(
   currentContextVersion: number,
 ): CharacterDraftReviewContent {
   const updatePatches = draft.updatePatches || []
-  const names = draft.characters.map((character) => character.fullName.trim())
   const normalizedCurrent = new Set(currentNames.map((name) => name.replace(/\s+/gu, '').toLowerCase()))
   const seen = new Set<string>()
   const duplicateNames: string[] = []

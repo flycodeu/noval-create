@@ -85,7 +85,6 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
 }
 
 export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
-  const promptTier = normalizePromptTier(params.promptTier)
   const fallback = appendPromptSection(rawBuildScenePlanPrompt(params), '生产补充要求', [
     '- 这份场景计划会直接进入 AI 主写流程，所以每段都必须可落成正文。',
     '- 先保证场景连贯、动作清楚、冲突具体，再考虑节奏和文气。',
@@ -231,7 +230,6 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
 }
 
 export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): string {
-  const promptTier = normalizePromptTier(params.promptTier)
   const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const withStructuralAlerts = params.structuralAlertsSummary
     ? appendPromptSection(rawBuildChapterRewritePrompt(params), '近期结构告警', params.structuralAlertsSummary.split('\n'))

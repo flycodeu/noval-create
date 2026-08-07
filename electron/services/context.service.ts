@@ -573,10 +573,6 @@ function splitContextLines(value?: string | null, limit = 6): string[] {
     .slice(0, limit)
 }
 
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map(asText).filter(Boolean)
@@ -610,19 +606,6 @@ function parseJsonStringArray(raw?: string | null): string[] {
   if (!raw) return []
   try {
     return toStringArray(JSON.parse(raw))
-  } catch {
-    return []
-  }
-}
-
-function parseJsonNumberArray(raw?: string | null): number[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => asNumber(item))
-      .filter((item): item is number => typeof item === 'number')
   } catch {
     return []
   }
@@ -1234,21 +1217,6 @@ function buildHardConstraintSummary(
   }
 
   return summaryParts.join('；')
-}
-
-function collectMentionedEntityNames(
-  sourceText: string,
-  candidateNames: string[],
-  limit: number,
-): string[] {
-  if (!sourceText.trim()) return []
-  return dedupe(
-    candidateNames
-      .map((name) => name.trim())
-      .filter((name) => Boolean(name) && sourceText.includes(name))
-      .sort((left, right) => right.length - left.length),
-    limit,
-  )
 }
 
 interface EntityMentionCandidate {
@@ -4000,14 +3968,6 @@ function buildDueForeshadowContext(
   // 悬置伏笔不挤占到期/超期名额：至多额外附加 1 条
   return [...dueLines, ...staleLedgerLines.slice(0, Math.max(1, limit - dueLines.length))]
     .join('\n')
-}
-
-function buildActiveThreadsContext(
-  novelId: number,
-  chapterNum: number,
-  currentArc?: typeof storyArcs.$inferSelect | null,
-): string {
-  return buildActiveThreadsContextData(novelId, chapterNum, currentArc).summary
 }
 
 function buildStoryThreadsSummary(novelId: number, limit = 24): string {

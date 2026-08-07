@@ -14,14 +14,7 @@ import {
 } from '../database/schema'
 
 type ChapterRow = typeof chapters.$inferSelect
-type ChapterSegmentRow = typeof chapterSegments.$inferSelect
-type CharacterRow = typeof characters.$inferSelect
-type CharacterRelationRow = typeof characterRelations.$inferSelect
-type CharacterStateVersionRow = typeof characterStateVersions.$inferSelect
-type FactionRow = typeof factions.$inferSelect
-type StoryItemRow = typeof storyItems.$inferSelect
 type TimelineEventRow = typeof timelineEvents.$inferSelect
-type WorldMapRow = typeof worldMap.$inferSelect
 type WorldStateVersionRow = typeof worldStateVersions.$inferSelect
 type WorldStateVersionInsert = typeof worldStateVersions.$inferInsert
 
@@ -128,11 +121,6 @@ const HARD_LOCK_STATE_KEYWORDS = ['决裂', '背叛', '覆灭', '死亡', '失�
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map((item) => asText(item)).filter(Boolean)
 }
 
 function parseNumberArray(raw?: string | null): number[] {

@@ -4,11 +4,7 @@ import { Alert, Button, Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import { isElectronRuntime } from '../../runtime/environment'
-import {
-  LeftOutlined,
-  RightOutlined,
-  RobotOutlined,
-} from '@ant-design/icons'
+import { RobotOutlined } from '@ant-design/icons'
 import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
 import ProjectTopbar from '../../components/novel/layout/ProjectTopbar'
 import { useNovelStore } from '../../stores/novel.store'

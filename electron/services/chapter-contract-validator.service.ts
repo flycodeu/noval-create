@@ -483,7 +483,7 @@ function buildKeywordCandidates(...values: Array<string | null | undefined>): st
     .map((value) => normalizeText(value))
     .filter(Boolean)
   const fragments = pool.flatMap((value) => value
-    .split(/[，。；、,\s/：:（）()\-]+/)
+    .split(/[，。；、,\s/：:（）()-]+/)
     .map((item) => item.trim())
     .filter(Boolean))
   const cjkFragments = [...pool, ...fragments].flatMap((value) => {
@@ -591,10 +591,6 @@ function resolveSceneResultEvidenceParagraphs(
   // instead of treating a valid cross-boundary result as missing.
   const evidenceWindows = buildLocalEvidenceWindows(fallbackParagraphs, keywords, 1)
   return evidenceWindows.length > 0 ? evidenceWindows : sceneParagraphs
-}
-
-function hasAllMarkerGroups(paragraph: string, groups: string[][]): boolean {
-  return groups.every((markers) => countMarkers(paragraph, markers) > 0)
 }
 
 function isGenericChapterTitle(title: string): boolean {
