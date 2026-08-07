@@ -20,7 +20,7 @@ import { estimateChapterCountFromOperatingMode } from '../../src/shared/operatin
 import { parseWorldRulesJson } from '../../src/shared/genre-system'
 import type { EntityRegenerateOptions } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, novels, storyThreads, worldMap } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
 import { recordAssetChangeEvent } from './asset-impact.service'
@@ -986,30 +986,32 @@ export function batchUpdateStoryThreads(
     .all()
   if (rows.length === 0) return 0
 
-  rows.forEach((row) => {
-    updateStoryThread(row.id, {
-      ...(data.status !== undefined ? { status: data.status } : {}),
-      ...(data.priority !== undefined ? { priority: data.priority } : {}),
-    }, { skipContextTracking: true })
-  })
+  getSqlite().transaction(() => {
+    rows.forEach((row) => {
+      updateStoryThread(row.id, {
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.priority !== undefined ? { priority: data.priority } : {}),
+      }, { skipContextTracking: true })
+    })
 
-  createOperationLog({
-    novelId: rows[0].novelId,
-    entityType: 'thread',
-    entityIds: rows.map((row) => row.id),
-    operationType: 'batch_update',
-    summary: `批量更新 ${rows.length} 条故事线程`,
-    batchKey: buildBatchKey('thread-batch-update'),
-    before: rows,
-    after: data,
-    undoPayload: {
-      kind: 'thread.batch_update',
+    createOperationLog({
       novelId: rows[0].novelId,
-      threads: rows,
-    },
-  })
+      entityType: 'thread',
+      entityIds: rows.map((row) => row.id),
+      operationType: 'batch_update',
+      summary: `批量更新 ${rows.length} 条故事线程`,
+      batchKey: buildBatchKey('thread-batch-update'),
+      before: rows,
+      after: data,
+      undoPayload: {
+        kind: 'thread.batch_update',
+        novelId: rows[0].novelId,
+        threads: rows,
+      },
+    })
 
-  markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+    markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+  })()
   return rows.length
 }
 
@@ -1024,27 +1026,29 @@ export function batchDeleteStoryThreads(ids: number[]) {
     .all()
   if (rows.length === 0) return 0
 
-  rows.forEach((row) => {
-    deleteStoryThread(row.id, { skipContextTracking: true })
-  })
+  getSqlite().transaction(() => {
+    rows.forEach((row) => {
+      deleteStoryThread(row.id, { skipContextTracking: true })
+    })
 
-  createOperationLog({
-    novelId: rows[0].novelId,
-    entityType: 'thread',
-    entityIds: rows.map((row) => row.id),
-    operationType: 'batch_delete',
-    summary: `批量删除 ${rows.length} 条故事线程`,
-    batchKey: buildBatchKey('thread-batch-delete'),
-    before: rows,
-    after: [],
-    undoPayload: {
-      kind: 'thread.batch_delete',
+    createOperationLog({
       novelId: rows[0].novelId,
-      threads: rows,
-    },
-  })
+      entityType: 'thread',
+      entityIds: rows.map((row) => row.id),
+      operationType: 'batch_delete',
+      summary: `批量删除 ${rows.length} 条故事线程`,
+      batchKey: buildBatchKey('thread-batch-delete'),
+      before: rows,
+      after: [],
+      undoPayload: {
+        kind: 'thread.batch_delete',
+        novelId: rows[0].novelId,
+        threads: rows,
+      },
+    })
 
-  markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+    markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+  })()
   return rows.length
 }
 
@@ -1056,25 +1060,27 @@ export function clearStoryThreads(novelId: number) {
     .all()
   if (rows.length === 0) return 0
 
-  db.delete(storyThreads).where(eq(storyThreads.novelId, novelId)).run()
+  getSqlite().transaction(() => {
+    db.delete(storyThreads).where(eq(storyThreads.novelId, novelId)).run()
 
-  createOperationLog({
-    novelId,
-    entityType: 'thread',
-    entityIds: rows.map((row) => row.id),
-    operationType: 'batch_delete',
-    summary: `清空 ${rows.length} 条故事线程`,
-    batchKey: buildBatchKey('thread-clear'),
-    before: rows,
-    after: [],
-    undoPayload: {
-      kind: 'thread.batch_delete',
+    createOperationLog({
       novelId,
-      threads: rows,
-    },
-  })
+      entityType: 'thread',
+      entityIds: rows.map((row) => row.id),
+      operationType: 'batch_delete',
+      summary: `清空 ${rows.length} 条故事线程`,
+      batchKey: buildBatchKey('thread-clear'),
+      before: rows,
+      after: [],
+      undoPayload: {
+        kind: 'thread.batch_delete',
+        novelId,
+        threads: rows,
+      },
+    })
 
-  markNovelContextChanged(novelId, 'Story threads changed')
+    markNovelContextChanged(novelId, 'Story threads changed')
+  })()
   return rows.length
 }
 

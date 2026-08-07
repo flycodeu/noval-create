@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   OVERVIEW_ZERO_STATE_ACTIONS,
   resolveOverviewDisplayState,
+  resolveOverviewProductionReadiness,
 } from './overview-presentation'
 
 describe('overview-presentation', () => {
@@ -82,5 +83,31 @@ describe('overview-presentation', () => {
       'contracts',
       'writing',
     ])
+  })
+
+  it('does not claim production is ready while chapters or assets still use stale context', () => {
+    const state = resolveOverviewProductionReadiness(
+      { readyRate: 100, summary: '当前产线可继续推进，综合就绪度 100%。' },
+      { staleChapterCount: 3, staleAssetCount: 3, staleCheckpointCount: 0 },
+    )
+
+    expect(state).toEqual({
+      readyRate: 34,
+      summary: '上下文尚未同步：3 章引用旧上下文，3 类资产待校准；处理完成前不宜继续扩批。',
+      blockedByContext: true,
+    })
+  })
+
+  it('keeps the quality readiness summary when context is current', () => {
+    const state = resolveOverviewProductionReadiness(
+      { readyRate: 88, summary: '当前产线可谨慎继续。' },
+      { staleChapterCount: 0, staleAssetCount: 0, staleCheckpointCount: 0 },
+    )
+
+    expect(state).toEqual({
+      readyRate: 88,
+      summary: '当前产线可谨慎继续。',
+      blockedByContext: false,
+    })
   })
 })

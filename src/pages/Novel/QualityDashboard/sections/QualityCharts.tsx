@@ -48,7 +48,7 @@ export const QualityCharts: React.FC<QualityChartsProps> = ({ data }) => {
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={12}>
-        <Card title="故事弧推进与空转趋势" bordered={false}>
+        <Card title="故事弧推进与空转趋势" variant="borderless">
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={storyArcProgressData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -62,7 +62,7 @@ export const QualityCharts: React.FC<QualityChartsProps> = ({ data }) => {
         </Card>
       </Col>
       <Col xs={24} lg={12}>
-        <Card title="章节质量漂移分布" bordered={false}>
+        <Card title="章节质量漂移分布" variant="borderless">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={driftDistributionData}>
               <CartesianGrid strokeDasharray="3 3" />

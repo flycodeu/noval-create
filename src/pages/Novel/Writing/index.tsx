@@ -339,6 +339,7 @@ export default function Writing({ novelId }: Props) {
   const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
+  const [chapterContextPreviewError, setChapterContextPreviewError] = useState<string | null>(null)
   const [generationExecutionModeOverride, setGenerationExecutionModeOverride] = useState<AiExecutionMode | 'follow_default'>('follow_default')
   const [savingAiMode, setSavingAiMode] = useState(false)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
@@ -429,6 +430,7 @@ export default function Writing({ novelId }: Props) {
     setAiResult(null)
     setForeshadowSnapshot(null)
     setChapterContextPreview(null)
+    setChapterContextPreviewError(null)
     setPublishCheck(null)
     setGateReportExpanded(false)
     setSelectedSnippet(null)
@@ -573,19 +575,28 @@ export default function Writing({ novelId }: Props) {
     isCurrent: () => boolean = () => true,
   ) => {
     if (!chapter) {
-      if (isCurrent()) setChapterContextPreview(null)
+      if (isCurrent()) {
+        setChapterContextPreview(null)
+        setChapterContextPreviewError(null)
+      }
       return
     }
+    if (isCurrent()) setChapterContextPreviewError(null)
     try {
       const preview = await window.electron.chapter.getContextPreview(chapter.id, {
         executionMode: effectiveAiExecutionMode,
         preserveConstraintLabels,
         stageId: creativeStageId || undefined,
       })
-      if (isCurrent()) setChapterContextPreview(preview)
+      if (isCurrent()) {
+        setChapterContextPreview(preview)
+        setChapterContextPreviewError(null)
+      }
     } catch (error) {
-      console.error('Failed to load chapter context preview', error)
-      if (isCurrent()) setChapterContextPreview(null)
+      if (isCurrent()) {
+        setChapterContextPreview(null)
+        setChapterContextPreviewError(getErrorMessage(error, 'common.loadFailed'))
+      }
     }
   }, [creativeStageId, effectiveAiExecutionMode, preserveConstraintLabels])
 
@@ -2003,6 +2014,14 @@ export default function Writing({ novelId }: Props) {
           collapsible
         >
           <div className="novel-writing-shell__insight-stack novel-writing-shell__insight-stack--nested">
+            {chapterContextPreviewError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="章节上下文预览不可用"
+                description={chapterContextPreviewError}
+              />
+            ) : null}
             {chapterContextPreview?.contractReady === false ? (
               <Alert
                 type="warning"

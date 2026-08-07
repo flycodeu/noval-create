@@ -177,15 +177,7 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
   return values.some((value) => Boolean(value && value.trim()))
 }
 
-function StoryThreadRow({
-  thread,
-  selected,
-  onSelect,
-  onEdit,
-  onRegenerate,
-  onDelete,
-  regenerating,
-}: {
+interface StoryThreadRowProps {
   thread: StoryThread
   selected: boolean
   onSelect: (id: number, checked: boolean) => void
@@ -193,9 +185,19 @@ function StoryThreadRow({
   onRegenerate: (thread: StoryThread) => void
   onDelete: (thread: StoryThread) => void
   regenerating: boolean
-}) {
+}
+
+const StoryThreadRow = React.forwardRef<HTMLDivElement, StoryThreadRowProps>(function StoryThreadRow({
+  thread,
+  selected,
+  onSelect,
+  onEdit,
+  onRegenerate,
+  onDelete,
+  regenerating,
+}, ref) {
   return (
-    <div className={`story-threads__row ${selected ? 'story-threads__row--selected' : ''}`}>
+    <div ref={ref} className={`story-threads__row ${selected ? 'story-threads__row--selected' : ''}`}>
       <Checkbox
         checked={selected}
         onChange={(e) => onSelect(thread.id, e.target.checked)}
@@ -217,7 +219,7 @@ function StoryThreadRow({
       </Space>
     </div>
   )
-}
+})
 
 function parseRouteId(value: string | null): number | null {
   const parsed = Number(value)

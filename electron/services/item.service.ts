@@ -1816,20 +1816,22 @@ export function deleteStoryItem(id: number, options: { skipContextTracking?: boo
 
 export function clearStoryItemsByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+  getSqlite().transaction(() => {
+    const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
 
-  eventRows.forEach((event) => {
-    db.update(timelineEvents).set({
-      linkedItemIdsJson: JSON.stringify([]),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(timelineEvents.id, event.id)).run()
-  })
+    eventRows.forEach((event) => {
+      db.update(timelineEvents).set({
+        linkedItemIdsJson: JSON.stringify([]),
+        updatedAt: new Date().toISOString(),
+      }).where(eq(timelineEvents.id, event.id)).run()
+    })
 
-  db.delete(storyItems).where(eq(storyItems.novelId, novelId)).run()
-  if (!options.skipContextTracking) {
-    markNovelContextChanged(novelId, 'Story items changed')
-    refreshWorldStateVersionsForNovel(novelId)
-  }
+    db.delete(storyItems).where(eq(storyItems.novelId, novelId)).run()
+    if (!options.skipContextTracking) {
+      markNovelContextChanged(novelId, 'Story items changed')
+      refreshWorldStateVersionsForNovel(novelId)
+    }
+  })()
 }
 
 // 批量物品输出的容错归一：对象根解包常见数组字段、单对象视为长度 1 的数组、

@@ -9,7 +9,7 @@ import type {
   FactionGraphQueryInput,
   FactionStats,
 } from '../../src/types'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { characters, factions, novels, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
@@ -767,12 +767,14 @@ export function clearFactions(novelId: number) {
     .all()
   if (rows.length === 0) return 0
 
-  rows.forEach((row) => {
-    cleanupFactionReferences(row.id, row.novelId, row.name)
-  })
-  db.delete(factions).where(eq(factions.novelId, novelId)).run()
-  markNovelContextChanged(novelId, 'Factions changed')
-  refreshWorldStateVersionsForNovel(novelId)
+  getSqlite().transaction(() => {
+    rows.forEach((row) => {
+      cleanupFactionReferences(row.id, row.novelId, row.name)
+    })
+    db.delete(factions).where(eq(factions.novelId, novelId)).run()
+    markNovelContextChanged(novelId, 'Factions changed')
+    refreshWorldStateVersionsForNovel(novelId)
+  })()
   return rows.length
 }
 

@@ -1269,19 +1269,21 @@ export function batchDeleteTimelineEvents(ids: number[]) {
 
 export function clearTimelineByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  getSqlite().transaction(() => {
+    const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
 
-  itemRows.forEach((item) => {
-    db.update(storyItems).set({
-      linkedTimelineEventIdsJson: JSON.stringify([]),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyItems.id, item.id)).run()
-  })
+    itemRows.forEach((item) => {
+      db.update(storyItems).set({
+        linkedTimelineEventIdsJson: JSON.stringify([]),
+        updatedAt: new Date().toISOString(),
+      }).where(eq(storyItems.id, item.id)).run()
+    })
 
-  db.delete(timelineEvents).where(eq(timelineEvents.novelId, novelId)).run()
-  if (!options.skipContextTracking) {
-    markNovelContextChanged(novelId, 'Timeline events changed')
-  }
+    db.delete(timelineEvents).where(eq(timelineEvents.novelId, novelId)).run()
+    if (!options.skipContextTracking) {
+      markNovelContextChanged(novelId, 'Timeline events changed')
+    }
+  })()
 }
 
 export async function generateTimelineBatchChunk(

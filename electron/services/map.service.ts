@@ -980,13 +980,15 @@ export function deleteMapItem(id: number, options: { skipContextTracking?: boole
 
 export function clearMapByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  db.update(timelineEvents).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(timelineEvents.novelId, novelId)).run()
-  db.update(storyItems).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(storyItems.novelId, novelId)).run()
-  db.delete(worldMap).where(eq(worldMap.novelId, novelId)).run()
-  if (!options.skipContextTracking) {
-    markNovelContextChanged(novelId, 'Map structure changed')
-    refreshWorldStateVersionsForNovel(novelId)
-  }
+  getSqlite().transaction(() => {
+    db.update(timelineEvents).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(timelineEvents.novelId, novelId)).run()
+    db.update(storyItems).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(storyItems.novelId, novelId)).run()
+    db.delete(worldMap).where(eq(worldMap.novelId, novelId)).run()
+    if (!options.skipContextTracking) {
+      markNovelContextChanged(novelId, 'Map structure changed')
+      refreshWorldStateVersionsForNovel(novelId)
+    }
+  })()
 }
 
 function getLayerCount(input: MapBatchGenerateOptions, depth: number, fallback: number): number {

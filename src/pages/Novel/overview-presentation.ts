@@ -1,5 +1,6 @@
 import type { AuthorWorkflowModeSummary, AuthorWorkflowRouteKey } from './author-workflow'
 import type { WorkflowStats } from './workflow'
+import type { ProductionReadinessSummary } from '../../types'
 
 export interface OverviewDisplayState {
   isZeroState: boolean
@@ -17,6 +18,12 @@ export interface OverviewQuickAction {
   description: string
   entryPage: AuthorWorkflowRouteKey
   actionLabel: string
+}
+
+export interface OverviewProductionReadinessPresentation {
+  readyRate: number
+  summary: string
+  blockedByContext: boolean
 }
 
 export const OVERVIEW_ZERO_STATE_ACTIONS: OverviewQuickAction[] = [
@@ -74,5 +81,36 @@ export function resolveOverviewDisplayState(
       : hasCriticalBlockers,
     showImpactPanel: !isZeroState && authorWorkflow.impactNotices.length > 0,
     showRevisionMetric: !isZeroState,
+  }
+}
+
+export function resolveOverviewProductionReadiness(
+  readiness: Pick<ProductionReadinessSummary, 'readyRate' | 'summary'>,
+  stats: Pick<WorkflowStats, 'staleChapterCount' | 'staleAssetCount' | 'staleCheckpointCount'>,
+): OverviewProductionReadinessPresentation {
+  const staleChapterCount = Math.max(0, stats.staleChapterCount || 0)
+  const staleAssetCount = Math.max(0, stats.staleAssetCount || 0)
+  const staleCheckpointCount = Math.max(0, stats.staleCheckpointCount || 0)
+  const blockedByContext = staleChapterCount > 0 || staleAssetCount > 0 || staleCheckpointCount > 0
+
+  if (!blockedByContext) {
+    return {
+      readyRate: readiness.readyRate,
+      summary: readiness.summary,
+      blockedByContext: false,
+    }
+  }
+
+  const contextPenalty = staleChapterCount * 12 + staleAssetCount * 10 + staleCheckpointCount * 8
+  const contextReasons = [
+    staleChapterCount > 0 ? `${staleChapterCount} 章引用旧上下文` : '',
+    staleAssetCount > 0 ? `${staleAssetCount} 类资产待校准` : '',
+    staleCheckpointCount > 0 ? `${staleCheckpointCount} 份检查点待刷新` : '',
+  ].filter(Boolean)
+
+  return {
+    readyRate: Math.max(0, Math.min(readiness.readyRate, 100 - contextPenalty)),
+    summary: `上下文尚未同步：${contextReasons.join('，')}；处理完成前不宜继续扩批。`,
+    blockedByContext: true,
   }
 }

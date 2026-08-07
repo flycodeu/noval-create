@@ -33,6 +33,7 @@ import {
 import {
   OVERVIEW_ZERO_STATE_ACTIONS,
   resolveOverviewDisplayState,
+  resolveOverviewProductionReadiness,
 } from '../overview-presentation'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
@@ -250,6 +251,9 @@ export default function Overview({ novelId }: Props) {
     : stats.revisionTaskCount > 0
       ? '待清理'
       : '稳定'
+  const productionReadiness = qualitySummary
+    ? resolveOverviewProductionReadiness(qualitySummary.productionReadiness, stats)
+    : null
 
   useEffect(() => {
     syncSuggestedAuthorMode(suggestedAuthorMode.mode)
@@ -626,7 +630,7 @@ export default function Overview({ novelId }: Props) {
         </WorkspacePanel>
       ) : null}
 
-      {displayState.showHealthPanel && qualitySummary ? (
+      {displayState.showHealthPanel && qualitySummary && productionReadiness ? (
         <WorkspacePanel
           className="novel-overview-page__health-panel"
           title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
@@ -634,8 +638,8 @@ export default function Overview({ novelId }: Props) {
           <div className="workspace-grid-auto-220">
             <div className="guided-step__fact-card">
               <span>生产就绪度</span>
-              <strong>{qualitySummary.productionReadiness.readyRate}%</strong>
-              <small>{qualitySummary.productionReadiness.summary}</small>
+              <strong>{productionReadiness.readyRate}%</strong>
+              <small>{productionReadiness.summary}</small>
             </div>
             <div className="guided-step__fact-card">
               <span>最近批次</span>

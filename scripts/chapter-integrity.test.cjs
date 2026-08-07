@@ -42,6 +42,8 @@ async function run() {
   const novelService = project('electron/services/novel.service.ts')
   const chapterService = project('electron/services/chapter.service.ts')
   const historyService = project('electron/services/history.service.ts')
+  const storyArcService = project('electron/services/story-arc.service.ts')
+  const storyThreadService = project('electron/services/story-thread.service.ts')
   const storyStructureService = project('electron/services/story-structure.service.ts')
   const storyStructureBatchService = project('electron/services/story-structure-batch.service.ts')
   const writebackService = project('electron/services/chapter-writeback.service.ts')
@@ -203,6 +205,71 @@ async function run() {
       getSqlite().prepare("SELECT COUNT(*) AS count FROM operation_logs WHERE novel_id = ? AND operation_type = 'batch_delete'").get(atomicNovel).count,
       0,
       'failed batch delete must not leave an undo log for a mutation that rolled back',
+    )
+
+    const arcNovel = novelService.createNovel({ title: '故事弧引用完整性测试', targetWords: 5000 })
+    const arcChapter = chapterService.createChapter(arcNovel, { chapterNum: 1, title: '绑定故事弧的章节' })
+    const deletedArcId = storyArcService.createStoryArc(arcNovel, { arcName: '待删除故事弧', arcOrder: 1 })
+    getSqlite().prepare('UPDATE chapters SET arc_id = ? WHERE id = ?').run(deletedArcId, arcChapter)
+    storyArcService.deleteStoryArc(deletedArcId)
+    assert.equal(
+      getSqlite().prepare('SELECT arc_id FROM chapters WHERE id = ?').get(arcChapter).arc_id,
+      null,
+      'deleting one story arc must detach chapters because chapters.arc_id has no foreign key',
+    )
+
+    const rollbackArcA = storyArcService.createStoryArc(arcNovel, { arcName: '清空回滚 A', arcOrder: 2 })
+    storyArcService.createStoryArc(arcNovel, { arcName: '清空回滚 B', arcOrder: 3 })
+    getSqlite().prepare('UPDATE chapters SET arc_id = ? WHERE id = ?').run(rollbackArcA, arcChapter)
+    getSqlite().exec(`
+      CREATE TRIGGER fail_story_arc_clear_chapter_update
+      BEFORE UPDATE OF arc_id ON chapters
+      WHEN OLD.id = ${arcChapter}
+      BEGIN
+        SELECT RAISE(ABORT, 'forced story arc clear failure');
+      END;
+    `)
+    assert.throws(
+      () => storyArcService.clearStoryArcs(arcNovel),
+      /forced story arc clear failure/u,
+    )
+    getSqlite().exec('DROP TRIGGER fail_story_arc_clear_chapter_update')
+    assert.equal(
+      getSqlite().prepare('SELECT COUNT(*) AS count FROM story_arcs WHERE novel_id = ?').get(arcNovel).count,
+      2,
+      'failed story arc clear must roll back arc deletion',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT arc_id FROM chapters WHERE id = ?').get(arcChapter).arc_id,
+      rollbackArcA,
+      'failed story arc clear must preserve the original chapter binding',
+    )
+
+    const threadAtomicNovel = novelService.createNovel({ title: '故事线程批量删除原子性测试', targetWords: 5000 })
+    const atomicThreadA = storyThreadService.createStoryThread(threadAtomicNovel, { title: '原子线程 A' }, { skipContextTracking: true })
+    const atomicThreadB = storyThreadService.createStoryThread(threadAtomicNovel, { title: '原子线程 B' }, { skipContextTracking: true })
+    getSqlite().exec(`
+      CREATE TRIGGER fail_atomic_thread_second_delete
+      BEFORE DELETE ON story_threads
+      WHEN OLD.id = ${atomicThreadB}
+      BEGIN
+        SELECT RAISE(ABORT, 'forced thread batch delete failure');
+      END;
+    `)
+    assert.throws(
+      () => storyThreadService.batchDeleteStoryThreads([atomicThreadA, atomicThreadB]),
+      /forced thread batch delete failure/u,
+    )
+    getSqlite().exec('DROP TRIGGER fail_atomic_thread_second_delete')
+    assert.deepEqual(
+      getSqlite().prepare('SELECT id FROM story_threads WHERE novel_id = ? ORDER BY id').all(threadAtomicNovel),
+      [{ id: atomicThreadA }, { id: atomicThreadB }],
+      'failed story thread batch delete must roll back threads deleted earlier in the batch',
+    )
+    assert.equal(
+      getSqlite().prepare("SELECT COUNT(*) AS count FROM operation_logs WHERE novel_id = ? AND entity_type = 'thread' AND operation_type = 'batch_delete'").get(threadAtomicNovel).count,
+      0,
+      'failed story thread batch delete must not leave a misleading undo log',
     )
 
     expectCode(() => chapterService.updateChapter(firstChapter, { status: 'final' }), 'chapter.publishBlocked')
@@ -556,7 +623,7 @@ async function run() {
       'accepted',
     )
 
-    console.log('PASS chapter integrity: final gate, generation edit lock, invalidation, ownership, cross-novel isolation, reorder remap and locked writeback decisions')
+    console.log('PASS chapter integrity: final gate, generation edit lock, arc/thread transactions, invalidation, ownership, cross-novel isolation, reorder remap and locked writeback decisions')
   } finally {
     closeDb()
     fs.rmSync(tempRoot, { recursive: true, force: true })

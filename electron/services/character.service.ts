@@ -1260,35 +1260,36 @@ export function deleteCharacter(id: number, options: { skipContextTracking?: boo
 
 export function clearCharactersByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
+  getSqlite().transaction(() => {
+    const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+    itemRows.forEach((item) => {
+      db.update(storyItems).set({
+        ownerCharacterId: null,
+        linkedCharacterIdsJson: stringifyNumberArray([]),
+        updatedAt: new Date().toISOString(),
+      }).where(eq(storyItems.id, item.id)).run()
+    })
 
-  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
-  itemRows.forEach((item) => {
-    db.update(storyItems).set({
-      ownerCharacterId: null,
-      linkedCharacterIdsJson: stringifyNumberArray([]),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyItems.id, item.id)).run()
-  })
+    const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+    eventRows.forEach((event) => {
+      const presentIds = parseNumberArray(event.presentCharacterIdsJson)
+      const affectedIds = parseNumberArray(event.affectedCharacterIdsJson)
+      if (presentIds.length === 0 && affectedIds.length === 0 && !event.protagonistAction) return
+      db.update(timelineEvents).set({
+        presentCharacterIdsJson: stringifyNumberArray([]),
+        affectedCharacterIdsJson: stringifyNumberArray([]),
+        protagonistAction: event.protagonistAction || null,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(timelineEvents.id, event.id)).run()
+    })
 
-  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
-  eventRows.forEach((event) => {
-    const presentIds = parseNumberArray(event.presentCharacterIdsJson)
-    const affectedIds = parseNumberArray(event.affectedCharacterIdsJson)
-    if (presentIds.length === 0 && affectedIds.length === 0 && !event.protagonistAction) return
-    db.update(timelineEvents).set({
-      presentCharacterIdsJson: stringifyNumberArray([]),
-      affectedCharacterIdsJson: stringifyNumberArray([]),
-      protagonistAction: event.protagonistAction || null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(timelineEvents.id, event.id)).run()
-  })
-
-  db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
-  db.delete(characters).where(eq(characters.novelId, novelId)).run()
-  if (!options.skipContextTracking) {
-    markNovelContextChanged(novelId, 'Character profiles changed')
-    refreshWorldStateVersionsForNovel(novelId)
-  }
+    db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
+    db.delete(characters).where(eq(characters.novelId, novelId)).run()
+    if (!options.skipContextTracking) {
+      markNovelContextChanged(novelId, 'Character profiles changed')
+      refreshWorldStateVersionsForNovel(novelId)
+    }
+  })()
 }
 
 export function getCharacterRelations(novelId: number) {
