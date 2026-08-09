@@ -7,6 +7,40 @@ import type {
 } from '../database/schema'
 import { getOperatingModePolicy } from '../../src/shared/operating-mode'
 
+type CharacterMentionRow = Pick<
+  typeof characters.$inferSelect,
+  | 'id'
+  | 'fullName'
+  | 'surname'
+  | 'givenName'
+  | 'occupation'
+  | 'rankLevel'
+  | 'socialIdentity'
+  | 'roleType'
+  | 'gender'
+  | 'sourceContextJson'
+>
+type ItemMentionRow = Pick<
+  typeof storyItems.$inferSelect,
+  'id' | 'itemName' | 'subType' | 'tagsJson' | 'sourceContextJson' | 'typedRefsJson'
+>
+type LocationMentionRow = Pick<
+  typeof worldMap.$inferSelect,
+  | 'id'
+  | 'name'
+  | 'locationType'
+  | 'structureRole'
+  | 'tagsJson'
+  | 'description'
+  | 'atmosphere'
+  | 'plotRelevance'
+>
+type FactionMentionRow = Pick<typeof factions.$inferSelect, 'id' | 'name' | 'notes'>
+type RelationMentionRow = Pick<
+  typeof characterRelations.$inferSelect,
+  'charAId' | 'charBId' | 'relationLabel' | 'interactionStyle'
+>
+
 export interface EntityMentionCandidate {
   canonicalName: string
   aliases?: string[]
@@ -282,7 +316,7 @@ export function collectMentionedEntityValidationTermsFromCandidates(
 }
 
 export function buildCharacterMentionCandidates(
-  rows: Array<typeof characters.$inferSelect>,
+  rows: CharacterMentionRow[],
 ): EntityMentionCandidate[] {
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.surname && row.givenName ? `${row.surname}${row.givenName}` : '',
@@ -312,7 +346,7 @@ export function buildCharacterMentionCandidates(
 }
 
 export function buildItemMentionCandidates(
-  rows: Array<typeof storyItems.$inferSelect>,
+  rows: ItemMentionRow[],
 ): EntityMentionCandidate[] {
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.subType || '',
@@ -328,7 +362,7 @@ export function buildItemMentionCandidates(
 }
 
 export function buildLocationMentionCandidates(
-  rows: Array<typeof worldMap.$inferSelect>,
+  rows: LocationMentionRow[],
 ): EntityMentionCandidate[] {
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.locationType || '',
@@ -346,7 +380,7 @@ export function buildLocationMentionCandidates(
 }
 
 export function buildFactionMentionCandidates(
-  rows: Array<typeof factions.$inferSelect>,
+  rows: FactionMentionRow[],
 ): EntityMentionCandidate[] {
   return rows.map((row) => ({
     canonicalName: row.name || '',
@@ -375,7 +409,7 @@ export function collectExplicitEntityNamesFromReferences(
 
 export function collectRelationMentionedCharacterNames(
   sourceText: string,
-  relationRows: Array<typeof characterRelations.$inferSelect>,
+  relationRows: RelationMentionRow[],
   characterNameById: Map<number, string>,
   limit: number,
 ): string[] {
@@ -398,7 +432,7 @@ export function collectRelationMentionedCharacterNames(
 
 export function collectRelationMentionValidationTerms(
   sourceText: string,
-  relationRows: Array<typeof characterRelations.$inferSelect>,
+  relationRows: RelationMentionRow[],
   characterNameById: Map<number, string>,
   limit: number,
 ): string[] {

@@ -50,6 +50,7 @@ linux:
   target: [AppImage, deb]
 
 nsis:
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
   installerIcon: build/installerIcon.ico
   uninstallerIcon: build/uninstallerIcon.ico
   oneClick: false
@@ -57,3 +58,6 @@ nsis:
   installerLanguages:
     - zh_CN
     - en_US
+
+portable:
+  artifactName: ${productName}-Portable-${version}-${arch}.${ext}

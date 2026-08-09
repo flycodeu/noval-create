@@ -14,6 +14,8 @@ function parseArgs(argv) {
     runId: process.env.NOVELFORGE_SOAK_RUN_ID || '',
     realModelCalled: undefined,
     listNovels: false,
+    inspectNovel: false,
+    sampleChapters: 2,
     json: false,
     help: false,
   }
@@ -23,6 +25,7 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') options.help = true
     if (arg === '--json') options.json = true
     if (arg === '--list-novels') options.listNovels = true
+    if (arg === '--inspect-novel') options.inspectNovel = true
     if (arg === '--real-model-called') options.realModelCalled = true
     if (arg === '--no-real-model-called') options.realModelCalled = false
     if (arg.startsWith('--db=')) options.dbPath = path.resolve(process.cwd(), readValue('--db='))
@@ -51,6 +54,12 @@ function parseArgs(argv) {
     if (arg === '--runId' && argv[index + 1]) options.runId = argv[index + 1]
     if (arg.startsWith('--run-id=')) options.runId = readValue('--run-id=')
     if (arg === '--run-id' && argv[index + 1]) options.runId = argv[index + 1]
+    if (arg.startsWith('--sample-chapters=')) {
+      options.sampleChapters = Math.max(1, Math.min(10, Number(readValue('--sample-chapters=')) || 2))
+    }
+    if (arg === '--sample-chapters' && argv[index + 1]) {
+      options.sampleChapters = Math.max(1, Math.min(10, Number(argv[index + 1]) || 2))
+    }
   })
 
   return options
@@ -60,11 +69,14 @@ function printHelp() {
   console.log([
     'Usage:',
     '  node scripts/export-chapter-soak-report.cjs --db path/to/novelforge.db --list-novels --json',
+    '  node scripts/export-chapter-soak-report.cjs --db path/to/novelforge.db --novelId 1 --inspect-novel --sample-chapters 2 --json',
     '  node scripts/export-chapter-soak-report.cjs --db path/to/novelforge.db --novelId 1 --out .tmp-tests/real-report.json',
     '  node scripts/export-chapter-soak-report.cjs --input path/to/run-status.json --real-model-called --provider openai --model gpt-5 --run-id nightly-001 --out .tmp-tests/real-report.json',
     '',
     'Options:',
     '  --list-novels       List read-only project scale and continuity coverage before selecting a run.',
+    '  --inspect-novel      Export bounded chapter and quality evidence without changing the database.',
+    '  --sample-chapters N  Include the first 1-10 chapter excerpts; defaults to 2.',
     '  --input <path>      Optional JSON run status/report to normalize without opening SQLite.',
     '  --taskId <id>        Optional chapter_batch_generate or chapter_write task id to scope the report.',
     '  --task-id <id>       Alias for --taskId.',
@@ -181,6 +193,148 @@ function listNovelInventory(db, dbPath) {
         successfulChapterTaskCount: Number(row.successfulChapterTaskCount || 0),
       }
     }),
+  }
+}
+
+function compactText(value, maxLength) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
+  const novel = db.prepare(`
+    SELECT
+      novel.id,
+      novel.title,
+      novel.target_words AS targetWords,
+      novel.launch_mode AS launchMode,
+      novel.context_version AS contextVersion,
+      COUNT(chapter.id) AS chapterCount,
+      COALESCE(SUM(chapter.word_count), 0) AS totalWords,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.content, '')) <> '' THEN 1 ELSE 0 END), 0) AS contentChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.outline, '')) <> '' THEN 1 ELSE 0 END), 0) AS outlineChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.summary, '')) <> '' THEN 1 ELSE 0 END), 0) AS summaryChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.continuity_state_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS continuityChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.review_notes_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS reviewNotesChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.ai_score_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS aiScoreChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.quality_scores_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS qualityScoreChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.writeback_status_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS writebackStatusChapterCount
+    FROM novels AS novel
+    LEFT JOIN chapters AS chapter
+      ON chapter.novel_id = novel.id
+    WHERE novel.id = ?
+    GROUP BY novel.id
+  `).get(novelId)
+  if (!novel) throw new Error(`Novel ${novelId} was not found`)
+
+  const chapters = db.prepare(`
+    SELECT
+      id,
+      chapter_num AS chapterNum,
+      title,
+      status,
+      target_words AS targetWords,
+      word_count AS wordCount,
+      outline,
+      content,
+      summary,
+      continuity_state_json AS continuityStateJson,
+      review_notes_json AS reviewNotesJson,
+      ai_score_json AS aiScoreJson,
+      quality_scores_json AS qualityScoresJson,
+      writeback_status_json AS writebackStatusJson
+    FROM chapters
+    WHERE novel_id = ?
+    ORDER BY chapter_num ASC, id ASC
+    LIMIT ?
+  `).all(novelId, Math.max(1, Math.min(10, Number(sampleChapters) || 2)))
+
+  const taskEvidence = db.prepare(`
+    SELECT
+      COUNT(*) AS totalTaskCount,
+      COALESCE(SUM(CASE WHEN model_config_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS modelBackedTaskCount,
+      COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS successfulTaskCount,
+      COALESCE(SUM(CASE
+        WHEN type = 'chapter_write' AND runner_type = 'workflow' AND parent_task_id IS NULL
+        THEN 1 ELSE 0 END), 0) AS chapterWorkflowTaskCount
+    FROM tasks
+    WHERE novel_id = ?
+  `).get(novelId)
+
+  const artifactEvidence = db.prepare(`
+    SELECT
+      COUNT(*) AS totalArtifactCount,
+      COALESCE(SUM(CASE WHEN kind = 'quality_report' THEN 1 ELSE 0 END), 0) AS qualityReportCount,
+      COALESCE(SUM(CASE WHEN kind = 'quality_report' AND status = 'reviewed' THEN 1 ELSE 0 END), 0) AS reviewedQualityReportCount,
+      COALESCE(SUM(CASE WHEN kind = 'quality_repair_review' THEN 1 ELSE 0 END), 0) AS qualityRepairReviewCount,
+      COALESCE(SUM(CASE WHEN model_config_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS modelBackedArtifactCount
+    FROM artifacts
+    WHERE novel_id = ?
+  `).get(novelId)
+
+  const chapterCount = Number(novel.chapterCount || 0)
+  const totalWords = Number(novel.totalWords || 0)
+  const coverage = (value) => chapterCount > 0 ? Number(value || 0) / chapterCount : 0
+
+  return {
+    mode: 'novel-quality-inspection',
+    invokedAt: new Date().toISOString(),
+    source: {
+      dbPath,
+      readonly: true,
+      novelId,
+      sampleChapters: chapters.length,
+    },
+    novel: {
+      id: Number(novel.id),
+      title: novel.title || '',
+      targetWords: Number(novel.targetWords || 0),
+      launchMode: novel.launchMode || '',
+      contextVersion: Number(novel.contextVersion || 1),
+      chapterCount,
+      totalWords,
+      averageWordsPerChapter: chapterCount > 0 ? Math.round(totalWords / chapterCount) : 0,
+      targetCompletionRate: Number(novel.targetWords || 0) > 0 ? totalWords / Number(novel.targetWords) : 0,
+      contentCoverageRate: coverage(novel.contentChapterCount),
+      outlineCoverageRate: coverage(novel.outlineChapterCount),
+      summaryCoverageRate: coverage(novel.summaryChapterCount),
+      continuityCoverageRate: coverage(novel.continuityChapterCount),
+      reviewNotesCoverageRate: coverage(novel.reviewNotesChapterCount),
+      aiScoreCoverageRate: coverage(novel.aiScoreChapterCount),
+      qualityScoreCoverageRate: coverage(novel.qualityScoreChapterCount),
+      writebackStatusCoverageRate: coverage(novel.writebackStatusChapterCount),
+    },
+    workflowEvidence: {
+      totalTaskCount: Number(taskEvidence?.totalTaskCount || 0),
+      modelBackedTaskCount: Number(taskEvidence?.modelBackedTaskCount || 0),
+      successfulTaskCount: Number(taskEvidence?.successfulTaskCount || 0),
+      chapterWorkflowTaskCount: Number(taskEvidence?.chapterWorkflowTaskCount || 0),
+      totalArtifactCount: Number(artifactEvidence?.totalArtifactCount || 0),
+      qualityReportCount: Number(artifactEvidence?.qualityReportCount || 0),
+      reviewedQualityReportCount: Number(artifactEvidence?.reviewedQualityReportCount || 0),
+      qualityRepairReviewCount: Number(artifactEvidence?.qualityRepairReviewCount || 0),
+      modelBackedArtifactCount: Number(artifactEvidence?.modelBackedArtifactCount || 0),
+    },
+    chapters: chapters.map((chapter) => ({
+      id: Number(chapter.id),
+      chapterNum: Number(chapter.chapterNum || 0),
+      title: chapter.title || '',
+      status: chapter.status || '',
+      targetWords: Number(chapter.targetWords || 0),
+      wordCount: Number(chapter.wordCount || 0),
+      wordRatio: Number(chapter.targetWords || 0) > 0
+        ? Number(chapter.wordCount || 0) / Number(chapter.targetWords)
+        : 0,
+      outline: compactText(chapter.outline, 800),
+      contentExcerpt: compactText(chapter.content, 1600),
+      summary: compactText(chapter.summary, 500),
+      continuityState: readJson(chapter.continuityStateJson, null),
+      reviewNotes: readJson(chapter.reviewNotesJson, null),
+      aiScore: readJson(chapter.aiScoreJson, null),
+      qualityScores: readJson(chapter.qualityScoresJson, null),
+      writebackStatus: readJson(chapter.writebackStatusJson, null),
+    })),
   }
 }
 
@@ -516,6 +670,17 @@ function runCli() {
       }
       return
     }
+    if (options.inspectNovel) {
+      if (!options.novelId) throw new Error('Provide --novelId with --inspect-novel')
+      const inspection = inspectNovelQuality(db, options.dbPath, options.novelId, options.sampleChapters)
+      writeReport(options.outPath, inspection)
+      if (options.json || !options.outPath) {
+        console.log(JSON.stringify(inspection, null, 2))
+      } else {
+        console.log(`novel quality inspection exported: ${path.relative(process.cwd(), options.outPath)}`)
+      }
+      return
+    }
     const report = buildReport(db, options)
     writeReport(options.outPath, report)
     if (options.json || !options.outPath) {
@@ -557,6 +722,7 @@ if (invokedAsCli) {
 }
 
 module.exports = {
+  inspectNovelQuality,
   listNovelInventory,
   normalizeInputReport,
   openReadonlyDb,

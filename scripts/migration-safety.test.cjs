@@ -250,6 +250,9 @@ function assertRequiredColumns(db) {
   assert.ok(db.prepare('PRAGMA index_list(chapter_embeddings)').all().some((row) => row.name === 'idx_chapter_embeddings_profile'))
   assert.ok(db.prepare('PRAGMA index_list(story_threads)').all().some((row) => row.name === 'idx_story_threads_context_due'))
   assert.ok(db.prepare('PRAGMA index_list(foreshadow_ledger)').all().some((row) => row.name === 'idx_foreshadow_ledger_thread'))
+  assert.ok(db.prepare('PRAGMA index_list(story_items)').all().some((row) => row.name === 'idx_story_items_novel_kind_sort'))
+  assert.ok(db.prepare('PRAGMA index_list(world_map)').all().some((row) => row.name === 'idx_world_map_novel_parent_sort'))
+  assert.ok(db.prepare('PRAGMA index_list(character_relations)').all().some((row) => row.name === 'idx_character_relations_novel_pair'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('source_type'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('fragment_key'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('embedding_profile'))
@@ -498,6 +501,7 @@ function testFreshDbIsIdempotent() {
       '0058_semantic_memory_outbox',
       '0059_semantic_memory_fts',
       '0060_thread_context_projection_indexes',
+      '0061_entity_context_projection_indexes',
     ])
 
     runMigrations(db)
@@ -637,6 +641,7 @@ function testPartialSchemaCanResume() {
       '0058_semantic_memory_outbox',
       '0059_semantic_memory_fts',
       '0060_thread_context_projection_indexes',
+      '0061_entity_context_projection_indexes',
     ])
 
     const configs = db.prepare(`

@@ -2822,6 +2822,34 @@ export function runMigrations(sqlite: Database.Database) {
       `)
     }
   })
+
+  runMigrationStep(sqlite, '0061_entity_context_projection_indexes', () => {
+    if (hasTable(sqlite, 'story_items')) {
+      ensureColumn(sqlite, 'story_items', 'item_kind', "TEXT DEFAULT 'instance'")
+      ensureColumn(sqlite, 'story_items', 'sort_order', 'INTEGER DEFAULT 0')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_story_items_novel_kind_sort
+        ON story_items (novel_id, item_kind, sort_order, id);
+      `)
+    }
+    if (hasTable(sqlite, 'world_map')) {
+      ensureColumn(sqlite, 'world_map', 'parent_id', 'INTEGER')
+      ensureColumn(sqlite, 'world_map', 'level', 'INTEGER DEFAULT 1')
+      ensureColumn(sqlite, 'world_map', 'sort_order', 'INTEGER DEFAULT 0')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_world_map_novel_parent_sort
+        ON world_map (novel_id, parent_id, level, sort_order, id);
+      `)
+    }
+    if (hasTable(sqlite, 'character_relations')) {
+      ensureColumn(sqlite, 'character_relations', 'char_a_id', 'INTEGER')
+      ensureColumn(sqlite, 'character_relations', 'char_b_id', 'INTEGER')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_character_relations_novel_pair
+        ON character_relations (novel_id, char_a_id, char_b_id, id);
+      `)
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

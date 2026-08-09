@@ -6,6 +6,7 @@ const projectRoot = path.resolve(__dirname, '..')
 const builderEntry = path.resolve(projectRoot, 'node_modules', 'electron-builder', 'cli.js')
 const setupNsisScript = path.resolve(__dirname, 'setup-local-nsis.cjs')
 const setupNsisResourcesScript = path.resolve(__dirname, 'setup-local-nsis-resources.cjs')
+const ensureBuildIconsScript = path.resolve(__dirname, 'ensure-build-icons.cjs')
 const signScript = path.resolve(__dirname, 'sign-windows-artifacts.cjs')
 const releaseDir = path.resolve(projectRoot, 'release')
 const args = new Set(process.argv.slice(2))
@@ -67,6 +68,13 @@ function runNpmScript(scriptName, options = {}) {
 function runTestPreflight() {
   process.stdout.write('[package:win] Running npm test before packaging.\n')
   const result = runNpmScript('test')
+  if (result.status !== 0) {
+    process.exit(result.status || 1)
+  }
+}
+
+function ensureBuildIcons() {
+  const result = runNodeScript(ensureBuildIconsScript, [])
   if (result.status !== 0) {
     process.exit(result.status || 1)
   }
@@ -239,6 +247,7 @@ function buildSigned() {
   process.exit(0)
 }
 
+ensureBuildIcons()
 runTestPreflight()
 
 if (signed) {

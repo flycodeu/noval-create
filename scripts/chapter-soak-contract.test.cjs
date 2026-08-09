@@ -8,6 +8,7 @@ const {
   validateRealReport,
 } = require('./chapter-soak.cjs')
 const {
+  inspectNovelQuality,
   listNovelInventory,
   normalizeInputReport,
   openReadonlyDb,
@@ -102,15 +103,117 @@ function testInventoryUsesReadonlyDatabaseAndSelectOnlyQueries() {
 }
 
 function testInventoryFlagParsing() {
-  const options = parseExportArgs(['--db', 'fixture.db', '--list-novels', '--json'])
+  const options = parseExportArgs([
+    '--db',
+    'fixture.db',
+    '--list-novels',
+    '--inspect-novel',
+    '--sample-chapters',
+    '12',
+    '--json',
+  ])
   assert.equal(options.listNovels, true)
+  assert.equal(options.inspectNovel, true)
+  assert.equal(options.sampleChapters, 10)
   assert.equal(options.json, true)
   assert.match(options.dbPath, /fixture\.db$/u)
+}
+
+function testQualityInspectionUsesBoundedReadonlyQueries() {
+  const sqlStatements = []
+  const db = {
+    prepare(sql) {
+      sqlStatements.push(sql)
+      if (sql.includes('FROM novels AS novel')) {
+        return {
+          get() {
+            return {
+              id: 7,
+              title: 'Fixture',
+              targetWords: 1000000,
+              launchMode: 'professional_longform',
+              contextVersion: 4,
+              chapterCount: 2,
+              totalWords: 1900,
+              contentChapterCount: 2,
+              outlineChapterCount: 2,
+              summaryChapterCount: 1,
+              continuityChapterCount: 2,
+              reviewNotesChapterCount: 1,
+              aiScoreChapterCount: 1,
+              qualityScoreChapterCount: 1,
+              writebackStatusChapterCount: 2,
+            }
+          },
+        }
+      }
+      if (sql.includes('FROM chapters')) {
+        return {
+          all(novelId, limit) {
+            assert.equal(novelId, 7)
+            assert.equal(limit, 2)
+            return [{
+              id: 71,
+              chapterNum: 1,
+              title: '第一章',
+              status: 'draft',
+              targetWords: 1000,
+              wordCount: 900,
+              outline: '目标、冲突、转折、钩子',
+              content: '正文',
+              summary: '摘要',
+              continuityStateJson: '{"ready":true}',
+              reviewNotesJson: '{"issues":[]}',
+              aiScoreJson: '{"overall":80}',
+              qualityScoresJson: '{"humanFlavor":82}',
+              writebackStatusJson: '{"readyForNextChapter":true}',
+            }]
+          },
+        }
+      }
+      if (sql.includes('FROM tasks')) {
+        return {
+          get() {
+            return {
+              totalTaskCount: 3,
+              modelBackedTaskCount: 2,
+              successfulTaskCount: 2,
+              chapterWorkflowTaskCount: 1,
+            }
+          },
+        }
+      }
+      if (sql.includes('FROM artifacts')) {
+        return {
+          get() {
+            return {
+              totalArtifactCount: 4,
+              qualityReportCount: 1,
+              reviewedQualityReportCount: 1,
+              qualityRepairReviewCount: 1,
+              modelBackedArtifactCount: 3,
+            }
+          },
+        }
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const report = inspectNovelQuality(db, 'fixture.db', 7, 2)
+  assert.equal(report.source.readonly, true)
+  assert.equal(report.novel.averageWordsPerChapter, 950)
+  assert.equal(report.novel.summaryCoverageRate, 0.5)
+  assert.equal(report.novel.qualityScoreCoverageRate, 0.5)
+  assert.equal(report.workflowEvidence.reviewedQualityReportCount, 1)
+  assert.deepEqual(report.chapters[0].qualityScores, { humanFlavor: 82 })
+  sqlStatements.forEach((sql) => assert.match(sql.trim(), /^SELECT\b/u))
 }
 
 testDryRunEvidenceCannotPassAsObserved()
 testNormalizationDoesNotPromoteDryRunEvidence()
 testInventoryUsesReadonlyDatabaseAndSelectOnlyQueries()
 testInventoryFlagParsing()
+testQualityInspectionUsesBoundedReadonlyQueries()
 
 console.log('chapter soak contract tests passed')

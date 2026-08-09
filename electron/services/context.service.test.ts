@@ -60,6 +60,15 @@ vi.mock('./context-cards', () => ({
 }))
 
 vi.mock('./faction-reference.service', () => ({
+  parseFactionReferenceArray: vi.fn((raw?: string | null) => {
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return raw.split(/[,\n，、]/).map((item) => item.trim()).filter(Boolean)
+    }
+  }),
   createFactionCatalog: vi.fn((rows: Array<{ id: number; name: string }>) => ({
     rows,
     byId: new Map(rows.map((row) => [row.id, row])),
@@ -948,7 +957,7 @@ describe('allocateChapterContext', () => {
     expect(complexMega.locations).toBeGreaterThan(40)
   })
 
-  it('collects expanded mentioned entities and map context for million-word chapters', async () => {
+  it('collects bounded entity context across chapters 1 and 2 for a million-word project', async () => {
     vi.mocked(buildCharacterContextCards).mockImplementation(((input: {
       allCharacters: Array<{ fullName?: string | null }>
       mentionedNames?: Set<string>
@@ -1080,25 +1089,23 @@ describe('allocateChapterContext', () => {
       [genres, [{ id: 11, name: '科幻群像' }]],
       [templates, []],
       [chapters, [
-        ...Array.from({ length: 519 }, (_, index) => ({
-          id: index + 1,
-          novelId: 1,
-          chapterNum: index + 1,
-          title: `第${index + 1}章`,
-          outline: '',
-          summary: index === 518 ? '主角团确认资源缺口。' : '',
-          nextChapterSeed: '',
-          continuityStateJson: index === 518
-            ? JSON.stringify({
-                continuity_notes: ['资源缺口必须承接'],
-                open_loops: ['多地点补给未闭合'],
-              })
-            : '{}',
-        })),
         {
-          id: 520,
+          id: 1,
           novelId: 1,
-          chapterNum: 520,
+          chapterNum: 1,
+          title: '首次会合',
+          outline,
+          summary: '主角团确认资源缺口。',
+          nextChapterSeed: '副手必须继续完成资源会合。',
+          continuityStateJson: JSON.stringify({
+            continuity_notes: ['资源缺口必须承接'],
+            open_loops: ['多地点补给未闭合'],
+          }),
+        },
+        {
+          id: 2,
+          novelId: 1,
+          chapterNum: 2,
           title: '多线会合',
           outline,
           summary: '',
@@ -1112,7 +1119,19 @@ describe('allocateChapterContext', () => {
       [storyArcs, []],
       [storyThreads, []],
       [timelineEvents, []],
-      [characterRelations, []],
+      [characterRelations, [{
+        id: 1,
+        novelId: 1,
+        charAId: 1,
+        charBId: 45,
+        relationType: 'ally',
+        relationLabel: '搭档',
+        intimacyLevel: 4,
+        tensionLevel: 6,
+        interactionStyle: '互相补位',
+        description: '资源调度中的临时搭档。',
+        subtextRule: '不直接承认信任。',
+      }]],
       [factions, factionRows],
       [glossary, []],
       [antiAiRuleHits, []],
@@ -1121,24 +1140,28 @@ describe('allocateChapterContext', () => {
       tableReadCounts.set(table, (tableReadCounts.get(table) || 0) + 1)
     }) as never)
 
-    const raw = await collectChapterContextRawData(1, 520)
+    const chapter1Raw = await collectChapterContextRawData(1, 1)
+    const chapter2Raw = await collectChapterContextRawData(1, 2)
 
-    expect(raw.mentionedCharacters).toContain('角色45')
-    expect(raw.mentionedItems).toContain('物品45')
-    expect(raw.mentionedLocations).toContain('地点45')
-    expect(raw.mentionedFactions).toContain('势力12')
-    expect(raw.contextParts.characterStates).toContain('角色45')
-    expect(raw.contextParts.itemSummary).toContain('物品45')
-    expect(raw.contextParts.mapSummary).toContain('地点45')
-    expect(raw.contextParts.worldRules).toContain('势力12')
-    expect(tableReadCounts.get(characters)).toBe(1)
-    expect(tableReadCounts.get(storyItems)).toBe(1)
-    expect(tableReadCounts.get(worldMap)).toBe(1)
-    expect(tableReadCounts.get(factions)).toBe(1)
-    expect(tableReadCounts.get(storyThreads)).toBe(1)
-    expect(createFactionCatalog).toHaveBeenCalledTimes(1)
-    expect(listForeshadowLedgerByIds).toHaveBeenCalledTimes(1)
-    expect(getWorldStateContextSnapshot).toHaveBeenCalledTimes(1)
+    for (const raw of [chapter1Raw, chapter2Raw]) {
+      expect(raw.mentionedCharacters).toContain('角色45')
+      expect(raw.mentionedItems).toContain('物品45')
+      expect(raw.mentionedLocations).toContain('地点45')
+      expect(raw.mentionedFactions).toContain('势力12')
+      expect(raw.contextParts.characterStates).toContain('角色45')
+      expect(raw.contextParts.itemSummary).toContain('物品45')
+      expect(raw.contextParts.mapSummary).toContain('地点45')
+      expect(raw.contextParts.worldRules).toContain('势力12')
+    }
+    expect(tableReadCounts.get(characters)).toBe(4)
+    expect(tableReadCounts.get(storyItems)).toBe(4)
+    expect(tableReadCounts.get(worldMap)).toBe(4)
+    expect(tableReadCounts.get(factions)).toBe(4)
+    expect(tableReadCounts.get(characterRelations)).toBe(4)
+    expect(tableReadCounts.get(storyThreads)).toBe(2)
+    expect(createFactionCatalog).toHaveBeenCalledTimes(2)
+    expect(listForeshadowLedgerByIds).toHaveBeenCalledTimes(2)
+    expect(getWorldStateContextSnapshot).toHaveBeenCalledTimes(2)
 
     vi.mocked(buildCharacterContextCards).mockReset()
     vi.mocked(buildCharacterContextCards).mockReturnValue([])

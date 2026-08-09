@@ -77,6 +77,13 @@ import {
 import { loadTimelineContextEventIds } from './context-timeline-projection'
 import { loadChapterThreadContextProjection } from './context-thread-projection'
 import {
+  loadChapterEntityMentionCatalogs,
+  loadProjectedChapterEntityRows,
+  resolveChapterEntityContextProjection,
+  type CharacterMentionCatalogRow,
+  type LocationMentionCatalogRow,
+} from './context-entity-projection'
+import {
   buildEmptyRecallDiagnostics,
   compactRecallLine,
   containsAny,
@@ -2067,13 +2074,15 @@ function buildHistoricalGroundingSummary(input: {
 }
 
 function getCanonicalProtagonist(
-  allCharacters: Array<typeof characters.$inferSelect>,
-): typeof characters.$inferSelect | null {
+  allCharacters: Array<Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'>>,
+): Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'> | null {
   return allCharacters.find((character) =>
     character.roleType === 'protagonist' && Boolean(character.fullName?.trim())) || null
 }
 
-function buildProtagonistPolicy(allCharacters: Array<typeof characters.$inferSelect>) {
+function buildProtagonistPolicy(
+  allCharacters: Array<Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'>>,
+) {
   const protagonist = getCanonicalProtagonist(allCharacters)
   const protagonistName = protagonist?.fullName?.trim() || ''
 
@@ -2131,13 +2140,16 @@ function buildCharacterStates(
   allCharacters: Array<typeof characters.$inferSelect>,
   recentChapters: ChapterWithContinuity[],
   mentionedNames?: Set<string>,
+  relationRowsOverride?: Array<typeof characterRelations.$inferSelect>,
 ): string {
   if (allCharacters.length === 0) return ''
   const db = getDb()
   const novelId = allCharacters[0]?.novelId
-  const relationRows = typeof novelId === 'number'
-    ? db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
-    : []
+  const relationRows = relationRowsOverride || (
+    typeof novelId === 'number'
+      ? db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+      : []
+  )
   const dialogueHintMap = typeof novelId === 'number' ? getCharacterDialogueHintMap(novelId) : undefined
   const stateHintMap = typeof novelId === 'number'
     ? getCharacterStateContextHintMap(novelId, {
@@ -2463,9 +2475,9 @@ function buildTimelineContext(
   novelId: number,
   chapterNum: number,
   currentArcId: number | null | undefined,
-  characterRows: Array<typeof characters.$inferSelect>,
+  characterRows: Array<Pick<CharacterMentionCatalogRow, 'id' | 'fullName'>>,
   arcRows: Array<typeof storyArcs.$inferSelect>,
-  mapRows: Array<typeof worldMap.$inferSelect>,
+  mapRows: Array<Pick<LocationMentionCatalogRow, 'id' | 'name'>>,
 ): { timelineSummary: string; timelineOpenThreads: string } {
   const db = getDb()
   const selectedEventIds = loadTimelineContextEventIds(
@@ -3217,7 +3229,7 @@ function loadStoryThreadRowsByIds(
 
 function buildStoryProfileFromSourceRows(
   novel: typeof novels.$inferSelect,
-  allCharacters: Array<typeof characters.$inferSelect>,
+  allCharacters: Array<Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'>>,
   threadRows: Array<typeof storyThreads.$inferSelect>,
 ): StoryProfile {
   const db = getDb()
@@ -3381,12 +3393,9 @@ export async function collectChapterContextRawData(
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
-  const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
-  const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+  const entityCatalogs = loadChapterEntityMentionCatalogs(novelId)
   const profileThreadRows = loadStoryProfileThreadRows(novel)
-  const profile = buildStoryProfileFromSourceRows(novel, allCharacters, profileThreadRows)
+  const profile = buildStoryProfileFromSourceRows(novel, entityCatalogs.characters, profileThreadRows)
   const chapterCount = getNovelChapterCount(novelId)
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentChapterBase = db.select().from(chapters)
@@ -3408,7 +3417,7 @@ export async function collectChapterContextRawData(
   const worldRules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const maxMapDepth = Math.max(
     ...worldRules.mapBlueprint.levels.map((level) => level.depth),
-    ...allLocations.map((location) => Number(location.level || 0)),
+    entityCatalogs.maxMapDepth,
     1,
   )
   const chapterGoalPreview = [
@@ -3457,26 +3466,22 @@ export async function collectChapterContextRawData(
     launchMode: novel.launchMode,
     settingsJson: novel.settingsJson,
     mapDepth: maxMapDepth,
-    factionCount: Math.max(worldRules.factionSystem.length, factionRows.length),
-    speciesCount: Math.max(
-      worldRules.speciesSystem.length,
-      new Set(allCharacters.map((character) => character.species).filter(Boolean)).size,
-    ),
+    factionCount: Math.max(worldRules.factionSystem.length, entityCatalogs.factions.length),
+    speciesCount: Math.max(worldRules.speciesSystem.length, entityCatalogs.speciesCount),
     powerSystemCount: worldRules.powerSystems.length,
   })
-  const characterMentionCandidates = buildCharacterMentionCandidates(allCharacters)
-  const itemMentionCandidates = buildItemMentionCandidates(allItems)
-  const locationMentionCandidates = buildLocationMentionCandidates(allLocations)
-  const factionMentionCandidates = buildFactionMentionCandidates(factionRows)
-  const characterNameById = new Map(allCharacters.map((character) => [character.id, character.fullName || '']))
-  const locationNameById = new Map(allLocations.map((location) => [location.id, location.name || '']))
-  const factionCatalog = createFactionCatalog(factionRows)
+  const characterMentionCandidates = buildCharacterMentionCandidates(entityCatalogs.characters)
+  const itemMentionCandidates = buildItemMentionCandidates(entityCatalogs.items)
+  const locationMentionCandidates = buildLocationMentionCandidates(entityCatalogs.locations)
+  const factionMentionCandidates = buildFactionMentionCandidates(entityCatalogs.factions)
+  const characterNameById = new Map(entityCatalogs.characters.map((character) => [character.id, character.fullName || '']))
+  const locationNameById = new Map(entityCatalogs.locations.map((location) => [location.id, location.name || '']))
   const mentionedCharacterNames = new Set<string>(collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
     characterMentionCandidates,
     mentionedEntityLimits.characters,
   ))
-  const relationRowsForMention = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  const relationRowsForMention = entityCatalogs.relations
   collectRelationMentionedCharacterNames(
     chapterSignalText,
     relationRowsForMention,
@@ -3541,13 +3546,40 @@ export async function collectChapterContextRawData(
     },
   ).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
+  const previousSummaries = buildPreviousSummaryRetrievalSummary(recentChapters, {
+    signalText: chapterSignalText,
+  })
+  const entityProjection = resolveChapterEntityContextProjection(entityCatalogs, {
+    mentionedCharacterNames: [...mentionedCharacterNames],
+    mentionedItemNames,
+    mentionedLocationNames: mergedMentionedLocationNames,
+    mentionedFactionNames,
+    relationFocusText: [
+      currentChapter?.outline,
+      currentArc?.arcSummary,
+      currentArc?.arcGoal,
+      previousSummaries,
+    ].filter(Boolean).join('\n'),
+    characterLimit: mentionedEntityLimits.characters,
+    itemLimit: mentionedEntityLimits.items,
+    locationLimit: mentionedEntityLimits.locations,
+    factionLimit: factionMentionLimit,
+    relationLimit: 8,
+  })
+  const projectedEntities = loadProjectedChapterEntityRows(novelId, entityProjection)
+  const allCharacters = projectedEntities.characters
+  const allItems = projectedEntities.items
+  const allLocations = projectedEntities.locations
+  const factionRows = projectedEntities.factions
+  const relationRowsForContext = projectedEntities.relations
+  const factionCatalog = createFactionCatalog(factionRows)
   const timelineContext = buildTimelineContext(
     novelId,
     chapterNum,
     currentArc?.id,
-    allCharacters,
+    entityCatalogs.characters,
     arcs,
-    allLocations,
+    entityCatalogs.locations,
   )
   const storyMemoryRuntimePolicy = getOperatingModeRuntimePolicy({
     launchMode: novel.launchMode,
@@ -3640,10 +3672,6 @@ export async function collectChapterContextRawData(
     mentionedEntityLimits.characters,
   ).length
 
-  const previousSummaries = buildPreviousSummaryRetrievalSummary(recentChapters, {
-    signalText: chapterSignalText,
-  })
-
   const matchedCharacterRows = allCharacters.filter((character) =>
     character.fullName && mentionedCharacterNames.has(character.fullName))
   const glossaryContextSummary = buildGlossaryContextSummary(novelId, [
@@ -3669,7 +3697,7 @@ export async function collectChapterContextRawData(
     allCharacters,
     [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal, previousSummaries].filter(Boolean).join("\n"),
     8,
-    relationRowsForMention,
+    relationRowsForContext,
   )
   const dialogueVoiceLocks = formatDialogueVoiceLocksSection(getChapterDialogueVoiceLocks(novelId, {
     chapterNum,
@@ -3741,7 +3769,12 @@ export async function collectChapterContextRawData(
       mapSummary: buildMapContextSummary(allLocations, mergedMentionedLocationNames, mentionedEntityLimits.locations),
       itemSummary,
       longTermMemory,
-      characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
+      characterStates: buildCharacterStates(
+        allCharacters,
+        recentChapters,
+        mentionedCharacterNames,
+        relationRowsForContext,
+      ),
       worldStates: worldStateSnapshot.worldStatesText,
       continuitySummary: buildContinuityRetrievalSummary(continuityChapters, {
         signalText: chapterSignalText,
