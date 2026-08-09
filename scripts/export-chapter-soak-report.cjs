@@ -13,6 +13,7 @@ function parseArgs(argv) {
     modelConfigId: process.env.NOVELFORGE_SOAK_MODEL_CONFIG_ID || '',
     runId: process.env.NOVELFORGE_SOAK_RUN_ID || '',
     realModelCalled: undefined,
+    listNovels: false,
     json: false,
     help: false,
   }
@@ -21,6 +22,7 @@ function parseArgs(argv) {
     const readValue = (prefix) => arg.startsWith(prefix) ? arg.slice(prefix.length) : argv[index + 1]
     if (arg === '--help' || arg === '-h') options.help = true
     if (arg === '--json') options.json = true
+    if (arg === '--list-novels') options.listNovels = true
     if (arg === '--real-model-called') options.realModelCalled = true
     if (arg === '--no-real-model-called') options.realModelCalled = false
     if (arg.startsWith('--db=')) options.dbPath = path.resolve(process.cwd(), readValue('--db='))
@@ -57,10 +59,12 @@ function parseArgs(argv) {
 function printHelp() {
   console.log([
     'Usage:',
+    '  node scripts/export-chapter-soak-report.cjs --db path/to/novelforge.db --list-novels --json',
     '  node scripts/export-chapter-soak-report.cjs --db path/to/novelforge.db --novelId 1 --out .tmp-tests/real-report.json',
     '  node scripts/export-chapter-soak-report.cjs --input path/to/run-status.json --real-model-called --provider openai --model gpt-5 --run-id nightly-001 --out .tmp-tests/real-report.json',
     '',
     'Options:',
+    '  --list-novels       List read-only project scale and continuity coverage before selecting a run.',
     '  --input <path>      Optional JSON run status/report to normalize without opening SQLite.',
     '  --taskId <id>        Optional chapter_batch_generate or chapter_write task id to scope the report.',
     '  --task-id <id>       Alias for --taskId.',
@@ -89,12 +93,14 @@ function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'))
 }
 
-function openReadonlyDb(dbPath) {
-  let Database
-  try {
-    Database = require('better-sqlite3')
-  } catch (error) {
-    throw new Error(`Cannot load better-sqlite3. Use --input=<json> or run in the Electron-compatible runtime. ${error.message}`)
+function openReadonlyDb(dbPath, DatabaseConstructor) {
+  let Database = DatabaseConstructor
+  if (!Database) {
+    try {
+      Database = require('better-sqlite3')
+    } catch (error) {
+      throw new Error(`Cannot load better-sqlite3. Use --input=<json> or run in the Electron-compatible runtime. ${error.message}`)
+    }
   }
   return new Database(dbPath, { readonly: true, fileMustExist: true })
 }
@@ -108,6 +114,74 @@ function percentile(values, pct) {
   if (sorted.length === 0) return 0
   const index = Math.min(sorted.length - 1, Math.ceil((pct / 100) * sorted.length) - 1)
   return sorted[index]
+}
+
+function listNovelInventory(db, dbPath) {
+  const rows = db.prepare(`
+    SELECT
+      novel.id,
+      novel.title,
+      novel.target_words AS targetWords,
+      novel.launch_mode AS launchMode,
+      novel.context_version AS contextVersion,
+      COUNT(chapter.id) AS chapterCount,
+      COALESCE(MAX(chapter.chapter_num), 0) AS latestChapterNum,
+      COALESCE(SUM(chapter.word_count), 0) AS totalWords,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.summary, '')) <> '' THEN 1 ELSE 0 END), 0) AS summaryChapterCount,
+      COALESCE(SUM(CASE WHEN TRIM(COALESCE(chapter.continuity_state_json, '')) <> '' THEN 1 ELSE 0 END), 0) AS continuityChapterCount,
+      (
+        SELECT COUNT(*)
+        FROM tasks AS task
+        WHERE task.novel_id = novel.id
+          AND task.type = 'chapter_write'
+          AND task.runner_type = 'workflow'
+          AND task.parent_task_id IS NULL
+      ) AS chapterTaskCount,
+      (
+        SELECT COUNT(*)
+        FROM tasks AS task
+        WHERE task.novel_id = novel.id
+          AND task.type = 'chapter_write'
+          AND task.runner_type = 'workflow'
+          AND task.parent_task_id IS NULL
+          AND task.status = 'success'
+      ) AS successfulChapterTaskCount
+    FROM novels AS novel
+    LEFT JOIN chapters AS chapter
+      ON chapter.novel_id = novel.id
+    GROUP BY novel.id
+    ORDER BY chapterCount DESC, novel.id ASC
+  `).all()
+
+  return {
+    mode: 'novel-inventory',
+    invokedAt: new Date().toISOString(),
+    source: {
+      dbPath,
+      readonly: true,
+    },
+    novels: rows.map((row) => {
+      const chapterCount = Number(row.chapterCount || 0)
+      const summaryChapterCount = Number(row.summaryChapterCount || 0)
+      const continuityChapterCount = Number(row.continuityChapterCount || 0)
+      return {
+        id: Number(row.id),
+        title: row.title || '',
+        targetWords: Number(row.targetWords || 0),
+        launchMode: row.launchMode || '',
+        contextVersion: Number(row.contextVersion || 1),
+        chapterCount,
+        latestChapterNum: Number(row.latestChapterNum || 0),
+        totalWords: Number(row.totalWords || 0),
+        summaryChapterCount,
+        continuityChapterCount,
+        summaryCoverageRate: chapterCount > 0 ? summaryChapterCount / chapterCount : 0,
+        continuityCoverageRate: chapterCount > 0 ? continuityChapterCount / chapterCount : 0,
+        chapterTaskCount: Number(row.chapterTaskCount || 0),
+        successfulChapterTaskCount: Number(row.successfulChapterTaskCount || 0),
+      }
+    }),
+  }
 }
 
 function truthyContent(value) {
@@ -287,6 +361,7 @@ function buildReport(db, options) {
       chapterTaskIds: rootTasks.map((row) => row.id),
     },
     metrics: {
+      observed: true,
       requestedChapters,
       completedChapters,
       failedChapters,
@@ -324,6 +399,13 @@ function normalizeInputReport(raw, options) {
       },
       metrics: {
         ...raw.metrics,
+        observed: raw.metrics.observed === true || (
+          raw.metrics.observed !== false
+          && raw.metrics.completedChapters !== null
+          && raw.metrics.completedChapters !== undefined
+          && raw.metrics.successRate !== null
+          && raw.metrics.successRate !== undefined
+        ),
         pipelineRolesCovered: Array.isArray(raw.metrics.pipelineRolesCovered)
           ? raw.metrics.pipelineRolesCovered
           : ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize'],
@@ -368,6 +450,7 @@ function normalizeInputReport(raw, options) {
       exportedAt: new Date().toISOString(),
     },
     metrics: {
+      observed: chapters.length > 0,
       requestedChapters,
       completedChapters: completed.length,
       failedChapters: failed.length,
@@ -417,10 +500,22 @@ function runCli() {
   }
   if (!options.dbPath) throw new Error('Missing --db path or NOVELFORGE_DB_PATH')
   if (!fs.existsSync(options.dbPath)) throw new Error(`Database file not found: ${options.dbPath}`)
-  if (!options.novelId && !options.taskId) throw new Error('Provide --novelId or --taskId')
+  if (!options.listNovels && !options.novelId && !options.taskId) {
+    throw new Error('Provide --list-novels, --novelId, or --taskId')
+  }
 
   const db = openReadonlyDb(options.dbPath)
   try {
+    if (options.listNovels) {
+      const inventory = listNovelInventory(db, options.dbPath)
+      writeReport(options.outPath, inventory)
+      if (options.json || !options.outPath) {
+        console.log(JSON.stringify(inventory, null, 2))
+      } else {
+        console.log(`novel inventory exported: ${path.relative(process.cwd(), options.outPath)}`)
+      }
+      return
+    }
     const report = buildReport(db, options)
     writeReport(options.outPath, report)
     if (options.json || !options.outPath) {
@@ -451,7 +546,19 @@ async function main() {
   runCli()
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exitCode = 1
-})
+const invokedAsCli = require.main === module
+  || process.argv.slice(1).some((arg) => path.resolve(arg) === __filename)
+
+if (invokedAsCli) {
+  main().catch((error) => {
+    console.error(error)
+    process.exitCode = 1
+  })
+}
+
+module.exports = {
+  listNovelInventory,
+  normalizeInputReport,
+  openReadonlyDb,
+  parseArgs,
+}

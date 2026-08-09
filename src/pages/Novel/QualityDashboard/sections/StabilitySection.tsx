@@ -153,6 +153,8 @@ function RecallReliabilityPanel({
             <Tag color={summary.fallbackHitCount > 0 ? 'warning' : 'success'}>{`兜底 ${summary.fallbackHitCount}`}</Tag>
             <Tag color="cyan">{`可用 ${summary.recallAvailabilityRate}%`}</Tag>
             <Tag color="geekblue">{`桶覆盖 ${summary.bucketCoverageRate}%`}</Tag>
+            <Tag color="purple">{`语义资产 ${summary.selectedSemanticAssetCount}/${summary.semanticAssetHitCount}`}</Tag>
+            <Tag>{`章节片段 ${summary.selectedChapterSourceCount}/${summary.chapterSourceHitCount}`}</Tag>
             <Tag>{`上章 ${summary.previousChapterFeedCoverageRate}%`}</Tag>
           </div>
         </div>
@@ -168,6 +170,7 @@ function RecallReliabilityPanel({
                 <div className="quality-dashboard-page__body-copy--tiny">第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
                 <div className="quality-dashboard-page__body-copy--strong">可用率 {volume.recallAvailabilityRate}% · 平均命中 {volume.averageHitCount} · 召回桶 {volume.bucketCoverageRate}%</div>
                 <div className="quality-dashboard-page__body-copy--strong">依赖率 {volume.recallDependencyRate}% · 过期 {volume.staleRecallCount} · 过期率 {volume.staleRecallRate}%</div>
+                <div className="quality-dashboard-page__body-copy--strong">语义资产 {volume.selectedSemanticAssetCount}/{volume.semanticAssetHitCount} · 章节片段 {volume.selectedChapterSourceCount}/{volume.chapterSourceHitCount}</div>
                 <div className="quality-dashboard-page__body-copy--strong">降级 {volume.degradedChapterCount} 章{volume.latestFallbackReason ? ` · 最近原因 ${volume.latestFallbackReason}` : ''}</div>
                 <div className="quality-dashboard-page__body-copy--strong">上章先验覆盖 {volume.previousChapterFeedCoverageRate}% · 平均 {volume.previousChapterFeedChars} 字</div>
               </div>

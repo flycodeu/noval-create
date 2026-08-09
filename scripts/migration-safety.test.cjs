@@ -248,6 +248,184 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'chapter_embeddings').has('context_version'))
   assert.ok(getColumns(db, 'chapter_embeddings').has('visibility'))
   assert.ok(db.prepare('PRAGMA index_list(chapter_embeddings)').all().some((row) => row.name === 'idx_chapter_embeddings_profile'))
+  assert.ok(db.prepare('PRAGMA index_list(story_threads)').all().some((row) => row.name === 'idx_story_threads_context_due'))
+  assert.ok(db.prepare('PRAGMA index_list(foreshadow_ledger)').all().some((row) => row.name === 'idx_foreshadow_ledger_thread'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('source_type'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('fragment_key'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('embedding_profile'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('source_hash'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('source_chapter_start'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('source_chapter_end'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('valid_from_chapter'))
+  assert.ok(getColumns(db, 'semantic_memory_entries').has('valid_to_chapter'))
+  assert.ok(db.prepare('PRAGMA index_list(semantic_memory_entries)').all().some((row) => row.name === 'idx_semantic_memory_source_fragment'))
+  assert.ok(db.prepare('PRAGMA index_list(semantic_memory_entries)').all().some((row) => row.name === 'idx_semantic_memory_profile'))
+  assert.ok(getColumns(db, 'semantic_memory_outbox').has('source_type'))
+  assert.ok(getColumns(db, 'semantic_memory_outbox').has('revision'))
+  assert.ok(getColumns(db, 'semantic_memory_outbox').has('available_at'))
+  assert.ok(getColumns(db, 'semantic_memory_outbox').has('last_error'))
+  assert.ok(db.prepare('PRAGMA index_list(semantic_memory_outbox)').all().some((row) => row.name === 'idx_semantic_memory_outbox_source'))
+  assert.ok(db.prepare('PRAGMA index_list(semantic_memory_outbox)').all().some((row) => row.name === 'idx_semantic_memory_outbox_pending'))
+  assert.ok(db.prepare(`
+    SELECT 1
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'semantic_memory_fts'
+  `).get())
+  const semanticTriggers = new Set(db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger' AND name LIKE '%_semantic_%'
+  `).all().map((row) => row.name))
+  assert.ok(semanticTriggers.has('trg_characters_semantic_insert'))
+  assert.ok(semanticTriggers.has('trg_world_map_semantic_update'))
+  assert.ok(semanticTriggers.has('trg_story_items_semantic_delete'))
+  assert.ok(semanticTriggers.has('trg_story_threads_semantic_update'))
+  assert.ok(semanticTriggers.has('trg_timeline_events_semantic_insert'))
+  assert.ok(semanticTriggers.has('trg_semantic_memory_fts_insert'))
+  assert.ok(semanticTriggers.has('trg_semantic_memory_fts_update'))
+  assert.ok(semanticTriggers.has('trg_semantic_memory_fts_delete'))
+}
+
+function assertSemanticMemoryOutboxBehavior(db) {
+  const novelId = Number(db.prepare(`
+    INSERT INTO novels (title, context_version)
+    VALUES ('Outbox Test', 7)
+  `).run().lastInsertRowid)
+  const characterId = Number(db.prepare(`
+    INSERT INTO characters (novel_id, full_name)
+    VALUES (?, '沈砚')
+  `).run(novelId).lastInsertRowid)
+  const itemId = Number(db.prepare(`
+    INSERT INTO story_items (novel_id, item_name, owner_character_id)
+    VALUES (?, '药箱', ?)
+  `).run(novelId, characterId).lastInsertRowid)
+
+  const initialRows = db.prepare(`
+    SELECT source_type, source_id, operation, status, revision, context_version
+    FROM semantic_memory_outbox
+    WHERE novel_id = ?
+    ORDER BY source_type, source_id
+  `).all(novelId)
+  assert.deepEqual(initialRows, [
+    {
+      source_type: 'character',
+      source_id: characterId,
+      operation: 'upsert',
+      status: 'pending',
+      revision: 1,
+      context_version: 7,
+    },
+    {
+      source_type: 'item',
+      source_id: itemId,
+      operation: 'upsert',
+      status: 'pending',
+      revision: 1,
+      context_version: 7,
+    },
+  ])
+
+  db.prepare(`UPDATE characters SET full_name = '沈砚舟' WHERE id = ?`).run(characterId)
+  const revisedRows = db.prepare(`
+    SELECT source_type, source_id, revision
+    FROM semantic_memory_outbox
+    WHERE novel_id = ?
+    ORDER BY source_type, source_id
+  `).all(novelId)
+  assert.deepEqual(revisedRows, [
+    { source_type: 'character', source_id: characterId, revision: 2 },
+    { source_type: 'item', source_id: itemId, revision: 2 },
+  ])
+
+  db.prepare('DELETE FROM characters WHERE id = ?').run(characterId)
+  const deletedCharacter = db.prepare(`
+    SELECT operation, status, revision
+    FROM semantic_memory_outbox
+    WHERE novel_id = ? AND source_type = 'character' AND source_id = ?
+  `).get(novelId, characterId)
+  assert.deepEqual(deletedCharacter, {
+    operation: 'delete',
+    status: 'pending',
+    revision: 3,
+  })
+}
+
+function assertSemanticMemoryFtsBehavior(db) {
+  const novelId = Number(db.prepare(`
+    INSERT INTO novels (title)
+    VALUES ('FTS Test')
+  `).run().lastInsertRowid)
+  const insert = db.prepare(`
+    INSERT INTO semantic_memory_entries (
+      novel_id, source_type, source_id, fragment_key, content_text, source_hash
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `)
+  const supplyId = Number(insert.run(
+    novelId,
+    'character',
+    9001,
+    'identity',
+    '沈砚负责北线补给线。',
+    'hash:supply',
+  ).lastInsertRowid)
+  insert.run(
+    novelId,
+    'map',
+    9002,
+    'identity',
+    '旧仓库储存药品。',
+    'hash:dirty-warehouse',
+  )
+  const cleanWarehouseId = Number(insert.run(
+    novelId,
+    'map',
+    9003,
+    'identity',
+    '旧仓库改造成医疗点。',
+    'hash:clean-warehouse',
+  ).lastInsertRowid)
+
+  const matchCount = (query) => db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM semantic_memory_fts
+    WHERE semantic_memory_fts MATCH ?
+  `).get(query).count
+  assert.equal(matchCount('"补给线"'), 1)
+  assert.equal(matchCount('"旧仓库"'), 2)
+  assert.equal(matchCount('"沈砚"'), 0)
+
+  db.prepare(`
+    INSERT INTO semantic_memory_outbox (
+      novel_id, source_type, source_id, operation, status, revision
+    ) VALUES (?, 'map', 9002, 'upsert', 'pending', 1)
+  `).run(novelId)
+  const cleanWarehouseCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM semantic_memory_fts
+    INNER JOIN semantic_memory_entries AS entry
+      ON entry.id = semantic_memory_fts.rowid
+    WHERE semantic_memory_fts MATCH '"旧仓库"'
+      AND entry.novel_id = ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM semantic_memory_outbox AS dirty
+        WHERE dirty.novel_id = entry.novel_id
+          AND dirty.source_type = entry.source_type
+          AND dirty.source_id = entry.source_id
+      )
+  `).get(novelId).count
+  assert.equal(cleanWarehouseCount, 1)
+
+  db.prepare(`
+    UPDATE semantic_memory_entries
+    SET content_text = '南码头改造成医疗点。'
+    WHERE id = ?
+  `).run(cleanWarehouseId)
+  assert.equal(matchCount('"旧仓库"'), 1)
+  assert.equal(matchCount('"南码头"'), 1)
+
+  db.prepare('DELETE FROM semantic_memory_entries WHERE id = ?').run(supplyId)
+  assert.equal(matchCount('"补给线"'), 0)
 }
 
 function testFreshDbIsIdempotent() {
@@ -255,6 +433,8 @@ function testFreshDbIsIdempotent() {
   try {
     runMigrations(db)
     assertRequiredColumns(db)
+    assertSemanticMemoryOutboxBehavior(db)
+    assertSemanticMemoryFtsBehavior(db)
     const firstIds = getMigrationIds(db)
     assert.deepEqual(firstIds, [
       '0001_core_schema',
@@ -314,6 +494,10 @@ function testFreshDbIsIdempotent() {
       '0054_workflow_node_snapshots',
       '0055_embedding_provenance',
       '0056_workflow_node_retry_lineage',
+      '0057_semantic_memory_entries',
+      '0058_semantic_memory_outbox',
+      '0059_semantic_memory_fts',
+      '0060_thread_context_projection_indexes',
     ])
 
     runMigrations(db)
@@ -449,6 +633,10 @@ function testPartialSchemaCanResume() {
       '0054_workflow_node_snapshots',
       '0055_embedding_provenance',
       '0056_workflow_node_retry_lineage',
+      '0057_semantic_memory_entries',
+      '0058_semantic_memory_outbox',
+      '0059_semantic_memory_fts',
+      '0060_thread_context_projection_indexes',
     ])
 
     const configs = db.prepare(`

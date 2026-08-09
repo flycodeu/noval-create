@@ -1,5 +1,5 @@
-import { asc, desc, eq, inArray } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm'
+import { getDb, getSqlite } from '../database/db'
 import {
   chapters,
   chapterSegments,
@@ -17,6 +17,11 @@ type ChapterRow = typeof chapters.$inferSelect
 type TimelineEventRow = typeof timelineEvents.$inferSelect
 type WorldStateVersionRow = typeof worldStateVersions.$inferSelect
 type WorldStateVersionInsert = typeof worldStateVersions.$inferInsert
+
+interface WorldStateVersionProjection {
+  rows: WorldStateVersionRow[]
+  warningCount: number
+}
 
 export type WorldStateEntityType = 'character' | 'faction' | 'item' | 'relation' | 'location'
 export type WorldStateSeverity = 'info' | 'warning' | 'critical'
@@ -695,17 +700,14 @@ function collectLatestWorldStates(
     upToChapterNum?: number
     entityTypes?: WorldStateEntityType[]
   } = {},
+  stateRowsOverride?: WorldStateVersionRow[],
 ): WorldStateSummary[] {
-  const db = getDb()
-  const rows = db.select().from(worldStateVersions)
-    .where(eq(worldStateVersions.novelId, novelId))
-    .orderBy(desc(worldStateVersions.chapterNum), desc(worldStateVersions.id))
-    .all()
-    .filter((row) => options.upToChapterNum === undefined || row.chapterNum <= options.upToChapterNum)
+  const rows = stateRowsOverride || loadWorldStateVersionRows(novelId, options.upToChapterNum)
+  const filteredRows = rows
     .filter((row) => !options.entityTypes || options.entityTypes.includes(row.entityType as WorldStateEntityType))
 
   const entityStateMap = new Map<string, WorldStateVersionRow>()
-  rows.forEach((row) => {
+  filteredRows.forEach((row) => {
     const key = `${row.entityType}:${row.entityId}:${row.stateKey}`
     if (!entityStateMap.has(key)) {
       entityStateMap.set(key, row)
@@ -735,6 +737,79 @@ function collectLatestWorldStates(
     })
 }
 
+function loadWorldStateVersionRows(
+  novelId: number,
+  upToChapterNum?: number,
+): WorldStateVersionRow[] {
+  return getDb().select().from(worldStateVersions)
+    .where(typeof upToChapterNum === 'number'
+      ? and(
+        eq(worldStateVersions.novelId, novelId),
+        lte(worldStateVersions.chapterNum, upToChapterNum),
+      )
+      : eq(worldStateVersions.novelId, novelId))
+    .orderBy(desc(worldStateVersions.chapterNum), desc(worldStateVersions.id))
+    .all()
+}
+
+function loadProjectedWorldStateVersionRows(
+  novelId: number,
+  upToChapterNum: number | undefined,
+  chapterDepth: 1 | 2,
+): WorldStateVersionProjection {
+  const chapterFilter = typeof upToChapterNum === 'number'
+    ? 'AND chapter_num <= ?'
+    : ''
+  const params = typeof upToChapterNum === 'number'
+    ? [novelId, upToChapterNum, chapterDepth]
+    : [novelId, chapterDepth]
+  const rows = getSqlite().prepare(`
+    WITH ranked AS (
+      SELECT
+        id,
+        novel_id AS novelId,
+        entity_type AS entityType,
+        entity_id AS entityId,
+        entity_name AS entityName,
+        chapter_id AS chapterId,
+        chapter_num AS chapterNum,
+        state_key AS stateKey,
+        state_value AS stateValue,
+        normalized_value AS normalizedValue,
+        summary_text AS summaryText,
+        event_cause AS eventCause,
+        change_reason AS changeReason,
+        source_kind AS sourceKind,
+        source_ref AS sourceRef,
+        severity,
+        trigger_event_id AS triggerEventId,
+        source_segment_id AS sourceSegmentId,
+        state_delta_json AS stateDeltaJson,
+        created_at AS createdAt,
+        updated_at AS updatedAt,
+        DENSE_RANK() OVER (
+          PARTITION BY entity_type, entity_id, state_key
+          ORDER BY chapter_num DESC
+        ) AS chapterRank,
+        SUM(CASE WHEN severity IN ('warning', 'critical') THEN 1 ELSE 0 END) OVER () AS totalWarningCount
+      FROM world_state_versions
+      WHERE novel_id = ?
+        ${chapterFilter}
+    )
+    SELECT *
+    FROM ranked
+    WHERE chapterRank <= ?
+    ORDER BY chapterNum DESC, id DESC
+  `).all(...params) as Array<WorldStateVersionRow & {
+    totalWarningCount?: number | null
+  }>
+
+  return {
+    rows,
+    warningCount: Math.max(0, Number(rows[0]?.totalWarningCount || 0)),
+  }
+}
+
 export function listLatestWorldStates(
   novelId: number,
   options: {
@@ -743,7 +818,8 @@ export function listLatestWorldStates(
     limit?: number
   } = {},
 ): WorldStateSummary[] {
-  return collectLatestWorldStates(novelId, options).slice(0, options.limit ?? 12)
+  const projection = loadProjectedWorldStateVersionRows(novelId, options.upToChapterNum, 1)
+  return collectLatestWorldStates(novelId, options, projection.rows).slice(0, options.limit ?? 12)
 }
 
 export function listWorldStateHistory(
@@ -754,12 +830,15 @@ export function listWorldStateHistory(
   limit = 12,
 ): WorldStateVersionRow[] {
   return getDb().select().from(worldStateVersions)
-    .where(eq(worldStateVersions.novelId, novelId))
+    .where(and(
+      eq(worldStateVersions.novelId, novelId),
+      eq(worldStateVersions.entityType, entityType),
+      eq(worldStateVersions.entityId, entityId),
+      ...(stateKey ? [eq(worldStateVersions.stateKey, stateKey)] : []),
+    ))
     .orderBy(desc(worldStateVersions.chapterNum), desc(worldStateVersions.id))
+    .limit(Math.max(1, Math.round(limit || 1)))
     .all()
-    .filter((row) => row.entityType === entityType && row.entityId === entityId)
-    .filter((row) => !stateKey || row.stateKey === stateKey)
-    .slice(0, limit)
 }
 
 function hasExplicitCause(row: WorldStateVersionRow): boolean {
@@ -790,9 +869,13 @@ function detectWorldStateDrift(history: WorldStateVersionRow[]): WorldStateAlert
   }
 }
 
-function buildConflictAlerts(novelId: number, upToChapterNum?: number): WorldStateAlert[] {
+function buildConflictAlerts(
+  novelId: number,
+  upToChapterNum?: number,
+  latestStatesOverride?: WorldStateSummary[],
+): WorldStateAlert[] {
   const db = getDb()
-  const latestStates = collectLatestWorldStates(novelId, { upToChapterNum })
+  const latestStates = latestStatesOverride || collectLatestWorldStates(novelId, { upToChapterNum })
   const summaryByEntity = new Map(latestStates.map((item) => [`${item.entityType}:${item.entityId}`, item] as const))
   const result: WorldStateAlert[] = []
 
@@ -875,13 +958,10 @@ function collectWorldStateAlerts(
   options: {
     upToChapterNum?: number
   } = {},
+  stateRowsOverride?: WorldStateVersionRow[],
+  latestStatesOverride?: WorldStateSummary[],
 ): WorldStateAlert[] {
-  const db = getDb()
-  const rows = db.select().from(worldStateVersions)
-    .where(eq(worldStateVersions.novelId, novelId))
-    .orderBy(desc(worldStateVersions.chapterNum), desc(worldStateVersions.id))
-    .all()
-    .filter((row) => options.upToChapterNum === undefined || row.chapterNum <= options.upToChapterNum)
+  const rows = stateRowsOverride || loadWorldStateVersionRows(novelId, options.upToChapterNum)
 
   const groupedByEntityState = new Map<string, WorldStateVersionRow[]>()
   rows.forEach((row) => {
@@ -894,7 +974,12 @@ function collectWorldStateAlerts(
   const drifts = [...groupedByEntityState.values()]
     .map((history) => detectWorldStateDrift(history))
     .filter((item): item is WorldStateAlert => Boolean(item))
-  const conflicts = buildConflictAlerts(novelId, options.upToChapterNum)
+  const latestStates = latestStatesOverride || collectLatestWorldStates(
+    novelId,
+    { upToChapterNum: options.upToChapterNum },
+    rows,
+  )
+  const conflicts = buildConflictAlerts(novelId, options.upToChapterNum, latestStates)
 
   return [...drifts, ...conflicts]
     .sort((left, right) => {
@@ -913,30 +998,43 @@ export function listWorldStateAlerts(
     limit?: number
   } = {},
 ): WorldStateAlert[] {
-  return collectWorldStateAlerts(novelId, options).slice(0, options.limit ?? 8)
+  const projection = loadProjectedWorldStateVersionRows(novelId, options.upToChapterNum, 2)
+  return collectWorldStateAlerts(
+    novelId,
+    options,
+    projection.rows,
+  ).slice(0, options.limit ?? 8)
 }
 
-export function getWorldStateTrendSummary(
+function buildWorldStateTrendSummary(
   novelId: number,
   options: {
     upToChapterNum?: number
   } = {},
+  stateRowsOverride?: WorldStateVersionRow[],
+  alertsOverride?: WorldStateAlert[],
 ): {
   trend: WorldStateTrendPoint[]
   summaryLines: string[]
 } {
   const db = getDb()
   const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
+    .where(typeof options.upToChapterNum === 'number'
+      ? and(
+        eq(chapters.novelId, novelId),
+        lte(chapters.chapterNum, options.upToChapterNum),
+      )
+      : eq(chapters.novelId, novelId))
     .orderBy(asc(chapters.chapterNum))
     .all()
-    .filter((chapter) => options.upToChapterNum === undefined || chapter.chapterNum <= options.upToChapterNum)
-  const alerts = collectWorldStateAlerts(novelId, { upToChapterNum: options.upToChapterNum })
-  const warningRows = db.select().from(worldStateVersions)
-    .where(eq(worldStateVersions.novelId, novelId))
-    .all()
+  const stateRows = stateRowsOverride || loadWorldStateVersionRows(novelId, options.upToChapterNum)
+  const alerts = alertsOverride || collectWorldStateAlerts(
+    novelId,
+    { upToChapterNum: options.upToChapterNum },
+    stateRows,
+  )
+  const warningRows = stateRows
     .filter((row) => row.severity === 'warning' || row.severity === 'critical')
-    .filter((row) => options.upToChapterNum === undefined || row.chapterNum <= options.upToChapterNum)
 
   const driftByChapter = new Map<number, number>()
   const conflictByChapter = new Map<number, number>()
@@ -957,11 +1055,27 @@ export function getWorldStateTrendSummary(
     warningCount: warningByChapter.get(chapter.chapterNum) || 0,
   }))
 
-  const summaryLines = alerts
-    .slice(0, 6)
-    .map((alert) => `第${alert.chapterNum}章 · ${alert.summary}`)
+  const summaryLines = buildWorldStateTrendSummaryLines(alerts)
 
   return { trend, summaryLines }
+}
+
+export function getWorldStateTrendSummary(
+  novelId: number,
+  options: {
+    upToChapterNum?: number
+  } = {},
+): {
+  trend: WorldStateTrendPoint[]
+  summaryLines: string[]
+} {
+  return buildWorldStateTrendSummary(novelId, options)
+}
+
+function buildWorldStateTrendSummaryLines(alerts: WorldStateAlert[]): string[] {
+  return alerts
+    .slice(0, 6)
+    .map((alert) => `第${alert.chapterNum}章 · ${alert.summary}`)
 }
 
 function createTrackedByTypeCounter(): Record<WorldStateEntityType, number> {
@@ -974,7 +1088,7 @@ function createTrackedByTypeCounter(): Record<WorldStateEntityType, number> {
 function buildWorldStateLedgerOverview(
   states: WorldStateSummary[],
   alerts: WorldStateAlert[],
-  trend: WorldStateTrendPoint[],
+  warningCount: number,
 ): WorldStateLedgerOverview {
   const trackedByType = createTrackedByTypeCounter()
   states.forEach((state) => {
@@ -992,7 +1106,7 @@ function buildWorldStateLedgerOverview(
     trackedByType,
     driftAlertCount: alerts.filter((alert) => alert.alertType === 'drift').length,
     conflictAlertCount: alerts.filter((alert) => alert.alertType === 'conflict').length,
-    warningCount: trend.reduce((sum, point) => sum + point.warningCount, 0),
+    warningCount,
     criticalCount: alerts.filter((alert) => alert.severity === 'critical').length,
     conflictEntityCount: conflictEntities.size,
     recentConflictEntities: dedupeStrings(
@@ -1057,15 +1171,26 @@ export function getWorldStateLedgerSnapshot(
     entityLimit?: number
     alertLimit?: number
     conflictEntityLimit?: number
+    includeTrend?: boolean
   } = {},
 ): WorldStateLedgerSnapshot {
-  const allStates = collectLatestWorldStates(novelId, {
-    upToChapterNum: options.upToChapterNum,
-    entityTypes: options.entityTypes,
-  })
+  const includeTrend = options.includeTrend !== false
+  const projection = includeTrend
+    ? null
+    : loadProjectedWorldStateVersionRows(novelId, options.upToChapterNum, 2)
+  const stateRows = projection?.rows || loadWorldStateVersionRows(novelId, options.upToChapterNum)
+  const allStates = collectLatestWorldStates(
+    novelId,
+    {
+      upToChapterNum: options.upToChapterNum,
+      entityTypes: options.entityTypes,
+    },
+    stateRows,
+  )
   const allAlerts = collectWorldStateAlerts(novelId, {
     upToChapterNum: options.upToChapterNum,
-  }).filter((alert) => !options.entityTypes || options.entityTypes.includes(alert.entityType))
+  }, stateRows, allStates)
+    .filter((alert) => !options.entityTypes || options.entityTypes.includes(alert.entityType))
   const alertsByEntity = allAlerts.reduce<Map<string, WorldStateAlert[]>>((result, alert) => {
     const key = `${alert.entityType}:${alert.entityId}`
     const current = result.get(key) || []
@@ -1086,18 +1211,47 @@ export function getWorldStateLedgerSnapshot(
   const filteredAlerts = allAlerts.slice(0, options.alertLimit ?? 8)
   const conflictEntities = buildWorldStateLedgerConflictEntities(entities, allAlerts)
     .slice(0, options.conflictEntityLimit ?? 8)
-  const trendSummary = getWorldStateTrendSummary(novelId, { upToChapterNum: options.upToChapterNum })
-  const overview = buildWorldStateLedgerOverview(allStates, allAlerts, trendSummary.trend)
+  const trendSummary = includeTrend
+    ? buildWorldStateTrendSummary(
+      novelId,
+      { upToChapterNum: options.upToChapterNum },
+      stateRows,
+      allAlerts,
+    )
+    : {
+        trend: [],
+        summaryLines: buildWorldStateTrendSummaryLines(allAlerts),
+      }
+  const warningCount = projection?.warningCount ?? stateRows
+    .filter((row) => row.severity === 'warning' || row.severity === 'critical')
+    .length
+  const overview = buildWorldStateLedgerOverview(allStates, allAlerts, warningCount)
+  const triggerEventIds = [...new Set(filteredEntities
+    .map((entity) => entity.triggerEventId)
+    .filter((id): id is number => typeof id === 'number'))]
   const eventMap = new Map(
-    getDb().select().from(timelineEvents)
-      .where(eq(timelineEvents.novelId, novelId))
-      .all()
+    (triggerEventIds.length > 0
+      ? getDb().select().from(timelineEvents)
+        .where(and(
+          eq(timelineEvents.novelId, novelId),
+          inArray(timelineEvents.id, triggerEventIds),
+        ))
+        .all()
+      : [])
       .map((row) => [row.id, row] as const),
   )
+  const sourceSegmentIds = [...new Set(filteredEntities
+    .map((entity) => entity.sourceSegmentId)
+    .filter((id): id is number => typeof id === 'number'))]
   const segmentMap = new Map(
-    getDb().select().from(chapterSegments)
-      .where(eq(chapterSegments.novelId, novelId))
-      .all()
+    (sourceSegmentIds.length > 0
+      ? getDb().select().from(chapterSegments)
+        .where(and(
+          eq(chapterSegments.novelId, novelId),
+          inArray(chapterSegments.id, sourceSegmentIds),
+        ))
+        .all()
+      : [])
       .map((row) => [row.id, row] as const),
   )
   const worldStatesText = [
@@ -1146,6 +1300,7 @@ export function getWorldStateContextSnapshot(
     upToChapterNum: options.upToChapterNum,
     entityLimit: options.limit || 12,
     alertLimit: 6,
+    includeTrend: false,
   })
 
   return {

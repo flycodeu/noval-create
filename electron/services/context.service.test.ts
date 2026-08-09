@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
+  getSqlite: vi.fn(),
 }))
 
 vi.mock('./embedding.service', () => ({
@@ -59,8 +60,36 @@ vi.mock('./context-cards', () => ({
 }))
 
 vi.mock('./faction-reference.service', () => ({
-  buildFactionCatalog: vi.fn(() => ({ rows: [], byId: new Map() })),
-  resolveFactionRowsByReferences: vi.fn(() => []),
+  createFactionCatalog: vi.fn((rows: Array<{ id: number; name: string }>) => ({
+    rows,
+    byId: new Map(rows.map((row) => [row.id, row])),
+    byName: new Map(rows.map((row) => [row.name.replace(/\s+/g, '').toLowerCase(), row])),
+  })),
+  resolveFactionRowsFromCatalog: vi.fn((
+    catalog: {
+      byId: Map<number, { id: number; name: string }>
+      byName: Map<string, { id: number; name: string }>
+    },
+    raw?: string | null,
+  ) => {
+    if (!raw) return []
+    let values: unknown[] = []
+    try {
+      const parsed = JSON.parse(raw)
+      values = Array.isArray(parsed) ? parsed : []
+    } catch {
+      values = raw.split(/[,\n，、]/)
+    }
+    const seen = new Set<number>()
+    return values.flatMap((value) => {
+      const row = typeof value === 'number'
+        ? catalog.byId.get(value)
+        : catalog.byName.get(String(value).trim().replace(/\s+/g, '').toLowerCase())
+      if (!row || seen.has(row.id)) return []
+      seen.add(row.id)
+      return [row]
+    })
+  }),
 }))
 
 vi.mock('./dialogue-fingerprint.service', () => ({
@@ -82,7 +111,7 @@ vi.mock('./world-state.service', () => ({
 
 vi.mock('./endgame-asset.service', () => ({
   getChapterContractContext: vi.fn(() => null),
-  listForeshadowLedger: vi.fn(() => []),
+  listForeshadowLedgerByIds: vi.fn(() => []),
 }))
 
 vi.mock('./batch-workbench.service', () => ({
@@ -108,6 +137,7 @@ import {
   buildWritingContextUsageSnapshot,
   buildPreviousChapterContextFeed,
   buildContinuityRetrievalSummary,
+  buildOutlineGenerationContext,
   buildPreviousSummaryRetrievalSummary,
   formatContinuityEntry,
   collectChapterContextRawData,
@@ -116,7 +146,7 @@ import {
   resolveMentionedEntityLimits,
   selectRecentContextRows,
 } from './context.service'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import {
   antiAiRuleHits,
   chapterGateRuns,
@@ -147,9 +177,10 @@ import {
   renderCharacterCards,
   renderItemCards,
 } from './context-cards'
-import { getChapterContractContext } from './endgame-asset.service'
-import { buildFactionCatalog } from './faction-reference.service'
+import { getChapterContractContext, listForeshadowLedgerByIds } from './endgame-asset.service'
+import { createFactionCatalog } from './faction-reference.service'
 import { ensureStoryStructure } from './story-structure.service'
+import { getWorldStateContextSnapshot } from './world-state.service'
 
 afterEach(() => {
   vi.mocked(getChapterContractContext).mockReset()
@@ -166,8 +197,9 @@ afterEach(() => {
   vi.mocked(buildItemContextCards).mockReturnValue([])
   vi.mocked(renderItemCards).mockReset()
   vi.mocked(renderItemCards).mockReturnValue('')
-  vi.mocked(buildFactionCatalog).mockReset()
-  vi.mocked(buildFactionCatalog).mockReturnValue({ rows: [], byId: new Map() } as never)
+  vi.mocked(createFactionCatalog).mockClear()
+  vi.mocked(listForeshadowLedgerByIds).mockClear()
+  vi.mocked(getWorldStateContextSnapshot).mockClear()
 })
 
 function createRecallDiagnostics(): RecallDiagnostics {
@@ -316,7 +348,10 @@ function createMockSelectDb<T>(responses: T[][]) {
   }
 }
 
-function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
+function createTableAwareDbMock(
+  rowsByTable: Map<unknown, unknown[]>,
+  onTableRead?: (table: unknown) => void,
+) {
   const makeQuery = (table: unknown) => {
     const query: {
       all: () => unknown[]
@@ -331,11 +366,14 @@ function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
   }
   return {
     select: () => ({
-      from: (table: unknown) => ({
-        where: () => makeQuery(table),
-        orderBy: () => makeQuery(table),
-        all: () => rowsByTable.get(table) || [],
-      }),
+      from: (table: unknown) => {
+        onTableRead?.(table)
+        return {
+          where: () => makeQuery(table),
+          orderBy: () => makeQuery(table),
+          all: () => rowsByTable.get(table) || [],
+        }
+      },
     }),
   }
 }
@@ -343,6 +381,13 @@ function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
 describe('allocateChapterContext', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(getSqlite).mockReset()
+    vi.mocked(getSqlite).mockReturnValue({
+      prepare: () => ({
+        all: () => [],
+        get: () => ({ pressureCount: 0 }),
+      }),
+    } as never)
     vi.mocked(resolveActiveStyleFingerprint).mockReturnValue(null)
     vi.mocked(buildStyleHardGuardPromptSection).mockReturnValue('')
     vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
@@ -969,10 +1014,7 @@ describe('allocateChapterContext', () => {
       name: `势力${index + 1}`,
       notes: index === 11 ? '别名：影阁、暗阁；只在关键会合节点公开施压。' : '',
     }))
-    vi.mocked(buildFactionCatalog).mockReturnValue({
-      rows: factionRows,
-      byId: new Map(factionRows.map((row) => [row.id, row])),
-    } as never)
+    const tableReadCounts = new Map<unknown, number>()
     const outline = [
       '目标：调度所有关键据点与资源，完成多线会合。',
       characterRows.slice(0, 44).map((row) => row.fullName).join('、'),
@@ -1075,7 +1117,9 @@ describe('allocateChapterContext', () => {
       [glossary, []],
       [antiAiRuleHits, []],
       [chapterGateRuns, []],
-    ])) as never)
+    ]), (table) => {
+      tableReadCounts.set(table, (tableReadCounts.get(table) || 0) + 1)
+    }) as never)
 
     const raw = await collectChapterContextRawData(1, 520)
 
@@ -1087,6 +1131,14 @@ describe('allocateChapterContext', () => {
     expect(raw.contextParts.itemSummary).toContain('物品45')
     expect(raw.contextParts.mapSummary).toContain('地点45')
     expect(raw.contextParts.worldRules).toContain('势力12')
+    expect(tableReadCounts.get(characters)).toBe(1)
+    expect(tableReadCounts.get(storyItems)).toBe(1)
+    expect(tableReadCounts.get(worldMap)).toBe(1)
+    expect(tableReadCounts.get(factions)).toBe(1)
+    expect(tableReadCounts.get(storyThreads)).toBe(1)
+    expect(createFactionCatalog).toHaveBeenCalledTimes(1)
+    expect(listForeshadowLedgerByIds).toHaveBeenCalledTimes(1)
+    expect(getWorldStateContextSnapshot).toHaveBeenCalledTimes(1)
 
     vi.mocked(buildCharacterContextCards).mockReset()
     vi.mocked(buildCharacterContextCards).mockReturnValue([])
@@ -1442,6 +1494,45 @@ describe('allocateChapterContext', () => {
     expect(recallResult.recalledMemory).not.toContain('旧案线索仍未处理')
     expect(recallResult.recallSnapshot.retrievalUsed).toBe(true)
   })
+
+  it('merges structured semantic assets into the same bounded recall snapshot', () => {
+    const recallResult = buildRecallSnapshot(
+      [{
+        bucket: 'character',
+        hits: [],
+      }],
+      [{
+        bucket: 'character',
+        hits: [{
+          sourceType: 'character',
+          sourceId: 31,
+          fragmentKey: 'motivation',
+          content: '人物：沈砚；当前目标=守住补给线；核心恐惧=再次因误判失去同伴',
+          entityRefs: ['沈砚'],
+          similarity: 0.82,
+          searchMode: 'vector',
+          bucket: 'character',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: ['沈砚'],
+          entityValidated: true,
+        }],
+      }],
+    )
+
+    expect(recallResult.recalledMemory).toContain('守住补给线')
+    expect(recallResult.recalledMemorySources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceKind: 'semantic_asset',
+        semanticSourceType: 'character',
+        semanticSourceId: 31,
+      }),
+    ]))
+    expect(recallResult.recallDiagnostics.semanticAssetHitCount).toBe(1)
+    expect(recallResult.recallDiagnostics.selectedSemanticAssetCount).toBe(1)
+    expect(recallResult.recallSnapshot.sourceStats?.semantic_asset.selectedHitCount).toBe(1)
+  })
 })
 
 describe('buildStoryProfile source/canon grounding', () => {
@@ -1529,6 +1620,187 @@ describe('buildStoryProfile source/canon grounding', () => {
 
     await buildStoryProfile(1, { ensureStructure: false })
 
+    expect(ensureStoryStructure).not.toHaveBeenCalled()
+  })
+
+  it('bounds protagonist and active-thread reads to the profile output window', async () => {
+    const queryLogs: Array<{ table: unknown; limits: number[] }> = []
+    const threadRows = Array.from({ length: 30 }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      title: `线程${index + 1}`,
+      status: 'active',
+      sortOrder: index,
+    }))
+    const rows = new Map<unknown, unknown[]>([
+      [novels, [{
+        id: 1,
+        title: '长篇画像查询',
+        genreId: null,
+        targetWords: 120000,
+        projectBriefJson: '{}',
+        settingsJson: '{}',
+        themeVoiceJson: '{}',
+        worldRulesJson: '{}',
+      }]],
+      [characters, [{
+        id: 99,
+        novelId: 1,
+        roleType: 'protagonist',
+        fullName: '沈砚',
+      }]],
+      [storyThreads, threadRows],
+      [glossary, []],
+    ])
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({
+        from: (table: unknown) => {
+          const log = { table, limits: [] as number[] }
+          queryLogs.push(log)
+          const query = {
+            where: () => query,
+            orderBy: () => query,
+            limit: (value: number) => {
+              log.limits.push(value)
+              return query
+            },
+            all: () => rows.get(table) || [],
+          }
+          return query
+        },
+      }),
+    } as never)
+
+    const profile = await buildStoryProfile(1)
+
+    expect(profile.protagonistName).toBe('沈砚')
+    expect(profile.storyThreadsSummary).toContain('线程16')
+    expect(profile.storyThreadsSummary).not.toContain('线程17')
+    expect(queryLogs.find((entry) => entry.table === characters)?.limits).toEqual([1])
+    expect(queryLogs.find((entry) => entry.table === storyThreads)?.limits).toEqual([16])
+  })
+})
+
+describe('buildOutlineGenerationContext', () => {
+  beforeEach(() => {
+    vi.mocked(getDb).mockReset()
+    vi.mocked(ensureStoryStructure).mockReset()
+  })
+
+  it('uses bounded chapter reads while retaining continuity anchors for large projects', async () => {
+    const queryLogs: Array<{
+      table: unknown
+      selection: unknown
+      limits: number[]
+    }> = []
+    const novel = {
+      id: 1,
+      title: '超长篇查询边界',
+      genreId: null,
+      targetWords: 1000000,
+      launchMode: 'professional_longform',
+      projectBriefJson: '{}',
+      settingsJson: '{}',
+      themeVoiceJson: '{}',
+      worldRulesJson: '{}',
+    }
+    const arc = {
+      id: 8,
+      novelId: 1,
+      arcName: '终局前夜',
+      arcOrder: 12,
+      chapterStart: 2401,
+      chapterEnd: 2450,
+      arcGoal: '回收最初的失踪案',
+      arcSummary: '主角重新核对第一章留下的旧线索。',
+    }
+    const boundedChapterRows = [
+      {
+        id: 1,
+        novelId: 1,
+        chapterNum: 1,
+        title: '失踪',
+        summary: '最初的失踪案仍未解决。',
+        content: '',
+        nextChapterSeed: '',
+        continuityStateJson: JSON.stringify({
+          open_loops: ['最初的失踪案仍未解决'],
+        }),
+      },
+      {
+        id: 2399,
+        novelId: 1,
+        chapterNum: 2399,
+        title: '旧账',
+        summary: '队伍找到旧案卷宗。',
+        content: '',
+        nextChapterSeed: '',
+        continuityStateJson: '{}',
+      },
+      {
+        id: 2400,
+        novelId: 1,
+        chapterNum: 2400,
+        title: '门前',
+        summary: '主角抵达终局入口。',
+        content: '',
+        nextChapterSeed: '',
+        continuityStateJson: '{}',
+      },
+    ]
+    const rowsByTable = new Map<unknown, unknown[]>([
+      [storyArcs, [arc]],
+      [novels, [novel]],
+    ])
+
+    vi.mocked(getDb).mockReturnValue({
+      select: (selection?: unknown) => ({
+        from: (table: unknown) => {
+          const log = { table, selection, limits: [] as number[] }
+          queryLogs.push(log)
+          const query = {
+            where: () => query,
+            orderBy: () => query,
+            limit: (value: number) => {
+              log.limits.push(value)
+              return query
+            },
+            all: () => {
+              if (table === chapters && selection !== undefined) return [{ count: 2500 }]
+              if (table === chapters) return boundedChapterRows
+              return rowsByTable.get(table) || []
+            },
+          }
+          return query
+        },
+      }),
+    } as never)
+
+    const context = await buildOutlineGenerationContext(arc.id)
+    const chapterDataQueries = queryLogs.filter((entry) =>
+      entry.table === chapters && entry.selection === undefined)
+
+    expect(chapterDataQueries).toHaveLength(5)
+    expect(chapterDataQueries.every((entry) => entry.limits.length === 1)).toBe(true)
+    expect(Math.max(...chapterDataQueries.flatMap((entry) => entry.limits))).toBeLessThanOrEqual(192)
+    expect(context.continuitySummary).toContain('最初的失踪案仍未解决')
+    expect(ensureStoryStructure).toHaveBeenCalledWith(1)
+  })
+
+  it('reports a missing novel before starting outline context assembly', async () => {
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [storyArcs, [{
+        id: 9,
+        novelId: 404,
+        arcName: '悬空故事弧',
+        arcOrder: 1,
+        chapterStart: 1,
+        chapterEnd: 10,
+      }]],
+      [novels, []],
+    ])) as never)
+
+    await expect(buildOutlineGenerationContext(9)).rejects.toThrow('novel.notFound')
     expect(ensureStoryStructure).not.toHaveBeenCalled()
   })
 })

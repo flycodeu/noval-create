@@ -1326,6 +1326,48 @@ export const chapterEmbeddings = sqliteTable('chapter_embeddings', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const semanticMemoryEntries = sqliteTable('semantic_memory_entries', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  sourceType: text('source_type').notNull(),
+  sourceId: integer('source_id').notNull(),
+  fragmentKey: text('fragment_key').notNull(),
+  contentText: text('content_text').notNull(),
+  embeddingJson: text('embedding_json'),
+  modelId: text('model_id'),
+  dimensions: integer('dimensions'),
+  embeddingProfile: text('embedding_profile'),
+  sourceHash: text('source_hash').notNull(),
+  contextVersion: integer('context_version').notNull().default(1),
+  stageId: integer('stage_id').references(() => creativeStages.id, { onDelete: 'set null' }),
+  entityRefsJson: text('entity_refs_json').notNull().default('[]'),
+  visibility: text('visibility').notNull().default('canon'),
+  sourceChapterStart: integer('source_chapter_start'),
+  sourceChapterEnd: integer('source_chapter_end'),
+  validFromChapter: integer('valid_from_chapter'),
+  validToChapter: integer('valid_to_chapter'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const semanticMemoryOutbox = sqliteTable('semantic_memory_outbox', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  sourceType: text('source_type').notNull(),
+  sourceId: integer('source_id').notNull(),
+  operation: text('operation').notNull().default('upsert'),
+  status: text('status').notNull().default('pending'),
+  revision: integer('revision').notNull().default(1),
+  attempts: integer('attempts').notNull().default(0),
+  contextVersion: integer('context_version').notNull().default(1),
+  availableAt: text('available_at').default(sql`CURRENT_TIMESTAMP`),
+  lockedAt: text('locked_at'),
+  processedAt: text('processed_at'),
+  lastError: text('last_error'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 // --- Task 4: 风格学习 ---
 export const styleFingerprints = sqliteTable('style_fingerprints', {
   id: integer('id').primaryKey({ autoIncrement: true }),

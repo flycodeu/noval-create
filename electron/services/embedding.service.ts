@@ -1,26 +1,36 @@
 import { createHash } from 'node:crypto'
-import { eq, and, isNotNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, like, or } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
-import { getDefaultAdapter, getAdapterById } from './model.service'
-let embeddingPipeline: any = null;
+import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
+
+const LOCAL_EMBEDDING_MODEL_ID = 'local:Xenova/bge-small-zh-v1.5:q8'
+const REMOTE_EMBEDDING_MODEL_ID = 'text-embedding-3-small'
+const MAX_KEYWORDS = 24
+const MAX_LOOKUP_KEYWORDS = 8
+const MIN_RETRIEVAL_CANDIDATES = 64
+const MAX_RETRIEVAL_CANDIDATES = 512
+const MAX_VECTOR_CANDIDATES = 4096
+const RECENT_VECTOR_CANDIDATES = 768
+
+let embeddingPipeline: any = null
 
 async function getLocalEmbeddingPipeline() {
   if (!embeddingPipeline) {
-    const { pipeline, env } = await import('@xenova/transformers');
-    env.allowLocalModels = true;
-    env.useBrowserCache = false;
+    const { pipeline, env } = await import('@xenova/transformers')
+    env.allowLocalModels = true
+    env.useBrowserCache = false
     embeddingPipeline = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
       quantized: true,
-    });
+    })
   }
-  return embeddingPipeline;
+  return embeddingPipeline
 }
 
 async function getLocalEmbeddings(texts: string[]): Promise<number[][]> {
-  const extractor = await getLocalEmbeddingPipeline();
-  const results = await extractor(texts, { pooling: 'mean', normalize: true });
-  return results.tolist();
+  const extractor = await getLocalEmbeddingPipeline()
+  const results = await extractor(texts, { pooling: 'mean', normalize: true })
+  return results.tolist()
 }
 
 export interface SimilarFragmentHit {
@@ -44,7 +54,7 @@ export interface SimilarFragmentSearchResult {
   fallbackReason?: SimilarFragmentFallbackReason
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0
   let dot = 0
   let normA = 0
@@ -62,10 +72,13 @@ export function buildEmbeddingProfile(modelId: string | null | undefined, dimens
   return `${modelId?.trim() || 'unknown'}:${Math.max(0, Math.floor(dimensions))}`
 }
 
-export function hashEmbeddingSource(chapterId: number, contextVersion: number, fragments: Array<{ type: string; text: string }>): string {
+export function hashEmbeddingSource(
+  chapterId: number,
+  _contextVersion: number,
+  fragments: Array<{ type: string; text: string }>,
+): string {
   const payload = JSON.stringify({
     chapterId,
-    contextVersion,
     fragments: fragments.map((fragment) => ({ type: fragment.type, text: fragment.text.trim() })),
   })
   return `sha256:${createHash('sha256').update(payload).digest('hex')}`
@@ -81,24 +94,145 @@ export function isCompatibleEmbeddingRow(
     && row.dimensions === dimensions
 }
 
-function extractKeywords(text: string): string[] {
-  // Simple Chinese keyword extraction: extract unique 2-4 char segments
-  const chars = text.replace(/[^\u4e00-\u9fff]/g, '')
-  const keywords = new Set<string>()
-  for (let len = 2; len <= 4; len++) {
-    for (let i = 0; i <= chars.length - len; i++) {
-      keywords.add(chars.slice(i, i + len))
-    }
+export function extractEmbeddingKeywords(text: string, limit = MAX_KEYWORDS): string[] {
+  const chunks = text.match(/[\u3400-\u9fff]+|[a-zA-Z0-9]+/g) || []
+  const keywords: string[] = []
+  const seen = new Set<string>()
+  const add = (value: string) => {
+    const normalized = value.trim().toLowerCase()
+    if (normalized.length < 2 || seen.has(normalized)) return
+    seen.add(normalized)
+    keywords.push(normalized)
   }
-  return Array.from(keywords)
+
+  chunks.forEach((chunk) => {
+    if (/^[a-zA-Z0-9]+$/.test(chunk)) {
+      add(chunk)
+      return
+    }
+
+    if (chunk.length <= 12) add(chunk)
+    for (let size = Math.min(4, chunk.length); size >= 2; size -= 1) {
+      for (let index = 0; index <= chunk.length - size; index += 1) {
+        add(chunk.slice(index, index + size))
+        if (keywords.length >= limit) return
+      }
+    }
+  })
+
+  return keywords.slice(0, Math.max(1, limit))
 }
 
 function keywordScore(text: string, keywords: string[]): number {
   let score = 0
   for (const kw of keywords) {
-    if (text.includes(kw)) score += 1
+    if (text.toLowerCase().includes(kw)) score += Math.min(kw.length, 4)
   }
   return score
+}
+
+function keywordScoreRatio(text: string, keywords: string[]): number {
+  const maxScore = keywords.reduce((sum, keyword) => sum + Math.min(keyword.length, 4), 0)
+  return maxScore > 0 ? keywordScore(text, keywords) / maxScore : 0
+}
+
+function getCandidateLimit(topK: number): number {
+  return Math.max(
+    MIN_RETRIEVAL_CANDIDATES,
+    Math.min(MAX_RETRIEVAL_CANDIDATES, Math.max(1, Math.floor(topK)) * 32),
+  )
+}
+
+function buildTextMatch(column: typeof chapterEmbeddings.fragmentText, keywords: string[]) {
+  const matches = keywords.map((keyword) => like(column, `%${keyword}%`))
+  return matches.length === 1 ? matches[0] : or(...matches)
+}
+
+export function isUsableEmbedding(embedding: unknown): embedding is number[] {
+  return Array.isArray(embedding)
+    && embedding.length > 0
+    && embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
+}
+
+export function areUsableEmbeddings(embeddings: unknown, expectedCount: number): embeddings is number[][] {
+  if (!Array.isArray(embeddings) || embeddings.length !== expectedCount) return false
+  if (!embeddings.every(isUsableEmbedding)) return false
+  const dimensions = embeddings[0]?.length || 0
+  return dimensions > 0 && embeddings.every((embedding) => embedding.length === dimensions)
+}
+
+async function resolveRemoteEmbeddingRuntime(modelConfigId?: number): Promise<{
+  adapter: Awaited<ReturnType<typeof getAdapterById>>
+  modelId: string
+}> {
+  const config = modelConfigId
+    ? getModelConfigRecord(modelConfigId)
+    : getDefaultModelConfigRecord()
+  const resolvedConfigId = config.id
+  const adapter = await getAdapterById(resolvedConfigId)
+  const configFingerprint = createHash('sha256').update(JSON.stringify({
+    id: config.id,
+    provider: config.provider,
+    modelId: config.modelId,
+    baseUrl: config.baseUrl,
+    embeddingModel: REMOTE_EMBEDDING_MODEL_ID,
+  })).digest('hex').slice(0, 16)
+  return {
+    adapter,
+    modelId: `${adapter.id}:config:${resolvedConfigId}:${configFingerprint}:${REMOTE_EMBEDDING_MODEL_ID}`,
+  }
+}
+
+export interface EmbeddingBatchResult {
+  embeddings?: number[][]
+  modelId?: string
+  dimensions?: number
+  profile?: string
+  source: 'remote' | 'local' | 'unavailable'
+}
+
+export async function embedSemanticTexts(
+  texts: string[],
+  modelConfigId?: number,
+): Promise<EmbeddingBatchResult> {
+  if (texts.length === 0) return { source: 'unavailable' }
+
+  try {
+    const { adapter, modelId } = await resolveRemoteEmbeddingRuntime(modelConfigId)
+    if (adapter.embed) {
+      const embeddings = await adapter.embed(texts, { model: REMOTE_EMBEDDING_MODEL_ID })
+      if (areUsableEmbeddings(embeddings, texts.length)) {
+        const dimensions = embeddings[0].length
+        return {
+          embeddings,
+          modelId,
+          dimensions,
+          profile: buildEmbeddingProfile(modelId, dimensions),
+          source: 'remote',
+        }
+      }
+    }
+  } catch {
+    // Remote embeddings are optional; local embeddings remain the deterministic fallback.
+  }
+
+  try {
+    const embeddings = await getLocalEmbeddings(texts)
+    if (areUsableEmbeddings(embeddings, texts.length)) {
+      const dimensions = embeddings[0].length
+      return {
+        embeddings,
+        modelId: LOCAL_EMBEDDING_MODEL_ID,
+        dimensions,
+        profile: buildEmbeddingProfile(LOCAL_EMBEDDING_MODEL_ID, dimensions),
+        source: 'local',
+      }
+    }
+  } catch (error) {
+    console.error('Local embedding failed:', error)
+  }
+
+  return { source: 'unavailable' }
 }
 
 function clipFallbackText(text: string, maxLength = 900): string {
@@ -194,6 +328,9 @@ export async function generateChapterEmbeddings(
     .where(eq(chapters.id, chapterId))
     .all()[0]
   if (!chapter) return
+  if (chapter.novelId !== novelId) {
+    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  }
 
   const fragments: Array<{ type: string; text: string }> = []
 
@@ -229,75 +366,52 @@ export async function generateChapterEmbeddings(
   const contextVersion = chapter.contextVersion || 1
   const sourceHash = hashEmbeddingSource(chapterId, contextVersion, fragments)
 
-  const texts = fragments.map((f) => f.text)
-  let embeddings: number[][] | undefined = undefined;
-  let usedModelId: string | null = null;
+  const embeddingBatch = await embedSemanticTexts(fragments.map((fragment) => fragment.text), modelConfigId)
+  const existingRows = db.select().from(chapterEmbeddings)
+    .where(eq(chapterEmbeddings.chapterId, chapterId))
+    .all()
+  const existingByFragmentType = new Map(existingRows.map((row) => [row.fragmentType, row]))
 
-  try {
-    const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
-    if (adapter && adapter.embed) {
-      embeddings = await adapter.embed(texts)
-      usedModelId = adapter.id
-    }
-  } catch {
-    // Ignore remote adapter failure
-  }
-
-  if (!embeddings) {
-    try {
-      embeddings = await getLocalEmbeddings(texts)
-      usedModelId = 'local_bge_small_zh'
-    } catch (e) {
-      console.error('Local embedding failed:', e)
-    }
-  }
-
-  db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
-
-  if (!embeddings || embeddings.length !== fragments.length) {
-    if (embeddings && embeddings.length !== fragments.length) {
-      console.warn(`[embedding] 章节 ${chapterId} 的向量数量与片段数量不一致，降级为关键词索引。`)
-    }
-    for (const frag of fragments) {
-      db.insert(chapterEmbeddings).values({
+  db.transaction((tx) => {
+    tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
+    fragments.forEach((fragment, index) => {
+      let embedding = embeddingBatch.embeddings?.[index]
+      let modelId = embedding ? embeddingBatch.modelId : undefined
+      let dimensions = embedding ? embeddingBatch.dimensions : undefined
+      let profile = embedding ? embeddingBatch.profile : undefined
+      if (!embedding) {
+        const existing = existingByFragmentType.get(fragment.type)
+        if (existing?.sourceHash === sourceHash) {
+          try {
+            const cachedEmbedding = JSON.parse(existing.embeddingJson || '')
+            if (isUsableEmbedding(cachedEmbedding)) {
+              embedding = cachedEmbedding
+              modelId = existing.modelId || undefined
+              dimensions = existing.dimensions || undefined
+              profile = existing.embeddingProfile || undefined
+            }
+          } catch {
+            // Corrupt cached vectors are replaced by the keyword-only fragment.
+          }
+        }
+      }
+      tx.insert(chapterEmbeddings).values({
         novelId,
         chapterId,
-        fragmentType: frag.type,
-        fragmentText: frag.text,
-        embeddingJson: null,
-        modelId: null,
-        dimensions: null,
-        embeddingProfile: null,
+        fragmentType: fragment.type,
+        fragmentText: fragment.text,
+        embeddingJson: embedding ? JSON.stringify(embedding) : null,
+        modelId: embedding ? modelId : null,
+        dimensions: embedding ? dimensions || embedding.length : null,
+        embeddingProfile: embedding ? profile : null,
         sourceHash,
         contextVersion,
         stageId: null,
         entityIdsJson: null,
         visibility: 'canon',
       }).run()
-    }
-    return
-  }
-
-  for (let i = 0; i < fragments.length; i++) {
-    const frag = fragments[i]
-    const embedding = embeddings[i]
-
-    db.insert(chapterEmbeddings).values({
-      novelId,
-      chapterId,
-      fragmentType: frag.type,
-      fragmentText: frag.text,
-      embeddingJson: JSON.stringify(embedding),
-      modelId: usedModelId,
-      dimensions: embedding.length,
-      embeddingProfile: buildEmbeddingProfile(usedModelId, embedding.length),
-      sourceHash,
-      contextVersion,
-      stageId: null,
-      entityIdsJson: null,
-      visibility: 'canon',
-    }).run()
-  }
+    })
+  })
 }
 
 export async function searchSimilarFragments(
@@ -313,6 +427,7 @@ export async function searchSimilarFragments(
       eq(chapterEmbeddings.novelId, novelId),
       isNotNull(chapterEmbeddings.embeddingJson),
     ))
+    .limit(1)
     .all()
 
   if (vectorRows.length === 0) {
@@ -323,32 +438,9 @@ export async function searchSimilarFragments(
     }
   }
 
-  let queryEmbedding: number[] | undefined = undefined;
-  let queryModelId: string | null = null
-
-  try {
-    const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
-    if (adapter && adapter.embed) {
-      const result = await adapter.embed([queryText])
-      queryEmbedding = result[0]
-      queryModelId = adapter.id
-    }
-  } catch {
-    // Ignore remote adapter failure
-  }
-
-  if (!queryEmbedding) {
-    try {
-      const result = await getLocalEmbeddings([queryText])
-      queryEmbedding = result[0]
-      queryModelId = 'local_bge_small_zh'
-    } catch (e) {
-      // Ignore local embedding failure
-      console.error('Local embedding failed during search:', e)
-    }
-  }
-
-  if (!queryEmbedding) {
+  const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
+  const queryEmbedding = queryBatch.embeddings?.[0]
+  if (!queryEmbedding || !queryBatch.profile) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK)
     return {
       hits,
@@ -356,16 +448,34 @@ export async function searchSimilarFragments(
     }
   }
 
-  const queryProfile = buildEmbeddingProfile(queryModelId, queryEmbedding.length)
-  const compatibleRows = db.select().from(chapterEmbeddings)
-    .where(and(
-      eq(chapterEmbeddings.novelId, novelId),
-      eq(chapterEmbeddings.embeddingProfile, queryProfile),
-      eq(chapterEmbeddings.dimensions, queryEmbedding.length),
-      isNotNull(chapterEmbeddings.embeddingJson),
-    ))
+  const queryProfile = queryBatch.profile
+  const compatibilityFilters = [
+    eq(chapterEmbeddings.novelId, novelId),
+    eq(chapterEmbeddings.embeddingProfile, queryProfile),
+    eq(chapterEmbeddings.dimensions, queryEmbedding.length),
+    isNotNull(chapterEmbeddings.embeddingJson),
+  ] as const
+  const lookupKeywords = extractEmbeddingKeywords(queryText, MAX_LOOKUP_KEYWORDS)
+  const lexicalRows = lookupKeywords.length > 0
+    ? db.select().from(chapterEmbeddings)
+      .where(and(
+        ...compatibilityFilters,
+        buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
+      ))
+      .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+      .limit(MAX_VECTOR_CANDIDATES - RECENT_VECTOR_CANDIDATES)
+      .all()
+    : []
+  const recentRows = db.select().from(chapterEmbeddings)
+    .where(and(...compatibilityFilters))
+    .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+    .limit(RECENT_VECTOR_CANDIDATES)
     .all()
-    .filter((row) => isCompatibleEmbeddingRow(row, queryProfile, queryEmbedding.length))
+  const compatibleRows = [...new Map(
+    [...lexicalRows, ...recentRows]
+      .filter((row) => isCompatibleEmbeddingRow(row, queryProfile, queryEmbedding.length))
+      .map((row) => [row.id, row] as const),
+  ).values()].slice(0, MAX_VECTOR_CANDIDATES)
 
   if (compatibleRows.length === 0) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK)
@@ -375,15 +485,19 @@ export async function searchSimilarFragments(
     }
   }
 
-  const chapterNumById = new Map(
-    db.select({
+  const compatibleChapterIds = [...new Set(compatibleRows.map((row) => row.chapterId))]
+  const chapterNumById = compatibleChapterIds.length > 0
+    ? new Map(db.select({
       id: chapters.id,
       chapterNum: chapters.chapterNum,
     }).from(chapters)
-      .where(eq(chapters.novelId, novelId))
+      .where(and(
+        eq(chapters.novelId, novelId),
+        inArray(chapters.id, compatibleChapterIds),
+      ))
       .all()
-      .map((row) => [row.id, row.chapterNum] as const),
-  )
+      .map((row) => [row.id, row.chapterNum] as const))
+    : new Map<number, number>()
 
   const scored = compatibleRows.flatMap((e) => {
       try {
@@ -425,27 +539,41 @@ export function fallbackKeywordSearch(
   topK = 5,
 ): SimilarFragmentHit[] {
   const db = getDb()
-  const allEmbeddings = db.select().from(chapterEmbeddings)
-    .where(eq(chapterEmbeddings.novelId, novelId))
+  const keywords = extractEmbeddingKeywords(queryText)
+  const lookupKeywords = keywords.slice(0, MAX_LOOKUP_KEYWORDS)
+  const candidateLimit = getCandidateLimit(topK)
+  const embeddingFilter = lookupKeywords.length > 0
+    ? and(
+      eq(chapterEmbeddings.novelId, novelId),
+      buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
+    )
+    : eq(chapterEmbeddings.novelId, novelId)
+  const candidateEmbeddings = db.select().from(chapterEmbeddings)
+    .where(embeddingFilter)
+    .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+    .limit(candidateLimit)
     .all()
 
-  const chapterNumById = new Map(
-    db.select({
+  const candidateChapterIds = [...new Set(candidateEmbeddings.map((row) => row.chapterId))]
+  const chapterNumById = candidateChapterIds.length > 0
+    ? new Map(db.select({
       id: chapters.id,
       chapterNum: chapters.chapterNum,
     }).from(chapters)
-      .where(eq(chapters.novelId, novelId))
+      .where(and(
+        eq(chapters.novelId, novelId),
+        inArray(chapters.id, candidateChapterIds),
+      ))
       .all()
-      .map((row) => [row.id, row.chapterNum] as const),
-  )
-  const keywords = extractKeywords(queryText)
+      .map((row) => [row.id, row.chapterNum] as const))
+    : new Map<number, number>()
 
-  const candidates: SimilarFragmentHit[] = allEmbeddings.map((e) => ({
+  const candidates: SimilarFragmentHit[] = candidateEmbeddings.map((e) => ({
       chapterId: e.chapterId,
       chapterNum: chapterNumById.get(e.chapterId) || 0,
       fragmentType: e.fragmentType,
       fragmentText: e.fragmentText,
-      similarity: keywordScore(e.fragmentText, keywords) / Math.max(keywords.length, 1),
+      similarity: keywordScoreRatio(e.fragmentText, keywords),
       searchMode: 'keyword' as const,
     }))
 
@@ -454,6 +582,13 @@ export function fallbackKeywordSearch(
   // summary or embedding row yet. Keep keyword recall useful in that window by
   // deriving bounded fragments from the chapter itself; this is background
   // evidence only and does not replace hard constraints or structured state.
+  const chapterMatches = lookupKeywords.flatMap((keyword) => [
+    like(chapters.summary, `%${keyword}%`),
+    like(chapters.nextChapterSeed, `%${keyword}%`),
+    like(chapters.continuityStateJson, `%${keyword}%`),
+    like(chapters.outline, `%${keyword}%`),
+    like(chapters.content, `%${keyword}%`),
+  ])
   const chapterRows = db.select({
     id: chapters.id,
     chapterNum: chapters.chapterNum,
@@ -464,7 +599,11 @@ export function fallbackKeywordSearch(
     content: chapters.content,
   })
     .from(chapters)
-    .where(eq(chapters.novelId, novelId))
+    .where(lookupKeywords.length > 0
+      ? and(eq(chapters.novelId, novelId), or(...chapterMatches))
+      : eq(chapters.novelId, novelId))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .limit(candidateLimit)
     .all()
 
   const existingKeys = new Set(candidates.map((item) => `${item.chapterId}:${item.fragmentType}:${item.fragmentText}`))
@@ -489,7 +628,7 @@ export function fallbackKeywordSearch(
         chapterNum: chapter.chapterNum || 0,
         fragmentType: fragment.type,
         fragmentText: fragment.text,
-        similarity: keywordScore(fragment.text, keywords) / Math.max(keywords.length, 1),
+        similarity: keywordScoreRatio(fragment.text, keywords),
         searchMode: 'keyword',
       })
     })

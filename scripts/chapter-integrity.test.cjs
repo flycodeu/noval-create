@@ -41,6 +41,7 @@ async function run() {
   const { closeDb, getSqlite, initDb } = project('electron/database/db.ts')
   const novelService = project('electron/services/novel.service.ts')
   const chapterService = project('electron/services/chapter.service.ts')
+  const contextImpactService = project('electron/services/context-impact.service.ts')
   const historyService = project('electron/services/history.service.ts')
   const storyArcService = project('electron/services/story-arc.service.ts')
   const storyThreadService = project('electron/services/story-thread.service.ts')
@@ -581,6 +582,43 @@ async function run() {
     getSqlite().prepare('UPDATE novels SET context_version = context_version + 1 WHERE id = ?').run(staleResumeNovel)
     await expectCodeAsync(
       () => chapterService.resumeChapterPipeline(Number(contextResumeTask.lastInsertRowid)),
+      'chapter.pipelineContextConflict',
+    )
+
+    const rollingContextNovel = novelService.createNovel({ title: '流水线上下文 checkpoint 测试', targetWords: 10000, operatingMode: 'shortform' })
+    const rollingContextChapter = chapterService.createChapter(rollingContextNovel, { chapterNum: 1, title: 'Finalize 恢复章节' })
+    chapterService.updateChapter(rollingContextChapter, { content: 'Finalize 已持久化正文' })
+    const internalContextVersion = contextImpactService.markNovelContextChanged(
+      rollingContextNovel,
+      'Draft entities discovered from new content',
+    )
+    assert.equal(
+      contextImpactService.markChapterContextCurrent(rollingContextChapter),
+      internalContextVersion,
+      'markChapterContextCurrent must report the committed rolling context version',
+    )
+    const rollingSnapshot = {
+      kind: 'chapter_pipeline',
+      chapterId: rollingContextChapter,
+      workflowTaskId: 0,
+      status: 'failed',
+      currentRole: 'finalize',
+      currentStage: 'canonizing',
+      totalTokensUsed: 0,
+      totalDurationMs: 0,
+      roles: {},
+      lastFailureRole: 'finalize',
+      partialContent: 'Finalize 已持久化正文',
+      baseContentHash: chapterService.__testing.buildChapterContentHash('Finalize 已持久化正文'),
+      baseContextVersion: internalContextVersion,
+    }
+    assert.doesNotThrow(
+      () => chapterService.__testing.assertChapterResumeBaseCurrent(rollingContextChapter, rollingSnapshot),
+      'a workflow-owned context bump must remain resumable after the chapter is marked current',
+    )
+    contextImpactService.markNovelContextChanged(rollingContextNovel, 'World rules changed')
+    expectCode(
+      () => chapterService.__testing.assertChapterResumeBaseCurrent(rollingContextChapter, rollingSnapshot),
       'chapter.pipelineContextConflict',
     )
 

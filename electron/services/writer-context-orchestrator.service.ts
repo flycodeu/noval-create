@@ -368,9 +368,10 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const worldStateEnabled = worldStateTerms.length > 0
   const timelineEnabled = mentionedLocations.length > 0 || /\S/.test(timelineSummary)
   const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
-  const recallCharacterEnabled = mentionedCharacters.length > 0 || mentionedFactions.length > 0
-  const recallRuleEnabled = Boolean(worldStates || timelineSummary || mentionedFactions.length > 0)
-  const recallThreadEnabled = Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
+  const frozenRecall = Boolean(input.frozenRecall)
+  const recallCharacterEnabled = !frozenRecall && (mentionedCharacters.length > 0 || mentionedFactions.length > 0)
+  const recallRuleEnabled = !frozenRecall && Boolean(worldStates || timelineSummary || mentionedFactions.length > 0)
+  const recallThreadEnabled = !frozenRecall && Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
   const groundingAssessment = assessHistoricalGrounding({
     genreName: genre,
     worldRulesJson: worldRules,
@@ -465,7 +466,7 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
     buildQueryStep(
       'recall_character',
       recallCharacterEnabled,
-      recallCharacterEnabled ? '需要补充人物相关历史片段。' : '没有人物召回需求。',
+      frozenRecall ? '章节流水线已固定统一召回快照。' : recallCharacterEnabled ? '需要补充人物相关历史片段。' : '没有人物召回需求。',
       dedupe([...mentionedCharacters, ...mentionedFactions], 12),
       ['recall.search_fragments'],
       [chapterGoal, relationSummary, ...mentionedCharacters, ...mentionedFactions].filter(Boolean).join('\n'),
@@ -474,7 +475,7 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
     buildQueryStep(
       'recall_rule',
       recallRuleEnabled,
-      recallRuleEnabled ? '需要补充规则/状态相关历史片段。' : '没有规则召回需求。',
+      frozenRecall ? '章节流水线已固定统一召回快照。' : recallRuleEnabled ? '需要补充规则/状态相关历史片段。' : '没有规则召回需求。',
       dedupe([...mentionedFactions, ...extractTerms([worldStates, timelineSummary], 6)], 12),
       ['recall.search_fragments'],
       [chapterGoal, worldStates, timelineSummary, ...mentionedFactions].filter(Boolean).join('\n'),
@@ -483,7 +484,7 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
     buildQueryStep(
       'recall_thread',
       recallThreadEnabled,
-      recallThreadEnabled ? '需要补充线程/伏笔相关历史片段。' : '没有线程召回需求。',
+      frozenRecall ? '章节流水线已固定统一召回快照。' : recallThreadEnabled ? '需要补充线程/伏笔相关历史片段。' : '没有线程召回需求。',
       extractTerms([activeThreads, openLoops, dueForeshadows, chapterBridgePlan, stepMemorySummary], 6),
       ['recall.search_fragments'],
       [chapterGoal, chapterBridgePlan, stepMemorySummary, activeThreads, openLoops, dueForeshadows].filter(Boolean).join('\n'),
@@ -505,7 +506,10 @@ function buildRetrievalFingerprint(
     queryText: step.queryText,
     resultLimit: step.resultLimit,
   }))).slice(0, 16)
-  const invalidationHash = hashOf(input.invalidation || {}).slice(0, 16)
+  const invalidationHash = hashOf({
+    invalidation: input.invalidation || {},
+    frozenRecall: input.frozenRecall || null,
+  }).slice(0, 16)
   const inputs = {
     novelId: input.novelId,
     chapterId: input.chapterId,
@@ -998,6 +1002,7 @@ function renderRecallHits(
   hits: Awaited<ReturnType<typeof searchSimilarFragments>>['hits'],
 ): WriterOrchestratedRecallHit[] {
   return hits.map((hit) => ({
+    sourceKind: 'chapter',
     bucket,
     chapterId: hit.chapterId,
     chapterNum: hit.chapterNum,
@@ -1005,6 +1010,23 @@ function renderRecallHits(
     summary: hit.fragmentText,
     similarity: hit.similarity,
     searchMode: hit.searchMode,
+  }))
+}
+
+function renderFrozenRecallHits(
+  frozenRecall: NonNullable<WriterContextOrchestratorInput['frozenRecall']>,
+): WriterOrchestratedRecallHit[] {
+  return frozenRecall.recalledMemorySources.map((source) => ({
+    sourceKind: source.sourceKind,
+    bucket: source.bucket,
+    chapterId: source.chapterId,
+    chapterNum: source.chapterNum,
+    semanticSourceType: source.semanticSourceType,
+    semanticSourceId: source.semanticSourceId,
+    fragmentType: source.fragmentType,
+    summary: source.summary,
+    similarity: source.similarity,
+    searchMode: source.searchMode,
   }))
 }
 
@@ -1069,7 +1091,7 @@ function buildRenderedOverrides(
     timelineOpenThreads: '',
     worldStates: '',
     mapSummary: '',
-    recalledMemory: '',
+    recalledMemory: baseContextParts?.recalledMemory || '',
     chapterBridgePlan: baseContextParts?.chapterBridgePlan || '',
     stepMemorySummary: baseContextParts?.stepMemorySummary || '',
   }
@@ -1200,9 +1222,14 @@ function buildRenderedOverrides(
       Math.max(760, threadCharLimit),
     )
   }
-  if (recallHits.length > 0) {
+  if (recallHits.length > 0 && !result.recalledMemory) {
     result.recalledMemory = compactLines(
-      recallHits.map((hit) => `[${hit.bucket}] Ch.${hit.chapterNum} ${hit.fragmentType}：${hit.summary}`),
+      recallHits.map((hit) => {
+        const origin = hit.sourceKind === 'semantic_asset'
+          ? `${hit.semanticSourceType || 'asset'}#${hit.semanticSourceId || 0}`
+          : `Ch.${hit.chapterNum || 0}`
+        return `[${hit.bucket}] ${origin} ${hit.fragmentType}：${hit.summary}`
+      }),
       Math.max(6, runtimeLimits.maxRecallHits),
       Math.max(860, Math.min(1600, runtimeLimits.maxRecallHits * 180)),
     )
@@ -1254,13 +1281,15 @@ function buildAllocatorInputSummary(
   }
 }
 
-function createWriterToolAccumulator(): WriterToolAccumulator {
+function createWriterToolAccumulator(
+  frozenRecall?: WriterContextOrchestratorInput['frozenRecall'],
+): WriterToolAccumulator {
   return {
     characterEntries: [],
     itemEntries: [],
     mapLocationEntries: [],
     timelineEntries: [],
-    recallHits: [],
+    recallHits: frozenRecall ? renderFrozenRecallHits(frozenRecall) : [],
   }
 }
 
@@ -1666,7 +1695,7 @@ export async function resolveWriterOrchestratedContext(
     maxThreads: input.runtime?.maxThreads || 4,
     maxRecallHits: input.runtime?.maxRecallHitsPerBucket || 3,
   }
-  const accumulator = createWriterToolAccumulator()
+  const accumulator = createWriterToolAccumulator(input.frozenRecall)
   const toolContext = createWriterToolExecutionContext(input, services, runtimeLimits)
   const toolRegistry = buildWriterToolRegistry()
 
@@ -1756,6 +1785,7 @@ export async function resolveWriterOrchestratedContext(
     toolCalls,
     fallbackEvents,
     allocatorInputSummary,
+    recallSnapshot: input.frozenRecall?.recallSnapshot,
   }
 
   if (useMemoryCache) {

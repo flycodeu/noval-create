@@ -1,6 +1,7 @@
 import type { GenreWorldRules } from '../shared/genre-system'
 import type { NovelOperatingMode } from '../shared/operating-mode'
 import type { StyleStats } from '../shared/style-fingerprint-stats'
+import type { SemanticMemorySourceType } from '../shared/semantic-memory'
 import type { QualityAgentDashboardSnapshot } from '../shared/quality-agent-dashboard'
 import type {
   SubPlotDraft,
@@ -2346,9 +2347,12 @@ export interface ConstraintInjectionStatus {
 }
 
 export interface RecallMemorySource {
+  sourceKind: 'chapter' | 'semantic_asset'
   bucket: RecallBucketKey
-  chapterId: number
-  chapterNum: number
+  chapterId?: number
+  chapterNum?: number
+  semanticSourceType?: SemanticMemorySourceType
+  semanticSourceId?: number
   fragmentType: string
   similarity: number
   searchMode: RecallSearchMode
@@ -2374,6 +2378,10 @@ export interface RecallDiagnostics {
   validatedHitCount: number
   lowSimilarityRejectedCount: number
   entityValidationRejectedCount: number
+  chapterSourceHitCount?: number
+  semanticAssetHitCount?: number
+  selectedChapterSourceCount?: number
+  selectedSemanticAssetCount?: number
   minVectorSimilarity: number
   minKeywordSimilarity: number
   summaryLines: string[]
@@ -2406,6 +2414,11 @@ export interface RecallSnapshot {
   fallbackReason?: RecallFallbackReason
   assemblyStage?: 'base_recall' | 'unified_recall'
   bucketStats: Record<RecallBucketKey, RecallBucketStats>
+  sourceStats?: Record<'chapter' | 'semantic_asset', {
+    hitCount: number
+    selectedHitCount: number
+    fallbackHitCount: number
+  }>
 }
 
 export type RecallRuntimeSnapshotSource = 'runtime' | 'backfilled'
@@ -2543,6 +2556,12 @@ export interface WriterContextOrchestratorInput {
   baseContextParts?: WriterContextRenderedOverrides
   invalidation?: WriterContextOrchestratorInvalidationInput
   runtime?: WriterContextOrchestratorRuntimeOptions
+  frozenRecall?: {
+    recalledMemory: string
+    recallSnapshot: RecallSnapshot
+    recallDiagnostics: RecallDiagnostics
+    recalledMemorySources: RecallMemorySource[]
+  }
 }
 
 export interface StageToolExecutionInput {
@@ -2747,9 +2766,12 @@ export interface WriterOrchestratedSourceGroundingPack {
 export type WriterContextRecallBucket = 'character' | 'rule' | 'thread'
 
 export interface WriterOrchestratedRecallHit {
+  sourceKind?: 'chapter' | 'semantic_asset'
   bucket: WriterContextRecallBucket
-  chapterId: number
-  chapterNum: number
+  chapterId?: number
+  chapterNum?: number
+  semanticSourceType?: SemanticMemorySourceType
+  semanticSourceId?: number
   fragmentType: string
   summary: string
   similarity: number
@@ -2782,6 +2804,7 @@ export interface WriterContextOrchestratorResolution {
   toolCalls: WriterContextToolCall[]
   fallbackEvents: WriterContextFallbackEvent[]
   allocatorInputSummary: WriterContextAllocatorInputSummary
+  recallSnapshot?: RecallSnapshot
 }
 
 export interface StageContextResolution {
@@ -5307,6 +5330,10 @@ export interface QualityDashboardData {
     validatedHitCount: number
     lowSimilarityRejectedCount: number
     entityValidationRejectedCount: number
+    chapterSourceHitCount: number
+    semanticAssetHitCount: number
+    selectedChapterSourceCount: number
+    selectedSemanticAssetCount: number
     minVectorSimilarity: number
     minKeywordSimilarity: number
     previousChapterFeedCoverageRate: number
@@ -5343,6 +5370,10 @@ export interface QualityDashboardData {
     validatedHitCount: number
     lowSimilarityRejectedCount: number
     entityValidationRejectedCount: number
+    chapterSourceHitCount: number
+    semanticAssetHitCount: number
+    selectedChapterSourceCount: number
+    selectedSemanticAssetCount: number
     minVectorSimilarity: number
     minKeywordSimilarity: number
     previousChapterFeedCoverageRate: number
@@ -6215,7 +6246,17 @@ declare global {
         updateGlobalLockLibrary: (novelId: number, patch: Partial<GlobalLockLibrary>) => Promise<GlobalLockLibrary>
       }
       embedding: {
-        reindex: (novelId: number) => Promise<{ reindexed: number }>
+        reindex: (novelId: number) => Promise<{
+          reindexed: number
+          failed: number
+          total: number
+          semanticMemory: {
+            documentCount: number
+            vectorizedCount: number
+            keywordOnlyCount: number
+            profiles: string[]
+          }
+        }>
       }
       style: {
         analyze: (text: string, modelConfigId?: number) => Promise<StyleFingerprint>

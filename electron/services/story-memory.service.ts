@@ -1,5 +1,5 @@
-import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { and, asc, desc, eq, gte, inArray, sql } from 'drizzle-orm'
+import { getDb, getSqlite } from '../database/db'
 import {
   type StoryMemoryCheckpoint as StoryMemoryCheckpointRow,
   chapters,
@@ -71,6 +71,10 @@ const storyMemoryRefreshStatus = new Map<number, {
 
 type StoryMemoryMode = 'standard' | 'longform' | 'epic' | 'mega'
 type CheckpointScope = 'novel' | 'volume' | 'part'
+type StoryMemoryChapterRow = Pick<
+  typeof chapters.$inferSelect,
+  'id' | 'chapterNum' | 'summary' | 'continuityStateJson'
+>
 
 export interface StoryMemorySnapshot {
   generatedAt: string
@@ -134,6 +138,10 @@ export interface StoryMemoryCheckpointRefreshStatus {
   lastError?: string
   reason?: string
   trigger?: string
+}
+
+export interface StoryMemorySnapshotBuildOptions {
+  ensureCheckpoints?: boolean
 }
 
 interface ContinuityStateLike {
@@ -241,6 +249,82 @@ function getModeLimit(mode: StoryMemoryMode, standard: number, longform: number,
   }
 }
 
+function resolveStoryMemoryThreadDecayThreshold(mode: StoryMemoryMode): number {
+  if (mode === 'mega') return 150
+  if (mode === 'epic') return 250
+  if (mode === 'longform') return 400
+  return Number.POSITIVE_INFINITY
+}
+
+function resolveStoryMemoryDetailDecayThreshold(mode: StoryMemoryMode): number {
+  if (mode === 'mega') return 80
+  if (mode === 'epic') return 150
+  if (mode === 'longform') return 250
+  return Number.POSITIVE_INFINITY
+}
+
+function loadStoryMemoryChapterWindow(
+  novelId: number,
+  targetWords: number,
+): {
+  chapterRows: StoryMemoryChapterRow[]
+  chapterCount: number
+  lastChapterNum: number
+  memoryMode: StoryMemoryMode
+} {
+  const db = getDb()
+  const countRow = db.select({ count: sql<number>`count(*)` })
+    .from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .all()[0]
+  const chapterCount = Math.max(0, Number(countRow?.count || 0))
+  const latestRow = chapterCount > 0
+    ? db.select({ chapterNum: chapters.chapterNum }).from(chapters)
+      .where(eq(chapters.novelId, novelId))
+      .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+      .limit(1)
+      .all()[0]
+    : null
+  const lastChapterNum = Math.max(0, Number(latestRow?.chapterNum || 0))
+  const memoryMode = resolveStoryMemoryMode(targetWords, chapterCount)
+  const selection = {
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    summary: chapters.summary,
+    continuityStateJson: chapters.continuityStateJson,
+  }
+  if (memoryMode === 'standard') {
+    return {
+      chapterRows: db.select(selection).from(chapters)
+        .where(eq(chapters.novelId, novelId))
+        .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+        .all(),
+      chapterCount,
+      lastChapterNum,
+      memoryMode,
+    }
+  }
+
+  const threadDecayThreshold = resolveStoryMemoryThreadDecayThreshold(memoryMode)
+  const maxRows = Math.min(802, threadDecayThreshold * 2 + 2)
+  const chapterRows = db.select(selection).from(chapters)
+    .where(and(
+      eq(chapters.novelId, novelId),
+      gte(chapters.chapterNum, Math.max(0, lastChapterNum - threadDecayThreshold)),
+    ))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .limit(maxRows)
+    .all()
+    .sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id)
+
+  return {
+    chapterRows,
+    chapterCount,
+    lastChapterNum,
+    memoryMode,
+  }
+}
+
 function buildCoverageSummary(
   mode: StoryMemoryMode,
   chapterCount: number,
@@ -297,29 +381,48 @@ function listRelevantEvents(
   filters: { volumeId?: number; partId?: number } = {},
 ) {
   const db = getDb()
-  // 只取 id/章号做映射，避免长篇场景把全部章节正文加载进内存
-  const chapterRows = db.select({ id: chapters.id, chapterNum: chapters.chapterNum }).from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  const chapterNumById = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
-  return db.select().from(timelineEvents)
+  const eventRows = db.select().from(timelineEvents)
     .where(eq(timelineEvents.novelId, novelId))
     .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
     .all()
-    .filter((event) => {
-      if (filters.partId && event.partId === filters.partId) return true
-      if (filters.volumeId && event.volumeId === filters.volumeId) return true
-      if (chapterStart === undefined || chapterEnd === undefined) return true
-      const start = event.chapterStartId ? chapterNumById.get(event.chapterStartId) : undefined
-      const end = event.chapterEndId ? chapterNumById.get(event.chapterEndId) : undefined
-      if (typeof start === 'number' && typeof end === 'number') {
-        return end >= chapterStart && start <= chapterEnd
-      }
-      if (typeof start === 'number') return start >= chapterStart && start <= chapterEnd
-      if (typeof end === 'number') return end >= chapterStart && end <= chapterEnd
-      return false
-    })
+  if (chapterStart === undefined || chapterEnd === undefined) return eventRows
+
+  const chapterIds = [...new Set(eventRows.flatMap((event) => [
+    event.chapterStartId,
+    event.chapterEndId,
+  ]).filter((id): id is number => typeof id === 'number'))]
+  const chapterRows = chapterIds.length > 0
+    ? db.select({ id: chapters.id, chapterNum: chapters.chapterNum }).from(chapters)
+      .where(and(
+        eq(chapters.novelId, novelId),
+        inArray(chapters.id, chapterIds),
+      ))
+      .all()
+    : []
+  const chapterNumById = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
+  return filterRelevantEvents(eventRows, chapterNumById, chapterStart, chapterEnd, filters)
+}
+
+function filterRelevantEvents(
+  eventRows: Array<typeof timelineEvents.$inferSelect>,
+  chapterNumById: Map<number, number>,
+  chapterStart?: number,
+  chapterEnd?: number,
+  filters: { volumeId?: number; partId?: number } = {},
+): Array<typeof timelineEvents.$inferSelect> {
+  if (chapterStart === undefined || chapterEnd === undefined) return eventRows
+  return eventRows.filter((event) => {
+    if (filters.partId && event.partId === filters.partId) return true
+    if (filters.volumeId && event.volumeId === filters.volumeId) return true
+    const start = event.chapterStartId ? chapterNumById.get(event.chapterStartId) : undefined
+    const end = event.chapterEndId ? chapterNumById.get(event.chapterEndId) : undefined
+    if (typeof start === 'number' && typeof end === 'number') {
+      return end >= chapterStart && start <= chapterEnd
+    }
+    if (typeof start === 'number') return start >= chapterStart && start <= chapterEnd
+    if (typeof end === 'number') return end >= chapterStart && end <= chapterEnd
+    return false
+  })
 }
 
 function buildScopeSummary(
@@ -371,19 +474,47 @@ function buildStyleGuard(): string {
   ].join(' ')
 }
 
+interface StoryMemoryCheckpointCatalogEntry {
+  id: number
+  scopeType: string
+  scopeId: number | null
+  locked: number
+}
+
+interface StoryMemoryCheckpointCatalog {
+  byScope: Map<string, StoryMemoryCheckpointCatalogEntry>
+}
+
+function checkpointScopeKey(scopeType: string, scopeId: number | null): string {
+  return `${scopeType}:${scopeId ?? 'novel'}`
+}
+
+function createStoryMemoryCheckpointCatalog(
+  rows: Array<typeof storyMemoryCheckpoints.$inferSelect>,
+): StoryMemoryCheckpointCatalog {
+  return {
+    byScope: new Map(rows.map((row) => [
+      checkpointScopeKey(row.scopeType, row.scopeId ?? null),
+      {
+        id: row.id,
+        scopeType: row.scopeType,
+        scopeId: row.scopeId ?? null,
+        locked: row.locked || 0,
+      },
+    ])),
+  }
+}
+
 function upsertCheckpoint(
   novelId: number,
   scopeType: CheckpointScope,
   scopeId: number | null,
   payload: Partial<typeof storyMemoryCheckpoints.$inferInsert>,
-) {
+  catalog: StoryMemoryCheckpointCatalog,
+): number {
   const db = getDb()
-  const existing = db.select().from(storyMemoryCheckpoints)
-    .where(eq(storyMemoryCheckpoints.novelId, novelId))
-    .all()
-    .find((checkpoint) =>
-      checkpoint.scopeType === scopeType
-      && ((scopeType === 'novel' && (checkpoint.scopeId ?? null) === null) || checkpoint.scopeId === scopeId))
+  const scopeKey = checkpointScopeKey(scopeType, scopeId)
+  const existing = catalog.byScope.get(scopeKey)
 
   if (existing) {
     db.update(storyMemoryCheckpoints).set({
@@ -399,7 +530,14 @@ function upsertCheckpoint(
     scopeId,
     ...payload,
   }).run()
-  return Number(result.lastInsertRowid)
+  const id = Number(result.lastInsertRowid)
+  catalog.byScope.set(scopeKey, {
+    id,
+    scopeType,
+    scopeId,
+    locked: 0,
+  })
+  return id
 }
 
 function checkpointsNeedRefresh(novelId: number): boolean {
@@ -410,10 +548,12 @@ function checkpointsNeedRefresh(novelId: number): boolean {
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .all()
   if (checkpoints.length === 0) return true
-  if (checkpoints.some((checkpoint) => (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)) {
+  const refreshableCheckpoints = checkpoints.filter((checkpoint) => checkpoint.locked !== 1)
+  if (refreshableCheckpoints.some((checkpoint) =>
+    (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)) {
     return true
   }
-  if (checkpoints.some((checkpoint) =>
+  if (refreshableCheckpoints.some((checkpoint) =>
     !checkpoint.characterCardsJson
     || !checkpoint.relationCardsJson
     || !checkpoint.itemCardsJson
@@ -422,11 +562,11 @@ function checkpointsNeedRefresh(novelId: number): boolean {
     return true
   }
 
-  const latestChapterNum = db.select().from(chapters)
+  const latestChapterNum = db.select({ chapterNum: chapters.chapterNum }).from(chapters)
     .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-    .at(-1)?.chapterNum || 0
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .limit(1)
+    .all()[0]?.chapterNum || 0
   const novelCheckpoint = checkpoints.find((checkpoint) =>
     checkpoint.scopeType === 'novel' && (checkpoint.scopeId ?? null) === null)
   if (!novelCheckpoint) return true
@@ -453,8 +593,7 @@ function checkpointsNeedRefresh(novelId: number): boolean {
   return false
 }
 
-export function refreshStoryMemoryCheckpoints(novelId: number) {
-  ensureStoryStructure(novelId)
+function rebuildStoryMemoryCheckpoints(novelId: number) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
@@ -483,6 +622,10 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
     .all()
   const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const eventRows = db.select().from(timelineEvents)
+    .where(eq(timelineEvents.novelId, novelId))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
 
   const baseVersion = novel.contextVersion || 1
   const forbiddenDirectionsJson = stringifyStringArray(buildForbiddenDirections())
@@ -491,15 +634,32 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
   const locationNameMap = new Map(mapRows.map((row) => [row.id, row.name]))
   const chapterNumMap = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
   const arcNameMap = new Map(arcRows.map((arc) => [arc.id, arc.arcName]))
+  const memoryMode = resolveStoryMemoryMode(novel.targetWords || 0, chapterRows.length)
+  const chapterRowsByVolume = new Map<number, typeof chapterRows>()
+  const chapterRowsByPart = new Map<number, typeof chapterRows>()
+  chapterRows.forEach((chapter) => {
+    if (typeof chapter.volumeId === 'number') {
+      const rows = chapterRowsByVolume.get(chapter.volumeId) || []
+      rows.push(chapter)
+      chapterRowsByVolume.set(chapter.volumeId, rows)
+    }
+    if (typeof chapter.partId === 'number') {
+      const rows = chapterRowsByPart.get(chapter.partId) || []
+      rows.push(chapter)
+      chapterRowsByPart.set(chapter.partId, rows)
+    }
+  })
 
-  // Skip locked checkpoints (completed volumes in mega mode)
   const existingCheckpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
-  for (const checkpoint of existingCheckpoints) {
-    if (checkpoint.locked === 1) continue
+  const checkpointCatalog = createStoryMemoryCheckpointCatalog(existingCheckpoints)
+  const unlockedCheckpointIds = existingCheckpoints
+    .filter((checkpoint) => checkpoint.locked !== 1)
+    .map((checkpoint) => checkpoint.id)
+  if (unlockedCheckpointIds.length > 0) {
     db.update(storyMemoryCheckpoints).set({
       stale: 1,
       updatedAt: new Date().toISOString(),
-    }).where(eq(storyMemoryCheckpoints.id, checkpoint.id)).run()
+    }).where(inArray(storyMemoryCheckpoints.id, unlockedCheckpointIds)).run()
   }
 
   const upsertScope = (
@@ -508,10 +668,19 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
     label: string,
     rows: typeof chapterRows,
     filters: { volumeId?: number; partId?: number } = {},
-  ) => {
+  ): number => {
+    const existing = checkpointCatalog.byScope.get(checkpointScopeKey(scopeType, scopeId))
+    if (existing?.locked === 1) return existing.id
+
     const start = rows[0]?.chapterNum ?? 0
     const end = rows.at(-1)?.chapterNum ?? 0
-    const events = listRelevantEvents(novelId, start || undefined, end || undefined, filters)
+    const events = filterRelevantEvents(
+      eventRows,
+      chapterNumMap,
+      start || undefined,
+      end || undefined,
+      filters,
+    )
     const eventIds = new Set(events.map((event) => event.id))
     const continuityRows = rows.map((row) => ({
       ...row,
@@ -562,7 +731,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       limit: 12,
     })
 
-    upsertCheckpoint(novelId, scopeType, scopeId, {
+    return upsertCheckpoint(novelId, scopeType, scopeId, {
       label,
       summary,
       resolvedThreadsJson: stringifyStringArray(resolvedThreads),
@@ -583,30 +752,38 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       lastRefreshedChapterNum: end || 0,
       version: baseVersion,
       stale: 0,
-    })
+    }, checkpointCatalog)
   }
 
   upsertScope('novel', null, novel.title, chapterRows)
 
   for (const volume of volumeRows) {
-    const rows = chapterRows.filter((chapter) => chapter.volumeId === volume.id)
-    upsertScope('volume', volume.id, volume.title?.trim() || `第${volume.volumeNumber}卷`, rows, { volumeId: volume.id })
+    const rows = chapterRowsByVolume.get(volume.id) || []
+    const scopeKey = checkpointScopeKey('volume', volume.id)
+    const wasLocked = checkpointCatalog.byScope.get(scopeKey)?.locked === 1
+    const checkpointId = upsertScope(
+      'volume',
+      volume.id,
+      volume.title?.trim() || `第${volume.volumeNumber}卷`,
+      rows,
+      { volumeId: volume.id },
+    )
 
     // In mega mode, lock completed volume checkpoints to avoid re-processing
-    const memoryMode = resolveStoryMemoryMode(novel.targetWords || 0, chapterRows.length)
-    if (memoryMode === 'mega' && rows.length > 0 && rows.every((row) => (row.wordCount || 0) > 0 && row.status === 'completed')) {
-      const existing = db.select().from(storyMemoryCheckpoints)
-        .where(eq(storyMemoryCheckpoints.novelId, novelId))
-        .all()
-        .find((cp) => cp.scopeType === 'volume' && cp.scopeId === volume.id)
-      if (existing) {
-        db.update(storyMemoryCheckpoints).set({ locked: 1 }).where(eq(storyMemoryCheckpoints.id, existing.id)).run()
-      }
+    if (
+      !wasLocked
+      && memoryMode === 'mega'
+      && rows.length > 0
+      && rows.every((row) => (row.wordCount || 0) > 0 && row.status === 'completed')
+    ) {
+      db.update(storyMemoryCheckpoints).set({ locked: 1 }).where(eq(storyMemoryCheckpoints.id, checkpointId)).run()
+      const catalogEntry = checkpointCatalog.byScope.get(scopeKey)
+      if (catalogEntry) catalogEntry.locked = 1
     }
   }
 
   for (const part of partRows) {
-    const rows = chapterRows.filter((chapter) => chapter.partId === part.id)
+    const rows = chapterRowsByPart.get(part.id) || []
     upsertScope('part', part.id, part.title?.trim() || `第${part.partNumber}部`, rows, { partId: part.id })
   }
 
@@ -616,10 +793,17 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
     .all()
 }
 
+export function refreshStoryMemoryCheckpoints(novelId: number) {
+  ensureStoryStructure(novelId)
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => rebuildStoryMemoryCheckpoints(novelId))
+  return sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
+}
+
 function ensureFreshCheckpoints(novelId: number) {
-  if (checkpointsNeedRefresh(novelId)) {
-    refreshStoryMemoryCheckpoints(novelId)
-  }
+  refreshStoryMemoryCheckpointsIfNeeded(novelId)
 }
 
 function setStoryMemoryRefreshStatus(
@@ -653,6 +837,7 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
     lastError: undefined,
   })
   void (async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
     const startedAt = new Date().toISOString()
     setStoryMemoryRefreshStatus(novelId, {
       status: 'running',
@@ -685,18 +870,45 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
   })()
 }
 
+export function refreshStoryMemoryCheckpointsIfNeeded(
+  novelId: number,
+  options: {
+    refreshMode?: 'sync' | 'schedule_only'
+    reason?: string
+    trigger?: string
+  } = {},
+): boolean {
+  if (!checkpointsNeedRefresh(novelId)) return false
+  if ((options.refreshMode || 'sync') === 'schedule_only') {
+    scheduleStoryMemoryCheckpointRefresh(
+      novelId,
+      options.reason || 'checkpoint stale',
+      options.trigger || 'background_precompute',
+    )
+    return true
+  }
+  refreshStoryMemoryCheckpoints(novelId)
+  return true
+}
+
 export function getStoryMemoryCheckpointRefreshStatus(novelId: number): StoryMemoryCheckpointRefreshStatus {
   return storyMemoryRefreshStatus.get(novelId) || { status: 'idle' }
 }
 
-export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
-  ensureFreshCheckpoints(novelId)
+export function buildStoryMemorySnapshot(
+  novelId: number,
+  options: StoryMemorySnapshotBuildOptions = {},
+): StoryMemorySnapshot {
+  if (options.ensureCheckpoints !== false) ensureFreshCheckpoints(novelId)
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
+  if (!novel) throwUserFacingError('novel.notFound')
+  const {
+    chapterRows,
+    chapterCount,
+    lastChapterNum,
+    memoryMode,
+  } = loadStoryMemoryChapterWindow(novelId, novel.targetWords || 0)
   const eventRows = listRelevantEvents(novelId)
 
   const continuityRows = chapterRows.map((chapter) => ({
@@ -704,15 +916,14 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
     summary: asText(chapter.summary),
     continuity: parseContinuityState(chapter.continuityStateJson),
   }))
-  const targetWords = novel?.targetWords || 0
-  const lastChapterNum = chapterRows.at(-1)?.chapterNum || 0
-  const memoryMode = resolveStoryMemoryMode(targetWords, chapterRows.length)
+  const targetWords = novel.targetWords || 0
   const characterCurrentStates = listLatestCharacterStates(novelId, { limit: getModeLimit(memoryMode, 6, 8, 10, 12) })
   const characterStateAlerts = listNovelCharacterStateAlerts(novelId, getModeLimit(memoryMode, 3, 4, 5, 6))
   const worldStateLedger = getWorldStateLedgerSnapshot(novelId, {
     entityLimit: getModeLimit(memoryMode, 6, 8, 10, 12),
     alertLimit: getModeLimit(memoryMode, 4, 5, 6, 8),
     conflictEntityLimit: getModeLimit(memoryMode, 4, 5, 6, 8),
+    includeTrend: false,
   })
   const worldCurrentStates = worldStateLedger.entities
   const worldStateAlerts = worldStateLedger.alerts
@@ -725,8 +936,8 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
     .map((checkpoint) => checkpoint.summary || '')
 
   // Hierarchical memory decay: limit detailed chapter events, relying on volume/part digests for the past
-  const threadDecayThreshold = memoryMode === 'mega' ? 150 : memoryMode === 'epic' ? 250 : memoryMode === 'longform' ? 400 : Infinity
-  const detailDecayThreshold = memoryMode === 'mega' ? 80 : memoryMode === 'epic' ? 150 : memoryMode === 'longform' ? 250 : Infinity
+  const threadDecayThreshold = resolveStoryMemoryThreadDecayThreshold(memoryMode)
+  const detailDecayThreshold = resolveStoryMemoryDetailDecayThreshold(memoryMode)
 
   const recentContinuityRows = threadDecayThreshold < Infinity
     ? continuityRows.filter((row) => lastChapterNum - row.chapterNum <= threadDecayThreshold)
@@ -738,10 +949,10 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
 
   return {
     generatedAt: new Date().toISOString(),
-    chapterCount: chapterRows.length,
+    chapterCount,
     lastChapterNum,
     memoryMode,
-    coverageSummary: buildCoverageSummary(memoryMode, chapterRows.length, lastChapterNum, targetWords),
+    coverageSummary: buildCoverageSummary(memoryMode, chapterCount, lastChapterNum, targetWords),
     phaseDigest: dedupe([
       ...partDigests.slice(0, 3),
       ...volumeDigests.slice(0, 3),
@@ -809,11 +1020,11 @@ export function buildStoryMemoryPromptPackage(
   options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only' } = {},
 ): StoryMemoryPromptPackage {
   const refreshMode = options.refreshMode || 'sync'
-  if (refreshMode === 'sync') {
-    ensureFreshCheckpoints(novelId)
-  } else if (checkpointsNeedRefresh(novelId)) {
-    scheduleStoryMemoryCheckpointRefresh(novelId, 'checkpoint stale during story memory prompt build', 'story_memory_prompt')
-  }
+  refreshStoryMemoryCheckpointsIfNeeded(novelId, {
+    refreshMode,
+    reason: 'checkpoint stale during story memory prompt build',
+    trigger: 'story_memory_prompt',
+  })
   const db = getDb()
   const chapter = options.chapterId
     ? db.select().from(chapters).where(eq(chapters.id, options.chapterId)).all()[0]
@@ -920,7 +1131,7 @@ export function buildStoryMemoryPromptPackage(
     }
   }
 
-  const snapshot = buildStoryMemorySnapshot(novelId)
+  const snapshot = buildStoryMemorySnapshot(novelId, { ensureCheckpoints: false })
   return {
     summary: [
       snapshot.coverageSummary,

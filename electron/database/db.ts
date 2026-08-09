@@ -2523,6 +2523,305 @@ export function runMigrations(sqlite: Database.Database) {
         ON workflow_node_runs(retry_of_node_run_id, attempt DESC);
     `)
   })
+
+  runMigrationStep(sqlite, '0057_semantic_memory_entries', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS semantic_memory_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL,
+        source_id INTEGER NOT NULL,
+        fragment_key TEXT NOT NULL,
+        content_text TEXT NOT NULL,
+        embedding_json TEXT,
+        model_id TEXT,
+        dimensions INTEGER,
+        embedding_profile TEXT,
+        source_hash TEXT NOT NULL,
+        context_version INTEGER NOT NULL DEFAULT 1,
+        stage_id INTEGER REFERENCES creative_stages(id) ON DELETE SET NULL,
+        entity_refs_json TEXT NOT NULL DEFAULT '[]',
+        visibility TEXT NOT NULL DEFAULT 'canon',
+        source_chapter_start INTEGER,
+        source_chapter_end INTEGER,
+        valid_from_chapter INTEGER,
+        valid_to_chapter INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_memory_source_fragment
+        ON semantic_memory_entries(novel_id, source_type, source_id, fragment_key);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_profile
+        ON semantic_memory_entries(novel_id, embedding_profile, dimensions, visibility);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_validity
+        ON semantic_memory_entries(novel_id, source_type, valid_from_chapter, valid_to_chapter);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_source_range
+        ON semantic_memory_entries(novel_id, source_type, source_chapter_start, source_chapter_end);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_source_hash
+        ON semantic_memory_entries(novel_id, source_hash);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0058_semantic_memory_outbox', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS semantic_memory_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL,
+        source_id INTEGER NOT NULL,
+        operation TEXT NOT NULL DEFAULT 'upsert',
+        status TEXT NOT NULL DEFAULT 'pending',
+        revision INTEGER NOT NULL DEFAULT 1,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        context_version INTEGER NOT NULL DEFAULT 1,
+        available_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        locked_at TEXT,
+        processed_at TEXT,
+        last_error TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_memory_outbox_source
+        ON semantic_memory_outbox(novel_id, source_type, source_id);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_outbox_pending
+        ON semantic_memory_outbox(status, available_at, id);
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_outbox_novel
+        ON semantic_memory_outbox(novel_id, status, id);
+    `)
+
+    const enqueueTrigger = (
+      triggerName: string,
+      tableName: string,
+      sourceType: string,
+      timing: 'INSERT' | 'UPDATE' | 'DELETE',
+      rowAlias: 'NEW' | 'OLD',
+    ) => {
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS ${triggerName}
+        AFTER ${timing} ON ${tableName}
+        BEGIN
+          INSERT INTO semantic_memory_outbox (
+            novel_id, source_type, source_id, operation, status, revision,
+            attempts, context_version, available_at, locked_at, processed_at,
+            last_error, created_at, updated_at
+          ) VALUES (
+            ${rowAlias}.novel_id,
+            '${sourceType}',
+            ${rowAlias}.id,
+            '${timing === 'DELETE' ? 'delete' : 'upsert'}',
+            'pending',
+            1,
+            0,
+            COALESCE((SELECT context_version FROM novels WHERE id = ${rowAlias}.novel_id), 1),
+            CURRENT_TIMESTAMP,
+            NULL,
+            NULL,
+            NULL,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+          )
+          ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+            operation = excluded.operation,
+            status = 'pending',
+            revision = semantic_memory_outbox.revision + 1,
+            attempts = 0,
+            context_version = excluded.context_version,
+            available_at = CURRENT_TIMESTAMP,
+            locked_at = NULL,
+            processed_at = NULL,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP;
+        END;
+      `)
+    }
+
+    const sourceTables = [
+      ['characters', 'character'],
+      ['world_map', 'map'],
+      ['story_items', 'item'],
+      ['story_threads', 'story_thread'],
+      ['timeline_events', 'timeline_event'],
+    ] as const
+    sourceTables.forEach(([tableName, sourceType]) => {
+      if (!hasTable(sqlite, 'novels') || !hasTable(sqlite, tableName)) return
+      enqueueTrigger(`trg_${tableName}_semantic_insert`, tableName, sourceType, 'INSERT', 'NEW')
+      enqueueTrigger(`trg_${tableName}_semantic_update`, tableName, sourceType, 'UPDATE', 'NEW')
+      enqueueTrigger(`trg_${tableName}_semantic_delete`, tableName, sourceType, 'DELETE', 'OLD')
+    })
+
+    if (hasTable(sqlite, 'novels') && hasTable(sqlite, 'characters') && hasTable(sqlite, 'story_items')) {
+      sqlite.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_characters_semantic_owner_items
+      AFTER UPDATE ON characters
+      BEGIN
+        INSERT INTO semantic_memory_outbox (
+          novel_id, source_type, source_id, operation, status, revision,
+          attempts, context_version, available_at, created_at, updated_at
+        )
+        SELECT
+          story_items.novel_id, 'item', story_items.id, 'upsert', 'pending', 1,
+          0, COALESCE((SELECT context_version FROM novels WHERE id = story_items.novel_id), 1),
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM story_items
+        WHERE story_items.novel_id = NEW.novel_id
+          AND story_items.owner_character_id = NEW.id
+        ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+          operation = 'upsert',
+          status = 'pending',
+          revision = semantic_memory_outbox.revision + 1,
+          attempts = 0,
+          context_version = excluded.context_version,
+          available_at = CURRENT_TIMESTAMP,
+          locked_at = NULL,
+          processed_at = NULL,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP;
+      END;
+      `)
+    }
+    if (hasTable(sqlite, 'novels') && hasTable(sqlite, 'world_map') && hasTable(sqlite, 'story_items') && hasTable(sqlite, 'timeline_events')) {
+      sqlite.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_world_map_semantic_dependents
+      AFTER UPDATE ON world_map
+      BEGIN
+        INSERT INTO semantic_memory_outbox (
+          novel_id, source_type, source_id, operation, status, revision,
+          attempts, context_version, available_at, created_at, updated_at
+        )
+        SELECT
+          story_items.novel_id, 'item', story_items.id, 'upsert', 'pending', 1,
+          0, COALESCE((SELECT context_version FROM novels WHERE id = story_items.novel_id), 1),
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM story_items
+        WHERE story_items.novel_id = NEW.novel_id
+          AND story_items.location_map_id = NEW.id
+        ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+          operation = 'upsert',
+          status = 'pending',
+          revision = semantic_memory_outbox.revision + 1,
+          attempts = 0,
+          context_version = excluded.context_version,
+          available_at = CURRENT_TIMESTAMP,
+          locked_at = NULL,
+          processed_at = NULL,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP;
+
+        INSERT INTO semantic_memory_outbox (
+          novel_id, source_type, source_id, operation, status, revision,
+          attempts, context_version, available_at, created_at, updated_at
+        )
+        SELECT
+          timeline_events.novel_id, 'timeline_event', timeline_events.id, 'upsert', 'pending', 1,
+          0, COALESCE((SELECT context_version FROM novels WHERE id = timeline_events.novel_id), 1),
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM timeline_events
+        WHERE timeline_events.novel_id = NEW.novel_id
+          AND timeline_events.location_map_id = NEW.id
+        ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+          operation = 'upsert',
+          status = 'pending',
+          revision = semantic_memory_outbox.revision + 1,
+          attempts = 0,
+          context_version = excluded.context_version,
+          available_at = CURRENT_TIMESTAMP,
+          locked_at = NULL,
+          processed_at = NULL,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP;
+      END;
+      `)
+    }
+
+    sourceTables.forEach(([tableName, sourceType]) => {
+      if (!hasTable(sqlite, 'novels') || !hasTable(sqlite, tableName)) return
+      sqlite.exec(`
+        INSERT INTO semantic_memory_outbox (
+          novel_id, source_type, source_id, operation, status, revision,
+          attempts, context_version, available_at, created_at, updated_at
+        )
+        SELECT
+          source.novel_id,
+          '${sourceType}',
+          source.id,
+          'upsert',
+          'pending',
+          1,
+          0,
+          COALESCE(novels.context_version, 1),
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
+        FROM ${tableName} AS source
+        LEFT JOIN novels ON novels.id = source.novel_id
+        ON CONFLICT(novel_id, source_type, source_id) DO NOTHING;
+      `)
+    })
+  })
+
+  runMigrationStep(sqlite, '0059_semantic_memory_fts', () => {
+    try {
+      sqlite.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS semantic_memory_fts
+        USING fts5(content_text, tokenize='trigram');
+
+        CREATE TRIGGER IF NOT EXISTS trg_semantic_memory_fts_insert
+        AFTER INSERT ON semantic_memory_entries
+        BEGIN
+          INSERT INTO semantic_memory_fts(rowid, content_text)
+          VALUES (NEW.id, NEW.content_text);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_semantic_memory_fts_update
+        AFTER UPDATE OF content_text ON semantic_memory_entries
+        BEGIN
+          DELETE FROM semantic_memory_fts WHERE rowid = OLD.id;
+          INSERT INTO semantic_memory_fts(rowid, content_text)
+          VALUES (NEW.id, NEW.content_text);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_semantic_memory_fts_delete
+        AFTER DELETE ON semantic_memory_entries
+        BEGIN
+          DELETE FROM semantic_memory_fts WHERE rowid = OLD.id;
+        END;
+
+        DELETE FROM semantic_memory_fts;
+        INSERT INTO semantic_memory_fts(rowid, content_text)
+        SELECT id, content_text
+        FROM semantic_memory_entries;
+      `)
+    } catch (error) {
+      try {
+        sqlite.exec(`
+          DROP TRIGGER IF EXISTS trg_semantic_memory_fts_insert;
+          DROP TRIGGER IF EXISTS trg_semantic_memory_fts_update;
+          DROP TRIGGER IF EXISTS trg_semantic_memory_fts_delete;
+          DROP TABLE IF EXISTS semantic_memory_fts;
+        `)
+      } catch {
+        // The LIKE candidate path remains available when FTS5 cleanup is unsupported.
+      }
+      console.warn('[database] FTS5 trigram unavailable; semantic memory will use LIKE fallback.', error)
+    }
+  })
+
+  runMigrationStep(sqlite, '0060_thread_context_projection_indexes', () => {
+    if (hasTable(sqlite, 'story_threads')) {
+      ensureColumn(sqlite, 'story_threads', 'start_chapter', 'INTEGER')
+      ensureColumn(sqlite, 'story_threads', 'target_payoff_chapter', 'INTEGER')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_story_threads_context_due
+        ON story_threads (novel_id, status, target_payoff_chapter, sort_order, id);
+      `)
+    }
+    if (hasTable(sqlite, 'foreshadow_ledger')) {
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_foreshadow_ledger_thread
+        ON foreshadow_ledger (novel_id, linked_thread_id, id);
+      `)
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -2918,6 +3217,9 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_story_threads_novel_status
     ON story_threads (novel_id, status, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_threads_context_due
+    ON story_threads (novel_id, status, target_payoff_chapter, sort_order, id);
 
     CREATE INDEX IF NOT EXISTS idx_revision_tasks_novel_updated
     ON revision_tasks (novel_id, updated_at, id);

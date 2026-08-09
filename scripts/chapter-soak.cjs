@@ -62,8 +62,10 @@ function buildThresholds(options) {
 
 function buildDryRunReport(options) {
   const chapterService = readText('electron/services/chapter.service.ts')
+  const chapterPipelineState = readText('electron/services/chapter-pipeline-state.ts')
   const batchWorkflow = readText('electron/services/batch-workflow.service.ts')
   const contextService = readText('electron/services/context.service.ts')
+  const contextEntityMentions = readText('electron/services/context-entity-mentions.ts')
   const promptLibrary = readText('src/shared/prompt-library.ts')
   const thresholds = buildThresholds(options)
   const checks = []
@@ -75,13 +77,22 @@ function buildDryRunReport(options) {
 
   check('chapter pipeline has six role checkpoints', () => {
     thresholds.requiredPipelineRoles.forEach((role) => {
-      assertMatches(chapterService, new RegExp(`${role}:\\s*createPipelineRoleState`, 'u'), `pipeline role ${role}`)
+      assertMatches(
+        chapterPipelineState,
+        new RegExp(`${role}:\\s*createChapterPipelineRoleState\\('${role}'\\)`, 'u'),
+        `pipeline role ${role}`,
+      )
     })
-    assertIncludes(chapterService, 'createInitialChapterPipelineSnapshot', 'chapter pipeline')
+    assertIncludes(chapterPipelineState, 'createInitialChapterPipelineSnapshot', 'chapter pipeline state')
+    assertIncludes(chapterService, 'createInitialChapterPipelineSnapshot', 'chapter pipeline integration')
   })
 
   check('chapter pipeline persists draft, gate, canon and finalize stages', () => {
-    assertIncludes(chapterService, 'runChapterPublishCheck(chapterId)', 'publish gate')
+    assertMatches(
+      chapterService,
+      /runChapterPublishCheck\(chapterId(?:,|\))/u,
+      'chapter pipeline publish gate',
+    )
     assertIncludes(chapterService, 'prepareChapterWritebackRunWithRetry', 'canonizer')
     assertIncludes(chapterService, 'finalizeGeneratedChapterContent', 'finalize')
     assertIncludes(chapterService, 'generateChapterEmbeddings', 'embedding refresh')
@@ -90,13 +101,17 @@ function buildDryRunReport(options) {
   check('batch workflow waits for real chapter generation children', () => {
     assertIncludes(batchWorkflow, 'generateChapterContent', 'batch chapter generation')
     assertIncludes(batchWorkflow, 'consecutiveRecallFallbackChapters', 'recall fallback guard')
-    assertIncludes(batchWorkflow, 'runChapterPublishCheck', 'batch publish gate')
+    assertMatches(
+      batchWorkflow,
+      /runChapterPublishCheck\(chapterId(?:,|\))/u,
+      'batch publish gate',
+    )
   })
 
   check('context retrieval is alias and scene-contract aware', () => {
-    assertIncludes(contextService, 'collectMentionedEntityMatchesFromCandidates', 'alias mention collector')
+    assertIncludes(contextEntityMentions, 'collectMentionedEntityMatchesFromCandidates', 'alias mention collector')
+    assertIncludes(contextEntityMentions, 'buildFactionMentionCandidates', 'faction alias mention collector')
     assertIncludes(contextService, 'mentionValidationCharacters', 'alias validation terms')
-    assertIncludes(contextService, 'buildFactionMentionCandidates', 'faction alias mention collector')
     assertIncludes(contextService, 'mentionedFactions', 'faction mention propagation')
     assertIncludes(contextService, 'contractContext?.sceneContracts', 'scene contract signal text')
     assertIncludes(contextService, 'requiredAssetRefs', 'contract asset refs')
@@ -120,28 +135,56 @@ function buildDryRunReport(options) {
     },
     thresholds,
     checks,
+    staticEvidence: {
+      pipelineRolesDeclared: thresholds.requiredPipelineRoles,
+      productionHooksInspected: true,
+    },
     metrics: {
+      observed: false,
       requestedChapters: options.chapters,
-      completedChapters: options.chapters,
-      failedChapters: 0,
-      successRate: 1,
-      p95ChapterDurationMs: 1,
-      consecutiveRecallFallbackChapters: 0,
-      minWordRatio: 1,
-      contextHitRate: 1,
-      aliasHitRate: 1,
-      contractAssetHitRate: 1,
-      recallFallbackRate: 0,
-      publishGateFailures: 0,
-      blockedWritebacks: 0,
-      pipelineRolesCovered: thresholds.requiredPipelineRoles,
+      completedChapters: null,
+      failedChapters: null,
+      successRate: null,
+      p95ChapterDurationMs: null,
+      consecutiveRecallFallbackChapters: null,
+      minWordRatio: null,
+      contextHitRate: null,
+      aliasHitRate: null,
+      contractAssetHitRate: null,
+      recallFallbackRate: null,
+      publishGateFailures: null,
+      blockedWritebacks: null,
+      pipelineRolesCovered: [],
     },
     notes: [
-      'Dry-run validates the production code hooks and the report schema only.',
+      'Dry-run validates production code hooks and report shape only; it does not emit observed chapter-run metrics.',
       'Use --report=<path> to validate metrics exported by a real app/Electron chapter batch run.',
       'Use --real-model only as a manual/nightly gate with explicit provider credentials and cost limits.',
     ],
   }
+}
+
+function assertDryRunEvidenceIsNonObservational(report) {
+  assert.equal(report.realModelCalled, false)
+  assert.equal(report.metrics.observed, false)
+  const unobservedMetricKeys = [
+    'completedChapters',
+    'failedChapters',
+    'successRate',
+    'p95ChapterDurationMs',
+    'consecutiveRecallFallbackChapters',
+    'minWordRatio',
+    'contextHitRate',
+    'aliasHitRate',
+    'contractAssetHitRate',
+    'recallFallbackRate',
+    'publishGateFailures',
+    'blockedWritebacks',
+  ]
+  unobservedMetricKeys.forEach((key) => {
+    assert.equal(report.metrics[key], null, `dry-run metric ${key} must remain unobserved`)
+  })
+  assert.deepEqual(report.metrics.pipelineRolesCovered, [])
 }
 
 function readReport(reportPath) {
@@ -175,12 +218,14 @@ function validateRealReport(report, thresholds) {
   const blockedWritebacks = Number(metrics.blockedWritebacks ?? 0)
   const pipelineRolesCovered = Array.isArray(metrics.pipelineRolesCovered) ? metrics.pipelineRolesCovered : []
   const realModelCalled = report.realModelCalled === true || metrics.realModelCalled === true
+  const metricsObserved = metrics.observed === true
   const modelProvider = asOptionalText(provenance.provider || metrics.modelProvider || report.modelProvider)
   const model = asOptionalText(provenance.model || metrics.model || metrics.modelName || report.model)
   const modelConfigId = asOptionalText(provenance.modelConfigId || metrics.modelConfigId || report.modelConfigId)
   const runId = asOptionalText(provenance.runId || metrics.runId || report.runId)
 
   if (!realModelCalled) failures.push('realModelCalled must be true for report validation')
+  if (!metricsObserved) failures.push('metrics.observed must be true for report validation')
   if (!modelProvider) failures.push('missing model provenance: provider')
   if (!model) failures.push('missing model provenance: model')
   if (!modelConfigId && !runId) failures.push('missing model provenance: modelConfigId or runId')
@@ -211,6 +256,7 @@ function validateRealReport(report, thresholds) {
     },
     thresholds,
     metrics: {
+      observed: metricsObserved,
       requestedChapters,
       completedChapters,
       failedChapters,
@@ -293,6 +339,7 @@ function main() {
     report = buildRealModeManifest(options)
   } else {
     report = buildDryRunReport(options)
+    assertDryRunEvidenceIsNonObservational(report)
   }
   report.outputPath = options.outPath
   writeReport(options.outPath, report)
@@ -301,9 +348,19 @@ function main() {
   if (report.mode === 'real-model-manifest' && !report.ready) process.exitCode = 2
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(error)
-  process.exitCode = 1
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
+  }
+}
+
+module.exports = {
+  assertDryRunEvidenceIsNonObservational,
+  buildDryRunReport,
+  buildThresholds,
+  parseArgs,
+  validateRealReport,
 }

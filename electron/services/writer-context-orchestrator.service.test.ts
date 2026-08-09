@@ -274,6 +274,83 @@ describe('writer context orchestrator', () => {
     ]))
   })
 
+  it('reuses a frozen recall snapshot without issuing a second fragment search', async () => {
+    const searchSimilarFragments = vi.fn(async () => ({
+      hits: [],
+      fallbackReason: 'no_hits' as const,
+    }))
+    const frozenMemory = '以下内容仅作背景补充，不定义当前事实。\n[角色/关系召回·人物#31·motivation] 沈砚必须守住补给线。'
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      baseContextParts: {
+        recalledMemory: frozenMemory,
+      },
+      frozenRecall: {
+        recalledMemory: frozenMemory,
+        recallSnapshot: {
+          retrievalUsed: true,
+          degraded: false,
+          hitCount: 1,
+          selectedHitCount: 1,
+          staleRecallCount: 0,
+          fallbackHitCount: 0,
+          bucketStats: {
+            character: { hitCount: 1, selectedHitCount: 1, staleCount: 0, fallbackHitCount: 0 },
+            rule: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+            thread: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+          },
+        },
+        recallDiagnostics: {
+          searchedBucketCount: 1,
+          selectedBucketCount: 1,
+          totalHitCount: 1,
+          selectedHitCount: 1,
+          staleRecallCount: 0,
+          staleRecallRate: 0,
+          recallDependencyRate: 100,
+          overriddenHitCount: 0,
+          fallbackHitCount: 0,
+          validatedHitCount: 1,
+          lowSimilarityRejectedCount: 0,
+          entityValidationRejectedCount: 0,
+          minVectorSimilarity: 0.6,
+          minKeywordSimilarity: 0.5,
+          summaryLines: [],
+        },
+        recalledMemorySources: [{
+          sourceKind: 'semantic_asset',
+          bucket: 'character',
+          semanticSourceType: 'character',
+          semanticSourceId: 31,
+          fragmentType: 'motivation',
+          similarity: 0.82,
+          searchMode: 'vector',
+          sourceLabel: '人物#31',
+          summary: '沈砚必须守住补给线。',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: ['沈砚'],
+          entityValidated: true,
+        }],
+      },
+    }), {
+      searchSimilarFragments,
+    })
+
+    expect(searchSimilarFragments).not.toHaveBeenCalled()
+    expect(resolution.renderedContextOverrides.recalledMemory).toBe(frozenMemory)
+    expect(resolution.recallSnapshot).toEqual(expect.objectContaining({
+      retrievalUsed: true,
+      selectedHitCount: 1,
+    }))
+    expect(resolution.queryPlan.filter((step) => step.bucket.startsWith('recall_')))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ bucket: 'recall_character', enabled: false }),
+        expect.objectContaining({ bucket: 'recall_rule', enabled: false }),
+        expect.objectContaining({ bucket: 'recall_thread', enabled: false }),
+      ]))
+  })
+
   it('reuses story memory snapshot within a single resolution', async () => {
     const buildStoryMemorySnapshotMock = vi.mocked(buildStoryMemorySnapshot)
     buildStoryMemorySnapshotMock.mockClear()

@@ -67,6 +67,7 @@ import * as chapterRecallRuntimeService from './services/chapter-recall-runtime.
 import * as storyArcProgressService from './services/story-arc-progress.service'
 import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
+import * as semanticMemoryService from './services/semantic-memory.service'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
 import * as batchWorkflowService from './services/batch-workflow.service'
@@ -421,7 +422,13 @@ function registerIpcHandlers() {
         failed += 1
       }
     }
-    return { reindexed: succeeded, failed, total: chapterList.length }
+    const semanticMemory = await semanticMemoryService.reindexCoreSemanticMemory(novelId)
+    return {
+      reindexed: succeeded,
+      failed,
+      total: chapterList.length,
+      semanticMemory,
+    }
   })
 
   // Style Analysis

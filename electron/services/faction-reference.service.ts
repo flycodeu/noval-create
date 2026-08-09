@@ -3,6 +3,11 @@ import { getDb } from '../database/db'
 import { factions } from '../database/schema'
 
 export type FactionReferenceValue = number | string
+export interface FactionCatalog {
+  rows: Array<typeof factions.$inferSelect>
+  byId: Map<number, typeof factions.$inferSelect>
+  byName: Map<string, typeof factions.$inferSelect>
+}
 
 function normalizeName(value: string): string {
   return value.trim().replace(/\s+/g, '').toLowerCase()
@@ -41,17 +46,25 @@ export function parseFactionReferenceArray(raw?: string | null): FactionReferenc
   return parseValues(raw || [])
 }
 
-export function buildFactionCatalog(novelId: number) {
-  const db = getDb()
-  const rows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+export function createFactionCatalog(
+  rows: Array<typeof factions.$inferSelect>,
+): FactionCatalog {
   const byId = new Map(rows.map((row) => [row.id, row]))
   const byName = new Map(rows.map((row) => [normalizeName(row.name), row]))
   return { rows, byId, byName }
 }
 
-export function resolveFactionRowsByReferences(novelId: number, raw?: string | null) {
+export function buildFactionCatalog(novelId: number): FactionCatalog {
+  const db = getDb()
+  const rows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+  return createFactionCatalog(rows)
+}
+
+export function resolveFactionRowsFromCatalog(
+  catalog: FactionCatalog,
+  raw?: string | null,
+): Array<typeof factions.$inferSelect> {
   const values = parseFactionReferenceArray(raw)
-  const catalog = buildFactionCatalog(novelId)
   const seen = new Set<number>()
 
   return values.reduce<typeof catalog.rows>((result, value) => {
@@ -63,6 +76,10 @@ export function resolveFactionRowsByReferences(novelId: number, raw?: string | n
     result.push(matched)
     return result
   }, [])
+}
+
+export function resolveFactionRowsByReferences(novelId: number, raw?: string | null) {
+  return resolveFactionRowsFromCatalog(buildFactionCatalog(novelId), raw)
 }
 
 export function resolveFactionNamesFromReferences(novelId: number, raw?: string | null): string[] {

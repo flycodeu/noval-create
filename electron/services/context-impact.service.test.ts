@@ -23,6 +23,9 @@ vi.mock('./quality-dashboard.service', () => ({
   getQualityDashboardData: vi.fn(() => ({
     storyPacingAlerts: [],
   })),
+}))
+
+vi.mock('./quality-dashboard-recall-diagnostics', () => ({
   buildHeuristicRecallDiagnostics: vi.fn(() => ({
     searchedBucketCount: 0,
     selectedBucketCount: 0,
@@ -90,7 +93,7 @@ import {
 } from '../database/schema'
 import { buildNovelConsistencyReport } from './consistency.service'
 import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
-import { buildHeuristicRecallDiagnostics } from './quality-dashboard.service'
+import { buildHeuristicRecallDiagnostics } from './quality-dashboard-recall-diagnostics'
 import { runChapterPublishCheck } from './context-impact.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>

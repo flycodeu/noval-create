@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { getDb } from '../database/db'
 import {
@@ -412,6 +412,24 @@ export function listEndgameCommitments(novelId: number) {
   return rows.map((row) => buildEndgameCommitmentView(row, referenceSummary.get(row.id), currentChapterNum, progressPercent))
 }
 
+export function listEndgameCommitmentsByIds(novelId: number, ids: number[]) {
+  const normalizedIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))]
+  if (normalizedIds.length === 0) return []
+  ensureStoryStructure(novelId)
+  return getDb().select().from(endgameCommitments)
+    .where(and(
+      eq(endgameCommitments.novelId, novelId),
+      inArray(endgameCommitments.id, normalizedIds),
+    ))
+    .orderBy(
+      asc(endgameCommitments.commitmentKind),
+      asc(endgameCommitments.sourceOrder),
+      asc(endgameCommitments.id),
+    )
+    .limit(normalizedIds.length)
+    .all()
+}
+
 export function getEndgameAssetSummary(novelId: number) {
   const commitments = listEndgameCommitments(novelId)
   const foreshadows = listForeshadowLedger(novelId)
@@ -558,29 +576,75 @@ export function updateEndgameCommitment(
   return listEndgameCommitments(current.novelId).find((row) => row.id === id) || null
 }
 
+function enrichForeshadowLedgerRows(
+  novelId: number,
+  rows: Array<typeof foreshadowLedger.$inferSelect>,
+) {
+  const db = getDb()
+  const sourceChapterIds = [...new Set(rows
+    .map((row) => row.sourceChapterId)
+    .filter((id): id is number => typeof id === 'number'))]
+  const linkedCommitmentIds = [...new Set(rows
+    .map((row) => row.linkedEndgameCommitmentId)
+    .filter((id): id is number => typeof id === 'number'))]
+  const chapterRows = sourceChapterIds.length > 0
+    ? db.select({
+        id: chapters.id,
+        chapterNum: chapters.chapterNum,
+      }).from(chapters)
+      .where(and(
+        eq(chapters.novelId, novelId),
+        inArray(chapters.id, sourceChapterIds),
+      ))
+      .limit(sourceChapterIds.length)
+      .all()
+    : []
+  const chapterNumById = new Map(chapterRows.map((row) => [row.id, row.chapterNum] as const))
+  const commitmentRows = linkedCommitmentIds.length > 0
+    ? db.select({
+        id: endgameCommitments.id,
+        title: endgameCommitments.title,
+      }).from(endgameCommitments)
+      .where(and(
+        eq(endgameCommitments.novelId, novelId),
+        inArray(endgameCommitments.id, linkedCommitmentIds),
+      ))
+      .limit(linkedCommitmentIds.length)
+      .all()
+    : []
+  const commitmentTitleById = new Map(commitmentRows.map((row) => [row.id, row.title] as const))
+
+  return rows.map((row) => ({
+    ...row,
+    sourceChapterNum: row.sourceChapterId ? chapterNumById.get(row.sourceChapterId) : undefined,
+    linkedEndgameCommitmentTitle: row.linkedEndgameCommitmentId
+      ? commitmentTitleById.get(row.linkedEndgameCommitmentId)
+      : undefined,
+  }))
+}
+
 export function listForeshadowLedger(novelId: number) {
   ensureStoryStructure(novelId)
-  const db = getDb()
-  const chapterRows = db.select({
-    id: chapters.id,
-    chapterNum: chapters.chapterNum,
-  }).from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .all()
-  const chapterNumById = new Map(chapterRows.map((row) => [row.id, row.chapterNum] as const))
-  const commitmentTitleById = new Map(listEndgameCommitments(novelId).map((row) => [row.id, row.title] as const))
-
-  return db.select().from(foreshadowLedger)
+  const rows = getDb().select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, novelId))
     .orderBy(asc(foreshadowLedger.targetPayoffChapter), asc(foreshadowLedger.id))
     .all()
-    .map((row) => ({
-      ...row,
-      sourceChapterNum: row.sourceChapterId ? chapterNumById.get(row.sourceChapterId) : undefined,
-      linkedEndgameCommitmentTitle: row.linkedEndgameCommitmentId
-        ? commitmentTitleById.get(row.linkedEndgameCommitmentId)
-        : undefined,
-    }))
+  return enrichForeshadowLedgerRows(novelId, rows)
+}
+
+export function listForeshadowLedgerByIds(novelId: number, ids: number[]) {
+  const normalizedIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))]
+  if (normalizedIds.length === 0) return []
+  ensureStoryStructure(novelId)
+  const rows = getDb().select().from(foreshadowLedger)
+    .where(and(
+      eq(foreshadowLedger.novelId, novelId),
+      inArray(foreshadowLedger.id, normalizedIds),
+    ))
+    .orderBy(asc(foreshadowLedger.targetPayoffChapter), asc(foreshadowLedger.id))
+    .limit(normalizedIds.length)
+    .all()
+  return enrichForeshadowLedgerRows(novelId, rows)
 }
 
 export function upsertForeshadowLedger(
@@ -1534,8 +1598,8 @@ export function getChapterContractContext(chapterId: number) {
   return {
     chapterContract: chapter,
     sceneContracts: sceneRows,
-    requiredCommitments: listEndgameCommitments(chapter.novelId).filter((item) => commitmentIds.includes(item.id)),
-    requiredForeshadows: listForeshadowLedger(chapter.novelId).filter((item) => foreshadowIds.includes(item.id)),
+    requiredCommitments: listEndgameCommitmentsByIds(chapter.novelId, commitmentIds),
+    requiredForeshadows: listForeshadowLedgerByIds(chapter.novelId, foreshadowIds),
   }
 }
 

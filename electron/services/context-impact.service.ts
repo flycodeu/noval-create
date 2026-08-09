@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, ne, or, sql } from 'drizzle-orm'
 import type {
   ChapterContractValidationResult,
   ChapterRewriteScope,
@@ -54,7 +54,8 @@ import {
 } from './chapter-gate-utils'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
-import { buildHeuristicRecallDiagnostics, getQualityDashboardData } from './quality-dashboard.service'
+import { getQualityDashboardData } from './quality-dashboard.service'
+import { buildHeuristicRecallDiagnostics } from './quality-dashboard-recall-diagnostics'
 import { getStoryArcProgressSnapshot, getStoryArcWarningsForChapter } from './story-arc-progress.service'
 import {
   getContractValidationScore,
@@ -2276,7 +2277,13 @@ export function markStoryMemoryCheckpointsDirty(novelId: number, updatedAt = new
   db.update(storyMemoryCheckpoints).set({
     stale: 1,
     updatedAt,
-  }).where(eq(storyMemoryCheckpoints.novelId, novelId)).run()
+  }).where(and(
+    eq(storyMemoryCheckpoints.novelId, novelId),
+    or(
+      isNull(storyMemoryCheckpoints.locked),
+      ne(storyMemoryCheckpoints.locked, 1),
+    ),
+  )).run()
 }
 
 export function markSubsequentChaptersStale(
@@ -2307,23 +2314,31 @@ export function markSubsequentChaptersStale(
   })()
 }
 
-export function markChapterContextCurrent(chapterId: number): void {
+export function markChapterContextCurrent(chapterId: number): number {
   const db = getDb()
-  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) {
-    throwUserFacingError('chapter.notFound')
-  }
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    if (!chapter) {
+      throwUserFacingError('chapter.notFound')
+    }
 
-  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  if (!novel) {
-    throwUserFacingError('novel.notFound')
-  }
+    const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+    if (!novel) {
+      throwUserFacingError('novel.notFound')
+    }
 
-  db.update(chapters).set({
-    contextVersion: novel.contextVersion || 1,
-    staleReasonJson: JSON.stringify([]),
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapters.id, chapterId)).run()
+    const contextVersion = novel.contextVersion || 1
+    db.update(chapters).set({
+      contextVersion,
+      staleReasonJson: JSON.stringify([]),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.id, chapterId)).run()
+    return contextVersion
+  })
+  return sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
 }
 
 function collectChapterRelatedIssues(

@@ -1,16 +1,11 @@
 ﻿import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
-import { and, desc, gte, lte, lt, or, sql } from 'drizzle-orm'
+import { getDb, getSqlite } from '../database/db'
+import { and, desc, gte, inArray, isNull, lte, lt, notInArray, or, sql } from 'drizzle-orm'
 import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { assessHistoricalGrounding, buildWorldRulesSummary, getGroundingSourceLedgerEntries, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
 import { parseGlossaryAliases } from '../../src/shared/glossary'
-import {
-  searchSimilarFragments,
-  type SimilarFragmentFallbackReason,
-  type SimilarFragmentHit,
-} from './embedding.service'
 import {
   buildStyleFingerprintPromptSection,
   buildStyleHardGuardPromptSection,
@@ -53,55 +48,60 @@ import {
   renderThreadCards,
 } from './context-cards'
 import {
-  buildFactionCatalog,
-  resolveFactionRowsByReferences,
+  createFactionCatalog,
+  resolveFactionRowsFromCatalog,
+  type FactionCatalog,
 } from './faction-reference.service'
 import { getCharacterDialogueHintMap, getChapterDialogueVoiceLocks } from './dialogue-fingerprint.service'
 import { getCharacterStateContextHintMap, listLatestCharacterStates } from './character-state.service'
 import { getWorldStateContextSnapshot } from './world-state.service'
-import { getChapterContractContext, listForeshadowLedger } from './endgame-asset.service'
+import { getChapterContractContext, listForeshadowLedgerByIds } from './endgame-asset.service'
 import { buildGlobalLockContext } from './batch-workbench.service'
 import { buildChapterBridgePlan, formatChapterBridgePlan } from './generation-integrity.service'
 import {
   resolveCreativeStageContextForChapter,
 } from './creative-stage.service'
 import type { CreativeStageContext } from '../../src/shared/creative-stages'
+import {
+  buildCharacterMentionCandidates,
+  buildFactionMentionCandidates,
+  buildItemMentionCandidates,
+  buildLocationMentionCandidates,
+  collectExplicitEntityNamesFromReferences,
+  collectMentionedEntityNamesFromCandidates,
+  collectMentionedEntityValidationTermsFromCandidates,
+  collectRelationMentionedCharacterNames,
+  collectRelationMentionValidationTerms,
+  resolveMentionedEntityLimits,
+} from './context-entity-mentions'
+import { loadTimelineContextEventIds } from './context-timeline-projection'
+import { loadChapterThreadContextProjection } from './context-thread-projection'
+import {
+  buildEmptyRecallDiagnostics,
+  compactRecallLine,
+  containsAny,
+  createEmptyRecallSnapshot,
+  finalizeRecallSnapshot,
+  isAcceptedRecallSource,
+  splitRecallLines,
+  type RecallDiagnostics,
+  type RecallMemorySource,
+  type RecallSnapshot,
+} from './context-recall-core'
+import { runRecallAugmentation } from './context-recall-runtime'
+import { estimateTokens, truncateToTokens } from './context-token-budget'
 
-/**
- * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
- * 标点和空格按 0.5 token 计。比固定 length/1.5 精确 20-30%。
- * 保留 10% 安全余量。
- */
-function estimateTokens(text: string): number {
-  if (!text) return 0
-  const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length
-  const punctuation = (text.match(/[\u3000-\u303f\uff00-\uffef，。！？；：、""''（）【】《》…—\s]/g) || []).length
-  const asciiChars = text.length - chineseChars - punctuation
-  const rawEstimate = chineseChars * 1.0 + asciiChars * 0.25 + punctuation * 0.5
-  // 10% 安全余量
-  return Math.ceil(rawEstimate * 1.1)
-}
-
-function truncateToTokens(text: string, maxTokens: number): string {
-  const safeMaxTokens = Math.max(0, Math.floor(maxTokens))
-  if (!text || safeMaxTokens <= 0) return ''
-  if (estimateTokens(text) <= safeMaxTokens) return text
-
-  // 中文接近 1 token/字，不能再用固定的 0.6 token/字符反推长度；
-  // 那会让“截断后”的中文片段仍然明显超过分配预算。二分查找直接
-  // 复用同一估算器，确保返回值满足 estimateTokens(result) <= budget。
-  const suffix = '…'
-  if (estimateTokens(suffix) > safeMaxTokens) return ''
-  let low = 0
-  let high = text.length
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2)
-    const candidate = `${text.slice(0, middle)}${suffix}`
-    if (estimateTokens(candidate) <= safeMaxTokens) low = middle
-    else high = middle - 1
-  }
-  return low > 0 ? `${text.slice(0, low)}${suffix}` : suffix
-}
+export { resolveMentionedEntityLimits } from './context-entity-mentions'
+export { buildRecallSnapshot } from './context-recall-core'
+export type {
+  RecallBucketKey,
+  RecallBucketStats,
+  RecallDiagnostics,
+  RecallFallbackReason,
+  RecallMemorySource,
+  RecallSearchMode,
+  RecallSnapshot,
+} from './context-recall-core'
 
 function resolveRecentContextWindow(
   targetWords: number,
@@ -148,14 +148,6 @@ interface BaseChapterContextParts {
   assemblyStage: Extract<ContextAssemblyStage, 'base'>
   contextParts: ChapterContextParts
   previousChapterSampleReport: PreviousChapterSampleReport
-  recallSnapshot: RecallSnapshot
-  recallDiagnostics: RecallDiagnostics
-  recalledMemorySources: RecallMemorySource[]
-}
-
-interface RecallAugmentationResult {
-  assemblyStage: Extract<ContextAssemblyStage, 'recall'>
-  recalledMemory: string
   recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
@@ -623,193 +615,6 @@ function dedupe(values: string[], limit?: number): string[] {
   return result
 }
 
-export type RecallBucketKey = 'character' | 'rule' | 'thread'
-
-export type RecallSearchMode = 'vector' | 'keyword'
-
-export type RecallFallbackReason =
-  | SimilarFragmentFallbackReason
-  | 'only_stale_hits'
-  | 'budget_trimmed'
-
-export interface RecallMemorySource {
-  bucket: RecallBucketKey
-  chapterId: number
-  chapterNum: number
-  fragmentType: string
-  similarity: number
-  searchMode: RecallSearchMode
-  sourceLabel: string
-  summary: string
-  stale: boolean
-  staleReasons: string[]
-  overriddenByConstraint: boolean
-  entityMatches: string[]
-  entityValidated: boolean
-}
-
-export interface RecallDiagnostics {
-  searchedBucketCount: number
-  selectedBucketCount: number
-  totalHitCount: number
-  selectedHitCount: number
-  staleRecallCount: number
-  staleRecallRate: number
-  recallDependencyRate: number
-  overriddenHitCount: number
-  fallbackHitCount: number
-  validatedHitCount: number
-  lowSimilarityRejectedCount: number
-  entityValidationRejectedCount: number
-  minVectorSimilarity: number
-  minKeywordSimilarity: number
-  summaryLines: string[]
-}
-
-export interface RecallBucketStats {
-  hitCount: number
-  selectedHitCount: number
-  staleCount: number
-  fallbackHitCount: number
-  fallbackReason?: RecallFallbackReason
-}
-
-export interface RecallSnapshot {
-  retrievalUsed: boolean
-  degraded: boolean
-  hitCount: number
-  selectedHitCount: number
-  staleRecallCount: number
-  fallbackHitCount: number
-  fallbackReason?: RecallFallbackReason
-  assemblyStage?: 'base_recall' | 'unified_recall'
-  bucketStats: Record<RecallBucketKey, RecallBucketStats>
-}
-
-interface RecallQueryBucket {
-  bucket: RecallBucketKey
-  query: string
-  topK: number
-}
-
-interface RecallQueryBuildInput {
-  chapterGoal: string
-  outline: string
-  arcGoal: string
-  arcSummary: string
-  storyGoal: string
-  coreConflict: string
-  mainPlot: string
-  themeVoiceSummary: string
-  worldRules: string
-  mapSummary?: string
-  relationSummary: string
-  characterStates: string
-  worldStates?: string
-  itemSummary: string
-  timelineSummary: string
-  timelineOpenThreads: string
-  activeThreads: string
-  openLoops: string
-  dueForeshadows: string
-  continuityNotes: string
-  chapterBridgePlan: string
-  storyThreadsSummary: string
-  mentionedCharacters: string[]
-  mentionedItems: string[]
-  mentionedLocations: string[]
-  mentionedFactions?: string[]
-  mentionValidationCharacters?: string[]
-  mentionValidationItems?: string[]
-  mentionValidationLocations?: string[]
-  mentionValidationFactions?: string[]
-}
-
-interface RecallHit extends SimilarFragmentHit {
-  bucket: RecallBucketKey
-  stale: boolean
-  staleReasons: string[]
-  overriddenByConstraint: boolean
-  entityMatches: string[]
-  entityValidationRequired: boolean
-  entityValidated: boolean
-}
-
-function compactRecallLine(text: string, maxLength = 96): string {
-  const normalized = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\s*\n+\s*/g, '；')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!normalized) return ''
-  if (normalized.length <= maxLength) return normalized
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trim()}…`
-}
-
-function splitRecallLines(text: string, maxLines = 4, maxLength = 96): string[] {
-  if (!text) return []
-  const lines = text
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => compactRecallLine(line, maxLength))
-    .filter(Boolean)
-  if (lines.length > 0) return dedupe(lines, maxLines)
-  return dedupe([compactRecallLine(text, maxLength)].filter(Boolean), maxLines)
-}
-
-function containsAny(text: string, keywords: string[]): boolean {
-  const normalized = asText(text)
-  return normalized ? keywords.some((keyword) => normalized.includes(keyword)) : false
-}
-
-function resolveRecallMinimumSimilarity(searchMode: RecallSearchMode): number {
-  return searchMode === 'vector' ? MIN_VECTOR_RECALL_SIMILARITY : MIN_KEYWORD_RECALL_SIMILARITY
-}
-
-function resolveRecallPreferredSimilarity(searchMode: RecallSearchMode): number {
-  return searchMode === 'vector' ? PREFERRED_VECTOR_RECALL_SIMILARITY : PREFERRED_KEYWORD_RECALL_SIMILARITY
-}
-
-function isAcceptedRecallSource(
-  source: Pick<RecallMemorySource, 'stale' | 'overriddenByConstraint' | 'entityValidated' | 'similarity' | 'searchMode'>,
-): boolean {
-  return !source.stale
-    && !source.overriddenByConstraint
-    && source.entityValidated
-    && source.similarity >= resolveRecallMinimumSimilarity(source.searchMode)
-}
-
-function resolveRecallValidationTerms(
-  bucket: RecallBucketKey,
-  input: Pick<RecallQueryBuildInput, 'mentionedCharacters' | 'mentionedItems' | 'mentionedLocations' | 'mentionedFactions' | 'mentionValidationCharacters' | 'mentionValidationItems' | 'mentionValidationLocations' | 'mentionValidationFactions'>,
-): string[] {
-  const characterTerms = dedupe([
-    ...input.mentionedCharacters,
-    ...(input.mentionValidationCharacters || []),
-  ], 12)
-  const itemTerms = dedupe([
-    ...input.mentionedItems,
-    ...(input.mentionValidationItems || []),
-  ], 12)
-  const locationTerms = dedupe([
-    ...input.mentionedLocations,
-    ...(input.mentionValidationLocations || []),
-  ], 12)
-  const factionTerms = dedupe([
-    ...(input.mentionedFactions || []),
-    ...(input.mentionValidationFactions || []),
-  ], 12)
-  switch (bucket) {
-    case 'character':
-      return dedupe([...characterTerms, ...factionTerms], 12)
-    case 'rule':
-      return dedupe([...locationTerms, ...itemTerms, ...characterTerms, ...factionTerms], 14)
-    case 'thread':
-    default:
-      return dedupe([...characterTerms, ...itemTerms, ...locationTerms, ...factionTerms], 16)
-  }
-}
-
 function buildConstraintSection(title: string, lines: string[]): string {
   const normalizedLines = dedupe(lines.map((line) => compactRecallLine(line, 92)).filter(Boolean), 6)
   if (normalizedLines.length === 0) return ''
@@ -864,15 +669,6 @@ const DEFAULT_PRESERVED_CONSTRAINT_LABELS: HardConstraintSourceLabel[] = [
 ]
 const MIN_HARD_CONSTRAINT_TOKENS = 28
 const MIN_PINNED_HARD_CONSTRAINT_TOKENS = 18
-const MIN_VECTOR_RECALL_SIMILARITY = 0.6
-const PREFERRED_VECTOR_RECALL_SIMILARITY = 0.72
-// Chinese keyword fallback uses sparse 2-4 character n-grams over a bounded
-// query, so a 0.50 ratio is unrealistically strict for long chapter queries
-// and rejects every useful fallback before entity validation can run. Vector
-// recall keeps the higher bar; keyword recall remains background-only and is
-// accepted at a lower, explicit threshold.
-const MIN_KEYWORD_RECALL_SIMILARITY = 0.08
-const PREFERRED_KEYWORD_RECALL_SIMILARITY = 0.16
 
 function selectConstraintLines(
   text: string,
@@ -1219,416 +1015,6 @@ function buildHardConstraintSummary(
   return summaryParts.join('；')
 }
 
-interface EntityMentionCandidate {
-  canonicalName: string
-  aliases?: string[]
-}
-
-const ENTITY_MENTION_ALIAS_KEYS = [
-  'alias',
-  'aliases',
-  'aliasesJson',
-  'name',
-  'displayName',
-  'entityName',
-  'refName',
-  'aliasNames',
-  'nicknames',
-  'nickname',
-  'titles',
-  'title',
-  'codenames',
-  'codename',
-  'codeName',
-  'mentionNames',
-  'mentions',
-  'addressTerms',
-  'relationTerms',
-  'relationshipTitles',
-  '称号',
-  '别名',
-  '代号',
-  '称谓',
-  '关系称谓',
-]
-
-function normalizeMentionAlias(value: string): string {
-  return value
-    .trim()
-    .replace(/^[\s"'“”‘’《》<>【】[\]()（）]+|[\s"'“”‘’《》<>【】[\]()（）]+$/gu, '')
-}
-
-function normalizeMentionAliasKey(value: string): string {
-  return normalizeMentionAlias(value).replace(/\s+/g, '').toLowerCase()
-}
-
-function splitMentionAliasText(value: string): string[] {
-  return value
-    .split(/[\n,，、;；/|]+/u)
-    .map(normalizeMentionAlias)
-    .filter(Boolean)
-}
-
-function isUsefulMentionAlias(value: string): boolean {
-  const alias = normalizeMentionAlias(value)
-  if (!alias) return false
-  if (/^\d+$/u.test(alias)) return false
-  if (alias.length < 2) return false
-  if (alias.length > 32) return false
-  return true
-}
-
-function aliasValuesFromUnknown(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => aliasValuesFromUnknown(item))
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    return [
-      ...ENTITY_MENTION_ALIAS_KEYS.flatMap((key) => aliasValuesFromUnknown(record[key])),
-      ...['pointers', 'refs', 'references', 'entities', 'items'].flatMap((key) => aliasValuesFromUnknown(record[key])),
-    ]
-  }
-  const text = asText(value)
-  if (!text) return []
-  return splitMentionAliasText(text)
-}
-
-function parseMentionAliasesFromJson(raw?: string | null): string[] {
-  if (!raw) return []
-  return dedupe([
-    ...aliasValuesFromUnknown(parseJsonRecord(raw)),
-    ...parseJsonRecordArray(raw).flatMap((record) => aliasValuesFromUnknown(record)),
-  ].filter(isUsefulMentionAlias), 16)
-}
-
-function parseMentionAliasesFromText(raw?: string | null): string[] {
-  const text = asText(raw)
-  if (!text) return []
-
-  const values: string[] = []
-  const labeledPattern = /(?:别名|又称|亦称|代号|称号|简称|称谓|alias|aliases|aka)\s*[:：]\s*([^\n。；;]+)/giu
-  let labeledMatch = labeledPattern.exec(text)
-  while (labeledMatch) {
-    values.push(...splitMentionAliasText(labeledMatch[1] || ''))
-    labeledMatch = labeledPattern.exec(text)
-  }
-
-  const inlinePattern = /(?:又称|亦称|代号为|简称为)\s*([\u4e00-\u9fffA-Za-z0-9_·-]{2,32})/gu
-  let inlineMatch = inlinePattern.exec(text)
-  while (inlineMatch) {
-    values.push(inlineMatch[1] || '')
-    inlineMatch = inlinePattern.exec(text)
-  }
-
-  return dedupe(values.filter(isUsefulMentionAlias), 16)
-}
-
-function collectUniqueAliasesByOwner<T extends { id: number }>(
-  rows: T[],
-  collectAliases: (row: T) => string[],
-): Map<number, string[]> {
-  const aliasesByOwner = new Map<number, string[]>()
-  const ownersByAlias = new Map<string, Set<number>>()
-
-  rows.forEach((row) => {
-    const aliases = dedupe(collectAliases(row)
-      .map(normalizeMentionAlias)
-      .filter(isUsefulMentionAlias), 24)
-    aliasesByOwner.set(row.id, aliases)
-    aliases.forEach((alias) => {
-      const key = normalizeMentionAliasKey(alias)
-      if (!ownersByAlias.has(key)) ownersByAlias.set(key, new Set())
-      ownersByAlias.get(key)?.add(row.id)
-    })
-  })
-
-  const result = new Map<number, string[]>()
-  aliasesByOwner.forEach((aliases, ownerId) => {
-    result.set(ownerId, aliases.filter((alias) => ownersByAlias.get(normalizeMentionAliasKey(alias))?.size === 1))
-  })
-  return result
-}
-
-function isTokenChar(value?: string): boolean {
-  return Boolean(value && /[A-Za-z0-9_]/u.test(value))
-}
-
-function isDigitChar(value?: string): boolean {
-  return Boolean(value && /\d/u.test(value))
-}
-
-function sourceContainsAlias(sourceText: string, alias: string): boolean {
-  const needle = normalizeMentionAlias(alias)
-  if (!needle) return false
-
-  let start = sourceText.indexOf(needle)
-  while (start >= 0) {
-    const before = sourceText[start - 1]
-    const after = sourceText[start + needle.length]
-    const first = needle[0]
-    const last = needle[needle.length - 1]
-    const blockedByAsciiToken = (isTokenChar(before) && isTokenChar(first)) || (isTokenChar(after) && isTokenChar(last))
-    const blockedByNumberSuffix = isDigitChar(after) && isDigitChar(last)
-    if (!blockedByAsciiToken && !blockedByNumberSuffix) return true
-    start = sourceText.indexOf(needle, start + 1)
-  }
-
-  return false
-}
-
-function collectMentionedEntityMatchesFromCandidates(
-  sourceText: string,
-  candidates: EntityMentionCandidate[],
-  limit: number,
-): Array<{ canonicalName: string; matchedTerms: string[]; score: number }> {
-  if (!sourceText.trim()) return []
-
-  const ownersByAlias = new Map<string, Set<string>>()
-  candidates.forEach((candidate) => {
-    dedupe([candidate.canonicalName, ...(candidate.aliases || [])]
-      .map(normalizeMentionAlias)
-      .filter(isUsefulMentionAlias), 32)
-      .forEach((alias) => {
-        const key = normalizeMentionAliasKey(alias)
-        if (!ownersByAlias.has(key)) ownersByAlias.set(key, new Set())
-        ownersByAlias.get(key)?.add(candidate.canonicalName)
-      })
-  })
-
-  return candidates
-    .map((candidate, index) => {
-      const aliases = dedupe([candidate.canonicalName, ...(candidate.aliases || [])]
-        .map(normalizeMentionAlias)
-        .filter(isUsefulMentionAlias), 32)
-        .filter((alias) => ownersByAlias.get(normalizeMentionAliasKey(alias))?.size === 1)
-      const matchedTerms = aliases
-        .filter((alias) => sourceContainsAlias(sourceText, alias))
-        .sort((left, right) => right.length - left.length)
-      return {
-        canonicalName: candidate.canonicalName,
-        matchedTerms,
-        index,
-        score: matchedTerms[0]?.length || 0,
-      }
-    })
-    .filter((entry) => entry.canonicalName && entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .slice(0, limit)
-}
-
-function collectMentionedEntityNamesFromCandidates(
-  sourceText: string,
-  candidates: EntityMentionCandidate[],
-  limit: number,
-): string[] {
-  return collectMentionedEntityMatchesFromCandidates(sourceText, candidates, limit)
-    .map((entry) => entry.canonicalName)
-    .filter(Boolean)
-}
-
-function collectMentionedEntityValidationTermsFromCandidates(
-  sourceText: string,
-  candidates: EntityMentionCandidate[],
-  limit: number,
-): string[] {
-  return dedupe(collectMentionedEntityMatchesFromCandidates(sourceText, candidates, limit)
-    .flatMap((entry) => [entry.canonicalName, ...entry.matchedTerms])
-    .filter(isUsefulMentionAlias), Math.max(limit * 3, limit))
-}
-
-function buildCharacterMentionCandidates(rows: Array<typeof characters.$inferSelect>): EntityMentionCandidate[] {
-  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
-    row.surname && row.givenName ? `${row.surname}${row.givenName}` : '',
-    row.occupation || '',
-    row.rankLevel || '',
-    row.socialIdentity || '',
-    ...parseMentionAliasesFromJson(row.sourceContextJson),
-  ])
-
-  return rows.map((row) => {
-    const roleAliases = row.roleType === 'protagonist'
-      ? [
-          '主角',
-          '主人公',
-          row.gender?.includes('男') ? '男主' : '',
-          row.gender?.includes('女') ? '女主' : '',
-        ]
-      : []
-    return {
-      canonicalName: row.fullName || '',
-      aliases: dedupe([
-        ...(uniqueAliases.get(row.id) || []),
-        ...roleAliases,
-      ], 24),
-    }
-  })
-}
-
-function buildItemMentionCandidates(rows: Array<typeof storyItems.$inferSelect>): EntityMentionCandidate[] {
-  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
-    row.subType || '',
-    ...parseJsonStringArray(row.tagsJson),
-    ...parseMentionAliasesFromJson(row.sourceContextJson),
-    ...parseMentionAliasesFromJson(row.typedRefsJson),
-  ])
-
-  return rows.map((row) => ({
-    canonicalName: row.itemName || '',
-    aliases: uniqueAliases.get(row.id) || [],
-  }))
-}
-
-function buildLocationMentionCandidates(rows: Array<typeof worldMap.$inferSelect>): EntityMentionCandidate[] {
-  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
-    row.locationType || '',
-    row.structureRole || '',
-    ...parseJsonStringArray(row.tagsJson),
-    ...parseMentionAliasesFromText(row.description),
-    ...parseMentionAliasesFromText(row.atmosphere),
-    ...parseMentionAliasesFromText(row.plotRelevance),
-  ])
-
-  return rows.map((row) => ({
-    canonicalName: row.name || '',
-    aliases: uniqueAliases.get(row.id) || [],
-  }))
-}
-
-function buildFactionMentionCandidates(rows: Array<typeof factions.$inferSelect>): EntityMentionCandidate[] {
-  return rows.map((row) => ({
-    canonicalName: row.name || '',
-    aliases: dedupe([
-      ...parseMentionAliasesFromJson(row.notes),
-      ...parseMentionAliasesFromText(row.notes),
-    ], 12),
-  }))
-}
-
-function collectExplicitEntityNamesFromReferences(
-  references: string[] | undefined,
-  candidates: EntityMentionCandidate[],
-): string[] {
-  const referenceKeys = new Set((references || [])
-    .map(normalizeMentionAliasKey)
-    .filter(Boolean))
-  if (referenceKeys.size === 0) return []
-
-  return candidates
-    .filter((candidate) => dedupe([candidate.canonicalName, ...(candidate.aliases || [])], 32)
-      .some((alias) => referenceKeys.has(normalizeMentionAliasKey(alias))))
-    .map((candidate) => candidate.canonicalName)
-    .filter(Boolean)
-}
-
-function collectRelationMentionedCharacterNames(
-  sourceText: string,
-  relationRows: Array<typeof characterRelations.$inferSelect>,
-  characterNameById: Map<number, string>,
-  limit: number,
-): string[] {
-  if (!sourceText.trim() || relationRows.length === 0 || limit <= 0) return []
-  return dedupe(relationRows.flatMap((relation) => {
-    const terms = [
-      relation.relationLabel || '',
-      relation.interactionStyle || '',
-    ]
-      .map(normalizeMentionAlias)
-      .filter(isUsefulMentionAlias)
-      .filter((term) => sourceContainsAlias(sourceText, term))
-    if (terms.length === 0) return []
-    return [
-      characterNameById.get(relation.charAId) || '',
-      characterNameById.get(relation.charBId) || '',
-    ]
-  }), limit)
-}
-
-function collectRelationMentionValidationTerms(
-  sourceText: string,
-  relationRows: Array<typeof characterRelations.$inferSelect>,
-  characterNameById: Map<number, string>,
-  limit: number,
-): string[] {
-  if (!sourceText.trim() || relationRows.length === 0 || limit <= 0) return []
-  return dedupe(relationRows.flatMap((relation) => {
-    const matchedTerms = [
-      relation.relationLabel || '',
-      relation.interactionStyle || '',
-    ]
-      .map(normalizeMentionAlias)
-      .filter(isUsefulMentionAlias)
-      .filter((term) => sourceContainsAlias(sourceText, term))
-    if (matchedTerms.length === 0) return []
-    return [
-      ...matchedTerms,
-      characterNameById.get(relation.charAId) || '',
-      characterNameById.get(relation.charBId) || '',
-    ]
-  }), Math.max(limit * 3, limit))
-}
-
-export function resolveMentionedEntityLimits(input: {
-  targetWords?: number | null
-  chapterCount?: number | null
-  launchMode?: string | null
-  settingsJson?: string | null
-  mapDepth?: number | null
-  factionCount?: number | null
-  speciesCount?: number | null
-  powerSystemCount?: number | null
-}) {
-  const policy = getOperatingModePolicy({
-    targetWords: input.targetWords,
-    chapterCount: input.chapterCount,
-    launchMode: input.launchMode,
-    settingsJson: input.settingsJson,
-  })
-  const targetWords = Number(input.targetWords || 0)
-  const chapterCount = Number(input.chapterCount || 0)
-  const extraWordBlocks = Math.max(0, Math.ceil((targetWords - 1000000) / 250000))
-  const extraChapterBlocks = Math.max(0, Math.ceil((chapterCount - 300) / 100))
-  const complexityScore = (
-    Math.min(Math.max(Number(input.mapDepth || 0) - 4, 0), 4) * 2
-    + Math.min(Math.max(Number(input.factionCount || 0) - 6, 0), 10)
-    + Math.min(Math.max(Number(input.speciesCount || 0) - 3, 0), 8)
-    + Math.min(Math.max(Number(input.powerSystemCount || 0) - 2, 0), 6)
-  )
-  const complexityBonus = Math.floor(complexityScore / 4)
-  const expand = (base: number, cap: number, weight = 1) => Math.min(
-    cap,
-    base + extraWordBlocks * weight * 2 + extraChapterBlocks * weight + complexityBonus * weight,
-  )
-
-  switch (policy.mode) {
-    case 'million_longform':
-      return {
-        characters: expand(targetWords >= 1500000 ? 32 : 24, 64, 2),
-        items: expand(targetWords >= 1500000 ? 24 : 20, 56, 2),
-        locations: expand(targetWords >= 1500000 ? 20 : 16, 56, 2),
-      }
-    case 'epic_longform':
-      return {
-        characters: expand(16, 40, 1),
-        items: expand(14, 36, 1),
-        locations: expand(12, 36, 1),
-      }
-    case 'standard_longform':
-      return {
-        characters: expand(10, 20, 1),
-        items: expand(10, 18, 1),
-        locations: expand(8, 16, 1),
-      }
-    case 'shortform':
-    default:
-      return {
-        characters: 8,
-        items: 8,
-        locations: 6,
-      }
-  }
-}
-
 function buildGlossaryContextSummary(
   novelId: number,
   signalTexts: string[],
@@ -1673,19 +1059,20 @@ function buildGlossaryContextSummary(
 }
 
 function buildFactionContextSummary(
-  novelId: number,
+  catalog: FactionCatalog,
   mentionedCharacters: Array<typeof characters.$inferSelect>,
+  characterNameMap: Map<number, string>,
+  locationNameMap: Map<number, string>,
   mentionedFactionNames: string[] = [],
   limit = 6,
 ): string {
   if (mentionedCharacters.length === 0 && mentionedFactionNames.length === 0) return ''
 
-  const catalog = buildFactionCatalog(novelId)
   const selected = new Map<number, typeof factions.$inferSelect>()
   const mentionedFactionSet = new Set(mentionedFactionNames)
 
   mentionedCharacters.forEach((character) => {
-    resolveFactionRowsByReferences(novelId, character.campFactionIdsJson).forEach((row) => {
+    resolveFactionRowsFromCatalog(catalog, character.campFactionIdsJson).forEach((row) => {
       selected.set(row.id, row)
     })
   })
@@ -1726,159 +1113,20 @@ function buildFactionContextSummary(
 
   const rows = [...selected.values()].slice(0, limit)
   if (rows.length === 0) return ''
-  const db = getDb()
-  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  const locationRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const cards = buildFactionContextCards({
     factions: rows,
-    characterNameMap: new Map(characterRows.map((row) => [row.id, row.fullName])),
-    locationNameMap: new Map(locationRows.map((row) => [row.id, row.name])),
+    characterNameMap,
+    locationNameMap,
     limit,
   })
 
   return cards.length > 0 ? `势力卡：\n${renderFactionCards(cards)}` : ''
 }
 
-function buildRecallQueryText(
-  title: string,
-  sections: Array<{ title: string; lines: string[] }>,
-  maxTokens = 450,
-): string {
-  const content = sections
-    .filter((section) => section.lines.length > 0)
-    .flatMap((section) => [
-      `${section.title}：`,
-      ...section.lines.map((line) => `- ${line}`),
-    ])
-    .join('\n')
-  if (!content) return ''
-  return truncateToTokens(`${title}\n${content}`, maxTokens)
-}
-
-function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucket[] {
-  const characterQuery = buildRecallQueryText('角色关系召回', [
-    {
-      title: '本章任务',
-      lines: dedupe([
-        compactRecallLine(input.chapterGoal, 80),
-        ...splitRecallLines(input.outline, 3, 84),
-        compactRecallLine(input.arcGoal, 80),
-      ], 4),
-    },
-    {
-      title: '当前涉及实体',
-      lines: dedupe([
-        input.mentionedCharacters.length > 0 ? `人物=${input.mentionedCharacters.join('、')}` : '',
-        input.mentionedItems.length > 0 ? `物品=${input.mentionedItems.join('、')}` : '',
-        input.mentionedLocations.length > 0 ? `地点=${input.mentionedLocations.join('、')}` : '',
-        input.mentionedFactions && input.mentionedFactions.length > 0 ? `势力=${input.mentionedFactions.join('、')}` : '',
-      ], 4),
-    },
-    {
-      title: '关系冲突',
-      lines: splitRecallLines(input.relationSummary, 4, 96),
-    },
-    {
-      title: '人物状态',
-      lines: splitRecallLines(input.characterStates, 4, 96),
-    },
-  ])
-
-  const ruleQuery = buildRecallQueryText('规则主题召回', [
-    {
-      title: '本章任务',
-      lines: dedupe([
-        compactRecallLine(input.chapterGoal, 80),
-        compactRecallLine(input.arcGoal, 80),
-        compactRecallLine(input.arcSummary, 84),
-      ], 3),
-    },
-    {
-      title: '主线与主题',
-      lines: dedupe([
-        compactRecallLine(input.storyGoal, 80),
-        compactRecallLine(input.coreConflict, 80),
-        compactRecallLine(input.mainPlot, 84),
-        ...splitRecallLines(input.themeVoiceSummary, 3, 84),
-      ], 5),
-    },
-    {
-      title: '世界规则与边界',
-      lines: dedupe([
-        ...splitRecallLines(input.worldRules, 5, 96),
-        ...splitRecallLines(input.mapSummary || '', 3, 96),
-      ], 6),
-    },
-    {
-      title: '时序与物品约束',
-      lines: dedupe([
-        ...splitRecallLines(input.timelineSummary, 2, 90),
-        ...splitRecallLines(input.itemSummary, 2, 90),
-      ], 4),
-    },
-  ])
-
-  const threadQuery = buildRecallQueryText('线程伏笔召回', [
-    {
-      title: '本章与故事弧',
-      lines: dedupe([
-        compactRecallLine(input.chapterGoal, 80),
-        compactRecallLine(input.arcGoal, 80),
-        compactRecallLine(input.arcSummary, 84),
-        ...splitRecallLines(input.chapterBridgePlan, 2, 84),
-      ], 5),
-    },
-    {
-      title: '活跃线程',
-      lines: dedupe([
-        ...splitRecallLines(input.activeThreads, 4, 96),
-        ...splitRecallLines(input.storyThreadsSummary, 3, 96),
-      ], 6),
-    },
-    {
-      title: '待回收事项',
-      lines: dedupe([
-        ...splitRecallLines(input.chapterBridgePlan, 2, 90),
-        ...splitRecallLines(input.openLoops, 4, 90),
-        ...splitRecallLines(input.dueForeshadows, 3, 90),
-        ...splitRecallLines(input.timelineOpenThreads, 3, 90),
-        ...splitRecallLines(input.continuityNotes, 3, 90),
-      ], 6),
-    },
-  ])
-
-  return [
-    characterQuery ? { bucket: 'character' as const, query: characterQuery, topK: 4 } : null,
-    ruleQuery ? { bucket: 'rule' as const, query: ruleQuery, topK: 3 } : null,
-    threadQuery ? { bucket: 'thread' as const, query: threadQuery, topK: 4 } : null,
-  ].filter((bucket): bucket is RecallQueryBucket => Boolean(bucket))
-}
-
-function summarizeRecallHit(hit: RecallHit): string {
-  const lines = hit.fragmentText
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => compactRecallLine(line, 96))
-    .filter(Boolean)
-
-  if (lines.length === 0) return ''
-  if (hit.fragmentType !== 'continuity') {
-    return compactRecallLine(lines.slice(0, 2).join('；'), 110)
-  }
-
-  const preferredPrefixes = hit.bucket === 'character'
-    ? ['人物变化：', '剧情推进：', '承接提醒：']
-    : hit.bucket === 'rule'
-      ? ['世界变化：', '承接提醒：', '剧情推进：', '故事弧推进：']
-      : ['未回收事项：', '承接提醒：', '故事弧推进：', '剧情推进：']
-
-  const preferred = lines.filter((line) => preferredPrefixes.some((prefix) => line.startsWith(prefix)))
-  return compactRecallLine((preferred.length > 0 ? preferred : lines).slice(0, 2).join('；'), 110)
-}
-
 function buildRecallEntityFreshnessMap(
   novelId: number,
   upToChapterNum?: number,
+  worldStatesOverride?: ReturnType<typeof getWorldStateContextSnapshot>['currentStates'],
 ): Map<string, number> {
   const result = new Map<string, number>()
   listLatestCharacterStates(novelId, { upToChapterNum, limit: 240 }).forEach((state) => {
@@ -1886,313 +1134,16 @@ function buildRecallEntityFreshnessMap(
       result.set(state.characterName, state.chapterNum)
     }
   })
-  getWorldStateContextSnapshot(novelId, {
+  const worldStates = worldStatesOverride || getWorldStateContextSnapshot(novelId, {
     upToChapterNum,
     limit: 240,
-  }).currentStates.forEach((state) => {
+  }).currentStates
+  worldStates.forEach((state) => {
     if (state.entityName) {
       result.set(state.entityName, state.chapterNum)
     }
   })
   return result
-}
-
-function enrichRecallHits(
-  hits: SimilarFragmentHit[],
-  bucket: RecallBucketKey,
-  currentChapterNum: number,
-  entityFreshnessMap: Map<string, number>,
-  constraintText: string,
-  validationTerms: string[] = [],
-): RecallHit[] {
-  const candidateNames = [...entityFreshnessMap.keys()].sort((left, right) => right.length - left.length)
-
-  return hits.map((hit) => {
-    const staleReasons: string[] = []
-    const matchedNames = candidateNames.filter((name) => hit.fragmentText.includes(name)).slice(0, 4)
-    matchedNames.forEach((name) => {
-      const freshnessChapterNum = entityFreshnessMap.get(name) || 0
-      if (freshnessChapterNum > 0 && freshnessChapterNum > hit.chapterNum) {
-        staleReasons.push(`${name} 已在第${freshnessChapterNum}章后更新，旧片段不可直接当作当前事实`)
-      }
-    })
-    if (bucket !== 'thread' && hit.chapterNum >= currentChapterNum) {
-      staleReasons.push(`命中片段来自第${hit.chapterNum}章，不应反向作为当前章之前的历史依据`)
-    }
-    const overriddenByConstraint = matchedNames.length > 0
-      && matchedNames.some((name) => constraintText.includes(name))
-      && staleReasons.length > 0
-    const entityMatches = validationTerms.filter((term) => term.length >= 2 && hit.fragmentText.includes(term)).slice(0, 4)
-    const entityValidationRequired = validationTerms.length > 0
-    const entityValidated = !entityValidationRequired || entityMatches.length > 0
-
-    return {
-      ...hit,
-      bucket,
-      stale: staleReasons.length > 0,
-      staleReasons: dedupe(staleReasons, 4),
-      overriddenByConstraint,
-      entityMatches,
-      entityValidationRequired,
-      entityValidated,
-    }
-  })
-}
-
-function buildEmptyRecallDiagnostics(summaryLines: string[] = []): RecallDiagnostics {
-  return {
-    searchedBucketCount: 0,
-    selectedBucketCount: 0,
-    totalHitCount: 0,
-    selectedHitCount: 0,
-    staleRecallCount: 0,
-    staleRecallRate: 0,
-    recallDependencyRate: 0,
-    overriddenHitCount: 0,
-    fallbackHitCount: 0,
-    validatedHitCount: 0,
-    lowSimilarityRejectedCount: 0,
-    entityValidationRejectedCount: 0,
-    minVectorSimilarity: MIN_VECTOR_RECALL_SIMILARITY,
-    minKeywordSimilarity: MIN_KEYWORD_RECALL_SIMILARITY,
-    summaryLines,
-  }
-}
-
-function createEmptyRecallBucketStats(): Record<RecallBucketKey, RecallBucketStats> {
-  return {
-    character: {
-      hitCount: 0,
-      selectedHitCount: 0,
-      staleCount: 0,
-      fallbackHitCount: 0,
-    },
-    rule: {
-      hitCount: 0,
-      selectedHitCount: 0,
-      staleCount: 0,
-      fallbackHitCount: 0,
-    },
-    thread: {
-      hitCount: 0,
-      selectedHitCount: 0,
-      staleCount: 0,
-      fallbackHitCount: 0,
-    },
-  }
-}
-
-function createEmptyRecallSnapshot(fallbackReason?: RecallFallbackReason): RecallSnapshot {
-  return {
-    retrievalUsed: false,
-    degraded: Boolean(fallbackReason),
-    hitCount: 0,
-    selectedHitCount: 0,
-    staleRecallCount: 0,
-    fallbackHitCount: 0,
-    fallbackReason,
-    assemblyStage: 'base_recall',
-    bucketStats: createEmptyRecallBucketStats(),
-  }
-}
-
-function pickRecallFallbackReason(reasons: Array<RecallFallbackReason | undefined>): RecallFallbackReason | undefined {
-  const rank: Record<RecallFallbackReason, number> = {
-    embedding_service_failed: 6,
-    query_embedding_failed: 5,
-    embedding_profile_mismatch: 5,
-    disabled_by_config: 4,
-    budget_trimmed: 3,
-    only_stale_hits: 2,
-    no_hits: 1,
-  }
-  return reasons
-    .filter((reason): reason is RecallFallbackReason => Boolean(reason))
-    .sort((left, right) => rank[right] - rank[left])[0]
-}
-
-function formatRecalledMemory(sources: RecallMemorySource[]): string {
-  const labels: Record<RecallBucketKey, string> = {
-    character: '角色/关系召回',
-    rule: '规则/主题召回',
-    thread: '线程/伏笔召回',
-  }
-  const selectedSources = sources
-    .filter((source) => isAcceptedRecallSource(source))
-    .slice(0, 6)
-  if (selectedSources.length === 0) return ''
-
-  const lines = ['以下内容仅作背景补充，不定义当前事实。']
-  selectedSources.forEach((source) => {
-    lines.push(`[${labels[source.bucket]}·第${source.chapterNum}章·${source.fragmentType}] ${source.summary}`)
-  })
-
-  return lines.join('\n')
-}
-
-function buildRecallMemorySource(
-  bucket: RecallBucketKey,
-  hit: RecallHit,
-  summary: string,
-): RecallMemorySource {
-  return {
-    bucket,
-    chapterId: hit.chapterId,
-    chapterNum: hit.chapterNum,
-    fragmentType: hit.fragmentType,
-    similarity: hit.similarity,
-    searchMode: hit.searchMode,
-    sourceLabel: `第${hit.chapterNum}章 · ${hit.fragmentType}`,
-    summary,
-    stale: hit.stale,
-    staleReasons: hit.staleReasons,
-    overriddenByConstraint: hit.overriddenByConstraint,
-    entityMatches: hit.entityMatches,
-    entityValidated: hit.entityValidated,
-  }
-}
-
-export function buildRecallSnapshot(
-  bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[]; fallbackReason?: RecallFallbackReason }>,
-): {
-  recalledMemory: string
-  recalledMemorySources: RecallMemorySource[]
-  recallDiagnostics: RecallDiagnostics
-  recallSnapshot: RecallSnapshot
-} {
-  const sources: RecallMemorySource[] = []
-  const seen = new Set<string>()
-  const selectedKeys = new Set<string>()
-  const selectedSources: RecallMemorySource[] = []
-  const bucketStats = createEmptyRecallBucketStats()
-  let selectedBucketCount = 0
-  let lowSimilarityRejectedCount = 0
-  let entityValidationRejectedCount = 0
-
-  bucketResults.forEach((result) => {
-    const eligible = result.hits.filter((hit) => {
-      if (hit.stale || hit.overriddenByConstraint) return false
-      if (hit.similarity < resolveRecallMinimumSimilarity(hit.searchMode)) {
-        lowSimilarityRejectedCount += 1
-        return false
-      }
-      if (!hit.entityValidated) {
-        entityValidationRejectedCount += 1
-        return false
-      }
-      return true
-    })
-    const significant = eligible.filter((hit) => hit.similarity >= resolveRecallPreferredSimilarity(hit.searchMode))
-    const fallback = eligible.filter((hit) => hit.similarity >= resolveRecallMinimumSimilarity(hit.searchMode))
-    const selected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
-    bucketStats[result.bucket] = {
-      hitCount: result.hits.length,
-      selectedHitCount: selected.length,
-      staleCount: result.hits.filter((hit) => hit.stale).length,
-      fallbackHitCount: result.hits.filter((hit) => hit.searchMode === 'keyword').length,
-      fallbackReason: result.fallbackReason,
-    }
-    if (selected.length > 0) {
-      selectedBucketCount += 1
-    }
-    selected.forEach((hit) => {
-      const summary = summarizeRecallHit(hit)
-      if (!summary) return
-      const selectionKey = `${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`
-      if (selectedKeys.has(selectionKey)) return
-      selectedKeys.add(selectionKey)
-      selectedSources.push(buildRecallMemorySource(result.bucket, hit, summary))
-    })
-
-    result.hits.forEach((hit) => {
-      const summary = summarizeRecallHit(hit)
-      if (!summary) return
-      const dedupeKey = `${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`
-      if (seen.has(dedupeKey)) return
-      seen.add(dedupeKey)
-      sources.push(buildRecallMemorySource(result.bucket, hit, summary))
-    })
-  })
-
-  const searchedBucketCount = bucketResults.length
-  const totalHitCount = sources.length
-  const validatedHitCount = sources.filter((source) => source.entityValidated).length
-  const selectedHitCount = selectedSources.length
-  const staleRecallCount = sources.filter((source) => source.stale).length
-  const overriddenHitCount = sources.filter((source) => source.overriddenByConstraint).length
-  const fallbackHitCount = sources.filter((source) => source.searchMode === 'keyword').length
-  const staleRecallRate = totalHitCount > 0 ? Math.round((staleRecallCount / totalHitCount) * 100) : 0
-  const recallDependencyRate = totalHitCount > 0 ? Math.round((selectedHitCount / totalHitCount) * 100) : 0
-  const recalledMemory = formatRecalledMemory(selectedSources)
-  const fallbackReason = pickRecallFallbackReason([
-    ...bucketResults.map((result) => result.fallbackReason),
-    selectedHitCount === 0 && staleRecallCount > 0 ? 'only_stale_hits' : undefined,
-    totalHitCount === 0 ? 'no_hits' : undefined,
-  ])
-  const recallDiagnostics: RecallDiagnostics = {
-    searchedBucketCount,
-    selectedBucketCount,
-    totalHitCount,
-    selectedHitCount,
-    staleRecallCount,
-    staleRecallRate,
-    recallDependencyRate,
-    overriddenHitCount,
-    fallbackHitCount,
-    validatedHitCount,
-    lowSimilarityRejectedCount,
-    entityValidationRejectedCount,
-    minVectorSimilarity: MIN_VECTOR_RECALL_SIMILARITY,
-    minKeywordSimilarity: MIN_KEYWORD_RECALL_SIMILARITY,
-    summaryLines: [
-      '向量召回只作背景补充，当前事实以硬约束和结构化状态为准。',
-      searchedBucketCount > 0
-        ? `召回覆盖 ${selectedBucketCount}/${searchedBucketCount} 个查询桶，补充片段 ${selectedHitCount} 条。`
-        : '当前章节没有可用的召回查询桶。',
-      `最低相似度门槛：向量 ${MIN_VECTOR_RECALL_SIMILARITY.toFixed(2)} / 关键词 ${MIN_KEYWORD_RECALL_SIMILARITY.toFixed(2)}。`,
-      staleRecallCount > 0
-        ? `拦截过期召回 ${staleRecallCount} 条，过期召回率 ${staleRecallRate}%。`
-        : '最近召回片段未命中过期状态。',
-      entityValidationRejectedCount > 0
-        ? `有 ${entityValidationRejectedCount} 条命中未覆盖当前章实体信号，已排除出背景补充。`
-        : `当前实体校验通过 ${validatedHitCount} 条历史片段。`,
-      lowSimilarityRejectedCount > 0
-        ? `有 ${lowSimilarityRejectedCount} 条低相似度命中低于门槛，已直接丢弃。`
-        : '当前没有低于门槛的低质量命中进入召回结果。',
-      overriddenHitCount > 0
-        ? `${overriddenHitCount} 条片段已被硬约束覆盖，不再参与当前事实定义。`
-        : '当前没有片段被硬约束直接覆盖。',
-    ].filter(Boolean),
-  }
-  const recallSnapshot: RecallSnapshot = {
-    retrievalUsed: Boolean(recalledMemory.trim()),
-    degraded: Boolean(fallbackReason),
-    hitCount: totalHitCount,
-    selectedHitCount,
-    staleRecallCount,
-    fallbackHitCount,
-    fallbackReason,
-    assemblyStage: 'base_recall',
-    bucketStats,
-  }
-
-  return {
-    recalledMemory,
-    recalledMemorySources: sources,
-    recallDiagnostics,
-    recallSnapshot,
-  }
-}
-
-function finalizeRecallSnapshot(snapshot: RecallSnapshot, recalledMemory: string): RecallSnapshot {
-  if (!snapshot.retrievalUsed) return snapshot
-  if (recalledMemory.trim()) return snapshot
-  return {
-    ...snapshot,
-    retrievalUsed: false,
-    degraded: true,
-    fallbackReason: 'budget_trimmed',
-  }
 }
 
 function buildBaseChapterContextParts(input: {
@@ -2209,133 +1160,6 @@ function buildBaseChapterContextParts(input: {
     recallSnapshot: createEmptyRecallSnapshot(),
     recallDiagnostics: buildEmptyRecallDiagnostics(['召回尚未执行。']),
     recalledMemorySources: [],
-  }
-}
-
-async function runRecallAugmentation(input: {
-  novelId: number
-  chapterNum: number
-  modelConfigId?: number | null
-  entityFreshnessMap: ReturnType<typeof buildRecallEntityFreshnessMap>
-  constraintText: string
-  chapterGoal: string
-  outline: string
-  arcGoal: string
-  arcSummary: string
-  storyGoal: string
-  coreConflict: string
-  mainPlot: string
-  themeVoiceSummary: string
-  worldRules: string
-  mapSummary?: string
-  relationSummary: string
-  characterStates: string
-  worldStates: string
-  itemSummary: string
-  timelineSummary: string
-  timelineOpenThreads: string
-  activeThreads: string
-  openLoops: string
-  dueForeshadows: string
-  continuityNotes: string
-  chapterBridgePlan: string
-  storyThreadsSummary: string
-  mentionedCharacters: string[]
-  mentionedItems: string[]
-  mentionedLocations: string[]
-  mentionedFactions?: string[]
-  mentionValidationCharacters?: string[]
-  mentionValidationItems?: string[]
-  mentionValidationLocations?: string[]
-  mentionValidationFactions?: string[]
-}): Promise<RecallAugmentationResult> {
-  const recallBuckets = buildRecallQueryBuckets({
-    chapterGoal: input.chapterGoal,
-    outline: input.outline,
-    arcGoal: input.arcGoal,
-    arcSummary: input.arcSummary,
-    storyGoal: input.storyGoal,
-    coreConflict: input.coreConflict,
-    mainPlot: input.mainPlot,
-    themeVoiceSummary: input.themeVoiceSummary,
-    worldRules: input.worldRules,
-    mapSummary: input.mapSummary,
-    relationSummary: input.relationSummary,
-    characterStates: input.characterStates,
-    worldStates: input.worldStates,
-    itemSummary: input.itemSummary,
-    timelineSummary: input.timelineSummary,
-    timelineOpenThreads: input.timelineOpenThreads,
-    activeThreads: input.activeThreads,
-    openLoops: input.openLoops,
-    dueForeshadows: input.dueForeshadows,
-    continuityNotes: input.continuityNotes,
-    chapterBridgePlan: input.chapterBridgePlan,
-    storyThreadsSummary: input.storyThreadsSummary,
-    mentionedCharacters: input.mentionedCharacters,
-    mentionedItems: input.mentionedItems,
-    mentionedLocations: input.mentionedLocations,
-    mentionedFactions: input.mentionedFactions,
-  })
-
-  if (recallBuckets.length === 0) {
-    return {
-      assemblyStage: 'recall',
-      recalledMemory: '',
-      recallSnapshot: createEmptyRecallSnapshot('no_hits'),
-      recallDiagnostics: buildEmptyRecallDiagnostics([
-        '当前章节没有形成可执行的召回查询桶，召回已跳过。',
-      ]),
-      recalledMemorySources: [],
-    }
-  }
-
-  try {
-    const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => {
-      const searchResult = await searchSimilarFragments(input.novelId, bucket.query, bucket.topK, input.modelConfigId || undefined)
-      const validationTerms = resolveRecallValidationTerms(bucket.bucket, {
-        mentionedCharacters: input.mentionedCharacters,
-        mentionedItems: input.mentionedItems,
-        mentionedLocations: input.mentionedLocations,
-        mentionedFactions: input.mentionedFactions,
-        mentionValidationCharacters: input.mentionValidationCharacters,
-        mentionValidationItems: input.mentionValidationItems,
-        mentionValidationLocations: input.mentionValidationLocations,
-        mentionValidationFactions: input.mentionValidationFactions,
-      })
-      return {
-        bucket: bucket.bucket,
-        fallbackReason: searchResult.fallbackReason,
-        hits: searchResult.hits
-          .filter((hit) => hit.chapterNum < input.chapterNum)
-          .map((hit) => enrichRecallHits(
-            [hit],
-            bucket.bucket,
-            input.chapterNum,
-            input.entityFreshnessMap,
-            input.constraintText,
-            validationTerms,
-          )[0]),
-      }
-    }))
-    const recallSnapshot = buildRecallSnapshot(bucketResults)
-    return {
-      assemblyStage: 'recall',
-      recalledMemory: recallSnapshot.recalledMemory,
-      recallSnapshot: recallSnapshot.recallSnapshot,
-      recallDiagnostics: recallSnapshot.recallDiagnostics,
-      recalledMemorySources: recallSnapshot.recalledMemorySources,
-    }
-  } catch {
-    return {
-      assemblyStage: 'recall',
-      recalledMemory: '',
-      recallSnapshot: createEmptyRecallSnapshot('embedding_service_failed'),
-      recallDiagnostics: buildEmptyRecallDiagnostics([
-        '向量召回当前不可用，已自动降级，不影响硬约束与结构化状态注入。',
-      ]),
-      recalledMemorySources: [],
-    }
   }
 }
 
@@ -3611,9 +2435,10 @@ export function buildStoryRelationSummary(
   allCharacters: Array<typeof characters.$inferSelect>,
   focusText: string,
   limit = 8,
+  relationRowsOverride?: Array<typeof characterRelations.$inferSelect>,
 ): string {
-  const db = getDb()
-  const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  const relationRows = relationRowsOverride
+    || getDb().select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
   if (relationRows.length === 0 || allCharacters.length < 2) return ''
 
   return renderRelationCards(buildRelationContextCards({
@@ -3638,49 +2463,53 @@ function buildTimelineContext(
   novelId: number,
   chapterNum: number,
   currentArcId: number | null | undefined,
-  chapterRows: Array<typeof chapters.$inferSelect>,
   characterRows: Array<typeof characters.$inferSelect>,
+  arcRows: Array<typeof storyArcs.$inferSelect>,
+  mapRows: Array<typeof worldMap.$inferSelect>,
 ): { timelineSummary: string; timelineOpenThreads: string } {
   const db = getDb()
-  const eventRows = db.select().from(timelineEvents)
-    .where(eq(timelineEvents.novelId, novelId))
-    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
-    .all()
-  if (eventRows.length === 0) {
+  const selectedEventIds = loadTimelineContextEventIds(
+    getSqlite(),
+    novelId,
+    chapterNum,
+    currentArcId,
+  )
+  if (selectedEventIds.length === 0) {
     return { timelineSummary: '', timelineOpenThreads: '' }
   }
 
-  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
-  const chapterNumMap = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
+  const selectedRows = db.select().from(timelineEvents)
+    .where(and(
+      eq(timelineEvents.novelId, novelId),
+      inArray(timelineEvents.id, selectedEventIds),
+    ))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .limit(selectedEventIds.length)
+    .all()
+  if (selectedRows.length === 0) {
+    return { timelineSummary: '', timelineOpenThreads: '' }
+  }
+
+  const anchorChapterIds = [...new Set(selectedRows.flatMap((event) => [
+    event.chapterStartId,
+    event.chapterEndId,
+  ]).filter((id): id is number => typeof id === 'number'))].slice(0, 12)
+  const anchorChapterRows = anchorChapterIds.length > 0
+    ? db.select({
+        id: chapters.id,
+        chapterNum: chapters.chapterNum,
+      }).from(chapters)
+      .where(and(
+        eq(chapters.novelId, novelId),
+        inArray(chapters.id, anchorChapterIds),
+      ))
+      .limit(anchorChapterIds.length)
+      .all()
+    : []
+  const chapterNumMap = new Map(anchorChapterRows.map((row) => [row.id, row.chapterNum]))
   const arcNameMap = new Map(arcRows.map((row) => [row.id, row.arcName]))
   const characterNameMap = new Map(characterRows.map((row) => [row.id, row.fullName]))
   const locationNameMap = new Map(mapRows.map((row) => [row.id, row.name]))
-
-  const hasHappened = (event: typeof timelineEvents.$inferSelect) => {
-    const end = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
-    const start = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
-    if (typeof end === 'number') return end < chapterNum
-    if (typeof start === 'number') return start < chapterNum
-    return event.status === 'written' || event.status === 'resolved'
-  }
-
-  const isNearFuture = (event: typeof timelineEvents.$inferSelect) => {
-    const start = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
-    if (typeof start === 'number') {
-      return start >= chapterNum && start <= chapterNum + 3
-    }
-    return event.status === 'planned' || event.status === 'seeded'
-  }
-
-  const selectedIds = new Set<number>()
-  eventRows.filter(hasHappened).slice(-4).forEach((event) => selectedIds.add(event.id))
-  eventRows.filter((event) => event.arcId && event.arcId === currentArcId).slice(-3).forEach((event) => selectedIds.add(event.id))
-  eventRows.filter(isNearFuture).slice(0, 3).forEach((event) => selectedIds.add(event.id))
-
-  const selectedRows = eventRows
-    .filter((event) => selectedIds.has(event.id))
-    .slice(-6)
 
   const timelineSummary = renderTimelineCards(buildTimelineContextCards(selectedRows, {
     chapterNumMap,
@@ -3759,29 +2588,24 @@ function buildMapContextSummary(
   }).join('\n')
 }
 
-function buildItemSummary(novelId: number, limit = 12, mentionedItemNames: string[] = []): string {
-  const db = getDb()
-  const characterNameMap = new Map(
-    db.select({ id: characters.id, fullName: characters.fullName }).from(characters).all()
-      .map((row) => [row.id, row.fullName]),
-  )
-  const locationNameMap = new Map(
-    db.select({ id: worldMap.id, name: worldMap.name }).from(worldMap).all()
-      .map((row) => [row.id, row.name]),
-  )
-  const rows = db.select().from(storyItems)
-    .where(eq(storyItems.novelId, novelId))
-    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
-    .all()
+function buildItemSummary(
+  rows: Array<typeof storyItems.$inferSelect>,
+  characterNameMap: Map<number, string>,
+  locationNameMap: Map<number, string>,
+  limit = 12,
+  mentionedItemNames: string[] = [],
+): string {
+  const instanceRows = rows
     .filter((item) => item.itemKind === 'instance')
+    .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0) || left.id - right.id)
 
-  if (rows.length === 0) return ''
+  if (instanceRows.length === 0) return ''
   const mentionedSet = new Set(mentionedItemNames)
   const orderedRows = mentionedSet.size === 0
-    ? rows
+    ? instanceRows
     : [
-        ...rows.filter((item) => mentionedSet.has(item.itemName)),
-        ...rows.filter((item) => !mentionedSet.has(item.itemName)),
+        ...instanceRows.filter((item) => mentionedSet.has(item.itemName)),
+        ...instanceRows.filter((item) => !mentionedSet.has(item.itemName)),
       ]
 
   return renderItemCards(buildItemContextCards({
@@ -3793,17 +2617,12 @@ function buildItemSummary(novelId: number, limit = 12, mentionedItemNames: strin
 }
 
 function buildActiveThreadsContextData(
-  novelId: number,
+  rows: Array<typeof storyThreads.$inferSelect>,
   chapterNum: number,
   currentArc?: typeof storyArcs.$inferSelect | null,
   limit = 10,
+  pressureCount?: number,
 ): { summary: string; pressureCount: number } {
-  const db = getDb()
-  const rows = db.select().from(storyThreads)
-    .where(eq(storyThreads.novelId, novelId))
-    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
-    .all()
-
   if (rows.length === 0) {
     return { summary: '', pressureCount: 0 }
   }
@@ -3816,7 +2635,7 @@ function buildActiveThreadsContextData(
 
   return {
     summary: renderThreadCards(threadContext.cards),
-    pressureCount: threadContext.pressureCount,
+    pressureCount: pressureCount ?? threadContext.pressureCount,
   }
 }
 
@@ -3849,18 +2668,18 @@ function threadPriorityRank(priority?: string | null): number {
 }
 
 function buildDueForeshadowContext(
-  novelId: number,
+  dueThreadRows: Array<typeof storyThreads.$inferSelect>,
+  foreshadowLinkedThreadRows: Array<typeof storyThreads.$inferSelect>,
+  foreshadowLedger: ReturnType<typeof listForeshadowLedgerByIds>,
   chapterNum: number,
   currentArc?: typeof storyArcs.$inferSelect | null,
   limit = 2,
 ): string {
-  const db = getDb()
-  const threadRows = db.select().from(storyThreads)
-    .where(eq(storyThreads.novelId, novelId))
-    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
-    .all()
-  const threadById = new Map(threadRows.map((thread) => [thread.id, thread] as const))
-  const ledgerLines = listForeshadowLedger(novelId)
+  const threadById = new Map(
+    [...dueThreadRows, ...foreshadowLinkedThreadRows]
+      .map((thread) => [thread.id, thread] as const),
+  )
+  const ledgerLines = foreshadowLedger
     .filter((entry) => entry.status !== 'resolved' && entry.status !== 'archived')
     .filter((entry) => typeof entry.targetPayoffChapter === 'number' && entry.targetPayoffChapter > 0)
     .filter((thread) => {
@@ -3901,11 +2720,11 @@ function buildDueForeshadowContext(
     ].filter(Boolean).join(' · '), 120))
     .filter(Boolean)
 
-  const coveredThreadIds = new Set(listForeshadowLedger(novelId)
+  const coveredThreadIds = new Set(foreshadowLedger
     .map((entry) => entry.linkedThreadId)
     .filter((id): id is number => typeof id === 'number'))
 
-  const threadLines = threadRows
+  const threadLines = dueThreadRows
     .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
     .filter(isForeshadowThreadCandidate)
     .filter((thread) => !coveredThreadIds.has(thread.id))
@@ -3947,7 +2766,7 @@ function buildDueForeshadowContext(
   // 长期悬置通道：没填目标回收章、但埋设已超过阈值的伏笔，周期性浮出提醒安排回收，
   // 避免长篇（几十万到百万字）里"无目标章"的伏笔被永久遗忘。
   const STALE_FORESHADOW_CHAPTER_GAP = 40
-  const staleLedgerLines = listForeshadowLedger(novelId)
+  const staleLedgerLines = foreshadowLedger
     .filter((entry) => entry.status !== 'resolved' && entry.status !== 'archived')
     .filter((entry) => !(typeof entry.targetPayoffChapter === 'number' && entry.targetPayoffChapter > 0))
     .filter((entry) => typeof entry.sourceChapterNum === 'number'
@@ -3970,12 +2789,12 @@ function buildDueForeshadowContext(
     .join('\n')
 }
 
-function buildStoryThreadsSummary(novelId: number, limit = 24): string {
-  const db = getDb()
-  const rows = db.select().from(storyThreads)
-    .where(eq(storyThreads.novelId, novelId))
-    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
-    .all()
+function buildStoryThreadsSummary(
+  threadRows: Array<typeof storyThreads.$inferSelect>,
+  limit = 24,
+): string {
+  const rows = [...threadRows]
+    .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0) || left.id - right.id)
     .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
 
   if (rows.length === 0) return ''
@@ -4351,7 +3170,58 @@ export async function buildStoryProfile(
   if (options.ensureStructure === true) ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
+  const protagonistRows = db.select().from(characters)
+    .where(and(
+      eq(characters.novelId, novelId),
+      eq(characters.roleType, 'protagonist'),
+      sql`trim(${characters.fullName}) <> ''`,
+    ))
+    .orderBy(asc(characters.id))
+    .limit(1)
+    .all()
+  const threadRows = loadStoryProfileThreadRows(novel)
+  return buildStoryProfileFromSourceRows(novel, protagonistRows, threadRows)
+}
 
+function loadStoryProfileThreadRows(
+  novel: typeof novels.$inferSelect,
+): Array<typeof storyThreads.$inferSelect> {
+  const threadLimit = resolveStoryThreadSummaryLimit(novel)
+  return getDb().select().from(storyThreads)
+    .where(and(
+      eq(storyThreads.novelId, novel.id),
+      or(
+        isNull(storyThreads.status),
+        notInArray(storyThreads.status, ['resolved', 'abandoned']),
+      ),
+    ))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .limit(threadLimit)
+    .all()
+}
+
+function loadStoryThreadRowsByIds(
+  novelId: number,
+  ids: number[],
+): Array<typeof storyThreads.$inferSelect> {
+  const normalizedIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))]
+  if (normalizedIds.length === 0) return []
+  return getDb().select().from(storyThreads)
+    .where(and(
+      eq(storyThreads.novelId, novelId),
+      inArray(storyThreads.id, normalizedIds),
+    ))
+    .limit(normalizedIds.length)
+    .all()
+}
+
+function buildStoryProfileFromSourceRows(
+  novel: typeof novels.$inferSelect,
+  allCharacters: Array<typeof characters.$inferSelect>,
+  threadRows: Array<typeof storyThreads.$inferSelect>,
+): StoryProfile {
+  const db = getDb()
+  const novelId = novel.id
   const genre = novel.genreId
     ? db.select().from(genres).where(eq(genres.id, novel.genreId)).all()[0]
     : null
@@ -4361,7 +3231,6 @@ export async function buildStoryProfile(
   const worldTemplate = novel.worldTemplateId
     ? db.select().from(templates).where(eq(templates.id, novel.worldTemplateId)).all()[0]
     : null
-  const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
 
   const settings = parseStorySettings(novel.settingsJson)
   const projectBrief = parseProjectBriefDocument(novel.projectBriefJson)
@@ -4421,7 +3290,7 @@ export async function buildStoryProfile(
     themeVoiceSummary: buildThemeVoiceSummary(themeVoice),
     writingContractSummary,
     writingRulesSummary: buildWritingRulesSummary(settings.writingRules),
-    storyThreadsSummary: buildStoryThreadsSummary(novelId, resolveStoryThreadSummaryLimit(novel)),
+    storyThreadsSummary: buildStoryThreadsSummary(threadRows, resolveStoryThreadSummaryLimit(novel)),
     storyGoal: settings.storyGoal,
     coreConflict: settings.coreConflict,
     mainPlot: settings.mainPlot,
@@ -4446,30 +3315,35 @@ export async function buildStoryProfile(
 export async function buildOutlineGenerationContext(arcId: number, stageId?: number): Promise<OutlineGenerationContext> {
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
-  if (arc) ensureStoryStructure(arc.novelId)
   if (!arc) throwUserFacingError('storyArc.notFound')
   const novel = db.select().from(novels).where(eq(novels.id, arc.novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+  ensureStoryStructure(arc.novelId)
 
   const profile = await buildStoryProfile(arc.novelId)
+  const chapterStart = arc.chapterStart || 1
   const creativeStageContext = resolveCreativeStageContextForChapter(
     arc.novelId,
-    arc.chapterStart || 1,
+    chapterStart,
     stageId,
   )
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, arc.novelId)).all()
-  const previousRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, arc.novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-    .filter((chapter) => chapter.chapterNum < (arc.chapterStart || 1))
+  const chapterCount = getNovelChapterCount(arc.novelId)
+  const chapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
+    ? loadBoundedChapterRows(arc.novelId, chapterStart, novel, arc)
+    : db.select().from(chapters)
+      .where(eq(chapters.novelId, arc.novelId))
+      .orderBy(asc(chapters.chapterNum))
+      .all()
+  const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterStart)
 
   const recentChapters = selectRecentContextRows(
     previousRows,
-    novel?.targetWords || 0,
-    previousRows.length,
+    novel.targetWords || 0,
+    chapterCount,
     {
-      launchMode: novel?.launchMode,
-      settingsJson: novel?.settingsJson,
+      launchMode: novel.launchMode,
+      settingsJson: novel.settingsJson,
       signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
     },
   ).map(toChapterWithContinuity)
@@ -4507,7 +3381,12 @@ export async function collectChapterContextRawData(
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const profile = await buildStoryProfile(novelId)
+  const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+  const profileThreadRows = loadStoryProfileThreadRows(novel)
+  const profile = buildStoryProfileFromSourceRows(novel, allCharacters, profileThreadRows)
   const chapterCount = getNovelChapterCount(novelId)
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentChapterBase = db.select().from(chapters)
@@ -4525,12 +3404,8 @@ export async function collectChapterContextRawData(
   const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapterNum, stageId)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
   const targetWords = Number(novel.targetWords || 0)
-  const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
-  const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const contractContext = currentChapter ? getChapterContractContext(currentChapter.id) : null
   const worldRules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
-  const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
   const maxMapDepth = Math.max(
     ...worldRules.mapBlueprint.levels.map((level) => level.depth),
     ...allLocations.map((location) => Number(location.level || 0)),
@@ -4593,12 +3468,14 @@ export async function collectChapterContextRawData(
   const itemMentionCandidates = buildItemMentionCandidates(allItems)
   const locationMentionCandidates = buildLocationMentionCandidates(allLocations)
   const factionMentionCandidates = buildFactionMentionCandidates(factionRows)
+  const characterNameById = new Map(allCharacters.map((character) => [character.id, character.fullName || '']))
+  const locationNameById = new Map(allLocations.map((location) => [location.id, location.name || '']))
+  const factionCatalog = createFactionCatalog(factionRows)
   const mentionedCharacterNames = new Set<string>(collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
     characterMentionCandidates,
     mentionedEntityLimits.characters,
   ))
-  const characterNameById = new Map(allCharacters.map((character) => [character.id, character.fullName || '']))
   const relationRowsForMention = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
   collectRelationMentionedCharacterNames(
     chapterSignalText,
@@ -4668,8 +3545,9 @@ export async function collectChapterContextRawData(
     novelId,
     chapterNum,
     currentArc?.id,
-    chapterRows,
     allCharacters,
+    arcs,
+    allLocations,
   )
   const storyMemoryRuntimePolicy = getOperatingModeRuntimePolicy({
     launchMode: novel.launchMode,
@@ -4684,8 +3562,42 @@ export async function collectChapterContextRawData(
   const longTermMemory = storyMemoryPromptPackage.summary
   const threadContextLimit = Math.max(10, Math.min(32, mentionedEntityLimits.characters))
   const dueForeshadowLimit = Math.max(2, Math.ceil(threadContextLimit / 4))
-  const itemSummary = buildItemSummary(novelId, Math.max(12, mentionedEntityLimits.items), mentionedItemNames)
-  const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc, threadContextLimit)
+  const threadProjection = loadChapterThreadContextProjection(getSqlite(), {
+    novelId,
+    chapterNum,
+    dueLimit: dueForeshadowLimit,
+    currentArc,
+  })
+  const projectedThreadRows = loadStoryThreadRowsByIds(novelId, [
+    ...threadProjection.activeThreadIds,
+    ...threadProjection.dueThreadIds,
+    ...threadProjection.foreshadowLinkedThreadIds,
+  ])
+  const projectedThreadById = new Map(projectedThreadRows.map((row) => [row.id, row] as const))
+  const activeThreadRows = threadProjection.activeThreadIds
+    .flatMap((id) => projectedThreadById.get(id) || [])
+  const dueThreadRows = threadProjection.dueThreadIds
+    .flatMap((id) => projectedThreadById.get(id) || [])
+  const foreshadowLinkedThreadRows = threadProjection.foreshadowLinkedThreadIds
+    .flatMap((id) => projectedThreadById.get(id) || [])
+  const foreshadowRows = listForeshadowLedgerByIds(novelId, [
+    ...threadProjection.dueForeshadowIds,
+    ...threadProjection.staleForeshadowIds,
+  ])
+  const itemSummary = buildItemSummary(
+    allItems,
+    characterNameById,
+    locationNameById,
+    Math.max(12, mentionedEntityLimits.items),
+    mentionedItemNames,
+  )
+  const activeThreadsContext = buildActiveThreadsContextData(
+    activeThreadRows,
+    chapterNum,
+    currentArc,
+    threadContextLimit,
+    threadProjection.pressureCount,
+  )
   const chapterContract = contractContext?.chapterContract || null
   const chapterGoal = [
     chapterContract?.chapterGoal || '',
@@ -4739,7 +3651,13 @@ export async function collectChapterContextRawData(
     currentChapter?.outline || '',
     previousSummaries,
   ])
-  const factionContextSummary = buildFactionContextSummary(novelId, matchedCharacterRows, mentionedFactionNames)
+  const factionContextSummary = buildFactionContextSummary(
+    factionCatalog,
+    matchedCharacterRows,
+    characterNameById,
+    locationNameById,
+    mentionedFactionNames,
+  )
   const worldRulesContext = [
     profile.worldRulesSummary,
     glossaryContextSummary,
@@ -4750,6 +3668,8 @@ export async function collectChapterContextRawData(
     novelId,
     allCharacters,
     [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal, previousSummaries].filter(Boolean).join("\n"),
+    8,
+    relationRowsForMention,
   )
   const dialogueVoiceLocks = formatDialogueVoiceLocksSection(getChapterDialogueVoiceLocks(novelId, {
     chapterNum,
@@ -4775,6 +3695,7 @@ export async function collectChapterContextRawData(
   const entityFreshnessMap = buildRecallEntityFreshnessMap(
     novelId,
     recentChapters[recentChapters.length - 1]?.chapterNum,
+    worldStateSnapshot.currentStates,
   )
 
   const baseContext = buildBaseChapterContextParts({
@@ -4804,7 +3725,14 @@ export async function collectChapterContextRawData(
         ...promiseCommitmentLines,
       ].filter(Boolean).join('\n'),
       dueForeshadows: [
-        buildDueForeshadowContext(novelId, chapterNum, currentArc, dueForeshadowLimit),
+        buildDueForeshadowContext(
+          dueThreadRows,
+          foreshadowLinkedThreadRows,
+          foreshadowRows,
+          chapterNum,
+          currentArc,
+          dueForeshadowLimit,
+        ),
         ...payoffCommitmentLines,
         ...requiredForeshadowLines,
       ].filter(Boolean).join('\n'),
