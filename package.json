@@ -81,6 +81,8 @@
     "check:encoding": "node scripts/check-encoding.cjs",
     "check:user-messages": "node scripts/check-user-facing-messages.cjs",
     "audit:interfaces": "node scripts/interface-inventory.cjs --check",
+    "audit:complexity": "node scripts/complexity-audit.cjs",
+    "audit:complexity:strict": "node scripts/complexity-audit.cjs --strict",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {

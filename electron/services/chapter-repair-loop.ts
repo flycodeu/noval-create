@@ -53,7 +53,6 @@ function judgeDimensionOutcome(previous: SemanticGateStatus, current: SemanticGa
     // blocker → pass/warning 视为已解决（以新 status 为准）；blocker → blocker 为仍存在。
     return current === 'warning' ? 'resolved' : 'persists'
   }
-  // previous === 'warning'
   if (current === 'blocker') return 'regressed'
   return 'persists'
 }

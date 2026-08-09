@@ -181,7 +181,6 @@ export default function AIScorePanel({
       marginTop: 10,
       paddingTop: 6,
     }}>
-      {/* 评分触发行 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <Button
           size="small"
@@ -230,7 +229,6 @@ export default function AIScorePanel({
         </div>
       )}
 
-      {/* 详细评分（可折叠） */}
       {result && (
         <Collapse
           ghost
@@ -279,7 +277,6 @@ export default function AIScorePanel({
                   </div>
                 ))}
 
-                {/* 综合评价 + 修改建议 */}
                 <div style={{
                   padding: '8px 12px',
                   background: 'var(--bg-hover)',
@@ -359,7 +356,6 @@ export default function AIScorePanel({
         />
       )}
 
-      {/* 按体检结果修复区域 */}
       {result && onRegenerate && showRegen && (
         <div style={{
           marginTop: 8,

@@ -11,6 +11,9 @@ directories:
 
 files:
   - out/**/*
+  - "!out/novel-ai-eval{,/**/*}"
+  - "!out/novel-ai-eval-pipeline{,/**/*}"
+  - "!out/novel-flow-audit{,/**/*}"
   - package.json
   - "!out/**/*.map"
   - "!dist-electron{,/**/*}"

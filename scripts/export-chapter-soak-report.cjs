@@ -1,6 +1,54 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+function resolveCliPath(value) {
+  return path.resolve(process.cwd(), value)
+}
+
+function parseId(value) {
+  return Number(value) || 0
+}
+
+function parseSampleChapterCount(value) {
+  return Math.max(1, Math.min(10, Number(value) || 2))
+}
+
+const FLAG_OPTIONS = new Map([
+  ['--help', ['help', true]],
+  ['-h', ['help', true]],
+  ['--json', ['json', true]],
+  ['--list-novels', ['listNovels', true]],
+  ['--inspect-novel', ['inspectNovel', true]],
+  ['--real-model-called', ['realModelCalled', true]],
+  ['--no-real-model-called', ['realModelCalled', false]],
+])
+
+const VALUE_OPTIONS = new Map([
+  ['--db', ['dbPath', resolveCliPath]],
+  ['--input', ['inputPath', resolveCliPath]],
+  ['--novelId', ['novelId', parseId]],
+  ['--novel-id', ['novelId', parseId]],
+  ['--taskId', ['taskId', parseId]],
+  ['--task-id', ['taskId', parseId]],
+  ['--out', ['outPath', resolveCliPath]],
+  ['--provider', ['provider', String]],
+  ['--model', ['model', String]],
+  ['--modelConfigId', ['modelConfigId', String]],
+  ['--model-config-id', ['modelConfigId', String]],
+  ['--runId', ['runId', String]],
+  ['--run-id', ['runId', String]],
+  ['--sample-chapters', ['sampleChapters', parseSampleChapterCount]],
+])
+
+function splitOption(arg) {
+  const separator = arg.indexOf('=')
+  if (separator < 0) return { name: arg, inlineValue: undefined }
+  return {
+    name: arg.slice(0, separator),
+    inlineValue: arg.slice(separator + 1),
+  }
+}
+
 function parseArgs(argv) {
   const options = {
     dbPath: process.env.NOVELFORGE_DB_PATH || '',
@@ -20,47 +68,21 @@ function parseArgs(argv) {
     help: false,
   }
 
-  argv.forEach((arg, index) => {
-    const readValue = (prefix) => arg.startsWith(prefix) ? arg.slice(prefix.length) : argv[index + 1]
-    if (arg === '--help' || arg === '-h') options.help = true
-    if (arg === '--json') options.json = true
-    if (arg === '--list-novels') options.listNovels = true
-    if (arg === '--inspect-novel') options.inspectNovel = true
-    if (arg === '--real-model-called') options.realModelCalled = true
-    if (arg === '--no-real-model-called') options.realModelCalled = false
-    if (arg.startsWith('--db=')) options.dbPath = path.resolve(process.cwd(), readValue('--db='))
-    if (arg === '--db' && argv[index + 1]) options.dbPath = path.resolve(process.cwd(), argv[index + 1])
-    if (arg.startsWith('--input=')) options.inputPath = path.resolve(process.cwd(), readValue('--input='))
-    if (arg === '--input' && argv[index + 1]) options.inputPath = path.resolve(process.cwd(), argv[index + 1])
-    if (arg.startsWith('--novelId=')) options.novelId = Number(readValue('--novelId=')) || 0
-    if (arg === '--novelId' && argv[index + 1]) options.novelId = Number(argv[index + 1]) || 0
-    if (arg.startsWith('--novel-id=')) options.novelId = Number(readValue('--novel-id=')) || 0
-    if (arg === '--novel-id' && argv[index + 1]) options.novelId = Number(argv[index + 1]) || 0
-    if (arg.startsWith('--taskId=')) options.taskId = Number(readValue('--taskId=')) || 0
-    if (arg === '--taskId' && argv[index + 1]) options.taskId = Number(argv[index + 1]) || 0
-    if (arg.startsWith('--task-id=')) options.taskId = Number(readValue('--task-id=')) || 0
-    if (arg === '--task-id' && argv[index + 1]) options.taskId = Number(argv[index + 1]) || 0
-    if (arg.startsWith('--out=')) options.outPath = path.resolve(process.cwd(), readValue('--out='))
-    if (arg === '--out' && argv[index + 1]) options.outPath = path.resolve(process.cwd(), argv[index + 1])
-    if (arg.startsWith('--provider=')) options.provider = readValue('--provider=')
-    if (arg === '--provider' && argv[index + 1]) options.provider = argv[index + 1]
-    if (arg.startsWith('--model=')) options.model = readValue('--model=')
-    if (arg === '--model' && argv[index + 1]) options.model = argv[index + 1]
-    if (arg.startsWith('--modelConfigId=')) options.modelConfigId = readValue('--modelConfigId=')
-    if (arg === '--modelConfigId' && argv[index + 1]) options.modelConfigId = argv[index + 1]
-    if (arg.startsWith('--model-config-id=')) options.modelConfigId = readValue('--model-config-id=')
-    if (arg === '--model-config-id' && argv[index + 1]) options.modelConfigId = argv[index + 1]
-    if (arg.startsWith('--runId=')) options.runId = readValue('--runId=')
-    if (arg === '--runId' && argv[index + 1]) options.runId = argv[index + 1]
-    if (arg.startsWith('--run-id=')) options.runId = readValue('--run-id=')
-    if (arg === '--run-id' && argv[index + 1]) options.runId = argv[index + 1]
-    if (arg.startsWith('--sample-chapters=')) {
-      options.sampleChapters = Math.max(1, Math.min(10, Number(readValue('--sample-chapters=')) || 2))
+  for (let index = 0; index < argv.length; index += 1) {
+    const { name, inlineValue } = splitOption(argv[index])
+    const flag = FLAG_OPTIONS.get(name)
+    if (flag) {
+      options[flag[0]] = flag[1]
+      continue
     }
-    if (arg === '--sample-chapters' && argv[index + 1]) {
-      options.sampleChapters = Math.max(1, Math.min(10, Number(argv[index + 1]) || 2))
-    }
-  })
+
+    const valueOption = VALUE_OPTIONS.get(name)
+    if (!valueOption) continue
+    const value = inlineValue === undefined ? argv[index + 1] : inlineValue
+    if (value === undefined) continue
+    options[valueOption[0]] = valueOption[1](value)
+    if (inlineValue === undefined) index += 1
+  }
 
   return options
 }
@@ -202,8 +224,8 @@ function compactText(value, maxLength) {
   return `${text.slice(0, Math.max(0, maxLength - 1))}…`
 }
 
-function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
-  const novel = db.prepare(`
+function loadNovelQualitySummary(db, novelId) {
+  return db.prepare(`
     SELECT
       novel.id,
       novel.title,
@@ -226,9 +248,10 @@ function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
     WHERE novel.id = ?
     GROUP BY novel.id
   `).get(novelId)
-  if (!novel) throw new Error(`Novel ${novelId} was not found`)
+}
 
-  const chapters = db.prepare(`
+function loadSampleChapterRows(db, novelId, sampleChapters) {
+  return db.prepare(`
     SELECT
       id,
       chapter_num AS chapterNum,
@@ -248,8 +271,10 @@ function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
     WHERE novel_id = ?
     ORDER BY chapter_num ASC, id ASC
     LIMIT ?
-  `).all(novelId, Math.max(1, Math.min(10, Number(sampleChapters) || 2)))
+  `).all(novelId, parseSampleChapterCount(sampleChapters))
+}
 
+function loadWorkflowEvidence(db, novelId) {
   const taskEvidence = db.prepare(`
     SELECT
       COUNT(*) AS totalTaskCount,
@@ -272,11 +297,76 @@ function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
     FROM artifacts
     WHERE novel_id = ?
   `).get(novelId)
+  return { taskEvidence, artifactEvidence }
+}
 
+function mapNovelQualitySummary(novel) {
   const chapterCount = Number(novel.chapterCount || 0)
   const totalWords = Number(novel.totalWords || 0)
   const coverage = (value) => chapterCount > 0 ? Number(value || 0) / chapterCount : 0
+  const targetWords = Number(novel.targetWords || 0)
+  return {
+    id: Number(novel.id),
+    title: novel.title || '',
+    targetWords,
+    launchMode: novel.launchMode || '',
+    contextVersion: Number(novel.contextVersion || 1),
+    chapterCount,
+    totalWords,
+    averageWordsPerChapter: chapterCount > 0 ? Math.round(totalWords / chapterCount) : 0,
+    targetCompletionRate: targetWords > 0 ? totalWords / targetWords : 0,
+    contentCoverageRate: coverage(novel.contentChapterCount),
+    outlineCoverageRate: coverage(novel.outlineChapterCount),
+    summaryCoverageRate: coverage(novel.summaryChapterCount),
+    continuityCoverageRate: coverage(novel.continuityChapterCount),
+    reviewNotesCoverageRate: coverage(novel.reviewNotesChapterCount),
+    aiScoreCoverageRate: coverage(novel.aiScoreChapterCount),
+    qualityScoreCoverageRate: coverage(novel.qualityScoreChapterCount),
+    writebackStatusCoverageRate: coverage(novel.writebackStatusChapterCount),
+  }
+}
 
+function mapWorkflowEvidence(taskEvidence, artifactEvidence) {
+  return {
+    totalTaskCount: Number(taskEvidence?.totalTaskCount || 0),
+    modelBackedTaskCount: Number(taskEvidence?.modelBackedTaskCount || 0),
+    successfulTaskCount: Number(taskEvidence?.successfulTaskCount || 0),
+    chapterWorkflowTaskCount: Number(taskEvidence?.chapterWorkflowTaskCount || 0),
+    totalArtifactCount: Number(artifactEvidence?.totalArtifactCount || 0),
+    qualityReportCount: Number(artifactEvidence?.qualityReportCount || 0),
+    reviewedQualityReportCount: Number(artifactEvidence?.reviewedQualityReportCount || 0),
+    qualityRepairReviewCount: Number(artifactEvidence?.qualityRepairReviewCount || 0),
+    modelBackedArtifactCount: Number(artifactEvidence?.modelBackedArtifactCount || 0),
+  }
+}
+
+function mapQualityChapter(chapter) {
+  const targetWords = Number(chapter.targetWords || 0)
+  const wordCount = Number(chapter.wordCount || 0)
+  return {
+    id: Number(chapter.id),
+    chapterNum: Number(chapter.chapterNum || 0),
+    title: chapter.title || '',
+    status: chapter.status || '',
+    targetWords,
+    wordCount,
+    wordRatio: targetWords > 0 ? wordCount / targetWords : 0,
+    outline: compactText(chapter.outline, 800),
+    contentExcerpt: compactText(chapter.content, 1600),
+    summary: compactText(chapter.summary, 500),
+    continuityState: readJson(chapter.continuityStateJson, null),
+    reviewNotes: readJson(chapter.reviewNotesJson, null),
+    aiScore: readJson(chapter.aiScoreJson, null),
+    qualityScores: readJson(chapter.qualityScoresJson, null),
+    writebackStatus: readJson(chapter.writebackStatusJson, null),
+  }
+}
+
+function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
+  const novel = loadNovelQualitySummary(db, novelId)
+  if (!novel) throw new Error(`Novel ${novelId} was not found`)
+  const chapters = loadSampleChapterRows(db, novelId, sampleChapters)
+  const { taskEvidence, artifactEvidence } = loadWorkflowEvidence(db, novelId)
   return {
     mode: 'novel-quality-inspection',
     invokedAt: new Date().toISOString(),
@@ -286,55 +376,9 @@ function inspectNovelQuality(db, dbPath, novelId, sampleChapters = 2) {
       novelId,
       sampleChapters: chapters.length,
     },
-    novel: {
-      id: Number(novel.id),
-      title: novel.title || '',
-      targetWords: Number(novel.targetWords || 0),
-      launchMode: novel.launchMode || '',
-      contextVersion: Number(novel.contextVersion || 1),
-      chapterCount,
-      totalWords,
-      averageWordsPerChapter: chapterCount > 0 ? Math.round(totalWords / chapterCount) : 0,
-      targetCompletionRate: Number(novel.targetWords || 0) > 0 ? totalWords / Number(novel.targetWords) : 0,
-      contentCoverageRate: coverage(novel.contentChapterCount),
-      outlineCoverageRate: coverage(novel.outlineChapterCount),
-      summaryCoverageRate: coverage(novel.summaryChapterCount),
-      continuityCoverageRate: coverage(novel.continuityChapterCount),
-      reviewNotesCoverageRate: coverage(novel.reviewNotesChapterCount),
-      aiScoreCoverageRate: coverage(novel.aiScoreChapterCount),
-      qualityScoreCoverageRate: coverage(novel.qualityScoreChapterCount),
-      writebackStatusCoverageRate: coverage(novel.writebackStatusChapterCount),
-    },
-    workflowEvidence: {
-      totalTaskCount: Number(taskEvidence?.totalTaskCount || 0),
-      modelBackedTaskCount: Number(taskEvidence?.modelBackedTaskCount || 0),
-      successfulTaskCount: Number(taskEvidence?.successfulTaskCount || 0),
-      chapterWorkflowTaskCount: Number(taskEvidence?.chapterWorkflowTaskCount || 0),
-      totalArtifactCount: Number(artifactEvidence?.totalArtifactCount || 0),
-      qualityReportCount: Number(artifactEvidence?.qualityReportCount || 0),
-      reviewedQualityReportCount: Number(artifactEvidence?.reviewedQualityReportCount || 0),
-      qualityRepairReviewCount: Number(artifactEvidence?.qualityRepairReviewCount || 0),
-      modelBackedArtifactCount: Number(artifactEvidence?.modelBackedArtifactCount || 0),
-    },
-    chapters: chapters.map((chapter) => ({
-      id: Number(chapter.id),
-      chapterNum: Number(chapter.chapterNum || 0),
-      title: chapter.title || '',
-      status: chapter.status || '',
-      targetWords: Number(chapter.targetWords || 0),
-      wordCount: Number(chapter.wordCount || 0),
-      wordRatio: Number(chapter.targetWords || 0) > 0
-        ? Number(chapter.wordCount || 0) / Number(chapter.targetWords)
-        : 0,
-      outline: compactText(chapter.outline, 800),
-      contentExcerpt: compactText(chapter.content, 1600),
-      summary: compactText(chapter.summary, 500),
-      continuityState: readJson(chapter.continuityStateJson, null),
-      reviewNotes: readJson(chapter.reviewNotesJson, null),
-      aiScore: readJson(chapter.aiScoreJson, null),
-      qualityScores: readJson(chapter.qualityScoresJson, null),
-      writebackStatus: readJson(chapter.writebackStatusJson, null),
-    })),
+    novel: mapNovelQualitySummary(novel),
+    workflowEvidence: mapWorkflowEvidence(taskEvidence, artifactEvidence),
+    chapters: chapters.map(mapQualityChapter),
   }
 }
 
@@ -535,39 +579,69 @@ function buildReport(db, options) {
   }
 }
 
-function normalizeInputReport(raw, options) {
-  if (raw.metrics && typeof raw.metrics === 'object') {
-    return {
-      ...raw,
-      mode: raw.mode === 'report-validation' ? 'real-run-export' : raw.mode || 'real-run-export',
-      invokedAt: raw.invokedAt || new Date().toISOString(),
-      realModelCalled: typeof options.realModelCalled === 'boolean' ? options.realModelCalled : raw.realModelCalled === true,
-      provenance: {
-        ...(raw.provenance || {}),
-        source: raw.provenance?.source || 'json',
-        provider: options.provider || raw.provenance?.provider || raw.modelProvider || '',
-        model: options.model || raw.provenance?.model || raw.model || '',
-        modelConfigId: options.modelConfigId || raw.provenance?.modelConfigId || raw.modelConfigId || '',
-        runId: options.runId || raw.provenance?.runId || raw.runId || '',
-        exportedAt: raw.provenance?.exportedAt || new Date().toISOString(),
-      },
-      metrics: {
-        ...raw.metrics,
-        observed: raw.metrics.observed === true || (
-          raw.metrics.observed !== false
-          && raw.metrics.completedChapters !== null
-          && raw.metrics.completedChapters !== undefined
-          && raw.metrics.successRate !== null
-          && raw.metrics.successRate !== undefined
-        ),
-        pipelineRolesCovered: Array.isArray(raw.metrics.pipelineRolesCovered)
-          ? raw.metrics.pipelineRolesCovered
-          : ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize'],
-      },
-    }
-  }
+const DEFAULT_PIPELINE_ROLES = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
 
-  const chapters = Array.isArray(raw.chapters) ? raw.chapters : []
+function resolveRealModelCalled(raw, options) {
+  return typeof options.realModelCalled === 'boolean'
+    ? options.realModelCalled
+    : raw.realModelCalled === true
+}
+
+function buildJsonProvenance(raw, options, preserveExportedAt = true) {
+  const exportedAt = preserveExportedAt
+    ? raw.provenance?.exportedAt || new Date().toISOString()
+    : new Date().toISOString()
+  return {
+    ...(raw.provenance || {}),
+    source: raw.provenance?.source || 'json',
+    provider: options.provider || raw.provenance?.provider || raw.modelProvider || '',
+    model: options.model || raw.provenance?.model || raw.model || '',
+    modelConfigId: options.modelConfigId || raw.provenance?.modelConfigId || raw.modelConfigId || '',
+    runId: options.runId || raw.provenance?.runId || raw.runId || '',
+    exportedAt,
+  }
+}
+
+function hasObservedMetrics(metrics) {
+  if (metrics.observed === true) return true
+  if (metrics.observed === false) return false
+  return metrics.completedChapters !== null
+    && metrics.completedChapters !== undefined
+    && metrics.successRate !== null
+    && metrics.successRate !== undefined
+}
+
+function normalizeExistingMetricsReport(raw, options) {
+  const pipelineRolesCovered = Array.isArray(raw.metrics.pipelineRolesCovered)
+    ? raw.metrics.pipelineRolesCovered
+    : DEFAULT_PIPELINE_ROLES
+  return {
+    ...raw,
+    mode: raw.mode === 'report-validation' ? 'real-run-export' : raw.mode || 'real-run-export',
+    invokedAt: raw.invokedAt || new Date().toISOString(),
+    realModelCalled: resolveRealModelCalled(raw, options),
+    provenance: buildJsonProvenance(raw, options),
+    metrics: {
+      ...raw.metrics,
+      observed: hasObservedMetrics(raw.metrics),
+      pipelineRolesCovered,
+    },
+  }
+}
+
+function collectPipelineRoles(chapters) {
+  return uniq(chapters.flatMap((chapter) => {
+    if (Array.isArray(chapter.pipelineRolesCovered)) return chapter.pipelineRolesCovered
+    if (Array.isArray(chapter.rolesCovered)) return chapter.rolesCovered
+    return chapter.roles && typeof chapter.roles === 'object' ? Object.keys(chapter.roles) : []
+  }))
+}
+
+function ratio(numerator, denominator, fallback = 0) {
+  return denominator > 0 ? numerator / denominator : fallback
+}
+
+function buildChapterInputMetrics(raw, chapters) {
   const completed = chapters.filter((chapter) => chapter.status === 'success' || chapter.completed === true)
   const failed = chapters.filter((chapter) => chapter.status === 'failed' || chapter.failed === true)
   const durations = completed
@@ -583,49 +657,44 @@ function normalizeInputReport(raw, options) {
   const contractExpected = completed.reduce((sum, chapter) => sum + Number(chapter.contractAssetRequirementCount || 0), 0)
   const contractHits = completed.reduce((sum, chapter) => sum + Number(chapter.contractAssetHitCount || 0), 0)
   const recallFallbackChapters = completed.filter((chapter) => chapter.recallFallback === true || chapter.recallSnapshot?.degraded === true).length
-  const pipelineRolesCovered = uniq(chapters.flatMap((chapter) => {
-    if (Array.isArray(chapter.pipelineRolesCovered)) return chapter.pipelineRolesCovered
-    if (Array.isArray(chapter.rolesCovered)) return chapter.rolesCovered
-    if (chapter.roles && typeof chapter.roles === 'object') return Object.keys(chapter.roles)
-    return []
-  }))
+  const pipelineRolesCovered = collectPipelineRoles(chapters)
+  const completedCount = completed.length
 
+  return {
+    observed: chapters.length > 0,
+    requestedChapters,
+    completedChapters: completedCount,
+    failedChapters: failed.length,
+    successRate: ratio(completedCount, requestedChapters),
+    p95ChapterDurationMs: percentile(durations, 95),
+    consecutiveRecallFallbackChapters: Number(raw.consecutiveRecallFallbackChapters || raw.workflow?.consecutiveRecallFallbackChapters || 0),
+    minWordRatio: wordRatios.length > 0 ? Math.min(...wordRatios) : 0,
+    contextHitRate: ratio(completed.filter((chapter) => chapter.contextHit !== false).length, completedCount),
+    aliasHitRate: Math.min(1, ratio(aliasHits, aliasExpected, completedCount > 0 ? 1 : 0)),
+    contractAssetHitRate: Math.min(1, ratio(contractHits, contractExpected, completedCount > 0 ? 1 : 0)),
+    recallFallbackRate: ratio(recallFallbackChapters, completedCount),
+    recallFallbackChapters,
+    publishGateFailures: Number(raw.publishGateFailures || raw.workflow?.publishGateFailures || 0),
+    blockedWritebacks: Number(raw.blockedWritebacks || raw.workflow?.blockedWritebacks || 0),
+    pipelineRolesCovered: pipelineRolesCovered.length > 0 ? pipelineRolesCovered : DEFAULT_PIPELINE_ROLES,
+  }
+}
+
+function normalizeChapterInputReport(raw, options) {
+  const chapters = Array.isArray(raw.chapters) ? raw.chapters : []
   return {
     mode: 'real-run-export',
     invokedAt: new Date().toISOString(),
-    realModelCalled: typeof options.realModelCalled === 'boolean' ? options.realModelCalled : raw.realModelCalled === true,
-    provenance: {
-      ...(raw.provenance || {}),
-      source: raw.provenance?.source || 'json',
-      provider: options.provider || raw.provenance?.provider || raw.modelProvider || '',
-      model: options.model || raw.provenance?.model || raw.model || '',
-      modelConfigId: options.modelConfigId || raw.provenance?.modelConfigId || raw.modelConfigId || '',
-      runId: options.runId || raw.provenance?.runId || raw.runId || '',
-      exportedAt: new Date().toISOString(),
-    },
-    metrics: {
-      observed: chapters.length > 0,
-      requestedChapters,
-      completedChapters: completed.length,
-      failedChapters: failed.length,
-      successRate: requestedChapters > 0 ? completed.length / requestedChapters : 0,
-      p95ChapterDurationMs: percentile(durations, 95),
-      consecutiveRecallFallbackChapters: Number(raw.consecutiveRecallFallbackChapters || raw.workflow?.consecutiveRecallFallbackChapters || 0),
-      minWordRatio: wordRatios.length > 0 ? Math.min(...wordRatios) : 0,
-      contextHitRate: completed.length > 0
-        ? completed.filter((chapter) => chapter.contextHit !== false).length / completed.length
-        : 0,
-      aliasHitRate: aliasExpected > 0 ? Math.min(1, aliasHits / aliasExpected) : (completed.length > 0 ? 1 : 0),
-      contractAssetHitRate: contractExpected > 0 ? Math.min(1, contractHits / contractExpected) : (completed.length > 0 ? 1 : 0),
-      recallFallbackRate: completed.length > 0 ? recallFallbackChapters / completed.length : 0,
-      recallFallbackChapters,
-      publishGateFailures: Number(raw.publishGateFailures || raw.workflow?.publishGateFailures || 0),
-      blockedWritebacks: Number(raw.blockedWritebacks || raw.workflow?.blockedWritebacks || 0),
-      pipelineRolesCovered: pipelineRolesCovered.length > 0
-        ? pipelineRolesCovered
-        : ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize'],
-    },
+    realModelCalled: resolveRealModelCalled(raw, options),
+    provenance: buildJsonProvenance(raw, options, false),
+    metrics: buildChapterInputMetrics(raw, chapters),
   }
+}
+
+function normalizeInputReport(raw, options) {
+  return raw.metrics && typeof raw.metrics === 'object'
+    ? normalizeExistingMetricsReport(raw, options)
+    : normalizeChapterInputReport(raw, options)
 }
 
 function writeReport(outPath, report) {

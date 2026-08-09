@@ -102,8 +102,16 @@
 
 - 新增 `scripts/ensure-build-icons.cjs`，在目录包和完整 Windows 打包前检查 `build/icon.ico`、`build/installerIcon.ico`、`build/uninstallerIcon.ico`，缺失时通过 Python 3 + Pillow 自动生成，并在依赖不可用时给出明确错误；
 - NSIS 与 portable 使用稳定文件名 `NovelForge-Setup-${version}-${arch}.exe` 和 `NovelForge-Portable-${version}-${arch}.exe`，`latest.yml` 与实际安装器文件名保持一致；
+- 发行文件清单永久排除 `out/novel-ai-eval`、`out/novel-ai-eval-pipeline` 和 `out/novel-flow-audit`，避免历史模型原始输出、日志和评测报告进入 `app.asar`；
 - 2026-08-09 已完成 `npm run package:win`，通过 131 个测试文件、855 项单测及完整 smoke，生成 x64 NSIS 安装器和 portable 可执行文件；解包版主程序已通过启动存活检查；
 - 当前产物未进行 Authenticode 签名，Windows SmartScreen 可能显示未知发布者；仓库保留 `build:installer:signed`，正式分发前需配置代码签名证书。
+
+## 代码卫生与复杂度
+
+- 已清理旧 `dist`/`dist-electron`、测试数据库、运行日志、历史 AI 评测输出、中断的 flow audit、旧连续性评测导出和遗留临时文件；
+- 注释审计未发现真实待办型 `TODO/FIXME/HACK/XXX` 或成段注释掉的生产代码；保留的注释用于事务边界、兼容行为、失败关闭、算法约束和脚本调用说明，已删除复述 JSX 结构和分支显然状态的注释；
+- 新增 `npm run audit:complexity` 与严格模式 `npm run audit:complexity:strict`。当前基线为 257 条，其中 173 条圈复杂度告警、84 条函数长度告警；默认审计阻止告警数继续增长，严格模式要求归零；
+- 当前不能宣称不存在过度复杂代码。最高风险仍包括 `generateChapterContentInternal`、`getQualityDashboardData`、`runChapterPublishCheck`、`Writing` 和迁移注册函数，需按行为边界分阶段拆分并逐阶段降低基线。
 
 ## 禁止提前宣称完成的事项
 

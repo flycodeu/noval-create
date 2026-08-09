@@ -1,20 +1,8 @@
 import type { StyleFingerprint } from '../../src/types'
 
-/**
- * Built-in genre voice seeds (题材默认声线).
- *
- * These are hand-authored style fingerprints inserted with novel_id = NULL and
- * genre_id = <matched genre>, so resolveActiveStyleFingerprint can fall back to
- * a sensible genre default when a novel has no fingerprint of its own.
- *
- * Numbers are deliberately conservative (mid-range values, loose bounds):
- * a genre default should nudge, never straitjacket. exampleExcerpts stays
- * empty on purpose — we never fabricate reference prose.
- */
+/** Conservative global fingerprints used when a novel has no style fingerprint. */
 export interface GenreVoiceFingerprintSeed {
-  /** Unique seed name; idempotency key among novel_id IS NULL rows. */
   name: string
-  /** Genre name as seeded in the genres table; unmatched seeds are skipped. */
   genreName: string
   fingerprint: StyleFingerprint
 }
