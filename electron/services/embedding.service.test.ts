@@ -18,6 +18,7 @@ import {
   fallbackKeywordSearch,
   generateChapterEmbeddings,
   hashEmbeddingSource,
+  resolveEmbeddingConfigCacheKey,
   searchSimilarFragments,
 } from './embedding.service'
 
@@ -105,6 +106,9 @@ describe('embedding fallback retrieval', () => {
   it('keeps source hashes stable across unrelated context version changes', () => {
     const fragments = [{ type: 'summary', text: '同一章内容' }]
     expect(hashEmbeddingSource(3, 7, fragments)).toBe(hashEmbeddingSource(3, 8, fragments))
+    expect(hashEmbeddingSource(3, 8, fragments, 'config:7:a')).not.toBe(
+      hashEmbeddingSource(3, 8, fragments, 'config:7:b'),
+    )
     expect(hashEmbeddingSource(3, 8, fragments)).not.toBe(hashEmbeddingSource(3, 8, [{
       type: 'summary',
       text: '内容已变化',
@@ -124,5 +128,48 @@ describe('embedding fallback retrieval', () => {
 
     await expect(generateChapterEmbeddings(1, 101, 7)).rejects.toThrow('不属于小说 1')
     expect(getAdapterById).not.toHaveBeenCalled()
+  })
+
+  it('reuses unchanged chapter vectors without calling the embedding adapter', async () => {
+    const fragments = [{ type: 'summary', text: '同一章摘要' }]
+    const insertedRows: Array<Record<string, unknown>> = []
+    const rowsByTable = new Map<unknown, Array<Record<string, unknown>>>([
+      [chapters, [{
+        id: 101,
+        novelId: 1,
+        chapterNum: 4,
+        summary: fragments[0].text,
+        contextVersion: 9,
+      }]],
+      [chapterEmbeddings, [{
+        id: 1,
+        novelId: 1,
+        chapterId: 101,
+        fragmentType: 'summary',
+        embeddingJson: '[0.1,0.2]',
+        modelId: 'local:Xenova/bge-small-zh-v1.5:q8',
+        dimensions: 2,
+        embeddingProfile: 'local:Xenova/bge-small-zh-v1.5:q8:2',
+        sourceHash: hashEmbeddingSource(101, 9, fragments, resolveEmbeddingConfigCacheKey()),
+      }]],
+    ])
+    const db = createDbMock(rowsByTable)
+    vi.mocked(getDb).mockReturnValue({
+      ...db,
+      transaction: (callback: (tx: unknown) => unknown) => callback({
+        delete: () => ({ where: () => ({ run: () => undefined }) }),
+        insert: () => ({
+          values: (row: Record<string, unknown>) => ({
+            run: () => insertedRows.push(row),
+          }),
+        }),
+      }),
+    } as never)
+
+    await generateChapterEmbeddings(1, 101)
+
+    expect(getAdapterById).not.toHaveBeenCalled()
+    expect(insertedRows).toHaveLength(1)
+    expect(insertedRows[0].embeddingJson).toBe('[0.1,0.2]')
   })
 })

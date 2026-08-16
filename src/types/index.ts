@@ -5701,6 +5701,30 @@ export interface ParallelMergeResult {
   success: boolean
 }
 
+export interface MaintenanceWorkerStatus {
+  state: 'stopped' | 'idle' | 'running' | 'failed'
+  allowRemoteEmbeddings: boolean
+  startedAt?: string
+  lastRunStartedAt?: string
+  lastRunFinishedAt?: string
+  lastError?: string
+  lastOutboxResult?: {
+    claimedCount: number
+    processedCount: number
+    supersededCount: number
+    failedCount: number
+  }
+  outbox: {
+    pendingCount: number
+    retryingCount: number
+    processingCount: number
+    deadLetterCount: number
+    oldestQueuedAt?: string
+  }
+  checkpointNovelCursor: number
+  checkpointRefreshScheduled: number
+}
+
 // 扩展 window 类型
 declare global {
   interface Window {
@@ -5714,6 +5738,7 @@ declare global {
       }
       app: {
         getDatabasePath: () => Promise<string>
+        getMaintenanceStatus: () => Promise<MaintenanceWorkerStatus>
         getLocalBackendStatus?: () => Promise<{
           isWebPreview: boolean
           status: 'checking' | 'connected' | 'unavailable'

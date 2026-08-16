@@ -835,7 +835,7 @@ npm run audit:complexity
 - `npm run test:unit`：166 个测试文件、972 项通过；其中新增 chapter/language/volume/repair/runtime 五个质量指标域的 13 项确定性测试、inspector/pipeline/contract/CRUD/editor/history/presentation 回归、默认 AI 模式与编译顺序的 2 项、pipeline/generation/伏笔/advisory runtime presentation 的 5 项，以及 review gate reducer 的 3 项测试；
 - `npm run typecheck`、`npm run lint` 通过；
 - `npm run test:smoke` 完整复跑全链通过，覆盖 prompt guardrails、workflow resilience、workspace/interface/layout 契约、章节完整性、写回幂等、Web RPC、MCP、迁移与 agent workflow；首次运行曾在写回幂等用例出现一次 `failed`/`applied` 瞬态差异，单项复跑及完整复跑均通过，本批未修改 Electron 写回链路；
-- `npm run audit:complexity`：245 条告警（165 条圈复杂度、80 条函数长度），低于 257 条基线；
+- `npm run audit:complexity`：244 条告警（165 条圈复杂度、79 条函数长度），低于 257 条基线；主进程 IPC 注册已按六个领域边界拆分，原 1116 行 `registerIpcHandlers` 告警已消除；
 - `Writing` 文件从本轮开始时的 1931 行下降到 646 行（本批总起点约 2203 行），主函数有效行降至 563；四路 inspector 批次先从 1818 行、复杂度 302 降到 1472 行、复杂度 101，后续已将复杂度降到审计阈值 25 以下。contract/command/modal/footer 批次降至 1111 行，acceptance/layout/CRUD 降至 1060 行，workspace refresh/editor lifecycle 降至 826 行，history/presentation 降至 696 行，workspace actions/runtime presentation 降至 651 行，本批 readiness/review/view composition 在增加显式依赖分层的同时继续净减 5 行；新文件均无长度或复杂度告警，主函数仍仅剩函数长度告警。`quality-dashboard.service.ts` 已下降到 3876 行，仍是待持续收缩的 façade。
 
 下一批固定顺序：

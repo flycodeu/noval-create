@@ -12,6 +12,21 @@ import {
 } from './context-entity-mentions'
 
 describe('context entity mention resolution', () => {
+  it('reuses parsed mention candidates for the same catalog snapshot', () => {
+    const rows = [{
+      id: 1,
+      fullName: '沈砚',
+      sourceContextJson: JSON.stringify({ aliases: ['砚哥'] }),
+    }] as never
+
+    const first = buildCharacterMentionCandidates(rows)
+    const reused = buildCharacterMentionCandidates(rows)
+    const refreshed = buildCharacterMentionCandidates([...rows] as never)
+
+    expect(reused).toBe(first)
+    expect(refreshed).not.toBe(first)
+  })
+
   it('keeps unique aliases and drops aliases shared by multiple owners', () => {
     const candidates = buildCharacterMentionCandidates([
       {

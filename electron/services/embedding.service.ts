@@ -72,13 +72,41 @@ export function buildEmbeddingProfile(modelId: string | null | undefined, dimens
   return `${modelId?.trim() || 'unknown'}:${Math.max(0, Math.floor(dimensions))}`
 }
 
+function buildEmbeddingConfigFingerprint(config: {
+  id: number
+  provider?: string | null
+  modelId?: string | null
+  baseUrl?: string | null
+}): string {
+  return createHash('sha256').update(JSON.stringify({
+    id: config.id,
+    provider: config.provider,
+    modelId: config.modelId,
+    baseUrl: config.baseUrl,
+    embeddingModel: REMOTE_EMBEDDING_MODEL_ID,
+  })).digest('hex').slice(0, 16)
+}
+
+export function resolveEmbeddingConfigCacheKey(modelConfigId?: number): string {
+  try {
+    const config = modelConfigId
+      ? getModelConfigRecord(modelConfigId)
+      : getDefaultModelConfigRecord()
+    return `config:${config.id}:${buildEmbeddingConfigFingerprint(config)}`
+  } catch {
+    return 'local:default'
+  }
+}
+
 export function hashEmbeddingSource(
   chapterId: number,
   _contextVersion: number,
   fragments: Array<{ type: string; text: string }>,
+  embeddingConfigKey: string | number = 'local:default',
 ): string {
   const payload = JSON.stringify({
     chapterId,
+    embeddingConfigKey,
     fragments: fragments.map((fragment) => ({ type: fragment.type, text: fragment.text.trim() })),
   })
   return `sha256:${createHash('sha256').update(payload).digest('hex')}`
@@ -170,13 +198,7 @@ async function resolveRemoteEmbeddingRuntime(modelConfigId?: number): Promise<{
     : getDefaultModelConfigRecord()
   const resolvedConfigId = config.id
   const adapter = await getAdapterById(resolvedConfigId)
-  const configFingerprint = createHash('sha256').update(JSON.stringify({
-    id: config.id,
-    provider: config.provider,
-    modelId: config.modelId,
-    baseUrl: config.baseUrl,
-    embeddingModel: REMOTE_EMBEDDING_MODEL_ID,
-  })).digest('hex').slice(0, 16)
+  const configFingerprint = buildEmbeddingConfigFingerprint(config)
   return {
     adapter,
     modelId: `${adapter.id}:config:${resolvedConfigId}:${configFingerprint}:${REMOTE_EMBEDDING_MODEL_ID}`,
@@ -191,29 +213,36 @@ export interface EmbeddingBatchResult {
   source: 'remote' | 'local' | 'unavailable'
 }
 
+export interface EmbeddingRequestOptions {
+  allowRemote?: boolean
+}
+
 export async function embedSemanticTexts(
   texts: string[],
   modelConfigId?: number,
+  options: EmbeddingRequestOptions = {},
 ): Promise<EmbeddingBatchResult> {
   if (texts.length === 0) return { source: 'unavailable' }
 
-  try {
-    const { adapter, modelId } = await resolveRemoteEmbeddingRuntime(modelConfigId)
-    if (adapter.embed) {
-      const embeddings = await adapter.embed(texts, { model: REMOTE_EMBEDDING_MODEL_ID })
-      if (areUsableEmbeddings(embeddings, texts.length)) {
-        const dimensions = embeddings[0].length
-        return {
-          embeddings,
-          modelId,
-          dimensions,
-          profile: buildEmbeddingProfile(modelId, dimensions),
-          source: 'remote',
+  if (options.allowRemote !== false) {
+    try {
+      const { adapter, modelId } = await resolveRemoteEmbeddingRuntime(modelConfigId)
+      if (adapter.embed) {
+        const embeddings = await adapter.embed(texts, { model: REMOTE_EMBEDDING_MODEL_ID })
+        if (areUsableEmbeddings(embeddings, texts.length)) {
+          const dimensions = embeddings[0].length
+          return {
+            embeddings,
+            modelId,
+            dimensions,
+            profile: buildEmbeddingProfile(modelId, dimensions),
+            source: 'remote',
+          }
         }
       }
+    } catch {
+      // Remote embeddings are optional; local embeddings remain the deterministic fallback.
     }
-  } catch {
-    // Remote embeddings are optional; local embeddings remain the deterministic fallback.
   }
 
   try {
@@ -364,37 +393,51 @@ export async function generateChapterEmbeddings(
   }
 
   const contextVersion = chapter.contextVersion || 1
-  const sourceHash = hashEmbeddingSource(chapterId, contextVersion, fragments)
-
-  const embeddingBatch = await embedSemanticTexts(fragments.map((fragment) => fragment.text), modelConfigId)
+  const embeddingConfigKey = resolveEmbeddingConfigCacheKey(modelConfigId)
+  const sourceHash = hashEmbeddingSource(chapterId, contextVersion, fragments, embeddingConfigKey)
   const existingRows = db.select().from(chapterEmbeddings)
     .where(eq(chapterEmbeddings.chapterId, chapterId))
     .all()
   const existingByFragmentType = new Map(existingRows.map((row) => [row.fragmentType, row]))
+  const reusableByFragmentType = new Map<string, {
+    embedding: number[]
+    modelId?: string
+    dimensions?: number
+    profile?: string
+  }>()
+  fragments.forEach((fragment) => {
+    const existing = existingByFragmentType.get(fragment.type)
+    if (existing?.sourceHash !== sourceHash) return
+    try {
+      const embedding = JSON.parse(existing.embeddingJson || '')
+      if (!isUsableEmbedding(embedding)) return
+      reusableByFragmentType.set(fragment.type, {
+        embedding,
+        modelId: existing.modelId || undefined,
+        dimensions: existing.dimensions || undefined,
+        profile: existing.embeddingProfile || undefined,
+      })
+    } catch {
+      // Corrupt cached vectors are regenerated below.
+    }
+  })
+  const missingFragments = fragments.filter((fragment) => !reusableByFragmentType.has(fragment.type))
+  const embeddingBatch = missingFragments.length > 0
+    ? await embedSemanticTexts(missingFragments.map((fragment) => fragment.text), modelConfigId)
+    : { source: 'unavailable' as const }
+  const generatedByFragmentType = new Map(missingFragments.map((fragment, index) => [
+    fragment.type,
+    embeddingBatch.embeddings?.[index],
+  ]))
 
   db.transaction((tx) => {
     tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
-    fragments.forEach((fragment, index) => {
-      let embedding = embeddingBatch.embeddings?.[index]
-      let modelId = embedding ? embeddingBatch.modelId : undefined
-      let dimensions = embedding ? embeddingBatch.dimensions : undefined
-      let profile = embedding ? embeddingBatch.profile : undefined
-      if (!embedding) {
-        const existing = existingByFragmentType.get(fragment.type)
-        if (existing?.sourceHash === sourceHash) {
-          try {
-            const cachedEmbedding = JSON.parse(existing.embeddingJson || '')
-            if (isUsableEmbedding(cachedEmbedding)) {
-              embedding = cachedEmbedding
-              modelId = existing.modelId || undefined
-              dimensions = existing.dimensions || undefined
-              profile = existing.embeddingProfile || undefined
-            }
-          } catch {
-            // Corrupt cached vectors are replaced by the keyword-only fragment.
-          }
-        }
-      }
+    fragments.forEach((fragment) => {
+      const reusable = reusableByFragmentType.get(fragment.type)
+      const embedding = reusable?.embedding || generatedByFragmentType.get(fragment.type)
+      const modelId = reusable?.modelId || (embedding ? embeddingBatch.modelId : undefined)
+      const dimensions = reusable?.dimensions || (embedding ? embeddingBatch.dimensions : undefined)
+      const profile = reusable?.profile || (embedding ? embeddingBatch.profile : undefined)
       tx.insert(chapterEmbeddings).values({
         novelId,
         chapterId,

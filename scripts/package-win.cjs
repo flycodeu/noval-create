@@ -158,14 +158,21 @@ function createBuildEnv() {
   }
 }
 
-function findUnpackedAppExe() {
+function collectUnpackedExecutables() {
   const unpackedDir = path.resolve(releaseDir, 'win-unpacked')
-  if (!fs.existsSync(unpackedDir)) {
-    return null
+  if (!fs.existsSync(unpackedDir)) return []
+  const result = []
+  const pending = [unpackedDir]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current) continue
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const target = path.resolve(current, entry.name)
+      if (entry.isDirectory()) pending.push(target)
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.exe')) result.push(target)
+    }
   }
-
-  const candidate = fs.readdirSync(unpackedDir).find((file) => file.endsWith('.exe') && file.toLowerCase() !== 'elevate.exe')
-  return candidate ? path.resolve(unpackedDir, candidate) : null
+  return result.sort()
 }
 
 function collectReleaseExecutables() {
@@ -235,8 +242,7 @@ function buildSigned() {
     process.exit(result.status || 1)
   }
 
-  const unpackedApp = findUnpackedAppExe()
-  signFiles([unpackedApp])
+  signFiles(collectUnpackedExecutables())
 
   result = runBuilder(['--prepackaged', path.resolve(releaseDir, 'win-unpacked'), '--win', 'nsis', 'portable'], env)
   if (result.status !== 0) {

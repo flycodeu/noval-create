@@ -10,11 +10,23 @@ import {
 import type { RewriteMiniReviewVerdict } from './chapter-pipeline-policy.service'
 import { countNarrativeWords, type ChapterReviewNotes } from './chapter-review-notes'
 import type { ChapterSemanticGateRun } from './semantic-gate/semantic-gate-runner.service'
+import { analyzeWorkspaceAiFlavor } from './workspace-quality.service'
+
+const MAX_HUMANIZATION_RISK_REGRESSION = 12
 
 export function guardrailRepairScore(findings: ReturnType<typeof collectQualityGuardrailFindings>): number {
   return findings.reduce((score, finding) => score + (
     finding.severity === 'high' ? 3 : finding.severity === 'medium' ? 2 : 1
   ), 0)
+}
+
+export function deterministicHumanizationRiskScore(content: string, genre?: string): number {
+  const report = analyzeWorkspaceAiFlavor(content, genre)
+  const normalizedScore = Number.isFinite(report.score) ? report.score : 0
+  const signalPenalty = report.humanizationSignals.reduce((total, signal) => (
+    total + (signal.severity === 'high' ? 6 : signal.severity === 'medium' ? 3 : 1)
+  ), 0)
+  return Math.max(0, 100 - normalizedScore) + signalPenalty
 }
 
 export function chooseBetterGuardrailCandidate(
@@ -27,7 +39,11 @@ export function chooseBetterGuardrailCandidate(
   const candidateFindings = collectQualityGuardrailFindings(candidate.content, genre, { knownTerms })
   const currentScore = guardrailRepairScore(currentFindings)
   const candidateScore = guardrailRepairScore(candidateFindings)
-  return candidateScore < currentScore ? candidate : current
+  const currentHumanizationRisk = deterministicHumanizationRiskScore(current.content, genre)
+  const candidateHumanizationRisk = deterministicHumanizationRiskScore(candidate.content, genre)
+  if (candidateHumanizationRisk > currentHumanizationRisk + MAX_HUMANIZATION_RISK_REGRESSION) return current
+  if (candidateScore !== currentScore) return candidateScore < currentScore ? candidate : current
+  return candidateHumanizationRisk < currentHumanizationRisk ? candidate : current
 }
 
 export type RepairDimensionOutcome = 'resolved' | 'persists' | 'regressed'
@@ -129,6 +145,9 @@ export function chooseBetterRepairCandidate(
     knownTerms?: string[]
   },
 ): { content: string; reviewNotes: ChapterReviewNotes } {
+  const currentHumanizationRisk = deterministicHumanizationRiskScore(current.content, opts.genre)
+  const candidateHumanizationRisk = deterministicHumanizationRiskScore(candidate.content, opts.genre)
+  if (candidateHumanizationRisk > currentHumanizationRisk + MAX_HUMANIZATION_RISK_REGRESSION) return current
   const currentBlockerDims = new Set(opts.currentSemantic ? collectBlockerDimensions(opts.currentSemantic) : [])
   const candidateBlockerDims = opts.candidateSemantic ? collectBlockerDimensions(opts.candidateSemantic) : null
 

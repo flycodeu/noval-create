@@ -63,6 +63,17 @@ function signFile(signtoolPath, filePath) {
   }
 }
 
+function verifyFile(signtoolPath, filePath) {
+  const result = spawnSync(signtoolPath, ['verify', '/pa', '/all', '/v', filePath], {
+    encoding: 'utf8',
+    shell: false,
+  })
+
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
+  if (result.status !== 0) fail(`Authenticode verification failed for ${filePath}`)
+}
+
 if (files.length === 0) {
   fail('Provide at least one file path to sign.')
 }
@@ -83,4 +94,6 @@ for (const file of files) {
 
   log(`Signing ${file} with ${signtoolPath}`)
   signFile(signtoolPath, file)
+  log(`Verifying ${file}`)
+  verifyFile(signtoolPath, file)
 }

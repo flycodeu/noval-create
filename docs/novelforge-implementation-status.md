@@ -24,7 +24,7 @@
 | 世界/地图状态 | 进行中 | 有地图树、关系和状态表，缺旅行约束 |
 | 章后 Canon Diff | 进行中 | 有候选差异与审批入口，尚未统一事件账本 |
 | Pipeline checkpoint | 进行中 | 已有节点快照、租约、角色级重试及滚动正文/上下文 checkpoint；仍缺跨进程故障注入和进程崩溃后的真实恢复验证 |
-| Worker/后台投影 | 进行中 | 已形成持久化 outbox、revision 防竞态和有界消费边界；为避免未授权 API 费用，当前仅在召回/显式重建时消费，尚无常驻后台 worker |
+| Worker/后台投影 | 进行中 | Electron 存活期间已有有界常驻维护 worker，默认只使用本地 embedding，远程 embedding 必须显式授权；outbox 具备 revision 防竞态、锁恢复、退避、dead-letter 和积压状态，仍缺应用崩溃/断网故障注入验证 |
 | 100/300/500 章连续性验证 | 待真实验证 | 当前仅有较小规模运行记录 |
 
 ## 本轮实施顺序
@@ -81,6 +81,8 @@
 - mega 模式已锁定的完成卷检查点在刷新前直接跳过，不再重算卡片或写回；全局失效和新鲜度校验也只作用于未锁定 scope，避免不可变检查点被标 stale 后形成永久后台刷新循环；
 - 章后派生状态刷新改为 `schedule_only` 且受 novel 检查点章节间隔/时间阈值控制；显式结构刷新和章节删除仍保持同步重建，兼顾交互延迟与结构一致性；
 - Story memory 全部 scope 的 stale 标记、卡片写回、锁定和最终读取已纳入同一 SQLite immediate transaction；任一卷/部分重建失败会整体回滚，不再向并发读取暴露半套新旧检查点；
+- 新增应用内常驻 `maintenance-worker`：启动延迟后按有界批次消费语义 outbox，每轮只扫描少量小说检查 stale checkpoint，禁止重入并在退出前等待当前批次；后台远程 embedding 默认关闭，可通过 `NOVELFORGE_BACKGROUND_REMOTE_EMBEDDINGS=1` 显式开启；永久失败达到 8 次后进入 `dead_letter`，避免无限重试；
+- Rewriter 候选择优新增确定性自然度风险无回退约束：语言漂移、模板连接、解释腔、动作/感官锚点和规则信号显著恶化时，即使模型语义 blocker 减少也不采纳；该分数只表示启发式文风风险，不作为“人类作者概率”；
 - 已提取 `chapter-pipeline-state.ts`，集中章节流水线角色元数据、快照解析/初始化、阶段映射、角色开始/成功/失败转换、指标汇总、重试阶段计划和恢复基线判定；数据库任务、节点租约、事务写回和模型调用继续留在主服务；
 - 修复精确节点重试在源任务快照缺失或损坏时仍可能跳过上游阶段的问题：现在无条件校验正文 checkpoint 与上下文版本，旧任务或损坏快照失败关闭；
 - 修复恢复基线一直停留在流水线启动前正文的问题：Writer、断点续写、Rewriter 和验收门修复每次成功持久化完整稿后都会推进滚动正文 checkpoint，不再把流水线自己的写入误判为作者编辑冲突；
@@ -104,13 +106,15 @@
 - NSIS 与 portable 使用稳定文件名 `NovelForge-Setup-${version}-${arch}.exe` 和 `NovelForge-Portable-${version}-${arch}.exe`，`latest.yml` 与实际安装器文件名保持一致；
 - 发行文件清单永久排除 `out/novel-ai-eval`、`out/novel-ai-eval-pipeline` 和 `out/novel-flow-audit`，避免历史模型原始输出、日志和评测报告进入 `app.asar`；
 - 2026-08-09 已完成 `npm run package:win`，通过 131 个测试文件、855 项单测及完整 smoke，生成 x64 NSIS 安装器和 portable 可执行文件；解包版主程序已通过启动存活检查；
-- 当前产物未进行 Authenticode 签名，Windows SmartScreen 可能显示未知发布者；仓库保留 `build:installer:signed`，正式分发前需配置代码签名证书。
+- 当前目录中的既有产物仍未进行 Authenticode 签名，Windows SmartScreen 可能显示未知发布者；`build:installer:signed` 已覆盖解包目录内全部 EXE、NSIS 安装器和 portable，并对每个签名文件强制执行 `signtool verify /pa /all /v`。正式分发仍需在受控发布环境配置可信代码签名证书并完成干净 Windows 验证。
 
 ## 代码卫生与复杂度
 
 - 已清理旧 `dist`/`dist-electron`、测试数据库、运行日志、历史 AI 评测输出、中断的 flow audit、旧连续性评测导出和遗留临时文件；
 - 注释审计未发现真实待办型 `TODO/FIXME/HACK/XXX` 或成段注释掉的生产代码；保留的注释用于事务边界、兼容行为、失败关闭、算法约束和脚本调用说明，已删除复述 JSX 结构和分支显然状态的注释；
-- 新增 `npm run audit:complexity` 与严格模式 `npm run audit:complexity:strict`。当前基线为 257 条，其中 173 条圈复杂度告警、84 条函数长度告警；默认审计阻止告警数继续增长，严格模式要求归零；
+- 新增 `npm run audit:complexity` 与严格模式 `npm run audit:complexity:strict`。门禁基线为 257 条；当前为 244 条（165 条圈复杂度、79 条函数长度），默认审计阻止告警数回升，严格模式要求归零；
+- 主进程 `registerIpcHandlers` 已按窗口/智能体、小说结构、章节人物、世界构建、历史模型、运行时和 AI 领域拆分，保持 channel、参数校验和注册顺序不变，并消除原 1116 行函数长度告警；
+- 2026-08-16 回归：167 个单测文件、984 项测试通过，typecheck、lint、应用构建和 244 条复杂度门禁通过；完整 smoke 聚合命令受工具 5 分钟上限中止，随后按原顺序分组复跑全部子项通过，覆盖接口清单、布局、上下文投影、章节/删除完整性、写回幂等、Web RPC、MCP、迁移和智能体工作流；
 - 当前不能宣称不存在过度复杂代码。最高风险仍包括 `generateChapterContentInternal`、`getQualityDashboardData`、`runChapterPublishCheck`、`Writing` 和迁移注册函数，需按行为边界分阶段拆分并逐阶段降低基线。
 
 ## 禁止提前宣称完成的事项

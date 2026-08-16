@@ -11,12 +11,19 @@ vi.mock('./embedding.service', () => ({
   extractEmbeddingKeywords: vi.fn(),
   isCompatibleEmbeddingRow: vi.fn(),
   isUsableEmbedding: vi.fn(),
+  resolveEmbeddingConfigCacheKey: vi.fn(() => 'config:7:test'),
 }))
 
-import { getSqlite } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
+import { characters, novels, semanticMemoryEntries } from '../database/schema'
+import { buildCharacterSemanticDocuments } from '../../src/shared/semantic-memory'
+import { embedSemanticTexts, isUsableEmbedding } from './embedding.service'
 import {
   buildSemanticMemoryFtsQuery,
+  getSemanticMemoryOutboxStatus,
+  hashSemanticDocument,
   querySemanticMemoryFtsCandidateIds,
+  reindexSemanticMemorySource,
 } from './semantic-memory.service'
 
 describe('semantic memory FTS candidate retrieval', () => {
@@ -109,5 +116,84 @@ describe('semantic memory FTS candidate retrieval', () => {
       limit: 64,
     })).toEqual([])
     expect(getSqlite).not.toHaveBeenCalled()
+  })
+
+  it('reports retry and dead-letter backlog for maintenance observability', () => {
+    vi.mocked(getSqlite).mockReturnValue({
+      prepare: vi.fn(() => ({
+        get: () => ({
+          pendingCount: 3,
+          retryingCount: 2,
+          processingCount: 1,
+          deadLetterCount: 4,
+          oldestQueuedAt: '2026-08-16 10:00:00',
+        }),
+      })),
+    } as never)
+
+    expect(getSemanticMemoryOutboxStatus()).toEqual({
+      pendingCount: 3,
+      retryingCount: 2,
+      processingCount: 1,
+      deadLetterCount: 4,
+      oldestQueuedAt: '2026-08-16 10:00:00',
+    })
+  })
+
+  it('reuses unchanged source embeddings before calling the embedding service', async () => {
+    const character = {
+      id: 11,
+      novelId: 8,
+      fullName: '沈砚',
+      roleType: 'protagonist',
+      occupation: '调查员',
+    }
+    const documents = buildCharacterSemanticDocuments(character as never)
+    const existingRows = documents.map((document, index) => ({
+      id: index + 1,
+      novelId: 8,
+      sourceType: document.sourceType,
+      sourceId: document.sourceId,
+      fragmentKey: document.fragmentKey,
+      sourceHash: hashSemanticDocument(8, document, 'config:7:test'),
+      embeddingJson: '[0.1,0.2]',
+      modelId: 'local:test',
+      dimensions: 2,
+      embeddingProfile: 'local:test:2',
+    }))
+    const insertedRows: Array<Record<string, unknown>> = []
+    vi.mocked(isUsableEmbedding).mockReturnValue(true)
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({
+        from: (table: unknown) => {
+          const rows = table === novels
+            ? [{ id: 8, contextVersion: 3, modelConfigId: 7 }]
+            : table === characters
+              ? [character]
+              : table === semanticMemoryEntries
+                ? existingRows
+                : []
+          const query = {
+            where: () => query,
+            all: () => rows,
+          }
+          return query
+        },
+      }),
+      transaction: (callback: (tx: unknown) => unknown) => callback({
+        delete: () => ({ where: () => ({ run: () => undefined }) }),
+        insert: () => ({
+          values: (row: Record<string, unknown>) => ({
+            run: () => insertedRows.push(row),
+          }),
+        }),
+      }),
+    } as never)
+
+    const result = await reindexSemanticMemorySource(8, 'character', 11)
+
+    expect(embedSemanticTexts).not.toHaveBeenCalled()
+    expect(result.vectorizedCount).toBe(documents.length)
+    expect(insertedRows).toHaveLength(documents.length)
   })
 })

@@ -46,6 +46,11 @@ export interface EntityMentionCandidate {
   aliases?: string[]
 }
 
+const characterMentionCandidateCache = new WeakMap<CharacterMentionRow[], EntityMentionCandidate[]>()
+const itemMentionCandidateCache = new WeakMap<ItemMentionRow[], EntityMentionCandidate[]>()
+const locationMentionCandidateCache = new WeakMap<LocationMentionRow[], EntityMentionCandidate[]>()
+const factionMentionCandidateCache = new WeakMap<FactionMentionRow[], EntityMentionCandidate[]>()
+
 const ENTITY_MENTION_ALIAS_KEYS = [
   'alias',
   'aliases',
@@ -318,6 +323,8 @@ export function collectMentionedEntityValidationTermsFromCandidates(
 export function buildCharacterMentionCandidates(
   rows: CharacterMentionRow[],
 ): EntityMentionCandidate[] {
+  const cached = characterMentionCandidateCache.get(rows)
+  if (cached) return cached
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.surname && row.givenName ? `${row.surname}${row.givenName}` : '',
     row.occupation || '',
@@ -326,7 +333,7 @@ export function buildCharacterMentionCandidates(
     ...parseMentionAliasesFromJson(row.sourceContextJson),
   ])
 
-  return rows.map((row) => {
+  const candidates = rows.map((row) => {
     const roleAliases = row.roleType === 'protagonist'
       ? [
           '主角',
@@ -343,11 +350,15 @@ export function buildCharacterMentionCandidates(
       ], 24),
     }
   })
+  characterMentionCandidateCache.set(rows, candidates)
+  return candidates
 }
 
 export function buildItemMentionCandidates(
   rows: ItemMentionRow[],
 ): EntityMentionCandidate[] {
+  const cached = itemMentionCandidateCache.get(rows)
+  if (cached) return cached
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.subType || '',
     ...parseJsonStringArray(row.tagsJson),
@@ -355,15 +366,19 @@ export function buildItemMentionCandidates(
     ...parseMentionAliasesFromJson(row.typedRefsJson),
   ])
 
-  return rows.map((row) => ({
+  const candidates = rows.map((row) => ({
     canonicalName: row.itemName || '',
     aliases: uniqueAliases.get(row.id) || [],
   }))
+  itemMentionCandidateCache.set(rows, candidates)
+  return candidates
 }
 
 export function buildLocationMentionCandidates(
   rows: LocationMentionRow[],
 ): EntityMentionCandidate[] {
+  const cached = locationMentionCandidateCache.get(rows)
+  if (cached) return cached
   const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
     row.locationType || '',
     row.structureRole || '',
@@ -373,22 +388,28 @@ export function buildLocationMentionCandidates(
     ...parseMentionAliasesFromText(row.plotRelevance),
   ])
 
-  return rows.map((row) => ({
+  const candidates = rows.map((row) => ({
     canonicalName: row.name || '',
     aliases: uniqueAliases.get(row.id) || [],
   }))
+  locationMentionCandidateCache.set(rows, candidates)
+  return candidates
 }
 
 export function buildFactionMentionCandidates(
   rows: FactionMentionRow[],
 ): EntityMentionCandidate[] {
-  return rows.map((row) => ({
+  const cached = factionMentionCandidateCache.get(rows)
+  if (cached) return cached
+  const candidates = rows.map((row) => ({
     canonicalName: row.name || '',
     aliases: dedupe([
       ...parseMentionAliasesFromJson(row.notes),
       ...parseMentionAliasesFromText(row.notes),
     ], 12),
   }))
+  factionMentionCandidateCache.set(rows, candidates)
+  return candidates
 }
 
 export function collectExplicitEntityNamesFromReferences(

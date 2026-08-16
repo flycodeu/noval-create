@@ -1445,6 +1445,18 @@ export function installWebElectronBridge(): void {
         [],
         async () => 'web-preview://localStorage/novelforge',
       ),
+      getMaintenanceStatus: async () => withLocalBackend('app', 'getMaintenanceStatus', [], async () => ({
+        state: 'stopped',
+        allowRemoteEmbeddings: false,
+        outbox: {
+          pendingCount: 0,
+          retryingCount: 0,
+          processingCount: 0,
+          deadLetterCount: 0,
+        },
+        checkpointNovelCursor: 0,
+        checkpointRefreshScheduled: 0,
+      })),
       getCapabilities: async () => withLocalBackend('app', 'getCapabilities', [], async () => ({
         surface: 'local-web',
         realDatabase: false,

@@ -159,6 +159,7 @@ function createRuntime() {
   const { throwUserFacingError } = requireProject('electron/utils/user-facing-error.ts')
   const { novelForgeToolRegistry } = requireProject('electron/application/novelforge-tool-registry.ts')
   const { consumeApprovalGrant, createApprovalGrant } = requireProject('electron/services/approval.service.ts')
+  const { maintenanceWorker } = requireProject('electron/services/maintenance-worker.service.ts')
   const { WEB_PREVIEW_AGENT_TOOL_SCOPES } = requireProject('src/shared/tool-contracts/index.ts')
 
   initDb()
@@ -335,6 +336,7 @@ function createRuntime() {
   const handlers = {
     app: {
       getDatabasePath,
+      getMaintenanceStatus: () => maintenanceWorker.getStatus(),
       getCapabilities: () => ({
         surface: 'local-web',
         realDatabase: true,

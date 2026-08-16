@@ -105,6 +105,19 @@ export interface ChapterEntityMentionCatalogLoadOptions {
 const ENTITY_CATALOG_CACHE_LIMIT = 8
 const entityCatalogCache = new Map<string, ChapterEntityMentionCatalogs>()
 
+export interface ChapterEntityMentionCatalogLookups {
+  characterIdByName: Map<string, number>
+  itemIdByName: Map<string, number>
+  locationIdByName: Map<string, number>
+  factionIdByName: Map<string, number>
+  characterNameById: Map<number, string>
+  locationNameById: Map<number, string>
+  locationById: Map<number, LocationMentionCatalogRow>
+  majorCharacterRows: CharacterMentionCatalogRow[]
+}
+
+const entityCatalogLookupCache = new WeakMap<ChapterEntityMentionCatalogs, ChapterEntityMentionCatalogLookups>()
+
 export function clearChapterEntityMentionCatalogCache(novelId?: number): void {
   if (typeof novelId !== 'number') {
     entityCatalogCache.clear()
@@ -195,6 +208,28 @@ function normalizedName(value?: string | null): string {
   return (value || '').trim().replace(/\s+/g, '').toLowerCase()
 }
 
+export function getChapterEntityMentionCatalogLookups(
+  catalogs: ChapterEntityMentionCatalogs,
+): ChapterEntityMentionCatalogLookups {
+  const cached = entityCatalogLookupCache.get(catalogs)
+  if (cached) return cached
+  const lookups: ChapterEntityMentionCatalogLookups = {
+    characterIdByName: new Map(catalogs.characters.map((row) => [normalizedName(row.fullName), row.id])),
+    itemIdByName: new Map(catalogs.items.map((row) => [normalizedName(row.itemName), row.id])),
+    locationIdByName: new Map(catalogs.locations.map((row) => [normalizedName(row.name), row.id])),
+    factionIdByName: new Map(catalogs.factions.map((row) => [normalizedName(row.name), row.id])),
+    characterNameById: new Map(catalogs.characters.map((row) => [row.id, row.fullName || ''])),
+    locationNameById: new Map(catalogs.locations.map((row) => [row.id, row.name || ''])),
+    locationById: new Map(catalogs.locations.map((row) => [row.id, row])),
+    majorCharacterRows: [...catalogs.characters].sort((left, right) =>
+      roleRank(left.roleType) - roleRank(right.roleType)
+      || Number(left.sortOrder || 0) - Number(right.sortOrder || 0)
+      || left.id - right.id),
+  }
+  entityCatalogLookupCache.set(catalogs, lookups)
+  return lookups
+}
+
 function appendUnique(target: number[], seen: Set<number>, values: Iterable<number>, limit: number): void {
   for (const value of values) {
     if (!Number.isInteger(value) || value <= 0 || seen.has(value)) continue
@@ -204,12 +239,10 @@ function appendUnique(target: number[], seen: Set<number>, values: Iterable<numb
   }
 }
 
-function idsForNames<T extends { id: number }>(
-  rows: T[],
+function idsForNames(
+  idByName: ReadonlyMap<string, number>,
   names: string[],
-  getName: (row: T) => string | null | undefined,
 ): number[] {
-  const idByName = new Map(rows.map((row) => [normalizedName(getName(row)), row.id]))
   return names.flatMap((name) => idByName.get(normalizedName(name)) || [])
 }
 
@@ -354,12 +387,10 @@ export function resolveChapterEntityContextProjection(
   catalogs: ChapterEntityMentionCatalogs,
   input: ResolveChapterEntityContextProjectionInput,
 ): ChapterEntityContextProjection {
-  const mentionedCharacterIds = idsForNames(catalogs.characters, input.mentionedCharacterNames, (row) => row.fullName)
+  const lookups = getChapterEntityMentionCatalogLookups(catalogs)
+  const mentionedCharacterIds = idsForNames(lookups.characterIdByName, input.mentionedCharacterNames)
   const mentionedCharacterIdSet = new Set(mentionedCharacterIds)
-  const majorCharacterRows = [...catalogs.characters].sort((left, right) =>
-    roleRank(left.roleType) - roleRank(right.roleType)
-    || Number(left.sortOrder || 0) - Number(right.sortOrder || 0)
-    || left.id - right.id)
+  const majorCharacterRows = lookups.majorCharacterRows
   const majorCharacterIds = new Set(
     majorCharacterRows.filter((row) => roleRank(row.roleType) <= 2).map((row) => row.id),
   )
@@ -395,7 +426,7 @@ export function resolveChapterEntityContextProjection(
   appendUnique(
     itemFullIds,
     itemSeen,
-    idsForNames(catalogs.items, input.mentionedItemNames, (row) => row.itemName),
+    idsForNames(lookups.itemIdByName, input.mentionedItemNames),
     itemFullLimit,
   )
   appendUnique(
@@ -405,8 +436,8 @@ export function resolveChapterEntityContextProjection(
     itemFullLimit,
   )
 
-  const locationById = new Map(catalogs.locations.map((row) => [row.id, row]))
-  const mentionedLocationIds = idsForNames(catalogs.locations, input.mentionedLocationNames, (row) => row.name)
+  const locationById = lookups.locationById
+  const mentionedLocationIds = idsForNames(lookups.locationIdByName, input.mentionedLocationNames)
   const locationFullLimit = Math.max(
     input.locationLimit,
     Math.min(128, input.locationLimit * Math.max(2, catalogs.maxMapDepth)),
@@ -425,7 +456,7 @@ export function resolveChapterEntityContextProjection(
     }
   }
 
-  const mentionedFactionIds = idsForNames(catalogs.factions, input.mentionedFactionNames, (row) => row.name)
+  const mentionedFactionIds = idsForNames(lookups.factionIdByName, input.mentionedFactionNames)
   const mentionedCharacterRows = catalogs.characters.filter((row) => mentionedCharacterIdSet.has(row.id))
   const characterFactionIds = mentionedCharacterRows.flatMap((row) =>
     resolveFactionReferenceIds(catalogs.factions, row.campFactionIdsJson))

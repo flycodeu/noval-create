@@ -58,7 +58,7 @@ import {
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
-const storyMemoryRefreshPending = new Set<number>()
+const storyMemoryRefreshRuns = new Map<number, Promise<void>>()
 const storyMemoryRefreshStatus = new Map<number, {
   status: 'idle' | 'queued' | 'running' | 'failed'
   queuedAt?: string
@@ -74,6 +74,18 @@ type CheckpointScope = 'novel' | 'volume' | 'part'
 type StoryMemoryChapterRow = Pick<
   typeof chapters.$inferSelect,
   'id' | 'chapterNum' | 'summary' | 'continuityStateJson'
+>
+type StoryMemoryCheckpointChapterRow = Pick<
+  typeof chapters.$inferSelect,
+  | 'id'
+  | 'chapterNum'
+  | 'volumeId'
+  | 'partId'
+  | 'title'
+  | 'wordCount'
+  | 'status'
+  | 'summary'
+  | 'continuityStateJson'
 >
 
 export interface StoryMemorySnapshot {
@@ -598,7 +610,17 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const chapterRows = db.select().from(chapters)
+  const chapterRows: StoryMemoryCheckpointChapterRow[] = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    volumeId: chapters.volumeId,
+    partId: chapters.partId,
+    title: chapters.title,
+    wordCount: chapters.wordCount,
+    status: chapters.status,
+    summary: chapters.summary,
+    continuityStateJson: chapters.continuityStateJson,
+  }).from(chapters)
     .where(eq(chapters.novelId, novelId))
     .orderBy(asc(chapters.chapterNum))
     .all()
@@ -819,7 +841,7 @@ function setStoryMemoryRefreshStatus(
 
 export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = 'checkpoint stale', trigger = 'background_precompute') {
   const now = new Date().toISOString()
-  if (storyMemoryRefreshPending.has(novelId)) {
+  if (storyMemoryRefreshRuns.has(novelId)) {
     setStoryMemoryRefreshStatus(novelId, {
       status: 'queued',
       queuedAt: now,
@@ -828,7 +850,6 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
     })
     return
   }
-  storyMemoryRefreshPending.add(novelId)
   setStoryMemoryRefreshStatus(novelId, {
     status: 'queued',
     queuedAt: now,
@@ -836,7 +857,7 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
     trigger,
     lastError: undefined,
   })
-  void (async () => {
+  const run = (async () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
     const startedAt = new Date().toISOString()
     setStoryMemoryRefreshStatus(novelId, {
@@ -865,9 +886,14 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
       })
       console.warn('[story-memory] failed to refresh checkpoints in background', error)
     } finally {
-      storyMemoryRefreshPending.delete(novelId)
+      storyMemoryRefreshRuns.delete(novelId)
     }
   })()
+  storyMemoryRefreshRuns.set(novelId, run)
+}
+
+export async function waitForScheduledStoryMemoryRefreshes(): Promise<void> {
+  await Promise.allSettled([...storyMemoryRefreshRuns.values()])
 }
 
 export function refreshStoryMemoryCheckpointsIfNeeded(

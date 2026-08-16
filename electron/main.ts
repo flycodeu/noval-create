@@ -12,7 +12,7 @@ if (process.platform === 'win32') {
     // 无控制台（打包后 GUI 启动）时忽略
   }
 }
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, gt } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
 import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
@@ -68,6 +68,7 @@ import * as storyArcProgressService from './services/story-arc-progress.service'
 import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
+import { maintenanceWorker } from './services/maintenance-worker.service'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
 import * as batchWorkflowService from './services/batch-workflow.service'
@@ -255,20 +256,45 @@ app.whenReady().then(() => {
   taskService.recoverOrphanedTasks()
   createWindow()
   registerIpcHandlers()
+  maintenanceWorker.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
+let shutdownComplete = false
+let shutdownPromise: Promise<void> | null = null
+
+function shutdownApplication(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = maintenanceWorker.stop()
+    .catch((error) => console.warn('[main] maintenance worker shutdown failed:', error))
+    .then(() => {
+      closeDb()
+      shutdownComplete = true
+    })
+  return shutdownPromise
+}
+
+app.on('before-quit', (event) => {
+  if (shutdownComplete) return
+  event.preventDefault()
+  void shutdownApplication().then(() => app.quit())
+})
+
 app.on('window-all-closed', () => {
-  closeDb()
   if (process.platform !== 'darwin') app.quit()
 })
 
+type IpcHandle = (
+  channel: string,
+  listener: Parameters<typeof ipcMain.handle>[1],
+) => void
+
 function registerIpcHandlers() {
   const registerHandle = ipcMain.handle.bind(ipcMain)
-  const handle = (
+  const handle: IpcHandle = (
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1],
   ) => registerHandle(channel, wrapIpcHandler(channel, listener))
@@ -302,6 +328,7 @@ function registerIpcHandlers() {
   })
 
   handle('app:getDatabasePath', () => getDatabasePath())
+  handle('app:getMaintenanceStatus', () => maintenanceWorker.getStatus())
 
   // Stable agent-tool surface. Caller identity and scopes are supplied here,
   // never accepted from renderer input.
@@ -383,6 +410,15 @@ function registerIpcHandlers() {
       })
   })
 
+  registerNovelAndStructureIpcHandlers(handle)
+  registerChapterAndCharacterIpcHandlers(handle)
+  registerWorldbuildingIpcHandlers(handle)
+  registerHistoryAndModelIpcHandlers(handle)
+  registerRuntimeIpcHandlers(handle)
+  registerAiIpcHandlers(handle)
+}
+
+function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
   handle('novel:create', (_, data) => novelService.createNovel(parseObjectPayload<NovelCreateInput>(data, 'data')))
@@ -410,23 +446,33 @@ function registerIpcHandlers() {
   // Embedding
   handle('embedding:reindex', async (_, novelId: number) => {
     const db = getDb()
-    const chapterList = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
     let succeeded = 0
     let failed = 0
-    for (const chapter of chapterList) {
-      try {
-        await embeddingService.generateChapterEmbeddings(novelId, chapter.id)
-        succeeded += 1
-      } catch (err) {
-        console.warn(`[embedding:reindex] 章节 ${chapter.id} 向量化失败:`, err)
-        failed += 1
+    let lastChapterId = 0
+    const pageSize = 100
+    while (true) {
+      const chapterPage = db.select({ id: chapters.id }).from(chapters)
+        .where(and(eq(chapters.novelId, novelId), gt(chapters.id, lastChapterId)))
+        .orderBy(asc(chapters.id))
+        .limit(pageSize)
+        .all()
+      if (chapterPage.length === 0) break
+      for (const chapter of chapterPage) {
+        try {
+          await embeddingService.generateChapterEmbeddings(novelId, chapter.id)
+          succeeded += 1
+        } catch (err) {
+          console.warn(`[embedding:reindex] 章节 ${chapter.id} 向量化失败:`, err)
+          failed += 1
+        }
       }
+      lastChapterId = chapterPage.at(-1)?.id || lastChapterId
     }
     const semanticMemory = await semanticMemoryService.reindexCoreSemanticMemory(novelId)
     return {
       reindexed: succeeded,
       failed,
-      total: chapterList.length,
+      total: succeeded + failed,
       semanticMemory,
     }
   })
@@ -569,7 +615,9 @@ function registerIpcHandlers() {
   handle('growthSystem:deleteEvent', (_, novelId, id) => growthSystemService.deleteRewardCostEvent(requireId(novelId, 'novelId'), requireId(id, 'id')))
   handle('growthSystem:bindChapterContract', (_, novelId, data) => growthSystemService.bindGrowthAssetsToChapterContract(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data') as { chapterId: number; trackIds: number[]; poolIds: number[]; eventIds: number[] }))
   handle('growthSystem:bindVolumeDesign', (_, novelId, data) => growthSystemService.bindGrowthAssetsToVolumeDesign(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data') as { volumeId: number; trackIds: number[]; poolIds: number[]; rewardCadence?: string }))
+}
 
+function registerChapterAndCharacterIpcHandlers(handle: IpcHandle) {
   handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
   handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))
   handle('chapter:create', (_, novelId, data) => chapterService.createChapter(requireId(novelId, 'novelId'), parseObjectPayload(data, 'data')))
@@ -747,7 +795,9 @@ function registerIpcHandlers() {
   handle('resistance:upsertBeat', (_, data) =>
     resistanceService.upsertBeat(parseObjectPayload<ResistanceBeatInput>(data, 'data')))
   handle('resistance:getDashboard', (_, novelId) => resistanceService.getDashboard(requireId(novelId, 'novelId')))
+}
 
+function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
   handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))
   handle('map:getGraph', (_, filters) => mapService.getMapGraph(filters))
@@ -985,7 +1035,9 @@ function registerIpcHandlers() {
     batchWorkflowService.getLatestSubplotAutoGenerateTask(novelId))
   handle('subplot:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+}
 
+function registerHistoryAndModelIpcHandlers(handle: IpcHandle) {
   handle('history:listRecent', (_, novelId, limit) => historyService.listRecentOperationLogs(novelId, limit))
   handle('history:getLatestUndoable', (_, novelId) => historyService.getLatestUndoableOperation(novelId))
   handle('history:undo', (_, logId) => historyService.undoOperation(logId))
@@ -1123,7 +1175,9 @@ function registerIpcHandlers() {
   })
 
   handle('model:test', (_, id) => modelService.testAdapter(id))
+}
 
+function registerRuntimeIpcHandlers(handle: IpcHandle) {
   handle('sourceSearch:getSettings', () => sourceSearchSettingsService.getSourceSearchSettings())
   handle('sourceSearch:updateSettings', (_, data) => {
     requireObject(data, 'data')
@@ -1240,7 +1294,9 @@ function registerIpcHandlers() {
     planningDraftService.finalizePlanningDraft(taskId, finalData))
   handle('planningDraft:clear', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
     planningDraftService.clearPlanningDrafts(novelId, pageKey))
+}
 
+function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:expandBackground', async (_, input: {
     userBackground: string
     genreId: number

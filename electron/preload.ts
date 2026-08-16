@@ -22,6 +22,7 @@ import type {
   CreativeStageHandoffInput,
   CreativeStageUpdateInput,
   MapRelationInput,
+  MaintenanceWorkerStatus,
   NovelCreateInput,
 } from '../src/types'
 
@@ -87,6 +88,7 @@ const api = {
 
   app: {
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
+    getMaintenanceStatus: () => invokeIpc<MaintenanceWorkerStatus>('app:getMaintenanceStatus'),
   },
 
   agentTools: {

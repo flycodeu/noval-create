@@ -39,6 +39,7 @@ import {
   extractEmbeddingKeywords,
   isCompatibleEmbeddingRow,
   isUsableEmbedding,
+  resolveEmbeddingConfigCacheKey,
 } from './embedding.service'
 
 const EMBEDDING_BATCH_SIZE = 24
@@ -49,6 +50,7 @@ const MAX_LOOKUP_KEYWORDS = 8
 const MIN_FTS_TERM_LENGTH = 3
 const DEFAULT_OUTBOX_BATCH_SIZE = 24
 const OUTBOX_LOCK_TIMEOUT_MINUTES = 5
+const MAX_OUTBOX_ATTEMPTS = 8
 const INDEXED_SOURCE_TYPES: SemanticMemorySourceType[] = [
   'character',
   'map',
@@ -102,6 +104,14 @@ export interface SemanticMemoryOutboxProcessResult {
   failedCount: number
 }
 
+export interface SemanticMemoryOutboxStatus {
+  pendingCount: number
+  retryingCount: number
+  processingCount: number
+  deadLetterCount: number
+  oldestQueuedAt?: string
+}
+
 export interface SemanticMemorySearchHit {
   sourceType: SemanticMemorySourceType
   sourceId: number
@@ -125,9 +135,14 @@ function isIndexedSourceType(value: string): value is SemanticMemorySourceType {
   return INDEXED_SOURCE_TYPES.includes(value as SemanticMemorySourceType)
 }
 
-function hashSemanticDocument(novelId: number, document: SemanticMemoryDocument): string {
+export function hashSemanticDocument(
+  novelId: number,
+  document: SemanticMemoryDocument,
+  embeddingConfigKey: string,
+): string {
   const payload = JSON.stringify({
     novelId,
+    embeddingConfigKey,
     sourceType: document.sourceType,
     sourceId: document.sourceId,
     fragmentKey: document.fragmentKey,
@@ -268,15 +283,26 @@ async function attachEmbeddings(
   novelId: number,
   documents: SemanticMemoryDocument[],
   modelConfigId?: number,
+  existingRows: Array<typeof semanticMemoryEntries.$inferSelect> = [],
+  options: { allowRemoteEmbeddings?: boolean } = {},
 ): Promise<PreparedSemanticDocument[]> {
+  const embeddingConfigKey = options.allowRemoteEmbeddings === false
+    ? 'local-only:default'
+    : resolveEmbeddingConfigCacheKey(modelConfigId)
   const prepared: PreparedSemanticDocument[] = documents.map((document) => ({
     document,
-    sourceHash: hashSemanticDocument(novelId, document),
+    sourceHash: hashSemanticDocument(novelId, document, embeddingConfigKey),
   }))
+  preserveUnchangedEmbeddings(prepared, existingRows)
 
-  for (let offset = 0; offset < prepared.length; offset += EMBEDDING_BATCH_SIZE) {
-    const batch = prepared.slice(offset, offset + EMBEDDING_BATCH_SIZE)
-    const result = await embedSemanticTexts(batch.map((entry) => entry.document.content), modelConfigId)
+  const missing = prepared.filter((entry) => !entry.embedding)
+  for (let offset = 0; offset < missing.length; offset += EMBEDDING_BATCH_SIZE) {
+    const batch = missing.slice(offset, offset + EMBEDDING_BATCH_SIZE)
+    const result = await embedSemanticTexts(
+      batch.map((entry) => entry.document.content),
+      modelConfigId,
+      { allowRemote: options.allowRemoteEmbeddings },
+    )
     batch.forEach((entry, index) => {
       const embedding = result.embeddings?.[index]
       if (!embedding) return
@@ -457,17 +483,17 @@ export async function reindexSemanticMemorySource(
   if (!novel) throw new Error(`小说 ${novelId} 不存在。`)
 
   const documents = loadSourceDocuments(novelId, sourceType, sourceId)
-  const prepared = await attachEmbeddings(
-    novelId,
-    documents,
-    options.modelConfigId || novel.modelConfigId || undefined,
-  )
   const existingRows = db.select().from(semanticMemoryEntries).where(and(
     eq(semanticMemoryEntries.novelId, novelId),
     eq(semanticMemoryEntries.sourceType, sourceType),
     eq(semanticMemoryEntries.sourceId, sourceId),
   )).all()
-  preserveUnchangedEmbeddings(prepared, existingRows)
+  const prepared = await attachEmbeddings(
+    novelId,
+    documents,
+    options.modelConfigId || novel.modelConfigId || undefined,
+    existingRows,
+  )
   const contextVersion = Math.max(1, novel.contextVersion || 1)
   let applied = false
 
@@ -522,68 +548,129 @@ export async function reindexCoreSemanticMemory(
   }).from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throw new Error(`小说 ${novelId} 不存在。`)
 
-  const queuedRows = db.select({
-    id: semanticMemoryOutbox.id,
-    revision: semanticMemoryOutbox.revision,
-  }).from(semanticMemoryOutbox).where(and(
-    eq(semanticMemoryOutbox.novelId, novelId),
-    inArray(semanticMemoryOutbox.sourceType, INDEXED_SOURCE_TYPES),
-  )).all()
-  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
-  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
-  const threadRows = db.select().from(storyThreads).where(eq(storyThreads.novelId, novelId)).all()
-  const timelineRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
-  const chapterRows = db.select({
-    id: chapters.id,
-    chapterNum: chapters.chapterNum,
-  }).from(chapters).where(eq(chapters.novelId, novelId)).all()
-  const characterNameMap = new Map(characterRows.map((character) => [character.id, character.fullName]))
-  const locationNameMap = new Map(mapRows.map((location) => [location.id, location.name]))
-  const chapterNumMap = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
-  const documents = [
-    ...characterRows.flatMap(buildCharacterSemanticDocuments),
-    ...mapRows.flatMap(buildMapSemanticDocuments),
-    ...itemRows.flatMap((item) => buildItemSemanticDocuments(item, {
-      ownerName: item.ownerCharacterId ? characterNameMap.get(item.ownerCharacterId) : undefined,
-      locationName: item.locationMapId ? locationNameMap.get(item.locationMapId) : undefined,
-    })),
-    ...threadRows.flatMap(buildStoryThreadSemanticDocuments),
-    ...timelineRows.flatMap((event) => buildTimelineEventSemanticDocuments(event, {
-      sourceChapterStart: event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined,
-      sourceChapterEnd: event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined,
-      entityRefs: [
-        event.locationMapId ? locationNameMap.get(event.locationMapId) || '' : '',
-      ],
-    })),
-  ]
-  const contextVersion = Math.max(1, novel.contextVersion || 1)
-  const prepared = await attachEmbeddings(
-    novelId,
-    documents,
-    modelConfigId || novel.modelConfigId || undefined,
-  )
-  const existingRows = db.select().from(semanticMemoryEntries).where(and(
-    eq(semanticMemoryEntries.novelId, novelId),
-    inArray(semanticMemoryEntries.sourceType, INDEXED_SOURCE_TYPES),
-  )).all()
-  preserveUnchangedEmbeddings(prepared, existingRows)
+  enqueueFullSemanticMemoryReindex(novelId)
+  const effectiveModelConfigId = modelConfigId || novel.modelConfigId || undefined
+  while (true) {
+    const batch = await processSemanticMemoryOutbox({
+      novelId,
+      limit: DEFAULT_OUTBOX_BATCH_SIZE,
+      modelConfigId: effectiveModelConfigId,
+    })
+    if (batch.claimedCount === 0) break
+  }
+  const failedCount = Number((getSqlite().prepare(`
+    SELECT COUNT(*) AS count
+    FROM semantic_memory_outbox
+    WHERE novel_id = ?
+      AND source_type IN ('character', 'map', 'item', 'story_thread', 'timeline_event')
+      AND status IN ('failed', 'dead_letter')
+  `).get(novelId) as { count?: number } | undefined)?.count || 0)
+  if (failedCount > 0) {
+    throw new Error(`语义记忆重索引仍有 ${failedCount} 个来源处理失败，请稍后重试。`)
+  }
+  cleanupOrphanedSemanticMemoryEntries(novelId)
+  return loadSemanticMemoryReindexSummary(novelId)
+}
 
-  db.transaction((tx) => {
-    tx.delete(semanticMemoryEntries).where(and(
-      eq(semanticMemoryEntries.novelId, novelId),
-      inArray(semanticMemoryEntries.sourceType, INDEXED_SOURCE_TYPES),
-    )).run()
-    insertPreparedDocuments(tx, novelId, contextVersion, prepared)
-    queuedRows.forEach((row) => {
-      tx.delete(semanticMemoryOutbox).where(and(
-        eq(semanticMemoryOutbox.id, row.id),
-        eq(semanticMemoryOutbox.revision, row.revision),
-      )).run()
+const SEMANTIC_SOURCE_TABLES = [
+  ['characters', 'character'],
+  ['world_map', 'map'],
+  ['story_items', 'item'],
+  ['story_threads', 'story_thread'],
+  ['timeline_events', 'timeline_event'],
+] as const
+
+function enqueueFullSemanticMemoryReindex(novelId: number): void {
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    SEMANTIC_SOURCE_TABLES.forEach(([tableName, sourceType]) => {
+      sqlite.prepare(`
+        INSERT INTO semantic_memory_outbox (
+          novel_id, source_type, source_id, operation, status, revision,
+          attempts, context_version, available_at, locked_at, processed_at,
+          last_error, created_at, updated_at
+        )
+        SELECT
+          source.novel_id, ?, source.id, 'upsert', 'pending', 1,
+          0, COALESCE(novel.context_version, 1), CURRENT_TIMESTAMP, NULL, NULL,
+          NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM ${tableName} AS source
+        INNER JOIN novels AS novel ON novel.id = source.novel_id
+        WHERE source.novel_id = ?
+        ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+          operation = 'upsert',
+          status = 'pending',
+          revision = semantic_memory_outbox.revision + 1,
+          attempts = 0,
+          context_version = excluded.context_version,
+          available_at = CURRENT_TIMESTAMP,
+          locked_at = NULL,
+          processed_at = NULL,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(sourceType, novelId)
     })
   })
+  if (sqlite.inTransaction || typeof transaction.immediate !== 'function') transaction()
+  else transaction.immediate()
+}
 
-  return buildReindexSummary(prepared)
+function cleanupOrphanedSemanticMemoryEntries(novelId: number): void {
+  getSqlite().prepare(`
+    DELETE FROM semantic_memory_entries
+    WHERE novel_id = ?
+      AND (
+        (source_type = 'character' AND NOT EXISTS (
+          SELECT 1 FROM characters WHERE characters.id = semantic_memory_entries.source_id
+            AND characters.novel_id = semantic_memory_entries.novel_id
+        ))
+        OR (source_type = 'map' AND NOT EXISTS (
+          SELECT 1 FROM world_map WHERE world_map.id = semantic_memory_entries.source_id
+            AND world_map.novel_id = semantic_memory_entries.novel_id
+        ))
+        OR (source_type = 'item' AND NOT EXISTS (
+          SELECT 1 FROM story_items WHERE story_items.id = semantic_memory_entries.source_id
+            AND story_items.novel_id = semantic_memory_entries.novel_id
+        ))
+        OR (source_type = 'story_thread' AND NOT EXISTS (
+          SELECT 1 FROM story_threads WHERE story_threads.id = semantic_memory_entries.source_id
+            AND story_threads.novel_id = semantic_memory_entries.novel_id
+        ))
+        OR (source_type = 'timeline_event' AND NOT EXISTS (
+          SELECT 1 FROM timeline_events WHERE timeline_events.id = semantic_memory_entries.source_id
+            AND timeline_events.novel_id = semantic_memory_entries.novel_id
+        ))
+      )
+  `).run(novelId)
+}
+
+function loadSemanticMemoryReindexSummary(novelId: number): SemanticMemoryReindexResult {
+  const sqlite = getSqlite()
+  const counts = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS documentCount,
+      SUM(CASE WHEN embedding_json IS NOT NULL THEN 1 ELSE 0 END) AS vectorizedCount
+    FROM semantic_memory_entries
+    WHERE novel_id = ?
+      AND source_type IN ('character', 'map', 'item', 'story_thread', 'timeline_event')
+  `).get(novelId) as { documentCount?: number; vectorizedCount?: number } | undefined
+  const profiles = sqlite.prepare(`
+    SELECT DISTINCT embedding_profile AS profile
+    FROM semantic_memory_entries
+    WHERE novel_id = ?
+      AND embedding_json IS NOT NULL
+      AND embedding_profile IS NOT NULL
+      AND source_type IN ('character', 'map', 'item', 'story_thread', 'timeline_event')
+    ORDER BY embedding_profile
+  `).all(novelId) as Array<{ profile?: string | null }>
+  const documentCount = Math.max(0, Number(counts?.documentCount || 0))
+  const vectorizedCount = Math.max(0, Number(counts?.vectorizedCount || 0))
+  return {
+    documentCount,
+    vectorizedCount,
+    keywordOnlyCount: Math.max(0, documentCount - vectorizedCount),
+    profiles: profiles.flatMap((row) => row.profile || []),
+  }
 }
 
 function claimSemanticMemoryOutbox(options: {
@@ -614,6 +701,7 @@ function claimSemanticMemoryOutbox(options: {
         attempts
       FROM semantic_memory_outbox
       WHERE status IN ('pending', 'failed')
+        AND attempts < ${MAX_OUTBOX_ATTEMPTS}
         AND datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) <= datetime('now')
         ${typeof options.novelId === 'number' ? 'AND novel_id = ?' : ''}
       ORDER BY id ASC
@@ -669,21 +757,31 @@ function claimSemanticMemoryOutbox(options: {
 function markOutboxClaimFailed(claim: SemanticMemoryOutboxClaim, error: unknown): void {
   const delaySeconds = Math.min(300, Math.max(5, 2 ** Math.min(claim.attempts, 8)))
   const message = error instanceof Error ? error.message : String(error || 'unknown error')
+  const terminal = claim.attempts >= MAX_OUTBOX_ATTEMPTS
   getSqlite().prepare(`
     UPDATE semantic_memory_outbox
-    SET status = 'failed',
-        available_at = datetime('now', ?),
+    SET status = ?,
+        available_at = CASE WHEN ? = 1 THEN NULL ELSE datetime('now', ?) END,
         locked_at = NULL,
         last_error = ?,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
       AND revision = ?
       AND status = 'processing'
-  `).run(`+${delaySeconds} seconds`, message.slice(0, 1200), claim.id, claim.revision)
+  `).run(
+    terminal ? 'dead_letter' : 'failed',
+    terminal ? 1 : 0,
+    `+${delaySeconds} seconds`,
+    message.slice(0, 1200),
+    claim.id,
+    claim.revision,
+  )
 }
 
 async function processOutboxClaimGroup(
   claims: SemanticMemoryOutboxClaim[],
+  modelConfigId?: number,
+  allowRemoteEmbeddings = true,
 ): Promise<Pick<SemanticMemoryOutboxProcessResult, 'processedCount' | 'supersededCount'>> {
   const db = getDb()
   const novelId = claims[0]?.novelId
@@ -709,18 +807,6 @@ async function processOutboxClaimGroup(
     claim,
     documents: loadSourceDocuments(claim.novelId, claim.sourceType, claim.sourceId),
   }))
-  const preparedBatch = await attachEmbeddings(
-    novelId,
-    documentsByClaim.flatMap((entry) => entry.documents),
-    novel.modelConfigId || undefined,
-  )
-  let offset = 0
-  const projections = documentsByClaim.map((entry) => {
-    const prepared = preparedBatch.slice(offset, offset + entry.documents.length)
-    offset += entry.documents.length
-    return { claim: entry.claim, prepared }
-  })
-
   const existingRows: Array<typeof semanticMemoryEntries.$inferSelect> = []
   for (const sourceType of INDEXED_SOURCE_TYPES) {
     const sourceIds = claims
@@ -733,8 +819,18 @@ async function processOutboxClaimGroup(
       inArray(semanticMemoryEntries.sourceId, sourceIds),
     )).all())
   }
-  projections.forEach((projection) => {
-    preserveUnchangedEmbeddings(projection.prepared, existingRows)
+  const preparedBatch = await attachEmbeddings(
+    novelId,
+    documentsByClaim.flatMap((entry) => entry.documents),
+    modelConfigId || novel.modelConfigId || undefined,
+    existingRows,
+    { allowRemoteEmbeddings },
+  )
+  let offset = 0
+  const projections = documentsByClaim.map((entry) => {
+    const prepared = preparedBatch.slice(offset, offset + entry.documents.length)
+    offset += entry.documents.length
+    return { claim: entry.claim, prepared }
   })
 
   const contextVersion = Math.max(1, novel.contextVersion || 1)
@@ -776,6 +872,8 @@ const outboxDrains = new Map<string, Promise<SemanticMemoryOutboxProcessResult>>
 export async function processSemanticMemoryOutbox(options: {
   novelId?: number
   limit?: number
+  modelConfigId?: number
+  allowRemoteEmbeddings?: boolean
 } = {}): Promise<SemanticMemoryOutboxProcessResult> {
   const key = typeof options.novelId === 'number' ? `novel:${options.novelId}` : 'all'
   const existing = outboxDrains.get(key)
@@ -797,7 +895,11 @@ export async function processSemanticMemoryOutbox(options: {
     })
     for (const group of claimsByNovel.values()) {
       try {
-        const groupResult = await processOutboxClaimGroup(group)
+        const groupResult = await processOutboxClaimGroup(
+          group,
+          options.modelConfigId,
+          options.allowRemoteEmbeddings !== false,
+        )
         result.processedCount += groupResult.processedCount
         result.supersededCount += groupResult.supersededCount
       } catch (error) {
@@ -812,6 +914,31 @@ export async function processSemanticMemoryOutbox(options: {
     return await drain
   } finally {
     if (outboxDrains.get(key) === drain) outboxDrains.delete(key)
+  }
+}
+
+export function getSemanticMemoryOutboxStatus(): SemanticMemoryOutboxStatus {
+  const row = getSqlite().prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS retryingCount,
+      SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processingCount,
+      SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END) AS deadLetterCount,
+      MIN(CASE WHEN status IN ('pending', 'failed') THEN created_at END) AS oldestQueuedAt
+    FROM semantic_memory_outbox
+  `).get() as {
+    pendingCount?: number
+    retryingCount?: number
+    processingCount?: number
+    deadLetterCount?: number
+    oldestQueuedAt?: string | null
+  } | undefined
+  return {
+    pendingCount: Math.max(0, Number(row?.pendingCount || 0)),
+    retryingCount: Math.max(0, Number(row?.retryingCount || 0)),
+    processingCount: Math.max(0, Number(row?.processingCount || 0)),
+    deadLetterCount: Math.max(0, Number(row?.deadLetterCount || 0)),
+    ...(row?.oldestQueuedAt ? { oldestQueuedAt: row.oldestQueuedAt } : {}),
   }
 }
 

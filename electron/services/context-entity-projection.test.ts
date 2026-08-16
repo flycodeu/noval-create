@@ -16,6 +16,7 @@ import {
 } from './context-entity-mentions'
 import {
   clearChapterEntityMentionCatalogCache,
+  getChapterEntityMentionCatalogLookups,
   loadChapterEntityMentionCatalogs,
   resolveChapterEntityContextProjection,
   type ChapterEntityMentionCatalogs,
@@ -177,6 +178,18 @@ describe('chapter entity context projection', () => {
       expect(projection.relationFullIds).toHaveLength(8)
     },
   )
+
+  it('reuses derived lookup maps for the same catalog snapshot', () => {
+    const catalogs = createCatalogs()
+
+    const first = getChapterEntityMentionCatalogLookups(catalogs)
+    const reused = getChapterEntityMentionCatalogLookups(catalogs)
+    const refreshed = getChapterEntityMentionCatalogLookups(createCatalogs())
+
+    expect(reused).toBe(first)
+    expect(refreshed).not.toBe(first)
+    expect(first.characterIdByName.get('顾遥')).toBe(60)
+  })
 
   it('reuses a bounded catalog snapshot until the novel context version changes', () => {
     const rows = new Map<unknown, unknown[]>([

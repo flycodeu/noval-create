@@ -79,6 +79,7 @@ import { loadChapterThreadContextProjection } from './context-thread-projection'
 import {
   loadChapterEntityMentionCatalogs,
   loadProjectedChapterEntityRows,
+  getChapterEntityMentionCatalogLookups,
   resolveChapterEntityContextProjection,
   type CharacterMentionCatalogRow,
   type LocationMentionCatalogRow,
@@ -3476,8 +3477,9 @@ export async function collectChapterContextRawData(
   const itemMentionCandidates = buildItemMentionCandidates(entityCatalogs.items)
   const locationMentionCandidates = buildLocationMentionCandidates(entityCatalogs.locations)
   const factionMentionCandidates = buildFactionMentionCandidates(entityCatalogs.factions)
-  const characterNameById = new Map(entityCatalogs.characters.map((character) => [character.id, character.fullName || '']))
-  const locationNameById = new Map(entityCatalogs.locations.map((location) => [location.id, location.name || '']))
+  const entityCatalogLookups = getChapterEntityMentionCatalogLookups(entityCatalogs)
+  const characterNameById = entityCatalogLookups.characterNameById
+  const locationNameById = entityCatalogLookups.locationNameById
   const mentionedCharacterNames = new Set<string>(collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
     characterMentionCandidates,

@@ -38,9 +38,12 @@ vi.mock('./style-compliance.service', () => ({
 }))
 
 vi.mock('./workspace-quality.service', () => ({
-  analyzeWorkspaceAiFlavor: vi.fn(() => ({
+  analyzeWorkspaceAiFlavor: vi.fn((content: string) => ({
+    score: content.includes('然而') ? 10 : 90,
     summary: '',
-    humanizationSignals: [],
+    humanizationSignals: content.includes('然而')
+      ? [{ severity: 'high' }]
+      : [],
     humanizationDirections: [],
     sampleFindings: [],
   })),
@@ -65,6 +68,7 @@ vi.mock('./chapter-pipeline-policy.service', () => ({
 
 import {
   chooseBetterRepairCandidate,
+  deterministicHumanizationRiskScore,
   judgeRepairOutcome,
 } from './chapter-repair-loop'
 import { normalizeReviewNotes } from './chapter-review-notes'
@@ -278,5 +282,26 @@ describe('chooseBetterRepairCandidate 否决规则', () => {
     const candidate = { content: LONG_CONTENT, reviewNotes: notes() }
     const chosen = chooseBetterRepairCandidate(current, candidate, { originalLength: 100 })
     expect(chosen).toBe(current)
+  })
+
+  it('语义 blocker 减少但确定性人味风险显著恶化时拒绝候选', () => {
+    const natural = {
+      content: '门轴响了一声。沈砚停在台阶下，把湿透的收据压进袖口。值班员伸手时，他先问了登记簿在哪。'.repeat(12),
+      reviewNotes: notes(),
+    }
+    const mechanical = {
+      content: '然而，这意味着某种变化。与此同时，这说明了某种意义。由此可见，似乎一切都在悄然改变。'.repeat(12),
+      reviewNotes: notes(),
+    }
+    expect(deterministicHumanizationRiskScore(mechanical.content)).toBeGreaterThan(
+      deterministicHumanizationRiskScore(natural.content) + 12,
+    )
+
+    const chosen = chooseBetterRepairCandidate(natural, mechanical, {
+      currentSemantic: buildReview([buildVerdict('contract_delivery', 'blocker')]),
+      candidateSemantic: buildReview([buildVerdict('contract_delivery', 'pass')]),
+      originalLength: 100,
+    })
+    expect(chosen).toBe(natural)
   })
 })
