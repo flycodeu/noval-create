@@ -493,8 +493,7 @@ export default function Overview({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="已恢复最近一次未保存的 AI 草稿"
-          description="当前表单包含最近一次已应用但尚未保存的草稿内容。保存基础信息后会自动清除。"
+          message="已恢复未保存的 AI 草稿，保存基础信息后自动生效"
         />
       ) : null}
       {assetBloat.risk !== 'none' ? (

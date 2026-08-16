@@ -138,17 +138,14 @@ export default function StyleLabPage({ novelId }: Props) {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [switchingId, setSwitchingId] = useState<number | null>(null)
 
-  // 新建：粘贴样本
   const [pasteName, setPasteName] = useState('')
   const [pasteText, setPasteText] = useState('')
   const pasteGeneration = useTrackedGeneration<number | null>()
 
-  // 新建：章节采样
   const [chapterName, setChapterName] = useState('')
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const chapterGeneration = useTrackedGeneration<number | null>()
 
-  // A/B 试写
   const [abFingerprintId, setAbFingerprintId] = useState<number | null>(null)
   const [sceneBrief, setSceneBrief] = useState('')
   const [abResult, setAbResult] = useState<StyleAbTestResult | null>(null)

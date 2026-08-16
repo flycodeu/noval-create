@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -393,8 +393,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="已恢复最近一次未保存的 AI 草稿"
-          description="当前项目立项表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
+          message="已恢复未保存的 AI 结果，保存后自动生效"
         />
       ) : null}
 

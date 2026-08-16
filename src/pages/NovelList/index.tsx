@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -767,10 +767,10 @@ export default function NovelList() {
 
           <div className="novel-list-page__stats">
             {[
-              { label: '项目总数', value: `${novels.length} 部`, hint: '当前库内小说项目' },
-              { label: '写作中', value: `${writingCount} 部`, hint: '已经进入章节生产' },
-              { label: '已完结', value: `${completedCount} 部`, hint: '已进入收尾状态' },
-              { label: '累计字数', value: formatWordCount(totalWordCount), hint: '全部项目总字数' },
+              { label: '项目总数', value: `${novels.length} 部` },
+              { label: '写作中', value: `${writingCount} 部` },
+              { label: '已完结', value: `${completedCount} 部` },
+              { label: '累计字数', value: formatWordCount(totalWordCount) },
             ].map((item) => (
               <div key={item.label} className="novel-list-page__stat-card">
                 <span className="novel-list-page__stat-label">{item.label}</span>
@@ -1016,17 +1016,10 @@ export default function NovelList() {
 
           {selectedLaunchMode === 'fast_launch' && wizardStep === 1 && (
             <>
-              <Alert
-                type="info"
-                showIcon
-                className="novel-list-page__wizard-note"
-                message="可以直接写一段人话，再让 AI 只做字段整理；提取结果仍需你逐项确认。"
-              />
               <Form.Item
                 name="launchIdea"
-                label="直接描述灵感（可选）"
+                label="灵感描述（可选）"
                 rules={[{ min: 20, message: '灵感描述至少写 20 个字，或直接填写下方字段。' }]}
-                extra="写人物、处境、异常、想看的冲突即可，不必先想好标准设定。"
               >
                 <Input.TextArea
                   autoSize={{ minRows: 4, maxRows: 8 }}
@@ -1120,12 +1113,6 @@ export default function NovelList() {
           {selectedLaunchMode === 'professional_longform' && wizardStep === 2 && (
             <div className="novel-list-page__expanded-layout">
               <div className="novel-list-page__expanded-main">
-                <Alert
-                  type="info"
-                  showIcon
-                  className="novel-list-page__wizard-note"
-                  message="AI 补全结果已生成"
-                />
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
                   <Input.TextArea
                     autoSize={EXPANDED_TEXTAREA_AUTO_SIZE}

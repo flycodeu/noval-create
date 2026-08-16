@@ -156,7 +156,6 @@ export default function TemplateManager() {
     if (!values) return
     setSaving(true)
     try {
-      // 验证 JSON
       if (values.contentJson) {
         try {
           JSON.parse(values.contentJson)
@@ -282,7 +281,7 @@ export default function TemplateManager() {
         heroVariant="compact"
         eyebrow="创作模板"
         title="文风与世界模板"
-        description="这里管理新建小说时可以选用的文风模板和世界设定模板。选好模板后，AI 写正文和生成背景时会参考它，让全书的风格和设定保持统一。"
+        description="管理新建小说时可选用的文风与世界设定模板。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
@@ -310,7 +309,7 @@ export default function TemplateManager() {
       >
         <WorkspacePanel
           title="模板目录"
-          description="内置模板只能查看，自己新建的模板可以编辑或删除。模板用来在新建小说时一键套用一套固定的文风或世界设定。"
+          description="查看内置模板与管理自定义创作模板。"
         >
           <div className="template-usage-overview">
             <div className="template-usage-overview__item">
@@ -354,19 +353,11 @@ export default function TemplateManager() {
             style={{ marginBottom: 16 }}
             type="info"
             showIcon
-            message="当前是内置模板"
-            description="内置模板为只读资源，可查看结构和内容，但不能直接编辑。"
+            message="内置模板为只读资源，不可直接编辑。"
           />
         ) : null}
-        <Alert
-          style={{ marginBottom: 16 }}
-          type="info"
-          showIcon
-          message={editingUsage.entry}
-          description={editingUsage.modalDescription}
-        />
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="模板名称" rules={[{ required: true }]} extra="会显示在新建小说弹窗的模板下拉框里。">
+          <Form.Item name="name" label="模板名称" rules={[{ required: true }]}>
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
           <Form.Item name="type" label="模板类型">
@@ -375,10 +366,10 @@ export default function TemplateManager() {
               options={Object.entries(TYPE_LABELS).map(([k, v]) => ({ value: k, label: v }))}
             />
           </Form.Item>
-          <Form.Item name="description" label="描述" extra="一句话说明这个模板适合什么题材和风格，会显示在卡片上。">
+          <Form.Item name="description" label="描述">
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
-          <Form.Item name="contentJson" label="内容（JSON 格式）" extra={editingUsage.fieldGuide}>
+          <Form.Item name="contentJson" label="内容（JSON 格式）">
             <Input.TextArea
               rows={10}
               disabled={editing?.isBuiltin === 1}

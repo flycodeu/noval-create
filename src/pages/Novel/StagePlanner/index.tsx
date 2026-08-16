@@ -447,7 +447,7 @@ export default function StagePlanner({ novelId }: Props) {
       )}
       guide={(
         <WorkspaceStepGuide
-          title="阶段不是复制一套新世界，而是给当前窗口设置焦点"
+          title="阶段规划流程"
           steps={[
             { title: '先定章节窗口', description: '例如第 1–100 章，只描述此段会真正出场的人物和地点。', status: selectedStage ? 'done' : 'focus' },
             { title: '登记资产角色', description: '核心人物做完整卡，功能人物只先登记动机、关系和出场任务。', status: assets.length > 0 ? 'done' : selectedStage ? 'focus' : 'todo' },

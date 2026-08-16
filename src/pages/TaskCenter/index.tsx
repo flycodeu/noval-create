@@ -241,7 +241,7 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
   if (stream?.content) return stream.content.slice(0, 140)
   if (task.outputText) return task.outputText.slice(0, 140)
   if (task.inputJson) return formatTaskPayload(task.inputJson).slice(0, 140)
-  return '任务已创建，但当前阶段还没产出可展示结果。先看状态、恢复入口和请求上下文。'
+  return '任务已创建，等待执行输出。'
 }
 
 function getFreshnessTags(labels: string[], visibleCount = 2) {
@@ -464,9 +464,7 @@ export default function TaskCenter() {
     try {
       await window.electron.task.retry(taskId)
       await loadTasks({ silent: true })
-    } catch {
-      // Keep the page quiet and let the detail panel explain retry availability.
-    }
+    } catch {}
   }
 
   const handleResume = async (task: Task, recoveryAction?: ReturnType<typeof buildTaskRecoveryAction> | null) => {
@@ -632,7 +630,7 @@ export default function TaskCenter() {
       className="task-center-page"
       eyebrow="任务运行台"
       title="任务中心"
-      description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，支持按每页 10 / 20 / 50 条查看任务历史。"
+      description="集中管理 AI 任务的执行状态、报错追踪与重试恢复。"
       heroVariant="compact"
       actions={(
         <div className="task-center-toolbar">
@@ -789,7 +787,7 @@ export default function TaskCenter() {
           className="task-center-detail-panel"
           scrollable
           title={selectedTask ? `任务详情 · ${getTaskTypeLabel(selectedTask.type)}` : '任务详情'}
-          description="集中查看状态、报错、流式输出和请求上下文。"
+          description="查看执行状态、日志输出与请求上下文。"
           extra={selectedTask ? (
             <div className="task-center-detail__actions">
               {selectedTask.status === 'running' ? (

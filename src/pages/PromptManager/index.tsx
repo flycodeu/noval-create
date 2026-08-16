@@ -567,7 +567,7 @@ export default function PromptManager() {
       layout="wide"
       eyebrow="运行时控制台"
       title="提示词控制台"
-      description="这里维护的是直接作用到生成链路的运行时提示词。左侧按生产阶段筛选，右侧检查当前模板、中文底板接入情况和服务层追加护栏。"
+      description="管理各生成链路的运行时提示词、风险控制与参数规范。"
       heroVariant="compact"
       actions={(
         <div className="prompt-manager-toolbar">
@@ -604,7 +604,7 @@ export default function PromptManager() {
           scrollable
           className="prompt-manager-catalog"
           title="链路目录"
-          description="先按生产阶段筛，再进具体模板。目录中的覆盖标记表示这条提示词已被本地改写。"
+          description="按生产阶段与分类浏览提示词模板。"
           extra={(
             <div className="prompt-manager-filter-group">
               {PROMPT_CATEGORIES.map((category) => (
@@ -682,7 +682,7 @@ export default function PromptManager() {
           <WorkspacePanel
             className="prompt-manager-inspector-panel"
             title={selectedPromptRow ? selectedPromptRow.prompt.name : '未选择提示词'}
-            description={selectedPromptRow ? selectedPromptRow.meta.goal : '从左侧选择一条提示词后，这里会显示它的运行时模板、风险和参数。'}
+            description={selectedPromptRow ? selectedPromptRow.meta.goal : '请从左侧选择一条提示词查看详细参数。'}
             extra={selectedPromptRow ? (
               <div className="prompt-manager-inspector-actions">
                 <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopy(selectedPromptRow.currentTemplate)}>复制</Button>
@@ -717,16 +717,10 @@ export default function PromptManager() {
                   </div>
                 </div>
 
-                <div className="prompt-manager-callout">
-                  <strong>运行时说明</strong>
-                  <span>这里展示的是当前运行中的模板。真正生效的链路通常由三层组成：基础模板、公共中文底板，以及 Electron 服务层追加的生产护栏。</span>
-                </div>
-
                 <div className="prompt-manager-inspector-section prompt-manager-template-stage">
                   <div className="prompt-manager-template-stage__head">
                     <div className="prompt-manager-template-stage__copy">
                       <div className="prompt-manager-inspector-section__title">当前模板</div>
-                      <div className="prompt-manager-inspector-section__copy">把长提示词前置成阅读区，先看正文，再决定是否复制或编辑。</div>
                     </div>
                     {selectedPromptTemplateStats ? (
                       <div className="prompt-manager-template-stage__stats">

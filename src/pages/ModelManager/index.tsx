@@ -53,7 +53,6 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-4o', baseUrl: '' },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'claude-sonnet-4-6' },
   deepseek: { temperature: 0.7, maxTokens: 384000, modelId: 'deepseek-v4-flash', baseUrl: '' },
-  // 国内 key 走 api.moonshot.cn；如果用海外 key 改成 api.moonshot.ai/v1
   kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', maxContextTokens: 256000 },
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen3.6-max', maxContextTokens: 128000 },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
@@ -482,7 +481,7 @@ export default function ModelManager() {
             scrollable
             className="model-manager-list-panel"
             title="模型配置"
-            description="点击配置查看状态，默认模型带星标。"
+            description="已保存的模型配置列表。"
             extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
           >
             {loading ? (
@@ -546,7 +545,7 @@ export default function ModelManager() {
           <WorkspacePanel
             className="model-manager-overview-panel"
             title="当前状态"
-            description="查看选中模型的关键参数和连接状态。"
+            description="查看模型参数与连接测试。"
             extra={<Button icon={<SearchOutlined />} onClick={openSourceEditor}>配置搜索 API</Button>}
           >
             {selected ? (
@@ -608,7 +607,7 @@ export default function ModelManager() {
         <WorkspacePanel
           className="model-manager-source-panel"
           title="来源检索与 API Key"
-          description="联网检索来源和密钥状态。"
+          description="联网检索来源配置。"
           extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
         >
           <div className="admin-detail-stack source-search-config">
