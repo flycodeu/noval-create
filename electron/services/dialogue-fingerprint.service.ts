@@ -51,7 +51,7 @@ interface DialogueSummaryPayload {
   compareHints: string[]
 }
 
-interface DialogueAnalyticsSnapshot {
+export interface DialogueAnalyticsSnapshot {
   dialogueFingerprintStats: DialogueFingerprintStats
   characterDialogueSignatures: CharacterDialogueSignature[]
   crossCharacterDialogueSimilarity: CrossCharacterDialogueSimilarity[]

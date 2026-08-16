@@ -62,6 +62,7 @@ function buildThresholds(options) {
 
 function buildDryRunReport(options) {
   const chapterService = readText('electron/services/chapter.service.ts')
+  const chapterPipelineFinalize = readText('electron/services/chapter-pipeline-finalize.ts')
   const chapterPipelineState = readText('electron/services/chapter-pipeline-state.ts')
   const batchWorkflow = readText('electron/services/batch-workflow.service.ts')
   const contextService = readText('electron/services/context.service.ts')
@@ -93,9 +94,9 @@ function buildDryRunReport(options) {
       /runChapterPublishCheck\(chapterId(?:,|\))/u,
       'chapter pipeline publish gate',
     )
-    assertIncludes(chapterService, 'prepareChapterWritebackRunWithRetry', 'canonizer')
+    assertIncludes(chapterPipelineFinalize, 'prepareChapterWritebackRunWithRetry', 'canonizer')
     assertIncludes(chapterService, 'finalizeGeneratedChapterContent', 'finalize')
-    assertIncludes(chapterService, 'generateChapterEmbeddings', 'embedding refresh')
+    assertIncludes(chapterPipelineFinalize, 'generateChapterEmbeddings', 'embedding refresh')
   })
 
   check('batch workflow waits for real chapter generation children', () => {

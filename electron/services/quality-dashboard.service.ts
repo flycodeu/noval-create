@@ -1,8 +1,5 @@
-import { asc, desc, eq } from 'drizzle-orm'
 import type {
-  AIScoreDimension,
   ChapterBatchAutoGenerateStatus,
-  ChapterGateHistoryEntry,
   ChapterDialogueReviewData,
   ExpressionDedupHit,
   ExpressionDedupMode,
@@ -10,9 +7,7 @@ import type {
   ChapterFunctionRun,
   ChapterFunctionTag,
   LanguageDriftMetrics,
-  LanguageDriftMetricSnapshot,
   LanguageDriftTrendStatus,
-  LanguageDriftTrendSummary,
   NovelLanguageDriftSummary,
   NovelQualityMetrics,
   QualityDashboardData,
@@ -33,7 +28,6 @@ import type {
 } from '../../src/types'
 import type { QualityAgentDashboardSnapshot } from '../../src/shared/quality-agent-dashboard'
 import {
-  estimateChapterCountFromOperatingMode,
   getOperatingModePolicy,
   getOperatingModeRuntimePolicy,
   isHistoricalGenreUsingGenericFallback,
@@ -44,34 +38,11 @@ import {
   hasTypedRefOverlay,
 } from '../../src/shared/typed-ref'
 import { assessHistoricalGrounding, getBuiltinGenreRules } from '../../src/shared/genre-system'
-import { getDb } from '../database/db'
-import {
-  chapterBatchInspections,
-  chapterBatchSnapshots,
-  chapterGateRuns,
-  chapterWritebackRuns,
-  chapters,
-  glossary,
-  genres,
-  novels,
-  revisionTasks,
-  storyFacts,
-  storyMemoryCheckpoints,
-  storyVolumes,
-  tasks,
-  storyItems,
-  storyThreads,
-  timelineEvents,
-} from '../database/schema'
+import { tasks } from '../database/schema'
 import { buildPreviousChapterContextFeed } from './context.service'
 import { getStoryMemoryCheckpointRefreshStatus } from './story-memory.service'
 import {
-  buildChapterGateDriftAlert,
   buildChapterGateDriftSummary,
-  getChapterGatePrimaryDimensions,
-  getChapterGateScoreBand,
-  normalizeChapterGateScoreBreakdown,
-  safeParseChapterGateScoreBreakdown,
   safeParseStringArray,
 } from './chapter-gate-utils'
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
@@ -85,7 +56,31 @@ import { buildStoryMemoryPromptPackage } from './story-memory.service'
 import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
 import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
-import { parseTaskProgress } from './task.service'
+import {
+  loadQualityDashboardBatchSnapshot,
+  loadQualityDashboardCatalogSnapshot,
+  loadQualityDashboardDerivedDatabaseSnapshot,
+} from './quality-dashboard-loader'
+import { deriveChapterGateMetrics } from './quality-dashboard-gate-metrics'
+import { deriveChapterScoreMetrics } from './quality-dashboard-chapter-metrics'
+import { assembleQualityDashboardData } from './quality-dashboard-assembler'
+import { buildRuntimeObservability } from './quality-dashboard-runtime-metrics'
+import { buildVolumeTopRisks } from './quality-dashboard-volume-metrics'
+import {
+  buildRepairActionSummary,
+  buildRepairMetricSummary as createRepairMetricSummary,
+} from './quality-dashboard-repair-metrics'
+import {
+  LANGUAGE_DRIFT_METRICS,
+  RECENT_LANGUAGE_DRIFT_WINDOW,
+  averageLanguageDrift,
+  emptyLanguageDriftSeries,
+  pushLanguageDriftMetrics,
+  rankLanguageDriftMetrics,
+  sortTrendSummaries,
+  summarizeTrend,
+  type LanguageDriftSeries,
+} from './quality-dashboard-language-metrics'
 import { listArtifacts } from './artifact.service'
 import {
   getHardContractValidationItems,
@@ -115,24 +110,17 @@ import {
   PRESSURE_RUN_THRESHOLD,
   SMOOTH_RUN_THRESHOLD,
   buildStoryPacingAlerts,
-  buildTimelineStoryHints,
   computeCostPersistence,
   computeProtagonistSetbackSummary,
   computeReversalDistribution,
-  enhanceStoryDynamics,
-  hasTimelineHint,
-  parseStoryDynamics,
   toRewardLevel,
   toSetbackLevel,
   type StoryDynamicsChapterRecord,
 } from './quality-dashboard-story-dynamics'
+import { buildStoryDynamicsReadModel } from './story-dynamics-read-model'
 
 export { buildHeuristicRecallDiagnostics } from './quality-dashboard-recall-diagnostics'
 
-interface QualityDimensionScore extends AIScoreDimension {}
-
-type LanguageDriftMetricKey = keyof LanguageDriftMetrics
-type LanguageDriftSeries = QualityDashboardData['languageDriftTrends']
 type VolumeAccumulator = {
   volumeId: number
   volumeNumber: number
@@ -167,26 +155,11 @@ type ForeshadowCounts = {
   overdue: number
   resolved: number
 }
-type ChapterGateRunRow = typeof chapterGateRuns.$inferSelect
-
 interface QualityDashboardOptions {
   includeDialogueInsights?: boolean
 }
 
 const DIMENSION_NAMES = ['文笔质量', '逻辑连贯', '节奏控制', '情感深度', '人物塑造', '世界一致', '创新性', '追读欲']
-const LANGUAGE_DRIFT_METRICS: Array<{ key: LanguageDriftMetricKey; label: string }> = [
-  { key: 'abstractTokenDensity', label: '抽象词密度' },
-  { key: 'sentencePatternRepeatRate', label: '句式重复率' },
-  { key: 'endingSummaryRate', label: '段尾升华率' },
-  { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
-  { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
-  { key: 'dashDensity', label: '破折号密度' },
-  { key: 'parentheticalExplanationDensity', label: '括号说明密度' },
-  { key: 'metaphorStackRate', label: '比喻堆叠率' },
-  { key: 'parallelismRate', label: '排比句率' },
-  { key: 'bodyDetailClicheRate', label: '手眼声音细节密度' },
-  { key: 'isolatedTemplateParagraphRate', label: '孤立模板短段率' },
-]
 const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
   commitment_delivery: '承诺兑现率',
   typed_ref_coverage: 'Typed Ref 覆盖',
@@ -231,8 +204,38 @@ const QUALITY_REPAIR_METRIC_LABELS: Record<QualityRepairMetricKey, string> = {
   world_state_drift: '世界状态漂移',
   info_reveal_pacing: '信息揭示节奏',
 }
-const RECENT_LANGUAGE_DRIFT_WINDOW = 20
-const LANGUAGE_DRIFT_DELTA_THRESHOLD = 5
+const DEFAULT_RISK_CAUSES: Partial<Record<QualityDashboardRiskKind, string>> = {
+  commitment_delivery: '承诺没有稳定进入卷级设计、章节合同和实际正文执行链，导致兑现节点开始漂移。',
+  endgame_debt: '承诺没有稳定进入卷级设计、章节合同和实际正文执行链，导致兑现节点开始漂移。',
+  voice_distinction: '对白指纹、角色声音锁和近期审校信号出现重叠，角色说话方式开始同质化。',
+  growth_cost_balance: '成长收益、主角受挫和代价持续性没有保持同步，导致剧情推进出现“只拿收益”或“只压不收”的失衡。',
+  story_dynamics: '成长收益、主角受挫和代价持续性没有保持同步，导致剧情推进出现“只拿收益”或“只压不收”的失衡。',
+  foreshadow_debt: '伏笔已进入应回收窗口，但合同推进、桥段铺设或延期说明没有及时跟上。',
+  world_state: '正文状态变更、章后回写和状态总账之间没有保持一致，出现漂移或冲突。',
+  info_reveal_pacing: '事实的读者知情、主角知情与计划揭示节奏发生错位，导致揭示过早或过晚。',
+  recall: '章节生成依赖的历史片段出现降级、缺失或过期，当前上下文稳定性不足。',
+  language_drift: '破折号、括号解释、模板短段、排比和低价值身体细节正在跨章节累积。',
+  feedback_recurrence: '相同审校问题在近期多章复现，说明单章修补没有进入后续硬约束。',
+  style_compliance: '章节与样章风格锁、禁用表达或句段比例约束发生偏移。',
+  chapter_function: '章节功能没有形成清晰推进、反转、回收或喘息节奏，导致连续阅读目标模糊。',
+  story_arc: '故事弧阶段推进和正文落点脱节，出现长段空转或阶段未兑现。',
+}
+const DEFAULT_RISK_FIXES: Partial<Record<QualityDashboardRiskKind, string>> = {
+  commitment_delivery: '先补齐卷承诺与章节合同绑定，再把兑现或推进动作落到具体章节任务。',
+  endgame_debt: '先补齐卷承诺与章节合同绑定，再把兑现或推进动作落到具体章节任务。',
+  voice_distinction: '优先回查相关章节的对白，把角色目标、词汇偏好和语气差异重新写实。',
+  growth_cost_balance: '补出代价留痕、收益交换或反转支撑，让主角成长与付出重新对应。',
+  story_dynamics: '补出代价留痕、收益交换或反转支撑，让主角成长与付出重新对应。',
+  foreshadow_debt: '决定是补写回收桥段、显式延期说明，还是把伏笔转移到新的兑现节点。',
+  world_state: '核对正文、时间轴和状态版本，优先同步冲突状态，再明确哪些偏移是作者允许的。',
+  info_reveal_pacing: '把信息揭示重新绑定到目标章节，必要时补桥段或后移暴露点。',
+  recall: '先恢复召回链路或缩窄上下文依赖，再继续基于旧片段推进后续章节。',
+  language_drift: '把风险落到最近章节的语言修订任务，优先删减模板句、解释腔和低价值细节。',
+  feedback_recurrence: '将复现审校项升级为修订任务和后续硬约束，先处理最近命中的章节。',
+  style_compliance: '对照风格锁回调句长、段长、对白密度和禁用表达，必要时重写问题段落。',
+  chapter_function: '回到章节合同确认本章功能位，并补足推进、反转、回收或喘息的可见动作。',
+  story_arc: '把停滞故事弧重新绑定到章节合同和正文行动，补阶段兑现或延期说明。',
+}
 function dedupeNumbers(values: number[]): number[] {
   return [...new Set(values)].sort((left, right) => left - right)
 }
@@ -251,51 +254,6 @@ function dedupeStrings(values: string[], limit?: number): string[] {
     result.push(normalized)
   })
   return typeof limit === 'number' ? result.slice(0, limit) : result
-}
-
-function sortChapterGateHistoryEntries(left: ChapterGateHistoryEntry, right: ChapterGateHistoryEntry): number {
-  const leftTime = Date.parse(left.createdAt || '')
-  const rightTime = Date.parse(right.createdAt || '')
-  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-    return rightTime - leftTime
-  }
-  return right.id - left.id
-}
-
-function mapChapterGateRunRow(row: ChapterGateRunRow): ChapterGateHistoryEntry {
-  return {
-    id: row.id,
-    novelId: row.novelId,
-    chapterId: row.chapterId,
-    chapterNum: row.chapterNum || 0,
-    gateLevel: (row.gateLevel || 'warning') as ChapterGateHistoryEntry['gateLevel'],
-    ready: row.ready === 1,
-    summary: row.summary || '',
-    rewriteCount: row.rewriteCount || 0,
-    blockerCount: row.blockerCount || 0,
-    warningCount: row.warningCount || 0,
-    generatedTaskCount: row.generatedTaskCount || 0,
-    topIssueKeys: safeParseStringArray(row.topIssueKeysJson),
-    scoreBreakdown: safeParseChapterGateScoreBreakdown(row.scoreBreakdownJson) || normalizeChapterGateScoreBreakdown(),
-    createdAt: row.createdAt || new Date(0).toISOString(),
-  }
-}
-
-function safeParseScores(json: string | null | undefined): {
-  dimensions: QualityDimensionScore[]
-  ai_like_rate: number
-  overall_score: number
-  weak_dimensions: string[]
-  language_drift_metrics?: LanguageDriftMetrics
-} | null {
-  if (!json) return null
-  try {
-    const parsed = JSON.parse(json)
-    if (!parsed || !Array.isArray(parsed.dimensions)) return null
-    return parsed
-  } catch {
-    return null
-  }
 }
 
 function roundMetric(value: number): number {
@@ -420,38 +378,6 @@ function normalizeBoolean(value: unknown): boolean {
   return false
 }
 
-function emptyLanguageDrift(): LanguageDriftMetrics {
-  return {
-    abstractTokenDensity: 0,
-    sentencePatternRepeatRate: 0,
-    endingSummaryRate: 0,
-    ornamentOverloadRate: 0,
-    nonHumanCollocationRate: 0,
-    dashDensity: 0,
-    parentheticalExplanationDensity: 0,
-    metaphorStackRate: 0,
-    parallelismRate: 0,
-    bodyDetailClicheRate: 0,
-    isolatedTemplateParagraphRate: 0,
-  }
-}
-
-function emptyLanguageDriftSeries(): LanguageDriftSeries {
-  return {
-    abstractTokenDensity: [],
-    sentencePatternRepeatRate: [],
-    endingSummaryRate: [],
-    ornamentOverloadRate: [],
-    nonHumanCollocationRate: [],
-    dashDensity: [],
-    parentheticalExplanationDensity: [],
-    metaphorStackRate: [],
-    parallelismRate: [],
-    bodyDetailClicheRate: [],
-    isolatedTemplateParagraphRate: [],
-  }
-}
-
 function qualityRiskLabel(kind: QualityDashboardRiskKind): string {
   return QUALITY_RISK_LABELS[kind]
 }
@@ -497,12 +423,6 @@ function toDashboardSeverityFromStoryAlert(severity: StoryDynamicsAlert['severit
 
 function toDashboardSeverityFromChapterFunctionAlert(severity: ChapterFunctionAlert['severity']): QualityDashboardRiskSeverity {
   return severity === 'blocker' ? 'critical' : 'warning'
-}
-
-function toDashboardSeverityFromArcAlert(severity: QualityDashboardData['storyArcProgressAlerts'][number]['severity']): QualityDashboardRiskSeverity {
-  if (severity === 'critical') return 'critical'
-  if (severity === 'warning') return 'warning'
-  return 'info'
 }
 
 function averageNumbers(values: number[]): number {
@@ -635,69 +555,14 @@ function toRepairTaskSeverity(severity: QualityDashboardRiskSeverity): 'high' | 
 }
 
 function buildDefaultRiskWhyItHappened(kind: QualityDashboardRiskKind, detail: string): string {
-  switch (kind) {
-    case 'commitment_delivery':
-    case 'endgame_debt':
-      return detail || '承诺没有稳定进入卷级设计、章节合同和实际正文执行链，导致兑现节点开始漂移。'
-    case 'voice_distinction':
-      return detail || '对白指纹、角色声音锁和近期审校信号出现重叠，角色说话方式开始同质化。'
-    case 'growth_cost_balance':
-    case 'story_dynamics':
-      return detail || '成长收益、主角受挫和代价持续性没有保持同步，导致剧情推进出现“只拿收益”或“只压不收”的失衡。'
-    case 'foreshadow_debt':
-      return detail || '伏笔已进入应回收窗口，但合同推进、桥段铺设或延期说明没有及时跟上。'
-    case 'world_state':
-      return detail || '正文状态变更、章后回写和状态总账之间没有保持一致，出现漂移或冲突。'
-    case 'info_reveal_pacing':
-      return detail || '事实的读者知情、主角知情与计划揭示节奏发生错位，导致揭示过早或过晚。'
-    case 'recall':
-      return detail || '章节生成依赖的历史片段出现降级、缺失或过期，当前上下文稳定性不足。'
-    case 'language_drift':
-      return detail || '破折号、括号解释、模板短段、排比和低价值身体细节正在跨章节累积。'
-    case 'feedback_recurrence':
-      return detail || '相同审校问题在近期多章复现，说明单章修补没有进入后续硬约束。'
-    case 'style_compliance':
-      return detail || '章节与样章风格锁、禁用表达或句段比例约束发生偏移。'
-    case 'chapter_function':
-      return detail || '章节功能没有形成清晰推进、反转、回收或喘息节奏，导致连续阅读目标模糊。'
-    case 'story_arc':
-      return detail || '故事弧阶段推进和正文落点脱节，出现长段空转或阶段未兑现。'
-    default:
-      return detail || '当前指标已经跨过预警阈值，需要把问题定位到具体章节和修复链路。'
-  }
+  return detail
+    || DEFAULT_RISK_CAUSES[kind]
+    || '当前指标已经跨过预警阈值，需要把问题定位到具体章节和修复链路。'
 }
 
 function buildDefaultRiskHowToFix(kind: QualityDashboardRiskKind): string {
-  switch (kind) {
-    case 'commitment_delivery':
-    case 'endgame_debt':
-      return '先补齐卷承诺与章节合同绑定，再把兑现或推进动作落到具体章节任务。'
-    case 'voice_distinction':
-      return '优先回查相关章节的对白，把角色目标、词汇偏好和语气差异重新写实。'
-    case 'growth_cost_balance':
-    case 'story_dynamics':
-      return '补出代价留痕、收益交换或反转支撑，让主角成长与付出重新对应。'
-    case 'foreshadow_debt':
-      return '决定是补写回收桥段、显式延期说明，还是把伏笔转移到新的兑现节点。'
-    case 'world_state':
-      return '核对正文、时间轴和状态版本，优先同步冲突状态，再明确哪些偏移是作者允许的。'
-    case 'info_reveal_pacing':
-      return '把信息揭示重新绑定到目标章节，必要时补桥段或后移暴露点。'
-    case 'recall':
-      return '先恢复召回链路或缩窄上下文依赖，再继续基于旧片段推进后续章节。'
-    case 'language_drift':
-      return '把风险落到最近章节的语言修订任务，优先删减模板句、解释腔和低价值细节。'
-    case 'feedback_recurrence':
-      return '将复现审校项升级为修订任务和后续硬约束，先处理最近命中的章节。'
-    case 'style_compliance':
-      return '对照风格锁回调句长、段长、对白密度和禁用表达，必要时重写问题段落。'
-    case 'chapter_function':
-      return '回到章节合同确认本章功能位，并补足推进、反转、回收或喘息的可见动作。'
-    case 'story_arc':
-      return '把停滞故事弧重新绑定到章节合同和正文行动，补阶段兑现或延期说明。'
-    default:
-      return '把风险落成修订任务，先处理受影响最大的章节或资产，再回看指标是否恢复。'
-  }
+  return DEFAULT_RISK_FIXES[kind]
+    || '把风险落成修订任务，先处理受影响最大的章节或资产，再回看指标是否恢复。'
 }
 
 function slugifyRiskActionId(value: string): string {
@@ -926,49 +791,10 @@ function summarizeBatchRange(chapterNums: number[]): string {
   return `第${normalized[0]}-${normalized[normalized.length - 1]}章`
 }
 
-function parseNumberArrayJson(raw?: string | null): number[] {
-  if (!raw?.trim()) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => (typeof item === 'number' ? item : Number(item)))
-      .filter((item) => Number.isFinite(item))
-      .map((item) => Math.trunc(item))
-  } catch {
-    return []
-  }
-}
-
-function getLatestWritebackRunMap(novelId: number) {
-  return getDb()
-    .select()
-    .from(chapterWritebackRuns)
-    .where(eq(chapterWritebackRuns.novelId, novelId))
-    .orderBy(desc(chapterWritebackRuns.updatedAt), desc(chapterWritebackRuns.id))
-    .all()
-    .reduce<Map<number, typeof chapterWritebackRuns.$inferSelect>>((result, row) => {
-      if (!result.has(row.chapterId)) {
-        result.set(row.chapterId, row)
-      }
-      return result
-    }, new Map())
-}
-
 function classifyWritebackStatus(status?: string | null): 'pending' | 'failed' | 'applied' {
   if (status === 'failed' || status === 'partially_failed') return 'failed'
   if (status === 'applied') return 'applied'
   return 'pending'
-}
-
-function getLatestChapterBatchTask(novelId: number): typeof tasks.$inferSelect | null {
-  return getDb()
-    .select()
-    .from(tasks)
-    .where(eq(tasks.novelId, novelId))
-    .orderBy(desc(tasks.updatedAt), desc(tasks.id))
-    .all()
-    .find((task) => task.type === 'chapter_batch_generate' && task.runnerType === 'workflow') || null
 }
 
 function summarizeReadinessStatus(input: {
@@ -1372,84 +1198,6 @@ function parseStyleCompliance(raw?: string | null): StyleComplianceResult | null
   }
 }
 
-function normalizeLanguageDrift(value: unknown): LanguageDriftMetrics | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const read = (key: LanguageDriftMetricKey) => typeof record[key] === 'number' && Number.isFinite(record[key]) ? Number(record[key]) : 0
-  return {
-    abstractTokenDensity: read('abstractTokenDensity'),
-    sentencePatternRepeatRate: read('sentencePatternRepeatRate'),
-    endingSummaryRate: read('endingSummaryRate'),
-    ornamentOverloadRate: read('ornamentOverloadRate'),
-    nonHumanCollocationRate: read('nonHumanCollocationRate'),
-    dashDensity: read('dashDensity'),
-    parentheticalExplanationDensity: read('parentheticalExplanationDensity'),
-    metaphorStackRate: read('metaphorStackRate'),
-    parallelismRate: read('parallelismRate'),
-    bodyDetailClicheRate: read('bodyDetailClicheRate'),
-    isolatedTemplateParagraphRate: read('isolatedTemplateParagraphRate'),
-  }
-}
-
-function pushLanguageDriftMetrics(series: LanguageDriftSeries, chapterNum: number, metrics: LanguageDriftMetrics) {
-  for (const { key } of LANGUAGE_DRIFT_METRICS) {
-    series[key].push({ chapterNum, value: metrics[key] })
-  }
-}
-
-function averageLanguageDrift(metricsList: LanguageDriftMetrics[]): LanguageDriftMetrics {
-  if (metricsList.length === 0) return emptyLanguageDrift()
-  const totals = emptyLanguageDrift()
-  for (const metrics of metricsList) {
-    for (const { key } of LANGUAGE_DRIFT_METRICS) {
-      totals[key] += metrics[key] || 0
-    }
-  }
-  const averaged = emptyLanguageDrift()
-  for (const { key } of LANGUAGE_DRIFT_METRICS) {
-    averaged[key] = roundMetric(totals[key] / metricsList.length)
-  }
-  return averaged
-}
-
-function averageTrendPoints(points: Array<{ chapterNum: number; value: number }>): number {
-  if (points.length === 0) return 0
-  return roundMetric(points.reduce((sum, point) => sum + point.value, 0) / points.length)
-}
-
-function toTrendStatus(delta: number): LanguageDriftTrendStatus {
-  if (delta >= LANGUAGE_DRIFT_DELTA_THRESHOLD) return 'worsening'
-  if (delta <= -LANGUAGE_DRIFT_DELTA_THRESHOLD) return 'improving'
-  return 'stable'
-}
-
-function summarizeTrend(metric: LanguageDriftMetricKey, label: string, points: Array<{ chapterNum: number; value: number }>): LanguageDriftTrendSummary {
-  if (points.length === 0) return { metric, label, latestValue: 0, previousValue: 0, delta: 0, status: 'stable' }
-  if (points.length === 1) {
-    const value = roundMetric(points[0].value)
-    return { metric, label, latestValue: value, previousValue: value, delta: 0, status: 'stable' }
-  }
-  const windowPoints = points.slice(-RECENT_LANGUAGE_DRIFT_WINDOW)
-  const splitIndex = Math.max(1, Math.floor(windowPoints.length / 2))
-  const previousWindow = windowPoints.slice(0, splitIndex)
-  const latestWindow = windowPoints.slice(splitIndex)
-  const previousValue = averageTrendPoints(previousWindow)
-  const latestValue = averageTrendPoints(latestWindow.length > 0 ? latestWindow : previousWindow)
-  const delta = roundMetric(latestValue - previousValue)
-  return { metric, label, latestValue, previousValue, delta, status: toTrendStatus(delta) }
-}
-
-function sortTrendSummaries(left: LanguageDriftTrendSummary, right: LanguageDriftTrendSummary): number {
-  return right.delta - left.delta || right.latestValue - left.latestValue || left.label.localeCompare(right.label)
-}
-
-function rankLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit = 3): LanguageDriftMetricSnapshot[] {
-  return LANGUAGE_DRIFT_METRICS
-    .map(({ key, label }) => ({ metric: key, label, value: roundMetric(metrics[key]) }))
-    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
-    .slice(0, limit)
-}
-
 function formatVolumeName(volumeId: number, volumeNumber: number | null | undefined, title: string | null | undefined): string {
   const safeTitle = typeof title === 'string' ? title.trim() : ''
   if (safeTitle) return safeTitle
@@ -1469,20 +1217,19 @@ function createVolumeChapterFunctionAccumulator(volumeId: number, volumeNumber: 
   return { volumeId, volumeNumber, volumeName, chapters: [] }
 }
 
-function buildTypedRefObservability(novelId: number): NonNullable<QualityDashboardData['typedRefObservability']> {
-  const db = getDb()
+function buildTypedRefObservability(typedRefRows: ReturnType<typeof loadQualityDashboardDerivedDatabaseSnapshot>['typedRefRows']): NonNullable<QualityDashboardData['typedRefObservability']> {
   const buckets = [
     {
       assetType: 'thread' as const,
-      rows: db.select({ typedRefsJson: storyThreads.typedRefsJson }).from(storyThreads).where(eq(storyThreads.novelId, novelId)).all(),
+      rows: typedRefRows.thread,
     },
     {
       assetType: 'timeline' as const,
-      rows: db.select({ typedRefsJson: timelineEvents.typedRefsJson }).from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all(),
+      rows: typedRefRows.timeline,
     },
     {
       assetType: 'item' as const,
-      rows: db.select({ typedRefsJson: storyItems.typedRefsJson }).from(storyItems).where(eq(storyItems.novelId, novelId)).all(),
+      rows: typedRefRows.item,
     },
   ].map((bucket) => {
     const totalCount = bucket.rows.length
@@ -1775,28 +1522,8 @@ function buildQualityAgentDashboardSnapshot(novelId: number): QualityAgentDashbo
   }
 }
 
-export function getQualityDashboardData(novelId: number, options: QualityDashboardOptions = {}): QualityDashboardData {
-  const db = getDb()
-  const novelMeta = db.select({
-    launchMode: novels.launchMode,
-    targetWords: novels.targetWords,
-    settingsJson: novels.settingsJson,
-    worldRulesJson: novels.worldRulesJson,
-    historicalProfileJson: novels.historicalProfileJson,
-    projectCanonProfileJson: novels.projectCanonProfileJson,
-    canonConstraintSetJson: novels.canonConstraintSetJson,
-    sourceLedgerJson: novels.sourceLedgerJson,
-    canonSourceLedgerJson: novels.canonSourceLedgerJson,
-    canonFactCardsJson: novels.canonFactCardsJson,
-    userBackground: novels.userBackground,
-    expandedBackground: novels.expandedBackground,
-    synopsis: novels.synopsis,
-    genreName: genres.name,
-  })
-    .from(novels)
-    .leftJoin(genres, eq(novels.genreId, genres.id))
-    .where(eq(novels.id, novelId))
-    .all()[0] || null
+function loadQualityDashboardCatalogContext(novelId: number, options: QualityDashboardOptions = {}) {
+  const { novelMeta, rows, volumeRows } = loadQualityDashboardCatalogSnapshot(novelId)
   const includeDialogueInsights = options.includeDialogueInsights !== false
   const dialogueSnapshot = includeDialogueInsights ? getDialogueAnalyticsSnapshot(novelId) : {
     dialogueFingerprintStats: {
@@ -1821,11 +1548,6 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   if (includeDialogueInsights) {
     scheduleDialogueFingerprintRefresh(novelId)
   }
-  const volumeRows = db.select({
-    id: storyVolumes.id,
-    volumeNumber: storyVolumes.volumeNumber,
-    title: storyVolumes.title,
-  }).from(storyVolumes).where(eq(storyVolumes.novelId, novelId)).orderBy(asc(storyVolumes.volumeNumber), asc(storyVolumes.id)).all()
   const storyArcProgressSnapshot = getStoryArcProgressSnapshot(novelId)
   const chapterArcProgressMap = storyArcProgressSnapshot.chapterPoints.reduce<Map<number, QualityDashboardData['chapterDetails'][number]['storyArcProgress']>>((result, point) => {
     const current = result.get(point.chapterId) || []
@@ -1835,19 +1557,29 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   }, new Map())
 
   const volumeById = new Map(volumeRows.map((row) => [row.id, row] as const))
-  const rows = db.select({
-    id: chapters.id,
-    chapterNum: chapters.chapterNum,
-    title: chapters.title,
-    summary: chapters.summary,
-    outline: chapters.outline,
-    volumeId: chapters.volumeId,
-    aiScoreJson: chapters.aiScoreJson,
-    reviewNotesJson: chapters.reviewNotesJson,
-    summaryHealthJson: chapters.summaryHealthJson,
-    expressionDedupJson: chapters.expressionDedupJson,
-    hookContinuityJson: chapters.hookContinuityJson,
-  }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  const derivedDatabaseSnapshot = loadQualityDashboardDerivedDatabaseSnapshot(novelId)
+  const batchSnapshot = loadQualityDashboardBatchSnapshot(novelId, rows)
+  return {
+    novelId,
+    options,
+    novelMeta,
+    includeDialogueInsights,
+    dialogueSnapshot,
+    volumeRows,
+    storyArcProgressSnapshot,
+    chapterArcProgressMap,
+    volumeById,
+    rows,
+    derivedDatabaseSnapshot,
+    batchSnapshot,
+    ...derivedDatabaseSnapshot,
+  }
+}
+
+function deriveQualityDashboardPolicyInputContext(
+  context: ReturnType<typeof loadQualityDashboardCatalogContext>,
+) {
+  const { novelId, novelMeta, rows, derivedDatabaseSnapshot } = context
   const currentOperatingMode = resolveOperatingMode({
     launchMode: novelMeta?.launchMode,
     targetWords: novelMeta?.targetWords,
@@ -1872,7 +1604,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     genreName: novelMeta?.genreName,
     worldRulesJson: novelMeta?.worldRulesJson,
     backgroundText: [novelMeta?.expandedBackground, novelMeta?.synopsis, novelMeta?.userBackground].filter(Boolean).join('\n'),
-    glossaryTerms: db.select({ term: glossary.term }).from(glossary).where(eq(glossary.novelId, novelId)).all().map((row) => row.term || '').filter(Boolean),
+    glossaryTerms: derivedDatabaseSnapshot.glossaryTerms,
     historicalProfileJson: novelMeta?.historicalProfileJson,
     projectCanonProfileJson: novelMeta?.projectCanonProfileJson,
     canonConstraintSetJson: novelMeta?.canonConstraintSetJson,
@@ -1885,130 +1617,108 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     refreshMode: currentRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
   }).observability
   const storyMemoryPrecomputeStatus = getStoryMemoryCheckpointRefreshStatus(novelId)
-  const typedRefObservability = buildTypedRefObservability(novelId)
-  const batchChapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
-  const latestWritebackRunMap = getLatestWritebackRunMap(novelId)
+  const typedRefObservability = buildTypedRefObservability(context.typedRefRows)
+  return {
+    ...context,
+    currentOperatingMode,
+    currentOperatingModePolicy,
+    currentRuntimePolicy,
+    resolvedGenreKey,
+    historicalGenericFallback,
+    groundingAssessment,
+    structuredMemoryObservability,
+    storyMemoryPrecomputeStatus,
+    typedRefObservability,
+  }
+}
+
+function deriveQualityDashboardBatchInputContext(
+  context: ReturnType<typeof deriveQualityDashboardPolicyInputContext>,
+) {
+  const { batchSnapshot, rows } = context
+  const {
+    batchChapterIdSet,
+    batchChapterIds,
+    batchChapterNums,
+    checkpointRows,
+    latestBatchInspections,
+    latestBatchProgress,
+    latestBatchSnapshot,
+    latestBatchTask,
+    latestWritebackRunMap,
+    revisionRows: batchRevisionRows,
+  } = batchSnapshot
   const latestWritebackRuns = [...latestWritebackRunMap.values()]
   const writebackPendingCount = latestWritebackRuns.filter((row) => classifyWritebackStatus(row.status) === 'pending').length
   const writebackFailedCount = latestWritebackRuns.filter((row) => classifyWritebackStatus(row.status) === 'failed').length
-  const latestBatchTask = getLatestChapterBatchTask(novelId)
-  const latestBatchProgress = latestBatchTask
-    ? parseTaskProgress<Partial<ChapterBatchAutoGenerateStatus>>(latestBatchTask)
-    : {}
   const latestBatchPauseReason = typeof latestBatchProgress.pauseReason === 'string' && latestBatchProgress.pauseReason.trim()
     ? latestBatchProgress.pauseReason
     : (latestBatchTask?.errorMessage || undefined)
   const latestBatchGuardrailReason = typeof latestBatchProgress.activeGuardrailReason === 'string' && latestBatchProgress.activeGuardrailReason.trim()
     ? latestBatchProgress.activeGuardrailReason
     : undefined
-  const latestBatchSnapshot = db.select().from(chapterBatchSnapshots)
-    .where(eq(chapterBatchSnapshots.novelId, novelId))
-    .orderBy(desc(chapterBatchSnapshots.createdAt), desc(chapterBatchSnapshots.id))
-    .all()[0] || null
   const latestBatchSnapshotId = latestBatchSnapshot?.id
   const latestBatchTaskId = latestBatchTask?.id
-  const batchChapterIds = dedupeNumbers(
-    Array.isArray(latestBatchProgress.chapterIds)
-      ? latestBatchProgress.chapterIds
-          .map((item) => Number(item))
-          .filter((item) => Number.isFinite(item))
-      : parseNumberArrayJson(latestBatchSnapshot?.chapterIdsJson),
-  )
-  const batchChapterNums = dedupeNumbers(
-    batchChapterIds.length > 0
-      ? batchChapterIds
-          .map((chapterId) => batchChapterNumById.get(chapterId) || 0)
-          .filter((chapterNum) => chapterNum > 0)
-      : parseNumberArrayJson(latestBatchSnapshot?.chapterNumsJson),
-  )
-  const batchChapterIdSet = new Set(batchChapterIds)
-  const batchRevisionRows = db.select().from(revisionTasks)
-    .where(eq(revisionTasks.novelId, novelId))
-    .all()
-    .filter((row) => batchChapterIdSet.size === 0 || (typeof row.chapterId === 'number' && batchChapterIdSet.has(row.chapterId)))
   const pendingRevisionCount = batchRevisionRows.filter((row) => (row.status || 'open') !== 'resolved' && (row.status || 'open') !== 'closed').length
   const rewriteTaskCount = batchRevisionRows.filter((row) => (row.taskType || '') === 'rewrite' || (row.severity || '') === 'critical').length
   const batchPendingWritebackCount = latestWritebackRuns.filter((row) =>
     batchChapterIdSet.size > 0
     && batchChapterIdSet.has(row.chapterId)
     && classifyWritebackStatus(row.status) === 'pending').length
-  const checkpointRows = db.select().from(storyMemoryCheckpoints)
-    .where(eq(storyMemoryCheckpoints.novelId, novelId))
-    .all()
   const staleCheckpointCount = checkpointRows.filter((row) => row.stale === 1).length
   const latestNovelCheckpoint = checkpointRows.find((row) => row.scopeType === 'novel' && (row.scopeId ?? null) === null) || null
   const latestChapterNum = rows.at(-1)?.chapterNum || 0
   const latestCheckpointChapterGap = latestChapterNum > 0
     ? Math.max(0, latestChapterNum - (latestNovelCheckpoint?.lastRefreshedChapterNum || 0))
     : 0
-  const chapterGateHistoryByChapterId = db.select().from(chapterGateRuns)
-    .where(eq(chapterGateRuns.novelId, novelId))
-    .all()
-    .map(mapChapterGateRunRow)
-    .reduce<Map<number, ChapterGateHistoryEntry[]>>((result, entry) => {
-      const current = result.get(entry.chapterId) || []
-      current.push(entry)
-      current.sort(sortChapterGateHistoryEntries)
-      result.set(entry.chapterId, current)
-      return result
-    }, new Map())
-  const latestChapterGateEntries = Array.from(chapterGateHistoryByChapterId.values())
-    .map((history) => history[0])
-    .filter((entry): entry is ChapterGateHistoryEntry => Boolean(entry))
-    .sort((left, right) => left.chapterNum - right.chapterNum || sortChapterGateHistoryEntries(left, right))
-  const chapterGateTrend: QualityDashboardData['chapterGateTrend'] = latestChapterGateEntries.map((entry) => ({
-    chapterId: entry.chapterId,
-    chapterNum: entry.chapterNum,
-    totalScore: entry.scoreBreakdown.totalScore,
-    gateLevel: entry.gateLevel,
-    scoreBand: getChapterGateScoreBand(entry.scoreBreakdown.totalScore),
-    createdAt: entry.createdAt,
-  }))
-  const chapterGateHeatmap: QualityDashboardData['chapterGateHeatmap'] = latestChapterGateEntries.flatMap((entry) => (
-    getChapterGatePrimaryDimensions(entry.scoreBreakdown).map((dimension) => ({
-      chapterId: entry.chapterId,
-      chapterNum: entry.chapterNum,
-      dimension: dimension.label,
-      score: dimension.score,
-      gateLevel: entry.gateLevel,
-      scoreBand: getChapterGateScoreBand(entry.scoreBreakdown.totalScore),
-      createdAt: entry.createdAt,
-    }))
-  ))
-  const chapterGateDriftAlerts: QualityDashboardData['chapterGateDriftAlerts'] = Array.from(chapterGateHistoryByChapterId.values())
-    .filter((history) => history.length > 1)
-    .map((history) => buildChapterGateDriftAlert(history[0], history[1]))
-    .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || '') || right.chapterNum - left.chapterNum)
-  const chapterGateSummary: QualityDashboardData['chapterGateSummary'] = latestChapterGateEntries.reduce<QualityDashboardData['chapterGateSummary']>((result, entry) => {
-    const band = getChapterGateScoreBand(entry.scoreBreakdown.totalScore)
-    result.coveredChapterCount += 1
-    result.snapshotCount += chapterGateHistoryByChapterId.get(entry.chapterId)?.length || 0
-    result.averageTotalScore += entry.scoreBreakdown.totalScore
-    result.latestLevelCounts[entry.gateLevel] += 1
-    if (band === 'stable') result.stableCount += 1
-    if (band === 'attention') result.attentionCount += 1
-    if (band === 'risky') result.riskyCount += 1
-    if (band === 'unstable') result.unstableCount += 1
-    return result
-  }, {
-    coveredChapterCount: 0,
-    snapshotCount: 0,
-    averageTotalScore: 0,
-    stableCount: 0,
-    attentionCount: 0,
-    riskyCount: 0,
-    unstableCount: 0,
-    worseningAlertCount: chapterGateDriftAlerts.filter((alert) => alert.status === 'worsening').length,
-    latestLevelCounts: {
-      pass: 0,
-      warning: 0,
-      blocker: 0,
-      rewrite: 0,
-    },
-  })
-  if (chapterGateSummary.coveredChapterCount > 0) {
-    chapterGateSummary.averageTotalScore = roundMetric(chapterGateSummary.averageTotalScore / chapterGateSummary.coveredChapterCount)
+  return {
+    ...context,
+    latestWritebackRunMap,
+    latestWritebackRuns,
+    writebackPendingCount,
+    writebackFailedCount,
+    latestBatchTask,
+    latestBatchProgress,
+    latestBatchPauseReason,
+    latestBatchGuardrailReason,
+    latestBatchSnapshot,
+    latestBatchSnapshotId,
+    latestBatchTaskId,
+    latestBatchInspections,
+    batchChapterIds,
+    batchChapterNums,
+    batchChapterIdSet,
+    batchRevisionRows,
+    pendingRevisionCount,
+    rewriteTaskCount,
+    batchPendingWritebackCount,
+    checkpointRows,
+    staleCheckpointCount,
+    latestNovelCheckpoint,
+    latestChapterNum,
+    latestCheckpointChapterGap,
   }
+}
+
+function loadQualityDashboardCoreContext(novelId: number, options: QualityDashboardOptions = {}) {
+  const catalog = loadQualityDashboardCatalogContext(novelId, options)
+  const policy = deriveQualityDashboardPolicyInputContext(catalog)
+  return deriveQualityDashboardBatchInputContext(policy)
+}
+
+function deriveQualityDashboardContinuityContext(
+  context: ReturnType<typeof loadQualityDashboardCoreContext>,
+) {
+  const { novelId, rows, volumeRows, derivedDatabaseSnapshot } = context
+  const gateMetrics = deriveChapterGateMetrics(derivedDatabaseSnapshot.gateRuns)
+  const {
+    chapterGateHistoryByChapterId,
+    latestChapterGateEntries,
+    chapterGateTrend,
+    chapterGateHeatmap,
+    chapterGateDriftAlerts,
+    chapterGateSummary,
+  } = gateMetrics
   const volumeChapterRanges = buildVolumeChapterRanges(volumeRows, rows)
   const foreshadowSnapshot = getForeshadowSnapshot(novelId)
   const foreshadowCountsByVolume = buildForeshadowCountsByVolume(foreshadowSnapshot, volumeChapterRanges)
@@ -2017,23 +1727,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     [...endgameDebtSnapshot.countsByVolume.entries()].map(([volumeId, counts]) => [volumeId, counts] as const),
   )
 
-  const chapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
   const volumeIdByChapterNum = new Map(rows.flatMap((row) => (
     typeof row.volumeId === 'number'
       ? [[row.chapterNum, row.volumeId] as const]
       : []
   )))
-  const timelineRows = db.select({
-    eventType: timelineEvents.eventType,
-    eventTitle: timelineEvents.eventTitle,
-    eventSummary: timelineEvents.eventSummary,
-    eventResult: timelineEvents.eventResult,
-    chapterStartId: timelineEvents.chapterStartId,
-    chapterEndId: timelineEvents.chapterEndId,
-    protagonistPresent: timelineEvents.protagonistPresent,
-    protagonistAction: timelineEvents.protagonistAction,
-  }).from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
-  const timelineHints = buildTimelineStoryHints(timelineRows, chapterNumById)
+  const { timelineRows } = derivedDatabaseSnapshot
+  const storyDynamicsReadModel = buildStoryDynamicsReadModel(rows, timelineRows)
   const worldStateLedger = getWorldStateLedgerSnapshot(novelId, {
     entityLimit: 200,
     alertLimit: 256,
@@ -2073,6 +1773,41 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     return result
   }, new Map())
 
+  return {
+    ...context,
+    chapterGateHistoryByChapterId,
+    latestChapterGateEntries,
+    chapterGateTrend,
+    chapterGateHeatmap,
+    chapterGateDriftAlerts,
+    chapterGateSummary,
+    volumeChapterRanges,
+    foreshadowSnapshot,
+    foreshadowCountsByVolume,
+    endgameDebtSnapshot,
+    endgameCountsByVolume,
+    volumeIdByChapterNum,
+    storyDynamicsReadModel,
+    worldStateLedger,
+    recallFreshnessState,
+    recallRuntimeByChapterId,
+    recallSnapshotByChapterId,
+    recallSnapshotSourceByChapterId,
+    recallDiagnosticsByChapterId,
+    recentWorldStateAlerts,
+    antiAiSummary,
+    antiAiSignalByChapterId,
+    feedbackSummary,
+    feedbackSignalByChapterId,
+    worldStateAlertMap,
+  }
+}
+
+function deriveQualityDashboardChapterNarrativeContext(
+  context: ReturnType<typeof deriveQualityDashboardContinuityContext>,
+) {
+  const { rows, storyDynamicsReadModel, volumeById } = context
+
   const heatmapData: QualityDashboardData['heatmapData'] = []
   const overallScoreTrend: QualityDashboardData['overallScoreTrend'] = []
   const aiLikeRateTrend: QualityDashboardData['aiLikeRateTrend'] = []
@@ -2086,15 +1821,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const chapterFunctionChapters: ChapterFunctionChapterRecord[] = []
   const volumeChapterFunctionAccumulators = new Map<number, VolumeChapterFunctionAccumulator>()
   const chapterFunctionDetailsByChapterId = new Map<number, { primaryTag?: ChapterFunctionTag; tags: ChapterFunctionTag[] }>()
-
-  let totalOverall = 0
-  let totalAiLike = 0
-  let scoredCount = 0
+  const storyDynamicsDetailsByChapterId = new Map<number, StoryDynamicsChapterRecord['dynamics']>()
 
   for (const row of rows) {
-    const parsedStoryDynamics = parseStoryDynamics(row.reviewNotesJson)
-    const storyDynamics = enhanceStoryDynamics(parsedStoryDynamics.dynamics, timelineHints.get(row.chapterNum))
-    const hasStoryDynamics = parsedStoryDynamics.explicit || hasTimelineHint(timelineHints.get(row.chapterNum))
+    const storyDynamics = storyDynamicsReadModel.dynamicsByChapterId.get(row.id)
+    const trackedStoryChapter = storyDynamicsReadModel.chapterById.get(row.id)
+    if (!storyDynamics) continue
     const parsedChapterFunction = parseChapterFunction(row.reviewNotesJson)
 
     const chapterFunctionRecord: ChapterFunctionChapterRecord = {
@@ -2123,46 +1855,69 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       volumeChapterFunctionAccumulators.set(row.volumeId, accumulator)
     }
 
-    if (hasStoryDynamics) {
-      const trackedChapter: StoryDynamicsChapterRecord = {
-        chapterId: row.id,
-        chapterNum: row.chapterNum,
-        title: row.title || `第 ${row.chapterNum} 章`,
-        volumeId: typeof row.volumeId === 'number' ? row.volumeId : undefined,
-        dynamics: storyDynamics,
-      }
-      trackedStoryChapters.push(trackedChapter)
+    if (trackedStoryChapter) {
+      storyDynamicsDetailsByChapterId.set(row.id, storyDynamics)
+      trackedStoryChapters.push(trackedStoryChapter)
       if (typeof row.volumeId === 'number') {
         const volumeMeta = volumeById.get(row.volumeId)
         const volumeNumber = volumeMeta?.volumeNumber ?? row.volumeId
         const volumeName = formatVolumeName(row.volumeId, volumeMeta?.volumeNumber, volumeMeta?.title)
         const accumulator = volumeStoryAccumulators.get(row.volumeId) || createVolumeStoryAccumulator(row.volumeId, volumeNumber, volumeName)
-        accumulator.chapters.push(trackedChapter)
+        accumulator.chapters.push(trackedStoryChapter)
         volumeStoryAccumulators.set(row.volumeId, accumulator)
       }
     }
 
-    const scores = safeParseScores(row.aiScoreJson)
+  }
+  return {
+    ...context,
+    heatmapData,
+    overallScoreTrend,
+    aiLikeRateTrend,
+    languageDriftTrends,
+    weakDimFreq,
+    chapterDetails,
+    languageMetricsList,
+    volumeAccumulators,
+    trackedStoryChapters,
+    volumeStoryAccumulators,
+    chapterFunctionChapters,
+    volumeChapterFunctionAccumulators,
+    chapterFunctionDetailsByChapterId,
+    storyDynamicsDetailsByChapterId,
+  }
+}
+
+function deriveQualityDashboardChapterContext(
+  context: ReturnType<typeof deriveQualityDashboardChapterNarrativeContext>,
+) {
+  const { rows, volumeById, chapterGateHistoryByChapterId } = context
+  const { antiAiSignalByChapterId, feedbackSignalByChapterId, chapterArcProgressMap } = context
+  const { worldStateAlertMap, recallSnapshotByChapterId, recallSnapshotSourceByChapterId } = context
+  const { recallDiagnosticsByChapterId, chapterFunctionDetailsByChapterId } = context
+  const { heatmapData, overallScoreTrend, aiLikeRateTrend, languageDriftTrends } = context
+  const { weakDimFreq, chapterDetails, languageMetricsList, volumeAccumulators } = context
+  const { storyDynamicsDetailsByChapterId } = context
+  let totalOverall = 0
+  let totalAiLike = 0
+  let scoredCount = 0
+
+  for (const row of rows) {
+    const storyDynamics = storyDynamicsDetailsByChapterId.get(row.id)
+    const hasStoryDynamics = Boolean(storyDynamics)
+
+    const scoreMetrics = deriveChapterScoreMetrics(row.aiScoreJson)
     const dialogueReview = parseDialogueReview(row.reviewNotesJson) || undefined
     const styleCompliance = parseStyleCompliance(row.reviewNotesJson) || undefined
-    let overallScore = 0
-    let aiLikeRate = 0
-    let weakDimensions: string[] = []
-    let dimensions: AIScoreDimension[] = []
-    let languageDriftMetrics: LanguageDriftMetrics | undefined
+    const { overallScore, aiLikeRate, weakDimensions, dimensions, languageDriftMetrics } = scoreMetrics
 
-    if (scores) {
+    if (scoreMetrics.scored) {
       scoredCount += 1
-      overallScore = scores.overall_score ?? 0
-      aiLikeRate = scores.ai_like_rate ?? 0
-      weakDimensions = scores.weak_dimensions ?? []
-      dimensions = scores.dimensions
       totalOverall += overallScore
       totalAiLike += aiLikeRate
       overallScoreTrend.push({ chapterNum: row.chapterNum, score: overallScore })
       aiLikeRateTrend.push({ chapterNum: row.chapterNum, rate: aiLikeRate })
 
-      languageDriftMetrics = normalizeLanguageDrift(scores.language_drift_metrics) || undefined
       if (languageDriftMetrics) {
         languageMetricsList.push(languageDriftMetrics)
         pushLanguageDriftMetrics(languageDriftTrends, row.chapterNum, languageDriftMetrics)
@@ -2178,8 +1933,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         }
       }
 
-      scores.dimensions.forEach((dim) => heatmapData.push({ chapterNum: row.chapterNum, dimension: dim.name, score: dim.score }))
-      ;(scores.weak_dimensions || []).forEach((dimension) => weakDimFreq.set(dimension, (weakDimFreq.get(dimension) || 0) + 1))
+      dimensions.forEach((dim) => heatmapData.push({ chapterNum: row.chapterNum, dimension: dim.name, score: dim.score }))
+      weakDimensions.forEach((dimension) => weakDimFreq.set(dimension, (weakDimFreq.get(dimension) || 0) + 1))
     }
 
     const chapterFunctionDetail = chapterFunctionDetailsByChapterId.get(row.id)
@@ -2221,6 +1976,20 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         : undefined,
     })
   }
+  return {
+    ...context,
+    totalOverall,
+    totalAiLike,
+    scoredCount,
+  }
+}
+
+function deriveQualityDashboardEditorialContext(
+  context: ReturnType<typeof deriveQualityDashboardChapterContext>,
+) {
+  const { rows, chapterDetails, weakDimFreq, languageMetricsList, languageDriftTrends } = context
+  const { volumeAccumulators, trackedStoryChapters, volumeStoryAccumulators } = context
+  const { chapterFunctionChapters, volumeChapterFunctionAccumulators } = context
   const reviewFindingEntries = rows.map((row) => ({
     chapterNum: row.chapterNum,
     findings: parseReviewFindingArrays(row.reviewNotesJson),
@@ -2414,6 +2183,48 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ...buildBookFunctionSkewAlert(chapterFunctionSummary, rows.map((row) => row.chapterNum)),
     ...volumeChapterFunctions.flatMap((entry) => entry.alerts.filter((alert) => alert.code === 'volume_function_skew')),
   ].sort(sortChapterFunctionAlerts)
+  return {
+    ...context,
+    reviewFindingEntries,
+    historicalViolationCount,
+    modePolicyViolationCount,
+    weakDimensionFrequency,
+    styleComplianceEntries,
+    styleComplianceAlerts,
+    styleComplianceSummary,
+    contractValidationStatuses,
+    contractBlockerCount,
+    contractWarningCount,
+    contractReadyRate,
+    contractProgressMetrics,
+    contractStatusEntries,
+    averageLanguageDriftMetrics,
+    languageDriftTrendSummaries,
+    recentLanguageDriftAlerts,
+    volumeLanguageDrift,
+    novelLanguageDriftSummary,
+    storyChapters,
+    protagonistSetbackSummary,
+    costPersistenceState,
+    reversalDistributionSummary,
+    storyPacingAlerts,
+    storyDynamicsTrend,
+    volumeStoryDynamics,
+    chapterFunctionDiagnostics,
+    chapterFunctionSummary,
+    repeatedFunctionRuns,
+    weakKeyFunctionAlerts,
+    volumeChapterFunctions,
+    chapterFunctionAlerts,
+  }
+}
+
+function deriveQualityDashboardContinuityMetricsContext(
+  context: ReturnType<typeof deriveQualityDashboardEditorialContext>,
+) {
+  const { novelId, rows, chapterArcProgressMap, storyArcProgressSnapshot } = context
+  const { worldStateLedger, volumeRows, recallDiagnosticsByChapterId } = context
+  const { recallFreshnessState, recallSnapshotByChapterId, recallSnapshotSourceByChapterId } = context
   const storyArcProgressTrend: QualityDashboardData['storyArcProgressTrend'] = rows
     .map((row) => {
       const points = chapterArcProgressMap.get(row.id) || []
@@ -2630,6 +2441,25 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       return result
     }, [])
     .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  return {
+    ...context,
+    storyArcProgressTrend,
+    storyArcProgressSummary,
+    volumeWorldStateStability,
+    worldStateSummary,
+    recallEntries,
+    recallSummary,
+    recentRecallAlerts,
+    volumeRecallDiagnostics,
+  }
+}
+
+function deriveQualityDashboardVolumeSignalContext(
+  context: ReturnType<typeof deriveQualityDashboardContinuityMetricsContext>,
+) {
+  const { rows, volumeRows, feedbackSummary, antiAiSummary } = context
+  const { volumeLanguageDrift, volumeStoryDynamics, volumeChapterFunctions } = context
+  const { storyArcProgressSnapshot, volumeRecallDiagnostics, volumeWorldStateStability } = context
   const volumeLanguageDriftById = new Map(volumeLanguageDrift.map((entry) => [entry.volumeId, entry] as const))
   const volumeStoryDynamicsById = new Map(volumeStoryDynamics.map((entry) => [entry.volumeId, entry] as const))
   const volumeChapterFunctionById = new Map(volumeChapterFunctions.map((entry) => [entry.volumeId, entry] as const))
@@ -2711,6 +2541,27 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       return result
     }, [])
     .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  return {
+    ...context,
+    volumeLanguageDriftById,
+    volumeStoryDynamicsById,
+    volumeChapterFunctionById,
+    volumeArcProgressById,
+    volumeRecallById,
+    volumeWorldStateById,
+    feedbackVolumeEntries,
+    feedbackVolumeById,
+    antiAiVolumeEntries,
+  }
+}
+
+function deriveQualityDashboardVolumeMetricsContext(
+  context: ReturnType<typeof deriveQualityDashboardVolumeSignalContext>,
+) {
+  const { volumeChapterRanges, chapterDetails, foreshadowCountsByVolume, endgameCountsByVolume } = context
+  const { storyArcProgressSnapshot, feedbackVolumeById } = context
+  const { volumeLanguageDriftById, volumeStoryDynamicsById, volumeChapterFunctionById } = context
+  const { volumeArcProgressById, volumeRecallById, volumeWorldStateById } = context
   const volumeQualityMetrics: VolumeQualityMetrics[] = volumeChapterRanges.map((volumeRange) => {
     const chapterEntries = chapterDetails.filter((entry) => entry.volumeId === volumeRange.volumeId)
     const scoredChapterEntries = chapterEntries.filter((entry) => entry.dimensions.length > 0)
@@ -2743,118 +2594,20 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     const worldConflictAlertCount = worldEntry?.conflictAlertCount || 0
     const staleRecallCount = recallEntry?.staleRecallCount || 0
     const staleRecallRate = recallEntry?.staleRecallRate || 0
-    const topRisks: QualityDashboardRiskItem[] = [
-      ...(languageEntry?.topWorseningMetrics.slice(0, 2).map((metric) => createDashboardRiskItem(
-        'language_drift',
-        metric.delta >= 10 || metric.latestValue >= 60 ? 'critical' : 'warning',
-        `${volumeRange.volumeName} 语言退化`,
-        `${metric.label} 最近恶化 ${metric.delta > 0 ? `+${metric.delta}` : metric.delta}，当前值 ${metric.latestValue}。`,
-        [volumeRange.chapterStart, volumeRange.chapterEnd],
-        volumeRange.volumeId,
-      )) || []),
-      ...((storyEntry?.alerts || []).map((alert) => createDashboardRiskItem(
-        'story_dynamics',
-        toDashboardSeverityFromStoryAlert(alert.severity),
-        alert.title,
-        alert.detail,
-        alert.chapterNums,
-        volumeRange.volumeId,
-      ))),
-      ...((functionEntry?.alerts || []).map((alert) => createDashboardRiskItem(
-        'chapter_function',
-        toDashboardSeverityFromChapterFunctionAlert(alert.severity),
-        alert.title,
-        alert.detail,
-        alert.chapterNums,
-        volumeRange.volumeId,
-      ))),
-      ...arcAlerts.map((alert) => createDashboardRiskItem(
-        'story_arc',
-        toDashboardSeverityFromArcAlert(alert.severity),
-        alert.title,
-        alert.detail,
-        alert.chapterNum ? [alert.chapterNum] : [volumeRange.chapterStart, volumeRange.chapterEnd],
-        volumeRange.volumeId,
-      )),
-      ...(foreshadowCounts.overdue > 0
-        ? [createDashboardRiskItem(
-          'foreshadow_debt',
-          'critical',
-          `${volumeRange.volumeName} 有超期伏笔`,
-          `本卷有 ${foreshadowCounts.overdue} 条伏笔已超过目标回收章位，建议优先兑现或回收。`,
-          [volumeRange.chapterStart, volumeRange.chapterEnd],
-          volumeRange.volumeId,
-        )]
-        : foreshadowCounts.dueSoon > 0
-          ? [createDashboardRiskItem(
-            'foreshadow_debt',
-            'warning',
-            `${volumeRange.volumeName} 伏笔接近到期`,
-            `本卷有 ${foreshadowCounts.dueSoon} 条伏笔接近目标回收章位，建议尽快安排兑现。`,
-            [volumeRange.chapterStart, volumeRange.chapterEnd],
-            volumeRange.volumeId,
-          )]
-          : []),
-      ...(endgameCounts.overdue > 0
-        ? [createDashboardRiskItem(
-          'endgame_debt',
-          'critical',
-          `${volumeRange.volumeName} 终局承诺失管`,
-          `本卷关联的终局承诺中有 ${endgameCounts.overdue} 条已过期，另有 ${endgameCounts.unbound} 条仍未进入执行链。`,
-          [volumeRange.chapterStart, volumeRange.chapterEnd],
-          volumeRange.volumeId,
-        )]
-        : endgameCounts.unbound > 0
-          ? [createDashboardRiskItem(
-            'endgame_debt',
-            'warning',
-            `${volumeRange.volumeName} 存在未绑定终局承诺`,
-            `本卷有 ${endgameCounts.unbound} 条终局承诺尚未被卷级设计、章节合同、场景合同或伏笔账本服务。`,
-            [volumeRange.chapterStart, volumeRange.chapterEnd],
-            volumeRange.volumeId,
-          )]
-          : []),
-      ...(staleRecallCount > 0
-        ? [createDashboardRiskItem(
-          'recall',
-          staleRecallRate >= 35 ? 'critical' : 'warning',
-          `${volumeRange.volumeName} 存在过期召回`,
-          `本卷识别到 ${staleRecallCount} 条过期召回，平均过期率 ${staleRecallRate}%。`,
-          [volumeRange.chapterStart, volumeRange.chapterEnd],
-          volumeRange.volumeId,
-        )]
-        : []),
-      ...((worldEntry && (worldEntry.conflictAlertCount > 0 || worldEntry.warningCount > 0))
-        ? [createDashboardRiskItem(
-          'world_state',
-          worldEntry.conflictAlertCount > 0 ? 'critical' : 'warning',
-          `${volumeRange.volumeName} 状态稳定性波动`,
-          `本卷状态冲突 ${worldEntry.conflictAlertCount} 次，预警 ${worldEntry.warningCount} 次。`,
-          [volumeRange.chapterStart, volumeRange.chapterEnd],
-          volumeRange.volumeId,
-        )]
-        : []),
-      ...((feedbackVolumeById.get(volumeRange.volumeId)?.highRiskIssueCount || 0) > 0
-        ? [createDashboardRiskItem(
-          'feedback_recurrence',
-          (feedbackVolumeById.get(volumeRange.volumeId)?.pauseSuggestedIssueCount || 0) > 0 ? 'critical' : 'warning',
-          `${volumeRange.volumeName} 审校复现升温`,
-          `本卷已有 ${feedbackVolumeById.get(volumeRange.volumeId)?.highRiskIssueCount || 0} 类问题在 5 章窗口内高风险复现。`,
-          [volumeRange.chapterStart, volumeRange.chapterEnd],
-          volumeRange.volumeId,
-        )]
-        : []),
-      ...(volumeStyleComplianceAlerts.length > 0
-        ? [createDashboardRiskItem(
-          'style_compliance',
-          volumeStyleComplianceAlerts.some((entry) => entry.styleCompliance.status === 'rewrite') ? 'critical' : 'warning',
-          `${volumeRange.volumeName} 文风硬约束漂移`,
-          `本卷有 ${volumeStyleComplianceAlerts.filter((entry) => entry.styleCompliance.status === 'rewrite').length} 章达到重写阈值，${volumeStyleComplianceAlerts.filter((entry) => entry.styleCompliance.status === 'warning').length} 章出现预警。`,
-          volumeStyleComplianceAlerts.map((entry) => entry.chapterNum),
-          volumeRange.volumeId,
-        )]
-        : []),
-    ].sort(sortDashboardRisks).slice(0, 6)
+    const topRisks = buildVolumeTopRisks({
+      volumeRange,
+      languageEntry,
+      storyEntry,
+      functionEntry,
+      arcAlerts,
+      foreshadowCounts,
+      endgameCounts,
+      recallEntry,
+      worldEntry,
+      feedbackEntry: feedbackVolumeById.get(volumeRange.volumeId),
+      styleComplianceAlerts: volumeStyleComplianceAlerts,
+      createRisk: createDashboardRiskItem,
+    })
     return {
       volumeId: volumeRange.volumeId,
       volumeNumber: volumeRange.volumeNumber,
@@ -2901,19 +2654,17 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       topRisks,
     }
   }).sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  return { ...context, volumeQualityMetrics }
+}
+
+function deriveQualityDashboardRepairFoundationContext(
+  context: ReturnType<typeof deriveQualityDashboardVolumeMetricsContext>,
+) {
+  const { chapterDetails, volumeRows, latestChapterGateEntries, derivedDatabaseSnapshot } = context
   const chapterDetailById = new Map(chapterDetails.map((entry) => [entry.chapterId, entry] as const))
   const chapterDetailByNum = new Map(chapterDetails.map((entry) => [entry.chapterNum, entry] as const))
   const volumeNumberById = new Map(volumeRows.map((row) => [row.id, row.volumeNumber || row.id] as const))
-  const storyFactRows = db.select({
-    id: storyFacts.id,
-    title: storyFacts.title,
-    volumeId: storyFacts.volumeId,
-    readerKnownChapterId: storyFacts.readerKnownChapterId,
-    protagonistKnownChapterId: storyFacts.protagonistKnownChapterId,
-    targetRevealChapterId: storyFacts.targetRevealChapterId,
-    forbiddenBeforeVolume: storyFacts.forbiddenBeforeVolume,
-    plannedRevealVolume: storyFacts.plannedRevealVolume,
-  }).from(storyFacts).where(eq(storyFacts.novelId, novelId)).all()
+  const { storyFactRows } = derivedDatabaseSnapshot
   const repairRiskItems: QualityDashboardRiskItem[] = []
   const addRepairRisk = (risk: QualityDashboardRiskItem | null | undefined) => {
     if (!risk) return
@@ -2932,6 +2683,25 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       || key === 'source_grounding'
       || key === 'operating_mode_policy'))
     .length
+
+  return {
+    ...context,
+    chapterDetailById,
+    chapterDetailByNum,
+    volumeNumberById,
+    storyFactRows,
+    repairRiskItems,
+    addRepairRisk,
+    createChapterNavigationQuery,
+    publishBlockedByProvenance,
+  }
+}
+
+function deriveQualityDashboardPolicyRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardRepairFoundationContext>,
+) {
+  const { typedRefObservability, historicalViolationCount, historicalGenericFallback } = context
+  const { groundingAssessment, reviewFindingEntries, publishBlockedByProvenance, addRepairRisk } = context
 
   if (typedRefObservability.unresolvedRefCount > 0 || typedRefObservability.overallCoverageRate < 90) {
     addRepairRisk(createDashboardRiskItem(
@@ -2967,6 +2737,15 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardMemoryRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardPolicyRepairContext>,
+) {
+  const { modePolicyViolationCount, recentLanguageDriftAlerts, groundingAssessment } = context
+  const { currentRuntimePolicy, publishBlockedByProvenance, reviewFindingEntries } = context
+  const { feedbackSummary, volumeIdByChapterNum, addRepairRisk } = context
   if (modePolicyViolationCount > 0) {
     addRepairRisk(createDashboardRiskItem(
       'operating_mode_policy',
@@ -3032,6 +2811,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardDialogueRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardMemoryRepairContext>,
+) {
+  const { antiAiSummary, dialogueSnapshot, volumeIdByChapterNum, addRepairRisk } = context
   if (antiAiSummary.overview.highRiskRuleCount > 0 || antiAiSummary.topRepeatedRules.some((item) => item.hitCount >= 3)) {
     const repeatedRule = antiAiSummary.topRepeatedRules.find((item) => item.hitCount >= 3) || antiAiSummary.topRepeatedRules[0]
     addRepairRisk(createDashboardRiskItem(
@@ -3069,6 +2855,15 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardContractRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardDialogueRepairContext>,
+) {
+  const { contractStatusEntries, contractBlockerCount, contractReadyRate, endgameDebtSnapshot } = context
+  const { volumeIdByChapterNum } = context
+  const { contractProgressMetrics, addRepairRisk, createChapterNavigationQuery } = context
   const contractBlockerChapters = contractStatusEntries.filter((entry) => hasDashboardContractHardBlocker(entry.validation))
   const firstContractBlocker = contractBlockerChapters[0]
   if (contractBlockerCount > 0 || endgameDebtSnapshot.overview.overdueCount > 0 || endgameDebtSnapshot.overview.unboundCount > 0 || contractProgressMetrics.storyThreadMentionOnlyCount > 0) {
@@ -3129,6 +2924,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       },
     ))
   }
+
+  return context
+}
+
+function deriveQualityDashboardStoryRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardContractRepairContext>,
+) {
+  const { chapterDetails, dialogueSnapshot, addRepairRisk, createChapterNavigationQuery } = context
 
   const dialogueRiskChapters = chapterDetails.filter((entry) =>
     Boolean(entry.dialogueReview) && (
@@ -3191,6 +2994,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardGrowthRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardStoryRepairContext>,
+) {
+  const { storyPacingAlerts, protagonistSetbackSummary, costPersistenceState } = context
+  const { chapterDetailByNum, addRepairRisk, createChapterNavigationQuery } = context
   const growthAlertChapterNums = dedupeChapterNums(storyPacingAlerts.flatMap((alert) => alert.chapterNums).slice(0, 6))
   const firstGrowthChapter = chapterDetailByNum.get(growthAlertChapterNums[0] || 0)
   if (protagonistSetbackSummary.longestSmoothRun >= SMOOTH_RUN_THRESHOLD || costPersistenceState.evaporatedCostCount > 0 || costPersistenceState.unresolvedCostCount > 0) {
@@ -3246,19 +3057,44 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function buildChapterRepairTarget(
+  chapter: QualityDashboardData['chapterDetails'][number] | undefined,
+  createNavigationQuery: (chapterId?: number, chapterNum?: number) => Record<string, string> | undefined,
+) {
+  const chapterId = chapter?.chapterId
+  const chapterNum = chapter?.chapterNum
+  return {
+    chapterId,
+    chapterNum,
+    volumeId: chapter?.volumeId,
+    issueSuffix: chapterNum || 'global',
+    navigationQuery: createNavigationQuery(chapterId, chapterNum),
+  }
+}
+
+function deriveQualityDashboardForeshadowRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardGrowthRepairContext>,
+) {
+  const { foreshadowSnapshot, contractProgressMetrics, chapterDetailByNum } = context
+  const { addRepairRisk, createChapterNavigationQuery } = context
   const overdueForeshadowChapterNums = dedupeChapterNums(foreshadowSnapshot.overdue.slice(0, 4).flatMap((card) => {
     const values = [card.targetPayoffChapter, card.plantedChapter, card.startChapter]
     return values.filter((chapterNum): chapterNum is number => typeof chapterNum === 'number')
   }))
   const firstForeshadowChapter = chapterDetailByNum.get(overdueForeshadowChapterNums[0] || 0)
+  const repairTarget = buildChapterRepairTarget(firstForeshadowChapter, createChapterNavigationQuery)
+  const repairSeverity = foreshadowSnapshot.overdue.length > 0 ? 'critical' : 'warning'
   if (foreshadowSnapshot.overdue.length > 0 || contractProgressMetrics.foreshadowBlockedCount > 0 || contractProgressMetrics.foreshadowStaleCount > 0) {
     addRepairRisk(createDashboardRiskItem(
       'foreshadow_debt',
-      foreshadowSnapshot.overdue.length > 0 ? 'critical' : 'warning',
+      repairSeverity,
       foreshadowSnapshot.overdue.length > 0 ? '伏笔已进入超期区' : '伏笔债务开始堆积',
       `待回收 ${foreshadowSnapshot.pending.length}，即将到期 ${foreshadowSnapshot.dueSoon.length}，已超期 ${foreshadowSnapshot.overdue.length}，合同阻塞 ${contractProgressMetrics.foreshadowBlockedCount}，失管 ${contractProgressMetrics.foreshadowStaleCount}。`,
       overdueForeshadowChapterNums,
-      firstForeshadowChapter?.volumeId,
+      repairTarget.volumeId,
       {
         metricKey: 'foreshadow_debt',
         whyItHappened: '伏笔进入计划兑现窗口后，没有被章节合同、桥段铺设或延期说明及时接住。',
@@ -3270,16 +3106,16 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             label: '生成伏笔修订任务',
             description: '把超期或失管伏笔打包进入修订中心。',
             targetPage: 'revision',
-            severity: foreshadowSnapshot.overdue.length > 0 ? 'critical' : 'warning',
+            severity: repairSeverity,
             safeToExecute: true,
-            issueKey: `foreshadow-debt-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            issueKey: `foreshadow-debt-${repairTarget.issueSuffix}`,
             taskType: 'continuity',
             taskTitle: '清理伏笔债务',
             taskDescription: '处理超期伏笔、合同阻塞和延期说明缺失。',
             fixBrief: '优先回收超期伏笔，再处理 due soon 和阻塞项。',
-            chapterId: firstForeshadowChapter?.chapterId,
-            chapterNum: firstForeshadowChapter?.chapterNum,
-            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+            chapterId: repairTarget.chapterId,
+            chapterNum: repairTarget.chapterNum,
+            navigationQuery: repairTarget.navigationQuery,
           }),
           createRepairAction({
             metricKey: 'foreshadow_debt',
@@ -3288,14 +3124,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             description: '为超期伏笔补过桥段或兑现动作。',
             targetPage: 'writing',
             severity: 'warning',
-            issueKey: `foreshadow-bridge-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            issueKey: `foreshadow-bridge-${repairTarget.issueSuffix}`,
             taskType: 'bridge_patch',
             taskTitle: firstForeshadowChapter ? `补写第${firstForeshadowChapter.chapterNum}章伏笔过桥` : '补写伏笔过桥',
             taskDescription: '补一段能承接伏笔回收或显式延期的桥接场景。',
             fixBrief: '不要只口头提及，必须让读者能感知推进。',
-            chapterId: firstForeshadowChapter?.chapterId,
-            chapterNum: firstForeshadowChapter?.chapterNum,
-            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+            chapterId: repairTarget.chapterId,
+            chapterNum: repairTarget.chapterNum,
+            navigationQuery: repairTarget.navigationQuery,
           }),
           createRepairAction({
             metricKey: 'foreshadow_debt',
@@ -3304,20 +3140,28 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             description: '如果伏笔延后是作者有意决策，显式记录为允许偏移。',
             targetPage: 'revision',
             severity: 'info',
-            issueKey: `foreshadow-deviation-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            issueKey: `foreshadow-deviation-${repairTarget.issueSuffix}`,
             taskType: 'continuity',
             taskTitle: '确认伏笔延期为允许偏移',
             taskDescription: '记录该伏笔延期的作者意图与新的回收节点。',
             fixBrief: '只有明确记录过的新节点，系统才不再继续提示为失管。',
-            chapterId: firstForeshadowChapter?.chapterId,
-            chapterNum: firstForeshadowChapter?.chapterNum,
-            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+            chapterId: repairTarget.chapterId,
+            chapterNum: repairTarget.chapterNum,
+            navigationQuery: repairTarget.navigationQuery,
           }),
         ],
       },
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardContinuityRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardForeshadowRepairContext>,
+) {
+  const { recentWorldStateAlerts, writebackPendingCount, writebackFailedCount } = context
+  const { volumeIdByChapterNum, addRepairRisk, createChapterNavigationQuery } = context
   const firstWorldAlert = recentWorldStateAlerts[0]
   if (recentWorldStateAlerts.length > 0 || writebackPendingCount > 0 || writebackFailedCount > 0) {
     addRepairRisk(createDashboardRiskItem(
@@ -3378,6 +3222,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
+  return context
+}
+
+function deriveQualityDashboardRevealRepairContext(
+  context: ReturnType<typeof deriveQualityDashboardContinuityRepairContext>,
+) {
+  const { storyFactRows, chapterDetailById, volumeNumberById, latestChapterNum } = context
+  const { addRepairRisk, createChapterNavigationQuery } = context
   const revealFactSignals = storyFactRows.reduce<{
     early: Array<{ factId: number; title: string; chapterId: number; chapterNum: number; volumeId?: number }>
     forbidden: Array<{ factId: number; title: string; chapterId: number; chapterNum: number; volumeId?: number }>
@@ -3417,10 +3269,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     return result
   }, { early: [], forbidden: [], late: [] })
   const firstRevealRisk = revealFactSignals.forbidden[0] || revealFactSignals.early[0] || revealFactSignals.late[0]
+  const revealSeverity = revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0
+    ? 'critical'
+    : 'warning'
   if (firstRevealRisk) {
     addRepairRisk(createDashboardRiskItem(
       'info_reveal_pacing',
-      revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
+      revealSeverity,
       revealFactSignals.forbidden.length > 0 ? '关键信息过早暴露' : '信息揭示节奏开始失步',
       `提前揭示 ${revealFactSignals.early.length} 条，禁区前暴露 ${revealFactSignals.forbidden.length} 条，超计划未揭示 ${revealFactSignals.late.length} 条。`,
       dedupeChapterNums([
@@ -3437,18 +3292,18 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
           createRepairAction({
             metricKey: 'info_reveal_pacing',
             actionType: 'open_bridge_patch',
-            label: firstRevealRisk ? `补写第${firstRevealRisk.chapterNum}章桥段` : '补写信息过桥',
+            label: `补写第${firstRevealRisk.chapterNum}章桥段`,
             description: '补一段承接信息揭示节奏的桥接场景。',
             targetPage: 'writing',
-            severity: revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
-            issueKey: `info-reveal-bridge-${firstRevealRisk?.factId || 'global'}`,
+            severity: revealSeverity,
+            issueKey: `info-reveal-bridge-${firstRevealRisk.factId}`,
             taskType: 'bridge_patch',
-            taskTitle: firstRevealRisk ? `修补第${firstRevealRisk.chapterNum}章信息揭示节奏` : '修补信息揭示节奏',
-            taskDescription: `围绕「${firstRevealRisk?.title || '关键信息'}」补桥，调整读者和主角的知情节奏。`,
+            taskTitle: `修补第${firstRevealRisk.chapterNum}章信息揭示节奏`,
+            taskDescription: `围绕「${firstRevealRisk.title || '关键信息'}」补桥，调整读者和主角的知情节奏。`,
             fixBrief: '让揭示回到目标章节附近，并保留必要信息差。',
-            chapterId: firstRevealRisk?.chapterId,
-            chapterNum: firstRevealRisk?.chapterNum,
-            navigationQuery: createChapterNavigationQuery(firstRevealRisk?.chapterId, firstRevealRisk?.chapterNum),
+            chapterId: firstRevealRisk.chapterId,
+            chapterNum: firstRevealRisk.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstRevealRisk.chapterId, firstRevealRisk.chapterNum),
           }),
           createRepairAction({
             metricKey: 'info_reveal_pacing',
@@ -3456,32 +3311,46 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             label: '生成揭示节奏修订',
             description: '把揭示过早/过晚问题落入修订中心。',
             targetPage: 'revision',
-            severity: revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
+            severity: revealSeverity,
             safeToExecute: true,
-            issueKey: `info-reveal-task-${firstRevealRisk?.factId || 'global'}`,
+            issueKey: `info-reveal-task-${firstRevealRisk.factId}`,
             taskType: 'continuity',
             taskTitle: '修复信息揭示节奏',
             taskDescription: '调整信息差谜题板中的揭示时机，避免过早暴露或过度拖延。',
             fixBrief: '必要时同时更新目标揭示章节和读者可知范围。',
-            chapterId: firstRevealRisk?.chapterId,
-            chapterNum: firstRevealRisk?.chapterNum,
-            navigationQuery: createChapterNavigationQuery(firstRevealRisk?.chapterId, firstRevealRisk?.chapterNum),
+            chapterId: firstRevealRisk.chapterId,
+            chapterNum: firstRevealRisk.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstRevealRisk.chapterId, firstRevealRisk.chapterNum),
           }),
         ],
       },
     ))
   }
 
+  return { ...context, revealFactSignals }
+}
+
+function deriveQualityDashboardRepairMetricsContext(
+  context: ReturnType<typeof deriveQualityDashboardRevealRepairContext>,
+) {
+  const { repairRiskItems, contractBlockerCount, contractWarningCount, contractReadyRate } = context
+  const { endgameDebtSnapshot, contractProgressMetrics, typedRefObservability } = context
+  const { historicalViolationCount, historicalGenericFallback, groundingAssessment } = context
+  const { modePolicyViolationCount, publishBlockedByProvenance, recentLanguageDriftAlerts } = context
+  const { feedbackSummary, antiAiSummary, dialogueSnapshot, styleComplianceSummary } = context
+  const { chapterFunctionAlerts, storyArcProgressSummary, protagonistSetbackSummary } = context
+  const { costPersistenceState, foreshadowSnapshot, recentWorldStateAlerts } = context
+  const { writebackPendingCount, writebackFailedCount, recentRecallAlerts, recallSummary } = context
+  const { revealFactSignals, volumeQualityMetrics } = context
+
   const buildRepairMetricSummary = (metricKey: QualityRepairMetricKey, score: number, summary: string): QualityDashboardData['repairMetrics'][number] => {
-    const metricRisks = repairRiskItems.filter((item) => item.metricKey === metricKey)
-    return {
-      key: metricKey,
+    return createRepairMetricSummary({
+      metricKey,
       label: qualityRepairMetricLabel(metricKey),
-      score: clampHealthScore(score),
+      score,
       summary,
-      riskCount: metricRisks.length,
-      focusLabels: metricRisks.slice(0, 3).map((item) => item.title),
-    }
+      repairRiskItems,
+    })
   }
   const repairMetrics: QualityDashboardData['repairMetrics'] = [
     buildRepairMetricSummary(
@@ -3580,15 +3449,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       `过早揭示 ${revealFactSignals.early.length}，禁区前暴露 ${revealFactSignals.forbidden.length}，超计划未揭示 ${revealFactSignals.late.length}。`,
     ),
   ]
-  const repairActionSummary: QualityDashboardData['repairActionSummary'] = {
-    actionableRiskCount: repairRiskItems.filter((item) => item.suggestedActions.length > 0).length,
-    taskActionCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => Boolean(action.taskDraft)).length,
-    directExecutableActionCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => action.safeToExecute).length,
-    allowDeviationCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => action.actionType === 'allow_deviation').length,
-    topPriorityActions: repairRiskItems
-      .flatMap((item) => item.suggestedActions.slice(0, 1).map((action) => action.label))
-      .slice(0, 4),
-  }
+  const repairActionSummary = buildRepairActionSummary(repairRiskItems)
   const volumeQualityMetricsWithRepairs: VolumeQualityMetrics[] = volumeQualityMetrics.map((volume) => ({
     ...volume,
     topRisks: dedupeDashboardRiskItems([
@@ -3596,6 +3457,18 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       ...repairRiskItems.filter((item) => item.volumeId === volume.volumeId),
     ]).sort(sortDashboardRisks).slice(0, 6),
   }))
+  return { ...context, repairMetrics, repairActionSummary, volumeQualityMetricsWithRepairs }
+}
+
+function deriveQualityDashboardRiskOverviewContext(
+  context: ReturnType<typeof deriveQualityDashboardRepairMetricsContext>,
+) {
+  const { recentLanguageDriftAlerts, storyPacingAlerts, chapterFunctionAlerts, styleComplianceAlerts } = context
+  const { volumeIdByChapterNum, endgameDebtSnapshot, recentRecallAlerts } = context
+  const { recentWorldStateAlerts, feedbackSummary, repairRiskItems } = context
+  const { volumeQualityMetricsWithRepairs, foreshadowSnapshot } = context
+  const { scoredCount, rows } = context
+  const { contractProgressMetrics } = context
   const globalRisks: QualityDashboardRiskItem[] = [
     ...recentLanguageDriftAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
       'language_drift',
@@ -3717,15 +3590,38 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
           summary: entry.topRisks[0]?.title || `${entry.volumeName} 当前健康分 ${entry.healthScore}，建议优先回查。`,
       })),
   }
+  return {
+    ...context,
+    globalRisks,
+    allRiskItems,
+    criticalRiskCount,
+    warningRiskCount,
+    foreshadowPendingCount,
+    foreshadowDueSoonCount,
+    foreshadowOverdueCount,
+    recentEndgameDebtAlerts,
+    riskOverview,
+    novelQualityMetrics,
+  }
+}
+
+function deriveQualityDashboardBatchRuntimeContext(
+  context: ReturnType<typeof deriveQualityDashboardRiskOverviewContext>,
+) {
+  const { batchChapterNums, latestChapterGateEntries } = context
+  const { rows, latestBatchProgress } = context
+  const { latestCheckpointChapterGap, writebackPendingCount, writebackFailedCount } = context
+  const { latestBatchTask } = context
+  const { pendingRevisionCount, rewriteTaskCount, batchPendingWritebackCount } = context
+  const { staleCheckpointCount } = context
+  const { recallRuntimeByChapterId, chapterDetails, latestBatchInspections } = context
+  const { latestBatchTaskId, latestBatchSnapshotId, batchChapterIds, worldStateLedger } = context
+  const { contractReadyRate, contractBlockerCount, contractWarningCount, contractProgressMetrics } = context
+  const { recentRecallAlerts, antiAiSummary, feedbackSummary } = context
+  const batchChapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
   const batchChapterNumSet = new Set(batchChapterNums)
   const batchGateEntries = latestChapterGateEntries.filter((entry) =>
     batchChapterNumSet.size > 0 && batchChapterNumSet.has(entry.chapterNum))
-  const latestBatchInspections = latestBatchSnapshotId
-    ? db.select().from(chapterBatchInspections)
-      .where(eq(chapterBatchInspections.snapshotId, latestBatchSnapshotId))
-      .orderBy(desc(chapterBatchInspections.createdAt), desc(chapterBatchInspections.id))
-      .all()
-    : []
   const inspectionBlockedCount = latestBatchInspections.filter((row) => row.status === 'blocked').length
   const inspectionWarningCount = latestBatchInspections.filter((row) => row.status === 'warning').length
   const inspectionPassedChapters = new Set(
@@ -3794,53 +3690,26 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
     feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
   })
-  const runtimePressureScore = clampHealthScore(
-    Math.min(
-      100,
-      writebackPendingCount * 10
-      + writebackFailedCount * 22
-      + staleCheckpointCount * 8
-      + Math.min(30, latestCheckpointChapterGap * 4)
-      + recallDegradedChapterCount * 6
-      + latestBatchConsecutiveRecallFallbackChapters * 12
-      + inspectionBlockedCount * 14
-      + batchGateBlockingEntries.length * 14,
-    ),
-  )
-  const runtimePressureLevel: NonNullable<QualityDashboardData['millionRuntimeObservability']>['runtimePressureLevel'] = runtimePressureScore >= 70
-    ? 'high'
-    : runtimePressureScore >= 35
-      ? 'medium'
-      : 'low'
-  const checkpointLagGuardrailActive = latestCheckpointChapterGap >= currentRuntimePolicy.checkpointGapWarningThreshold
-  const writebackGuardrailActive = currentRuntimePolicy.requireWritebackReady && (writebackPendingCount > 0 || writebackFailedCount > 0)
-  const recallGuardrailActive = latestBatchConsecutiveRecallFallbackChapters >= currentRuntimePolicy.recallPauseThreshold
-  const inspectionGuardrailActive = inspectionBlockedCount > 0 || batchGateBlockingEntries.length > 0
-  const runtimeGuardrailActive = writebackGuardrailActive || recallGuardrailActive || checkpointLagGuardrailActive || inspectionGuardrailActive || Boolean(latestBatchGuardrailReason)
-  const activeGuardrailReason = latestBatchGuardrailReason
-    || (writebackGuardrailActive
-      ? '章后回写闸门仍在阻断继续推进，当前运行时不允许跨章乱序。'
-      : recallGuardrailActive
-        ? `连续召回降级已达到阈值 ${currentRuntimePolicy.recallPauseThreshold}，需要先恢复记忆链路。`
-        : checkpointLagGuardrailActive
-          ? `检查点已落后 ${latestCheckpointChapterGap} 章，超过当前模式阈值 ${currentRuntimePolicy.checkpointGapWarningThreshold}。`
-          : inspectionGuardrailActive
-            ? '最近批次仍有检查阻断项，建议先清空阻断再继续扩批。'
-            : undefined)
-  const millionRuntimeObservability: NonNullable<QualityDashboardData['millionRuntimeObservability']> = {
-    operatingMode: currentRuntimePolicy.operatingMode,
-    label: currentRuntimePolicy.label,
-    strategySummary: currentRuntimePolicy.strategySummary,
-    chapterGenerationMode: currentRuntimePolicy.chapterGenerationMode,
-    serialOnly: currentRuntimePolicy.serialOnly,
-    backgroundPrecomputeEnabled: currentRuntimePolicy.backgroundPrecomputeEnabled,
-    requireWritebackReady: currentRuntimePolicy.requireWritebackReady,
-    recallPauseThreshold: currentRuntimePolicy.recallPauseThreshold,
-    checkpointGapWarningThreshold: currentRuntimePolicy.checkpointGapWarningThreshold,
-    mainThreadPressureStrategy: currentRuntimePolicy.mainThreadPressureStrategy,
-    guardrailActive: runtimeGuardrailActive,
-    activeGuardrailReason,
-    pauseReason: latestBatchPauseReason,
+  return {
+    ...context,
+    inspectionBlockedCount,
+    inspectionWarningCount,
+    recallDegradedChapterCount,
+    latestBatchConsecutiveRecallFallbackChapters,
+    batchGateBlockingEntries,
+    millionWordDashboard,
+  }
+}
+
+function deriveQualityDashboardRuntimeContext(
+  context: ReturnType<typeof deriveQualityDashboardBatchRuntimeContext>,
+) {
+  const { writebackPendingCount, writebackFailedCount, staleCheckpointCount } = context
+  const { latestCheckpointChapterGap, recallDegradedChapterCount } = context
+  const { latestBatchConsecutiveRecallFallbackChapters, inspectionBlockedCount } = context
+  const { batchGateBlockingEntries, currentRuntimePolicy, latestBatchGuardrailReason } = context
+  const { latestBatchPauseReason, storyMemoryPrecomputeStatus, millionWordDashboard } = context
+  const millionRuntimeObservability = buildRuntimeObservability({
     writebackPendingCount,
     writebackFailedCount,
     staleCheckpointCount,
@@ -3849,28 +3718,18 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
     inspectionBlockedCount,
     batchGateBlockedCount: batchGateBlockingEntries.length,
-    precomputeQueueStatus: storyMemoryPrecomputeStatus.status,
-    precomputeLastError: storyMemoryPrecomputeStatus.lastError,
-    precomputeReason: storyMemoryPrecomputeStatus.reason || storyMemoryPrecomputeStatus.trigger,
-    precomputeUpdatedAt: storyMemoryPrecomputeStatus.finishedAt || storyMemoryPrecomputeStatus.startedAt || storyMemoryPrecomputeStatus.queuedAt,
-    precomputeActiveTaskSummary: storyMemoryPrecomputeStatus.status === 'running'
-      ? 'story-memory checkpoint refresh 正在后台预计算。'
-      : storyMemoryPrecomputeStatus.status === 'queued'
-        ? 'story-memory checkpoint refresh 已排队等待执行。'
-        : storyMemoryPrecomputeStatus.status === 'failed'
-          ? 'story-memory checkpoint refresh 最近一次后台预计算失败。'
-          : '当前没有排队中的 story-memory 后台预计算。',
-    runtimePressureLevel,
-    runtimePressureScore,
-    runtimePressureSummary: runtimePressureLevel === 'high'
-      ? '当前主线程压力代理偏高，继续扩批前应先清理回写、召回或检查点阻断。'
-      : runtimePressureLevel === 'medium'
-        ? '当前运行时压力可控但已有累积信号，建议先观察批次闭环再继续。'
-        : '当前运行时压力代理较低，串行正文与回写顺序处于可继续状态。',
-    summary: currentRuntimePolicy.operatingMode === 'million_longform'
-      ? `百万字模式已按“正文串行 + 后台预计算 + 回写前置”运行；预计算状态 ${storyMemoryPrecomputeStatus.status}，当前压力 ${runtimePressureLevel}。`
-      : `${currentRuntimePolicy.label} 当前仍按正文串行执行；预计算状态 ${storyMemoryPrecomputeStatus.status}，运行时压力 ${runtimePressureLevel}。`,
-  }
+    runtimePolicy: currentRuntimePolicy,
+    latestBatchGuardrailReason,
+    latestBatchPauseReason,
+    precomputeStatus: storyMemoryPrecomputeStatus,
+  })
+  return { ...context, millionWordDashboard, millionRuntimeObservability }
+}
+
+function deriveQualityDashboardLanguageArtifactsContext(
+  context: ReturnType<typeof deriveQualityDashboardRuntimeContext>,
+) {
+  const { rows, novelId, dialogueSnapshot } = context
   const expressionDedupReports = rows
     .map((row) => ({ chapterId: row.id, chapterNum: row.chapterNum, report: parseExpressionDedupJson(row.expressionDedupJson) }))
     .filter((entry): entry is { chapterId: number; chapterNum: number; report: NonNullable<ReturnType<typeof parseExpressionDedupJson>> } => Boolean(entry.report))
@@ -3975,144 +3834,43 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const agentQualityObservability = buildQualityAgentDashboardSnapshot(novelId)
 
   return {
-    dashboardVersion: 'v2-repair',
-    dashboardNotes: [
-      ...millionWordDashboard.dashboardNotes,
-      '当前版本已升级为质量修复引擎：每个高价值风险都会给出原因、修法和直接动作。',
-      '安全动作会直接落任务，其他动作会保留定位信息并引导到对应页面处理。',
-    ],
-    operatingModeObservability: {
-      mode: currentOperatingMode,
-      label: currentOperatingModePolicy.label,
-      summary: currentOperatingModePolicy.modeSummary,
-      quickStartAligned: (novelMeta?.launchMode || '') === 'fast_launch' && currentOperatingMode === 'shortform',
-      recommendedChapterWords: currentOperatingModePolicy.chapterWords.recommended,
-      estimatedChapterCount: estimateChapterCountFromOperatingMode({
-        launchMode: novelMeta?.launchMode,
-        targetWords: novelMeta?.targetWords,
-        settingsJson: novelMeta?.settingsJson,
-        chapterCount: rows.length,
-      }),
-      recentContextWindow: currentOperatingModePolicy.recentContextWindow,
-    },
-    agentQualityObservability,
-    millionRuntimeObservability,
-    genreGroundingObservability: {
-      genreName: novelMeta?.genreName || '未设置题材',
-      resolvedGenreKey,
-      historicalGenericFallback,
-      historicalMode: groundingAssessment.mode,
-      sourceCoverage: groundingAssessment.coverage,
-      conservativeFallbackActive: groundingAssessment.conservativeFallbackActive,
-      sourceSignalCount: groundingAssessment.sourceSignals.length,
-      summary: historicalGenericFallback
-        ? '当前历史题材仍落在 generic fallback，应继续补来源层或 capability pack 约束。'
-        : groundingAssessment.mode !== 'none'
-          ? `${groundingAssessment.summary} 当前题材已命中 ${resolvedGenreKey} capability pack。`
-          : `当前题材已命中 ${resolvedGenreKey} capability pack。`,
-    },
-    typedRefObservability,
-    structuredMemoryObservability,
-    repairActionSummary,
-    repairMetrics,
-    heatmapData,
-    overallScoreTrend,
-    aiLikeRateTrend,
-    chapterGateTrend,
-    chapterGateHeatmap,
-    chapterGateSummary,
-    chapterGateDriftAlerts,
-    languageDriftTrends,
-    averageLanguageDrift: averageLanguageDriftMetrics,
-    recentLanguageDriftAlerts,
-    volumeLanguageDrift,
-    novelLanguageDriftSummary,
-    antiAiRecurrence: {
-      totalHitCount: antiAiSummary.overview.totalHitCount,
-      hitChapterCount: antiAiSummary.overview.hitChapterCount,
-      recurringRuleCount: antiAiSummary.overview.recurringRuleCount,
-      promotedRuleCount: antiAiSummary.overview.promotedRuleCount,
-      highRiskRuleCount: antiAiSummary.overview.highRiskRuleCount,
-      topRepeatedRules: antiAiSummary.topRepeatedRules,
-      promotedRules: antiAiSummary.promotedRules,
-      recentAlerts: antiAiSummary.recentAlerts,
-      volumeEntries: antiAiVolumeEntries,
-    },
-    feedbackRecurrence: {
-      totalHitCount: feedbackSummary.overview.totalHitCount,
-      hitChapterCount: feedbackSummary.overview.hitChapterCount,
-      recurringIssueCount: feedbackSummary.overview.recurringIssueCount,
-      promotedIssueCount: feedbackSummary.overview.promotedIssueCount,
-      highRiskIssueCount: feedbackSummary.overview.highRiskIssueCount,
-      pauseSuggestedIssueCount: feedbackSummary.overview.pauseSuggestedIssueCount,
-      topRepeatedIssues: feedbackSummary.topRepeatedIssues,
-      promotedIssues: feedbackSummary.promotedIssues,
-      recentAlerts: feedbackSummary.recentAlerts,
-      humanization: {
-        totalHitCount: feedbackSummary.humanizationSummary.totalHitCount,
-        hitChapterCount: feedbackSummary.humanizationSummary.hitChapterCount,
-        recurringIssueCount: feedbackSummary.humanizationSummary.recurringIssueCount,
-        promotedIssueCount: feedbackSummary.humanizationSummary.promotedIssueCount,
-        highRiskIssueCount: feedbackSummary.humanizationSummary.highRiskIssueCount,
-        pauseSuggestedIssueCount: feedbackSummary.humanizationSummary.pauseSuggestedIssueCount,
-        topRepeatedIssues: feedbackSummary.humanizationSummary.topRepeatedIssues,
-        promotedIssues: feedbackSummary.humanizationSummary.promotedIssues,
-        recentAlerts: feedbackSummary.humanizationSummary.recentAlerts,
-      },
-      volumeEntries: feedbackVolumeEntries,
-    },
-    styleCompliance: styleComplianceSummary,
-    dialogueFingerprintStats: dialogueSnapshot.dialogueFingerprintStats,
-    characterDialogueSignatures: dialogueSnapshot.characterDialogueSignatures,
-    crossCharacterDialogueSimilarity: dialogueSnapshot.crossCharacterDialogueSimilarity,
-    dialogueDriftTrend: dialogueSnapshot.dialogueDriftTrend,
-    volumeDialogueSimilarity: dialogueSnapshot.volumeDialogueSimilarity,
-    recentDialogueAlerts: dialogueSnapshot.recentDialogueAlerts,
-    requiredDialogueVoiceLocks: dialogueSnapshot.requiredDialogueVoiceLocks,
-    storyDynamicsTrend,
-    storyPacingAlerts,
-    volumeStoryDynamics,
-    volumeQualityMetrics: volumeQualityMetricsWithRepairs,
-    novelQualityMetrics,
-    productionReadiness: millionWordDashboard.productionReadiness,
-    batchHealth: millionWordDashboard.batchHealth,
-    continuityHealth: millionWordDashboard.continuityHealth,
-    contractDelivery: millionWordDashboard.contractDelivery,
-    batchReview: millionWordDashboard.batchReview,
-    chapterFunctionSummary,
-    repeatedFunctionRuns,
-    chapterFunctionAlerts,
-    volumeChapterFunctions,
-    storyArcProgressSummary,
-    storyArcProgressTrend,
-    storyArcProgressArcs: storyArcProgressSnapshot.arcs,
-    storyArcProgressAlerts: storyArcProgressSnapshot.alerts,
-    storyArcProgressVolumes: storyArcProgressSnapshot.volumeEntries,
-    worldStateTrend: worldStateLedger.trend,
-    recentWorldStateAlerts,
-    worldConflictEntities: worldStateLedger.conflictEntities,
+    ...context,
     expressionDedupSummary,
     summaryHealthSummary,
     hookContinuitySummary,
     voiceEvolutionSummary,
-    recallSummary,
-    recentRecallAlerts,
-    recentEndgameDebtAlerts,
-    volumeRecallDiagnostics,
-    volumeWorldStateStability,
-    worldStateSummary,
-    protagonistSetbackSummary,
-    costPersistenceSummary: {
-      averageCostDuration: costPersistenceState.averageCostDuration,
-      evaporatedCostCount: costPersistenceState.evaporatedCostCount,
-      unresolvedCostCount: costPersistenceState.unresolvedCostCount,
-      activeCosts: costPersistenceState.activeCosts,
-    },
-    reversalDistributionSummary,
-    weakDimensionFrequency,
-    chapterDetails,
-    totalChaptersScored: scoredCount,
-    averageOverallScore: scoredCount > 0 ? roundMetric(totalOverall / scoredCount) : 0,
-    averageAiLikeRate: scoredCount > 0 ? roundMetric(totalAiLike / scoredCount) : 0,
+    agentQualityObservability,
   }
+}
+
+export type QualityDashboardAssemblyContext = ReturnType<typeof deriveQualityDashboardLanguageArtifactsContext>
+
+export function getQualityDashboardData(
+  novelId: number,
+  options: QualityDashboardOptions = {},
+): QualityDashboardData {
+  const core = loadQualityDashboardCoreContext(novelId, options)
+  const continuity = deriveQualityDashboardContinuityContext(core)
+  const chapterNarrative = deriveQualityDashboardChapterNarrativeContext(continuity)
+  const chapters = deriveQualityDashboardChapterContext(chapterNarrative)
+  const editorial = deriveQualityDashboardEditorialContext(chapters)
+  const continuityMetrics = deriveQualityDashboardContinuityMetricsContext(editorial)
+  const volumeSignals = deriveQualityDashboardVolumeSignalContext(continuityMetrics)
+  const volumeMetrics = deriveQualityDashboardVolumeMetricsContext(volumeSignals)
+  const repairFoundation = deriveQualityDashboardRepairFoundationContext(volumeMetrics)
+  const policyRepairs = deriveQualityDashboardPolicyRepairContext(repairFoundation)
+  const languageRepairs = deriveQualityDashboardMemoryRepairContext(policyRepairs)
+  const dialogueRepairs = deriveQualityDashboardDialogueRepairContext(languageRepairs)
+  const contractRepairs = deriveQualityDashboardContractRepairContext(dialogueRepairs)
+  const storyRepairs = deriveQualityDashboardStoryRepairContext(contractRepairs)
+  const growthRepairs = deriveQualityDashboardGrowthRepairContext(storyRepairs)
+  const foreshadowRepairs = deriveQualityDashboardForeshadowRepairContext(growthRepairs)
+  const continuityRepairs = deriveQualityDashboardContinuityRepairContext(foreshadowRepairs)
+  const revealRepairs = deriveQualityDashboardRevealRepairContext(continuityRepairs)
+  const repairMetrics = deriveQualityDashboardRepairMetricsContext(revealRepairs)
+  const riskOverview = deriveQualityDashboardRiskOverviewContext(repairMetrics)
+  const batchRuntime = deriveQualityDashboardBatchRuntimeContext(riskOverview)
+  const runtime = deriveQualityDashboardRuntimeContext(batchRuntime)
+  const languageArtifacts = deriveQualityDashboardLanguageArtifactsContext(runtime)
+  return assembleQualityDashboardData(languageArtifacts)
 }

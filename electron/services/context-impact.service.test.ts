@@ -19,10 +19,8 @@ vi.mock('./consistency.service', () => ({
   })),
 }))
 
-vi.mock('./quality-dashboard.service', () => ({
-  getQualityDashboardData: vi.fn(() => ({
-    storyPacingAlerts: [],
-  })),
+vi.mock('./story-dynamics-read-model', () => ({
+  getChapterStoryPacingAlerts: vi.fn(() => []),
 }))
 
 vi.mock('./quality-dashboard-recall-diagnostics', () => ({

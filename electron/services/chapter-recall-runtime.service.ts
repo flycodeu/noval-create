@@ -15,7 +15,7 @@ import {
   HardConstraintOverflowError,
 } from './context.service'
 
-interface ChapterRecallRuntimeRecord {
+export interface ChapterRecallRuntimeRecord {
   chapterId: number
   novelId: number
   recallSnapshot?: RecallSnapshot
