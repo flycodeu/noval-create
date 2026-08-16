@@ -4,7 +4,7 @@ import SectionHeader from '../../../../components/novel/common/SectionHeader'
 import { formatChapterNumber } from '../chapter-labels'
 import type { WritingRouteKey } from './InsightPanel'
 
-interface WritingStatusBarProps {
+export interface WritingStatusBarProps {
   currentChapter: Chapter | null
   editorTitle: string
   primaryStatusText: string

@@ -564,11 +564,23 @@ Writing/index.tsx
 | Hook | 状态与命令所有权 |
 | --- | --- |
 | `useWritingRouteState.ts` | `chapterId`、`stageId`、active route、路由预加载和导航 |
-| `useWritingWorkspaceData.ts` | 章节列表、当前章节、元数据、上下文状态、质量快照、章节关联资产和 request race guards |
-| `useChapterEditor.ts` | contentEditable ref、正文、字数、选区、undo/redo、自动保存、立即保存和章节切换 flush |
+| `useWritingWorkspaceData.ts` | 章节列表、当前章节、章节选择和 request race guards |
+| `useWritingWorkspaceRefreshController.ts` | workspace metadata、上下文/质量快照、章节关联资产、空工作区与章节加载刷新编排 |
+| `useChapterEditor.ts` | contentEditable ref、正文、字数、选区和 bounded undo/redo history |
+| `useWritingEditorLifecycle.ts` | 编辑器输入、自动/立即保存、快捷键、保存注册和卸载 flush；`writing-editor-lifecycle.ts` 固定持久化副作用顺序 |
+| `useWritingHistoryLifecycle.ts` | 版本列表请求、旧响应失效、选择回退、history route 触发和 modal/route Escape 优先级 |
+| `useWritingPresentationModel.ts` | continuity/scene/review 解析、章节关联资产、insight items 与 publish sections/scores/drift/history；纯规则位于 `writing-presentation-model.ts` |
+| `useWritingWorkspaceActionController.ts` | 默认 AI 模式保存、章节编译和带当前章节 guard 的 context preview 触发；副作用顺序位于 `writing-workspace-actions.ts` |
+| `useWritingRuntimePresentation.ts` | live/persisted pipeline 选择、当前章节 generation、伏笔到期摘要、writeback/prompt override 与 editor advisory 派生 |
 | `useChapterGeneration.ts` | 生成、恢复、重启、取消、任务订阅、live/persisted snapshot、错误恢复和生成基线 |
 | `useChapterReview.ts` | AI 体检、发布检查、状态切换、局部重写、整章优化、候选应用和版本恢复 |
 | `useChapterWriteback.ts` | 信息揭示约束、伏笔新增/修改/删除和工作区 mutation 通知 |
+| `useWritingPipelineItems.ts` | 七角色流水线展示状态、旧快照回退和重试动作绑定 |
+| `useWritingInspector.ts` | chapter/memory/review/history 四路稳定 view model 与 actions 组合 |
+| `useWritingChapterController.ts` | 章节头部、可写性、生成前置检查、验收反馈和流水线元数据 |
+| `useWritingContractSections.ts` | chapter/scene contract 的稳定展示 section 组合 |
+| `useWritingCommandBindings.ts` | 章节导航、状态栏、命令栏及编辑器恢复/建议动作装配 |
+| `useWritingChapterCrudController.ts` | 章节新增、选择、删除确认和删除前保存队列协调 |
 
 ### 8.3 组件
 
@@ -578,6 +590,11 @@ Writing/index.tsx
 | `components/WritingCommandBar.tsx` | 生成、取消、恢复、审校、优化、保存、撤销/重做和状态命令 |
 | `components/WritingStatusBar.tsx` | 字数、保存/生成状态、上下文版本和当前流水线阶段 |
 | `components/WritingInspector.tsx` | route tabs、移动端抽屉、桌面侧栏和 route outlet |
+| `components/WritingChapterHeader.tsx` | 当前章节 hero、版本/卷/字数元数据和可写性卡片 |
+| `components/WritingFooter.tsx` | 流水线执行元数据和版本时间线 |
+| `components/WritingModals.tsx` | 选区重写、整章优化和并行生成弹窗容器 |
+| `components/WritingAcceptanceSummary.tsx` | 当前章轻量验收卡和质量问题摘要 |
+| `components/WritingWorkspaceLayout.tsx` | loading、pipeline、hero、导航、编辑器、inspector 与 footer 页面结构 |
 | `routes/EditorRoute.tsx` | 本章合同、场景、约束、承接与发布摘要 |
 | `routes/ContextRoute.tsx` | 记忆、召回、时间轴、物品、人物、伏笔与信息差 |
 | `routes/ReviewRoute.tsx` | AI 体检、审校意见、发布门、优化候选和质量风险 |
@@ -811,22 +828,22 @@ npm run audit:complexity
 - 章节流水线已提取 runtime、context、planner、writer、review、rewriter、finalize、session 和 observability 边界；`generateChapterContentInternal` 已退出复杂度审计榜首。
 - 发布检查已提取 evidence、contract gate、quality gates、score、rewrite plan、persistence 和共享故事动态读模型；发布检查不再通过完整质量看板获取当前章节节奏证据。
 - 质量看板已提取 loader、gate metrics、最终 assembler，以及 chapter/language/volume/repair/runtime 纯计算边界；语言趋势、卷级风险排序、修复摘要和运行时压力/闸门不再内联在 façade 中，production 与其余聚合上下文仍待继续迁移。
-- Writing 已提取 route state、workspace data/request race guards、editor state/history、generation controller、review/optimization、publication/version 和 chapter writeback 边界；本批又提取 `WritingStatusBar`、`WritingCommandBar`、`WritingEditorPane`、`WritingInspector`，页面 JSX 已按状态、命令、编辑器和检查器四块收口。
+- Writing 已提取 route state、workspace data/request race guards、editor state/history、generation controller、review/optimization、publication/version 和 chapter writeback 边界；`WritingStatusBar`、`WritingCommandBar`、`WritingEditorPane`、`WritingInspector` 已完成组件化，chapter/memory/review/history 四路 inspector 也已改为基于稳定 view model 与独立 actions 的真实内容组件。后续批次又提取七角色 pipeline item 纯派生模型、inspector 组合 hook、章节头部/可写性/生成前置检查控制器、验收与流水线元数据模型，以及独立 `WritingChapterHeader`。chapter/scene contract 投影、章节导航/编辑器命令绑定、footer、modal、轻量验收反馈和 `WritingWorkspaceLayout` 也已完成收口，章节 CRUD 交给独立 controller。workspace refresh/editor/history lifecycle、continuity/publish presentation、默认 AI 模式保存、章节编译、context preview trigger，以及 live/persisted pipeline、伏笔到期和 editor advisory 均已完成。本批进一步把 writeback/due foreshadow/readiness/preflight 前移到 generation hook 之前，`useChapterGeneration` 改为直接消费同轮派生值，彻底移除 render 期间写 ref 的 bridge；review/gate/rewrite/optimization/modal 状态进入独立 controller，inspector 四域与 layout/editor/footer/modal props 进入独立 composition 边界。原有 IPC→刷新顺序、章节 guard、角色顺序、gate 自动展开和提示计数规则保持不变。
 
 本轮验证证据：
 
-- `npm run test:unit`：155 个测试文件、944 项通过；其中新增 chapter/language/volume/repair/runtime 五个质量指标域的 13 项确定性测试；
-- `npm run typecheck:web`、`npm run typecheck:node`、`npm run lint` 通过；
-- `npm run test:smoke` 全链通过，覆盖 prompt guardrails、workflow resilience、workspace/interface/layout 契约、章节完整性、写回幂等、Web RPC、MCP、迁移与 agent workflow；
-- `npm run audit:complexity`：247 条告警（167 条圈复杂度、80 条函数长度），低于 257 条基线；
-- `Writing` 主函数从本轮开始时的 1931 行下降到 1818 行（本批总起点约 2203 行），但仍未达到 250 行目标；`quality-dashboard.service.ts` 已下降到 3876 行，仍是待持续收缩的 façade。
+- `npm run test:unit`：166 个测试文件、972 项通过；其中新增 chapter/language/volume/repair/runtime 五个质量指标域的 13 项确定性测试、inspector/pipeline/contract/CRUD/editor/history/presentation 回归、默认 AI 模式与编译顺序的 2 项、pipeline/generation/伏笔/advisory runtime presentation 的 5 项，以及 review gate reducer 的 3 项测试；
+- `npm run typecheck`、`npm run lint` 通过；
+- `npm run test:smoke` 完整复跑全链通过，覆盖 prompt guardrails、workflow resilience、workspace/interface/layout 契约、章节完整性、写回幂等、Web RPC、MCP、迁移与 agent workflow；首次运行曾在写回幂等用例出现一次 `failed`/`applied` 瞬态差异，单项复跑及完整复跑均通过，本批未修改 Electron 写回链路；
+- `npm run audit:complexity`：245 条告警（165 条圈复杂度、80 条函数长度），低于 257 条基线；
+- `Writing` 文件从本轮开始时的 1931 行下降到 646 行（本批总起点约 2203 行），主函数有效行降至 563；四路 inspector 批次先从 1818 行、复杂度 302 降到 1472 行、复杂度 101，后续已将复杂度降到审计阈值 25 以下。contract/command/modal/footer 批次降至 1111 行，acceptance/layout/CRUD 降至 1060 行，workspace refresh/editor lifecycle 降至 826 行，history/presentation 降至 696 行，workspace actions/runtime presentation 降至 651 行，本批 readiness/review/view composition 在增加显式依赖分层的同时继续净减 5 行；新文件均无长度或复杂度告警，主函数仍仅剩函数长度告警。`quality-dashboard.service.ts` 已下降到 3876 行，仍是待持续收缩的 façade。
 
 下一批固定顺序：
 
-1. 将 Writing 四个 inspector route 从 ReactNode 内容映射继续下沉为稳定 view model 与真实内容组件；
-2. 把 Writing 中仍在主函数生成的 chapter/memory/review/history 展示模型移入专用 hooks，继续缩短主控制函数；
+1. 收口 Writing metadata/context/assets 状态簇与 workspace refresh 输入装配，减少主函数剩余的 setter plumbing；
+2. 合并 generation/review/writeback command orchestration 的依赖装配，让主函数进一步接近纯页面组合层；
 3. 继续迁移 quality production、continuity、batch 和 language artifacts 聚合域，并压低剩余 façade 复杂度；
-4. 补齐 publish persistence、quality assembler 和 Writing 运行态组件测试；
+4. 补齐 workspace refresh、publish persistence、quality assembler 和 Writing 运行态组件测试；
 5. 完成两章 Writing 交互矩阵后，再以完整 `npm test`、真实已填充页面验收和复杂度审计收口四阶段目标。
 
 上述证据只证明静态、单元和确定性 Electron 测试路径；真实模型生成、已填充 Writing 页面浏览器交互和人工发布确认仍未在本轮验证。

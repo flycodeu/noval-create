@@ -4,7 +4,7 @@ import ActionBar from '../../../../components/novel/common/ActionBar'
 import CreativeStageScope from '../../../../components/novel/CreativeStageScope'
 import { AI_EXECUTION_MODE_OPTIONS, type AiExecutionMode } from '../../../../shared/ai-execution'
 
-interface WritingCommandBarProps {
+export interface WritingCommandBarProps {
   novelId: number
   creativeStageId: number | null
   defaultAiExecutionMode: AiExecutionMode

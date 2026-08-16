@@ -31,7 +31,7 @@ function getGenerationTagMeta(snapshot: WritingGenerationSnapshot) {
   return { color: 'success' as const, label: '刚完成' }
 }
 
-interface ChapterNavigatorProps {
+export interface ChapterNavigatorProps {
   chapters: Chapter[]
   volumes: StoryVolume[]
   currentChapter: Chapter | null

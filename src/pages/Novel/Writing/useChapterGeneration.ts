@@ -45,7 +45,7 @@ interface UseChapterGenerationOptions {
   preserveConstraintLabels: HardConstraintSourceLabel[]
   latestPipelineTask: Task | null
   currentPipelineSnapshot: WritingPipelineSnapshot | null
-  generationPreflightRef: MutableRefObject<ChapterGenerationPreflight | null>
+  generationPreflight: ChapterGenerationPreflight
   setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
   setActionError: Dispatch<SetStateAction<WritingActionError | null>>
   refreshBackgroundChapter(chapterId: number): Promise<void>
@@ -284,7 +284,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     currentChapter,
     currentPipelineSnapshot,
     effectiveAiExecutionMode,
-    generationPreflightRef,
+    generationPreflight,
     latestPipelineTask,
     preserveConstraintLabels,
     setActionError,
@@ -315,9 +315,8 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
       return
     }
     if (generationStartingRef.current || activeGeneration.status === 'running') return
-    const preflight = generationPreflightRef.current
-    if (preflight && !preflight.ready) {
-      showPreflightWarning(preflight.messages)
+    if (!generationPreflight.ready) {
+      showPreflightWarning(generationPreflight.messages)
       return
     }
     generationStartingRef.current = true
@@ -351,7 +350,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     creativeStageId,
     currentChapter,
     effectiveAiExecutionMode,
-    generationPreflightRef,
+    generationPreflight,
     preserveConstraintLabels,
     setActionError,
     showPreflightWarning,

@@ -8,7 +8,7 @@ import type { WritingActionError } from '../useChapterGeneration'
 import { countChapterWords } from '../useChapterEditor'
 import StreamingOutput from './StreamingOutput'
 
-interface WritingEditorPaneProps {
+export interface WritingEditorPaneProps {
   title: string
   subtitle: string
   currentChapter: Chapter | null
