@@ -279,7 +279,6 @@ export default function TemplateManager() {
         className="admin-page template-manager-page"
         layout="wide"
         heroVariant="compact"
-        eyebrow="创作模板"
         title="文风与世界模板"
         description="管理新建小说时可选用的文风与世界设定模板。"
         actions={(

@@ -628,7 +628,6 @@ export default function TaskCenter() {
   return (
     <WorkspacePage
       className="task-center-page"
-      eyebrow="任务运行台"
       title="任务中心"
       description="集中管理 AI 任务的执行状态、报错追踪与重试恢复。"
       heroVariant="compact"
@@ -787,7 +786,6 @@ export default function TaskCenter() {
           className="task-center-detail-panel"
           scrollable
           title={selectedTask ? `任务详情 · ${getTaskTypeLabel(selectedTask.type)}` : '任务详情'}
-          description="查看执行状态、日志输出与请求上下文。"
           extra={selectedTask ? (
             <div className="task-center-detail__actions">
               {selectedTask.status === 'running' ? (

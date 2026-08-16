@@ -253,7 +253,6 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   return (
     <>
       <WorkspacePage
-        eyebrow="角色变化维护"
         title="人物弧线中心"
         description="维护主角弧、关键角色弧和关系弧，并登记章节层面的实际推进。"
         actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>去章节合同</Button><Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>刷新</Button></Space>}

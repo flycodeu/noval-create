@@ -436,7 +436,6 @@ export default function Overview({ novelId }: Props) {
       className="novel-overview-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="基础总览"
       title="项目总览"
       description="统一查看基础设定、素材和下一步重点。"
       actions={(

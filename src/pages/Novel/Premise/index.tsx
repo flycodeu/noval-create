@@ -536,7 +536,6 @@ export default function PremisePage({ novelId }: Props) {
       className="novel-premise-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="基础设定"
       title="基础设定"
       actions={(
         <Space wrap>

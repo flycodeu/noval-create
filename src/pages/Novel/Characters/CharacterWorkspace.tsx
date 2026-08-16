@@ -1064,7 +1064,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
     <WorkspacePage
       className="novel-characters-page"
       layout="wide"
-      eyebrow="角色系统"
       title="角色系统"
       actions={(
         <Space wrap>

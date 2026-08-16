@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -901,7 +901,6 @@ export default function WorldRules({ novelId }: Props) {
 
     return (
       <WorkspacePage
-        eyebrow="世界规则"
         title="世界规则"
         actions={(
         <Space wrap>

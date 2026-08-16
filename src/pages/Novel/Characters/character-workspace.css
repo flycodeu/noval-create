@@ -532,7 +532,7 @@
 
 .character-agent-workflow__rail {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
   gap: 1px;
   padding: 0 24px;
   background: rgba(84, 72, 52, 0.08);
@@ -587,16 +587,21 @@
 .character-agent-workflow__step > span:last-child {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .character-agent-workflow__step strong {
   color: inherit;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .character-agent-workflow__step small {
   color: var(--character-copy);
   font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .character-agent-workflow__alert {

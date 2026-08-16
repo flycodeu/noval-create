@@ -1,23 +1,23 @@
 .novel-world-rules-page__section-actions {
-  margin-bottom: var(--space-m);
+  margin-bottom: var(--space-m, 14px);
 }
 
 .novel-world-rules-page__grid {
   display: grid;
-  gap: var(--space-m);
+  gap: var(--space-m, 14px);
 }
 
 .novel-world-rules-page__grid--2,
 .novel-world-rules-page__grid--lang {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
 }
 
 .novel-world-rules-page__grid--3 {
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
 }
 
 .novel-world-rules-page__grid--map {
-  grid-template-columns: 120px 1fr 140px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
 }
 
 .novel-world-rules-page__full-width-input {
@@ -26,17 +26,35 @@
 
 .novel-world-rules-page__language-cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: var(--space-m);
-  margin-bottom: var(--space-l);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-m, 14px);
+  margin-bottom: var(--space-l, 20px);
 }
 
 .novel-world-rules-page__language-card {
-  background: var(--color-bg-card);
+  background: var(--color-bg-card, rgba(255, 255, 255, 0.7));
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle, rgba(122, 93, 52, 0.12));
+}
+
+.novel-world-rules-page__language-card .ant-card-body {
+  padding: 12px 16px;
 }
 
 .novel-world-rules-page__compact-form-item {
   margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.novel-world-rules-page__compact-form-item .ant-form-item-label {
+  padding-bottom: 0;
+}
+
+.novel-world-rules-page__compact-form-item .ant-form-item-label > label {
+  white-space: nowrap;
+  font-size: 13px;
 }
 
 .novel-world-rules-page__status-block,
@@ -46,7 +64,7 @@
 
 .novel-world-rules-page__progress-copy {
   display: grid;
-  gap: var(--space-m);
+  gap: var(--space-m, 14px);
 }
 
 @media (max-width: 960px) {

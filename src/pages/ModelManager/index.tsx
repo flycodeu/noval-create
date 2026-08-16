@@ -448,7 +448,6 @@ export default function ModelManager() {
         className="admin-page model-manager-page"
         layout="wide"
         heroVariant="compact"
-        eyebrow="模型 / 检索"
         title="模型与搜索管理"
         description="管理 AI 模型接入、联网检索和连接测试。"
         actions={(

@@ -565,7 +565,6 @@ export default function PromptManager() {
     <WorkspacePage
       className="prompt-manager-page"
       layout="wide"
-      eyebrow="运行时控制台"
       title="提示词控制台"
       description="管理各生成链路的运行时提示词、风险控制与参数规范。"
       heroVariant="compact"
@@ -601,10 +600,8 @@ export default function PromptManager() {
       ) : null}
       <div className="prompt-manager-shell">
         <WorkspacePanel
-          scrollable
           className="prompt-manager-catalog"
           title="链路目录"
-          description="按生产阶段与分类浏览提示词模板。"
           extra={(
             <div className="prompt-manager-filter-group">
               {PROMPT_CATEGORIES.map((category) => (

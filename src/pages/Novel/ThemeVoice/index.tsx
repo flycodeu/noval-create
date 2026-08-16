@@ -458,7 +458,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
       className="novel-theme-voice-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="主题与文风"
       title="主题与文风"
       actions={(
         <Space wrap>

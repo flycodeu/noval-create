@@ -1371,7 +1371,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
           title="资产列表"
-          description="筛选、分页和关键词都走后端查询。左侧用于快速筛选，右侧负责查看与编辑完整上下文。"
           extra={(
             <div className="novel-filter-bar">
               <div className="novel-filter-bar__row">
@@ -1461,7 +1460,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
 
         <WorkspacePanel
           title={selectedItem ? `编辑 · ${selectedItem.itemName}` : creating ? '新建物品' : '物品详情'}
-          description="右侧把详情视图与编辑视图合并：先看清上下文，再改字段。"
           extra={(
             <Space wrap>
               {aiActions}
