@@ -117,6 +117,7 @@ import {
 import {
   buildChapterContentHash,
   buildChapterPipelineRetryPlan,
+  buildChapterPipelineResumeRetryMetadata,
   checkpointChapterPipelineContent,
   createInitialChapterPipelineSnapshot,
   getCompletedChapterPipelineRoleCount,
@@ -3855,14 +3856,19 @@ async function resumeChapterPipelineInternal(taskId: number, sender?: WebContent
         stageId,
       })
     }
-    // Critic/Rewriter/Canonizer 失败时，partialContent 已经是一份完整候选稿。
-    // 再调用“续写”会无端追加内容并可能把章节越写越长；应直接把保留稿
-    // 重新送入 Planner -> Critic -> Rewriter -> Gate -> Canonizer -> Finalize。
+    // Later-stage failures retain a complete persisted candidate. Retry the
+    // failed node and reuse immutable upstream outputs instead of appending to
+    // the chapter or regenerating Planner/Writer artifacts.
+    const retry = buildChapterPipelineResumeRetryMetadata(snapshot)
     return generateChapterContent(rootTask.relatedEntityId, sender, {
       executionMode: snapshot?.executionMode,
       stageId,
       resumeDraft: partialContent,
       resumeSourceTaskId: rootTask.id,
+      retryNodeRole: retry?.retryNodeRole,
+      retrySourceNodeRunId: retry?.retrySourceNodeRunId,
+      retryUpstreamSnapshotId: retry?.retryUpstreamSnapshotId,
+      retryReason: retry ? `automatic_resume:${retry.retryNodeRole}` : undefined,
     })
   }
   return generateChapterContent(rootTask.relatedEntityId, sender, { stageId })

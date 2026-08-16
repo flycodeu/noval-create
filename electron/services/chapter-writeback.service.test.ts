@@ -196,6 +196,7 @@ describe('applyChapterWritebackRun', () => {
     vi.mocked(getSqlite).mockReset()
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
+      prepare: () => ({ run: vi.fn() }),
     }) as never)
   })
 
@@ -470,6 +471,7 @@ describe('chapter writeback decision locking', () => {
     vi.mocked(getSqlite).mockReset()
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
+      prepare: () => ({ run: vi.fn() }),
     }) as never)
   })
 
@@ -519,6 +521,7 @@ describe('prepareChapterWritebackRun', () => {
     vi.mocked(getSqlite).mockReset()
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
+      prepare: () => ({ run: vi.fn() }),
     }) as never)
   })
 

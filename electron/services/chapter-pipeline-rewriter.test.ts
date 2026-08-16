@@ -174,6 +174,39 @@ describe('chapter pipeline rewriter', () => {
     }))
   })
 
+  it('discards a long interrupted stream and retries instead of treating it as a complete draft', async () => {
+    const transientError = new Error('socket closed')
+    const interruptedOutput = '未完成的重写片段。'.repeat(30)
+    mocks.executeStreamTask
+      .mockImplementationOnce(async (_taskId, options) => {
+        await options.onChunk('', interruptedOutput)
+        throw transientError
+      })
+      .mockResolvedValueOnce({ output: '重试后的完整正文。' })
+    mocks.isTransientModelNetworkError.mockImplementation((error) => error === transientError)
+    const startRole = vi.fn()
+      .mockResolvedValueOnce(81)
+      .mockResolvedValueOnce(82)
+    const runner = createRewriterStreamAttemptRunner({
+      novelId: 7,
+      chapterId: 101,
+      defaultChatOptions: {},
+      buildMessages: () => [{ role: 'user', content: '重写第一章' }],
+      startRole,
+      validateInputs: vi.fn(),
+      failRole: vi.fn(() => { throw new Error('unexpected') }),
+      onChunk: vi.fn(),
+    })
+
+    const result = await runner(1, [], '执行重写')
+
+    expect(result).toEqual({ taskId: 82, result: { output: '重试后的完整正文。' } })
+    expect(startRole).toHaveBeenCalledTimes(2)
+    expect(mocks.updateTask).toHaveBeenCalledWith(81, expect.objectContaining({
+      outputText: expect.stringContaining('未提交不完整输出'),
+    }))
+  })
+
   it('accepts a distinct chapter 1 candidate without spending a retry', async () => {
     const runAttempt = vi.fn().mockResolvedValue({ taskId: 11, result: { output: '他撞开侧门，警铃随即响起。' } })
     const processOutcome = vi.fn(async (content: string) => rewriteOutcome(content))

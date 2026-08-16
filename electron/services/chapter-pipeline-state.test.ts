@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyChapterPipelineRoleMetrics,
   buildChapterPipelineRetryPlan,
+  buildChapterPipelineResumeRetryMetadata,
   checkpointChapterPipelineContent,
   checkpointChapterPipelineContext,
   completeChapterPipelineRole,
@@ -84,6 +85,20 @@ describe('chapter pipeline state', () => {
       canonizer: !skippedRoleSet.has('canonizer'),
       finalize: true,
     })
+  })
+
+  it('builds automatic retry metadata from the failed node and its upstream snapshot', () => {
+    const snapshot = createInitialChapterPipelineSnapshot(12, 34)
+    snapshot.lastFailureRole = 'rewriter'
+    snapshot.roles.enforcer.nodeSnapshotId = 'enforcer-snapshot'
+    snapshot.roles.rewriter.nodeRunId = 91
+
+    expect(buildChapterPipelineResumeRetryMetadata(snapshot)).toEqual({
+      retryNodeRole: 'rewriter',
+      retrySourceNodeRunId: 91,
+      retryUpstreamSnapshotId: 'enforcer-snapshot',
+    })
+    expect(buildChapterPipelineResumeRetryMetadata({ ...snapshot, lastFailureRole: undefined })).toBeNull()
   })
 
   it('recognizes only supported chapter pipeline roles', () => {

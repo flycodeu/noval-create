@@ -103,6 +103,12 @@ export interface ChapterPipelineRetryPlan {
   shouldRun: Record<ChapterPipelineRole, boolean>
 }
 
+export interface ChapterPipelineResumeRetryMetadata {
+  retryNodeRole: ChapterPipelineRole
+  retrySourceNodeRunId?: number
+  retryUpstreamSnapshotId: string | null
+}
+
 export type ChapterPipelineResumeBaseStatus =
   | 'ready'
   | 'unsupported'
@@ -322,6 +328,23 @@ export function buildChapterPipelineRetryPlan(retryRole: ChapterPipelineRole): C
     shouldRun: Object.fromEntries(
       CHAPTER_PIPELINE_ROLES.map((role, index) => [role, index >= retryIndex]),
     ) as Record<ChapterPipelineRole, boolean>,
+  }
+}
+
+export function buildChapterPipelineResumeRetryMetadata(
+  snapshot: Partial<ChapterPipelineSnapshot> | null,
+): ChapterPipelineResumeRetryMetadata | null {
+  const retryNodeRole = snapshot?.lastFailureRole
+  if (!retryNodeRole || !isChapterPipelineRole(retryNodeRole)) return null
+
+  const retryIndex = CHAPTER_PIPELINE_ROLES.indexOf(retryNodeRole)
+  const upstreamRole = retryIndex > 0 ? CHAPTER_PIPELINE_ROLES[retryIndex - 1] : null
+  return {
+    retryNodeRole,
+    retrySourceNodeRunId: snapshot?.roles?.[retryNodeRole]?.nodeRunId,
+    retryUpstreamSnapshotId: upstreamRole
+      ? snapshot?.roles?.[upstreamRole]?.nodeSnapshotId || null
+      : null,
   }
 }
 

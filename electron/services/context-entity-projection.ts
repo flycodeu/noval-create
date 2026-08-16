@@ -97,6 +97,54 @@ export interface ChapterEntityMentionCatalogs {
   speciesCount: number
 }
 
+export interface ChapterEntityMentionCatalogLoadOptions {
+  /** Novel context versions are advanced by entity/canon edits. */
+  contextVersion?: number
+}
+
+const ENTITY_CATALOG_CACHE_LIMIT = 8
+const entityCatalogCache = new Map<string, ChapterEntityMentionCatalogs>()
+
+export function clearChapterEntityMentionCatalogCache(novelId?: number): void {
+  if (typeof novelId !== 'number') {
+    entityCatalogCache.clear()
+    return
+  }
+  for (const key of entityCatalogCache.keys()) {
+    if (key.startsWith(`${novelId}:`)) entityCatalogCache.delete(key)
+  }
+}
+
+function getCachedEntityCatalog(novelId: number, contextVersion?: number): ChapterEntityMentionCatalogs | null {
+  if (!Number.isInteger(contextVersion) || (contextVersion as number) <= 0) return null
+  const key = `${novelId}:${contextVersion}`
+  const cached = entityCatalogCache.get(key)
+  if (!cached) return null
+  // Refresh LRU order without retaining multiple versions of one novel.
+  entityCatalogCache.delete(key)
+  entityCatalogCache.set(key, cached)
+  return cached
+}
+
+function cacheEntityCatalog(
+  novelId: number,
+  contextVersion: number | undefined,
+  catalogs: ChapterEntityMentionCatalogs,
+): void {
+  if (typeof contextVersion !== 'number' || !Number.isInteger(contextVersion) || contextVersion <= 0) return
+  const key = `${novelId}:${contextVersion}`
+  for (const existingKey of entityCatalogCache.keys()) {
+    if (existingKey.startsWith(`${novelId}:`) && existingKey !== key) entityCatalogCache.delete(existingKey)
+  }
+  entityCatalogCache.delete(key)
+  entityCatalogCache.set(key, catalogs)
+  while (entityCatalogCache.size > ENTITY_CATALOG_CACHE_LIMIT) {
+    const oldestKey = entityCatalogCache.keys().next().value as string | undefined
+    if (!oldestKey) break
+    entityCatalogCache.delete(oldestKey)
+  }
+}
+
 export interface ChapterEntityContextProjection {
   characterFullIds: number[]
   itemFullIds: number[]
@@ -204,7 +252,13 @@ function relationScore(
   )
 }
 
-export function loadChapterEntityMentionCatalogs(novelId: number): ChapterEntityMentionCatalogs {
+export function loadChapterEntityMentionCatalogs(
+  novelId: number,
+  options: ChapterEntityMentionCatalogLoadOptions = {},
+): ChapterEntityMentionCatalogs {
+  const cached = getCachedEntityCatalog(novelId, options.contextVersion)
+  if (cached) return cached
+
   const db = getDb()
   const characterRows = db.select({
     id: characters.id,
@@ -283,7 +337,7 @@ export function loadChapterEntityMentionCatalogs(novelId: number): ChapterEntity
     .orderBy(asc(characterRelations.id))
     .all()
 
-  return {
+  const catalogs = {
     characters: characterRows,
     items: itemRows,
     locations: locationRows,
@@ -292,6 +346,8 @@ export function loadChapterEntityMentionCatalogs(novelId: number): ChapterEntity
     maxMapDepth: Math.max(1, ...locationRows.map((row) => Number(row.level || 0))),
     speciesCount: new Set(characterRows.map((row) => row.species).filter(Boolean)).size,
   }
+  cacheEntityCatalog(novelId, options.contextVersion, catalogs)
+  return catalogs
 }
 
 export function resolveChapterEntityContextProjection(

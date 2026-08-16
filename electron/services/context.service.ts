@@ -3393,7 +3393,9 @@ export async function collectChapterContextRawData(
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const entityCatalogs = loadChapterEntityMentionCatalogs(novelId)
+  const entityCatalogs = loadChapterEntityMentionCatalogs(novelId, {
+    contextVersion: novel.contextVersion || 1,
+  })
   const profileThreadRows = loadStoryProfileThreadRows(novel)
   const profile = buildStoryProfileFromSourceRows(novel, entityCatalogs.characters, profileThreadRows)
   const chapterCount = getNovelChapterCount(novelId)

@@ -84,12 +84,48 @@ const ASSET_FRESHNESS_LABELS: Record<AssetFreshnessKey, string> = {
   timeline: '时间轴',
 }
 
-function stringifyStringArray(values: string[]): string {
-  return JSON.stringify([...new Set(values.map((item) => item.trim()).filter(Boolean))])
-}
-
-function mergeReasons(raw: string | null | undefined, reasons: string[]): string {
-  return stringifyStringArray([...parseStringArray(raw), ...reasons])
+function markChapterRowsStale(
+  sqlite: ReturnType<typeof getSqlite>,
+  input: {
+    novelId: number
+    reasons: string[]
+    updatedAt: string
+    afterChapterNum?: number
+  },
+): void {
+  const rangeClause = typeof input.afterChapterNum === 'number' ? ' AND chapter_num > ?' : ''
+  sqlite.prepare(`
+    UPDATE chapters AS target
+    SET stale_reason_json = (
+      SELECT COALESCE(json_group_array(reason), '[]')
+      FROM (
+        SELECT reason, MIN(sort_order) AS first_order
+        FROM (
+          SELECT TRIM(CAST(value AS TEXT)) AS reason, CAST(key AS INTEGER) AS sort_order
+          FROM json_each(
+            CASE
+              WHEN json_valid(COALESCE(target.stale_reason_json, '')) THEN target.stale_reason_json
+              ELSE '[]'
+            END
+          )
+          WHERE type = 'text'
+          UNION ALL
+          SELECT TRIM(CAST(value AS TEXT)) AS reason, 1000000 + CAST(key AS INTEGER) AS sort_order
+          FROM json_each(?)
+          WHERE type = 'text'
+        )
+        WHERE reason <> ''
+        GROUP BY reason
+        ORDER BY first_order
+      )
+    ), updated_at = ?
+    WHERE novel_id = ?${rangeClause}
+  `).run(
+    JSON.stringify(input.reasons),
+    input.updatedAt,
+    input.novelId,
+    ...(typeof input.afterChapterNum === 'number' ? [input.afterChapterNum] : []),
+  )
 }
 
 function getChecklistCount(items: ChapterPublishCheckItem[], status: ChapterGateLevel): number {
@@ -291,13 +327,7 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
     }).where(eq(novels.id, novelId)).run()
     if (!updateResult.changes) throwUserFacingError('novel.notFound')
 
-    const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
-    for (const chapter of chapterRows) {
-      db.update(chapters).set({
-        staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
-        updatedAt: now,
-      }).where(eq(chapters.id, chapter.id)).run()
-    }
+    markChapterRowsStale(sqlite, { novelId, reasons: normalizedReasons, updatedAt: now })
 
     markStoryMemoryCheckpointsDirty(novelId, now)
     const updatedNovel = db.select({ contextVersion: novels.contextVersion })
@@ -332,27 +362,21 @@ export function markSubsequentChaptersStale(
   chapterNum: number,
   reasons: string | string[],
 ): void {
-  const db = getDb()
   const normalizedReasons = translateContextChangeReasons(Array.isArray(reasons) ? reasons : [reasons])
   if (normalizedReasons.length === 0) return
 
   const now = new Date().toISOString()
-  const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-    .filter((chapter) => chapter.chapterNum > chapterNum)
-
-  if (chapterRows.length === 0) return
-
-  getSqlite().transaction(() => {
-    for (const chapter of chapterRows) {
-      db.update(chapters).set({
-        staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
-        updatedAt: now,
-      }).where(eq(chapters.id, chapter.id)).run()
-    }
-  })()
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    markChapterRowsStale(sqlite, {
+      novelId,
+      reasons: normalizedReasons,
+      updatedAt: now,
+      afterChapterNum: chapterNum,
+    })
+  })
+  if (sqlite.inTransaction || typeof transaction.immediate !== 'function') transaction()
+  else transaction.immediate()
 }
 
 export function markChapterContextCurrent(chapterId: number): number {

@@ -156,6 +156,7 @@ import {
   selectRecentContextRows,
 } from './context.service'
 import { getDb, getSqlite } from '../database/db'
+import { clearChapterEntityMentionCatalogCache } from './context-entity-projection'
 import {
   antiAiRuleHits,
   chapterGateRuns,
@@ -389,6 +390,7 @@ function createTableAwareDbMock(
 
 describe('allocateChapterContext', () => {
   beforeEach(() => {
+    clearChapterEntityMentionCatalogCache()
     vi.mocked(getDb).mockReset()
     vi.mocked(getSqlite).mockReset()
     vi.mocked(getSqlite).mockReturnValue({
@@ -1153,11 +1155,11 @@ describe('allocateChapterContext', () => {
       expect(raw.contextParts.mapSummary).toContain('地点45')
       expect(raw.contextParts.worldRules).toContain('势力12')
     }
-    expect(tableReadCounts.get(characters)).toBe(4)
-    expect(tableReadCounts.get(storyItems)).toBe(4)
-    expect(tableReadCounts.get(worldMap)).toBe(4)
-    expect(tableReadCounts.get(factions)).toBe(4)
-    expect(tableReadCounts.get(characterRelations)).toBe(4)
+    expect(tableReadCounts.get(characters)).toBe(3)
+    expect(tableReadCounts.get(storyItems)).toBe(3)
+    expect(tableReadCounts.get(worldMap)).toBe(3)
+    expect(tableReadCounts.get(factions)).toBe(3)
+    expect(tableReadCounts.get(characterRelations)).toBe(3)
     expect(tableReadCounts.get(storyThreads)).toBe(2)
     expect(createFactionCatalog).toHaveBeenCalledTimes(2)
     expect(listForeshadowLedgerByIds).toHaveBeenCalledTimes(2)

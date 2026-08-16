@@ -328,9 +328,13 @@ export function createRewriterStreamAttemptRunner(input: {
         })
         return { taskId, result }
       } catch (error) {
-        if (isTransientModelNetworkError(error) && receivedOutput.trim().length < 120 && networkRetryCount < 1) {
+        if (isTransientModelNetworkError(error) && networkRetryCount < 1) {
           networkRetryCount += 1
-          updateTask(taskId, { outputText: '流式连接在返回可用正文前中断，已自动新建 Rewriter 任务重试一次。' })
+          updateTask(taskId, {
+            outputText: receivedOutput.trim()
+              ? '流式连接中断，未提交不完整输出；已自动新建 Rewriter 任务重试一次。'
+              : '流式连接在返回正文前中断，已自动新建 Rewriter 任务重试一次。',
+          })
           taskId = await startTask(messages, `${detail}（网络中断自动重试 ${networkRetryCount}/1）`)
           continue
         }

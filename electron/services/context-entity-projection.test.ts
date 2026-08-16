@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../database/db', () => ({
+  getDb: vi.fn(),
+}))
+
+import { getDb } from '../database/db'
+import { characterRelations, characters, factions, storyItems, worldMap } from '../database/schema'
 import {
   buildCharacterMentionCandidates,
   buildFactionMentionCandidates,
@@ -8,9 +15,16 @@ import {
   collectRelationMentionedCharacterNames,
 } from './context-entity-mentions'
 import {
+  clearChapterEntityMentionCatalogCache,
+  loadChapterEntityMentionCatalogs,
   resolveChapterEntityContextProjection,
   type ChapterEntityMentionCatalogs,
 } from './context-entity-projection'
+
+beforeEach(() => {
+  clearChapterEntityMentionCatalogCache()
+  vi.mocked(getDb).mockReset()
+})
 
 function createCatalogs(): ChapterEntityMentionCatalogs {
   const characters = Array.from({ length: 80 }, (_, index) => ({
@@ -163,4 +177,32 @@ describe('chapter entity context projection', () => {
       expect(projection.relationFullIds).toHaveLength(8)
     },
   )
+
+  it('reuses a bounded catalog snapshot until the novel context version changes', () => {
+    const rows = new Map<unknown, unknown[]>([
+      [characters, createCatalogs().characters.slice(0, 2)],
+      [storyItems, createCatalogs().items.slice(0, 2)],
+      [worldMap, createCatalogs().locations.slice(0, 2)],
+      [factions, createCatalogs().factions.slice(0, 2)],
+      [characterRelations, createCatalogs().relations.slice(0, 2)],
+    ])
+    const select = vi.fn(() => ({
+      from: vi.fn((table: unknown) => ({
+        where: vi.fn(() => ({
+          orderBy: vi.fn(() => ({
+            all: vi.fn(() => rows.get(table) || []),
+          })),
+        })),
+      })),
+    }))
+    vi.mocked(getDb).mockReturnValue({ select } as never)
+
+    const first = loadChapterEntityMentionCatalogs(1, { contextVersion: 7 })
+    const cached = loadChapterEntityMentionCatalogs(1, { contextVersion: 7 })
+    const refreshed = loadChapterEntityMentionCatalogs(1, { contextVersion: 8 })
+
+    expect(cached).toBe(first)
+    expect(refreshed).not.toBe(first)
+    expect(select).toHaveBeenCalledTimes(10)
+  })
 })
