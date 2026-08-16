@@ -135,7 +135,8 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 
 export default function PremisePage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const pendingResultKey = useMemo(() => buildAiResultKey('premise_generate', novelId), [novelId])
   const [form] = Form.useForm<PremiseFormValues>()

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tabs, Tag, message } from 'antd'
 import {
   AppstoreAddOutlined,
@@ -331,7 +332,7 @@ function pickCurrentItemKind(
 
 export default function ItemsWorkspace({ novelId }: Props) {
   const [searchParams] = useSearchParams()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
   const [form] = Form.useForm<ItemFormValues>()
@@ -353,7 +354,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [listMode, setListMode] = useState<'template' | 'instance'>('template')
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false)
   const routeFocusRef = useRef<number | null>(null)
@@ -1377,9 +1378,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
                 <Input.Search
                   allowClear
                   placeholder="搜索名称、分类、剧情作用"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  onSearch={setKeyword}
+                  value={keywordInput}
+                  onChange={(event) => setKeywordInput(event.target.value)}
+                  onSearch={setKeywordInput}
                 />
                 <Select
                   value={listMode}

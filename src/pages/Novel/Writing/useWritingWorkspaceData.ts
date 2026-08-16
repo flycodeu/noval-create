@@ -28,7 +28,11 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
     onEmptyWorkspace,
     refreshWorkspaceMetadata,
   } = options
-  const { chapters, currentChapterId, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
+  const chapters = useNovelStore((state) => state.chapters)
+  const currentChapterId = useNovelStore((state) => state.currentChapterId)
+  const setChapters = useNovelStore((state) => state.setChapters)
+  const setCurrentChapterId = useNovelStore((state) => state.setCurrentChapterId)
+  const updateChapter = useNovelStore((state) => state.updateChapter)
   const trackerRef = useRef(createWritingWorkspaceRequestTracker())
   const routeChapterFocusRef = useRef<number | null>(null)
   const routeChapterRequestRef = useRef(0)

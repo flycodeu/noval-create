@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, List, Modal, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -63,14 +64,14 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function SceneTemplatesPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
   const [form] = Form.useForm<SceneTemplateFormValues>()
   const [items, setItems] = useState<SceneTemplate[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [stats, setStats] = useState({ total: 0, builtinCount: 0, customCount: 0, genreScopedCount: 0 })
   const [workflowStats, setWorkflowStats] = useState({ outlineCount: 0, chapterCount: 0 })
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [scope, setScope] = useState<'all' | 'builtin' | 'custom'>('all')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -256,7 +257,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       <WorkspacePanel title="模板清单">
         <div className="novel-resource-workspace__layout">
           <div className="novel-resource-workspace__sidebar">
-            <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模板名、描述或情绪弧线" allowClear />
+            <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索模板名、描述或情绪弧线" allowClear />
             <Select value={scope} onChange={setScope} options={[
               { value: 'all', label: '全部' },
               { value: 'builtin', label: '仅内置' },

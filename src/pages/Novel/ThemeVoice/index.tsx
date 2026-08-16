@@ -243,7 +243,8 @@ function mergeGeneratedValues(
 
 export default function ThemeVoicePage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ThemeVoiceFormValues>()
   const [saving, setSaving] = useState(false)

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
   Button,
   Col,
   Empty,
@@ -121,7 +120,8 @@ function getWizardStepItems(launchMode: NovelLaunchMode) {
 
 export default function NovelList() {
   const navigate = useNavigate()
-  const { novels, setNovels } = useNovelStore()
+  const novels = useNovelStore((state) => state.novels)
+  const setNovels = useNovelStore((state) => state.setNovels)
   const loadVersionRef = React.useRef(0)
   const [loading, setLoading] = useState(true)
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<number, WorkspaceSnapshot>>({})

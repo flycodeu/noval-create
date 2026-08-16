@@ -98,6 +98,13 @@ function normalizePlatform(value: unknown): PlatformFormat {
     : 'generic'
 }
 
+function normalizeExportFormat(value: unknown): ExportFormat {
+  if (value === 'txt' || value === 'md' || value === 'json' || value === 'docx' || value === 'epub') {
+    return value
+  }
+  throwUserFacingError('common.invalidParameter', { parameter: 'format' })
+}
+
 function normalizePlatformScope(value: unknown): PlatformFormatScope {
   return value === 'currentChapter' || value === 'selectedChapters' || value === 'all'
     ? value
@@ -637,6 +644,7 @@ async function createExportDirectory(baseDir: string, novelTitle: string, format
 
 export async function exportNovel(novelId: number, format: ExportFormat): Promise<string> {
   const db = getDb()
+  const normalizedFormat = normalizeExportFormat(format)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
@@ -656,12 +664,12 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
 
   if (!splitExport) {
     const { filePath } = await dialog.showSaveDialog({
-      defaultPath: path.join(app.getPath('documents'), `${defaultName}.${format}`),
-      filters: [{ name: format === 'epub' ? 'EPUB电子书' : format.toUpperCase(), extensions: [format] }],
+      defaultPath: path.join(app.getPath('documents'), `${defaultName}.${normalizedFormat}`),
+      filters: [{ name: normalizedFormat === 'epub' ? 'EPUB电子书' : normalizedFormat.toUpperCase(), extensions: [normalizedFormat] }],
     })
 
     if (!filePath) throwUserFacingError('common.userCancelled')
-    await writeSingleExport(filePath, format, novel, chapterList)
+    await writeSingleExport(filePath, normalizedFormat, novel, chapterList)
     return filePath
   }
 
@@ -673,11 +681,11 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
   const selectedDir = filePaths[0]
   if (!selectedDir) throwUserFacingError('common.userCancelled')
 
-  const outputDir = await createExportDirectory(selectedDir, defaultName, format)
+  const outputDir = await createExportDirectory(selectedDir, defaultName, normalizedFormat)
   const chunks = buildExportChunks(chapterList, volumeRows)
 
   for (const chunk of chunks) {
-    const outputPath = path.join(outputDir, `${chunk.fileStem}.${format}`)
+    const outputPath = path.join(outputDir, `${chunk.fileStem}.${normalizedFormat}`)
     await writeChunkExport(outputPath, format, novel, chunk)
   }
 

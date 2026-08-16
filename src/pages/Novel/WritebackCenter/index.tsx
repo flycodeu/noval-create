@@ -165,7 +165,7 @@ function JsonDiffViewer({ beforeJson, afterJson }: { beforeJson?: string | null,
 }
 
 export default function WritebackCenterPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)

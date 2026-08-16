@@ -89,7 +89,7 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 export default function CharacterArcCenterPage({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [dashboard, setDashboard] = useState<CharacterArcDashboard | null>(null)

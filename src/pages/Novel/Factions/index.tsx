@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, InputNumber, List, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -153,7 +154,7 @@ function buildFormValues(item?: Faction | null): FactionFormValues {
 
 export default function FactionsPage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<FactionFormValues>()
   const [generateForm] = Form.useForm<FactionBatchGenerationOptions>()
@@ -164,7 +165,7 @@ export default function FactionsPage({ novelId }: Props) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [graphLoading, setGraphLoading] = useState(false)
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [generateOpen, setGenerateOpen] = useState(false)
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
   const [mapOptions, setMapOptions] = useState<MapNodeSummary[]>([])
@@ -540,7 +541,7 @@ export default function FactionsPage({ novelId }: Props) {
 
       <div className="faction-workspace">
         <WorkspacePanel className="faction-workspace__sidebar" title="势力列表">
-          <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
+          <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
           <List
             loading={loading}
             size="small"

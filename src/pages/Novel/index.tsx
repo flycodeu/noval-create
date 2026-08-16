@@ -1,4 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Navigate, useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
 import { Alert, Button, Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
@@ -8,7 +9,6 @@ import { RobotOutlined } from '@ant-design/icons'
 import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
 import ProjectTopbar from '../../components/novel/layout/ProjectTopbar'
 import { useNovelStore } from '../../stores/novel.store'
-import { useWorkspaceStore } from '../../stores/workspace.store'
 import {
   ALL_WORKSPACE_ROUTE_KEYS,
   buildWorkspaceRoute,
@@ -190,11 +190,14 @@ export default function NovelRouter() {
     chapters,
     currentChapterId,
     currentNovel,
-    setChapters,
-    setCurrentNovel,
-    resetWorkspace,
-  } = useNovelStore()
-  const { mode, setMode } = useWorkspaceStore()
+  } = useNovelStore(useShallow((state) => ({
+    chapters: state.chapters,
+    currentChapterId: state.currentChapterId,
+    currentNovel: state.currentNovel,
+  })))
+  const setChapters = useNovelStore((state) => state.setChapters)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
+  const resetWorkspace = useNovelStore((state) => state.resetWorkspace)
   const saveHandlerRef = useRef<(() => void) | null>(null)
   const clearHandlerRef = useRef<(() => void) | null>(null)
   const escapeHandlerRef = useRef<(() => void) | null>(null)
@@ -708,12 +711,6 @@ export default function NovelRouter() {
       return haystack.includes(normalized)
     })
   }, [chapterJumpKeyword, chapters])
-
-  useEffect(() => {
-    if (mode !== 'pro') {
-      setMode('pro')
-    }
-  }, [mode, setMode])
 
   useEffect(() => {
     writeBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)

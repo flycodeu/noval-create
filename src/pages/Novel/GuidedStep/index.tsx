@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Space, message } from 'antd'
 import {
   AppstoreOutlined,
@@ -195,7 +195,8 @@ const BASICS_AI_TOOLS = [
 
 export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { setMode } = useWorkspaceStore()
   const [form] = Form.useForm<BasicsFormValues>()
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)

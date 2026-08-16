@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, List, Modal, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -78,7 +79,7 @@ function buildFormValues(item?: GlossaryEntry | null): GlossaryFormValues {
 }
 
 export default function GlossaryPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
   const [form] = Form.useForm<GlossaryFormValues>()
   const [items, setItems] = useState<GlossaryEntry[]>([])
@@ -89,7 +90,7 @@ export default function GlossaryPage({ novelId }: Props) {
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [usageReport, setUsageReport] = useState<GlossaryUsageReport | null>(null)
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [canonicalFilter, setCanonicalFilter] = useState<'all' | 'active' | 'deprecated'>('all')
   const refreshRequestRef = useRef(0)
   const creatingRef = useRef(false)
@@ -321,7 +322,7 @@ export default function GlossaryPage({ novelId }: Props) {
       <WorkspacePanel title="词典清单">
         <div className="novel-resource-workspace__layout">
           <div className="novel-resource-workspace__sidebar">
-            <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索术语、定义或别名" allowClear />
+            <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索术语、定义或别名" allowClear />
             <Select value={canonicalFilter} onChange={setCanonicalFilter} options={[
               { value: 'all', label: '全部' },
               { value: 'active', label: '仅规范用法' },

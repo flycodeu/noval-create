@@ -222,7 +222,7 @@ function normalizeFactStatus(value: unknown, fallback: StoryFact['status'] = 'in
 }
 
 export default function InfoGapBoardPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerSaveHandler, registerEscapeHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryFactFormValues>()
   const [facts, setFacts] = useState<StoryFact[]>([])

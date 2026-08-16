@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Modal } from 'antd'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
 import { type AiExecutionMode } from '../../../shared/ai-execution'
@@ -69,7 +69,9 @@ const getPublishCheckAlertType = (check: ChapterPublishCheck | null) => {
 export default function Writing({ novelId }: Props) {
   const { activeWritingRoute, creativeStageId, navigate, navigateToWritingRoute, routeChapterId, setCreativeStageId } = useWritingRouteState(novelId)
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
-  const { currentNovel, setCurrentNovel, updateChapter } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
+  const updateChapter = useNovelStore((state) => state.updateChapter)
   const chapterEditor = useChapterEditor()
   const {
     editorRef,

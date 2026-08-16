@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, ArrowRightOutlined } from '@ant-design/icons'
@@ -107,7 +107,7 @@ function buildIssueSummary(report: NovelConsistencyReport | null) {
 export default function RevisionCenterPage({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<RevisionTaskFormValues>()
   const [tasks, setTasks] = useState<RevisionTask[]>([])
   const [taskTotal, setTaskTotal] = useState(0)

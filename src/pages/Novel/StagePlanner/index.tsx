@@ -125,7 +125,7 @@ type StageQualityReportHistoryEntry = StageQualityReportView & {
 }
 
 export default function StagePlanner({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [createForm] = Form.useForm<CreativeStageCreateInput>()
   const [assetForm] = Form.useForm<CreativeStageAssetInput>()
   const [handoffForm] = Form.useForm<CreativeStageHandoffForm>()

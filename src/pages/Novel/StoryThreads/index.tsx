@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
@@ -274,7 +274,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const listHeight = useResponsivePanelHeight({ minHeight: 400, maxHeight: 720, fallback: 460 })
   const [editorForm] = Form.useForm<StoryThreadFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()

@@ -90,7 +90,7 @@ export function useTimelineWorkspace(
   const segmentsRequestRef = useRef(0)
   const saveActionRef = useRef(false)
 
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<TimelineFormValues>()
   const [generateForm] = Form.useForm<TimelineGenerateValues>()
 

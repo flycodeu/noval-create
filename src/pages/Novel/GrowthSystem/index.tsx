@@ -86,7 +86,7 @@ const EMPTY_GROWTH_SUMMARY: GrowthSystemDashboard['summary'] = {
 }
 
 export default function GrowthSystemPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [trackForm] = Form.useForm<TrackValues>()
   const [poolForm] = Form.useForm<PoolValues>()

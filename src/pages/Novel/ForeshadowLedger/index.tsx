@@ -175,7 +175,7 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function ForeshadowLedgerPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ForeshadowFormValues>()
 

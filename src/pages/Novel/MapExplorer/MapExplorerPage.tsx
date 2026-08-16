@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
@@ -170,7 +171,7 @@ function TaskStrip({
 export default function MapExplorerPage({ novelId }: Props) {
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [detailForm] = Form.useForm<DetailFormValues>()
   const [batchForm] = Form.useForm()
   const [relationForm] = Form.useForm<RelationFormValues>()
@@ -195,7 +196,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [branchPath, setBranchPath] = useState<MapNodeSummary[]>([])
   const [rootPage, setRootPage] = useState(1)
   const [branchPage, setBranchPage] = useState(1)
-  const [searchKeyword, setSearchKeyword] = useState('')
+  const [searchKeywordInput, setSearchKeywordInput, searchKeyword] = useDebouncedSearch('')
   const [batchOpen, setBatchOpen] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('list')
   const [graphLoading, setGraphLoading] = useState(false)
@@ -434,7 +435,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     setBranchPath([])
     setRootPage(1)
     setBranchPage(1)
-    setSearchKeyword('')
+    setSearchKeywordInput('')
     setBatchOpen(false)
     setWorkspaceMode('list')
     setGraphData(EMPTY_GRAPH)
@@ -448,7 +449,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     setAutoStatus(EMPTY_AUTO_STATUS)
     selectNode(null)
     resetBatchForm()
-  }, [resetBatchForm, selectNode])
+  }, [resetBatchForm, selectNode, setSearchKeywordInput])
 
   const refreshVisible = useCallback(async (options: RefreshVisibleOptions = {}) => {
     const requestId = ++visibleRequestRef.current
@@ -1535,7 +1536,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             extra={(
               <div className="novel-filter-bar">
                 <div className="novel-filter-bar__row">
-                  <Input.Search allowClear placeholder="搜索名称、类型、简介" value={searchKeyword} onChange={(event) => setSearchKeyword(event.target.value)} onSearch={setSearchKeyword} />
+                  <Input.Search allowClear placeholder="搜索名称、类型、简介" value={searchKeywordInput} onChange={(event) => setSearchKeywordInput(event.target.value)} onSearch={setSearchKeywordInput} />
                 </div>
                 <div className="novel-filter-bar__summary">{isSearching ? `搜索结果 ${rootData.total} 条` : `根节点共 ${rootData.total} 个`}</div>
               </div>

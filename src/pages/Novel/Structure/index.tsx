@@ -139,7 +139,7 @@ function clampPlannerValues(
 
 export default function StructurePage({ novelId }: { novelId: number }) {
   const workspace = useStructureWorkspace(novelId)
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [plannerForm] = Form.useForm<StructurePlannerFormValues>()
   const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])

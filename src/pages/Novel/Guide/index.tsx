@@ -125,7 +125,8 @@ function getFreshnessTags(labels: string[], visibleCount = 2) {
 
 export default function GuidePage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)

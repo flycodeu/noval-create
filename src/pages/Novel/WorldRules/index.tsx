@@ -150,7 +150,8 @@ function getProgressType(progress: WorldRulesGenerationProgressEvent | null): 'i
 }
 
 export default function WorldRules({ novelId }: Props) {
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<GenreWorldRules>()
   const [saving, setSaving] = useState(false)

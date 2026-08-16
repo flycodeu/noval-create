@@ -108,7 +108,7 @@ function getVolumeDesignCompletion(design?: VolumeDesignAsset | null): number {
 
 export default function VolumeDesignPage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<VolumeDesignFormValues>()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)

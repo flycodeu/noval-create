@@ -37,8 +37,8 @@ export function initDb(): AppDatabase {
   ensureLegacyElectronDatabaseCopied(userDataPath, dbPath)
 
   _sqlite = new Database(dbPath)
-  _sqlite.pragma('journal_mode = WAL')
   _sqlite.pragma('busy_timeout = 5000')
+  _sqlite.pragma('journal_mode = WAL')
   _sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(_sqlite, { schema })
@@ -2866,17 +2866,20 @@ function runMigrationStep(
   migrationId: string,
   execute: () => void,
 ) {
-  const existing = sqlite.prepare('SELECT id FROM _schema_migrations WHERE id = ?').get(migrationId) as { id: string } | undefined
-  if (existing) return
-
+  // 存在性检查必须与写入处于同一事务，并用 BEGIN IMMEDIATE 抢占写锁，
+  // 否则主进程与 local-web-backend 并发 initDb 时会同时读到"未应用"，
+  // 随后一方 ALTER TABLE ADD COLUMN（非幂等）抛 duplicate column。
   const transaction = sqlite.transaction(() => {
+    const existing = sqlite.prepare('SELECT id FROM _schema_migrations WHERE id = ?').get(migrationId) as { id: string } | undefined
+    if (existing) return
+
     execute()
     sqlite.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)').run(
       migrationId,
       new Date().toISOString(),
     )
   })
-  transaction()
+  transaction.immediate()
 }
 
 function ensureColumn(

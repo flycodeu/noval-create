@@ -132,7 +132,7 @@ function HistogramBar({ histogram }: { histogram: NonNullable<FingerprintCardSta
 }
 
 export default function StyleLabPage({ novelId }: Props) {
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [fingerprints, setFingerprints] = useState<StyleFingerprintRecord[]>([])
   const [resolved, setResolved] = useState<ResolvedStyleFingerprintPayload | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])

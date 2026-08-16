@@ -118,7 +118,7 @@ function buildChapterFormValues(contract?: ChapterContractAsset | null): Chapter
 export default function ContractsPage({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { currentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<ChapterContractFormValues>()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)

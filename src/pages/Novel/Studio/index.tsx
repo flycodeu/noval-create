@@ -78,7 +78,8 @@ function activityTone(log: OperationLog) {
 export default function StudioPage({ novelId }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)

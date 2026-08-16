@@ -135,7 +135,8 @@ function mergeGeneratedValues(
 
 export default function ProjectBriefPage({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ProjectBriefFormValues>()
   const [saving, setSaving] = useState(false)

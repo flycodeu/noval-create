@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
+import { useDebouncedCallback } from '../../../hooks/useDebouncedCallback'
 import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
@@ -324,7 +326,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { currentNovel, setCharacters } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<CharacterFormValues>()
   const [batchForm] = Form.useForm<CharacterBatchFormValues>()
   const [protagonistForm] = Form.useForm<ProtagonistFormValues>()
@@ -367,7 +369,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [relationSaving, setRelationSaving] = useState(false)
   const [relationCharacterOptions, setRelationCharacterOptions] = useState<Character[]>([])
   const [page, setPage] = useState(1)
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [roleFilter, setRoleFilter] = useState<Character['roleType'] | 'all'>('all')
   const [speciesFilter, setSpeciesFilter] = useState<string>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all')
@@ -470,6 +472,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     const rows = await window.electron.item.search(novelId, value, 'instance', 24)
     setItemOptions((prev) => mergeById(rows, prev))
   }, [novelId])
+  const debouncedSearchItems = useDebouncedCallback(searchItems)
 
   const hydrateItemOptions = useCallback(async (context?: CharacterDetailContext) => {
     const baseItems = await window.electron.item.search(novelId, '', 'instance', 24)
@@ -484,6 +487,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     )
     setRelationCharacterOptions(merged.filter((character) => character.id !== selectedCharacter?.id))
   }, [detailContext.relatedCharacters, novelId, pageData.items, selectedCharacter?.id])
+  const debouncedSearchRelationCharacters = useDebouncedCallback(searchRelationCharacters)
 
   const loadCharacterDetail = useCallback(async (characterId: number) => {
     const requestId = ++detailRequestRef.current
@@ -551,7 +555,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
       setPageData(list)
       setStats(summary)
       setFilterOptions(nextFilters)
-      setCharacters(list.items)
 
       if (typeof preferredId !== 'number' && detailRequestRef.current !== detailRequestAtStart) return
       if (typeof preferredId !== 'number' && options.preserveCreating && creatingRef.current) return
@@ -580,7 +583,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     } finally {
       if (pageRequestRef.current === requestId) setLoading(false)
     }
-  }, [buildQuery, form, hydrateItemOptions, loadCharacterDetail, novelId, setCharacters])
+  }, [buildQuery, form, hydrateItemOptions, loadCharacterDetail, novelId])
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   useEffect(() => { creatingRef.current = creating }, [creating])
@@ -1139,7 +1142,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
               extra={(
                 <div className="novel-filter-bar">
                   <div className="novel-filter-bar__row">
-                    <Input.Search allowClear placeholder="搜索姓名、目标、职业或矛盾" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} />
+                    <Input.Search allowClear placeholder="搜索姓名、目标、职业或矛盾" value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} onSearch={setKeywordInput} />
                   </div>
                   <div className="novel-filter-bar__row">
                     <Select value={roleFilter} options={[{ value: 'all', label: '全部角色' }, ...ROLE_OPTIONS]} onChange={setRoleFilter} />
@@ -1354,10 +1357,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 <Form.Item name="contextHooks" label="主线挂点"><Select mode="tags" allowClear placeholder="例如：掌握补给线、知道旧案真相、被关键势力追杀" /></Form.Item>
                 <div className="novel-grid novel-grid--2">
                   <Form.Item name="ownedItemIds" label="当前持有物品">
-                    <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void searchItems(value)} placeholder="绑定当前持有或长期占有的物品" />
+                    <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void debouncedSearchItems(value)} placeholder="绑定当前持有或长期占有的物品" />
                   </Form.Item>
                   <Form.Item name="linkedItemIds" label="剧情关联物品">
-                    <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void searchItems(value)} placeholder="绑定争夺物、证据、信物、装备等" />
+                    <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void debouncedSearchItems(value)} placeholder="绑定争夺物、证据、信物、装备等" />
                   </Form.Item>
                 </div>
                 <Form.Item name="background" label="背景经历"><Input.TextArea rows={6} /></Form.Item>
@@ -1467,7 +1470,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
               filterOption={false}
               options={relationCharacterSelectOptions}
               onFocus={() => { void searchRelationCharacters('') }}
-              onSearch={(value) => { void searchRelationCharacters(value) }}
+              onSearch={(value) => { void debouncedSearchRelationCharacters(value) }}
               placeholder="选择当前角色要建立关系的人物"
             />
           </Form.Item>
@@ -1725,7 +1728,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
               allowClear
               options={itemPromptOptions}
               onFocus={() => void searchItems('')}
-              onSearch={(value) => void searchItems(value)}
+              onSearch={(value) => void debouncedSearchItems(value)}
               showSearch
               filterOption={false}
             />

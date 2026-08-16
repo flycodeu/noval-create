@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Tabs, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
@@ -222,7 +222,8 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 
 export default function CoreSettings({ novelId }: Props) {
   const navigate = useNavigate()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const currentNovel = useNovelStore((state) => state.currentNovel)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryDesignFormValues>()
   const [subplots, setSubplots] = useState<SubPlot[]>([])

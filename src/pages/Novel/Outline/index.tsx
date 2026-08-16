@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined, SwapOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
@@ -126,7 +126,9 @@ function buildPhaseTargetsOverrideJson(values: ArcFormValues): string | null {
 }
 
 export default function Outline({ novelId }: Props) {
-  const { chapters, setChapters, currentNovel } = useNovelStore()
+  const chapters = useNovelStore((state) => state.chapters)
+  const setChapters = useNovelStore((state) => state.setChapters)
+  const currentNovel = useNovelStore((state) => state.currentNovel)
   const {
     mutationToken,
     notifyWorkspaceMutation,

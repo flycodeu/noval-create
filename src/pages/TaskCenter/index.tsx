@@ -464,7 +464,9 @@ export default function TaskCenter() {
     try {
       await window.electron.task.retry(taskId)
       await loadTasks({ silent: true })
-    } catch {}
+    } catch (error) {
+      message.error(getErrorMessage(error, 'taskCenter.retryFailed'))
+    }
   }
 
   const handleResume = async (task: Task, recoveryAction?: ReturnType<typeof buildTaskRecoveryAction> | null) => {
