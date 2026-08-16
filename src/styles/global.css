@@ -266,11 +266,11 @@ html, body, #root {
 }
 
 .workspace-grid-auto-220 {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
 }
 
 .workspace-grid-auto-280 {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
 }
 
 .workspace-field-heading {
@@ -12747,12 +12747,6 @@ html[data-runtime="web"] .project-topbar__main-row {
 
   .app-layout .novel-theme-voice-page__section .guided-step__field-card--full {
     grid-column: 1 / -1;
-  }
-
-  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(5),
-  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(13),
-  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(14) {
-    grid-column: auto;
   }
 
   .app-layout .chapter-console-page {

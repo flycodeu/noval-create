@@ -32,6 +32,7 @@ import {
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -457,53 +458,91 @@ export default function ProjectBriefPage({ novelId }: Props) {
                   }}
                 />
               </Space>
-              <div className="guided-step__field-grid">
-                <div className="guided-step__field-card guided-step__field-card--compact">
+              <div className="guided-step__field-grid project-brief__grid">
+                <div className="guided-step__field-card guided-step__field-card--compact project-brief__platform-select-card">
                   <Form.Item name="platformMode" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
                     <Select options={PLATFORM_OPTIONS} placeholder="选择平台，后续设计会套用对应策略" />
                   </Form.Item>
                 </div>
-                {selectedPlatform ? (
-                  <div className="guided-step__field-card guided-step__field-card--full">
-                    <div className="workspace-stack-10">
-                      <Space wrap>
-                        <strong className="workspace-card-section-title">{selectedPlatform.label}·平台设计约束</strong>
-                        <Tag color="gold">将同步到后续生成与质量门</Tag>
-                      </Space>
-                      <div className="workspace-muted-text">{selectedPlatform.positioning}</div>
-                      <div className="workspace-grid-auto-220">
-                        <div><strong>开局</strong><div className="workspace-muted-text">{selectedPlatform.openingFocus}</div></div>
-                        <div><strong>节奏</strong><div className="workspace-muted-text">{selectedPlatform.rhythmFocus}</div></div>
-                        <div><strong>包装</strong><div className="workspace-muted-text">{selectedPlatform.packagingFocus}</div></div>
-                      </div>
-                      <div className="workspace-muted-text">质量门：{selectedPlatform.qualityFocus.join('；')}</div>
-                      <div className="workspace-muted-text">主要风险：{selectedPlatform.riskFocus.join('；')}</div>
-                    </div>
-                  </div>
-                ) : null}
-                <div className="guided-step__field-card guided-step__field-card--compact">
+                <div className="guided-step__field-card guided-step__field-card--compact project-brief__track-card">
                   <Form.Item name="targetAudience" label="目标赛道" rules={[{ required: true, message: '请写清目标赛道' }]}>
                     <Input placeholder="例如：女频悬疑成长 / 男频末世群像" />
                   </Form.Item>
                 </div>
+
+                {selectedPlatform ? (
+                  <div className="guided-step__field-card guided-step__field-card--full project-brief__platform-card">
+                    <div className="project-brief__platform-header">
+                      <div className="project-brief__platform-header-row">
+                        <span className="project-brief__platform-badge">平台设计约束</span>
+                        <strong className="project-brief__platform-title">{selectedPlatform.label}</strong>
+                        <Tag color="gold">已绑定后续生成与质量门</Tag>
+                      </div>
+                      <div className="project-brief__platform-quote">
+                        {selectedPlatform.positioning}
+                      </div>
+                    </div>
+
+                    <div className="project-brief__platform-subgrid">
+                      <div className="project-brief__platform-subcard">
+                        <div className="project-brief__platform-subcard-head">
+                          <span className="project-brief__platform-pill project-brief__platform-pill--opening">开局设计</span>
+                        </div>
+                        <div className="project-brief__platform-subcard-text">{selectedPlatform.openingFocus}</div>
+                      </div>
+                      <div className="project-brief__platform-subcard">
+                        <div className="project-brief__platform-subcard-head">
+                          <span className="project-brief__platform-pill project-brief__platform-pill--rhythm">连载节奏</span>
+                        </div>
+                        <div className="project-brief__platform-subcard-text">{selectedPlatform.rhythmFocus}</div>
+                      </div>
+                      <div className="project-brief__platform-subcard">
+                        <div className="project-brief__platform-subcard-head">
+                          <span className="project-brief__platform-pill project-brief__platform-pill--packaging">包装建议</span>
+                        </div>
+                        <div className="project-brief__platform-subcard-text">{selectedPlatform.packagingFocus}</div>
+                      </div>
+                    </div>
+
+                    <div className="project-brief__platform-footer">
+                      <div className="project-brief__platform-meta-row">
+                        <span className="project-brief__platform-meta-label">质量门准则</span>
+                        <div className="project-brief__platform-tags">
+                          {selectedPlatform.qualityFocus.map((item, idx) => (
+                            <Tag key={idx} color="blue">{item}</Tag>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="project-brief__platform-meta-row">
+                        <span className="project-brief__platform-meta-label">主要风险</span>
+                        <div className="project-brief__platform-tags">
+                          {selectedPlatform.riskFocus.map((item, idx) => (
+                            <Tag key={idx} color="orange">{item}</Tag>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="guided-step__field-card">
                   <Form.Item name="targetReader" label="目标读者" rules={[{ required: true, message: '请写清目标读者' }]}>
-                    <Input.TextArea rows={6} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
+                    <Input.TextArea rows={4} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
                   </Form.Item>
                 </div>
                 <div className="guided-step__field-card">
                   <Form.Item name="readerPromise" label="读者承诺" rules={[{ required: true, message: '请写清读者承诺' }]}>
-                    <Input.TextArea rows={6} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
+                    <Input.TextArea rows={4} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
                   </Form.Item>
                 </div>
                 <div className="guided-step__field-card guided-step__field-card--full">
                   <Form.Item name="sellingPoints" label="卖点列表" rules={[{ required: true, message: '请补充作品卖点' }]}>
-                    <Input.TextArea rows={6} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
+                    <Input.TextArea rows={4} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
                   </Form.Item>
                 </div>
                 <div className="guided-step__field-card guided-step__field-card--full">
                   <Form.Item name="compTitles" label="参考作品 / 对标方向" rules={[{ required: true, message: '请补充参考作品' }]}>
-                    <Input.TextArea rows={6} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
+                    <Input.TextArea rows={4} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
                   </Form.Item>
                 </div>
               </div>
@@ -554,12 +593,12 @@ export default function ProjectBriefPage({ novelId }: Props) {
               <div className="guided-step__field-grid">
                 <div className="guided-step__field-card">
                   <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
-                    <Input.TextArea rows={6} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
+                    <Input.TextArea rows={4} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
                   </Form.Item>
                 </div>
                 <div className="guided-step__field-card">
                   <Form.Item name="deliveryRhythm" label="连载 / 交付节奏">
-                    <Input.TextArea rows={6} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
+                    <Input.TextArea rows={4} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
                   </Form.Item>
                 </div>
               </div>
