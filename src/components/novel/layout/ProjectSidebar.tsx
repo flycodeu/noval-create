@@ -44,12 +44,16 @@ export default function ProjectSidebar({
     <div className="project-sidebar">
       <div className="project-sidebar__summary">
         <div className="project-sidebar__summary-copy">
-          <strong className="project-sidebar__summary-title">{stageLabel}</strong>
-          <span className="project-sidebar__summary-meta">{`已完成 ${progressText}`}</span>
-          <div className="project-sidebar__current-task">
-            <ClockCircleOutlined />
-            <span>{currentTask}</span>
+          <div className="project-sidebar__summary-header">
+            <span className="project-sidebar__summary-badge">{stageLabel}</span>
+            <span className="project-sidebar__summary-meta">{`已完成 ${progressText}`}</span>
           </div>
+          {currentTask ? (
+            <div className="project-sidebar__current-task">
+              <ClockCircleOutlined />
+              <span>{currentTask}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 

@@ -14304,19 +14304,25 @@ html[data-runtime="web"] .project-topbar__main-row {
 }
 
 .app-layout .novel-hero--has-actions {
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas:
     "copy actions"
     "context context"
     "metrics metrics";
-  align-items: start;
-  column-gap: 28px;
-  row-gap: 12px;
+  align-items: center;
+  column-gap: 24px;
+  row-gap: 14px;
 }
 
 .app-layout .novel-hero--has-actions .novel-hero__copy {
   grid-area: copy;
-  min-width: 0;
+  min-width: max-content;
+  flex-shrink: 0;
+}
+
+.app-layout .novel-hero--has-actions .novel-hero__title {
+  white-space: nowrap !important;
+  min-width: max-content;
 }
 
 .app-layout .novel-hero--has-actions .novel-hero__actions {
@@ -14340,7 +14346,8 @@ html[data-runtime="web"] .project-topbar__main-row {
 .app-layout .novel-panel__extra > .ant-space,
 .app-layout .novel-section-header__extra > .ant-space,
 .app-layout .novel-action-bar > .ant-space {
-  display: flex;
+  display: flex !important;
+  flex-wrap: wrap !important;
   align-items: center;
   justify-content: flex-end;
   max-width: 100%;
@@ -14476,10 +14483,6 @@ html[data-runtime="web"] .project-topbar__main-row {
 }
 
 @media (min-width: 1200px) {
-  .app-layout .novel-hero--has-actions .novel-hero__actions > .ant-space {
-    flex-wrap: nowrap;
-  }
-
   .app-layout .novel-hero--inline-metrics {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 0.42fr);
     grid-template-areas:
