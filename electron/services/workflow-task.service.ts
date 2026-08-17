@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { desc, eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -289,7 +289,7 @@ function upsertFailedWorldRuleSection(
   return [...rest, nextItem]
 }
 
-function settleMapWorkflowFatalError(task: TaskRow, sender: WebContents | undefined, error: unknown) {
+function settleMapWorkflowFatalError(task: TaskRow, sender: ProgressSink | undefined, error: unknown) {
   const control = parseTaskControl(task)
   const progress = toMapStatus(task.id, task)
   const isAbort = error instanceof Error && error.name === 'AbortError'
@@ -330,7 +330,7 @@ function settleMapWorkflowFatalError(task: TaskRow, sender: WebContents | undefi
   })
 }
 
-function settleWorldRulesWorkflowFatalError(task: TaskRow, sender: WebContents | undefined, error: unknown) {
+function settleWorldRulesWorkflowFatalError(task: TaskRow, sender: ProgressSink | undefined, error: unknown) {
   const control = parseTaskControl(task)
   const progress = toWorldRulesStatus(task.id, task)
   const isAbort = error instanceof Error && error.name === 'AbortError'
@@ -373,7 +373,7 @@ function settleWorldRulesWorkflowFatalError(task: TaskRow, sender: WebContents |
   })
 }
 
-function settleWorkflowFatalError(taskId: number, sender: WebContents | undefined, error: unknown) {
+function settleWorkflowFatalError(taskId: number, sender: ProgressSink | undefined, error: unknown) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow') {
     console.error(`[workflow] Fatal workflow recovery failed for task ${taskId}:`, error)
@@ -393,7 +393,7 @@ function settleWorkflowFatalError(taskId: number, sender: WebContents | undefine
   console.error(`[workflow] Unsupported fatal workflow recovery for task ${taskId}:`, error)
 }
 
-async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
+async function runMapAutoGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   if (activeWorkflows.has(taskId)) return
   activeWorkflows.add(taskId)
 
@@ -584,7 +584,7 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
   }
 }
 
-async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
+async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   if (activeWorkflows.has(taskId)) return
   activeWorkflows.add(taskId)
 
@@ -791,7 +791,7 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
 export async function startMapAutoGenerateWorkflow(
   novelId: number,
   options: MapBatchGenerateOptions,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ) {
   const existing = getLatestMapWorkflow(novelId)
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) {
@@ -823,7 +823,7 @@ export async function startMapAutoGenerateWorkflow(
 export async function startWorldRulesAutoGenerateWorkflow(
   novelId: number,
   options: WorldRulesAutoGenerateOptions,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ) {
   const safeOptions: WorldRulesAutoGenerateOptions = {
     currentRules: normalizeWorldRulesDraft(options.currentRules, options.currentRules?.genreProfile?.name),
@@ -962,7 +962,7 @@ export function getWorkflowTask(taskId: number) {
 export async function resumeWorldRulesAutoGenerateWorkflow(
   taskId: number,
   currentRules?: GenreWorldRules,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow' || task.type !== 'world_rules_auto_generate') {
@@ -1002,7 +1002,7 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
   return taskId
 }
 
-export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
+export async function resumeWorkflowTask(taskId: number, sender?: ProgressSink) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow') {
     throwUserFacingError('workflow.taskNotFound', { taskId })

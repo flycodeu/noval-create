@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { parseAiJsonResult } from '../utils/json'
 import {
@@ -275,7 +275,7 @@ export function createRewriterStreamAttemptRunner(input: {
   novelId: number
   chapterId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   defaultChatOptions: RewriterChatOptions
   buildMessages: (attemptNumber: number, rejectedDigests: string[], draftContent?: string) => Message[]
   startRole: (messages: Message[], detail: string) => Promise<number>

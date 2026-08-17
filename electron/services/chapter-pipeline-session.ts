@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { chapters } from '../database/schema'
 import type { AiExecutionMode } from '../../src/types'
 import type { ChapterContext, HardConstraintSourceLabel } from './context.service'
@@ -63,7 +63,7 @@ export interface ChapterPipelineStageShared {
   rawContext: ChapterRawContext
   novel: ChapterRawContext['novel']
   profile: ChapterRawContext['profile']
-  sender?: WebContents
+  sender?: ProgressSink
   runtime: ChapterPipelineRuntime
   bindings: ChapterPipelineRuntimeBindings
   /** 精确节点重试时的上游快照，用于复用已固化的角色产物。 */
@@ -109,7 +109,7 @@ export function createChapterPipelineDraftState(init: {
 
 export interface CreateChapterPipelineSessionInput {
   chapter: typeof chapters.$inferSelect
-  sender?: WebContents
+  sender?: ProgressSink
   idempotencyKey?: string
   stageId?: number
   resumeDraft?: string

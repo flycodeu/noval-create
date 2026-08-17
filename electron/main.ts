@@ -39,6 +39,7 @@ import type {
   RelationshipArcInput,
 } from '../src/types'
 import { closeDb, getDb, initDb } from './database/db'
+import { acquireSingleWriterLock, type SingleWriterLockHandle } from './utils/single-writer-lock'
 import {
   chapters,
   genres as genresTable,
@@ -96,6 +97,7 @@ import * as outlineGenerationService from './services/outline-generation.service
 import * as storyArcService from './services/story-arc.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
+import * as knowledgeBoundaryService from './services/knowledge-boundary.service'
 import * as growthSystemService from './services/growth-system.service'
 import * as chapterWritebackService from './services/chapter-writeback.service'
 import * as assetImpactService from './services/asset-impact.service'
@@ -126,6 +128,7 @@ import { enhanceAiScoreResult } from './services/ai-score.service'
 import { wrapIpcHandler } from './utils/ipc-wrapper'
 import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
 import { consumeApprovalGrant, createApprovalGrant } from './services/approval.service'
+import { fromWebContents } from './utils/progress-sink'
 import {
   appendVariationMessage,
   buildVariationDigest,
@@ -133,6 +136,7 @@ import {
 } from './services/variation-control.service'
 
 let mainWindow: BrowserWindow | null = null
+let writerLock: SingleWriterLockHandle | null = null
 
 app.setName('NovelForge')
 
@@ -252,6 +256,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const lockHandle = acquireSingleWriterLock(app.getPath('userData'), 'desktop-main')
+  if (!lockHandle) {
+    dialog.showErrorBox(
+      'NovelForge 已在运行',
+      '检测到另一个 NovelForge 实例（桌面端、本地 Web 后端或 MCP 运行时）正在写入同一个数据库。为避免数据损坏，请先关闭其他实例再启动。',
+    )
+    app.quit()
+    return
+  }
+  writerLock = lockHandle
+
   initDb()
   taskService.recoverOrphanedTasks()
   createWindow()
@@ -271,6 +286,8 @@ function shutdownApplication(): Promise<void> {
   shutdownPromise = maintenanceWorker.stop()
     .catch((error) => console.warn('[main] maintenance worker shutdown failed:', error))
     .then(() => {
+      writerLock?.release()
+      writerLock = null
       closeDb()
       shutdownComplete = true
     })
@@ -603,6 +620,13 @@ function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
       parseObjectPayload<Record<string, unknown>>(data, 'data'),
     ))
   handle('storyFact:delete', (_, id) => storyFactService.deleteStoryFact(requireId(id)))
+  handle('knowledgeBoundary:characterSnapshot', (_, novelId, characterId, upToChapterNum, isProtagonist) =>
+    knowledgeBoundaryService.getCharacterKnowledgeSnapshot(
+      requireId(novelId, 'novelId'),
+      requireId(characterId, 'characterId'),
+      typeof upToChapterNum === 'number' ? upToChapterNum : Number.MAX_SAFE_INTEGER,
+      isProtagonist === true,
+    ))
   handle('growthSystem:getDashboard', (_, novelId) => growthSystemService.getGrowthSystemDashboard(requireId(novelId, 'novelId')))
   handle('growthSystem:listTracks', (_, novelId) => growthSystemService.listGrowthTracks(requireId(novelId, 'novelId')))
   handle('growthSystem:upsertTrack', (_, novelId, data) => growthSystemService.upsertGrowthTrack(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data')))
@@ -641,11 +665,11 @@ function registerChapterAndCharacterIpcHandlers(handle: IpcHandle) {
   handle('chapter:generateContent', (event, chapterId, options) =>
     chapterService.generateChapterContent(
       requireId(chapterId, 'chapterId'),
-      event.sender,
+      fromWebContents(event.sender),
       chapterService.sanitizeChapterGenerationOptions(options),
     ))
   handle('chapter:resumeContent', (event, taskId) =>
-    chapterService.resumeChapterPipeline(taskId, event.sender))
+    chapterService.resumeChapterPipeline(taskId, fromWebContents(event.sender)))
   handle('chapter:generateSummary', (_, chapterId) =>
     chapterService.generateChapterSummary(chapterId))
   handle('chapter:aiCheck', (_, chapterId) =>
@@ -658,25 +682,25 @@ function registerChapterAndCharacterIpcHandlers(handle: IpcHandle) {
       parseObjectPayload<{ executionMode?: AiExecutionMode; extraRequirements?: string }>(options || {}, 'options'),
     ))
   handle('chapterBatch:startAutoGenerate', (event, novelId, options) =>
-    batchWorkflowService.startChapterBatchGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+    batchWorkflowService.startChapterBatchGenerateWorkflow(requireId(novelId, 'novelId'), options, fromWebContents(event.sender)))
   handle('chapterBatch:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getChapterBatchAutoGenerateStatus(requireId(taskId, 'taskId')))
   handle('chapterBatch:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestChapterBatchAutoGenerateTask(requireId(novelId, 'novelId')))
   handle('chapterBatch:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), fromWebContents(event.sender)))
   handle('chapterBatch:startQualityAnalysis', (event, novelId, options) =>
     batchWorkflowService.startChapterQualityAnalysisWorkflow(
       requireId(novelId, 'novelId'),
       parseObjectPayload(options || {}, 'options'),
-      event.sender,
+      fromWebContents(event.sender),
     ))
   handle('chapterBatch:getQualityAnalysisStatus', (_, taskId) =>
     batchWorkflowService.getChapterQualityAnalysisStatus(requireId(taskId, 'taskId')))
   handle('chapterBatch:getLatestQualityAnalysisTask', (_, novelId) =>
     batchWorkflowService.getLatestChapterQualityAnalysisTask(requireId(novelId, 'novelId')))
   handle('chapterBatch:resumeQualityAnalysis', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), fromWebContents(event.sender)))
   handle('batchWorkbench:getData', (_, novelId, snapshotId) =>
     batchWorkbenchService.getBatchWorkbenchData(
       requireId(novelId, 'novelId'),
@@ -761,18 +785,18 @@ function registerChapterAndCharacterIpcHandlers(handle: IpcHandle) {
   handle('character:applyPatch', (_, id, patch) =>
     characterService.applyCharacterPatch(requireId(id), patch))
   handle('character:startAutoGenerate', (event, novelId, opts) =>
-    batchWorkflowService.startCharacterAutoGenerateWorkflow(novelId, opts, event.sender))
+    batchWorkflowService.startCharacterAutoGenerateWorkflow(novelId, opts, fromWebContents(event.sender)))
   handle('character:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getCharacterAutoGenerateStatus(taskId))
   handle('character:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestCharacterAutoGenerateTask(novelId))
   handle('character:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, fromWebContents(event.sender)))
   handle('character:getRelations', (_, novelId) => characterService.getCharacterRelations(novelId))
   handle('character:generateProtagonist', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))
   handle('character:batchGenerate', (event, novelId, opts) =>
-    batchWorkflowService.generateCharactersViaWorkflow(novelId, opts, event.sender))
+    batchWorkflowService.generateCharactersViaWorkflow(novelId, opts, fromWebContents(event.sender)))
   handle('character:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
   handle('character:upsertRelation', (_, data) =>
@@ -816,13 +840,13 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('map:batchGenerateToTarget', (_, novelId, structure) =>
     mapService.batchGenerateMapToTarget(novelId, structure))
   handle('map:startAutoGenerate', (event, novelId, structure) =>
-    workflowTaskService.startMapAutoGenerateWorkflow(novelId, structure, event.sender))
+    workflowTaskService.startMapAutoGenerateWorkflow(novelId, structure, fromWebContents(event.sender)))
   handle('map:getAutoGenerateStatus', (_, taskId) =>
     workflowTaskService.getMapAutoGenerateStatus(taskId))
   handle('map:getLatestAutoGenerateTask', (_, novelId) =>
     workflowTaskService.getLatestMapAutoGenerateTask(novelId))
   handle('map:resumeAutoGenerate', (event, taskId) =>
-    workflowTaskService.resumeWorkflowTask(taskId, event.sender))
+    workflowTaskService.resumeWorkflowTask(taskId, fromWebContents(event.sender)))
   handle('map:clear', (_, novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')))
   handle('creativeStage:list', (_, novelId, includeArchived) => creativeStageService.listCreativeStages(requireId(novelId, 'novelId'), includeArchived === true))
   handle('creativeStage:get', (_, stageId) => creativeStageService.getCreativeStage(requireId(stageId, 'stageId')))
@@ -843,13 +867,13 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('creativeStage:approveHandoff', (_, artifactId) => creativeStageService.approveCreativeStageHandoff(requireString(artifactId, 'artifactId')))
 
   handle('worldRules:startAutoGenerate', (event, novelId, options) =>
-    workflowTaskService.startWorldRulesAutoGenerateWorkflow(novelId, options, event.sender))
+    workflowTaskService.startWorldRulesAutoGenerateWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('worldRules:getAutoGenerateStatus', (_, taskId) =>
     workflowTaskService.getWorldRulesAutoGenerateStatus(taskId))
   handle('worldRules:getLatestAutoGenerateTask', (_, novelId) =>
     workflowTaskService.getLatestWorldRulesAutoGenerateTask(novelId))
   handle('worldRules:resumeAutoGenerate', (event, taskId, currentRules) =>
-    workflowTaskService.resumeWorldRulesAutoGenerateWorkflow(taskId, currentRules, event.sender))
+    workflowTaskService.resumeWorldRulesAutoGenerateWorkflow(taskId, currentRules, fromWebContents(event.sender)))
   handle('worldRules:clearAutoGenerateDraft', (_, novelId) =>
     workflowTaskService.clearWorldRulesAutoGenerateDraft(novelId))
 
@@ -865,15 +889,15 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('timeline:batchUpdate', (_, ids, data) => timelineService.batchUpdateTimelineEvents(requireIds(ids), data))
   handle('timeline:batchDelete', (_, ids) => timelineService.batchDeleteTimelineEvents(requireIds(ids)))
   handle('timeline:generate', (event, novelId, options) =>
-    batchWorkflowService.generateTimelineViaWorkflow(novelId, options, event.sender))
+    batchWorkflowService.generateTimelineViaWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('timeline:startAutoGenerate', (event, novelId, options) =>
-    batchWorkflowService.startTimelineAutoGenerateWorkflow(novelId, options, event.sender))
+    batchWorkflowService.startTimelineAutoGenerateWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('timeline:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getTimelineAutoGenerateStatus(taskId))
   handle('timeline:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestTimelineAutoGenerateTask(novelId))
   handle('timeline:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, fromWebContents(event.sender)))
   handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
   handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(requireId(novelId, 'novelId')))
 
@@ -887,15 +911,15 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('item:create', (_, novelId, data) => itemService.createStoryItem(requireId(novelId, 'novelId'), data))
   handle('item:update', (_, id, data) => itemService.updateStoryItem(requireId(id), data))
   handle('item:delete', (_, id) => itemService.deleteStoryItem(requireId(id)))
-  handle('item:generate', (event, novelId, options) => batchWorkflowService.generateItemsViaWorkflow(novelId, options, event.sender))
+  handle('item:generate', (event, novelId, options) => batchWorkflowService.generateItemsViaWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('item:startAutoGenerate', (event, novelId, options) =>
-    batchWorkflowService.startItemAutoGenerateWorkflow(novelId, options, event.sender))
+    batchWorkflowService.startItemAutoGenerateWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('item:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getItemAutoGenerateStatus(taskId))
   handle('item:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestItemAutoGenerateTask(novelId))
   handle('item:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, fromWebContents(event.sender)))
   handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
   handle('item:getLinkRecommendations', (_, itemId) => itemService.getStoryItemLinkRecommendations(requireId(itemId, 'itemId')))
   handle('item:applyLinkRecommendations', (_, itemId, data) => itemService.applyStoryItemLinkRecommendations(
@@ -971,15 +995,15 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
   handle('thread:getForeshadowSnapshot', (_, novelId, chapterNum) =>
     storyThreadService.getForeshadowSnapshot(requireId(novelId, 'novelId'), typeof chapterNum === 'number' ? chapterNum : undefined))
-  handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
+  handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('thread:startAutoGenerate', (event, novelId, options) =>
-    batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, event.sender))
+    batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, fromWebContents(event.sender)))
   handle('thread:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getStoryThreadAutoGenerateStatus(taskId))
   handle('thread:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestStoryThreadAutoGenerateTask(novelId))
   handle('thread:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, fromWebContents(event.sender)))
   handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(requireId(novelId, 'novelId'), data))
   handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(requireId(id), data))
   handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(requireId(id)))
@@ -998,15 +1022,15 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
   handle('faction:clear', (_, novelId) => factionService.clearFactions(requireId(novelId, 'novelId')))
   handle('faction:batchGenerate', (event, novelId, options) =>
-    batchWorkflowService.generateFactionsViaWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+    batchWorkflowService.generateFactionsViaWorkflow(requireId(novelId, 'novelId'), options, fromWebContents(event.sender)))
   handle('faction:startAutoGenerate', (event, novelId, options) =>
-    batchWorkflowService.startFactionAutoGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+    batchWorkflowService.startFactionAutoGenerateWorkflow(requireId(novelId, 'novelId'), options, fromWebContents(event.sender)))
   handle('faction:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getFactionAutoGenerateStatus(requireId(taskId)))
   handle('faction:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestFactionAutoGenerateTask(requireId(novelId, 'novelId')))
   handle('faction:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId), event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId), fromWebContents(event.sender)))
   handle('faction:resolveNameOptions', (_, novelId) => factionService.resolveFactionNameOptions(requireId(novelId, 'novelId')))
   handle('glossary:list', (_, novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')))
   handle('glossary:query', (_, filters) => glossaryService.queryGlossary(filters))
@@ -1026,15 +1050,15 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('sceneTemplate:create', (_, data) => sceneTemplateService.createSceneTemplate(data))
   handle('sceneTemplate:update', (_, id, data) => sceneTemplateService.updateSceneTemplate(requireId(id), data))
   handle('sceneTemplate:delete', (_, id) => sceneTemplateService.deleteSceneTemplate(requireId(id)))
-  handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, event.sender))
+  handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, fromWebContents(event.sender)))
   handle('subplot:startAutoGenerate', (event, request) =>
-    batchWorkflowService.startSubplotAutoGenerateWorkflow(request, event.sender))
+    batchWorkflowService.startSubplotAutoGenerateWorkflow(request, fromWebContents(event.sender)))
   handle('subplot:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getSubplotAutoGenerateStatus(taskId))
   handle('subplot:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestSubplotAutoGenerateTask(novelId))
   handle('subplot:resumeAutoGenerate', (event, taskId) =>
-    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, fromWebContents(event.sender)))
 }
 
 function registerHistoryAndModelIpcHandlers(handle: IpcHandle) {
@@ -1237,27 +1261,27 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
     return db.select().from(tasks).where(eq(tasks.id, id)).all()[0] || null
   })
 
-  handle('task:cancel', (event, id) => taskService.cancelTask(id, event.sender))
+  handle('task:cancel', (event, id) => taskService.cancelTask(id, fromWebContents(event.sender)))
   handle('task:retry', async (event, id) => {
     const db = getDb()
     const task = db.select().from(tasks).where(eq(tasks.id, id)).all()[0]
     if (!task) throwUserFacingError('task.notFound', { id })
 
     if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) {
-      return chapterService.resumeChapterPipeline(id, event.sender)
+      return chapterService.resumeChapterPipeline(id, fromWebContents(event.sender))
     }
 
     if (task.type === 'subplot_framework') {
       return subplotService.retrySubplotBatch(id)
     }
 
-    return taskService.retryTask(id, event.sender)
+    return taskService.retryTask(id, fromWebContents(event.sender))
   })
 
   handle('workflow:list', (_, novelId) => workflowTaskService.listWorkflowTasks(novelId))
   handle('workflow:get', (_, id) => workflowTaskService.getWorkflowTask(id))
-  handle('workflow:cancel', (event, id) => taskService.cancelTask(id, event.sender))
-  handle('workflow:resume', (event, id) => workflowTaskService.resumeWorkflowTask(id, event.sender))
+  handle('workflow:cancel', (event, id) => taskService.cancelTask(id, fromWebContents(event.sender)))
+  handle('workflow:resume', (event, id) => workflowTaskService.resumeWorkflowTask(id, fromWebContents(event.sender)))
   handle('workflowNode:list', (_, filters) => workflowNodeService.listWorkflowNodeRuns(
     parseObjectPayload<Record<string, unknown>>(filters || {}, 'filters') as {
       workflowTaskId?: number
@@ -1269,7 +1293,7 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
   ))
   handle('workflowNode:get', (_, id) => workflowNodeService.getWorkflowNodeRun(requireId(id, 'nodeRunId')))
   handle('workflowNode:getSnapshot', (_, id) => workflowNodeService.getWorkflowNodeSnapshot(requireString(id, 'snapshotId')))
-  handle('workflowNode:retry', (event, id) => chapterService.retryChapterPipelineNode(requireId(id, 'nodeRunId'), event.sender))
+  handle('workflowNode:retry', (event, id) => chapterService.retryChapterPipelineNode(requireId(id, 'nodeRunId'), fromWebContents(event.sender)))
 
   handle('premiseDraft:getLatest', (_, novelId: number) => premiseService.getLatestPremiseDraft(novelId))
   handle('premiseDraft:markApplied', (_, taskId: number, appliedMode: 'replace' | 'fill_blanks') =>
@@ -1369,15 +1393,15 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   })
 
   handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
-    coreSettingsService.generateCoreSettings(data, event.sender))
+    coreSettingsService.generateCoreSettings(data, fromWebContents(event.sender)))
   handle('ai:generatePremise', (event, data: PremiseGenerationRequest) =>
-    premiseService.generatePremise(data, event.sender))
+    premiseService.generatePremise(data, fromWebContents(event.sender)))
   handle('ai:generateProjectBrief', (_, data: ProjectBriefGenerationRequest) =>
     projectBriefService.generateProjectBrief(data))
   handle('ai:generateThemeVoice', (_, data: ThemeVoiceGenerationRequest) =>
     themeVoiceService.generateThemeVoice(data))
   handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
-    worldRulesService.generateWorldRules(data, event.sender))
+    worldRulesService.generateWorldRules(data, fromWebContents(event.sender)))
 
   handle('ai:generateCharacter', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))

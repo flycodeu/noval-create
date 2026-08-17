@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm'
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { getDb } from '../database/db'
 import { characters } from '../database/schema'
@@ -463,7 +463,7 @@ export async function runChapterCriticStage(input: {
   chapterId: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   promptInput: ChapterReviewPromptInput
   chatOptions: ChatOptions
   contractVersion: string

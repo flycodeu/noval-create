@@ -645,6 +645,9 @@ export const mapRelations = sqliteTable('map_relations', {
   intensity: text('intensity'),
   colorHint: text('color_hint'),
   sortOrder: integer('sort_order').default(0),
+  travelHours: real('travel_hours'),
+  travelMode: text('travel_mode'),
+  routeOpen: integer('route_open').default(1),
 })
 
 export const timelineEvents = sqliteTable('timeline_events', {

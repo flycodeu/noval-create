@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
 import type {
   Character as AppCharacter,
@@ -1870,7 +1870,7 @@ export async function generateStoryItemsBatchChunk(
   options: StoryItemGenerateOptions = {},
   runtime: {
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
     batchIndex?: number
     totalBatches?: number
   } = {},

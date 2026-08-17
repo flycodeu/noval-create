@@ -253,6 +253,10 @@ function assertRequiredColumns(db) {
   assert.ok(db.prepare('PRAGMA index_list(story_items)').all().some((row) => row.name === 'idx_story_items_novel_kind_sort'))
   assert.ok(db.prepare('PRAGMA index_list(world_map)').all().some((row) => row.name === 'idx_world_map_novel_parent_sort'))
   assert.ok(db.prepare('PRAGMA index_list(character_relations)').all().some((row) => row.name === 'idx_character_relations_novel_pair'))
+  assert.ok(getColumns(db, 'map_relations').has('travel_hours'))
+  assert.ok(getColumns(db, 'map_relations').has('travel_mode'))
+  assert.ok(getColumns(db, 'map_relations').has('route_open'))
+  assert.ok(db.prepare('PRAGMA index_list(map_relations)').all().some((row) => row.name === 'idx_map_relations_novel_travel'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('source_type'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('fragment_key'))
   assert.ok(getColumns(db, 'semantic_memory_entries').has('embedding_profile'))
@@ -502,6 +506,7 @@ function testFreshDbIsIdempotent() {
       '0059_semantic_memory_fts',
       '0060_thread_context_projection_indexes',
       '0061_entity_context_projection_indexes',
+      '0062_map_travel_fields',
     ])
 
     runMigrations(db)
@@ -642,6 +647,7 @@ function testPartialSchemaCanResume() {
       '0059_semantic_memory_fts',
       '0060_thread_context_projection_indexes',
       '0061_entity_context_projection_indexes',
+      '0062_map_travel_fields',
     ])
 
     const configs = db.prepare(`

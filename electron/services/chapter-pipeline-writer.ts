@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import {
@@ -250,7 +250,7 @@ export async function runChapterWriterStage(input: {
   chapterNum: number
   chapterTitle: string
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   promptInput: ChapterWriterPromptInput
   chatOptions: ChatOptions
   contractVersion: string
@@ -330,7 +330,7 @@ export async function executeChapterWriterPhase(input: {
   chapterNum: number
   chapterTitle: string
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   chatOptions: ChatOptions
   contractVersion: string
   scenePlanText: string

@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { eq } from 'drizzle-orm'
 import {
   CORE_SETTINGS_GENERATION_STEPS,
@@ -276,8 +276,8 @@ function clampSubplotCount(value: number): number {
   return Math.max(1, Math.min(MAX_SUBPLOT_GENERATION_COUNT, Math.round(value)))
 }
 
-function sendProgress(sender: WebContents | undefined, payload: CoreSettingsGenerationProgressEvent) {
-  if (!sender || sender.isDestroyed()) return
+function sendProgress(sender: ProgressSink | undefined, payload: CoreSettingsGenerationProgressEvent) {
+  if (!sender) return
   sender.send('ai:core-settings-progress', payload)
 }
 
@@ -760,7 +760,7 @@ export async function tryGenerateSubplotBatch(
   totalBatches: number,
   runtime: {
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
   } = {},
 ): Promise<{ batchResult: Awaited<ReturnType<typeof generateSubplotBatch>> | null; warning?: string }> {
   let lastError: unknown
@@ -897,7 +897,7 @@ async function generateSubplots(
   coreConflict: string,
   mainPlot: string,
   subplotCount: number,
-  sender?: WebContents,
+  sender?: ProgressSink,
   baseProgress?: Omit<CoreSettingsGenerationProgressEvent, 'status' | 'detail' | 'warning'>,
 ): Promise<{ subplots: SubPlotDraft[]; warning?: string; error?: string; status?: 'success' | 'warning' | 'failed' }> {
   const totalBatches = Math.ceil(subplotCount / SUBPLOT_GENERATION_CHUNK_SIZE)
@@ -1013,7 +1013,7 @@ async function generateSubplots(
 
 export async function generateCoreSettings(
   request: CoreSettingsGenerationRequest,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ): Promise<CoreSettingsGenerationResult> {
   const context = await loadStoryContext(request)
   const steps: CoreSettingsGenerationStepResult[] = []

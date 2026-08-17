@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
@@ -351,12 +351,10 @@ function serializeContinuityState(state: ContinuityState): string {
 }
 
 function sendGenerationProgress(
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   payload: ChapterGenerationProgressEvent,
 ) {
-  if (sender && !sender.isDestroyed()) {
-    sender.send('chapter:generation-progress', payload)
-  }
+  sender?.send('chapter:generation-progress', payload)
 }
 
 function buildChapterWorkspacePath(novelId: number, page: string, chapterId: number, extra?: Record<string, string | number | undefined>) {
@@ -467,7 +465,7 @@ function buildContinuationPrompt(basePrompt: string, partialContent: string): st
 }
 
 function sendPipelineProgress(
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   snapshot: ChapterPipelineSnapshot,
   payload: Pick<ChapterGenerationProgressEvent, 'stage' | 'label' | 'detail' | 'status'> & { role?: ChapterPipelineRole },
 ) {
@@ -1976,7 +1974,7 @@ interface ChapterContinuationPreparation {
 async function prepareChapterContinuation(
   chapterId: number,
   partialContent: string,
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   options: { executionMode?: AiExecutionMode; sourceTaskId?: number; stageId?: number },
 ): Promise<ChapterContinuationPreparation> {
   const chapter = getRequiredChapterGenerationInput(chapterId)
@@ -2131,7 +2129,7 @@ interface ChapterContinuationRuntimeState {
 async function runChapterContinuationSuccess(input: {
   prepared: ChapterContinuationPreparation
   runtime: ChapterContinuationRuntimeState
-  sender?: WebContents
+  sender?: ProgressSink
   options: { executionMode?: AiExecutionMode; sourceTaskId?: number; stageId?: number }
   onDownstreamTask: (taskId: number) => void
   onWriterHandoff: () => void
@@ -2296,7 +2294,7 @@ function buildChapterContinuationFailureSnapshot(input: {
 async function continueChapterContent(
   chapterId: number,
   partialContent: string,
-  sender?: WebContents,
+  sender?: ProgressSink,
   options: { executionMode?: AiExecutionMode; sourceTaskId?: number; stageId?: number } = {},
 ): Promise<number> {
   const prepared = await prepareChapterContinuation(chapterId, partialContent, sender, options)
@@ -2477,7 +2475,7 @@ interface GeneratedChapterReviewPhaseInput {
   novel: typeof novels.$inferSelect
   profile: StoryProfile
   session: ChapterPipelineSession
-  sender?: WebContents
+  sender?: ProgressSink
   options: ChapterGenerationOptions
   plannerWriter: Awaited<ReturnType<typeof executeGeneratedChapterPlannerWriterPhase>>
   storyCore: string
@@ -2614,7 +2612,7 @@ interface GeneratedChapterPlannerWriterPhaseInput {
   profile: StoryProfile
   session: ChapterPipelineSession
   options: ChapterGenerationOptions
-  sender?: WebContents
+  sender?: ProgressSink
   fallbackScenePlan: ScenePlanStep[]
   storyCore: string
   scenePlanContext: ChapterContext
@@ -2833,7 +2831,7 @@ interface GeneratedChapterRewritePhaseInput {
   profile: StoryProfile
   session: ChapterPipelineSession
   options: ChapterGenerationOptions
-  sender?: WebContents
+  sender?: ProgressSink
   promptGuidance: ChapterPipelinePromptGuidanceBundle
   themeVoice: ReturnType<typeof parseThemeVoiceDocument>
   draftResolution: StageContextResolverPayload
@@ -3327,7 +3325,7 @@ interface GeneratedChapterFinalizePhaseInput {
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>
   repairedContent: string
   publishCheck: ChapterPublishCheck
-  sender?: WebContents
+  sender?: ProgressSink
 }
 
 async function finalizeGeneratedChapterPipeline(input: GeneratedChapterFinalizePhaseInput): Promise<void> {
@@ -3428,7 +3426,7 @@ function findExistingChapterGenerationTask(chapterId: number, idempotencyKey: st
  */
 export async function generateChapterContent(
   chapterId: number,
-  sender?: WebContents,
+  sender?: ProgressSink,
   options: ChapterGenerationOptions = {},
 ): Promise<number> {
   const inFlight = chapterGenerationLocks.get(chapterId)
@@ -3478,7 +3476,7 @@ export async function generateChapterContent(
 
 async function generateChapterContentInternal(
   chapterId: number,
-  sender?: WebContents,
+  sender?: ProgressSink,
   options: ChapterGenerationOptions = {},
   idempotencyKey?: string,
 ): Promise<number> {
@@ -3766,7 +3764,7 @@ function assertChapterResumeBaseCurrent(
   if (status === 'context_conflict') throwUserFacingError('chapter.pipelineContextConflict')
 }
 
-export async function resumeChapterPipeline(taskId: number, sender?: WebContents): Promise<number> {
+export async function resumeChapterPipeline(taskId: number, sender?: ProgressSink): Promise<number> {
   const inFlight = chapterResumeLocks.get(taskId)
   if (inFlight) return inFlight
 
@@ -3779,7 +3777,7 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
   }
 }
 
-export async function retryChapterPipelineNode(nodeRunId: number, sender?: WebContents): Promise<number> {
+export async function retryChapterPipelineNode(nodeRunId: number, sender?: ProgressSink): Promise<number> {
   const retryPlan = prepareWorkflowNodeRetry(nodeRunId)
   if (!isChapterPipelineRole(retryPlan.source.nodeKey)) {
     throwUserFacingError('workflow.resumeUnsupported')
@@ -3820,7 +3818,7 @@ export async function retryChapterPipelineNode(nodeRunId: number, sender?: WebCo
   })
 }
 
-async function resumeChapterPipelineInternal(taskId: number, sender?: WebContents): Promise<number> {
+async function resumeChapterPipelineInternal(taskId: number, sender?: ProgressSink): Promise<number> {
   const task = getTaskRecord(taskId)
   if (!task) throwUserFacingError('task.notFound', { id: taskId })
 

@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { eq } from 'drizzle-orm'
 import { Message } from '../adapters/base.adapter'
 import { getDb } from '../database/db'
@@ -94,7 +94,7 @@ function joinWarnings(...warnings: Array<string | undefined | null>): string | u
 async function runSubplotBatchTask(
   request: SubplotGenerationRequest,
   taskId: number,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ): Promise<SubplotGenerationResult> {
   let finalResult: SubplotGenerationResult | null = null
   const messages = request.messages as Message[]
@@ -209,7 +209,7 @@ async function runSubplotBatchTask(
 
 export async function generateSubplotBatch(
   request: SubplotGenerationRequest,
-  runtime: { parentTaskId?: number; sender?: WebContents } = {},
+  runtime: { parentTaskId?: number; sender?: ProgressSink } = {},
 ): Promise<SubplotGenerationResult> {
   const taskId = await createTask({
     type: 'subplot_framework',

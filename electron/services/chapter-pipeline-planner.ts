@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { parseAiJsonResult } from '../utils/json'
 import type { ChapterContext } from './context.service'
@@ -185,7 +185,7 @@ export async function runChapterPlannerStage(input: {
   chapterId: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   messages: Message[]
   chatOptions: ChatOptions
   fallbackScenePlan: ScenePlanStep[]
@@ -261,7 +261,7 @@ export async function executeChapterPlannerPhase(input: {
   chapterId: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   chatOptions: ChatOptions
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null

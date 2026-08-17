@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
 import type {
   Character as AppCharacter,
@@ -56,7 +56,7 @@ interface FactionQueryFilters {
 
 interface FactionGenerateRuntimeOptions {
   parentTaskId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   batchIndex?: number
   totalBatches?: number
 }
@@ -943,7 +943,7 @@ export async function generateFactionBatchChunk(
 export async function batchGenerateFactions(
   novelId: number,
   options: FactionBatchGenerationOptions = DEFAULT_BATCH_OPTIONS,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ): Promise<number[]> {
   const normalized = normalizeBatchOptions(options)
   const ids: number[] = []

@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
@@ -23,7 +23,7 @@ export interface AssetQualityLoopOptions {
   relatedEntityType?: string
   relatedEntityId?: number
   parentTaskId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   contextSummary: string
   generatedOutput: string
   schemaHint?: string
@@ -157,7 +157,7 @@ function buildProgressPatch(
 
 function updateAssetReviewProgress(
   taskId: number | undefined,
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   patch: Partial<AssetReviewObservability> & { message?: string },
 ): void {
   if (typeof taskId !== 'number') return
@@ -171,7 +171,7 @@ async function runNestedReviewTask(params: {
   parentTaskId?: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   relatedEntityType?: string
   relatedEntityId?: number
   prompt: string

@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
@@ -1519,7 +1519,7 @@ export async function generateCharacterBatchChunk(
   opts: CharacterBatchGenerationOptions,
   runtime: {
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
     batchIndex?: number
     totalBatches?: number
     commit?: boolean
@@ -1845,7 +1845,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   relationSeedMode?: 'balanced' | 'conflict-heavy' | 'ally-heavy'
   requiredItemLinks?: string[]
   diversityConstraints?: string[]
-}, sender?: WebContents): Promise<number[]> {
+}, sender?: ProgressSink): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
@@ -1978,13 +1978,11 @@ export async function batchGenerateCharacters(novelId: number, opts: {
 
     if (rejectedByQuality) {
       markRejected(historyId)
-      if (sender && !sender.isDestroyed()) {
-        sender.send('character:batch-progress', {
-          batch: generatedAttempts + 1,
-          total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
-          newIds,
-        })
-      }
+      sender?.send('character:batch-progress', {
+        batch: generatedAttempts + 1,
+        total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+        newIds,
+      })
       generatedAttempts += 1
       continue
     }
@@ -1994,13 +1992,11 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
       if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
         markRejected(historyId)
-        if (sender && !sender.isDestroyed()) {
-          sender.send('character:batch-progress', {
-            batch: generatedAttempts + 1,
-            total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
-            newIds,
-          })
-        }
+        sender?.send('character:batch-progress', {
+          batch: generatedAttempts + 1,
+          total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+          newIds,
+        })
         generatedAttempts += 1
         continue
       }
@@ -2043,13 +2039,11 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       markRejected(historyId)
     }
 
-    if (sender && !sender.isDestroyed()) {
-      sender.send('character:batch-progress', {
-        batch: generatedAttempts + 1,
-        total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
-        newIds,
-      })
-    }
+    sender?.send('character:batch-progress', {
+      batch: generatedAttempts + 1,
+      total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+      newIds,
+    })
     generatedAttempts += 1
   }
 

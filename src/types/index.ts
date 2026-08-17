@@ -1123,6 +1123,9 @@ export interface MapRelation {
   intensity?: string
   colorHint?: string
   sortOrder: number
+  travelHours?: number | null
+  travelMode?: string | null
+  routeOpen?: number | null
 }
 
 export interface MapRelationInput {
@@ -1137,6 +1140,9 @@ export interface MapRelationInput {
   intensity?: string
   colorHint?: string
   sortOrder?: number
+  travelHours?: number | null
+  travelMode?: string | null
+  routeOpen?: number | null
 }
 
 export interface MapGraphQueryInput {
@@ -5858,6 +5864,15 @@ declare global {
         create: (novelId: number, data: Partial<StoryFact>) => Promise<number>
         update: (id: number, data: Partial<StoryFact>) => Promise<void>
         delete: (id: number) => Promise<void>
+      }
+      knowledgeBoundary: {
+        characterSnapshot: (novelId: number, characterId: number, upToChapterNum?: number, isProtagonist?: boolean) => Promise<{
+          characterId: number
+          upToChapterNum: number
+          isProtagonist: boolean
+          knownFacts: StoryFact[]
+          unknownFacts: Array<{ fact: StoryFact; reason: string }>
+        }>
       }
       growthSystem: {
         getDashboard: (novelId: number) => Promise<GrowthSystemDashboard>

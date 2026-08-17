@@ -1365,6 +1365,16 @@ export function installWebElectronBridge(): void {
       list: async (novelId?: unknown) => withLocalBackend('storyFact', 'list', [novelId], async () => []),
       get: async (id?: unknown) => withLocalBackend('storyFact', 'get', [id], async () => null),
     }),
+    knowledgeBoundary: createService('knowledgeBoundary', {
+      characterSnapshot: async (novelId?: unknown, characterId?: unknown, upToChapterNum?: unknown, isProtagonist?: unknown) =>
+        withLocalBackend('knowledgeBoundary', 'characterSnapshot', [novelId, characterId, upToChapterNum, isProtagonist], async () => ({
+          characterId: 0,
+          upToChapterNum: 0,
+          isProtagonist: false,
+          knownFacts: [],
+          unknownFacts: [],
+        })),
+    }),
     growthSystem: createService('growthSystem', {
       getDashboard: async (novelId?: unknown) => withLocalBackend('growthSystem', 'getDashboard', [novelId], async () => ({
         tracks: [],

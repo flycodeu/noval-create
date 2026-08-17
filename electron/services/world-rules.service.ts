@@ -1,4 +1,4 @@
-﻿import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -497,8 +497,8 @@ function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string
   return cleanAiFieldText(raw).replace(/^\[[^\]]+\]\s*/g, '').trim() || fallback
 }
 
-function sendProgress(sender: WebContents | undefined, payload: WorldRulesGenerationProgressEvent) {
-  if (!sender || sender.isDestroyed()) return
+function sendProgress(sender: ProgressSink | undefined, payload: WorldRulesGenerationProgressEvent) {
+  if (!sender) return
   sender.send('ai:world-rules-progress', payload)
 }
 
@@ -515,7 +515,7 @@ export interface GenerateWorldRulesSectionOptions {
   action: WorldRulesGenerationRequest['action']
   workingRules: GenreWorldRules
   requirements?: string
-  sender?: WebContents
+  sender?: ProgressSink
   parentTaskId?: number
   completedBefore?: number
   totalSections?: number
@@ -531,7 +531,7 @@ async function runPromptTask(params: {
   novelId: number
   modelConfigId?: number
   prompt: string
-  sender?: WebContents
+  sender?: ProgressSink
   parentTaskId?: number
 }): Promise<string> {
   const messages = [{ role: 'user' as const, content: params.prompt }]
@@ -749,7 +749,7 @@ export async function generateWorldRulesSection(
 
 export async function generateWorldRules(
   data: WorldRulesGenerationRequest,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ): Promise<WorldRulesGenerationResult> {
   if (data.mode === 'section' && !data.section) {
     throwUserFacingError('worldRules.targetSectionMissing')

@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, desc, eq } from 'drizzle-orm'
 import type {
   ChapterBatchAutoGenerateStatus,
@@ -785,7 +785,7 @@ function mergeWarnings(current: string[], next?: string | string[] | null): stri
   return [...current, ...values.filter((item) => item.trim())]
 }
 
-function getRunningTask(taskId: number, sender?: WebContents) {
+function getRunningTask(taskId: number, sender?: ProgressSink) {
   const task = getTaskRecord(taskId)
   if (!task || !task.novelId) {
     throwUserFacingError('workflow.taskNotFound', { taskId })
@@ -858,7 +858,7 @@ function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowP
   return toSubplotStatus(taskId, task)
 }
 
-function settleBatchWorkflowFatalError(taskId: number, sender: WebContents | undefined, error: unknown) {
+function settleBatchWorkflowFatalError(taskId: number, sender: ProgressSink | undefined, error: unknown) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow' || !isBatchWorkflowType(task.type)) {
     console.error(`[batch-workflow] Fatal workflow recovery failed for task ${taskId}:`, error)
@@ -907,7 +907,7 @@ function settleBatchWorkflowFatalError(taskId: number, sender: WebContents | und
   })
 }
 
-async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
+async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
@@ -1067,7 +1067,7 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
 
 async function runSimpleEntityWorkflow(
   taskId: number,
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   type: 'faction' | 'item' | 'timeline' | 'thread',
 ) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
@@ -1276,7 +1276,7 @@ async function runSimpleEntityWorkflow(
 
 function pauseChapterBatchWorkflow(
   taskId: number,
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   progress: ChapterBatchAutoGenerateStatus,
   options: {
     message: string
@@ -1317,7 +1317,7 @@ function pauseChapterBatchWorkflow(
   })
 }
 
-async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebContents) {
+async function runChapterBatchGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
@@ -1557,7 +1557,7 @@ function createAnalysisInspection(
   }
 }
 
-async function runChapterQualityAnalysisWorkflow(taskId: number, sender?: WebContents) {
+async function runChapterQualityAnalysisWorkflow(taskId: number, sender?: ProgressSink) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
@@ -1754,7 +1754,7 @@ async function runChapterQualityAnalysisWorkflow(taskId: number, sender?: WebCon
   }
 }
 
-async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
+async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
@@ -2024,7 +2024,7 @@ export function isBatchWorkflowType(type?: string | null): type is BatchWorkflow
     || type === 'chapter_quality_analysis'
 }
 
-async function startFactionAutoGenerateWorkflowUnlocked(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+async function startFactionAutoGenerateWorkflowUnlocked(novelId: number, options: FactionBatchGenerationOptions, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.factionPausedExists')
@@ -2044,11 +2044,11 @@ async function startFactionAutoGenerateWorkflowUnlocked(novelId: number, options
   return taskId
 }
 
-export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('faction_auto_generate', novelId, () => startFactionAutoGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startCharacterAutoGenerateWorkflowUnlocked(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
+async function startCharacterAutoGenerateWorkflowUnlocked(novelId: number, options: CharacterBatchGenerationOptions, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'character_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.characterPausedExists')
@@ -2068,11 +2068,11 @@ async function startCharacterAutoGenerateWorkflowUnlocked(novelId: number, optio
   return taskId
 }
 
-export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
+export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('character_auto_generate', novelId, () => startCharacterAutoGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startItemAutoGenerateWorkflowUnlocked(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
+async function startItemAutoGenerateWorkflowUnlocked(novelId: number, options: StoryItemGenerateOptions = {}, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'item_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.itemPausedExists')
@@ -2092,11 +2092,11 @@ async function startItemAutoGenerateWorkflowUnlocked(novelId: number, options: S
   return taskId
 }
 
-export async function startItemAutoGenerateWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
+export async function startItemAutoGenerateWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('item_auto_generate', novelId, () => startItemAutoGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startTimelineAutoGenerateWorkflowUnlocked(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
+async function startTimelineAutoGenerateWorkflowUnlocked(novelId: number, options: TimelineGenerateOptions = {}, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'timeline_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.timelinePausedExists')
@@ -2116,11 +2116,11 @@ async function startTimelineAutoGenerateWorkflowUnlocked(novelId: number, option
   return taskId
 }
 
-export async function startTimelineAutoGenerateWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
+export async function startTimelineAutoGenerateWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('timeline_auto_generate', novelId, () => startTimelineAutoGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startStoryThreadAutoGenerateWorkflowUnlocked(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
+async function startStoryThreadAutoGenerateWorkflowUnlocked(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'story_thread_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.threadPausedExists')
@@ -2140,11 +2140,11 @@ async function startStoryThreadAutoGenerateWorkflowUnlocked(novelId: number, opt
   return taskId
 }
 
-export async function startStoryThreadAutoGenerateWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
+export async function startStoryThreadAutoGenerateWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('story_thread_auto_generate', novelId, () => startStoryThreadAutoGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startSubplotAutoGenerateWorkflowUnlocked(request: SubplotAutoGenerateRequest, sender?: WebContents) {
+async function startSubplotAutoGenerateWorkflowUnlocked(request: SubplotAutoGenerateRequest, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(request.novelId, 'subplot_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.subplotPausedExists')
@@ -2164,11 +2164,11 @@ async function startSubplotAutoGenerateWorkflowUnlocked(request: SubplotAutoGene
   return taskId
 }
 
-export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGenerateRequest, sender?: WebContents) {
+export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGenerateRequest, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('subplot_auto_generate', request.novelId, () => startSubplotAutoGenerateWorkflowUnlocked(request, sender))
 }
 
-async function startChapterBatchGenerateWorkflowUnlocked(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
+async function startChapterBatchGenerateWorkflowUnlocked(novelId: number, options: ChapterBatchGenerateOptions, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_batch_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.chapterPausedExists')
@@ -2209,11 +2209,11 @@ async function startChapterBatchGenerateWorkflowUnlocked(novelId: number, option
   return taskId
 }
 
-export async function startChapterBatchGenerateWorkflow(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
+export async function startChapterBatchGenerateWorkflow(novelId: number, options: ChapterBatchGenerateOptions, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('chapter_batch_generate', novelId, () => startChapterBatchGenerateWorkflowUnlocked(novelId, options, sender))
 }
 
-async function startChapterQualityAnalysisWorkflowUnlocked(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
+async function startChapterQualityAnalysisWorkflowUnlocked(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: ProgressSink) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_quality_analysis'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
 
@@ -2260,7 +2260,7 @@ async function startChapterQualityAnalysisWorkflowUnlocked(novelId: number, opti
   return taskId
 }
 
-export async function startChapterQualityAnalysisWorkflow(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
+export async function startChapterQualityAnalysisWorkflow(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: ProgressSink) {
   return withBatchWorkflowStartLock('chapter_quality_analysis', novelId, () => startChapterQualityAnalysisWorkflowUnlocked(novelId, options, sender))
 }
 
@@ -2340,7 +2340,7 @@ export function getLatestChapterQualityAnalysisTask(novelId: number) {
   return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_quality_analysis'))
 }
 
-async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefined, type: BatchWorkflowTaskType) {
+async function resumeBatchWorkflow(taskId: number, sender: ProgressSink | undefined, type: BatchWorkflowTaskType) {
   cleanupInactiveBatchWorkflowEntries()
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow' || task.type !== type) {
@@ -2390,7 +2390,7 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
   return taskId
 }
 
-export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
+export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: ProgressSink) {
   const task = getTaskRecord(taskId)
   if (!task || !isBatchWorkflowType(task.type)) {
     throwUserFacingError('workflow.taskNotFound', { taskId })
@@ -2401,21 +2401,21 @@ export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: W
   return resumeBatchWorkflow(taskId, sender, task.type)
 }
 
-export async function generateFactionsViaWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+export async function generateFactionsViaWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: ProgressSink) {
   const taskId = await startFactionAutoGenerateWorkflow(novelId, options, sender)
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)
   return getFactionAutoGenerateStatus(taskId)?.acceptedIds || []
 }
 
-export async function generateCharactersViaWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
+export async function generateCharactersViaWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: ProgressSink) {
   const taskId = await startCharacterAutoGenerateWorkflow(novelId, options, sender)
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)
   return toCharacterStatus(taskId, task).acceptedIds
 }
 
-export async function generateItemsViaWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
+export async function generateItemsViaWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: ProgressSink) {
   if (options.templateOnly) {
     return generateStoryItemsBatchChunk(novelId, options, { sender }).then((result) => result.ids)
   }
@@ -2425,14 +2425,14 @@ export async function generateItemsViaWorkflow(novelId: number, options: StoryIt
   return getItemAutoGenerateStatus(taskId)?.acceptedIds || []
 }
 
-export async function generateTimelineViaWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
+export async function generateTimelineViaWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: ProgressSink) {
   const taskId = await startTimelineAutoGenerateWorkflow(novelId, options, sender)
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)
   return getTimelineAutoGenerateStatus(taskId)?.acceptedIds || []
 }
 
-export async function generateStoryThreadsViaWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents): Promise<StoryThreadBatchGenerationResult> {
+export async function generateStoryThreadsViaWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: ProgressSink): Promise<StoryThreadBatchGenerationResult> {
   const taskId = await startStoryThreadAutoGenerateWorkflow(novelId, options, sender)
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)
@@ -2445,7 +2445,7 @@ export async function generateStoryThreadsViaWorkflow(novelId: number, options: 
   }
 }
 
-export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRequest, sender?: WebContents) {
+export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRequest, sender?: ProgressSink) {
   const taskId = await startSubplotAutoGenerateWorkflow(request, sender)
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)

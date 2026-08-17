@@ -1,4 +1,4 @@
-﻿import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { desc, eq } from 'drizzle-orm'
 import {
   PREMISE_GENERATION_STEPS,
@@ -211,8 +211,8 @@ function listPremiseDraftTasks(novelId: number) {
     .filter((task) => task.type === 'premise_generate' && parsePremiseDraftProgress(task.progressJson))
 }
 
-function sendProgress(sender: WebContents | undefined, payload: PremiseGenerationProgressEvent) {
-  if (!sender || sender.isDestroyed()) return
+function sendProgress(sender: ProgressSink | undefined, payload: PremiseGenerationProgressEvent) {
+  if (!sender) return
   sender.send('ai:premise-progress', payload)
 }
 
@@ -722,7 +722,7 @@ export function clearPremiseDrafts(novelId: number, excludeTaskId?: number) {
 
 export async function generatePremise(
   data: PremiseGenerationRequest,
-  sender?: WebContents,
+  sender?: ProgressSink,
 ): Promise<PremiseGenerationResult> {
   const context = await loadPremiseContext(data)
   const total = PREMISE_GENERATION_STEPS.length

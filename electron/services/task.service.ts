@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
@@ -189,7 +189,7 @@ interface CreateTaskOptions {
 interface RunTaskOptions extends CreateTaskOptions {
   messages: Message[]
   chatOpts?: Partial<ChatOptions>
-  sender?: WebContents
+  sender?: ProgressSink
   onChunk?: (chunk: string, fullOutput: string, taskId: number) => void | Promise<void>
   onSuccess?: (outputText: string, taskId: number) => Promise<unknown> | unknown
 }
@@ -934,32 +934,30 @@ function startTaskHeartbeat(taskId: number): () => void {
   return () => clearInterval(timer)
 }
 
-function notifyStatus(sender: WebContents | undefined, taskId: number, status: TaskStatus) {
+function notifyStatus(sender: ProgressSink | undefined, taskId: number, status: TaskStatus) {
   safeSend(sender, 'task:status-change', { taskId, status })
 }
 
-function notifyProgress(sender: WebContents | undefined, taskId: number, progress: object) {
+function notifyProgress(sender: ProgressSink | undefined, taskId: number, progress: object) {
   safeSend(sender, 'task:progress', { taskId, progress })
 }
 
 function notifyComplete(
-  sender: WebContents | undefined,
+  sender: ProgressSink | undefined,
   payload: { taskId: number; status: TaskStatus; output?: string; error?: string; result?: unknown },
 ) {
   safeSend(sender, 'task:complete', payload)
 }
 
-function safeSend(sender: WebContents | undefined, channel: string, payload: unknown): void {
+function safeSend(sender: ProgressSink | undefined, channel: string, payload: unknown): void {
   try {
-    if (sender && !sender.isDestroyed()) {
-      sender.send(channel, payload)
-    }
+    sender?.send(channel, payload)
   } catch {
-    // 窗口在 isDestroyed 检查与 send 之间被销毁，安全忽略
+    // 窗口在发送期间被销毁，安全忽略
   }
 }
 
-export function updateTaskStatus(taskId: number, status: TaskStatus, sender?: WebContents, extra: Partial<typeof tasks.$inferInsert> = {}) {
+export function updateTaskStatus(taskId: number, status: TaskStatus, sender?: ProgressSink, extra: Partial<typeof tasks.$inferInsert> = {}) {
   updateTask(taskId, {
     ...extra,
     status,
@@ -967,7 +965,7 @@ export function updateTaskStatus(taskId: number, status: TaskStatus, sender?: We
   notifyStatus(sender, taskId, status)
 }
 
-export function updateTaskProgress(taskId: number, progress: object, sender?: WebContents) {
+export function updateTaskProgress(taskId: number, progress: object, sender?: ProgressSink) {
   updateTask(taskId, {
     progressJson: JSON.stringify(progress),
   })
@@ -1233,7 +1231,7 @@ export async function runChatTask(opts: RunTaskOptions): Promise<string> {
   })
 }
 
-export function cancelTask(taskId: number, sender?: WebContents, visited = new Set<number>()): boolean {
+export function cancelTask(taskId: number, sender?: ProgressSink, visited = new Set<number>()): boolean {
   if (visited.has(taskId)) return false
   visited.add(taskId)
 
@@ -1379,7 +1377,7 @@ export function recoverOrphanedTasks(): number {
   return orphanedTasks.length
 }
 
-export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {
+export async function retryTask(taskId: number, sender?: ProgressSink): Promise<number> {
   const task = getTaskRecord(taskId)
   if (!task) throwUserFacingError('task.notFound', { id: taskId })
   if (task.runnerType === 'workflow') {

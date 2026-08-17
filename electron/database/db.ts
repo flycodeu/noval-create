@@ -2850,6 +2850,18 @@ export function runMigrations(sqlite: Database.Database) {
       `)
     }
   })
+
+  runMigrationStep(sqlite, '0062_map_travel_fields', () => {
+    if (hasTable(sqlite, 'map_relations')) {
+      ensureColumn(sqlite, 'map_relations', 'travel_hours', 'REAL')
+      ensureColumn(sqlite, 'map_relations', 'travel_mode', 'TEXT')
+      ensureColumn(sqlite, 'map_relations', 'route_open', 'INTEGER DEFAULT 1')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_map_relations_novel_travel
+        ON map_relations (novel_id, route_open, map_a_id, map_b_id, id);
+      `)
+    }
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

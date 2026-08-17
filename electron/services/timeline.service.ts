@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq, inArray } from 'drizzle-orm'
 import type { EntityRegenerateOptions, TimelineGenerateOptions } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
@@ -1291,7 +1291,7 @@ export async function generateTimelineBatchChunk(
   options: TimelineGenerateOptions = {},
   runtime: {
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
     batchIndex?: number
     totalBatches?: number
   } = {},

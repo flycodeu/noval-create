@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq, inArray } from 'drizzle-orm'
 import type {
   StoryThreadBatchGenerateOptions,
@@ -1089,7 +1089,7 @@ export async function generateStoryThreadBatchChunk(
   options: StoryThreadBatchGenerateOptions = {},
   runtime: {
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
     batchIndex?: number
     totalBatches?: number
   } = {},

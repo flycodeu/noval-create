@@ -199,6 +199,15 @@ const api = {
     delete: (id: number) => invokeIpc('storyFact:delete', id),
   },
 
+  knowledgeBoundary: {
+    characterSnapshot: (
+      novelId: number,
+      characterId: number,
+      upToChapterNum?: number,
+      isProtagonist?: boolean,
+    ) => invokeIpc('knowledgeBoundary:characterSnapshot', novelId, characterId, upToChapterNum, isProtagonist),
+  },
+
   growthSystem: {
     getDashboard: (novelId: number) => invokeIpc('growthSystem:getDashboard', novelId),
     listTracks: (novelId: number) => invokeIpc('growthSystem:listTracks', novelId),

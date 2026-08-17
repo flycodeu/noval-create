@@ -144,6 +144,7 @@ function createRuntime() {
   const sceneTemplateService = requireProject('electron/services/scene-template.service.ts')
   const endgameAssetService = requireProject('electron/services/endgame-asset.service.ts')
   const storyFactService = requireProject('electron/services/story-fact.service.ts')
+  const knowledgeBoundaryService = requireProject('electron/services/knowledge-boundary.service.ts')
   const growthSystemService = requireProject('electron/services/growth-system.service.ts')
   const resistanceService = requireProject('electron/services/resistance.service.ts')
   const characterArcService = requireProject('electron/services/character-arc.service.ts')
@@ -819,6 +820,15 @@ function createRuntime() {
       update: (id, data) => storyFactService.updateStoryFact(requireId(id), data),
       delete: (id) => storyFactService.deleteStoryFact(requireId(id)),
     },
+    knowledgeBoundary: {
+      characterSnapshot: (novelId, characterId, upToChapterNum, isProtagonist) =>
+        knowledgeBoundaryService.getCharacterKnowledgeSnapshot(
+          requireId(novelId, 'novelId'),
+          requireId(characterId, 'characterId'),
+          typeof upToChapterNum === 'number' ? upToChapterNum : Number.MAX_SAFE_INTEGER,
+          isProtagonist === true,
+        ),
+    },
     growthSystem: {
       getDashboard: (novelId) => growthSystemService.getGrowthSystemDashboard(requireId(novelId, 'novelId')),
       listTracks: (novelId) => growthSystemService.listGrowthTracks(requireId(novelId, 'novelId')),
@@ -1061,6 +1071,16 @@ function readRequestJson(req) {
 
 async function start() {
   await app.whenReady()
+
+  const { acquireSingleWriterLock } = requireProject('electron/utils/single-writer-lock.ts')
+  const writerLock = acquireSingleWriterLock(app.getPath('userData'), 'local-web-backend')
+  if (!writerLock) {
+    console.error('[local-web-backend] 检测到另一个 NovelForge 实例（桌面端、本地 Web 后端或 MCP 运行时）正在写入同一个数据库。')
+    console.error('[local-web-backend] 为避免数据损坏，本后端拒绝启动。请先关闭其他实例（或切换桌面端用户数据目录）再重试。')
+    app.quit()
+    process.exit(1)
+  }
+
   const runtime = createRuntime()
 
   const server = http.createServer(async (req, res) => {
@@ -1150,6 +1170,7 @@ async function start() {
     webEventClients.clear()
     server.close(() => {
       runtime.closeDb()
+      writerLock.release()
       app.quit()
     })
   }

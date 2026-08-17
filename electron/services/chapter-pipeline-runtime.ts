@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import type { AiExecutionMode, ChapterRewriteScope, TaskRecoveryHint } from '../../src/types'
@@ -83,7 +83,7 @@ export interface CreateChapterPipelineRuntimeInput {
   chapterId: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   idempotencyKey?: string
   stageId?: number
   resumeDraft?: string

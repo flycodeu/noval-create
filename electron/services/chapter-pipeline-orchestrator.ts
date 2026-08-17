@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { ScenePlanStep } from './chapter-scene-plan'
 import {
@@ -32,7 +32,7 @@ export async function executeChapterPlannerRuntimePhase(input: {
   chapterId: number
   novelId: number
   modelConfigId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   chatOptions: ChatOptions
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null

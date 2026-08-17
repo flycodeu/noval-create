@@ -52,6 +52,14 @@ function resolveConfiguredApprovalId(suppliedToken) {
 
 async function main() {
   await app.whenReady()
+  const { acquireSingleWriterLock } = requireProject('electron/utils/single-writer-lock.ts')
+  const writerLock = acquireSingleWriterLock(app.getPath('userData'), 'mcp-runtime')
+  if (!writerLock) {
+    console.error('[novelforge-mcp-runtime] 检测到另一个 NovelForge 实例（桌面端、本地 Web 后端或 MCP 运行时）正在写入同一个数据库。')
+    console.error('[novelforge-mcp-runtime] 为避免数据损坏，本运行时拒绝启动。请先关闭其他实例再重试。')
+    app.quit()
+    process.exit(1)
+  }
   const { initDb, closeDb } = requireProject('electron/database/db.ts')
   const { novelForgeToolRegistry } = requireProject('electron/application/novelforge-tool-registry.ts')
   const toolContracts = requireProject('src/shared/tool-contracts/index.ts')
@@ -64,6 +72,7 @@ async function main() {
     if (closing) return
     closing = true
     closeDb()
+    writerLock.release()
     app.quit()
   }
 

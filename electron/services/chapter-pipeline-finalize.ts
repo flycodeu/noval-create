@@ -1,5 +1,5 @@
 import { desc, eq } from 'drizzle-orm'
-import type { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { getDb } from '../database/db'
 import { chapterWritebackRuns } from '../database/schema'
 import type { ChapterContextRawData } from './context.service'
@@ -124,7 +124,7 @@ export function buildChapterFinalizeDetail(input: {
 
 export async function runChapterCanonizerAndFinalize(input: {
   chapterId: number
-  sender?: WebContents
+  sender?: ProgressSink
   contractVersion: string
   prepareCanon: boolean
   priorCanonizerTaskId?: number
@@ -204,7 +204,7 @@ export async function runChapterCanonizerAndFinalize(input: {
 
 export async function executeChapterFinalizePhase(input: {
   chapterId: number
-  sender?: WebContents
+  sender?: ProgressSink
   contractVersion: string
   priorCanonizerTaskId?: number
   canonizerRecoveryHintJson?: string

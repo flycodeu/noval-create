@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { mapRelations, novels, storyItems, timelineEvents, worldMap } from '../database/schema'
@@ -100,7 +100,7 @@ export interface MapNextBatchPreview {
 
 interface MapBatchGenerateRuntimeOptions {
   parentTaskId?: number
-  sender?: WebContents
+  sender?: ProgressSink
   chatOpts?: Partial<ChatOptions>
   onBatchPlan?: (preview: MapNextBatchPreview) => void
   shouldStop?: () => boolean
@@ -350,7 +350,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
     modelConfigId?: number
     prompt: string
     parentTaskId?: number
-    sender?: WebContents
+    sender?: ProgressSink
     chatOpts?: Partial<ChatOptions>
     context: ParseGeneratedNodeBatchContext
     reviewContext: string
@@ -504,6 +504,9 @@ function mapRelationRecord(row: Record<string, unknown>): MapRelation {
     intensity: typeof row.intensity === 'string' ? row.intensity : undefined,
     colorHint: typeof row.color_hint === 'string' ? row.color_hint : undefined,
     sortOrder: Number(row.sort_order || 0),
+    travelHours: typeof row.travel_hours === 'number' && row.travel_hours > 0 ? row.travel_hours : null,
+    travelMode: typeof row.travel_mode === 'string' ? row.travel_mode : null,
+    routeOpen: row.route_open == null ? 1 : (Number(row.route_open) > 0 ? 1 : 0),
   }
 }
 
@@ -877,6 +880,11 @@ function sanitizeMapRelationInput(data: MapRelationInput): MapRelationInput {
     intensity: asText(data.intensity),
     colorHint: asText(data.colorHint),
     sortOrder: typeof data.sortOrder === 'number' ? Math.max(0, Math.round(data.sortOrder)) : 0,
+    travelHours: typeof data.travelHours === 'number' && Number.isFinite(data.travelHours) && data.travelHours > 0
+      ? Math.round(data.travelHours * 100) / 100
+      : null,
+    travelMode: asText(data.travelMode),
+    routeOpen: data.routeOpen == null ? 1 : (Number(data.routeOpen) > 0 ? 1 : 0),
   }
 }
 
@@ -921,6 +929,9 @@ export function upsertMapRelation(input: MapRelationInput) {
     intensity: data.intensity || null,
     colorHint: data.colorHint || null,
     sortOrder: data.sortOrder ?? 0,
+    travelHours: data.travelHours ?? null,
+    travelMode: data.travelMode || null,
+    routeOpen: data.routeOpen ?? 1,
   }
 
   if (existing) {
@@ -1145,7 +1156,7 @@ async function runBatchWithRetries<T>(
   throw new Error(`${label}执行失败`)
 }
 
-async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: WebContents; chatOpts?: Partial<ChatOptions> }) {
+async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: ProgressSink; chatOpts?: Partial<ChatOptions> }) {
   const messages = [{ role: 'user' as const, content: params.prompt }]
   if (typeof params.parentTaskId !== 'number') {
     return runChatTask({ type: 'generate_map', novelId: params.novelId, modelConfigId: params.modelConfigId, messages, sender: params.sender, chatOpts: params.chatOpts })
