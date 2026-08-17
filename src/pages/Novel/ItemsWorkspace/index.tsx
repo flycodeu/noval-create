@@ -1309,7 +1309,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
   return (
     <WorkspacePage
       className="novel-items-page"
-      eyebrow="物品系统"
       title="物品与装备工作台"
       description="模板、实例与自动发现草稿现在统一管理。你可以直接查看实例来源、持有人、地点、事件链以及同模板流转，不再只是停留在单条表单。"
       actions={(

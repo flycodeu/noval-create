@@ -200,7 +200,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   return (
     <WorkspacePage
       className="novel-timeline-page"
-      eyebrow={TIMELINE_TEXT.pageEyebrow}
       title={TIMELINE_TEXT.pageTitle}
       actions={(
         <Space wrap>

@@ -187,9 +187,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
         <div className="recommendation-governance__title">
           <SafetyCertificateOutlined />
           <div>
-            <span>RECOMMENDATION CONTROL</span>
             <strong>推荐评估机会治理</strong>
-            <p>内部预检无限运行且永不计次；只有确认真实发生的作者评估或平台自动评估才进入三次额度。</p>
           </div>
         </div>
         <Space wrap>
@@ -211,18 +209,17 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
               return (
                 <div key={index} className={`recommendation-governance__attempt-slot${attempt ? ` is-${attempt.outcome}` : ''}`}>
                   <span>{attempt ? (attempt.outcome === 'passed' ? '✓' : '×') : index + 1}</span>
-                  <div><strong>{attempt ? (attempt.outcome === 'passed' ? '通过' : '未通过') : '未使用'}</strong><small>{attempt ? (attempt.source === 'author_requested' ? '作者主动' : '平台自动') : '不计内部预检'}</small></div>
+                  <div><strong>{attempt ? (attempt.outcome === 'passed' ? '通过' : '未通过') : '未使用'}</strong><small>{attempt ? (attempt.source === 'author_requested' ? '作者主动' : '平台自动') : '外部评估'}</small></div>
                 </div>
               )
             })}
           </div>
           {state.lockReason ? <Alert type={state.status === 'passed' ? 'success' : 'error'} showIcon message={state.lockReason} /> : null}
-          <p className="recommendation-governance__policy-note">规则来源：项目负责人提供的业务规则；尚未绑定官方平台政策链接，系统按保守硬门执行。</p>
         </div>
 
         <div className="recommendation-governance__preflight-card">
           <div className="recommendation-governance__card-head">
-            <div><span>INTERNAL PREFLIGHT</span><strong>内部预检 · 明确不计次</strong></div>
+            <div><strong>内部预检</strong></div>
             <Button type="primary" loading={running === 'preflight'} disabled={running !== null && running !== 'preflight'} onClick={() => void runPreflight()}>运行预检</Button>
           </div>
           {latestPreflight ? (
@@ -241,12 +238,12 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
                 <div className="recommendation-governance__issues">{latestPreflight.blockers.slice(0, 6).map((blocker) => <div key={blocker}>× {blocker}</div>)}</div>
               ) : <div className="recommendation-governance__ready-line"><CheckCircleOutlined />所有硬门已通过，可以锁定候选版本。</div>}
             </>
-          ) : <div className="recommendation-governance__empty">还没有内部预检记录。先运行预检，不会消耗平台机会。</div>}
+          ) : <div className="recommendation-governance__empty">暂无内部预检记录，点击上方按钮运行预检。</div>}
         </div>
 
         <div className="recommendation-governance__candidate-card">
           <div className="recommendation-governance__card-head">
-            <div><span>LOCKED CANDIDATE</span><strong>候选版本与真实结果</strong></div>
+            <div><strong>候选版本与真实结果</strong></div>
             {recordCandidate ? (
               <Tag color={matchingCandidate ? 'cyan' : 'gold'}>
                 {matchingCandidate ? `当前候选 #${recordCandidate.id}` : `历史候选 #${recordCandidate.id}`}
@@ -258,7 +255,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
               <FileProtectOutlined />
               <div><strong>已锁定 Run #{recordCandidate.preflightRunId}</strong><span>Context v{recordCandidate.contextVersion}</span><code>{recordCandidate.contentHash}</code></div>
             </div>
-          ) : <p className="recommendation-governance__empty">预检通过后，人工确认精确哈希并锁定候选。锁定不会增加评估次数。</p>}
+          ) : <p className="recommendation-governance__empty">预检通过后可锁定候选版本，锁定不计入外部评估次数。</p>}
           <Space wrap>
             <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={running !== null || !latestPreflight || latestPreflight.status !== 'ready' || !state.canRecordExternalEvaluation || Boolean(matchingCandidate)} onClick={() => void lockCandidate()}>
               锁定当前候选
@@ -269,10 +266,9 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
               setRecordIdempotencyKey((current) => current || createKey('recommendation-result'))
               setRecordOpen(true)
             }}>
-              记录已发生的真实结果
+              记录真实结果
             </Button>
           </Space>
-          <small className="recommendation-governance__no-auto">不会自动提交平台，也不会在失败后自动开始下一次评估。</small>
         </div>
       </div>
 

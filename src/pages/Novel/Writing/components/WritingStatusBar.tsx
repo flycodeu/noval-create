@@ -33,7 +33,6 @@ export default function WritingStatusBar({
     <section className="chapter-console-page__panel chapter-console-page__editor-hero">
       <div className="chapter-console-page__editor-hero-main">
         <SectionHeader
-          eyebrow="写作主任务"
           title={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${editorTitle}` : '请选择一个章节'}
           description={primaryStatusText}
         />

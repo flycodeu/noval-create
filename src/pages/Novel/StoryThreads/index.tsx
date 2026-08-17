@@ -654,7 +654,6 @@ export default function StoryThreadsPage({ novelId }: Props) {
       className="novel-story-threads-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="故事线程"
       title="故事线程"
       actions={(
         <Space wrap>

@@ -390,7 +390,6 @@ export default function GrowthSystemPage({ novelId }: Props) {
       className="novel-growth-system-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="成长资源代价系统"
       title="成长资源代价系统"
       description="统一维护阶段目标、瓶颈、获取路径、消耗机制与失败代价，并把收益/代价回写绑定到合同与卷级节奏。"
       actions={<Space wrap><Button type="primary" icon={<PlusOutlined />} onClick={() => openTrack()}>新建成长轨道</Button><Button icon={<PlusOutlined />} onClick={() => openPool()}>新建资源池</Button><Button icon={<PlusOutlined />} onClick={() => openEvent()}>章节回写</Button></Space>}

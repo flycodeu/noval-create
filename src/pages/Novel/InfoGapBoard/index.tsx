@@ -468,7 +468,6 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       className="novel-info-gap-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="信息差与谜题板"
       title="信息差与谜题板"
       description="独立维护谜题、线索、真相、假线索，并控制“谁何时知道什么”。"
       actions={(

@@ -454,7 +454,6 @@ export default function ContractsPage({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      eyebrow="章节合同 / 场景合同"
       title="章节合同与场景合同"
       description="把大纲前的约束变成显式合同，让写作链路优先遵守本章目标、终局承诺和场景限制。"
       actions={(

@@ -1,7 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, ReloadOutlined, DeleteOutlined, ArrowRightOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  DeleteOutlined,
+  ArrowRightOutlined,
+  EditOutlined,
+  CheckOutlined,
+  WrenchOutlined,
+  SearchOutlined,
+  ClearOutlined,
+} from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -24,6 +34,7 @@ import {
   getRevisionSeverityColor,
   getRevisionSeverityLabel,
 } from '../shared/revision-quality'
+import './RevisionCenter.css'
 
 interface Props {
   novelId: number
@@ -43,7 +54,7 @@ const STATUS_OPTIONS = [
   { value: 'open', label: '待处理' },
   { value: 'in_progress', label: '处理中' },
   { value: 'resolved', label: '已解决' },
-  { value: 'ignored', label: '忽略' },
+  { value: 'ignored', label: '已忽略' },
 ]
 
 const SEVERITY_OPTIONS = [
@@ -68,6 +79,15 @@ const RELATED_PAGE_OPTIONS = [
   { value: 'revision', label: '修订中心' },
 ]
 
+const TASK_TYPE_LABELS: Record<string, string> = {
+  continuity: '连续性',
+  timeline: '时间线',
+  character: '人物设定',
+  map: '地图结构',
+  plot: '剧情逻辑',
+  rule: '世界规则',
+}
+
 const EMPTY_VALUES: RevisionTaskFormValues = {
   taskType: 'continuity',
   title: '',
@@ -84,11 +104,11 @@ function getStatusColor(status: RevisionTask['status']) {
   if (status === 'resolved') return 'success'
   if (status === 'in_progress') return 'processing'
   if (status === 'ignored') return 'default'
-  return 'blue'
+  return 'gold'
 }
 
 function getSourceColor(source: RevisionTask['taskSource']) {
-  return source === 'system' ? 'purple' : 'cyan'
+  return source === 'system' ? 'purple' : 'blue'
 }
 
 function getSourceLabel(source: RevisionTask['taskSource']) {
@@ -99,14 +119,29 @@ function getStatusLabel(status: RevisionTask['status']) {
   return STATUS_OPTIONS.find((item) => item.value === status)?.label || status
 }
 
+function formatDate(value?: string | null): string {
+  if (!value) return '-'
+  try {
+    const d = new Date(value)
+    if (isNaN(d.getTime())) return '-'
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    return `${month}-${day} ${hours}:${minutes}`
+  } catch {
+    return '-'
+  }
+}
+
 function buildIssueSummary(report: NovelConsistencyReport | null) {
-  if (!report || report.issues.length === 0) return '最近一轮诊断没有拉出高价值摘要。'
+  if (!report || report.issues.length === 0) return '最近一轮诊断暂无高风险问题。'
   return report.issues.slice(0, 5).map((issue) => `${getConsistencySeverityLabel(issue.severity)}：${issue.title}`).join('\n')
 }
 
 export default function RevisionCenterPage({ novelId }: Props) {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<RevisionTaskFormValues>()
   const [tasks, setTasks] = useState<RevisionTask[]>([])
@@ -187,6 +222,18 @@ export default function RevisionCenterPage({ novelId }: Props) {
     [tasks],
   )
   const systemCount = tasks.length - manualCount
+
+  const hasActiveFilters = sourceFilter !== 'all' || statusFilter !== 'all' || Boolean(keyword.trim()) || Boolean(scopedFilterSummary)
+
+  const clearAllFilters = useCallback(() => {
+    setSourceFilter('all')
+    setStatusFilter('all')
+    setKeyword('')
+    if (scopedFilterSummary) {
+      setSearchParams({})
+    }
+  }, [scopedFilterSummary, setSearchParams])
+
   const applyRevisionDraft = useCallback((draft: Partial<RevisionTaskFormValues>) => {
     const currentValues = form.getFieldsValue(true)
     form.setFieldsValue({
@@ -200,11 +247,13 @@ export default function RevisionCenterPage({ novelId }: Props) {
       relatedPage: typeof draft.relatedPage === 'string' ? draft.relatedPage : currentValues.relatedPage,
     })
   }, [form])
+
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<RevisionTaskFormValues>({
     novelId,
     pageKey: 'revision',
     applyDraft: applyRevisionDraft,
   })
+
   const taskDraftButton = (
     <AIGenerateButton
       novelId={novelId}
@@ -353,61 +402,94 @@ export default function RevisionCenterPage({ novelId }: Props) {
 
   const columns = useMemo<ColumnsType<RevisionTask>>(() => [
     {
-      title: '任务',
+      title: '修订任务与说明',
       key: 'title',
+      minWidth: 420,
       render: (_, record) => (
-        <div>
-          <div className="workspace-row workspace-row--wrap workspace-row-gap-8">
-            <strong>{record.title}</strong>
+        <div className="revision-task-cell">
+          <div className="revision-task-cell__header">
+            <span className="revision-task-cell__title">{record.title}</span>
             <Tag color={getSourceColor(record.taskSource)}>{getSourceLabel(record.taskSource)}</Tag>
-            <Tag color={getRevisionSeverityColor(record.severity)}>{getRevisionSeverityLabel(record.severity)}</Tag>
-            <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
           </div>
-          <div className="workspace-margin-top-6 workspace-text-muted workspace-text-small">
-            {record.description || record.fixBrief || '当前还没有补充说明。'}
-          </div>
+          {record.description ? (
+            <div className="revision-task-cell__desc">{record.description}</div>
+          ) : null}
           {record.fixBrief ? (
-            <div className="workspace-margin-top-6 workspace-text-small">
+            <div className="revision-task-cell__suggestion">
               <strong>建议：</strong>
-              {record.fixBrief}
+              <span>{record.fixBrief}</span>
             </div>
           ) : null}
         </div>
       ),
     },
     {
-      title: '定位页',
+      title: '任务类型',
+      dataIndex: 'taskType',
+      key: 'taskType',
+      width: 105,
+      render: (value) => {
+        const label = TASK_TYPE_LABELS[value] || value || '连续性'
+        return <Tag color="geekblue">{label}</Tag>
+      },
+    },
+    {
+      title: '优先级',
+      dataIndex: 'severity',
+      key: 'severity',
+      width: 95,
+      render: (value) => <Tag color={getRevisionSeverityColor(value)}>{getRevisionSeverityLabel(value)}</Tag>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 95,
+      render: (value) => <Tag color={getStatusColor(value)}>{getStatusLabel(value)}</Tag>,
+    },
+    {
+      title: '定位模块',
       dataIndex: 'relatedPage',
       key: 'relatedPage',
-      width: 150,
-      render: (value) => RELATED_PAGE_OPTIONS.find((item) => item.value === value)?.label || value || '修订中心',
+      width: 110,
+      render: (value) => {
+        const label = RELATED_PAGE_OPTIONS.find((item) => item.value === value)?.label || value || '正文写作'
+        return <Tag>{label}</Tag>
+      },
     },
     {
       title: '更新时间',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
-      width: 180,
-      render: (value) => value ? new Date(value).toLocaleString() : '-',
+      width: 120,
+      render: (value) => <span className="workspace-text-muted workspace-text-small">{formatDate(value)}</span>,
     },
     {
       title: '操作',
       key: 'actions',
-      width: 320,
+      width: 200,
+      fixed: 'right',
       render: (_, record) => (
-        <Space wrap>
-          <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(record)}>
-            带上下文打开
-          </Button>
+        <Space size={6} wrap>
+          <Tooltip title="跳转至对应工作区定位问题">
+            <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(record)}>
+              定位
+            </Button>
+          </Tooltip>
           {record.taskSource === 'manual' ? (
             <>
-              <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
+              <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(record)}>
+                编辑
+              </Button>
               {record.status !== 'resolved' ? (
                 <Button
                   size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
                   loading={actionKey === `status:${record.id}:resolved`}
                   onClick={() => void handleQuickStatus(record, 'resolved')}
                 >
-                  标记解决
+                  解决
                 </Button>
               ) : null}
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDelete(record)} />
@@ -418,6 +500,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
                 <Button
                   size="small"
                   type="primary"
+                  icon={<WrenchOutlined />}
                   loading={actionKey === `autofix:${record.id}`}
                   onClick={() => void handleAutoFix(record)}
                 >
@@ -444,10 +527,11 @@ export default function RevisionCenterPage({ novelId }: Props) {
               {record.status !== 'resolved' ? (
                 <Button
                   size="small"
+                  icon={<CheckOutlined />}
                   loading={actionKey === `status:${record.id}:resolved`}
                   onClick={() => void handleQuickStatus(record, 'resolved')}
                 >
-                  标记完成
+                  完成
                 </Button>
               ) : null}
             </>
@@ -462,9 +546,8 @@ export default function RevisionCenterPage({ novelId }: Props) {
       className="novel-revision-center-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="修订中心"
       title="修订中心"
-      asidePlacement="side"
+      asidePlacement="below"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
@@ -481,33 +564,19 @@ export default function RevisionCenterPage({ novelId }: Props) {
       contextSummary={(
         <WorkspaceContextSummary
           items={[
-            { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '未处理任务', value: stats.openCount + stats.inProgressCount },
-            { label: '待同步章节', value: contextStatus ? contextStatus.staleChapterCount : '加载中' },
-            { label: '高优先问题', value: consistencyReport ? consistencyReport.highCount : '加载中' },
+            { label: '体检评分', value: consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中' },
+            { label: '未解决任务', value: `${stats.openCount + stats.inProgressCount} 项` },
+            { label: '待同步章节', value: contextStatus ? `${contextStatus.staleChapterCount} 章` : '加载中' },
+            { label: '高优先问题', value: consistencyReport ? `${consistencyReport.highCount} 项` : '加载中' },
           ]}
         />
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="阻塞项" value={stats.blockerCount} tone="warm" />
+          <WorkspaceMetric label="阻塞项" value={stats.blockerCount} tone={stats.blockerCount > 0 ? 'warm' : 'default'} />
           <WorkspaceMetric label="待处理" value={stats.openCount} />
           <WorkspaceMetric label="处理中" value={stats.inProgressCount} />
           <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} />
-        </>
-      )}
-      aside={(
-        <>
-          {consistencyReport && (
-            <WorkspacePanel sticky title="当前体检" description={consistencyReport.overview}>
-              <div className="novel-note-list">
-                <div className="novel-note-list__item">{`体检分数：${consistencyReport.readinessScore}`}</div>
-                <div className="novel-note-list__item">{`高优先：${consistencyReport.highCount}`}</div>
-                <div className="novel-note-list__item">{`中优先：${consistencyReport.mediumCount}`}</div>
-                <div className="novel-note-list__item">{`低优先：${consistencyReport.lowCount}`}</div>
-              </div>
-            </WorkspacePanel>
-          )}
         </>
       )}
     >
@@ -515,8 +584,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message={`当前有 ${stats.blockerCount} 个阻塞项需要优先处理`}
-            description="这些阻塞项会影响后续写作和批量生成。"
+          message={`当前存在 ${stats.blockerCount} 个阻塞项，建议优先处理以保障后续生成与同步。`}
         />
       ) : null}
 
@@ -524,8 +592,12 @@ export default function RevisionCenterPage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="当前按定向筛选打开"
-          description={`只显示与 ${scopedFilterSummary} 相关的修订任务。`}
+          message={`当前处于定向筛选视图：${scopedFilterSummary}`}
+          action={
+            <Button size="small" onClick={clearAllFilters}>
+              查看全部
+            </Button>
+          }
         />
       ) : null}
 
@@ -533,33 +605,34 @@ export default function RevisionCenterPage({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message={`有 ${contextStatus.staleChapterCount} 章仍在引用旧上下文`}
-            description="这些章节仍在引用旧上下文。"
+          message={`检测到 ${contextStatus.staleChapterCount} 个章节引用了旧上下文，建议在正文或大纲中同步更新。`}
         />
       ) : null}
+
       {draftWarnings.length > 0 ? (
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 草稿附带修补提示"
+          message="AI 任务生成提示"
           description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}
+
       {draft?.appliedAt ? (
         <Alert
           type="info"
           showIcon
-          message="已恢复最近一次未保存的 AI 草稿"
-          description="当前修订任务表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
+          message="已恢复最近一次未保存的 AI 草稿，提交后自动生效。"
         />
       ) : null}
 
+      {/* 主修订任务列表板 */}
       <WorkspacePanel title="修订任务板">
-        <div className="workspace-stack-16">
-          <div className="workspace-row workspace-row--wrap workspace-row-gap-12">
+        <div className="revision-toolbar">
+          <div className="revision-toolbar__filters">
             <Select
               value={sourceFilter}
-              className="workspace-control-140"
+              style={{ width: 130 }}
               options={[
                 { value: 'all', label: '全部来源' },
                 { value: 'system', label: '系统任务' },
@@ -569,7 +642,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
             />
             <Select
               value={statusFilter}
-              className="workspace-control-140"
+              style={{ width: 130 }}
               options={[
                 { value: 'all', label: '全部状态' },
                 ...STATUS_OPTIONS,
@@ -580,43 +653,81 @@ export default function RevisionCenterPage({ novelId }: Props) {
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
               placeholder="搜索任务标题、说明或建议"
-              className="workspace-max-320"
+              prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
+              allowClear
+              style={{ maxWidth: 300, flex: 1 }}
             />
+            {hasActiveFilters ? (
+              <Button size="small" icon={<ClearOutlined />} onClick={clearAllFilters}>
+                重置筛选
+              </Button>
+            ) : null}
           </div>
-
-          <Table
-            rowKey="id"
-            loading={loading}
-            columns={columns}
-            dataSource={tasks}
-            pagination={{
-              current: page,
-              pageSize: REVISION_PAGE_SIZE,
-              total: taskTotal,
-              showSizeChanger: false,
-              onChange: setPage,
-            }}
-          />
         </div>
+
+        <Table
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={tasks}
+          scroll={{ x: 1080 }}
+          pagination={{
+            current: page,
+            pageSize: REVISION_PAGE_SIZE,
+            total: taskTotal,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
+        />
       </WorkspacePanel>
 
+      {/* 系统体检与一致性诊断卡片 */}
       {consistencyReport ? (
-        <WorkspacePanel title="系统体检摘要">
-          <div className="novel-issue-list">
-            {consistencyReport.issues.slice(0, 6).map((issue) => (
-              <div key={issue.id} className="novel-issue-item">
-                <div className="novel-issue-item__head">
-                  <Tag color={getConsistencySeverityColor(issue.severity)}>{getConsistencySeverityLabel(issue.severity)}</Tag>
-                  <strong>{issue.title}</strong>
-                </div>
-                <div className="novel-issue-item__desc">{issue.description}</div>
-                <div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div>
-              </div>
-            ))}
+        <WorkspacePanel
+          title="系统健康体检"
+          description={consistencyReport.overview || '综合多维度设定与章节连续性的一致性检查报告'}
+        >
+          <div className="revision-health-grid">
+            <div className="revision-health-card">
+              <span className="revision-health-card__label">健康评分</span>
+              <span className="revision-health-card__value" style={{ color: consistencyReport.readinessScore >= 80 ? 'var(--success, #52c41a)' : 'var(--warning, #faad14)' }}>
+                {consistencyReport.readinessScore} 分
+              </span>
+            </div>
+            <div className="revision-health-card">
+              <span className="revision-health-card__label">高优先级风险</span>
+              <span className="revision-health-card__value" style={{ color: consistencyReport.highCount > 0 ? 'var(--danger, #ff4d4f)' : 'inherit' }}>
+                {consistencyReport.highCount} 项
+              </span>
+            </div>
+            <div className="revision-health-card">
+              <span className="revision-health-card__label">中优先级预警</span>
+              <span className="revision-health-card__value">{consistencyReport.mediumCount} 项</span>
+            </div>
+            <div className="revision-health-card">
+              <span className="revision-health-card__label">低优先级提示</span>
+              <span className="revision-health-card__value">{consistencyReport.lowCount} 项</span>
+            </div>
           </div>
+
+          {consistencyReport.issues.length > 0 ? (
+            <div className="novel-issue-list" style={{ marginTop: 16 }}>
+              {consistencyReport.issues.slice(0, 8).map((issue) => (
+                <div key={issue.id} className="novel-issue-item">
+                  <div className="novel-issue-item__head">
+                    <Tag color={getConsistencySeverityColor(issue.severity)}>{getConsistencySeverityLabel(issue.severity)}</Tag>
+                    <strong>{issue.title}</strong>
+                  </div>
+                  <div className="novel-issue-item__desc">{issue.description}</div>
+                  <div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </WorkspacePanel>
       ) : null}
 
+      {/* 新建/编辑任务弹窗 */}
       <Modal
         title={editingTask ? '编辑人工修订任务' : '新建人工修订任务'}
         open={modalOpen}
@@ -625,9 +736,9 @@ export default function RevisionCenterPage({ novelId }: Props) {
         onOk={() => void handleSave()}
         confirmLoading={saving}
         okText={editingTask ? '保存修改' : '创建任务'}
-        width={760}
+        width={720}
       >
-        <div className="workspace-margin-bottom-12">
+        <div style={{ marginBottom: 16 }}>
           {taskDraftButton}
         </div>
         <Form form={form} layout="vertical" initialValues={EMPTY_VALUES}>
@@ -654,16 +765,16 @@ export default function RevisionCenterPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="description" label="问题描述">
-                <Input.TextArea rows={6} placeholder="写清具体问题、影响范围和现状。" />
+                <Input.TextArea rows={4} placeholder="写清具体问题、影响范围和现状。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="fixBrief" label="修订方案 / 检查清单">
-                <Input.TextArea rows={6} placeholder="写清修订动作，例如需要回查哪些章节、人物、时间轴或线程。" />
+                <Input.TextArea rows={4} placeholder="写清修订动作，例如需要回查哪些章节、人物、时间轴或线程。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="relatedPage" label="关联页面">
+              <Form.Item name="relatedPage" label="关联模块">
                 <Select options={RELATED_PAGE_OPTIONS} />
               </Form.Item>
             </div>

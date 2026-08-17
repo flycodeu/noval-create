@@ -309,7 +309,6 @@ export default function StyleLabPage({ novelId }: Props) {
       className="novel-style-lab-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="文风实验室"
       title="文风实验室"
       description="管理风格指纹、切换生效声线，并用 A/B 试写验证指纹对生成文本的真实影响。"
       actions={(

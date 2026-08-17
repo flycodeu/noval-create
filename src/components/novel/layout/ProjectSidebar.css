@@ -9,23 +9,20 @@
   --project-sidebar-accent: var(--accent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
   height: 100%;
   min-height: 0;
 }
 
 .project-sidebar__summary {
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(184, 134, 11, 0.18);
-  background: linear-gradient(135deg, rgba(255, 250, 240, 0.98), rgba(255, 255, 255, 0.92));
-  box-shadow: 0 4px 14px rgba(122, 93, 52, 0.06);
-}
-
-.project-sidebar__summary-copy {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(184, 134, 11, 0.16);
+  background: linear-gradient(135deg, rgba(255, 250, 240, 0.95), rgba(255, 255, 255, 0.9));
+  box-shadow: 0 2px 8px rgba(122, 93, 52, 0.04);
 }
 
 .project-sidebar__summary-header {
@@ -38,51 +35,66 @@
 .project-sidebar__summary-badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 9px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 5px;
   background: rgba(184, 134, 11, 0.12);
   color: #8c5810;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .project-sidebar__summary-meta {
   color: var(--project-sidebar-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.project-sidebar__progress-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.project-sidebar__progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d4a017, #b8860b);
+  transition: width 0.3s ease;
 }
 
 .project-sidebar__current-task {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-top: 2px;
-  padding-top: 6px;
+  gap: 6px;
+  margin-top: 1px;
+  padding-top: 5px;
   border-top: 1px dashed color-mix(in srgb, var(--project-sidebar-border) 78%, transparent 22%);
   color: var(--project-sidebar-text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 .project-sidebar__current-task .anticon {
   color: var(--project-sidebar-accent);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .project-sidebar__current-task span {
   min-width: 0;
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-sidebar__groups {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
@@ -90,8 +102,8 @@
 
 .project-sidebar__group {
   display: grid;
-  gap: 4px;
-  padding: 4px 0 6px;
+  gap: 3px;
+  padding: 3px 0 5px;
   border-top: 1px solid color-mix(in srgb, var(--project-sidebar-border) 82%, transparent 18%);
 }
 
@@ -106,10 +118,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 32px;
-  padding: 6px 8px;
+  min-height: 30px;
+  padding: 5px 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -123,13 +135,13 @@
 .project-sidebar__group-toggle-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .project-sidebar__group-toggle-icon {
   color: var(--project-sidebar-accent);
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -138,54 +150,52 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 6px;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
   background: rgba(184, 134, 11, 0.12);
   color: #9a6818;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 800;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
 }
 
 .project-sidebar__group-title {
   color: var(--project-sidebar-text);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 12.5px;
+  line-height: 1.35;
   font-weight: 700;
-  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
 .project-sidebar__group-progress {
   color: var(--project-sidebar-text-muted);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .project-sidebar__group-items {
   display: grid;
-  gap: 3px;
-  padding-left: 6px;
+  gap: 2px;
+  padding-left: 4px;
 }
 
 .project-sidebar__group-item {
   position: relative;
   width: 100%;
-  display: grid;
-  gap: 2px;
-  padding: 8px 10px 8px 14px;
+  display: block;
+  padding: 6px 8px 6px 12px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: all 0.15s ease;
 }
 
 .project-sidebar__group-item:hover {
@@ -196,23 +206,23 @@
 .project-sidebar__group-item-bar {
   position: absolute;
   left: 3px;
-  top: 8px;
-  bottom: 8px;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
   border-radius: 999px;
   background: transparent;
-  transition: background 0.16s ease, width 0.16s ease;
+  transition: background 0.15s ease, width 0.15s ease;
 }
 
 .project-sidebar__group-item.is-active {
   border-color: rgba(184, 134, 11, 0.28);
   background: linear-gradient(90deg, rgba(254, 243, 224, 0.95), rgba(255, 252, 246, 0.85));
-  box-shadow: 0 2px 8px rgba(122, 93, 52, 0.08);
+  box-shadow: 0 2px 6px rgba(122, 93, 52, 0.06);
 }
 
 .project-sidebar__group-item.is-active .project-sidebar__group-item-bar {
   background: #b8860b;
-  width: 4px;
+  width: 3.5px;
 }
 
 .project-sidebar__group-item.is-active .project-sidebar__group-item-label {
@@ -235,36 +245,23 @@
 }
 
 .project-sidebar__group-item-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.project-sidebar__group-item-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .project-sidebar__group-item-label {
+  flex: 1;
+  min-width: 0;
   display: block;
   overflow: hidden;
   color: var(--project-sidebar-text);
-  font-size: 13px;
-  line-height: 1.4;
-  font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.project-sidebar__group-item-meta {
-  overflow: hidden;
-  color: var(--project-sidebar-text-muted);
-  font-size: 11px;
+  font-size: 12.5px;
   line-height: 1.35;
-  text-overflow: ellipsis;
+  font-weight: 500;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .project-sidebar__group-item-head > .status-tag {
@@ -279,14 +276,22 @@
 }
 
 [data-theme="dark"] .project-sidebar__summary {
-  border-color: rgba(246, 197, 111, 0.18);
+  border-color: rgba(246, 197, 111, 0.16);
   background: linear-gradient(135deg, rgba(24, 30, 42, 0.95), rgba(16, 20, 30, 0.92));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
 [data-theme="dark"] .project-sidebar__summary-badge {
   background: rgba(246, 197, 111, 0.16);
   color: #f6c56f;
+}
+
+[data-theme="dark"] .project-sidebar__progress-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .project-sidebar__progress-fill {
+  background: linear-gradient(90deg, #f6c56f, #d4a017);
 }
 
 [data-theme="dark"] .project-sidebar__group-index {
@@ -297,7 +302,7 @@
 [data-theme="dark"] .project-sidebar__group-item.is-active {
   border-color: rgba(246, 197, 111, 0.35);
   background: linear-gradient(90deg, rgba(246, 197, 111, 0.16), rgba(30, 36, 48, 0.65));
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 [data-theme="dark"] .project-sidebar__group-item.is-active .project-sidebar__group-item-label {
@@ -307,3 +312,4 @@
 [data-theme="dark"] .project-sidebar__group-item.is-active .project-sidebar__group-item-bar {
   background: #f6c56f;
 }
+

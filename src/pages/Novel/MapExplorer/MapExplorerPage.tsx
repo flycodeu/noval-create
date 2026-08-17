@@ -1202,7 +1202,6 @@ export default function MapExplorerPage({ novelId }: Props) {
     <WorkspacePage
       className="novel-map-page"
       layout="wide"
-      eyebrow="地图结构"
       title="地图结构"
       description="图谱默认显示整张地图树结构，优先保证全局可浏览、可定位、可查看；右侧检查器只负责节点和关系详情，不再主导主画布布局。"
       guide={(

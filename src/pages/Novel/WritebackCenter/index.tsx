@@ -398,7 +398,6 @@ export default function WritebackCenterPage({ novelId }: Props) {
       className="novel-writeback-center-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="正典确认 / 统一回写"
       title="章后状态回写中心"
       actions={(
         <Space wrap>

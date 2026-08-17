@@ -413,7 +413,6 @@ export default function StagePlanner({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      eyebrow="创作节奏 / STAGE PLANNING"
       title="阶段计划"
       description="把百万字长篇拆成可交接的创作窗口：先锁当前真正要用的角色和地点，再随剧情推进增量扩展。"
       actions={(

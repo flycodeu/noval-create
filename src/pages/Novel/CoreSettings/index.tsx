@@ -951,7 +951,6 @@ export default function CoreSettings({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       asidePlacement="side"
-      eyebrow="故事设计"
       title="故事设计"
       description="这里专门负责主线目标、核心冲突、主推进链、支线布局、节奏比例和结局落点。背景、人物、地图、物品先在前面准备好，再来这里把剧情骨架压实。"
       actions={(

@@ -56,58 +56,55 @@
 }
 
 .app-layout__theme-panel {
-  padding: 16px 20px;
+  padding: 12px 14px;
   border-top: 1px solid var(--border-default);
 }
 
-.app-layout__theme-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.app-layout__theme-options {
+.app-layout__theme-segmented {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-surface, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border-default);
 }
 
-.app-layout__theme-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-height: 40px;
-  padding: 0 16px;
-  color: var(--text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
-}
-
-.app-layout__theme-option:hover {
-  background: var(--bg-hover);
-}
-
-.app-layout__theme-option.is-active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent-soft) 48%, var(--bg-surface) 52%);
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent 58%);
-}
-
-.app-layout__theme-option-icon {
+.app-layout__theme-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  color: currentColor;
-  font-size: 14px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.app-layout__theme-pill:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.app-layout__theme-pill.is-active {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent-soft) 56%, var(--bg-elevated, #fff) 44%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.app-layout__theme-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
 }
 
 .app-shell-bar {
@@ -205,7 +202,6 @@
   .app-shell-bar__content {
     padding-left: 14px;
   }
-
 }
 
 @media (max-width: 720px) {

@@ -40,23 +40,40 @@ export default function ProjectSidebar({
     onDismissDrawer?.()
   }
 
+  // 计算整体进度百分比
+  const progressPercent = useMemo(() => {
+    const match = progressText.match(/(\d+)\s*\/\s*(\d+)/)
+    if (match) {
+      const done = parseInt(match[1], 10)
+      const total = parseInt(match[2], 10)
+      return total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
+    }
+    return 0
+  }, [progressText])
+
   return (
     <div className="project-sidebar">
+      {/* 顶部阶段与进度 */}
       <div className="project-sidebar__summary">
-        <div className="project-sidebar__summary-copy">
-          <div className="project-sidebar__summary-header">
-            <span className="project-sidebar__summary-badge">{stageLabel}</span>
-            <span className="project-sidebar__summary-meta">{`已完成 ${progressText}`}</span>
-          </div>
-          {currentTask ? (
-            <div className="project-sidebar__current-task">
-              <ClockCircleOutlined />
-              <span>{currentTask}</span>
-            </div>
-          ) : null}
+        <div className="project-sidebar__summary-header">
+          <span className="project-sidebar__summary-badge">{stageLabel}</span>
+          <span className="project-sidebar__summary-meta">{progressText}</span>
         </div>
+        <div className="project-sidebar__progress-bar">
+          <div
+            className="project-sidebar__progress-fill"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        {currentTask ? (
+          <div className="project-sidebar__current-task" title={currentTask}>
+            <ClockCircleOutlined />
+            <span>{currentTask}</span>
+          </div>
+        ) : null}
       </div>
 
+      {/* 模块导航分组列表 */}
       <div className="project-sidebar__groups">
         {navGroups.map((group, groupIndex) => {
           const isOpen = openGroups[group.key] ?? group.key === activeGroup
@@ -88,7 +105,6 @@ export default function ProjectSidebar({
                     const pending = !active && item.key === pendingKey
                     const recent = !active && item.key === recentKey
                     const attention = item.hasBlocker
-                    const metaText = recent ? '最近访问' : item.meta?.trim()
 
                     return (
                       <button
@@ -104,10 +120,7 @@ export default function ProjectSidebar({
                       >
                         <span className="project-sidebar__group-item-bar" aria-hidden="true" />
                         <div className="project-sidebar__group-item-head">
-                          <span className="project-sidebar__group-item-copy">
-                            <span className="project-sidebar__group-item-label">{item.label}</span>
-                            {metaText ? <span className="project-sidebar__group-item-meta">{metaText}</span> : null}
-                          </span>
+                          <span className="project-sidebar__group-item-label">{item.label}</span>
                           <StatusTag status={item.status} size="small" />
                         </div>
                       </button>
@@ -122,3 +135,4 @@ export default function ProjectSidebar({
     </div>
   )
 }
+

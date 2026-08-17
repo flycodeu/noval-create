@@ -322,7 +322,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
       className="novel-project-brief-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="项目立项"
       title="项目立项"
       actions={(
         <Space wrap>

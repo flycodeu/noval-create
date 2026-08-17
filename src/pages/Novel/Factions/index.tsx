@@ -478,7 +478,6 @@ export default function FactionsPage({ novelId }: Props) {
     <WorkspacePage
       className="novel-factions-page"
       layout="wide"
-      eyebrow="世界与资源"
       title="势力系统"
       actions={(
         <Space wrap>

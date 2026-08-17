@@ -90,7 +90,7 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
       {resumable.visible ? (
         <Alert showIcon type={resumable.cancelled ? 'warning' : 'error'} message="检测到可恢复的中断正文" description={(
           <div className="novel-writing-shell__segment-alert">
-            <div className="novel-writing-shell__segment-alert-copy">{`已保留 ${countChapterWords(resumable.content)} 字正文草稿。当前恢复模式会基于这份内容继续往后写，不会重写前文。`}</div>
+            <div className="novel-writing-shell__segment-alert-copy">{`已保留 ${countChapterWords(resumable.content)} 字草稿，可从断点继续生成。`}</div>
             <div className="novel-writing-shell__segment-alert-actions">
               <Button size="small" type="primary" onClick={resumable.onResume}>从断点继续</Button>
               <Button size="small" onClick={resumable.onRestart}>从头重来</Button>
@@ -106,7 +106,7 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
           </div>
         ) : (
           <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={onInput} onMouseUp={onSyncSelection} onKeyUp={onSyncSelection} className="novel-writing-shell__editor-sheet">{content}</div>
-        )) : <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>}
+        )) : <div className="novel-empty novel-empty--writing">选择左侧章节开始写作，或点击新建章节。</div>}
       </div>
       {advisory.count > 0 ? (
         <div className="chapter-console-page__advisory">
@@ -114,17 +114,17 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
           {advisory.open ? (
             <div className="chapter-console-page__advisory-body">
               {advisory.productionBriefItems.length > 0 ? <div className="chapter-console-page__brief-strip">{advisory.productionBriefItems.map((item) => <div key={item} className="chapter-console-page__brief-chip">{item}</div>)}</div> : null}
-              {advisory.staleReasonSummary ? <Alert showIcon type="warning" message="当前章节上下文已过期" description={advisory.staleReasonSummary} /> : null}
+              {advisory.staleReasonSummary ? <Alert showIcon type="warning" message="章节上下文已过期" description={advisory.staleReasonSummary} /> : null}
               {advisory.writebackStatus?.readyForNextChapter === false ? (
-                <Alert showIcon type={advisory.writebackStatus.phase === 'failed' ? 'error' : 'warning'} message={advisory.writebackStatus.candidateReady ? '候选已生成，等待正典应用' : '等待回写候选'} description={`当前处于 ${advisory.writebackPhaseLabel}，正典${advisory.writebackStatus.canonApplied ? '已应用' : '尚未应用'}。${advisory.writebackStatus.lastError ? `原因：${advisory.writebackStatus.lastError}` : '完成正典应用前，系统会暂停后续章节生成。'}`} />
+                <Alert showIcon type={advisory.writebackStatus.phase === 'failed' ? 'error' : 'warning'} message={advisory.writebackStatus.candidateReady ? '候选已生成，等待正典应用' : '等待回写候选'} description={`处于 ${advisory.writebackPhaseLabel}（正典${advisory.writebackStatus.canonApplied ? '已应用' : '待应用'}）${advisory.writebackStatus.lastError ? `：${advisory.writebackStatus.lastError}` : ''}`} />
               ) : null}
               {advisory.publishCheck ? <Alert showIcon type={advisory.publishCheckAlertType} message={`章节验收：${advisory.publishCheck.summary}`} description={`重写 ${advisory.publishCheck.rewriteCount} 项，阻塞 ${advisory.publishCheck.blockerCount} 项，预警 ${advisory.publishCheck.warningCount} 项。`} /> : null}
               {hasMultiSegments ? (
-                <Alert showIcon type="info" message="当前章节处于多场景结构模式" description={(
+                <Alert showIcon type="info" message="多场景结构模式" description={(
                   <div className="novel-writing-shell__segment-alert">
-                    <div className="novel-writing-shell__segment-alert-copy">该章节已经拆成多个场景。请优先维护场景合同，再重新编译整章。</div>
+                    <div className="novel-writing-shell__segment-alert-copy">该章节包含多个场景片段，请在结构页维护场景后重新编译。</div>
                     <div className="novel-writing-shell__segment-alert-actions">
-                      <Button size="small" icon={<ApartmentOutlined />} onClick={onOpenStructure}>去结构页</Button>
+                      <Button size="small" icon={<ApartmentOutlined />} onClick={onOpenStructure}>结构页</Button>
                       <Button size="small" icon={<BranchesOutlined />} onClick={onCompile}>重新编译</Button>
                     </div>
                   </div>

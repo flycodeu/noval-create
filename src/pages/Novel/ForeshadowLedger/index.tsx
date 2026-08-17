@@ -423,7 +423,6 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       className="novel-foreshadow-ledger-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="伏笔与回收账本"
       title="伏笔与回收账本"
       description="独立维护伏笔资产，支持章节/场景回写、回收状态追踪和终局绑定。"
       actions={(

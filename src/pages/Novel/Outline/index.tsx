@@ -599,7 +599,6 @@ export default function Outline({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      eyebrow="故事大纲"
       title="故事大纲"
       actions={(
         <div className="novel-outline-page__toolbar">

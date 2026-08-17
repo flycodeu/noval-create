@@ -357,7 +357,6 @@ export default function EndgamePage({ novelId }: Props) {
       className="novel-endgame-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="终局设计"
       title="终局设计"
       description="提前锁定最终冲突、兑现承诺和最后一幕，避免长篇只会向前扩写不会向后收束。"
       actions={(

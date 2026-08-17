@@ -300,7 +300,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      eyebrow="卷级设计中心"
       title="卷级设计中心"
       description="把终局承诺拆到各卷，让每卷都有自己的主题、闭环和必须服务的终局压力。"
       className="volume-design-page"

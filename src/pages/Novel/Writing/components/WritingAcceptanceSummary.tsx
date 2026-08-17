@@ -12,7 +12,6 @@ export default function WritingAcceptanceSummary({ acceptance, qualityIssues }: 
   return (
     <section className="chapter-console-page__panel chapter-console-page__review-strip">
       <SectionHeader
-        eyebrow="轻量验收反馈"
         title="当前章检查结果"
         description="合同、连续性、AI 味与节奏的当前状态。"
       />

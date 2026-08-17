@@ -431,7 +431,6 @@ export default function StudioPage({ novelId }: Props) {
               <div className="novel-dashboard__reference-stack">
                 <section className="novel-dashboard__reference-section">
                   <SectionHeader
-                    eyebrow="最近活动"
                     title="项目活动流"
                     description="最近的修改、生成、修订和回滚都会汇总在这里。"
                   />
@@ -461,7 +460,6 @@ export default function StudioPage({ novelId }: Props) {
 
                 <section className="novel-dashboard__reference-section">
                   <SectionHeader
-                    eyebrow="风险提示"
                     title="当前风险"
                     description="这里汇总结构体检、上下文同步和质量监控给出的高价值信号。"
                   />
@@ -486,7 +484,6 @@ export default function StudioPage({ novelId }: Props) {
 
                 <section className="novel-dashboard__reference-section">
                   <SectionHeader
-                    eyebrow="修订反推"
                     title="质量问题回推任务"
                     description="修订中心里最该先处理的问题会直接出现在这里。"
                   />

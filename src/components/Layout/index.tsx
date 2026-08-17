@@ -105,20 +105,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
             />
 
             <div className="app-layout__theme-panel">
-              <div className="app-layout__theme-title">
-                <BulbOutlined style={{ fontSize: 12 }} />
-                主题设置
-              </div>
-              <div className="app-layout__theme-options">
+              <div className="app-layout__theme-segmented">
                 {THEME_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
                     onClick={() => setTheme(opt.value)}
-                    className={`app-layout__theme-option${theme === opt.value ? ' is-active' : ''}`}
+                    className={`app-layout__theme-pill${theme === opt.value ? ' is-active' : ''}`}
+                    title={`切换为${opt.label}主题`}
                   >
+                    <span className="app-layout__theme-pill-icon">{opt.icon}</span>
                     <span>{opt.label}</span>
-                    <span className="app-layout__theme-option-icon">{opt.icon}</span>
                   </button>
                 ))}
               </div>

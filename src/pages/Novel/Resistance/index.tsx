@@ -429,7 +429,6 @@ export default function ResistancePage({ novelId }: Props) {
   return (
     <>
       <WorkspacePage
-        eyebrow="冲突压力维护"
         title="反派与阻力系统"
         description="把人物反派、势力反派、环境阻力和制度阻力统一放进同一个阻力工作台，并登记章节层面的真实出手。"
         actions={(

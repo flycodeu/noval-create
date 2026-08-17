@@ -235,7 +235,6 @@ export default function GlossaryPage({ novelId }: Props) {
       className="novel-glossary-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="世界与资源"
       title="设定词典"
       description="把术语、阶位、材料、事件和种族名词固定成可检索资产，减少章节生成和修订时的命名漂移。"
       actions={(

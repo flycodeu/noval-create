@@ -765,7 +765,6 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     <WorkspacePage
       className="novel-structure-page"
       layout="wide"
-      eyebrow="结构工程"
       title="卷 / 部 / 章 / 场景"
       actions={(
         <Space wrap>

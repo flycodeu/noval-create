@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Empty, Skeleton, Spin, Tabs, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import type { QualityDashboardData, QualityRepairAction, TaskPipelineStats } from '../../../types'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
@@ -207,30 +207,30 @@ export default function QualityDashboard({ novelId }: Props) {
   return (
     <WorkspacePage
       title="质量监控"
-      metrics={[
-        <WorkspaceMetric key="ready" label="生产就绪度" value={`${data.productionReadiness.readyRate}%`} tone="warm" />,
-        <WorkspaceMetric key="mode" label="运行模式" value={data.operatingModeObservability?.label || '未推导'} />,
-        <WorkspaceMetric key="runtime-guardrail" label="运行时护栏" value={data.millionRuntimeObservability?.serialOnly ? '正文串行' : '未接管'} tone={data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="provenance" label="来源与模式" value={`引用未解析 ${data.typedRefObservability?.unresolvedRefCount || 0} / ${sourceCoverageLabel(data.genreGroundingObservability?.sourceCoverage)} / ${data.millionRuntimeObservability?.guardrailActive ? '护栏中' : '空闲'}`} tone={(data.typedRefObservability?.unresolvedRefCount || 0) > 0 || data.genreGroundingObservability?.conservativeFallbackActive || data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="grounding" label="题材支撑" value={data.genreGroundingObservability?.historicalGenericFallback ? '待修复' : (data.genreGroundingObservability?.genreName || data.genreGroundingObservability?.resolvedGenreKey || '未命中')} tone={data.genreGroundingObservability?.historicalGenericFallback || data.genreGroundingObservability?.conservativeFallbackActive ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="memory" label="结构化记忆" value={data.structuredMemoryObservability ? `${data.structuredMemoryObservability.cardCoverageRate}% / ${data.structuredMemoryObservability.fallbackScopeCount}` : '未统计'} tone={data.structuredMemoryObservability && data.structuredMemoryObservability.fallbackScopeCount > 0 ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="typed-ref" label="引用覆盖" value={data.typedRefObservability ? `${data.typedRefObservability.overallCoverageRate}% / ${data.typedRefObservability.unresolvedRefCount}` : '未统计'} tone={data.typedRefObservability && data.typedRefObservability.unresolvedRefCount > 0 ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="batch" label="最近批次" value={data.batchHealth.chapterIds.length > 0 ? `${data.batchHealth.chapterIds.length}章` : '空闲'} />,
-        <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
-        <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
-        <WorkspaceMetric key="style" label="风格预警" value={data.styleCompliance.warningCount + data.styleCompliance.rewriteCount} />,
-        <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
-        <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
-        <WorkspaceMetric key="pipeline" label="正文流水线" value={pipelineStats?.totalPipelineCount || 0} />,
-        <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
-      ]}
-    >
-      {refreshing ? <div className="novel-dashboard__refresh-indicator quality-dashboard-page__refresh"><Spin size="small" /><span>正在同步质量监控数据</span></div> : null}
-      <div className="quality-dashboard-page__toolbar">
+      actions={(
         <Button loading={refreshing} onClick={() => void loadData()}>
           刷新质量数据
         </Button>
-      </div>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '运行模式', value: data.operatingModeObservability?.label || '单卷推进' },
+            { label: '题材支撑', value: data.genreGroundingObservability?.genreName || data.genreGroundingObservability?.resolvedGenreKey || '通用网文' },
+            { label: '跟踪故事弧', value: `${data.storyArcProgressSummary.trackedArcCount} 组` },
+            { label: '正文流水线', value: `${pipelineStats?.totalPipelineCount || 0} 批` },
+          ]}
+        />
+      )}
+      metrics={[
+        <WorkspaceMetric key="ready" label="生产就绪度" value={`${data.productionReadiness.readyRate}%`} tone="warm" />,
+        <WorkspaceMetric key="scored" label="已评分章节" value={`${data.totalChaptersScored} 章`} />,
+        <WorkspaceMetric key="avg" label="平均总分" value={hasScoreData ? `${data.averageOverallScore} 分` : '暂无'} />,
+        <WorkspaceMetric key="style" label="风格预警" value={`${data.styleCompliance.warningCount + data.styleCompliance.rewriteCount} 项`} tone={data.styleCompliance.warningCount + data.styleCompliance.rewriteCount > 0 ? 'warm' : 'default'} />,
+        <WorkspaceMetric key="runtime-guardrail" label="运行时护栏" value={data.millionRuntimeObservability?.serialOnly ? '正文串行' : '正常'} tone={data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
+      ]}
+    >
+      {refreshing ? <div className="novel-dashboard__refresh-indicator quality-dashboard-page__refresh"><Spin size="small" /><span>正在同步质量监控数据</span></div> : null}
       <QualityFilterBar filters={filters} onChange={setFilters} />
       <Tabs
         activeKey={activeTab}

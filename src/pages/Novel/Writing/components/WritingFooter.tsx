@@ -23,7 +23,7 @@ export default function WritingFooter({
     <div className="chapter-console-page__footer">
       <div className="chapter-console-page__footer-grid">
         <section className="chapter-console-page__panel">
-          <SectionHeader eyebrow="流水线元数据" title="执行记录" description="本次流水线运行记录。" />
+          <SectionHeader title="执行记录" description="本次流水线运行记录。" />
           <div className="chapter-console-page__meta-grid">
             {pipelineMetadata.map((item) => (
               <div key={item.label} className="chapter-console-page__meta-card">

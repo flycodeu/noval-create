@@ -213,7 +213,6 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       className="novel-scene-templates-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="世界与资源"
       title="场景模板库"
       actions={(
         <Space wrap>

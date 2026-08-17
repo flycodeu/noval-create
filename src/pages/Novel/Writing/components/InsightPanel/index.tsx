@@ -57,7 +57,6 @@ export default function InsightPanel({
     <aside className={`chapter-console-page__column chapter-console-page__column--right${open ? '' : ' is-hidden'}`}>
       <section className="chapter-console-page__panel">
         <SectionHeader
-          eyebrow="辅助区"
           title="合同 / 上下文 / 审校 / 版本"
           description="按需展开辅助内容，避免持续压缩正文编辑器。"
         />
