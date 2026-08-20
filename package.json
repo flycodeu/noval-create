@@ -85,6 +85,7 @@
     "audit:complexity:strict": "node scripts/complexity-audit.cjs --strict",
     "acceptance:p0-00": "node scripts/ui-acceptance/capture-p0-00.cjs",
     "acceptance:p0-00:prepare": "node scripts/ui-acceptance/capture-p0-00.cjs --prepare",
+    "acceptance:p0-01": "node scripts/ui-acceptance/capture-p0-01.cjs",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {

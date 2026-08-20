@@ -1,10 +1,11 @@
-import React, { useLayoutEffect } from 'react'
+import React from 'react'
 import { createPortal } from 'react-dom'
-import type { MenuProps } from 'antd'
 import {
-  useWorkspaceActionDispatch,
-  useWorkspaceActionPortal,
-} from '../../../components/novel/workspace-layout/workspace-actions-context'
+  WorkspaceContractActions,
+  WorkspaceInformationRail,
+  useWorkspaceChromePortal,
+  type WorkspaceActionContract,
+} from '../../../components/novel/workspace-layout/workspace-chrome'
 
 function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -21,34 +22,10 @@ function countRenderableNodes(node: React.ReactNode): number {
   return 1
 }
 
-export function WorkspacePage({
-  eyebrow,
-  title,
-  description,
-  actions,
-  primaryAction,
-  secondaryActions,
-  moreMenu,
-  metrics,
-  contextSummary,
-  guide,
-  aside,
-  footerBar,
-  heroVariant = 'default',
-  layout = 'wide',
-  scrollMode = 'sectioned',
-  asidePlacement = 'below',
-  bodyClassName,
-  className,
-  children,
-}: {
+interface WorkspacePageBaseProps {
   eyebrow?: string
   title: string
   description?: string
-  actions?: React.ReactNode
-  primaryAction?: React.ReactNode
-  secondaryActions?: React.ReactNode[]
-  moreMenu?: MenuProps
   metrics?: React.ReactNode
   contextSummary?: React.ReactNode
   guide?: React.ReactNode
@@ -61,45 +38,84 @@ export function WorkspacePage({
   bodyClassName?: string
   className?: string
   children: React.ReactNode
-}) {
+}
+
+type WorkspacePageChromeProps =
+  | {
+      chrome?: 'legacy'
+      actions?: React.ReactNode
+      actionContract?: never
+    }
+  | {
+      chrome: 'shared'
+      actions?: never
+      actionContract: WorkspaceActionContract
+    }
+
+type WorkspacePageProps = WorkspacePageBaseProps & WorkspacePageChromeProps
+
+export function WorkspacePage({
+  eyebrow,
+  title,
+  description,
+  chrome = 'legacy',
+  actions,
+  actionContract,
+  metrics,
+  contextSummary,
+  guide,
+  aside,
+  footerBar,
+  heroVariant = 'default',
+  layout = 'wide',
+  scrollMode = 'sectioned',
+  asidePlacement = 'below',
+  bodyClassName,
+  className,
+  children,
+}: WorkspacePageProps) {
   const hasAside = Boolean(aside)
   const metricCount = countRenderableNodes(metrics)
   const inlineMetrics = metricCount > 0 && metricCount <= 2
-
-  const dispatch = useWorkspaceActionDispatch()
-  const actionPortal = useWorkspaceActionPortal()
-  const isMigrated = Boolean(primaryAction || secondaryActions || moreMenu)
-  const pageActions = isMigrated ? (
-    <>
-      {secondaryActions}
-      {primaryAction}
-    </>
-  ) : actions
-
-  useLayoutEffect(() => {
-    if (!dispatch?.setActions) return undefined
-    dispatch.setActions(moreMenu ? { moreMenu } : null)
-    return () => {
-      dispatch.setActions(null)
-    }
-  }, [dispatch, moreMenu])
+  const portal = useWorkspaceChromePortal()
+  const usesSharedChrome = chrome === 'shared'
+  const sharedInformation = usesSharedChrome ? (
+    <WorkspaceInformationRail
+      eyebrow={eyebrow}
+      title={title}
+      description={description}
+      contextSummary={contextSummary}
+      metrics={metrics}
+    />
+  ) : null
+  const sharedActions = usesSharedChrome && actionContract
+    ? <WorkspaceContractActions contract={actionContract} />
+    : null
+  const sharedInformationMounted = Boolean(usesSharedChrome && portal?.informationTarget)
+  const sharedActionsMounted = Boolean(usesSharedChrome && portal?.actionTarget)
 
   return (
     <>
-    {actionPortal && pageActions ? createPortal(pageActions, actionPortal) : null}
+    {sharedInformationMounted && sharedInformation
+      ? createPortal(sharedInformation, portal?.informationTarget as HTMLDivElement)
+      : null}
+    {sharedActionsMounted && sharedActions
+      ? createPortal(sharedActions, portal?.actionTarget as HTMLDivElement)
+      : null}
     <div
       className={joinClassNames(
         'novel-workspace',
         `novel-workspace--${layout}`,
         `novel-workspace--${scrollMode}`,
+        usesSharedChrome && 'novel-workspace--shared-chrome',
         className,
       )}
     >
-      <section
+      {!usesSharedChrome || !sharedInformationMounted ? <section
         className={joinClassNames(
           'novel-hero',
           heroVariant === 'compact' && 'novel-hero--compact',
-          Boolean(actions) && 'novel-hero--has-actions',
+          Boolean(actions || sharedActions) && 'novel-hero--has-actions',
           Boolean(contextSummary) && 'novel-hero--has-context',
           Boolean(metrics) && 'novel-hero--has-metrics',
           inlineMetrics && 'novel-hero--inline-metrics',
@@ -111,10 +127,11 @@ export function WorkspacePage({
           <h1 className="novel-hero__title">{title}</h1>
           {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>
-        {pageActions && !actionPortal ? <div className="novel-hero__actions">{pageActions}</div> : null}
+        {actions ? <div className="novel-hero__actions">{actions}</div> : null}
+        {sharedActions && !sharedActionsMounted ? <div className="novel-hero__actions">{sharedActions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
         {metrics ? <div className="novel-hero__metrics">{metrics}</div> : null}
-      </section>
+      </section> : null}
 
       {guide ? <div className="novel-workspace__guide">{guide}</div> : null}
 

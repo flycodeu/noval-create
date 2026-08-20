@@ -26,7 +26,6 @@ import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared
 import { useThemeStore, type Theme } from '../../../stores/theme.store'
 import WindowControls from '../../Layout/WindowControls'
 import TaskIndicator from '../../TaskIndicator'
-import type { WorkspaceActionContract } from '../workspace-layout/workspace-actions-context'
 import './ProjectTopbar.css'
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
@@ -67,8 +66,8 @@ interface ProjectTopbarProps {
   assistantToggleActive?: boolean
   statusTone?: 'default' | 'processing' | 'warning'
   statusText?: string
-  workspaceActions?: WorkspaceActionContract | null
   onPageActionsTargetChange?: (target: HTMLDivElement | null) => void
+  onInformationTargetChange?: (target: HTMLDivElement | null) => void
 }
 
 export default function ProjectTopbar({
@@ -103,8 +102,8 @@ export default function ProjectTopbar({
   assistantToggleActive = false,
   statusTone = 'default',
   statusText,
-  workspaceActions,
   onPageActionsTargetChange,
+  onInformationTargetChange,
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
   const { theme, setTheme } = useThemeStore()
@@ -192,18 +191,6 @@ export default function ProjectTopbar({
       })
     }
 
-    if (workspaceActions?.moreMenu?.items && workspaceActions.moreMenu.items.length > 0) {
-      appendDivider()
-      workspaceActions.moreMenu.items.forEach((item) => {
-        if (!item) return
-        if (item.type === 'divider') {
-          appendDivider()
-          return
-        }
-        items.push(item)
-      })
-    }
-
     while (items[items.length - 1]?.type === 'divider') {
       items.pop()
     }
@@ -221,7 +208,6 @@ export default function ProjectTopbar({
     setTheme,
     showQuality,
     theme,
-    workspaceActions?.moreMenu?.items,
   ])
 
   return (
@@ -309,13 +295,6 @@ export default function ProjectTopbar({
               />
             ) : null}
             <div ref={onPageActionsTargetChange} className="project-topbar__page-actions">
-              {workspaceActions && (workspaceActions.legacyActions || workspaceActions.primaryAction || workspaceActions.secondaryActions) ? (
-                <>
-                {workspaceActions.legacyActions}
-                {workspaceActions.secondaryActions}
-                {workspaceActions.primaryAction}
-                </>
-              ) : null}
             </div>
             {onPrevPage ? (
               <Button
@@ -359,6 +338,7 @@ export default function ProjectTopbar({
           </div>
         </div>
       </div>
+      <div ref={onInformationTargetChange} className="project-topbar__information-slot" />
     </header>
   )
 }

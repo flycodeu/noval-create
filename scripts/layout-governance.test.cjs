@@ -22,6 +22,9 @@ const qualityDashboardCss = read('src/pages/Novel/QualityDashboard/index.css')
 const foreshadowLedgerCss = read('src/pages/Novel/ForeshadowLedger/index.css')
 const outlinePage = read('src/pages/Novel/Outline/index.tsx')
 const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
+const workspaceChrome = read('src/components/novel/workspace-layout/workspace-chrome.tsx')
+const workspaceChromeCss = read('src/components/novel/workspace-layout/workspace-chrome.css')
+const projectBriefPage = read('src/pages/Novel/ProjectBrief/index.tsx')
 const destructiveActionPages = [
   read('src/pages/Novel/Factions/index.tsx'),
   read('src/pages/Novel/Glossary/index.tsx'),
@@ -94,11 +97,28 @@ assertPass(
     && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础设定状态。"'),
 )
 assertPass(
-  'workspace actions are mounted via context instead of localized inline rendering (P0-01)',
-  workspaceShell.includes('useWorkspaceActionDispatch')
-    && workspaceShell.includes('dispatch.setActions')
+  'shared workspace chrome is explicit and legacy actions stay isolated (P0-01)',
+  workspaceShell.includes("chrome = 'legacy'")
+    && workspaceShell.includes("chrome: 'shared'")
+    && workspaceShell.includes('actions?: never')
+    && workspaceShell.includes('usesSharedChrome && portal?.informationTarget')
+    && !workspaceShell.includes('dispatch.setActions')
     && projectTopbarCss.includes('.project-topbar__page-actions')
-    && read('src/components/novel/layout/ProjectTopbar.tsx').includes('workspaceActions'),
+    && read('src/components/novel/layout/ProjectTopbar.tsx').includes('project-topbar__information-slot'),
+)
+assertPass(
+  'workspace action contract limits visible secondary actions and keeps compact overflow (P0-01)',
+  workspaceChrome.includes('MAX_VISIBLE_SECONDARY_ACTIONS = 2')
+    && workspaceChrome.includes('secondary.slice(0, MAX_VISIBLE_SECONDARY_ACTIONS)')
+    && workspaceChrome.includes('workspace-contract-actions__more--compact')
+    && workspaceChromeCss.includes('@media (max-width: 1200px)')
+    && workspaceChromeCss.includes('.workspace-contract-actions__secondary'),
+)
+assertPass(
+  'project brief is the explicit shared chrome migration pilot (P0-01)',
+  projectBriefPage.includes('chrome="shared"')
+    && projectBriefPage.includes('actionContract={{')
+    && !projectBriefPage.includes('actions={(\n        <Space wrap>'),
 )
 
 console.log('layout governance tests passed')

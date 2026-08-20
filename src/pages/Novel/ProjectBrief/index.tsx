@@ -322,32 +322,41 @@ export default function ProjectBriefPage({ novelId }: Props) {
       className="novel-project-brief-page"
       layout="wide"
       heroVariant="compact"
+      chrome="shared"
       title="项目立项"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存项目立项
-          </Button>
-          <Button
-            icon={<RobotOutlined />}
-            loading={generatingMode === 'replace'}
-            disabled={Boolean(generatingMode)}
-            onClick={() => void handleGenerate('replace')}
-          >
-            AI 生成·首版
-          </Button>
-          <Button
-            loading={generatingMode === 'fill_blanks'}
-            disabled={Boolean(generatingMode)}
-            onClick={() => void handleGenerate('fill_blanks')}
-          >
-            AI 补全·空白字段
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'core-settings'))}>
-            去基础设定
-          </Button>
-        </Space>
-      )}
+      description="把读者承诺、平台方向和创作边界压成一份可执行简报。"
+      actionContract={{
+        primary: {
+          key: 'save',
+          label: '保存项目立项',
+          icon: <SaveOutlined />,
+          loading: saving,
+          onClick: () => void handleSave(),
+        },
+        secondary: [
+          {
+            key: 'generate-first',
+            label: 'AI 生成·首版',
+            icon: <RobotOutlined />,
+            loading: generatingMode === 'replace',
+            disabled: Boolean(generatingMode),
+            onClick: () => void handleGenerate('replace'),
+          },
+          {
+            key: 'fill-blanks',
+            label: 'AI 补全·空白字段',
+            loading: generatingMode === 'fill_blanks',
+            disabled: Boolean(generatingMode),
+            onClick: () => void handleGenerate('fill_blanks'),
+          },
+          {
+            key: 'next-settings',
+            label: '去基础设定',
+            icon: <ArrowRightOutlined />,
+            onClick: () => navigate(buildWorkspaceRoute(novelId, 'core-settings')),
+          },
+        ],
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[

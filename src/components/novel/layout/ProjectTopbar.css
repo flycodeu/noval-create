@@ -135,6 +135,11 @@
   gap: 8px;
   position: relative;
 }
+
+.project-topbar__page-actions:empty {
+  display: none;
+}
+
 .project-topbar__page-actions:not(:empty)::after {
   content: '';
   width: 1px;
