@@ -1,4 +1,10 @@
-import React from 'react'
+import React, { useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
+import type { MenuProps } from 'antd'
+import {
+  useWorkspaceActionDispatch,
+  useWorkspaceActionPortal,
+} from '../../../components/novel/workspace-layout/workspace-actions-context'
 
 function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -20,6 +26,9 @@ export function WorkspacePage({
   title,
   description,
   actions,
+  primaryAction,
+  secondaryActions,
+  moreMenu,
   metrics,
   contextSummary,
   guide,
@@ -37,6 +46,9 @@ export function WorkspacePage({
   title: string
   description?: string
   actions?: React.ReactNode
+  primaryAction?: React.ReactNode
+  secondaryActions?: React.ReactNode[]
+  moreMenu?: MenuProps
   metrics?: React.ReactNode
   contextSummary?: React.ReactNode
   guide?: React.ReactNode
@@ -54,7 +66,27 @@ export function WorkspacePage({
   const metricCount = countRenderableNodes(metrics)
   const inlineMetrics = metricCount > 0 && metricCount <= 2
 
+  const dispatch = useWorkspaceActionDispatch()
+  const actionPortal = useWorkspaceActionPortal()
+  const isMigrated = Boolean(primaryAction || secondaryActions || moreMenu)
+  const pageActions = isMigrated ? (
+    <>
+      {secondaryActions}
+      {primaryAction}
+    </>
+  ) : actions
+
+  useLayoutEffect(() => {
+    if (!dispatch?.setActions) return undefined
+    dispatch.setActions(moreMenu ? { moreMenu } : null)
+    return () => {
+      dispatch.setActions(null)
+    }
+  }, [dispatch, moreMenu])
+
   return (
+    <>
+    {actionPortal && pageActions ? createPortal(pageActions, actionPortal) : null}
     <div
       className={joinClassNames(
         'novel-workspace',
@@ -79,7 +111,7 @@ export function WorkspacePage({
           <h1 className="novel-hero__title">{title}</h1>
           {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>
-        {actions ? <div className="novel-hero__actions">{actions}</div> : null}
+        {pageActions && !actionPortal ? <div className="novel-hero__actions">{pageActions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
         {metrics ? <div className="novel-hero__metrics">{metrics}</div> : null}
       </section>
@@ -100,6 +132,7 @@ export function WorkspacePage({
 
       {footerBar ? <div className="novel-workspace__footer">{footerBar}</div> : null}
     </div>
+    </>
   )
 }
 

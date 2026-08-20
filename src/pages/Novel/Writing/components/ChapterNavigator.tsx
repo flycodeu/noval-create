@@ -427,7 +427,8 @@ export default function ChapterNavigator({
         )}
       </div>
 
-      <ActionBar align="between" className="chapter-navigator__bottom-bar">
+      <div className="chapter-navigator__bottom-bar">
+        <ActionBar align="between">
         <Button
           type="dashed"
           icon={<PlusOutlined />}
@@ -449,7 +450,8 @@ export default function ChapterNavigator({
           ]}
           onChange={(value) => onExecutionModeChange(value)}
         />
-      </ActionBar>
+        </ActionBar>
+      </div>
     </section>
   )
 }

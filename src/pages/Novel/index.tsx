@@ -23,6 +23,11 @@ import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import WorkspaceChatAssistant from './components/WorkspaceChatAssistant'
 import {
+  WorkspaceActionDispatchContext,
+  WorkspaceActionPortalContext,
+  type WorkspaceActionContract,
+} from '../../components/novel/workspace-layout/workspace-actions-context'
+import {
   EMPTY_WORKFLOW_STATS,
   loadWorkflowStats,
   type GuidedWorkflowStepKey,
@@ -220,6 +225,9 @@ export default function NovelRouter() {
   const [latestUndoable, setLatestUndoable] = useState<OperationLog | null>(null)
   const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
+  const [workspaceActions, setWorkspaceActions] = useState<WorkspaceActionContract | null>(null)
+  const [workspaceActionPortal, setWorkspaceActionPortal] = useState<HTMLDivElement | null>(null)
+  const workspaceActionDispatch = useMemo(() => ({ setActions: setWorkspaceActions }), [])
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState<boolean>(() => (
     readBrowserStorage(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) === '1'
@@ -354,6 +362,7 @@ export default function NovelRouter() {
 
   useEffect(() => {
     setPendingPage((current) => (current === currentPage ? null : current))
+    setWorkspaceActions(null)
   }, [currentPage])
 
   useEffect(() => {
@@ -1030,6 +1039,8 @@ export default function NovelRouter() {
         notifyWorkspaceMutation,
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
+      <WorkspaceActionDispatchContext.Provider value={workspaceActionDispatch}>
+      <WorkspaceActionPortalContext.Provider value={workspaceActionPortal}>
       <div
         ref={routeShellRef}
         className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}${assistantOpen && !isCompactShell ? ' novel-route-shell--assistant-open' : ''}`}
@@ -1038,6 +1049,8 @@ export default function NovelRouter() {
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
         workspaceLabel={currentPageMeta.label}
+        workspaceActions={workspaceActions}
+        onPageActionsTargetChange={setWorkspaceActionPortal}
         statusTone={statusTone}
         statusText={sidebarStatusText}
         mode={workspaceViewMode}
@@ -1427,6 +1440,8 @@ export default function NovelRouter() {
           <div className="novel-note-list__item">正文写作页额外支持 `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` 本地撤销重做。</div>
         </div>
       </Modal>
+      </WorkspaceActionPortalContext.Provider>
+      </WorkspaceActionDispatchContext.Provider>
       </NovelWorkspaceQualityProvider>
       </NovelWorkspaceActionsProvider>
     </WorkspaceErrorBoundary>

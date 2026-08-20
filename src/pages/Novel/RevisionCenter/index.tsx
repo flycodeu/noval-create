@@ -8,7 +8,7 @@ import {
   ArrowRightOutlined,
   EditOutlined,
   CheckOutlined,
-  WrenchOutlined,
+  ToolOutlined,
   SearchOutlined,
   ClearOutlined,
 } from '@ant-design/icons'
@@ -500,7 +500,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
                 <Button
                   size="small"
                   type="primary"
-                  icon={<WrenchOutlined />}
+                  icon={<ToolOutlined />}
                   loading={actionKey === `autofix:${record.id}`}
                   onClick={() => void handleAutoFix(record)}
                 >

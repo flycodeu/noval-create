@@ -93,5 +93,12 @@ assertPass(
     && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示项目立项状态。"')
     && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础设定状态。"'),
 )
+assertPass(
+  'workspace actions are mounted via context instead of localized inline rendering (P0-01)',
+  workspaceShell.includes('useWorkspaceActionDispatch')
+    && workspaceShell.includes('dispatch.setActions')
+    && projectTopbarCss.includes('.project-topbar__page-actions')
+    && read('src/components/novel/layout/ProjectTopbar.tsx').includes('workspaceActions'),
+)
 
 console.log('layout governance tests passed')

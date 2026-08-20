@@ -785,7 +785,7 @@ const characters = [
   },
   {
     key: 'jiangzhaoye',
-    role_type: 'deuteragonist',
+    role_type: 'major',
     full_name: '姜照夜',
     gender: '女',
     age: 27,
@@ -863,7 +863,7 @@ const characters = [
   },
   {
     key: 'zhouboheng',
-    role_type: 'mentor',
+    role_type: 'major',
     full_name: '周伯衡',
     gender: '男',
     age: 51,
@@ -1818,6 +1818,7 @@ async function main() {
   const db = getSqlite()
   const now = new Date().toISOString()
 
+  db.pragma('foreign_keys = OFF')
   const result = db.transaction(() => {
     resetExistingSample(db)
     const genreId = ensureGenre(db)
@@ -1851,6 +1852,7 @@ async function main() {
       resistanceTracks: db.prepare('SELECT COUNT(*) AS count FROM resistance_tracks WHERE novel_id = ?').get(novelId).count,
     }
   })()
+  db.pragma('foreign_keys = ON')
 
   console.log(JSON.stringify({ backups, ...result }, null, 2))
   closeDb()

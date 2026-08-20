@@ -126,10 +126,21 @@
 .project-topbar__action-cluster {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.project-topbar__page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+.project-topbar__page-actions:not(:empty)::after {
+  content: '';
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border);
+  margin: 0 4px;
 }
 
 .project-topbar__status-line {

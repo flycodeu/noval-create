@@ -176,6 +176,13 @@ const ROLE_META: Record<Character['roleType'], { label: string; color: string }>
   minor: { label: '次要人物', color: 'default' },
 }
 
+function getRoleMeta(roleType: Character['roleType'] | string | null | undefined) {
+  return ROLE_META[roleType as Character['roleType']] || {
+    label: roleType?.trim() || '次要人物',
+    color: 'default',
+  }
+}
+
 const ROLE_OPTIONS = [
   { value: 'protagonist', label: '主角' },
   { value: 'major', label: '主要人物' },
@@ -439,7 +446,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     .filter((character) => character.id !== selectedCharacter?.id)
     .map((character) => ({
       value: character.id,
-      label: character.fullName + (character.roleType ? ' · ' + ROLE_META[character.roleType].label : ''),
+      label: character.fullName + (character.roleType ? ' · ' + getRoleMeta(character.roleType).label : ''),
     })), [relationCharacterOptions, selectedCharacter?.id])
   const selectedLead = selectedCharacter
     ? selectedCharacter.innerConflict || selectedCharacter.goals || selectedCharacter.firstImpression || selectedCharacter.background || '先把这个角色的动机、关系和资源绑紧。'
@@ -1179,7 +1186,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                         {character.recordStatus === 'draft' ? <Tag color="processing">草稿</Tag> : null}
                       </div>
                       <div className="novel-list-card__meta">
-                        <Tag color={ROLE_META[character.roleType].color}>{ROLE_META[character.roleType].label}</Tag>
+                        <Tag color={getRoleMeta(character.roleType).color}>{getRoleMeta(character.roleType).label}</Tag>
                         {character.species ? <Tag>{character.species}</Tag> : null}
                         {character.occupation ? <Tag color="blue">{character.occupation}</Tag> : null}
                       </div>
@@ -1297,7 +1304,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                   <span>{selectedLead}</span>
                 </div>
                 <div className="novel-characters__editor-tags">
-                  {selectedCharacter ? <Tag color={ROLE_META[selectedCharacter.roleType].color}>{ROLE_META[selectedCharacter.roleType].label}</Tag> : null}
+                  {selectedCharacter ? <Tag color={getRoleMeta(selectedCharacter.roleType).color}>{getRoleMeta(selectedCharacter.roleType).label}</Tag> : null}
                   {selectedCharacter?.recordStatus === 'draft' ? <Tag color="processing">来自自动发现</Tag> : null}
                   {detailContext.relatedItems.length > 0 ? <Tag icon={<AppstoreOutlined />}>{detailContext.relatedItems.length} 个关联物品</Tag> : null}
                   {detailContext.relatedRelations.length > 0 ? <Tag icon={<ApartmentOutlined />}>{detailContext.relatedRelations.length} 条关系</Tag> : null}
