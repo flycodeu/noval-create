@@ -1,12 +1,11 @@
 import React from 'react'
-import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Drawer, Dropdown, Form, Input, InputNumber, Modal, Progress, Segmented, Space, Spin, Tag, message } from 'antd'
 import {
-  ApartmentOutlined,
   BranchesOutlined,
-  BuildOutlined,
+  EllipsisOutlined,
   LinkOutlined,
+  MenuOutlined,
   PlusOutlined,
-  ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -25,7 +24,6 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import {
   ChapterEditorPanel,
   SegmentEditorPanel,
-  StructureAsideTip,
   StructureChaptersPanel,
   StructureCheckpointsPanel,
   StructureLinkedEventsPanel,
@@ -35,7 +33,7 @@ import {
 } from './StructurePanels'
 import AiPatchEditor from '../components/AiPatchEditor'
 import { STRUCTURE_BATCH_CREATE_MAX, useStructureWorkspace } from './useStructureWorkspace'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { WorkspacePage } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
@@ -137,6 +135,18 @@ function clampPlannerValues(
   }
 }
 
+function useNarrowStructureLayout() {
+  const [narrow, setNarrow] = React.useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 960px)').matches)
+  React.useEffect(() => {
+    const query = window.matchMedia('(max-width: 960px)')
+    const sync = () => setNarrow(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+  return narrow
+}
+
 export default function StructurePage({ novelId }: { novelId: number }) {
   const workspace = useStructureWorkspace(novelId)
   const currentNovel = useNovelStore((state) => state.currentNovel)
@@ -154,6 +164,13 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   const [sceneTemplates, setSceneTemplates] = React.useState<SceneTemplate[]>([])
   const [linkageSummary, setLinkageSummary] = React.useState<Awaited<ReturnType<typeof window.electron.structure.getLinkageSummary>> | null>(null)
   const [linkageSyncing, setLinkageSyncing] = React.useState(false)
+  const [editorMode, setEditorMode] = React.useState<'chapter' | 'segment'>('chapter')
+  const [navigatorOpen, setNavigatorOpen] = React.useState(false)
+  const [inspectorOpen, setInspectorOpen] = React.useState(false)
+  const [batchDrawerOpen, setBatchDrawerOpen] = React.useState(false)
+  const [chapterDirty, setChapterDirty] = React.useState(false)
+  const [segmentDirty, setSegmentDirty] = React.useState(false)
+  const narrowLayout = useNarrowStructureLayout()
   const plannerLimits = React.useMemo(
     () => resolveStructurePlannerLimits(currentNovel?.targetWords),
     [currentNovel?.targetWords],
@@ -191,7 +208,6 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     linked,
     loading,
     parts,
-    refreshing,
     savingChapter,
     savingSegment,
     segmentDetail,
@@ -254,6 +270,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         summary: typeof draft.summary === 'string' ? draft.summary : currentValues.summary,
         content: typeof draft.content === 'string' ? draft.content : currentValues.content,
       })
+      setSegmentDirty(true)
       return
     }
 
@@ -264,6 +281,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       outline: typeof draft.outline === 'string' ? draft.outline : currentValues.outline,
       targetWords: normalizeOptionalNumber(draft.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
     })
+    setChapterDirty(true)
   }, [chapterForm, segmentForm])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
     novelId,
@@ -320,6 +338,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       outputState: currentValues.outputState || beats.at(-1) || '',
       summary: currentValues.summary || beats.join(' -> ') || template.description,
     })
+    setSegmentDirty(true)
     setSceneTemplateOpen(false)
     message.success(getUserFacingMessage('structure.sceneTemplateApplied'))
   }, [segmentForm])
@@ -607,6 +626,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       placeholder="例如：保留章节位置，把本章目标改成更明确的转折：主角救下伤员但暴露补给路线。"
       onApplied={async () => {
         await refreshStructure()
+        setChapterDirty(false)
       }}
     />
   ) : null
@@ -706,9 +726,110 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       placeholder="例如：把这个场景改成更有压迫感的临时救治场面，强化地点、进入状态和离开状态。"
       onApplied={async () => {
         await refreshStructure()
+        setSegmentDirty(false)
       }}
     />
   ) : null
+
+  const saveChapterEditor = React.useCallback(async () => {
+    const finalData = chapterForm.getFieldsValue(true) as Record<string, unknown>
+    const saved = await saveChapter()
+    if (!saved) return false
+    await finalizeDraft(finalData)
+    await clearDraft()
+    setChapterDirty(false)
+    return true
+  }, [chapterForm, clearDraft, finalizeDraft, saveChapter])
+
+  const saveSegmentEditor = React.useCallback(async () => {
+    const finalData = segmentForm.getFieldsValue(true) as Record<string, unknown>
+    const saved = await saveSegment()
+    if (!saved) return false
+    await finalizeDraft(finalData)
+    await clearDraft()
+    setSegmentDirty(false)
+    return true
+  }, [clearDraft, finalizeDraft, saveSegment, segmentForm])
+
+  const hasUnsavedChanges = editorMode === 'chapter' ? chapterDirty : segmentDirty
+  const saveActiveEditor = React.useCallback(
+    () => editorMode === 'chapter' ? saveChapterEditor() : saveSegmentEditor(),
+    [editorMode, saveChapterEditor, saveSegmentEditor],
+  )
+
+  const runGuardedAction = React.useCallback((action: () => void | Promise<void>) => {
+    if (!hasUnsavedChanges) {
+      void Promise.resolve(action()).catch((error) => {
+        console.error(error)
+        message.error(getErrorMessage(error, 'common.loadFailed'))
+      })
+      return
+    }
+    Modal.confirm({
+      title: `${editorMode === 'chapter' ? '章节' : '场景'}还有未保存修改`,
+      content: '保存当前对象后再继续，避免刚填写的结构字段丢失。',
+      okText: '保存并继续',
+      cancelText: '留在当前对象',
+      onOk: async () => {
+        const saved = await saveActiveEditor()
+        if (!saved) throw new Error('当前结构对象保存失败')
+        await action()
+      },
+    })
+  }, [editorMode, hasUnsavedChanges, saveActiveEditor])
+
+  const handleEditorModeChange = React.useCallback((value: string | number) => {
+    const nextMode = value === 'segment' ? 'segment' : 'chapter'
+    if (nextMode === editorMode || (nextMode === 'segment' && !segmentDetail)) return
+    runGuardedAction(() => setEditorMode(nextMode))
+  }, [editorMode, runGuardedAction, segmentDetail])
+
+  const handleSelectVolume = React.useCallback((volumeId: number) => {
+    runGuardedAction(async () => {
+      await selectVolume(volumeId)
+      setEditorMode('chapter')
+    })
+  }, [runGuardedAction, selectVolume])
+
+  const handleSelectPart = React.useCallback((partId: number) => {
+    runGuardedAction(async () => {
+      await selectPart(partId)
+      setEditorMode('chapter')
+    })
+  }, [runGuardedAction, selectPart])
+
+  const handleSelectChapter = React.useCallback((chapterId: number) => {
+    runGuardedAction(async () => {
+      await selectChapter(chapterId)
+      setEditorMode('chapter')
+      if (narrowLayout) setNavigatorOpen(false)
+    })
+  }, [narrowLayout, runGuardedAction, selectChapter])
+
+  const handleSelectSegment = React.useCallback((segmentId: number) => {
+    runGuardedAction(async () => {
+      await selectSegment(segmentId)
+      setEditorMode('segment')
+      if (narrowLayout) setNavigatorOpen(false)
+    })
+  }, [narrowLayout, runGuardedAction, selectSegment])
+
+  React.useEffect(() => {
+    setChapterDirty(false)
+  }, [chapterDetail?.id])
+
+  React.useEffect(() => {
+    setSegmentDirty(false)
+  }, [segmentDetail?.id])
+
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   const handleClear = React.useCallback(() => {
     Modal.confirm({
@@ -756,271 +877,361 @@ export default function StructurePage({ novelId }: { novelId: number }) {
 
   React.useEffect(() => {
     registerClearHandler(() => {
-      handleClear()
+      runGuardedAction(handleClear)
     })
     return () => registerClearHandler(null)
-  }, [handleClear, registerClearHandler])
+  }, [handleClear, registerClearHandler, runGuardedAction])
+
+  const saveState = (editorMode === 'chapter' ? savingChapter : savingSegment)
+    ? 'saving'
+    : hasUnsavedChanges ? 'unsaved' : 'saved'
+
+  const navigatorPanel = (
+    <div className="novel-structure-navigator" data-structure-hierarchy="volume-part-chapter-segment">
+      <div className="novel-structure-navigator__path">
+        <span>{getVolumeLabel(currentVolume)}</span>
+        <i>›</i>
+        <span>{getPartLabel(currentPart)}</span>
+        <i>›</i>
+        <span>{getChapterLabel(chapterDetail)}</span>
+        <i>›</i>
+        <span>{getSegmentLabel(segmentDetail)}</span>
+      </div>
+      <div className="novel-structure-navigator__scroll">
+        <StructureVolumesPanel
+          volumes={volumes}
+          selectedVolumeId={selection.volumeId}
+          editingVolumeId={editingVolumeId}
+          editingTitle={editingTitle}
+          onEditingTitleChange={setEditingTitle}
+          onSelectVolume={handleSelectVolume}
+          onStartRenameVolume={(volume) => runGuardedAction(() => startRenameVolume(volume))}
+          onCancelRename={cancelRename}
+          onSaveRename={() => void saveRename()}
+          onAddPart={(volumeId) => runGuardedAction(async () => {
+            await addPart(volumeId)
+            setEditorMode('chapter')
+          })}
+          onDeleteVolume={(volume) => runGuardedAction(async () => {
+            await deleteVolume(volume)
+            setEditorMode('chapter')
+          })}
+          onDragEnd={(result) => runGuardedAction(() => handleVolumeDragEnd(result))}
+        />
+        <StructurePartsPanel
+          currentVolume={currentVolume}
+          parts={parts}
+          selectedPartId={selection.partId}
+          editingPartId={editingPartId}
+          editingTitle={editingTitle}
+          onEditingTitleChange={setEditingTitle}
+          onSelectPart={handleSelectPart}
+          onStartRenamePart={(part) => runGuardedAction(() => startRenamePart(part))}
+          onCancelRename={cancelRename}
+          onSaveRename={() => void saveRename()}
+          onDeletePart={(part) => runGuardedAction(async () => {
+            await deletePart(part)
+            setEditorMode('chapter')
+          })}
+          onPageChange={(page) => {
+            if (selection.volumeId) void loadParts(selection.volumeId, page)
+          }}
+          onDragEnd={(result) => runGuardedAction(() => handlePartDragEnd(result))}
+        />
+        <StructureChaptersPanel
+          currentPart={currentPart}
+          chapters={chapters}
+          selectedChapterId={selection.chapterId}
+          onSelectChapter={handleSelectChapter}
+          onAddChapter={() => runGuardedAction(async () => {
+            await addChapter()
+            setEditorMode('chapter')
+          })}
+          onPageChange={(page) => {
+            if (selection.partId) void loadChapters(selection.partId, page)
+          }}
+        />
+        <StructureSegmentsPanel
+          chapterDetail={chapterDetail}
+          segments={segments}
+          selectedSegmentId={selection.segmentId}
+          canReorderSegments={canReorderSegments}
+          onSelectSegment={handleSelectSegment}
+          onAddSegment={() => runGuardedAction(async () => {
+            await addSegment()
+            setEditorMode('segment')
+          })}
+          onCreateEvent={() => runGuardedAction(openCreateEvent)}
+          onDragEnd={(result) => runGuardedAction(() => handleSegmentDragEnd(result))}
+          onPageChange={(page) => {
+            if (selection.chapterId) void loadSegments(selection.chapterId, page)
+          }}
+        />
+      </div>
+    </div>
+  )
+
+  const inspectorPanel = (
+    <div className="novel-structure-inspector" data-structure-inspector="on-demand">
+      <section className="novel-structure-inspector__summary">
+        <div>
+          <span>结构联动</span>
+          <strong>{linkageSummary?.totalGapCount ?? 0}</strong>
+          <small>个待处理缺口</small>
+        </div>
+        <Button size="small" loading={linkageSyncing} onClick={() => void handleSyncLinkage()}>
+          一键补齐
+        </Button>
+      </section>
+      {linkageSummary?.totalGapCount ? (
+        <details className="novel-structure-inspector__issues">
+          <summary>查看联动缺口</summary>
+          <div className="novel-note-list">
+            {linkageSummary.missingChapterContractLabels.length ? <div className="novel-note-list__item">{`缺章节合同：${linkageSummary.missingChapterContractLabels.join('；')}`}</div> : null}
+            {linkageSummary.missingSceneContractLabels.length ? <div className="novel-note-list__item">{`缺场景合同：${linkageSummary.missingSceneContractLabels.join('；')}`}</div> : null}
+            {linkageSummary.uncoveredChapterLabels.length ? <div className="novel-note-list__item">{`缺章节锚点：${linkageSummary.uncoveredChapterLabels.join('；')}`}</div> : null}
+            {linkageSummary.uncoveredSegmentLabels.length ? <div className="novel-note-list__item">{`缺场景锚点：${linkageSummary.uncoveredSegmentLabels.join('；')}`}</div> : null}
+            {linkageSummary.anchorInvalidEventTitles.length ? <div className="novel-note-list__item">{`锚点失效事件：${linkageSummary.anchorInvalidEventTitles.join('；')}`}</div> : null}
+          </div>
+        </details>
+      ) : null}
+      <StructureLinkedEventsPanel
+        linked={linked}
+        timelineFilters={timelineFilters}
+        onOpenEvent={openLinkedEvent}
+        onPageChange={(page) => void loadLinked(page)}
+      />
+      <StructureCheckpointsPanel
+        title={checkpointPanelTitle}
+        checkpoints={checkpoints}
+        onPageChange={(page) => void loadCheckpoints(page)}
+      />
+    </div>
+  )
 
   return (
     <WorkspacePage
       className="novel-structure-page"
       layout="wide"
-      title="卷 / 部 / 章 / 场景"
+      title="卷章结构"
+      heroVariant="compact"
       actions={(
-        <Space wrap>
-          <Button icon={<PlusOutlined />} onClick={() => void addVolume()}>
+        <Space wrap className="novel-structure-page__top-actions">
+          <Button icon={<PlusOutlined />} onClick={() => runGuardedAction(async () => {
+            await addVolume()
+            setEditorMode('chapter')
+          })}>
             新建卷
           </Button>
           <Button icon={<RobotOutlined />} onClick={() => setPlannerOpen(true)}>
             AI 批量规划
           </Button>
-          <div className="novel-structure-batch-control">
-            <span>新增数量</span>
-            <InputNumber
-              min={1}
-              max={STRUCTURE_BATCH_CREATE_MAX}
-              value={batchCreateCount}
-              onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(STRUCTURE_BATCH_CREATE_MAX, Number(value) || 1)))}
-              className="novel-structure-input-88"
-            />
-          </div>
-          <Button icon={<PlusOutlined />} onClick={() => void addVolumes(batchCreateCount)}>
-            批量加卷
-          </Button>
-          <Button icon={<PlusOutlined />} disabled={!selection.volumeId} onClick={() => selection.volumeId && void addParts(selection.volumeId, batchCreateCount)}>
-            批量加部
-          </Button>
-          <Button icon={<PlusOutlined />} disabled={!selection.partId} onClick={() => void addChapters(batchCreateCount)}>
-            批量加章
-          </Button>
-          <Button icon={<PlusOutlined />} disabled={!selection.chapterId} onClick={() => void addSegments(batchCreateCount)}>
-            批量加场景
-          </Button>
-          <Button icon={<BuildOutlined />} loading={refreshing} onClick={() => void refreshMemory()}>
-            刷新检查点
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void refreshStructure()}>
-            刷新结构
-          </Button>
-          <Button
-            icon={<LinkOutlined />}
-            loading={linkageSyncing}
-            onClick={() => void handleSyncLinkage()}
-          >
-            补齐结构联动
-          </Button>
-          <Button
-            type="primary"
-            icon={<LinkOutlined />}
-            disabled={!selection.volumeId}
-            onClick={openCreateEvent}
-          >
-            创建事件
-          </Button>
           <Button
             type="primary"
             icon={<BranchesOutlined />}
             disabled={!selection.chapterId}
-            onClick={() => void compileChapter()}
+            onClick={() => runGuardedAction(compileChapter)}
           >
             编译章节
           </Button>
-          <Button icon={<ApartmentOutlined />} disabled={!selection.chapterId} onClick={openWritingPage}>
-            去正文页
-          </Button>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'batch', label: '批量新增' },
+                { key: 'event', label: '创建关联事件', disabled: !selection.volumeId },
+                { key: 'linkage', label: '补齐结构联动' },
+                { key: 'memory', label: '刷新检查点' },
+                { key: 'refresh', label: '刷新结构' },
+                { type: 'divider' },
+                { key: 'writing', label: '去正文页', disabled: !selection.chapterId },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'batch') setBatchDrawerOpen(true)
+                if (key === 'event') runGuardedAction(openCreateEvent)
+                if (key === 'linkage') runGuardedAction(handleSyncLinkage)
+                if (key === 'memory') runGuardedAction(refreshMemory)
+                if (key === 'refresh') runGuardedAction(refreshStructure)
+                if (key === 'writing') runGuardedAction(openWritingPage)
+              },
+            }}
+          >
+            <Button icon={<EllipsisOutlined />}>更多</Button>
+          </Dropdown>
         </Space>
       )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="卷数" value={volumes.length} tone="warm" />
-          <WorkspaceMetric label="当前部章节" value={chapters.total} />
-          <WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" />
-          <WorkspaceMetric label="关联事件" value={linked.total} />
-          <WorkspaceMetric label="联动缺口" value={linkageSummary?.totalGapCount ?? 0} />
-        </>
-      )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '当前卷', value: getVolumeLabel(currentVolume) },
-            { label: '当前部', value: getPartLabel(currentPart) },
-            { label: '当前章', value: getChapterLabel(chapterDetail) },
-            { label: '当前场景', value: getSegmentLabel(segmentDetail) },
-            { label: '定位方式', value: '按路径自动恢复' },
-          ]}
-        />
-      )}
-      aside={(
-        <>
-          <WorkspacePanel
-            title="联动状态"
-            extra={(
-              <Button size="small" loading={linkageSyncing} onClick={() => void handleSyncLinkage()}>
-                一键补齐
-              </Button>
-            )}
-          >
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">{linkageSummary?.summary || '正在统计结构联动状态。'}</div>
-              {linkageSummary?.missingChapterContractLabels.length ? (
-                <div className="novel-note-list__item">{`缺章节合同：${linkageSummary.missingChapterContractLabels.join('；')}`}</div>
-              ) : null}
-              {linkageSummary?.missingSceneContractLabels.length ? (
-                <div className="novel-note-list__item">{`缺场景合同：${linkageSummary.missingSceneContractLabels.join('；')}`}</div>
-              ) : null}
-              {linkageSummary?.uncoveredChapterLabels.length ? (
-                <div className="novel-note-list__item">{`缺章节锚点：${linkageSummary.uncoveredChapterLabels.join('；')}`}</div>
-              ) : null}
-              {linkageSummary?.uncoveredSegmentLabels.length ? (
-                <div className="novel-note-list__item">{`缺场景锚点：${linkageSummary.uncoveredSegmentLabels.join('；')}`}</div>
-              ) : null}
-              {linkageSummary?.anchorInvalidEventTitles.length ? (
-                <div className="novel-note-list__item">{`锚点失效事件：${linkageSummary.anchorInvalidEventTitles.join('；')}`}</div>
-              ) : null}
-            </div>
-          </WorkspacePanel>
-          <StructureLinkedEventsPanel
-            linked={linked}
-            timelineFilters={timelineFilters}
-            onOpenEvent={openLinkedEvent}
-            onPageChange={(page) => void loadLinked(page)}
-          />
-          <StructureCheckpointsPanel
-            title={checkpointPanelTitle}
-            checkpoints={checkpoints}
-            onPageChange={(page) => void loadCheckpoints(page)}
-          />
-          <StructureAsideTip />
-        </>
-      )}
     >
-      {linkageSummary ? (
-        <div className="novel-structure-banner">
-          <Tag color={linkageSummary.totalGapCount > 0 ? 'warning' : 'success'}>
-            {linkageSummary.totalGapCount > 0 ? `还有 ${linkageSummary.totalGapCount} 个结构联动缺口` : '结构联动已补齐'}
-          </Tag>
-          <span className="novel-structure-banner__summary">{linkageSummary.summary}</span>
-        </div>
-      ) : null}
-      {draftWarnings.length > 0 ? (
-        <div className="novel-note-list novel-structure-banner">
-          {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}
-        </div>
-      ) : null}
-      {draft?.appliedAt ? (
-        <div className="novel-note-list novel-structure-banner">
-          <div className="novel-note-list__item">最近一次已应用但未保存的结构草稿已恢复。保存章节或场景后会自动清除。</div>
-        </div>
-      ) : null}
       {loading ? (
         <div className="novel-empty">
           <Spin />
         </div>
       ) : (
-        <>
-          <div className="novel-split novel-split--sidebar">
-            <StructureVolumesPanel
-              volumes={volumes}
-              selectedVolumeId={selection.volumeId}
-              editingVolumeId={editingVolumeId}
-              editingTitle={editingTitle}
-              onEditingTitleChange={setEditingTitle}
-              onSelectVolume={(volumeId) => void selectVolume(volumeId)}
-              onStartRenameVolume={startRenameVolume}
-              onCancelRename={cancelRename}
-              onSaveRename={() => void saveRename()}
-              onAddPart={(volumeId) => void addPart(volumeId)}
-              onDeleteVolume={(volume) => void deleteVolume(volume)}
-              onDragEnd={(result) => void handleVolumeDragEnd(result)}
-            />
-            <StructurePartsPanel
-              currentVolume={currentVolume}
-              parts={parts}
-              selectedPartId={selection.partId}
-              editingPartId={editingPartId}
-              editingTitle={editingTitle}
-              onEditingTitleChange={setEditingTitle}
-              onSelectPart={(partId) => void selectPart(partId)}
-              onStartRenamePart={startRenamePart}
-              onCancelRename={cancelRename}
-              onSaveRename={() => void saveRename()}
-              onDeletePart={(part) => void deletePart(part)}
-              onPageChange={(page) => {
-                if (selection.volumeId) void loadParts(selection.volumeId, page)
-              }}
-              onDragEnd={(result) => void handlePartDragEnd(result)}
-            />
-          </div>
+        <div
+          className="novel-structure-master-detail"
+          data-structure-master-detail="active"
+          data-structure-navigator-mode={narrowLayout ? 'drawer' : 'rail'}
+          data-structure-unsaved-guard={hasUnsavedChanges ? 'active' : 'inactive'}
+        >
+          {!narrowLayout ? <aside className="novel-structure-master-detail__rail">{navigatorPanel}</aside> : null}
+          <section className="novel-structure-master-detail__detail">
+            <header className="novel-structure-detail-bar">
+              <div className="novel-structure-detail-bar__identity">
+                {narrowLayout ? (
+                  <Button data-structure-navigator-trigger icon={<MenuOutlined />} onClick={() => setNavigatorOpen(true)}>
+                    层级
+                  </Button>
+                ) : null}
+                <div>
+                  <strong>{editorMode === 'chapter' ? getChapterLabel(chapterDetail) : getSegmentLabel(segmentDetail)}</strong>
+                  <span>{editorMode === 'chapter' ? getPartLabel(currentPart) : getChapterLabel(chapterDetail)}</span>
+                </div>
+              </div>
+              <div className="novel-structure-detail-bar__actions">
+                <span className={`novel-structure-save-state is-${saveState}`} data-structure-save-state={saveState}>
+                  {saveState === 'saving' ? '正在保存' : saveState === 'unsaved' ? '有未保存修改' : '已保存'}
+                </span>
+                <Segmented
+                  size="small"
+                  value={editorMode}
+                  options={[
+                    { value: 'chapter', label: '章节' },
+                    { value: 'segment', label: '场景', disabled: !segmentDetail },
+                  ]}
+                  onChange={handleEditorModeChange}
+                />
+                <Button data-structure-inspector-trigger icon={<LinkOutlined />} onClick={() => setInspectorOpen(true)}>
+                  检查器{linkageSummary?.totalGapCount ? ` · ${linkageSummary.totalGapCount}` : ''}
+                </Button>
+              </div>
+            </header>
 
-          <div className="novel-split novel-split--sidebar">
-            <StructureChaptersPanel
-              currentPart={currentPart}
-              chapters={chapters}
-              selectedChapterId={selection.chapterId}
-              onSelectChapter={(chapterId) => void selectChapter(chapterId)}
-              onAddChapter={() => void addChapter()}
-              onPageChange={(page) => {
-                if (selection.partId) void loadChapters(selection.partId, page)
-              }}
-            />
-            <StructureSegmentsPanel
-              chapterDetail={chapterDetail}
-              segments={segments}
-              selectedSegmentId={selection.segmentId}
-              canReorderSegments={canReorderSegments}
-              onSelectSegment={(segmentId) => void selectSegment(segmentId)}
-              onAddSegment={() => void addSegment()}
-              onCreateEvent={openCreateEvent}
-              onDragEnd={(result) => void handleSegmentDragEnd(result)}
-              onPageChange={(page) => {
-                if (selection.chapterId) void loadSegments(selection.chapterId, page)
-              }}
-            />
-          </div>
+            {linkageSummary?.totalGapCount ? (
+              <button type="button" className="novel-structure-gap-strip" onClick={() => setInspectorOpen(true)}>
+                <Tag color="warning">{linkageSummary.totalGapCount} 个联动缺口</Tag>
+                <span>{linkageSummary.summary}</span>
+              </button>
+            ) : null}
+            {draftWarnings.length > 0 ? (
+              <details className="novel-structure-warning-disclosure">
+                <summary>{`${draftWarnings.length} 条 AI 规划提醒`}</summary>
+                <div className="novel-note-list">{draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}</div>
+              </details>
+            ) : null}
+            {draft?.appliedAt ? <div className="novel-structure-draft-state">已恢复未保存结构草稿</div> : null}
 
-          <div className="novel-split novel-split--sidebar">
-            <ChapterEditorPanel
-              chapterDetail={chapterDetail}
-              parts={parts}
-              chapterForm={chapterForm}
-              savingChapter={savingChapter}
-              onSaveChapter={() => void (async () => {
-                const finalData = chapterForm.getFieldsValue(true) as Record<string, unknown>
-                const saved = await saveChapter()
-                if (!saved) return
-                await finalizeDraft(finalData)
-                await clearDraft()
-              })().catch((error) => {
-                console.error(error)
-                message.error(getErrorMessage(error, 'common.saveFailed'))
-              })}
-              onDeleteChapter={() => void deleteChapter()}
-              aiActions={chapterAiActions}
-              patchEditor={chapterPatchEditor}
-            />
-            <SegmentEditorPanel
-              segmentDetail={segmentDetail}
-              selectionSegmentId={selection.segmentId}
-              visibleSegments={segments.items}
-              segmentForm={segmentForm}
-              savingSegment={savingSegment}
-              onSaveSegment={() => void (async () => {
-                const finalData = segmentForm.getFieldsValue(true) as Record<string, unknown>
-                const saved = await saveSegment()
-                if (!saved) return
-                await finalizeDraft(finalData)
-                await clearDraft()
-              })().catch((error) => {
-                console.error(error)
-                message.error(getErrorMessage(error, 'common.saveFailed'))
-              })}
-              onDeleteSegment={() => void deleteSegment()}
-              aiActions={segmentAiActions}
-              patchEditor={segmentPatchEditor}
-            />
-          </div>
-        </>
+            <div className="novel-structure-editor-viewport" data-structure-editor-mode={editorMode}>
+              {editorMode === 'chapter' ? (
+                <ChapterEditorPanel
+                  chapterDetail={chapterDetail}
+                  parts={parts}
+                  chapterForm={chapterForm}
+                  savingChapter={savingChapter}
+                  onSaveChapter={() => void saveChapterEditor().catch((error) => {
+                    console.error(error)
+                    message.error(getErrorMessage(error, 'common.saveFailed'))
+                  })}
+                  onDeleteChapter={() => runGuardedAction(async () => {
+                    await deleteChapter()
+                    setEditorMode('chapter')
+                  })}
+                  onFormChange={() => setChapterDirty(true)}
+                  aiActions={chapterAiActions}
+                  patchEditor={chapterPatchEditor}
+                />
+              ) : (
+                <SegmentEditorPanel
+                  segmentDetail={segmentDetail}
+                  selectionSegmentId={selection.segmentId}
+                  visibleSegments={segments.items}
+                  segmentForm={segmentForm}
+                  savingSegment={savingSegment}
+                  onSaveSegment={() => void saveSegmentEditor().catch((error) => {
+                    console.error(error)
+                    message.error(getErrorMessage(error, 'common.saveFailed'))
+                  })}
+                  onDeleteSegment={() => runGuardedAction(async () => {
+                    await deleteSegment()
+                    setEditorMode('chapter')
+                  })}
+                  onFormChange={() => setSegmentDirty(true)}
+                  aiActions={segmentAiActions}
+                  patchEditor={segmentPatchEditor}
+                />
+              )}
+            </div>
+          </section>
+        </div>
       )}
+
+      <Drawer
+        className="novel-structure-drawer"
+        title="卷 / 部 / 章 / 场景"
+        placement="left"
+        width="min(92vw, 380px)"
+        open={narrowLayout && navigatorOpen}
+        onClose={() => setNavigatorOpen(false)}
+        destroyOnHidden={false}
+      >
+        {navigatorPanel}
+      </Drawer>
+      <Drawer
+        className="novel-structure-drawer novel-structure-drawer--inspector"
+        title="结构检查器"
+        placement="right"
+        width="min(94vw, 440px)"
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        destroyOnHidden={false}
+      >
+        {inspectorPanel}
+      </Drawer>
+      <Drawer
+        className="novel-structure-drawer novel-structure-drawer--batch"
+        title="批量新增结构"
+        placement="right"
+        width="min(92vw, 420px)"
+        open={batchDrawerOpen}
+        onClose={() => setBatchDrawerOpen(false)}
+      >
+        <div className="novel-structure-batch-drawer">
+          <label htmlFor="structure-batch-count">每次新增数量</label>
+          <InputNumber
+            id="structure-batch-count"
+            min={1}
+            max={STRUCTURE_BATCH_CREATE_MAX}
+            value={batchCreateCount}
+            onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(STRUCTURE_BATCH_CREATE_MAX, Number(value) || 1)))}
+            className="novel-structure-input-full"
+          />
+          <div className="novel-structure-batch-drawer__actions">
+            <Button icon={<PlusOutlined />} onClick={() => runGuardedAction(async () => {
+              await addVolumes(batchCreateCount)
+              setEditorMode('chapter')
+            })}>批量加卷</Button>
+            <Button
+              icon={<PlusOutlined />}
+              disabled={!selection.volumeId}
+              onClick={() => {
+                const volumeId = selection.volumeId
+                if (volumeId) runGuardedAction(async () => {
+                  await addParts(volumeId, batchCreateCount)
+                  setEditorMode('chapter')
+                })
+              }}
+            >
+              批量加部
+            </Button>
+            <Button icon={<PlusOutlined />} disabled={!selection.partId} onClick={() => runGuardedAction(async () => {
+              await addChapters(batchCreateCount)
+              setEditorMode('chapter')
+            })}>批量加章</Button>
+            <Button icon={<PlusOutlined />} disabled={!selection.chapterId} onClick={() => runGuardedAction(async () => {
+              await addSegments(batchCreateCount)
+              setEditorMode('segment')
+            })}>批量加场景</Button>
+          </div>
+        </div>
+      </Drawer>
       <Modal
         open={plannerOpen}
         title="AI 批量规划卷 / 部 / 章 / 场景"
@@ -1029,7 +1240,10 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         cancelText="取消"
         confirmLoading={plannerGenerating}
         onCancel={() => setPlannerOpen(false)}
-        onOk={() => void plannerForm.validateFields().then((values) => applyHierarchyPlan(values)).catch(() => undefined)}
+        onOk={() => void plannerForm.validateFields().then((values) => runGuardedAction(async () => {
+          await applyHierarchyPlan(values)
+          setEditorMode('chapter')
+        })).catch(() => undefined)}
       >
         <Form
           form={plannerForm}

@@ -89,6 +89,7 @@
     "acceptance:p0-01": "node scripts/ui-acceptance/capture-p0-01.cjs",
     "acceptance:p0-02": "node scripts/ui-acceptance/capture-p0-02.cjs",
     "acceptance:p1-01": "node scripts/ui-acceptance/capture-p1-01.cjs",
+    "acceptance:p1-02": "node scripts/ui-acceptance/capture-p1-02.cjs",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {

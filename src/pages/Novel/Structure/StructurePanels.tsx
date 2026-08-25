@@ -207,43 +207,44 @@ export function StructureVolumesPanel({
                       >
                         <div className="novel-structure-volume-card__head">
                           <div className="novel-structure-card-title">
-                            <button type="button" className="novel-structure-drag-handle" {...drag.dragHandleProps}>
-                              <HolderOutlined />
-                            </button>
                             <button
                               type="button"
-                              className="novel-structure-card-title__main"
-                              onClick={() => onSelectVolume(volume.id)}
+                              className="novel-structure-drag-handle"
+                              aria-label={`拖动${getVolumeLabel(volume)}排序`}
+                              title={`拖动${getVolumeLabel(volume)}排序`}
+                              {...drag.dragHandleProps}
                             >
-                              <div className="novel-kicker">{`第 ${volume.volumeNumber} 卷`}</div>
-                              {editingVolumeId === volume.id ? (
-                                <div className="novel-structure-inline-editor" onClick={(event) => event.stopPropagation()}>
-                                  <Input
-                                    value={editingTitle}
-                                    onChange={(event) => onEditingTitleChange(event.target.value)}
-                                    onPressEnter={onSaveRename}
-                                    autoFocus
-                                  />
-                                  <Button size="small" type="primary" onClick={onSaveRename}>保存</Button>
-                                  <Button size="small" onClick={onCancelRename}>取消</Button>
-                                </div>
-                              ) : (
-                                <strong>{getVolumeLabel(volume)}</strong>
-                              )}
+                              <HolderOutlined />
                             </button>
+                            {editingVolumeId === volume.id ? (
+                              <div className="novel-structure-inline-editor">
+                                <Input
+                                  aria-label={`${getVolumeLabel(volume)}的新名称`}
+                                  value={editingTitle}
+                                  onChange={(event) => onEditingTitleChange(event.target.value)}
+                                  onPressEnter={onSaveRename}
+                                  autoFocus
+                                />
+                                <Button size="small" type="primary" onClick={onSaveRename}>保存</Button>
+                                <Button size="small" onClick={onCancelRename}>取消</Button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="novel-structure-card-title__main"
+                                aria-current={selectedVolumeId === volume.id ? 'true' : undefined}
+                                onClick={() => onSelectVolume(volume.id)}
+                              >
+                                <strong>{getVolumeLabel(volume)}</strong>
+                              </button>
+                            )}
                           </div>
                           <Space size={8}>
                             {editingVolumeId !== volume.id ? (
-                              <Button size="small" icon={<EditOutlined />} onClick={() => onStartRenameVolume(volume)}>
-                                改名
-                              </Button>
+                              <Button size="small" icon={<EditOutlined />} aria-label={`重命名${getVolumeLabel(volume)}`} title={`重命名${getVolumeLabel(volume)}`} onClick={() => onStartRenameVolume(volume)} />
                             ) : null}
-                            <Button size="small" icon={<PlusOutlined />} onClick={() => onAddPart(volume.id)}>
-                              加一部
-                            </Button>
-                            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteVolume(volume)}>
-                              删除
-                            </Button>
+                            <Button size="small" icon={<PlusOutlined />} aria-label={`在${getVolumeLabel(volume)}中新增一部`} title={`在${getVolumeLabel(volume)}中新增一部`} onClick={() => onAddPart(volume.id)} />
+                            <Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除${getVolumeLabel(volume)}`} title={`删除${getVolumeLabel(volume)}`} onClick={() => onDeleteVolume(volume)} />
                           </Space>
                         </div>
                         <div className="novel-structure-volume-card__meta">
@@ -319,40 +320,43 @@ export function StructurePartsPanel({
                         >
                           <div className="novel-structure-part-card__head">
                             <div className="novel-structure-card-title">
-                              <button type="button" className="novel-structure-drag-handle" {...drag.dragHandleProps}>
-                                <HolderOutlined />
-                              </button>
                               <button
                                 type="button"
-                                className="novel-structure-card-title__main"
-                                onClick={() => onSelectPart(part.id)}
+                                className="novel-structure-drag-handle"
+                                aria-label={`拖动${getPartLabel(part)}排序`}
+                                title={`拖动${getPartLabel(part)}排序`}
+                                {...drag.dragHandleProps}
                               >
-                                <div className="novel-kicker">{`第 ${part.partNumber} 部`}</div>
-                                {editingPartId === part.id ? (
-                                  <div className="novel-structure-inline-editor" onClick={(event) => event.stopPropagation()}>
-                                    <Input
-                                      value={editingTitle}
-                                      onChange={(event) => onEditingTitleChange(event.target.value)}
-                                      onPressEnter={onSaveRename}
-                                      autoFocus
-                                    />
-                                    <Button size="small" type="primary" onClick={onSaveRename}>保存</Button>
-                                    <Button size="small" onClick={onCancelRename}>取消</Button>
-                                  </div>
-                                ) : (
-                                  <strong>{getPartLabel(part)}</strong>
-                                )}
+                                <HolderOutlined />
                               </button>
+                              {editingPartId === part.id ? (
+                                <div className="novel-structure-inline-editor">
+                                  <Input
+                                    aria-label={`${getPartLabel(part)}的新名称`}
+                                    value={editingTitle}
+                                    onChange={(event) => onEditingTitleChange(event.target.value)}
+                                    onPressEnter={onSaveRename}
+                                    autoFocus
+                                  />
+                                  <Button size="small" type="primary" onClick={onSaveRename}>保存</Button>
+                                  <Button size="small" onClick={onCancelRename}>取消</Button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="novel-structure-card-title__main"
+                                  aria-current={selectedPartId === part.id ? 'true' : undefined}
+                                  onClick={() => onSelectPart(part.id)}
+                                >
+                                  <strong>{getPartLabel(part)}</strong>
+                                </button>
+                              )}
                             </div>
                             <Space size={8}>
                               {editingPartId !== part.id ? (
-                                <Button size="small" icon={<EditOutlined />} onClick={() => onStartRenamePart(part)}>
-                                  改名
-                                </Button>
+                                <Button size="small" icon={<EditOutlined />} aria-label={`重命名${getPartLabel(part)}`} title={`重命名${getPartLabel(part)}`} onClick={() => onStartRenamePart(part)} />
                               ) : null}
-                              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeletePart(part)}>
-                                删除
-                              </Button>
+                              <Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除${getPartLabel(part)}`} title={`删除${getPartLabel(part)}`} onClick={() => onDeletePart(part)} />
                             </Space>
                           </div>
                           <div className="novel-structure-part-card__meta">
@@ -405,7 +409,7 @@ export function StructureChaptersPanel({
   return (
     <WorkspacePanel
       title={currentPart ? `章节 · ${getPartLabel(currentPart)}` : '章节'}
-      extra={currentPart ? <Button icon={<PlusOutlined />} onClick={onAddChapter}>加章节</Button> : null}
+      extra={currentPart ? <Button icon={<PlusOutlined />} title={`在${getPartLabel(currentPart)}中新增章节`} onClick={onAddChapter}>加章节</Button> : null}
     >
       {!currentPart ? (
         <div className="novel-empty">先选择一部。</div>
@@ -419,6 +423,7 @@ export function StructureChaptersPanel({
                 key={chapter.id}
                 type="button"
                 className={`novel-structure-chapter-card ${selectedChapterId === chapter.id ? 'is-active' : ''}`}
+                aria-current={selectedChapterId === chapter.id ? 'true' : undefined}
                 onClick={() => onSelectChapter(chapter.id)}
               >
                 <div className="novel-structure-chapter-card__head">
@@ -480,8 +485,8 @@ export function StructureSegmentsPanel({
       title={chapterDetail ? `场景 · 第 ${chapterDetail.chapterNum} 章` : '场景'}
       extra={chapterDetail ? (
         <Space size={8}>
-          <Button icon={<PlusOutlined />} onClick={onAddSegment}>加场景</Button>
-          <Button icon={<LinkOutlined />} onClick={onCreateEvent}>建事件</Button>
+          <Button icon={<PlusOutlined />} title={`在第 ${chapterDetail.chapterNum} 章中新增场景`} onClick={onAddSegment}>加场景</Button>
+          <Button icon={<LinkOutlined />} title={`为第 ${chapterDetail.chapterNum} 章创建关联事件`} onClick={onCreateEvent}>建事件</Button>
         </Space>
       ) : null}
     >
@@ -505,6 +510,7 @@ export function StructureSegmentsPanel({
                             {...drag.dragHandleProps}
                             type="button"
                             className={`novel-structure-scene-card ${selectedSegmentId === segment.id ? 'is-active' : ''}`}
+                            aria-current={selectedSegmentId === segment.id ? 'true' : undefined}
                             onClick={() => onSelectSegment(segment.id)}
                           >
                             <StructureSegmentCard segment={segment} />
@@ -525,6 +531,7 @@ export function StructureSegmentsPanel({
                     key={segment.id}
                     type="button"
                     className={`novel-structure-scene-card ${selectedSegmentId === segment.id ? 'is-active' : ''}`}
+                    aria-current={selectedSegmentId === segment.id ? 'true' : undefined}
                     onClick={() => onSelectSegment(segment.id)}
                   >
                     <StructureSegmentCard segment={segment} />
@@ -576,6 +583,7 @@ interface ChapterEditorPanelProps {
   savingChapter: boolean
   onSaveChapter: () => void
   onDeleteChapter: () => void
+  onFormChange?: () => void
   aiActions?: React.ReactNode
   patchEditor?: React.ReactNode
 }
@@ -587,6 +595,7 @@ export function ChapterEditorPanel({
   savingChapter,
   onSaveChapter,
   onDeleteChapter,
+  onFormChange,
   aiActions,
   patchEditor,
 }: ChapterEditorPanelProps) {
@@ -605,12 +614,17 @@ export function ChapterEditorPanel({
         </Space>
       ) : null}
     >
-      <Form form={chapterForm} layout="vertical">
+      <Form form={chapterForm} layout="vertical" onValuesChange={onFormChange}>
         {!chapterDetail ? (
           <div className="novel-empty">先选择章节。</div>
         ) : (
           <>
-          {patchEditor}
+          {patchEditor ? (
+            <details className="novel-structure-ai-disclosure">
+              <summary>定向 AI 修改</summary>
+              <div className="novel-structure-ai-disclosure__body">{patchEditor}</div>
+            </details>
+          ) : null}
           <div className="novel-grid novel-grid--2">
             <Form.Item name="title" label="章节标题">
               <Input />
@@ -646,6 +660,7 @@ interface SegmentEditorPanelProps {
   savingSegment: boolean
   onSaveSegment: () => void
   onDeleteSegment: () => void
+  onFormChange?: () => void
   aiActions?: React.ReactNode
   patchEditor?: React.ReactNode
 }
@@ -658,6 +673,7 @@ export function SegmentEditorPanel({
   savingSegment,
   onSaveSegment,
   onDeleteSegment,
+  onFormChange,
   aiActions,
   patchEditor,
 }: SegmentEditorPanelProps) {
@@ -682,12 +698,17 @@ export function SegmentEditorPanel({
         </Space>
       ) : null}
     >
-      <Form form={segmentForm} layout="vertical">
+      <Form form={segmentForm} layout="vertical" onValuesChange={onFormChange}>
         {!segmentDetail ? (
           <div className="novel-empty">先选择一个场景。</div>
         ) : (
           <>
-            {patchEditor}
+            {patchEditor ? (
+              <details className="novel-structure-ai-disclosure">
+                <summary>定向 AI 修改</summary>
+                <div className="novel-structure-ai-disclosure__body">{patchEditor}</div>
+              </details>
+            ) : null}
             <div className="novel-grid novel-grid--2">
               <Form.Item name="title" label="场景标题">
                 <Input />

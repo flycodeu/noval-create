@@ -1,249 +1,732 @@
 .novel-structure-page {
-  --structure-surface: rgba(255, 255, 255, 0.76);
+  --structure-ink: var(--workspace-ink, #2d2a25);
+  --structure-ink-soft: var(--workspace-ink-soft, #71695e);
+  --structure-line: rgba(117, 91, 55, 0.16);
+  --structure-line-strong: rgba(117, 91, 55, 0.28);
+  --structure-surface: rgba(255, 252, 246, 0.88);
   --structure-surface-soft: rgba(255, 255, 255, 0.72);
-  --structure-surface-muted: rgba(255, 255, 255, 0.68);
-  --structure-surface-strong: rgba(255, 255, 255, 0.82);
-  --structure-active-surface: linear-gradient(180deg, rgba(246, 202, 124, 0.14), rgba(255, 255, 255, 0.82));
-  --structure-stale-surface: linear-gradient(180deg, rgba(250, 229, 181, 0.28), rgba(255, 255, 255, 0.82));
+  --structure-surface-muted: rgba(247, 241, 230, 0.78);
+  --structure-accent: #8f6330;
+  --structure-accent-soft: rgba(143, 99, 48, 0.12);
+  min-width: 0;
 }
 
-.novel-structure-page .novel-structure-volume-board {
+.novel-structure-page .novel-structure-page__top-actions {
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.novel-structure-page .novel-structure-master-detail {
   display: grid;
-  gap: 18px;
+  grid-template-columns: minmax(242px, 284px) minmax(0, 1fr);
+  gap: 14px;
+  height: clamp(420px, calc(100vh - 282px), 820px);
+  min-height: 420px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--structure-line);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(250, 243, 231, 0.72), rgba(255, 255, 255, 0.48)),
+    var(--structure-surface);
+  box-shadow: 0 18px 42px rgba(71, 53, 28, 0.08);
+}
+
+.novel-structure-page .novel-structure-master-detail__rail {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 0 12px 12px;
+  overflow: hidden;
+}
+
+.novel-structure-page .novel-structure-master-detail__detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 12px 12px 0;
+}
+
+.novel-structure-page .novel-structure-navigator {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-right: 1px solid var(--structure-line);
+}
+
+.novel-structure-page .novel-structure-navigator__path {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 12px 10px;
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.novel-structure-page .novel-structure-navigator__path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.novel-structure-page .novel-structure-navigator__path span:last-child {
+  color: var(--structure-ink);
+  font-weight: 650;
+}
+
+.novel-structure-page .novel-structure-navigator__path i {
+  color: var(--structure-accent);
+  font-style: normal;
+}
+
+.novel-structure-page .novel-structure-navigator__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 12px 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The hierarchy is an information rail, not a set of nested cards. */
+.novel-structure-page .novel-structure-navigator .novel-panel {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--structure-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-structure-page .novel-structure-navigator .novel-panel:first-child {
+  border-top: 0;
+}
+
+.novel-structure-page .novel-structure-navigator .novel-panel__header {
+  min-height: 36px;
+  padding: 10px 10px 6px;
+  border: 0;
+  background: transparent;
+}
+
+.novel-structure-page .novel-structure-navigator .novel-panel__body {
+  padding: 0 8px 10px;
+}
+
+.novel-structure-page .novel-structure-navigator .novel-panel__title {
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.novel-structure-page .novel-structure-volume-board,
+.novel-structure-page .novel-structure-part-stack,
+.novel-structure-page .novel-structure-editor-stack,
+.novel-structure-page .novel-structure-checkpoint-list,
+.novel-structure-page .novel-structure-stack,
+.novel-structure-page .novel-structure-linked-list {
+  display: grid;
+  gap: 7px;
 }
 
 .novel-structure-page .novel-structure-volume-card,
 .novel-structure-page .novel-structure-part-card,
-.novel-structure-page .novel-structure-editor-card,
-.novel-structure-page .novel-structure-checkpoint {
-  border: 1px solid rgba(122, 93, 52, 0.12);
-  border-radius: 22px;
-  background: var(--structure-surface);
-  box-shadow: 0 14px 28px rgba(71, 53, 28, 0.06);
+.novel-structure-page .novel-structure-chapter-card,
+.novel-structure-page .novel-structure-scene-card {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: none;
 }
 
-.novel-structure-page .novel-structure-volume-card {
-  padding: 20px;
+.novel-structure-page .novel-structure-volume-card,
+.novel-structure-page .novel-structure-part-card {
+  padding: 9px 10px;
+}
+
+.novel-structure-page .novel-structure-volume-card:hover,
+.novel-structure-page .novel-structure-part-card:hover,
+.novel-structure-page .novel-structure-chapter-card:hover,
+.novel-structure-page .novel-structure-scene-card:hover {
+  border-color: var(--structure-line-strong);
+  background: var(--structure-surface-soft);
+  box-shadow: 0 7px 14px rgba(71, 53, 28, 0.06);
+}
+
+.novel-structure-page .novel-structure-volume-card.is-active,
+.novel-structure-page .novel-structure-part-card.is-active,
+.novel-structure-page .novel-structure-chapter-card.is-active,
+.novel-structure-page .novel-structure-scene-card.is-active {
+  border-color: rgba(143, 99, 48, 0.32);
+  background: linear-gradient(100deg, rgba(246, 202, 124, 0.2), rgba(255, 255, 255, 0.66));
+  box-shadow: inset 3px 0 0 var(--structure-accent);
 }
 
 .novel-structure-page .novel-structure-volume-card__head,
 .novel-structure-page .novel-structure-part-card__head,
-.novel-structure-page .novel-structure-editor-card__head,
-.novel-structure-page .novel-structure-checkpoint__head,
-.novel-structure-page .novel-structure-scene-toolbar {
+.novel-structure-page .novel-structure-chapter-card__head,
+.novel-structure-page .novel-structure-scene-card__head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+}
+
+.novel-structure-page .novel-structure-card-title {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+  gap: 7px;
+}
+
+.novel-structure-page .novel-structure-card-title__main {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--structure-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.novel-structure-page .novel-structure-card-title__main strong,
+.novel-structure-page .novel-structure-volume-card strong,
+.novel-structure-page .novel-structure-part-card strong,
+.novel-structure-page .novel-structure-chapter-card strong,
+.novel-structure-page .novel-structure-scene-card strong {
+  display: block;
+  overflow: hidden;
+  color: var(--structure-ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-structure-page .novel-structure-drag-handle {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px dashed var(--structure-line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--structure-ink-soft);
+  cursor: grab;
+}
+
+.novel-structure-page .novel-structure-volume-card__head > .ant-space,
+.novel-structure-page .novel-structure-part-card__head > .ant-space {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.novel-structure-page .novel-structure-volume-card:hover .novel-structure-volume-card__head > .ant-space,
+.novel-structure-page .novel-structure-volume-card.is-active .novel-structure-volume-card__head > .ant-space,
+.novel-structure-page .novel-structure-part-card:hover .novel-structure-part-card__head > .ant-space,
+.novel-structure-page .novel-structure-part-card.is-active .novel-structure-part-card__head > .ant-space {
+  opacity: 1;
+}
+
+.novel-structure-page .novel-structure-volume-card__head > .ant-space .ant-btn,
+.novel-structure-page .novel-structure-part-card__head > .ant-space .ant-btn {
+  min-width: 32px;
+  min-height: 32px;
+  padding-inline: 6px;
 }
 
 .novel-structure-page .novel-structure-volume-card__meta,
 .novel-structure-page .novel-structure-part-card__meta,
-.novel-structure-page .novel-structure-checkpoint__meta,
 .novel-structure-page .novel-structure-chapter-card__meta,
 .novel-structure-page .novel-structure-scene-card__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-  color: var(--workspace-ink-soft);
-  font-size: 12px;
-}
-
-.novel-structure-page .novel-structure-part-stack,
-.novel-structure-page .novel-structure-editor-stack,
-.novel-structure-page .novel-structure-checkpoint-list {
-  display: grid;
-  gap: 14px;
-}
-
-.novel-structure-page .novel-structure-part-card,
-.novel-structure-page .novel-structure-editor-card,
-.novel-structure-page .novel-structure-checkpoint {
-  padding: 18px;
-}
-
-.novel-structure-page .novel-structure-part-card.is-active {
-  border-color: rgba(143, 99, 48, 0.28);
-  background: var(--structure-active-surface);
+  gap: 5px 8px;
+  margin-top: 6px;
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .novel-structure-page .novel-structure-chapter-grid,
 .novel-structure-page .novel-structure-scene-board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .novel-structure-page .novel-structure-chapter-card,
 .novel-structure-page .novel-structure-scene-card {
-  width: 100%;
-  padding: 14px;
-  border: 1px solid rgba(122, 93, 52, 0.12);
-  border-radius: 18px;
-  background: var(--structure-surface-soft);
-  cursor: pointer;
+  padding: 8px 9px;
   text-align: left;
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
-}
-
-.novel-structure-page .novel-structure-chapter-card:hover,
-.novel-structure-page .novel-structure-scene-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(62, 105, 136, 0.28);
-  box-shadow: 0 12px 24px rgba(71, 53, 28, 0.08);
-}
-
-.novel-structure-page .novel-structure-chapter-card.is-active,
-.novel-structure-page .novel-structure-scene-card.is-active {
-  border-color: rgba(143, 99, 48, 0.28);
-  background: var(--structure-active-surface);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .novel-structure-page .novel-structure-chapter-card__head,
 .novel-structure-page .novel-structure-scene-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
-.novel-structure-page .novel-structure-chapter-card strong,
-.novel-structure-page .novel-structure-scene-card strong,
-.novel-structure-page .novel-structure-volume-card strong,
-.novel-structure-page .novel-structure-part-card strong,
-.novel-structure-page .novel-structure-editor-card strong,
-.novel-structure-page .novel-structure-checkpoint strong {
-  color: var(--workspace-ink);
-  font-size: 15px;
+.novel-structure-page .novel-structure-chapter-card__head .ant-tag,
+.novel-structure-page .novel-structure-scene-card__head .ant-tag {
+  margin-inline-end: 0;
+  transform: scale(0.9);
+  transform-origin: right center;
 }
 
 .novel-structure-page .novel-structure-scene-card__desc,
-.novel-structure-page .novel-structure-checkpoint__summary,
-.novel-structure-page .novel-structure-inline-hint span,
 .novel-structure-page .novel-structure-chapter-empty {
-  margin-top: 8px;
-  color: var(--workspace-ink-soft);
-  font-size: 12px;
-  line-height: 1.75;
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.novel-structure-page .novel-structure-scene-toolbar {
-  margin-bottom: 14px;
-  padding: 16px 18px;
-  border-radius: 18px;
-  border: 1px solid rgba(122, 93, 52, 0.1);
-  background: var(--structure-surface-soft);
-}
-
-.novel-structure-page .novel-structure-scene-toolbar span,
-.novel-structure-page .novel-structure-inline-hint {
-  color: var(--workspace-ink-soft);
-  font-size: 12px;
-  line-height: 1.75;
-}
-
-.novel-structure-page .novel-structure-inline-hint {
+.novel-structure-page .novel-structure-inline-editor {
   display: grid;
-  gap: 6px;
-  align-self: center;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: var(--structure-surface-muted);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 5px;
+  margin-top: 5px;
 }
 
-.novel-structure-page .novel-structure-checkpoint--stale {
-  border-color: rgba(212, 136, 6, 0.22);
-  background: var(--structure-stale-surface);
-}
-
-@media (max-width: 960px) {
-  .novel-structure-page .novel-structure-volume-card__head,
-  .novel-structure-page .novel-structure-part-card__head,
-  .novel-structure-page .novel-structure-editor-card__head,
-  .novel-structure-page .novel-structure-checkpoint__head,
-  .novel-structure-page .novel-structure-scene-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-.novel-structure-page .novel-structure-card-title { display: flex; align-items: flex-start; gap: 10px; flex: 1; }
-.novel-structure-page .novel-structure-card-title__main { flex: 1; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
-.novel-structure-page .novel-structure-drag-handle { width: 34px; height: 34px; border: 1px dashed rgba(122,93,52,.18); border-radius: 12px; background: var(--structure-surface); color: var(--workspace-ink-soft); cursor: grab; }
-.novel-structure-page .novel-structure-inline-editor { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; margin-top: 8px; }
-.novel-structure-page .novel-structure-volume-card.is-active { border-color: rgba(143,99,48,.28); background: var(--structure-active-surface); }
-.novel-structure-page .novel-structure-linked-list { display: grid; gap: 12px; }
-.novel-structure-page .novel-structure-linked-card { width: 100%; border: 1px solid rgba(122,93,52,.12); border-radius: 18px; background: var(--structure-surface-strong); padding: 14px; text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
-.novel-structure-page .novel-structure-linked-card:hover { transform: translateY(-1px); border-color: rgba(62,105,136,.28); box-shadow: 0 12px 24px rgba(71,53,28,.08); }
-.novel-structure-page .novel-structure-linked-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.novel-structure-page .novel-structure-linked-card__meta, .novel-structure-page .novel-structure-linked-card__desc { margin-top: 8px; color: var(--workspace-ink-soft); font-size: 12px; line-height: 1.7; display: flex; flex-wrap: wrap; gap: 8px; }
-.novel-structure-page .novel-structure-stack { display: grid; gap: 12px; }
-.novel-structure-page .novel-structure-batch-control {
-  display: inline-flex;
+.novel-structure-page .novel-structure-detail-bar {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--color-bg-card);
-  color: var(--color-text-secondary);
-  box-shadow: none;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 4px 10px 10px;
+  border-bottom: 1px solid var(--structure-line);
 }
 
-.novel-structure-page .novel-structure-batch-control > span {
-  flex: 0 0 auto;
-  font-size: 12px;
-  line-height: 1.4;
+.novel-structure-page .novel-structure-detail-bar__identity,
+.novel-structure-page .novel-structure-detail-bar__actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.novel-structure-page .novel-structure-detail-bar__identity > div:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.novel-structure-page .novel-structure-detail-bar__identity strong {
+  overflow: hidden;
+  color: var(--structure-ink);
+  font-size: 16px;
+  font-weight: 720;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.novel-structure-page .novel-structure-batch-control .ant-input-number {
-  background: var(--color-bg-input);
+.novel-structure-page .novel-structure-detail-bar__identity span {
+  overflow: hidden;
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.novel-structure-page .novel-structure-input-88 { width: 88px; }
-.novel-structure-page .novel-structure-banner { margin-bottom: 16px; }
-.novel-structure-page .novel-structure-banner__summary { margin-left: 8px; color: var(--workspace-ink-soft); }
-.novel-structure-page .novel-structure-planner-preview { margin-bottom: 16px; }
-.novel-structure-page .novel-structure-planner-progress { display: grid; gap: 8px; margin-bottom: 16px; color: var(--workspace-ink-soft); font-size: 12px; line-height: 1.7; }
-.novel-structure-page .novel-structure-scroll-list { display: grid; gap: 12px; max-height: 520px; overflow: auto; }
-.novel-structure-page .novel-structure-template-card { padding: 16px; }
-.novel-structure-page .novel-structure-template-card__head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.novel-structure-page .novel-structure-template-card__desc { color: var(--workspace-ink-soft); margin-bottom: 8px; }
-.novel-structure-page .novel-structure-template-card__beats { font-size: 13px; color: var(--workspace-ink-soft); }
-.novel-structure-page .novel-structure-alert-top { margin-top: 14px; }
-.novel-structure-page .novel-structure-input-full { width: 100%; }
+.novel-structure-page .novel-structure-detail-bar__actions {
+  flex: 0 0 auto;
+}
 
-[data-theme="dark"] .novel-structure-page .novel-structure-volume-card,
-[data-theme="dark"] .novel-structure-page .novel-structure-part-card,
-[data-theme="dark"] .novel-structure-page .novel-structure-editor-card,
-[data-theme="dark"] .novel-structure-page .novel-structure-checkpoint,
-[data-theme="dark"] .novel-structure-page .novel-structure-chapter-card,
-[data-theme="dark"] .novel-structure-page .novel-structure-scene-card,
-[data-theme="dark"] .novel-structure-page .novel-structure-scene-toolbar,
-[data-theme="dark"] .novel-structure-page .novel-structure-inline-hint,
-[data-theme="dark"] .novel-structure-page .novel-structure-drag-handle,
-[data-theme="dark"] .novel-structure-page .novel-structure-linked-card {
-  border-color: rgba(210, 190, 156, 0.14);
-  background: rgba(28, 34, 47, 0.88);
+.novel-structure-page .novel-structure-save-state {
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.novel-structure-page .novel-structure-save-state.is-unsaved {
+  color: #b26a16;
+  font-weight: 650;
+}
+
+.novel-structure-page .novel-structure-save-state.is-saving {
+  color: #3c7296;
+}
+
+.novel-structure-page .novel-structure-editor-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 0 0 10px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.novel-structure-page .novel-structure-editor-viewport > * {
+  min-width: 0;
+}
+
+.novel-structure-page .novel-structure-editor-viewport .novel-panel,
+.novel-structure-page .novel-structure-editor-viewport .novel-structure-editor-card,
+.novel-structure-page .novel-structure-editor-viewport .novel-structure-checkpoint {
+  border: 1px solid var(--structure-line);
+  border-radius: 14px;
+  background: var(--structure-surface-soft);
+  box-shadow: 0 8px 20px rgba(71, 53, 28, 0.045);
+}
+
+.novel-structure-page .novel-structure-editor-viewport .novel-panel__body {
+  min-width: 0;
+}
+
+.novel-structure-page .novel-structure-gap-strip,
+.novel-structure-page .novel-structure-warning-disclosure,
+.novel-structure-page .novel-structure-draft-state {
+  margin: 10px 0 0 10px;
+}
+
+.novel-structure-page .novel-structure-gap-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 10px);
+  padding: 8px 10px;
+  border: 1px solid rgba(212, 136, 6, 0.2);
+  border-radius: 10px;
+  background: rgba(250, 229, 181, 0.24);
+  color: var(--structure-ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+
+.novel-structure-page .novel-structure-gap-strip .ant-tag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+}
+
+.novel-structure-page .novel-structure-warning-disclosure {
+  padding: 8px 10px;
+  border: 1px solid rgba(212, 136, 6, 0.18);
+  border-radius: 10px;
+  background: rgba(250, 229, 181, 0.18);
+  color: var(--structure-ink-soft);
+  font-size: 12px;
+}
+
+.novel-structure-page .novel-structure-warning-disclosure summary,
+.novel-structure-page .novel-structure-inspector__issues summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.novel-structure-page .novel-structure-draft-state {
+  padding: 7px 10px;
+  border-left: 3px solid #b26a16;
+  background: rgba(250, 229, 181, 0.18);
+  color: var(--structure-ink-soft);
+  font-size: 12px;
+}
+
+.novel-structure-page .novel-structure-inspector {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-structure-page .novel-structure-inspector__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--structure-line);
+  border-radius: 12px;
+  background: var(--structure-surface-muted);
+}
+
+.novel-structure-page .novel-structure-inspector__summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.novel-structure-page .novel-structure-inspector__summary span {
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+}
+
+.novel-structure-page .novel-structure-inspector__summary strong {
+  color: var(--structure-ink);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.novel-structure-page .novel-structure-inspector__summary small {
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+}
+
+.novel-structure-page .novel-structure-inspector__issues {
+  padding: 10px 12px;
+  border: 1px solid var(--structure-line);
+  border-radius: 12px;
+  color: var(--structure-ink-soft);
+}
+
+.novel-structure-page .novel-structure-inspector .novel-panel {
+  border: 1px solid var(--structure-line);
+  border-radius: 14px;
+  background: var(--structure-surface-soft);
+}
+
+.novel-structure-page .novel-structure-inspector .novel-panel__body {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.novel-structure-page .novel-structure-linked-card,
+.novel-structure-page .novel-structure-checkpoint {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--structure-line);
+  border-radius: 11px;
+  background: var(--structure-surface);
+  text-align: left;
+}
+
+.novel-structure-page .novel-structure-linked-card__head,
+.novel-structure-page .novel-structure-checkpoint__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.novel-structure-page .novel-structure-linked-card strong,
+.novel-structure-page .novel-structure-checkpoint strong {
+  color: var(--structure-ink);
+  font-size: 13px;
+}
+
+.novel-structure-page .novel-structure-linked-card__meta,
+.novel-structure-page .novel-structure-linked-card__desc,
+.novel-structure-page .novel-structure-checkpoint__summary,
+.novel-structure-page .novel-structure-checkpoint__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin-top: 6px;
+  color: var(--structure-ink-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.novel-structure-page .novel-structure-checkpoint--stale {
+  border-color: rgba(212, 136, 6, 0.24);
+  background: rgba(250, 229, 181, 0.2);
+}
+
+.novel-structure-page .novel-structure-batch-drawer {
+  display: grid;
+  gap: 14px;
+}
+
+.novel-structure-page .novel-structure-batch-drawer label {
+  color: var(--structure-ink-soft);
+  font-size: 12px;
+}
+
+.novel-structure-page .novel-structure-batch-drawer__actions {
+  display: grid;
+  gap: 8px;
+}
+
+.novel-structure-page .novel-structure-input-full {
+  width: 100%;
+}
+
+.novel-structure-page .novel-structure-scroll-list {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.novel-structure-page .novel-structure-template-card {
+  padding: 14px;
+}
+
+.novel-structure-page .novel-structure-template-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.novel-structure-page .novel-structure-template-card__desc,
+.novel-structure-page .novel-structure-template-card__beats {
+  color: var(--structure-ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.novel-structure-page .novel-structure-template-card__beats {
+  margin-top: 6px;
+}
+
+.novel-structure-page .novel-structure-planner-preview,
+.novel-structure-page .novel-structure-planner-progress {
+  margin-bottom: 14px;
+}
+
+.novel-structure-page .novel-structure-planner-progress {
+  display: grid;
+  gap: 7px;
+  color: var(--structure-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.novel-structure-page .novel-structure-ai-disclosure {
+  margin-top: 12px;
+  border-top: 1px solid var(--structure-line);
+  padding-top: 10px;
+}
+
+.novel-structure-page .novel-structure-ai-disclosure summary {
+  color: var(--structure-ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.novel-structure-page .novel-structure-ai-disclosure__body {
+  padding-top: 10px;
+}
+
+@media (max-width: 1100px) {
+  .novel-structure-page .novel-structure-master-detail {
+    height: clamp(380px, calc(100vh - 374px), 620px);
+    min-height: 380px;
+  }
+}
+
+@media (max-width: 960px) {
+  .novel-structure-page .novel-structure-master-detail {
+    display: block;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .novel-structure-page .novel-structure-master-detail__detail {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 1px solid var(--structure-line);
+    border-radius: 16px;
+    background: var(--structure-surface);
+  }
+
+  .novel-structure-page .novel-structure-detail-bar {
+    padding: 10px 12px;
+  }
+
+  .novel-structure-page .novel-structure-editor-viewport {
+    padding: 12px;
+  }
+
+  .novel-structure-page .novel-structure-detail-bar__actions {
+    gap: 6px;
+  }
+
+  .novel-structure-page .novel-structure-editor-viewport .novel-panel__header {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .novel-structure-page .novel-structure-editor-viewport .novel-panel__extra {
+    flex: 0 1 auto;
+  }
+
+  .novel-structure-page .novel-structure-editor-viewport .novel-panel__extra .ant-space,
+  .novel-structure-page .novel-structure-editor-viewport .novel-panel__extra .ant-btn {
+    width: auto;
+  }
+
+}
+
+@media (max-width: 640px) {
+  .novel-structure-page .novel-structure-page__top-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .novel-structure-page .novel-structure-page__top-actions > .ant-btn {
+    flex: 1 1 auto;
+  }
+
+  .novel-structure-page .novel-structure-detail-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .novel-structure-page .novel-structure-detail-bar__actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .novel-structure-page .novel-structure-detail-bar__actions .ant-segmented {
+    flex: 1;
+  }
+
+  .novel-structure-page .novel-structure-detail-bar__actions .ant-btn {
+    flex: 0 0 auto;
+  }
 }
 
 [data-theme="dark"] .novel-structure-page {
-  --structure-surface: rgba(28, 34, 47, 0.88);
-  --structure-surface-soft: rgba(28, 34, 47, 0.88);
-  --structure-surface-muted: rgba(28, 34, 47, 0.84);
-  --structure-surface-strong: rgba(28, 34, 47, 0.92);
-  --structure-active-surface: linear-gradient(180deg, rgba(95, 66, 31, 0.22), rgba(28, 34, 47, 0.92));
-  --structure-stale-surface: linear-gradient(180deg, rgba(95, 66, 31, 0.22), rgba(28, 34, 47, 0.92));
+  --structure-line: rgba(221, 205, 177, 0.15);
+  --structure-line-strong: rgba(221, 205, 177, 0.28);
+  --structure-surface: rgba(29, 35, 49, 0.94);
+  --structure-surface-soft: rgba(31, 38, 52, 0.82);
+  --structure-surface-muted: rgba(39, 45, 59, 0.92);
+  --structure-ink: #f2eadc;
+  --structure-ink-soft: #b9b2a5;
 }
 
-[data-theme="dark"] .novel-structure-page .novel-structure-part-card.is-active,
+[data-theme="dark"] .novel-structure-page .novel-structure-master-detail {
+  background: linear-gradient(135deg, rgba(39, 45, 59, 0.9), rgba(29, 35, 49, 0.96));
+}
+
+[data-theme="dark"] .novel-structure-page .novel-structure-volume-card,
+[data-theme="dark"] .novel-structure-page .novel-structure-part-card,
+[data-theme="dark"] .novel-structure-page .novel-structure-chapter-card,
+[data-theme="dark"] .novel-structure-page .novel-structure-scene-card {
+  background: rgba(29, 35, 49, 0.54);
+}
+
 [data-theme="dark"] .novel-structure-page .novel-structure-volume-card.is-active,
+[data-theme="dark"] .novel-structure-page .novel-structure-part-card.is-active,
 [data-theme="dark"] .novel-structure-page .novel-structure-chapter-card.is-active,
-[data-theme="dark"] .novel-structure-page .novel-structure-scene-card.is-active,
+[data-theme="dark"] .novel-structure-page .novel-structure-scene-card.is-active {
+  background: linear-gradient(100deg, rgba(105, 76, 39, 0.34), rgba(29, 35, 49, 0.84));
+}
+
+[data-theme="dark"] .novel-structure-page .novel-structure-gap-strip,
+[data-theme="dark"] .novel-structure-page .novel-structure-warning-disclosure,
+[data-theme="dark"] .novel-structure-page .novel-structure-draft-state,
 [data-theme="dark"] .novel-structure-page .novel-structure-checkpoint--stale {
-  background: linear-gradient(180deg, rgba(95, 66, 31, 0.22), rgba(28, 34, 47, 0.92));
+  background: rgba(95, 66, 31, 0.26);
 }
