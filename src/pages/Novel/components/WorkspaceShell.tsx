@@ -110,6 +110,9 @@ export function WorkspacePage({
         usesSharedChrome && 'novel-workspace--shared-chrome',
         className,
       )}
+      data-workspace-chrome={chrome}
+      data-workspace-information-mounted={usesSharedChrome ? String(sharedInformationMounted) : 'legacy'}
+      data-workspace-actions-mounted={usesSharedChrome ? String(sharedActionsMounted) : 'legacy'}
     >
       {!usesSharedChrome || !sharedInformationMounted ? <section
         className={joinClassNames(

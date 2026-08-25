@@ -78,12 +78,12 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
   const {
     actionError, advisory, commandBar, content, currentChapter, editorRef, generating, onCompile,
     onDismissError, onInput, onOpenStructure, onSyncSelection, resumable, segments, streamTaskId,
-    subtitle, title, wordCount,
+    title, wordCount,
   } = props
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
   return (
     <section className="chapter-console-page__panel chapter-console-page__editor-card">
-      <SectionHeader title={title} description={subtitle} extra={currentChapter ? <Tag color="default">{`字数 ${wordCount}`}</Tag> : null} />
+      <SectionHeader title={title} extra={currentChapter ? <Tag color="default">{`字数 ${wordCount}`}</Tag> : null} />
       {commandBar}
       {actionError ? <ActionErrorAlert title={actionError.title} message={actionError.message} onRetry={actionError.retry} onDismiss={onDismissError} /> : null}
       {generating ? <StreamingOutput streamTaskId={streamTaskId} /> : null}

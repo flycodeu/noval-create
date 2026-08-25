@@ -39,7 +39,7 @@
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:layout-governance && npm run test:chapter-soak-contract && npm run test:timeline-context-projection && npm run test:thread-context-projection && npm run test:fast-launch-bootstrap && npm run test:agent-conflict-stress && npm run test:chapter-integrity && npm run test:delete-integrity && npm run test:chapter-writeback-idempotency && npm run test:web-rpc && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow",
+    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:layout-governance && npm run test:workspace-chrome-contract && npm run test:chapter-soak-contract && npm run test:timeline-context-projection && npm run test:thread-context-projection && npm run test:fast-launch-bootstrap && npm run test:agent-conflict-stress && npm run test:chapter-integrity && npm run test:delete-integrity && npm run test:chapter-writeback-idempotency && npm run test:web-rpc && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:migrations": "electron scripts/migration-safety.test.cjs",
     "test:fts5": "electron scripts/fts5-capability.test.cjs",
@@ -48,6 +48,7 @@
     "test:workspace-routing": "node scripts/workspace-routing.test.cjs",
     "test:interface-contracts": "node scripts/interface-inventory.test.cjs",
     "test:layout-governance": "node scripts/layout-governance.test.cjs",
+    "test:workspace-chrome-contract": "node scripts/workspace-chrome-contract.test.cjs",
     "test:fast-launch-bootstrap": "electron scripts/fast-launch-bootstrap.test.cjs",
     "test:agent-conflict-stress": "electron scripts/agent-conflict-stress.test.cjs",
     "test:chapter-integrity": "electron scripts/chapter-integrity.test.cjs",
@@ -86,6 +87,8 @@
     "acceptance:p0-00": "node scripts/ui-acceptance/capture-p0-00.cjs",
     "acceptance:p0-00:prepare": "node scripts/ui-acceptance/capture-p0-00.cjs --prepare",
     "acceptance:p0-01": "node scripts/ui-acceptance/capture-p0-01.cjs",
+    "acceptance:p0-02": "node scripts/ui-acceptance/capture-p0-02.cjs",
+    "acceptance:p1-01": "node scripts/ui-acceptance/capture-p1-01.cjs",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {

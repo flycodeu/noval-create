@@ -23,31 +23,44 @@ interface UseWritingEditorLifecycleInput {
   clearChapterArtifacts(): void
 }
 
-function useChapterPersistence(input: UseWritingEditorLifecycleInput) {
+export type WritingSaveState = 'saved' | 'unsaved' | 'saving' | 'error'
+
+function useChapterPersistence(
+  input: UseWritingEditorLifecycleInput,
+  setCurrentSaveState: (chapterId: number, state: WritingSaveState) => void,
+) {
   const { currentChapterIdRef, refreshContextStatus, refreshPublishCheck, updateChapter } = input
   const [saveCoordinator] = useState(() => createChapterSaveCoordinator())
-  const persistChapter = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => (
-    persistWritingChapter({
-      chapterId,
-      text,
-      versionSource,
-      isCurrentChapter: (id) => currentChapterIdRef.current === id,
-      updateRemote: (id, nextText, wordCount, source) => window.electron.chapter.update(
-        id,
-        { content: nextText, wordCount },
-        { versionSource: source },
-      ),
-      refreshContextStatus,
-      refreshPublishCheck,
-      updateStore: (id, nextText, wordCount) => updateChapter(id, { content: nextText, wordCount }),
-    })
-  ), [currentChapterIdRef, refreshContextStatus, refreshPublishCheck, updateChapter])
+  const persistChapter = useCallback(async (chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => {
+    setCurrentSaveState(chapterId, 'saving')
+    try {
+      await persistWritingChapter({
+        chapterId,
+        text,
+        versionSource,
+        isCurrentChapter: (id) => currentChapterIdRef.current === id,
+        updateRemote: (id, nextText, wordCount, source) => window.electron.chapter.update(
+          id,
+          { content: nextText, wordCount },
+          { versionSource: source },
+        ),
+        refreshContextStatus,
+        refreshPublishCheck,
+        updateStore: (id, nextText, wordCount) => updateChapter(id, { content: nextText, wordCount }),
+      })
+      setCurrentSaveState(chapterId, 'saved')
+    } catch (error) {
+      setCurrentSaveState(chapterId, 'error')
+      throw error
+    }
+  }, [currentChapterIdRef, refreshContextStatus, refreshPublishCheck, setCurrentSaveState, updateChapter])
   const saveNow = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => (
     saveCoordinator.runNow(chapterId, () => persistChapter(chapterId, text, versionSource))
   ), [persistChapter, saveCoordinator])
   const queueSave = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => {
+    setCurrentSaveState(chapterId, 'unsaved')
     saveCoordinator.schedule(chapterId, () => persistChapter(chapterId, text, versionSource))
-  }, [persistChapter, saveCoordinator])
+  }, [persistChapter, saveCoordinator, setCurrentSaveState])
   return { queueSave, saveCoordinator, saveNow }
 }
 
@@ -99,6 +112,7 @@ function useEditorLifecycleEffects(
   handleSaveCurrentChapter: () => void,
   handleUndoEditor: () => void,
   handleRedoEditor: () => void,
+  hasUnsavedChanges: boolean,
 ) {
   const { clearChapterArtifacts, currentChapter, registerSaveHandler } = input
   useEffect(() => {
@@ -126,21 +140,38 @@ function useEditorLifecycleEffects(
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentChapter?.segmentCount, handleRedoEditor, handleUndoEditor])
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 }
 
 export function useWritingEditorLifecycle(input: UseWritingEditorLifecycleInput) {
   const { content, currentChapter, editorRef } = input
-  const { queueSave, saveCoordinator, saveNow } = useChapterPersistence(input)
+  const [saveRecord, setSaveRecord] = useState<{ chapterId: number; state: WritingSaveState } | null>(null)
+  const setCurrentSaveState = useCallback((chapterId: number, state: WritingSaveState) => {
+    setSaveRecord({ chapterId, state })
+  }, [])
+  const { queueSave, saveCoordinator, saveNow } = useChapterPersistence(input, setCurrentSaveState)
   const editor = useEditorMutations(input, queueSave)
-  const handleSaveCurrentChapter = useCallback(() => {
-    if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return
+  const saveState = saveRecord && currentChapter && saveRecord.chapterId === currentChapter.id ? saveRecord.state : 'saved'
+  const hasUnsavedChanges = saveState !== 'saved'
+  const handleSaveCurrentChapter = useCallback(async () => {
+    if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return false
     const latestText = normalizeEditorText(editorRef.current?.innerText || content)
-    void saveNow(currentChapter.id, latestText)
-      .then(() => message.success(getUserFacingMessage('writing.saved')))
-      .catch((error) => {
-        console.error(error)
-        message.error(getErrorMessage(error, 'writing.saveFailed'))
-      })
+    try {
+      await saveNow(currentChapter.id, latestText)
+      message.success(getUserFacingMessage('writing.saved'))
+      return true
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'writing.saveFailed'))
+      return false
+    }
   }, [content, currentChapter, editorRef, saveNow])
   useEditorLifecycleEffects(
     input,
@@ -148,6 +179,15 @@ export function useWritingEditorLifecycle(input: UseWritingEditorLifecycleInput)
     handleSaveCurrentChapter,
     editor.handleUndoEditor,
     editor.handleRedoEditor,
+    hasUnsavedChanges,
   )
-  return { queueSave, saveCoordinator, saveNow, ...editor, handleSaveCurrentChapter }
+  return {
+    queueSave,
+    saveCoordinator,
+    saveNow,
+    saveState,
+    hasUnsavedChanges,
+    ...editor,
+    handleSaveCurrentChapter,
+  }
 }

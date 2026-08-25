@@ -25,6 +25,7 @@ const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
 const workspaceChrome = read('src/components/novel/workspace-layout/workspace-chrome.tsx')
 const workspaceChromeCss = read('src/components/novel/workspace-layout/workspace-chrome.css')
 const projectBriefPage = read('src/pages/Novel/ProjectBrief/index.tsx')
+const workspaceChromeContract = read('scripts/workspace-chrome-contract.test.cjs')
 const destructiveActionPages = [
   read('src/pages/Novel/Factions/index.tsx'),
   read('src/pages/Novel/Glossary/index.tsx'),
@@ -119,6 +120,12 @@ assertPass(
   projectBriefPage.includes('chrome="shared"')
     && projectBriefPage.includes('actionContract={{')
     && !projectBriefPage.includes('actions={(\n        <Space wrap>'),
+)
+assertPass(
+  'workspace chrome migration contract has a dedicated static gate (P0-01)',
+  workspaceChromeContract.includes('Project Brief is the only shared chrome migration')
+    && workspaceChromeContract.includes('Legacy/default pages cannot pass actionContract')
+    && workspaceChromeContract.includes('Portal provider wraps the route shell'),
 )
 
 console.log('layout governance tests passed')

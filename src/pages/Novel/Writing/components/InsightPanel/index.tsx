@@ -58,7 +58,6 @@ export default function InsightPanel({
       <section className="chapter-console-page__panel">
         <SectionHeader
           title="合同 / 上下文 / 审校 / 版本"
-          description="按需展开辅助内容，避免持续压缩正文编辑器。"
         />
         <div className="chapter-console-page__route-switch">
           {UTILITY_TABS.map((tab) => (

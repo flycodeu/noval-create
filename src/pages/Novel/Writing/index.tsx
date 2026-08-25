@@ -214,7 +214,9 @@ export default function Writing({ novelId }: Props) {
     getEditorText,
     handleContentChange,
     handleSaveCurrentChapter,
+    hasUnsavedChanges,
     saveCoordinator,
+    saveState,
     saveNow,
     syncSelectedSnippet,
   } = editorLifecycle
@@ -234,6 +236,22 @@ export default function Writing({ novelId }: Props) {
     deleteChapter: handleDeleteChapter,
     selectChapter: handleSelectChapter,
   } = chapterCrud
+  const handleGuardedSelectChapter = useCallback((chapterId: number) => {
+    if (!hasUnsavedChanges || currentChapter?.id === chapterId) {
+      void handleSelectChapter(chapterId)
+      return
+    }
+    Modal.confirm({
+      title: '正文还有未保存修改',
+      content: '保存当前章节后再切换，避免刚输入的正文丢失。',
+      okText: '保存并切换',
+      cancelText: '留在当前章',
+      onOk: async () => {
+        const saved = await handleSaveCurrentChapter()
+        if (saved) await handleSelectChapter(chapterId)
+      },
+    })
+  }, [currentChapter?.id, handleSaveCurrentChapter, handleSelectChapter, hasUnsavedChanges])
 
   const presentation = useWritingPresentationModel({
     currentChapter,
@@ -542,7 +560,7 @@ export default function Writing({ novelId }: Props) {
       defaultAiExecutionMode,
       executionModeOverride: generationExecutionModeOverride,
       setExecutionMode: setGenerationExecutionModeOverride,
-      selectChapter: handleSelectChapter,
+      selectChapter: async (chapterId) => handleGuardedSelectChapter(chapterId),
       addChapter: handleAddChapter,
       deleteChapter: handleDeleteChapter,
       navigate,
@@ -578,6 +596,7 @@ export default function Writing({ novelId }: Props) {
       writability: chapterWritability,
       versionCount: chapterVersions.length,
       currentStatusLabel: editorHeader.statusLabel,
+      saveState,
       insightPanelOpen,
       setInsightPanelOpen,
       onNavigate: navigateToWritingRoute,

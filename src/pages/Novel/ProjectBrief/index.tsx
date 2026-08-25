@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Select, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -20,8 +20,6 @@ import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
-  WorkspaceContextSummary,
-  WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
@@ -66,16 +64,6 @@ const EMPTY_PROJECT_BRIEF_VALUES: ProjectBriefFormValues = {
   compTitles: '',
   tabooRules: '',
   deliveryRhythm: '',
-}
-
-function compactText(value?: string | null, max = 44): string {
-  const text = value?.trim() || ''
-  if (!text) return '待补充'
-  return text.length > max ? `${text.slice(0, max)}...` : text
-}
-
-function isFilled(value?: string | null): boolean {
-  return Boolean(value && value.trim())
 }
 
 function normalizeText(value?: string | null): string {
@@ -137,9 +125,10 @@ export default function ProjectBriefPage({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ProjectBriefFormValues>()
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [generatingMode, setGeneratingMode] = useState<ProjectBriefGenerationMode | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [stats, setStats] = useState({ threadCount: 0, outlineCount: 0, timelineCount: 0, chapterCount: 0 })
@@ -174,16 +163,8 @@ export default function ProjectBriefPage({ novelId }: Props) {
   const selectedPlatform = currentValues.platformMode
     ? getPlatformDesignProfile(currentValues.platformMode)
     : null
-  const coreFilledCount = [
-    currentValues.platformMode,
-    currentValues.targetAudience,
-    currentValues.targetReader,
-    currentValues.readerPromise,
-    currentValues.sellingPoints,
-    currentValues.compTitles,
-  ].filter((value) => typeof value === 'string' ? isFilled(value) : Boolean(value)).length
-  const guardrailCount = [currentValues.tabooRules, currentValues.deliveryRhythm].filter(isFilled).length
-  const structureAssetCount = stats.outlineCount + stats.timelineCount + stats.chapterCount
+  const hasUnsavedChanges = JSON.stringify(normalizeFormValues(currentValues))
+    !== JSON.stringify(normalizeFormValues(snapshot))
   const applyProjectBriefDraft = React.useCallback((draft: Partial<ProjectBriefFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
   }, [form, snapshot])
@@ -227,11 +208,12 @@ export default function ProjectBriefPage({ novelId }: Props) {
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
-  const handleSave = async () => {
+  const handleSave = React.useCallback(async () => {
     const rawValues = await form.validateFields().catch(() => null)
-    if (!rawValues) return
+    if (!rawValues) return false
     const values = normalizeFormValues(rawValues)
     setSaving(true)
+    setSaveError(null)
 
     try {
       await window.electron.novel.update(novelId, {
@@ -242,14 +224,52 @@ export default function ProjectBriefPage({ novelId }: Props) {
       if (updated) setCurrentNovel(updated)
       await finalizeDraft(values)
       await clearDraft()
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('projectBrief.saved'))
+      return true
     } catch (error) {
       console.error(error)
-      message.error(getErrorMessage(error, 'projectBrief.saveFailed'))
+      const messageText = getErrorMessage(error, 'projectBrief.saveFailed')
+      setSaveError(messageText)
+      message.error(messageText)
+      return false
     } finally {
       setSaving(false)
     }
-  }
+  }, [clearDraft, currentNovel?.projectBriefJson, finalizeDraft, form, notifyWorkspaceMutation, novelId, setCurrentNovel])
+
+  const navigateToSettings = React.useCallback(() => {
+    if (!hasUnsavedChanges) {
+      navigate(buildWorkspaceRoute(novelId, 'core-settings'))
+      return
+    }
+    Modal.confirm({
+      title: '项目立项还有未保存修改',
+      content: '先保存当前字段再离开，避免读者承诺和禁区内容丢失。',
+      okText: '保存并离开',
+      cancelText: '留在当前页',
+      onOk: async () => {
+        const saved = await handleSave()
+        if (saved) navigate(buildWorkspaceRoute(novelId, 'core-settings'))
+      },
+    })
+  }, [handleSave, hasUnsavedChanges, navigate, novelId])
+
+  useEffect(() => {
+    registerSaveHandler(() => {
+      if (hasUnsavedChanges && !saving) void handleSave()
+    })
+    return () => registerSaveHandler(null)
+  }, [handleSave, hasUnsavedChanges, registerSaveHandler, saving])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges || saving) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges, saving])
 
   const handleGenerate = async (mode: ProjectBriefGenerationMode) => {
     setGeneratingMode(mode)
@@ -269,6 +289,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
       )
       form.setFieldsValue(merged)
       setWarnings(result.warnings)
+      setSaveError(null)
       void saveAppliedDraft(merged, result.warnings, 'project-brief', {
         inputSummary: `${mode === 'fill_blanks' ? '补空白' : '首版'} · ${currentNovel?.title || '未命名小说'}`,
       }).catch(console.error)
@@ -353,29 +374,10 @@ export default function ProjectBriefPage({ novelId }: Props) {
             key: 'next-settings',
             label: '去基础设定',
             icon: <ArrowRightOutlined />,
-            onClick: () => navigate(buildWorkspaceRoute(novelId, 'core-settings')),
+            onClick: navigateToSettings,
           },
         ],
       }}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '目标平台', value: selectedPlatform?.label || '未选择' },
-            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
-            { label: '完成度', value: `${coreFilledCount}/6` },
-          ]}
-        />
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="核心字段" value={`${coreFilledCount}/6`} tone="warm" />
-          <WorkspaceMetric label="边界约束" value={`${guardrailCount}/2`} />
-          <WorkspaceMetric label="故事线程" value={stats.threadCount} />
-          <WorkspaceMetric label="结构资产" value={structureAssetCount} />
-        </>
-      )}
     >
       {!currentNovel?.synopsis && !currentNovel?.expandedBackground ? (
         <Alert
@@ -399,6 +401,22 @@ export default function ProjectBriefPage({ novelId }: Props) {
           )}
         />
       ) : null}
+      {saveError ? (
+        <Alert
+          type="error"
+          showIcon
+          className="project-brief__save-error"
+          message="保存失败，当前表单内容仍保留"
+          description={saveError}
+          action={(
+            <Button size="small" danger onClick={() => void handleSave()} disabled={saving}>
+              重试保存
+            </Button>
+          )}
+          closable
+          onClose={() => setSaveError(null)}
+        />
+      ) : null}
       {draft?.appliedAt ? (
         <Alert
           type="info"
@@ -407,24 +425,33 @@ export default function ProjectBriefPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
+      <WorkspacePanel>
         <Form form={form} layout="vertical">
-          <div className="workspace-stack-16">
-            <div className="workspace-stack-10">
-              <Space wrap align="center">
-                <strong className="workspace-card-section-title">赛道与读者承诺</strong>
-                <AIGenerateButton
-                  novelId={novelId}
-                  label="AI 生成·赛道与承诺"
-                  intent={hasFilledValues([
-                    currentValues.targetAudience,
-                    currentValues.targetReader,
-                    currentValues.readerPromise,
-                    currentValues.sellingPoints,
-                    currentValues.compTitles,
-                  ]) ? 'complete' : 'generate'}
-                  isJson
-                  buildMessages={() => buildDraftMessages({
+          <div className="project-brief__form" data-project-brief-unsaved-guard={hasUnsavedChanges ? 'active' : 'inactive'}>
+            <section className="project-brief__section project-brief__section--core">
+              <div className="project-brief__section-header">
+                <div>
+                  <h2>赛道与读者承诺</h2>
+                  <p>先把作品交付给谁、为什么值得追读说清楚。</p>
+                </div>
+                <div className="project-brief__section-actions">
+                  <div className="project-brief__save-state" role="status" aria-live="polite">
+                    <Tag color={saving || generatingMode ? 'gold' : hasUnsavedChanges ? 'orange' : 'blue'}>
+                      {saving ? '保存中' : generatingMode ? 'AI 生成中' : hasUnsavedChanges ? '有未保存修改' : '已保存'}
+                    </Tag>
+                  </div>
+                  <AIGenerateButton
+                    novelId={novelId}
+                    label="AI 生成·赛道与承诺"
+                    intent={hasFilledValues([
+                      currentValues.targetAudience,
+                      currentValues.targetReader,
+                      currentValues.readerPromise,
+                      currentValues.sellingPoints,
+                      currentValues.compTitles,
+                    ]) ? 'complete' : 'generate'}
+                    isJson
+                    buildMessages={() => buildDraftMessages({
                     task: '项目立项的赛道与读者承诺',
                     mode: hasFilledValues([
                       currentValues.targetAudience,
@@ -454,112 +481,110 @@ export default function ProjectBriefPage({ novelId }: Props) {
                       '必须服从当前目标平台策略，不要把番茄的情绪回报和飞卢的即时反馈写成同一套模板。',
                     ],
                   })}
-                  onResult={(raw) => {
-                    const draft = parseDraftJson<Partial<ProjectBriefFormValues>>(raw)
-                    applyProjectBriefDraft({
-                      platformMode: draft.platformMode,
-                      targetAudience: typeof draft.targetAudience === 'string' ? draft.targetAudience : undefined,
-                      targetReader: typeof draft.targetReader === 'string' ? draft.targetReader : undefined,
-                      readerPromise: typeof draft.readerPromise === 'string' ? draft.readerPromise : undefined,
-                      sellingPoints: typeof draft.sellingPoints === 'string' ? draft.sellingPoints : undefined,
-                      compTitles: typeof draft.compTitles === 'string' ? draft.compTitles : undefined,
-                    })
-                  }}
-                />
-              </Space>
-              <div className="guided-step__field-grid project-brief__grid">
-                <div className="guided-step__field-card guided-step__field-card--compact project-brief__platform-select-card">
+                    onResult={(raw) => {
+                      const draft = parseDraftJson<Partial<ProjectBriefFormValues>>(raw)
+                      applyProjectBriefDraft({
+                        platformMode: draft.platformMode,
+                        targetAudience: typeof draft.targetAudience === 'string' ? draft.targetAudience : undefined,
+                        targetReader: typeof draft.targetReader === 'string' ? draft.targetReader : undefined,
+                        readerPromise: typeof draft.readerPromise === 'string' ? draft.readerPromise : undefined,
+                        sellingPoints: typeof draft.sellingPoints === 'string' ? draft.sellingPoints : undefined,
+                        compTitles: typeof draft.compTitles === 'string' ? draft.compTitles : undefined,
+                      })
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="project-brief__field-grid">
+                <div className="project-brief__field project-brief__field--compact" data-project-brief-field="platformMode">
                   <Form.Item name="platformMode" label="目标平台" rules={[{ required: true, message: '请选择目标平台' }]}>
                     <Select options={PLATFORM_OPTIONS} placeholder="选择平台，后续设计会套用对应策略" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--compact project-brief__track-card">
+                <div className="project-brief__field project-brief__field--compact" data-project-brief-field="targetAudience">
                   <Form.Item name="targetAudience" label="目标赛道" rules={[{ required: true, message: '请写清目标赛道' }]}>
                     <Input placeholder="例如：女频悬疑成长 / 男频末世群像" />
                   </Form.Item>
                 </div>
-
-                {selectedPlatform ? (
-                  <div className="guided-step__field-card guided-step__field-card--full project-brief__platform-card">
-                    <div className="project-brief__platform-header">
-                      <div className="project-brief__platform-header-row">
-                        <span className="project-brief__platform-badge">平台设计约束</span>
-                        <strong className="project-brief__platform-title">{selectedPlatform.label}</strong>
-                        <Tag color="gold">已绑定后续生成与质量门</Tag>
-                      </div>
-                      <div className="project-brief__platform-quote">
-                        {selectedPlatform.positioning}
-                      </div>
-                    </div>
-
-                    <div className="project-brief__platform-subgrid">
-                      <div className="project-brief__platform-subcard">
-                        <div className="project-brief__platform-subcard-head">
-                          <span className="project-brief__platform-pill project-brief__platform-pill--opening">开局设计</span>
-                        </div>
-                        <div className="project-brief__platform-subcard-text">{selectedPlatform.openingFocus}</div>
-                      </div>
-                      <div className="project-brief__platform-subcard">
-                        <div className="project-brief__platform-subcard-head">
-                          <span className="project-brief__platform-pill project-brief__platform-pill--rhythm">连载节奏</span>
-                        </div>
-                        <div className="project-brief__platform-subcard-text">{selectedPlatform.rhythmFocus}</div>
-                      </div>
-                      <div className="project-brief__platform-subcard">
-                        <div className="project-brief__platform-subcard-head">
-                          <span className="project-brief__platform-pill project-brief__platform-pill--packaging">包装建议</span>
-                        </div>
-                        <div className="project-brief__platform-subcard-text">{selectedPlatform.packagingFocus}</div>
-                      </div>
-                    </div>
-
-                    <div className="project-brief__platform-footer">
-                      <div className="project-brief__platform-meta-row">
-                        <span className="project-brief__platform-meta-label">质量门准则</span>
-                        <div className="project-brief__platform-tags">
-                          {selectedPlatform.qualityFocus.map((item, idx) => (
-                            <Tag key={idx} color="blue">{item}</Tag>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="project-brief__platform-meta-row">
-                        <span className="project-brief__platform-meta-label">主要风险</span>
-                        <div className="project-brief__platform-tags">
-                          {selectedPlatform.riskFocus.map((item, idx) => (
-                            <Tag key={idx} color="orange">{item}</Tag>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="guided-step__field-card">
+                <div className="project-brief__field" data-project-brief-field="targetReader">
                   <Form.Item name="targetReader" label="目标读者" rules={[{ required: true, message: '请写清目标读者' }]}>
-                    <Input.TextArea rows={4} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
+                    <Input.TextArea rows={2} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card">
+                <div className="project-brief__field" data-project-brief-field="readerPromise">
                   <Form.Item name="readerPromise" label="读者承诺" rules={[{ required: true, message: '请写清读者承诺' }]}>
-                    <Input.TextArea rows={4} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
+                    <Input.TextArea rows={2} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--full">
+                <div className="project-brief__field project-brief__field--full" data-project-brief-field="sellingPoints">
                   <Form.Item name="sellingPoints" label="卖点列表" rules={[{ required: true, message: '请补充作品卖点' }]}>
-                    <Input.TextArea rows={4} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
+                    <Input.TextArea rows={2} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--full">
-                  <Form.Item name="compTitles" label="参考作品 / 对标方向" rules={[{ required: true, message: '请补充参考作品' }]}>
-                    <Input.TextArea rows={4} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
+                <div className="project-brief__field project-brief__field--full" data-project-brief-field="tabooRules">
+                  <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
+                    <Input.TextArea rows={2} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
                   </Form.Item>
                 </div>
               </div>
-            </div>
+            </section>
 
-            <div className="workspace-stack-10">
-              <Space wrap align="center">
-                <strong className="workspace-card-section-title">边界与交付</strong>
+            <details className="project-brief__strategy-disclosure">
+              <summary>
+                <span className="project-brief__disclosure-title">平台策略</span>
+                <span className="project-brief__disclosure-summary">
+                  {selectedPlatform
+                    ? `${selectedPlatform.label} · ${selectedPlatform.positioning}`
+                    : '选择平台后显示开局、节奏和包装摘要'}
+                </span>
+                <span className="project-brief__disclosure-action">查看详情</span>
+              </summary>
+              {selectedPlatform ? (
+                <div className="project-brief__platform-detail">
+                  <div className="project-brief__platform-detail-grid">
+                    <div className="project-brief__platform-detail-item">
+                      <span>开局设计</span>
+                      <p>{selectedPlatform.openingFocus}</p>
+                    </div>
+                    <div className="project-brief__platform-detail-item">
+                      <span>连载节奏</span>
+                      <p>{selectedPlatform.rhythmFocus}</p>
+                    </div>
+                    <div className="project-brief__platform-detail-item">
+                      <span>包装建议</span>
+                      <p>{selectedPlatform.packagingFocus}</p>
+                    </div>
+                  </div>
+                  <div className="project-brief__platform-meta-row">
+                    <span className="project-brief__platform-meta-label">质量门准则</span>
+                    <div className="project-brief__platform-tags">
+                      {selectedPlatform.qualityFocus.map((item, idx) => (
+                        <Tag key={idx} color="blue">{item}</Tag>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="project-brief__platform-meta-row">
+                    <span className="project-brief__platform-meta-label">主要风险</span>
+                    <div className="project-brief__platform-tags">
+                      {selectedPlatform.riskFocus.map((item, idx) => (
+                        <Tag key={idx} color="orange">{item}</Tag>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="project-brief__platform-detail project-brief__platform-detail--empty">
+                  先选择目标平台，再查看对应的开局、节奏、包装和质量门建议。
+                </div>
+              )}
+            </details>
+
+            <section className="project-brief__section project-brief__section--boundary">
+              <div className="project-brief__section-header">
+                <div>
+                  <h2>边界与交付</h2>
+                  <p>把不能跑偏的方向和读者每章能得到的回报固定下来。</p>
+                </div>
                 <AIGenerateButton
                   novelId={novelId}
                   label="AI 生成·边界与交付"
@@ -598,20 +623,25 @@ export default function ProjectBriefPage({ novelId }: Props) {
                     })
                   }}
                 />
-              </Space>
-              <div className="guided-step__field-grid">
-                <div className="guided-step__field-card">
-                  <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
-                    <Input.TextArea rows={4} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
+              </div>
+              <div className="project-brief__field-grid">
+                <div className="project-brief__field" data-project-brief-field="deliveryRhythm">
                   <Form.Item name="deliveryRhythm" label="连载 / 交付节奏">
-                    <Input.TextArea rows={4} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
+                    <Input.TextArea rows={3} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
                   </Form.Item>
                 </div>
               </div>
-            </div>
+
+            </section>
+
+            <details className="project-brief__references-disclosure">
+              <summary>参考作品 / 对标方向 <span>可选</span></summary>
+              <div className="project-brief__field project-brief__field--disclosure" data-project-brief-field="compTitles">
+                <Form.Item name="compTitles" label="参考作品 / 对标方向">
+                  <Input.TextArea rows={3} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
+                </Form.Item>
+              </div>
+            </details>
           </div>
         </Form>
       </WorkspacePanel>

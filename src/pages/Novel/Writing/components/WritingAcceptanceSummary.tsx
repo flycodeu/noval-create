@@ -13,7 +13,6 @@ export default function WritingAcceptanceSummary({ acceptance, qualityIssues }: 
     <section className="chapter-console-page__panel chapter-console-page__review-strip">
       <SectionHeader
         title="当前章检查结果"
-        description="合同、连续性、AI 味与节奏的当前状态。"
       />
       <div className="chapter-console-page__acceptance-grid">
         <TruncatedList

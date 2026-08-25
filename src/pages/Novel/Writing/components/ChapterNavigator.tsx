@@ -85,6 +85,7 @@ export default function ChapterNavigator({
   const lastGenerationByChapter = useWritingViewStore((state) => state.lastGenerationByChapter)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [openVolumeKeys, setOpenVolumeKeys] = useState<Record<string, boolean>>({})
   const [volumePages, setVolumePages] = useState<Record<string, number>>({})
   const activeChapterRef = useRef<HTMLDivElement | null>(null)
@@ -144,20 +145,6 @@ export default function ChapterNavigator({
     [chapterVolumeGroups, currentVolumeGroupKey],
   )
 
-  // 确保当前选中的章节所在的卷始终展开并定位到对应分页
-  useEffect(() => {
-    if (currentVolumeGroupKey) {
-      setOpenVolumeKeys((prev) => ({ ...prev, [currentVolumeGroupKey]: true }))
-    }
-    if (currentChapter && currentVolumeGroup) {
-      const indexInGroup = currentVolumeGroup.chapters.findIndex((c) => c.id === currentChapter.id)
-      if (indexInGroup >= 0) {
-        const targetPage = Math.floor(indexInGroup / CHAPTERS_PER_PAGE) + 1
-        setVolumePages((prev) => ({ ...prev, [currentVolumeGroup.key]: targetPage }))
-      }
-    }
-  }, [currentChapter, currentVolumeGroup, currentVolumeGroupKey])
-
   // 滚动到激活章节
   useEffect(() => {
     if (activeChapterRef.current) {
@@ -168,11 +155,11 @@ export default function ChapterNavigator({
   const normalizedKeyword = searchKeyword.trim().toLowerCase()
 
   const filteredGroups = useMemo(() => {
-    if (!normalizedKeyword) return chapterVolumeGroups
-
     return chapterVolumeGroups
       .map((group) => {
         const filteredChapters = group.chapters.filter((chapter) => {
+          if (statusFilter !== 'all' && chapter.status !== statusFilter) return false
+          if (!normalizedKeyword) return true
           const numStr = String(chapter.chapterNum)
           const title = (chapter.title || '').toLowerCase()
           return (
@@ -188,7 +175,15 @@ export default function ChapterNavigator({
         }
       })
       .filter((group) => group.chapters.length > 0)
-  }, [chapterVolumeGroups, normalizedKeyword])
+  }, [chapterVolumeGroups, normalizedKeyword, statusFilter])
+
+  const statusOptions = useMemo(() => {
+    const statuses = Array.from(new Set(chapters.map((chapter) => chapter.status).filter(Boolean)))
+    return [
+      { value: 'all', label: '全部状态' },
+      ...statuses.map((status) => ({ value: status, label: getStatusLabel(status) })),
+    ]
+  }, [chapters])
 
   const totalFilteredChapters = useMemo(
     () => filteredGroups.reduce((acc, g) => acc + g.chapters.length, 0),
@@ -212,8 +207,8 @@ export default function ChapterNavigator({
 
   const isAllOpen = useMemo(() => {
     if (chapterVolumeGroups.length === 0) return true
-    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key] ?? true)
-  }, [chapterVolumeGroups, openVolumeKeys])
+    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key] ?? g.key === currentVolumeGroupKey)
+  }, [chapterVolumeGroups, currentVolumeGroupKey, openVolumeKeys])
 
   return (
     <section className="chapter-console-page__panel chapter-navigator-panel">
@@ -227,12 +222,15 @@ export default function ChapterNavigator({
               icon={isAllOpen ? <FolderFilled /> : <FolderOpenFilled />}
               onClick={() => setAllVolumesOpen(!isAllOpen)}
               title={isAllOpen ? '折叠全部卷' : '展开全部卷'}
-            >
-              {isAllOpen ? '折叠全部' : '展开全部'}
-            </Button>
-            <Button size="small" icon={<UnorderedListOutlined />} onClick={onOpenStructure}>
-              结构
-            </Button>
+              aria-label={isAllOpen ? '折叠全部卷' : '展开全部卷'}
+            />
+            <Button
+              size="small"
+              icon={<UnorderedListOutlined />}
+              onClick={onOpenStructure}
+              title="打开卷章结构"
+              aria-label="打开卷章结构"
+            />
           </div>
         )}
       />
@@ -247,6 +245,14 @@ export default function ChapterNavigator({
           onChange={(e) => setSearchKeyword(e.target.value)}
           allowClear
           className="chapter-navigator__search-input"
+        />
+        <Select
+          size="small"
+          aria-label="章节状态筛选"
+          className="chapter-navigator__status-filter"
+          value={statusFilter}
+          options={statusOptions}
+          onChange={setStatusFilter}
         />
         {normalizedKeyword ? (
           <span className="chapter-navigator__search-badge">
@@ -263,8 +269,14 @@ export default function ChapterNavigator({
       <div className="chapter-console-page__chapter-list chapter-navigator__list">
         {filteredGroups.length > 0 ? (
           filteredGroups.map((group) => {
-            const isOpen = openVolumeKeys[group.key] ?? true
-            const currentPage = volumePages[group.key] || 1
+            const isOpen = normalizedKeyword
+              ? true
+              : openVolumeKeys[group.key] ?? group.key === currentVolumeGroupKey
+            const currentIndex = group.key === currentVolumeGroupKey && currentChapter
+              ? group.chapters.findIndex((chapter) => chapter.id === currentChapter.id)
+              : -1
+            const currentPage = volumePages[group.key]
+              || (currentIndex >= 0 ? Math.floor(currentIndex / CHAPTERS_PER_PAGE) + 1 : 1)
             const isPaginated = !normalizedKeyword && group.chapters.length > CHAPTERS_PER_PAGE
             const paginatedChapters = isPaginated
               ? group.chapters.slice((currentPage - 1) * CHAPTERS_PER_PAGE, currentPage * CHAPTERS_PER_PAGE)
@@ -338,6 +350,7 @@ export default function ChapterNavigator({
                             className={`chapter-console-page__chapter-card chapter-navigator__chapter-card ${
                               isCurrent ? 'is-active' : ''
                             }`}
+                            data-writing-chapter-row={chapter.id}
                             onClick={() => onSelectChapter(chapter.id)}
                             onMouseEnter={() => setHoverChapterId(chapter.id)}
                             onMouseLeave={() => setHoverChapterId(null)}

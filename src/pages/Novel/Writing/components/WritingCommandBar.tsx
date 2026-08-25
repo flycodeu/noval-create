@@ -1,5 +1,5 @@
-import { Button, Select } from 'antd'
-import { CheckOutlined, FileSearchOutlined, LoadingOutlined, RobotOutlined } from '@ant-design/icons'
+import { Button, Dropdown, Select } from 'antd'
+import { DownOutlined, LoadingOutlined, RobotOutlined } from '@ant-design/icons'
 import ActionBar from '../../../../components/novel/common/ActionBar'
 import CreativeStageScope from '../../../../components/novel/CreativeStageScope'
 import { AI_EXECUTION_MODE_OPTIONS, type AiExecutionMode } from '../../../../shared/ai-execution'
@@ -80,24 +80,34 @@ export default function WritingCommandBar({
             生成
           </Button>
         )}
-        <Button
-          icon={<RobotOutlined />}
-          disabled={!hasChapter || hasMultiSegments || selectedSnippetLength === 0}
-          loading={rewritingSelection}
-          onClick={onOpenRewrite}
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              {
+                key: 'rewrite',
+                label: rewritingSelection ? '正在重写选区…' : '重写选区',
+                disabled: !hasChapter || hasMultiSegments || selectedSnippetLength === 0 || rewritingSelection,
+              },
+              {
+                key: 'optimize',
+                label: optimizingChapter ? '正在优化整章…' : '整章优化',
+                disabled: !hasChapter || hasMultiSegments || generating || optimizingChapter,
+              },
+              { key: 'review', label: '审校', disabled: !hasChapter },
+              { type: 'divider' },
+              { key: 'finalize', label: '定稿', disabled: !hasChapter },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'rewrite') onOpenRewrite()
+              if (key === 'optimize') onOptimize()
+              if (key === 'review') onAiCheck()
+              if (key === 'finalize') onFinalize()
+            },
+          }}
         >
-          重写
-        </Button>
-        <Button
-          icon={<RobotOutlined />}
-          disabled={!hasChapter || hasMultiSegments || generating}
-          loading={optimizingChapter}
-          onClick={onOptimize}
-        >
-          整章优化
-        </Button>
-        <Button icon={<FileSearchOutlined />} disabled={!hasChapter} onClick={onAiCheck}>审校</Button>
-        <Button icon={<CheckOutlined />} disabled={!hasChapter} onClick={onFinalize}>定稿</Button>
+          <Button disabled={!hasChapter}>更多 <DownOutlined /></Button>
+        </Dropdown>
       </div>
     </ActionBar>
   )

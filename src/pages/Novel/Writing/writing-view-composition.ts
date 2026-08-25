@@ -41,14 +41,13 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
   layout: WritingWorkspaceLayoutProps
   modals: WritingModalsProps
 } {
-  const { chapter, commandBindings, contracts, generation, history, inspector, runtime, workspace } = input
+  const { chapter, commandBindings, contracts, generation, inspector, runtime, workspace } = input
   return {
     layout: {
       loading: workspace.loading,
       refreshing: workspace.refreshing,
       currentChapter: workspace.currentChapter,
       pipelineItems: workspace.pipelineItems,
-      chapterHeader: chapter.header,
       insightPanelOpen: workspace.insightPanelOpen,
       commandBindings,
       editor: {
@@ -59,8 +58,6 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
         streamTaskId: generation.activeGeneration.streamTaskId,
         ...commandBindings.editorActions,
       },
-      acceptance: chapter.metadata.acceptance,
-      qualityIssues: chapter.metadata.qualityIssues,
       inspector: {
         open: workspace.insightPanelOpen,
         activeRoute: workspace.activeRoute,
@@ -69,13 +66,6 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
         viewModels: inspector.viewModels,
         actions: inspector.actions,
         onNavigate: workspace.onNavigate,
-      },
-      footer: {
-        pipelineMetadata: chapter.metadata.pipeline,
-        versions: history.versions,
-        selectedVersionId: history.selectedVersionId,
-        onSelectVersion: history.setSelectedVersionId,
-        onRestoreVersion: input.modals.actions.restoreVersion,
       },
     },
     modals: {

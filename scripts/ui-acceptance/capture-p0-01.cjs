@@ -60,6 +60,7 @@ async function measure(page, kind) {
     const body = document.body
     const informationSlot = document.querySelector('.project-topbar__information-slot')
     const actionSlot = document.querySelector('.project-topbar__page-actions')
+    const workspaceRoot = document.querySelector('.novel-workspace')
     const localHero = document.querySelector('.novel-workspace > .novel-hero')
     const errorCard = document.querySelector('.novel-route-shell__error-card')
     const sharedTitle = informationSlot?.querySelector('.workspace-information-rail__heading h1')?.textContent?.trim() || ''
@@ -83,6 +84,9 @@ async function measure(page, kind) {
     if (root.scrollWidth > root.clientWidth || (body?.scrollWidth || 0) > root.clientWidth) reasons.push('页面存在横向溢出')
 
     if (pageKind === 'shared') {
+      if (workspaceRoot?.dataset.workspaceChrome !== 'shared') reasons.push('共享迁移页未声明 data-workspace-chrome=shared')
+      if (workspaceRoot?.dataset.workspaceInformationMounted !== 'true') reasons.push('共享信息栏 portal 未挂载')
+      if (workspaceRoot?.dataset.workspaceActionsMounted !== 'true') reasons.push('共享动作 portal 未挂载')
       if (sharedTitle !== '项目立项') reasons.push(`共享信息栏标题异常：${sharedTitle || '空'}`)
       if (localHero) reasons.push('迁移页仍渲染本地 Hero')
       if (primaryActions.length !== 1) reasons.push(`主动作数量为 ${primaryActions.length}`)
@@ -90,6 +94,9 @@ async function measure(page, kind) {
       if (innerWidth > 1200 && !isVisible(desktopMore)) reasons.push('桌面更多操作未显示')
       if (innerWidth <= 1200 && !isVisible(compactMore)) reasons.push('窄屏页面操作菜单未显示')
     } else {
+      if (workspaceRoot?.dataset.workspaceChrome !== 'legacy') reasons.push('对照页未保持 legacy chrome')
+      if (workspaceRoot?.dataset.workspaceInformationMounted !== 'legacy') reasons.push('legacy 页信息 portal 标记异常')
+      if (workspaceRoot?.dataset.workspaceActionsMounted !== 'legacy') reasons.push('legacy 页动作 portal 标记异常')
       if (informationSlot?.childElementCount) reasons.push('未迁移页污染了共享信息栏')
       if (actionSlot?.childElementCount) reasons.push('未迁移页污染了共享动作槽')
       if (!localHero) reasons.push('未迁移页本地 Hero 消失')
@@ -134,6 +141,20 @@ async function inspectPageActionMenu(page, viewportWidth) {
   return labels.map((label) => label.replace(/\s+/g, ' ').trim()).filter(Boolean)
 }
 
+async function verifyCoreSettingsNavigation(page, viewportWidth, projectId) {
+  const selector = viewportWidth > 1200
+    ? '.workspace-contract-actions__more--desktop'
+    : '.workspace-contract-actions__more--compact'
+  await page.locator(selector).click()
+  const navigationItem = page
+    .locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item')
+    .filter({ hasText: '去基础设定' })
+  await navigationItem.click()
+  const expectedPath = `#/novels/${projectId}/core-settings`
+  await page.waitForFunction((path) => window.location.hash.split('?')[0] === path, expectedPath, { timeout: 12000 })
+  return expectedPath
+}
+
 function buildReport({ runId, projectId, results }) {
   const lines = [
     '# P0-01 共享信息栏、动作契约与迁移隔离验收',
@@ -143,13 +164,13 @@ function buildReport({ runId, projectId, results }) {
     '- 迁移样板：`project-brief`；隔离对照：`structure`。',
     '- 契约：1 个主动作；桌面最多 2 个可见次动作；其余进入更多；窄屏次动作统一进入页面操作菜单。',
     '',
-    '| 页面 | 视口 | 结果 | 共享标题 | 本地 Hero | 主动作 | 可见次动作 | 桌面更多 | 窄屏菜单 | client/scroll | 截图 |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| 页面 | 视口 | 结果 | 共享标题 | 本地 Hero | 主动作 | 可见次动作 | 桌面更多 | 窄屏菜单 | 导航动作 | client/scroll | 截图 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
   ]
   for (const [key, viewports] of Object.entries(results)) {
     for (const [viewport, metric] of Object.entries(viewports)) {
       const result = metric.status === 'PASS' ? 'PASS' : `BLOCKED：${metric.reasons.join('；')}`
-      lines.push(`| ${key} | ${viewport} | ${result} | ${metric.sharedTitle || '-'} | ${metric.localHeroPresent ? '是' : '否'} | ${metric.primaryActionCount} | ${metric.visibleSecondaryActionCount} | ${metric.desktopMoreVisible ? '是' : '否'} | ${metric.compactMoreVisible ? '是' : '否'} | ${metric.clientWidth}/${metric.scrollWidth} | [截图](runs/${runId}/screenshots/${key}-${viewport}.png) |`)
+      lines.push(`| ${key} | ${viewport} | ${result} | ${metric.sharedTitle || '-'} | ${metric.localHeroPresent ? '是' : '否'} | ${metric.primaryActionCount} | ${metric.visibleSecondaryActionCount} | ${metric.desktopMoreVisible ? '是' : '否'} | ${metric.compactMoreVisible ? '是' : '否'} | ${metric.navigationActionVerified ? '通过' : '-'} | ${metric.clientWidth}/${metric.scrollWidth} | [截图](runs/${runId}/screenshots/${key}-${viewport}.png) |`)
     }
   }
   lines.push('')
@@ -192,6 +213,11 @@ async function main() {
       if (missingMenuLabels.length > 0) {
         results['project-brief'][size].status = 'BLOCKED'
         results['project-brief'][size].reasons.push(`页面操作菜单缺少：${missingMenuLabels.join('、')}`)
+      }
+      if (missingMenuLabels.length === 0) {
+        results['project-brief'][size].navigationTarget = await verifyCoreSettingsNavigation(page, viewport.width, projectId)
+        results['project-brief'][size].navigationActionVerified = true
+        await navigate(page, `#/novels/${projectId}/project-brief`, '项目简报')
       }
       await captureScreenshot(page, path.join(screenshotsDir, `project-brief-${size}.png`))
       console.log(`[P0-01] ${size} structure`)
