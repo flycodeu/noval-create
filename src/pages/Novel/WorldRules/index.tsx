@@ -902,47 +902,87 @@ export default function WorldRules({ novelId }: Props) {
 
     return (
       <WorkspacePage
+        className="novel-world-rules-page"
+        heroVariant="compact"
+        chrome="shared"
         title="世界规则"
-        actions={(
-        <Space wrap>
-          <CreativeStageScope
-            novelId={novelId}
-            value={creativeStageId}
-            onChange={(stageId) => {
-              setCreativeStageId(stageId)
-              const route = window.location.hash.split('?')[0]
-              window.location.hash = `${route}${stageId ? `?stageId=${stageId}` : ''}`
-            }}
-          />
-          <Button icon={<RobotOutlined />} loading={runningAction === 'all-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('all', 'generate')}>
-            {'生成全部分区'}
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={runningAction === 'section-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('section', 'generate')}>
-            {'生成当前分区'}
-          </Button>
-          <Button icon={<PlusOutlined />} loading={runningAction === 'section-expand'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('section', 'expand')}>
-            {'扩写当前分区'}
-          </Button>
-          <Button danger icon={<DeleteOutlined />} disabled={saving || isGenerating || hasRunningAutoTask} onClick={handleClearCurrentFlow}>
-            {'清空当前流程'}
-          </Button>
-          {autoTaskActions}
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGenerating || hasRunningAutoTask} onClick={handleSave}>
-            {'保存规则'}
-          </Button>
-        </Space>
-      )}
+        description="先固定当前分区的规则，生成、扩写与后台诊断按需打开。"
+        actionContract={{
+          primary: {
+            key: 'save',
+            label: '保存规则',
+            icon: <SaveOutlined />,
+            loading: saving,
+            disabled: isGenerating || hasRunningAutoTask,
+            onClick: handleSave,
+          },
+          secondary: [
+            {
+              key: 'generate-section',
+              label: '生成当前分区',
+              icon: <ReloadOutlined />,
+              loading: runningAction === 'section-generate',
+              disabled: saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused',
+              onClick: () => void handleGenerateWorldRules('section', 'generate'),
+            },
+            {
+              key: 'expand-section',
+              label: '扩写当前分区',
+              icon: <PlusOutlined />,
+              loading: runningAction === 'section-expand',
+              disabled: saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused',
+              onClick: () => void handleGenerateWorldRules('section', 'expand'),
+            },
+          ],
+          more: {
+            items: [
+              {
+                key: 'generate-all',
+                label: '生成全部分区',
+                icon: <RobotOutlined />,
+                disabled: saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused',
+                onClick: () => void handleGenerateWorldRules('all', 'generate'),
+              },
+              {
+                key: 'start-auto',
+                label: autoTask?.status === 'paused' ? '继续后台生成' : '后台连续生成',
+                icon: <RobotOutlined />,
+                disabled: saving || isGenerating || hasRunningAutoTask,
+                onClick: () => autoTask?.status === 'paused' ? void handleResumeAutoGenerate() : void handleStartAutoGenerate(),
+              },
+              { type: 'divider' },
+              {
+                key: 'clear',
+                label: '清空当前流程',
+                icon: <DeleteOutlined />,
+                danger: true,
+                disabled: saving || isGenerating || hasRunningAutoTask,
+                onClick: handleClearCurrentFlow,
+              },
+            ],
+          },
+        }}
       metrics={(
         <>
-          <WorkspaceMetric label="力量体系" value={liveRules.powerSystems.length} tone="warm" />
-          <WorkspaceMetric label="种族实体" value={liveRules.speciesSystem.length} />
-          <WorkspaceMetric label="组织势力" value={liveRules.factionSystem.length} tone="cool" />
-          <WorkspaceMetric label="地图层级" value={liveRules.mapBlueprint.levels.length} />
-          <WorkspaceMetric label="动态系统" value={liveRules.worldDynamics.climateCycles.length + liveRules.worldDynamics.economyLoops.length} tone="cool" />
+          <WorkspaceMetric label="当前分区" value={activeSectionMeta.label} tone="warm" />
+          <WorkspaceMetric label="规则体量" value={tokenCount} tone="cool" />
         </>
       )}
       contextSummary={<WorkspaceContextSummary items={[{ label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' }, { label: '当前分区', value: activeSectionMeta.label }, { label: '时间制度', value: calendarLabel }, { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` }]} />}
     >
+      <div className="novel-world-rules-page__control-rail">
+        <CreativeStageScope
+          novelId={novelId}
+          value={creativeStageId}
+          onChange={(stageId) => {
+            setCreativeStageId(stageId)
+            const route = window.location.hash.split('?')[0]
+            window.location.hash = `${route}${stageId ? `?stageId=${stageId}` : ''}`
+          }}
+        />
+        <span>当前编辑：{activeSectionMeta.label}</span>
+        <span>只在需要时展开后台运行明细</span>
+      </div>
       {generationProgress ? (
         <Alert
           className="novel-world-rules-page__status-block"
@@ -968,15 +1008,18 @@ export default function WorldRules({ novelId }: Props) {
                 .join(' · ')
               : '需要时再启动，系统会按分区连续生成当前草稿。'}
           />
+          {autoTask ? <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} /> : null}
           {autoTask ? (
-            <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} />
-          ) : null}
-          {autoStatus.failedSections.length > 0 ? (
-            <div className="novel-note-list">
-              {autoStatus.failedSections.map((item) => (
-                <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>
-              ))}
-            </div>
+            <details className="novel-world-rules-page__auto-details" open={autoTask.status === 'failed' || autoTask.status === 'paused'}>
+              <summary>查看运行明细</summary>
+              {autoStatus.failedSections.length > 0 ? (
+                <div className="novel-note-list">
+                  {autoStatus.failedSections.map((item) => (
+                    <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>
+                  ))}
+                </div>
+              ) : <div className="novel-world-rules-page__auto-note">暂无失败分区，关闭明细不会停止后台任务。</div>}
+            </details>
           ) : null}
         </div>
       </WorkspacePanel>

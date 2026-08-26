@@ -867,3 +867,90 @@
 [data-theme="dark"] .novel-map-page .map-node-relations-inline {
   border-top-color: rgba(210, 190, 156, 0.12);
 }
+
+.novel-map-page__control-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid rgba(122, 93, 52, 0.14);
+  color: var(--workspace-ink-soft, #766b5f);
+  font-size: 12px;
+}
+
+.novel-map-page__control-rail > span + span {
+  padding-left: 16px;
+  border-left: 1px solid rgba(122, 93, 52, 0.14);
+}
+
+.novel-map-page .map-list-workspace {
+  min-width: 0;
+}
+
+.novel-map-page .map-list-workspace > .map-list-panel {
+  min-width: 0;
+}
+
+.novel-map-page .map-list-workspace > .map-list-panel--detail .novel-panel__body,
+.novel-map-page .map-list-workspace > .map-list-panel:nth-child(1) .novel-panel__body,
+.novel-map-page .map-list-workspace > .map-list-panel:nth-child(2) .novel-panel__body {
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+
+@container novel-content (max-width: 1000px) {
+  .novel-map-page .map-list-workspace {
+    grid-template-columns: minmax(240px, 0.86fr) minmax(0, 1.14fr);
+    align-items: stretch;
+  }
+
+  .novel-map-page .map-list-workspace > .map-list-panel--detail {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: var(--novel-sticky-offset);
+  }
+
+  .novel-map-page .map-list-workspace > .map-list-panel:nth-child(2) {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 1024px) and (min-width: 761px) {
+  .novel-map-page .map-list-workspace {
+    grid-template-columns: minmax(240px, 0.86fr) minmax(0, 1.14fr);
+    align-items: stretch;
+  }
+
+  .novel-map-page .map-list-workspace > .map-list-panel--detail {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: var(--novel-sticky-offset);
+  }
+
+  .novel-map-page .map-list-workspace > .map-list-panel:nth-child(2) {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .novel-map-page .map-list-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-map-page .map-list-workspace > .map-list-panel--detail,
+  .novel-map-page .map-list-workspace > .map-list-panel:nth-child(2) {
+    grid-column: auto;
+    grid-row: auto;
+    position: static;
+  }
+
+  .novel-map-page__control-rail > span + span {
+    padding-left: 0;
+    border-left: 0;
+  }
+}

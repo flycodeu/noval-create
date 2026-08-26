@@ -68,11 +68,24 @@ const calls = files.flatMap((absolutePath) => extractWorkspacePageOpenTags(fs.re
 })))
 const sharedCalls = calls.filter(({ tag }) => /\bchrome\s*=\s*["']shared["']/.test(tag))
 const sharedFiles = new Set(sharedCalls.map(({ file }) => file))
+const approvedSharedFiles = new Set([
+  'src/pages/Novel/ProjectBrief/index.tsx',
+  'src/pages/Novel/Premise/index.tsx',
+  'src/pages/Novel/ThemeVoice/index.tsx',
+  'src/pages/Novel/StyleLab/index.tsx',
+  'src/pages/Novel/WorldRules/index.tsx',
+  'src/pages/Novel/MapExplorer/MapExplorerPage.tsx',
+  'src/pages/Novel/ItemsWorkspace/index.tsx',
+])
 const invalidLegacyContracts = calls.filter(({ tag }) => !/\bchrome\s*=\s*["']shared["']/.test(tag) && /\bactionContract\s*=/.test(tag))
 const sharedWithoutContract = sharedCalls.filter(({ tag }) => !/\bactionContract\s*=/.test(tag))
 
 assertPass('WorkspacePage call inventory is non-empty', calls.length > 0)
-assertPass('Project Brief is the only shared chrome migration', sharedCalls.length === 1 && sharedFiles.has('src/pages/Novel/ProjectBrief/index.tsx'))
+assertPass(
+  'Approved shared chrome migrations are explicit',
+  sharedCalls.length === approvedSharedFiles.size
+    && [...approvedSharedFiles].every((file) => sharedFiles.has(file)),
+)
 assertPass('Shared chrome requires an action contract', sharedWithoutContract.length === 0)
 assertPass('Legacy/default pages cannot pass actionContract', invalidLegacyContracts.length === 0)
 

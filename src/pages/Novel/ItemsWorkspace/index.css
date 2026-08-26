@@ -1,0 +1,90 @@
+.novel-items__status-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid rgba(122, 93, 52, 0.14);
+  color: var(--workspace-ink-soft, #766b5f);
+  font-size: 12px;
+}
+
+.novel-items__status-rail strong {
+  color: var(--workspace-ink, #2c241d);
+}
+
+.novel-items__status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #3a9b69;
+  box-shadow: 0 0 0 3px rgba(58, 155, 105, 0.12);
+}
+
+.novel-items__status-dot.is-unsaved {
+  background: #c58a32;
+  box-shadow: 0 0 0 3px rgba(197, 138, 50, 0.14);
+}
+
+.novel-items-page.novel-workspace--wide .novel-split--sidebar {
+  grid-template-columns: minmax(270px, 0.76fr) minmax(0, 1.24fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.novel-items-page.novel-workspace--wide .novel-split--sidebar > .novel-panel {
+  min-width: 0;
+}
+
+.novel-items-page.novel-workspace--wide .novel-list-card {
+  min-height: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+.novel-items-page .novel-list-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.novel-items-page .novel-list-card__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.55;
+}
+
+.novel-items-page .novel-items__list-facts {
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.novel-items-page .novel-panel--scrollable .novel-panel__body {
+  min-height: 0;
+  max-height: min(66vh, 680px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1024px) and (min-width: 761px) {
+  .novel-items-page.novel-workspace--wide .novel-split--sidebar {
+    grid-template-columns: minmax(240px, 0.78fr) minmax(0, 1.22fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .novel-items-page.novel-workspace--wide .novel-split--sidebar {
+    grid-template-columns: 1fr;
+  }
+}
+
+[data-theme="dark"] .novel-items-page__status-rail strong {
+  color: var(--workspace-ink, #f1e7d8);
+}

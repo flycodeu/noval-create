@@ -123,7 +123,7 @@ assertPass(
 )
 assertPass(
   'workspace chrome migration contract has a dedicated static gate (P0-01)',
-  workspaceChromeContract.includes('Project Brief is the only shared chrome migration')
+  workspaceChromeContract.includes('Approved shared chrome migrations are explicit')
     && workspaceChromeContract.includes('Legacy/default pages cannot pass actionContract')
     && workspaceChromeContract.includes('Portal provider wraps the route shell'),
 )

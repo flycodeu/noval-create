@@ -76,3 +76,52 @@
     grid-template-columns: 1fr;
   }
 }
+
+.novel-world-rules-page__control-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-width: 0;
+  margin-bottom: var(--space-m, 14px);
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(122, 93, 52, 0.14));
+  color: var(--workspace-ink-soft, #766b5f);
+  font-size: 12px;
+}
+
+.novel-world-rules-page__control-rail > span + span {
+  padding-left: 16px;
+  border-left: 1px solid var(--border-subtle, rgba(122, 93, 52, 0.14));
+}
+
+.novel-world-rules-page__auto-details {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle, rgba(122, 93, 52, 0.16));
+}
+
+.novel-world-rules-page__auto-details summary {
+  width: fit-content;
+  color: var(--workspace-accent, #9a6a2f);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.novel-world-rules-page__auto-note {
+  margin-top: 10px;
+  color: var(--workspace-ink-soft, #766b5f);
+  font-size: 12px;
+}
+
+.novel-world-rules-page .novel-panel__extra {
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .novel-world-rules-page__control-rail > span + span {
+    padding-left: 0;
+    border-left: 0;
+  }
+}

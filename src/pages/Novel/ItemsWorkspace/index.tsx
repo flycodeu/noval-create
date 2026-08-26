@@ -40,6 +40,7 @@ import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type Work
 import { getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
 import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -102,6 +103,7 @@ const EMPTY_DETAIL: StoryItemDetailContext = {
   siblingInstances: [],
   sourceContexts: [],
 }
+const EMPTY_WATCHED_ITEM_VALUES: Partial<ItemFormValues> = {}
 
 const ITEM_KIND_OPTIONS = [
   { value: 'template', label: '模板' },
@@ -331,7 +333,7 @@ function pickCurrentItemKind(
 }
 
 export default function ItemsWorkspace({ novelId }: Props) {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
@@ -357,6 +359,8 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false)
+  const [pendingItemNavigation, setPendingItemNavigation] = useState<(() => void) | null>(null)
+  const [persistedFormSignature, setPersistedFormSignature] = useState(() => JSON.stringify(serialize(emptyValues('template'))))
   const routeFocusRef = useRef<number | null>(null)
   const selectedIdRef = useRef<number | null>(null)
   const creatingRef = useRef(false)
@@ -395,10 +399,23 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [eventOptions, setEventOptions] = useState<TimelineEvent[]>([])
 
   const watchedItemKind = Form.useWatch('itemKind', form)
+  const watchedItemValues = (Form.useWatch([], { form, preserve: true }) as Partial<ItemFormValues> | undefined) || EMPTY_WATCHED_ITEM_VALUES
   const currentItemKind = pickCurrentItemKind(watchedItemKind, selectedItem, listMode)
   const rarityOptions = useMemo(() => Array.from(new Set([...RARITY_OPTIONS, ...filters.rarities].filter(Boolean))), [filters.rarities])
   const generationBlockers = useMemo(() => getWorkflowBlockers('items', currentNovel, workflowStats), [currentNovel, workflowStats])
   const editorLead = useMemo(() => buildItemLead(selectedItem, detailContext, creating, currentItemKind), [creating, currentItemKind, detailContext, selectedItem])
+  const currentFormSignature = useMemo(
+    () => JSON.stringify(serialize({ ...emptyValues(currentItemKind), ...watchedItemValues } as ItemFormValues)),
+    [currentItemKind, watchedItemValues],
+  )
+  const hasUnsavedChanges = Boolean(selectedItem || creating) && currentFormSignature !== persistedFormSignature
+
+  const syncItemRoute = useCallback((itemId: number | null) => {
+    const nextParams = new URLSearchParams(searchParams)
+    if (itemId) nextParams.set('itemId', String(itemId))
+    else nextParams.delete('itemId')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const searchTemplates = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'template', 24)
@@ -496,7 +513,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setSelectedItem(context.item)
     setDetailContext(context)
     setListMode(context.item.itemKind)
-    form.setFieldsValue(toFormValues(context.item))
+    const nextFormValues = toFormValues(context.item)
+    form.setFieldsValue(nextFormValues)
+    setPersistedFormSignature(JSON.stringify(serialize(nextFormValues)))
     const isCurrent = () => detailRequestRef.current === requestId
     await Promise.all([
       hydrateOptions(context, context.item, isCurrent),
@@ -546,6 +565,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     try {
       const list = await refreshListState(targetPage, isCurrent)
       if (!isCurrent()) return
+      if (hasUnsavedChanges && typeof preferredId !== 'number') return
 
       if (typeof preferredId === 'number') {
         const loadedItem = await loadItemDetail(preferredId)
@@ -575,7 +595,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     } finally {
       if (isCurrent()) setLoading(false)
     }
-  }, [form, hydrateOptions, loadItemDetail, refreshListState])
+  }, [form, hasUnsavedChanges, hydrateOptions, loadItemDetail, refreshListState])
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   useEffect(() => { creatingRef.current = creating }, [creating])
@@ -600,6 +620,17 @@ export default function ItemsWorkspace({ novelId }: Props) {
   }, [categoryFilter, keyword, listMode, recordStatusFilter])
 
   useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return
+      event.preventDefault()
+      event.returnValue = '当前物品还有未保存修改。'
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
+
+  useEffect(() => {
     generateForm.setFieldsValue({
       count: itemGenerationProfile.defaultBatch,
       batchSize: itemGenerationProfile.batchSize || 4,
@@ -609,7 +640,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     })
   }, [generateForm, itemGenerationProfile.batchSize, itemGenerationProfile.defaultBatch])
 
-  const handleNew = (kind: 'template' | 'instance') => {
+  const handleNew = useCallback((kind: 'template' | 'instance') => {
     detailRequestRef.current += 1
     selectedIdRef.current = null
     creatingRef.current = true
@@ -619,10 +650,13 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setSelectedItem(null)
     setDetailContext(EMPTY_DETAIL)
     setLinkRecommendations(null)
+    syncItemRoute(null)
     form.resetFields()
-    form.setFieldsValue(emptyValues(kind))
+    const nextFormValues = emptyValues(kind)
+    form.setFieldsValue(nextFormValues)
+    setPersistedFormSignature(JSON.stringify(serialize(nextFormValues)))
     void hydrateOptions()
-  }
+  }, [form, hydrateOptions, syncItemRoute])
 
   const refreshWorkspace = async () => {
     setLoading(true)
@@ -639,9 +673,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
     const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (!values) return false
     setSaving(true)
     try {
       if (selectedItem?.id) {
@@ -649,17 +683,54 @@ export default function ItemsWorkspace({ novelId }: Props) {
         await Promise.all([loadItemDetail(selectedItem.id), refreshListState(page)])
       } else {
         const nextId = await window.electron.item.create(novelId, serialize(values))
+        syncItemRoute(nextId)
         await Promise.all([loadItemDetail(nextId), refreshListState(page)])
       }
       setCreating(false)
       message.success(getUserFacingMessage(selectedItem?.recordStatus === 'draft' ? 'item.savedDraft' : 'item.saved'))
+      return true
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'item.saveFailed'))
+      return false
     } finally {
       setSaving(false)
     }
-  }
+  }, [form, loadItemDetail, novelId, page, refreshListState, selectedItem?.id, selectedItem?.recordStatus, syncItemRoute])
+
+  const requestItemNavigation = useCallback((action: () => void) => {
+    if (!hasUnsavedChanges) {
+      action()
+      return
+    }
+    setPendingItemNavigation(() => action)
+  }, [hasUnsavedChanges])
+
+  const requestItemDetail = useCallback((itemId: number) => {
+    requestItemNavigation(() => {
+      syncItemRoute(itemId)
+      void loadItemDetail(itemId)
+    })
+  }, [loadItemDetail, requestItemNavigation, syncItemRoute])
+
+  const requestNewItem = useCallback((kind: 'template' | 'instance') => {
+    requestItemNavigation(() => handleNew(kind))
+  }, [handleNew, requestItemNavigation])
+
+  const discardPendingItemNavigation = useCallback(() => {
+    const action = pendingItemNavigation
+    setPendingItemNavigation(null)
+    action?.()
+  }, [pendingItemNavigation])
+
+  const saveAndContinueItemNavigation = useCallback(async () => {
+    const action = pendingItemNavigation
+    if (!action) return
+    const saved = await handleSave()
+    if (!saved) return
+    setPendingItemNavigation(null)
+    action()
+  }, [handleSave, pendingItemNavigation])
 
   const handleDelete = async () => {
     if (!selectedItem?.id) return
@@ -924,7 +995,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             <button
               type="button"
               className="novel-items__linked-button"
-              onClick={() => void loadItemDetail(detailContext.parentTemplate!.id)}
+              onClick={() => requestItemDetail(detailContext.parentTemplate!.id)}
             >
               查看来源模板 · {detailContext.parentTemplate.itemName}
             </button>
@@ -1271,7 +1342,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
                   key={item.id}
                   type="button"
                   className="novel-items__linked-card"
-                  onClick={() => void loadItemDetail(item.id)}
+                  onClick={() => requestItemDetail(item.id)}
                 >
                   <strong>{item.itemName}</strong>
                   <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
@@ -1291,7 +1362,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
                   key={item.id}
                   type="button"
                   className="novel-items__linked-card"
-                  onClick={() => void loadItemDetail(item.id)}
+                  onClick={() => requestItemDetail(item.id)}
                 >
                   <strong>{item.itemName}</strong>
                   <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
@@ -1309,17 +1380,58 @@ export default function ItemsWorkspace({ novelId }: Props) {
   return (
     <WorkspacePage
       className="novel-items-page"
+      heroVariant="compact"
+      chrome="shared"
       title="物品与装备工作台"
-      description="模板、实例与自动发现草稿现在统一管理。你可以直接查看实例来源、持有人、地点、事件链以及同模板流转，不再只是停留在单条表单。"
-      actions={(
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => void refreshWorkspace()}>刷新</Button>
-          <Button icon={<AppstoreAddOutlined />} onClick={() => handleNew('template')}>新建模板</Button>
-          <Button icon={<InboxOutlined />} onClick={() => handleNew('instance')}>新建实例</Button>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => void openGenerateModal()}>AI 生成·批量物品</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
-        </Space>
-      )}
+      description="模板与实例共用一套列表—详情工作区；关联、生成和清理操作按需展开。"
+      actionContract={{
+        primary: {
+          key: 'save',
+          label: '保存物品',
+          icon: <SaveOutlined />,
+          loading: saving,
+          disabled: !selectedItem && !creating,
+          onClick: () => void handleSave(),
+        },
+        secondary: [
+          {
+            key: 'new-template',
+            label: '新建模板',
+            icon: <AppstoreAddOutlined />,
+            onClick: () => requestNewItem('template'),
+          },
+          {
+            key: 'new-instance',
+            label: '新建实例',
+            icon: <InboxOutlined />,
+            onClick: () => requestNewItem('instance'),
+          },
+        ],
+        more: {
+          items: [
+            {
+              key: 'refresh',
+              label: '刷新列表',
+              icon: <ReloadOutlined />,
+              onClick: () => void refreshWorkspace(),
+            },
+            {
+              key: 'generate',
+              label: 'AI 生成·批量物品',
+              icon: <ThunderboltOutlined />,
+              onClick: () => void openGenerateModal(),
+            },
+            { type: 'divider' },
+            {
+              key: 'clear',
+              label: '清空物品系统',
+              icon: <DeleteOutlined />,
+              danger: true,
+              onClick: () => void handleClear(),
+            },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -1335,14 +1447,16 @@ export default function ItemsWorkspace({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="模板" value={stats.templateCount} tone="warm" />
-          <WorkspaceMetric label="实例" value={stats.instanceCount} />
-          <WorkspaceMetric label="草稿" value={stats.draftCount || 0} tone="cool" />
-          <WorkspaceMetric label="事件关联" value={stats.linkedEventCount} />
-          <WorkspaceMetric label="分类" value={stats.categoryCount} />
+          <WorkspaceMetric label="当前列表" value={listMode === 'template' ? '模板' : '实例'} tone="warm" />
+          <WorkspaceMetric label="当前焦点" value={selectedItem?.itemName || (creating ? '新建记录' : '未选择')} tone="cool" />
         </>
       )}
     >
+      <div className="novel-items__status-rail" data-items-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`novel-items__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前记录同步'}</strong>
+        <span>{selectedItem ? `当前编辑：${selectedItem.itemName}` : creating ? '正在新建记录' : '从列表选择一条记录开始'}</span>
+      </div>
       {stats.draftCount ? (
         <Alert
           type="info"
@@ -1413,7 +1527,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             <div className="novel-empty">当前筛选下还没有记录。</div>
           ) : (
             <div className="workspace-stack-12">
-              <VirtualList data={pageData.items} height={listHeight} itemHeight={136} itemKey="id">
+              <VirtualList data={pageData.items} height={listHeight} itemHeight={116} itemKey="id">
                 {(item: StoryItem) => {
                   const relatedCharacterCount = parseNumberArray(item.linkedCharacterIdsJson).length + (item.ownerCharacterId ? 1 : 0)
                   const relatedEventCount = parseNumberArray(item.linkedTimelineEventIdsJson).length
@@ -1423,7 +1537,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
                       key={item.id}
                       type="button"
                       className={`novel-list-card workspace-button-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`}
-                      onClick={() => void loadItemDetail(item.id)}
+                      onClick={() => requestItemDetail(item.id)}
                     >
                       <div className="novel-list-card__title">
                         <span>{item.itemName}</span>
@@ -1465,7 +1579,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
               {aiActions}
               {selectedItem ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 修复·重做当前物品</Button> : null}
               {selectedItem ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
-              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存</Button>
             </Space>
           )}
         >
@@ -1548,6 +1661,21 @@ export default function ItemsWorkspace({ novelId }: Props) {
           )}
         </WorkspacePanel>
       </div>
+
+      <Modal
+        title="物品表单还有未保存修改"
+        open={Boolean(pendingItemNavigation)}
+        onCancel={() => setPendingItemNavigation(null)}
+        footer={(
+          <Space>
+            <Button onClick={() => setPendingItemNavigation(null)}>继续编辑</Button>
+            <Button onClick={discardPendingItemNavigation}>放弃并继续</Button>
+            <Button type="primary" loading={saving} onClick={() => void saveAndContinueItemNavigation()}>保存并继续</Button>
+          </Space>
+        )}
+      >
+        <p>切换记录或新建记录会替换当前表单。请选择保存当前修改、放弃修改，或返回继续编辑。</p>
+      </Modal>
 
       <Modal
         title="AI 生成·批量物品"

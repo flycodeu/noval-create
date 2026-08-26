@@ -386,8 +386,18 @@ export default function MapExplorerPage({ novelId }: Props) {
     return null
   }, [novelId])
 
+  const syncNodeRoute = useCallback((nodeId: number | null) => {
+    const nextParams = new URLSearchParams(searchParams)
+    if (nodeId) nextParams.set('nodeId', String(nodeId))
+    else nextParams.delete('nodeId')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
   const selectNode = useCallback((node: MapNodeSummary | null, markIntent = true) => {
-    if (markIntent) selectionIntentRef.current += 1
+    if (markIntent) {
+      selectionIntentRef.current += 1
+      syncNodeRoute(node?.id || null)
+    }
     selectedNodeRef.current = node
     setSelectedNode(node)
     setSelectedRelation((current) => {
@@ -396,7 +406,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       return current.mapAId === node.id || current.mapBId === node.id ? current : null
     })
     if (node) detailForm.setFieldsValue(toFormValues(node))
-  }, [detailForm])
+  }, [detailForm, syncNodeRoute])
 
   const loadGraph = useCallback(async () => {
     const requestId = ++graphRequestRef.current
@@ -1202,8 +1212,10 @@ export default function MapExplorerPage({ novelId }: Props) {
     <WorkspacePage
       className="novel-map-page"
       layout="wide"
+      heroVariant="compact"
+      chrome="shared"
       title="地图结构"
-      description="图谱默认显示整张地图树结构，优先保证全局可浏览、可定位、可查看；右侧检查器只负责节点和关系详情，不再主导主画布布局。"
+      description="列表与图谱只保留一个主视角；选中节点、路径和关系详情按需展开。"
       guide={(
         <WorkspaceStepGuide
           steps={[
@@ -1213,17 +1225,54 @@ export default function MapExplorerPage({ novelId }: Props) {
           ]}
         />
       )}
-      actions={(
-        <Space wrap>
-          <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
-          <Button type={workspaceMode === 'list' ? 'primary' : 'default'} icon={<UnorderedListOutlined />} onClick={() => setWorkspaceMode('list')}>列表模式</Button>
-          <Button type={workspaceMode === 'graph' ? 'primary' : 'default'} icon={<ShareAltOutlined />} onClick={() => setWorkspaceMode('graph')}>图谱模式</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void refreshVisible({ preferredId: selectedNode?.id || null })}>刷新</Button>
-          <Button icon={<ApartmentOutlined />} onClick={openBatchModal}>AI 生成·层级骨架</Button>
-          <Button icon={<PlusOutlined />} onClick={() => void handleAddRoot()}>添加根节点</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: {
+          key: 'save-node',
+          label: '保存节点',
+          icon: <SaveOutlined />,
+          loading: saving,
+          disabled: !selectedNode,
+          onClick: () => void handleSave(),
+        },
+        secondary: [
+          {
+            key: 'switch-mode',
+            label: workspaceMode === 'list' ? '图谱模式' : '列表模式',
+            icon: workspaceMode === 'list' ? <ShareAltOutlined /> : <UnorderedListOutlined />,
+            onClick: () => setWorkspaceMode(workspaceMode === 'list' ? 'graph' : 'list'),
+          },
+          {
+            key: 'refresh',
+            label: '刷新',
+            icon: <ReloadOutlined />,
+            onClick: () => void refreshVisible({ preferredId: selectedNode?.id || null }),
+          },
+        ],
+        more: {
+          items: [
+            {
+              key: 'generate-batch',
+              label: 'AI 生成·层级骨架',
+              icon: <ApartmentOutlined />,
+              onClick: openBatchModal,
+            },
+            {
+              key: 'add-root',
+              label: '添加根节点',
+              icon: <PlusOutlined />,
+              onClick: () => void handleAddRoot(),
+            },
+            { type: 'divider' },
+            {
+              key: 'clear',
+              label: '清空地图',
+              icon: <DeleteOutlined />,
+              danger: true,
+              onClick: () => void handleClear(),
+            },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -1237,14 +1286,16 @@ export default function MapExplorerPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="根节点" value={stats.rootCount} tone="warm" />
-          <WorkspaceMetric label="第二层" value={stats.secondLevelCount} />
-          <WorkspaceMetric label="叶子节点" value={stats.leafCount} tone="cool" />
-          <WorkspaceMetric label="显式关系" value={allRelations.length} />
-          <WorkspaceMetric label="总节点" value={stats.total} />
+          <WorkspaceMetric label="当前视角" value={workspaceMode === 'list' ? '层级列表' : '关系图谱'} tone="warm" />
+          <WorkspaceMetric label="当前节点" value={selectedNode?.name || '未选中'} tone="cool" />
         </>
       )}
     >
+      <div className="novel-map-page__control-rail">
+        <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
+        <span>{workspaceMode === 'list' ? '先选节点，再查看详情' : '先看地图，再按需展开检查器'}</span>
+        {selectedNode ? <span>当前焦点：{selectedNode.name}</span> : null}
+      </div>
       {workspaceMode === 'graph' ? (
         <div className={`map-graph-workspace ${graphInspectorOpen ? 'map-graph-workspace--inspector-open' : 'map-graph-workspace--inspector-closed'} ${graphFullscreen ? 'map-graph-workspace--fullscreen' : ''}`}>
           <div ref={graphStageRef} className={`map-graph-stage ${graphFullscreen ? 'map-graph-stage--fullscreen' : ''}`}>
