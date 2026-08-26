@@ -43,7 +43,6 @@ interface Props {
   novelId: number
 }
 
-type LedgerViewMode = 'board' | 'table'
 type LedgerLaneKey = 'pending' | 'dueSoon' | 'overdue' | 'resolved'
 
 interface ForeshadowFormValues {
@@ -154,6 +153,10 @@ function getStatusTagColor(status: string): string {
   return 'gold'
 }
 
+function getStatusLabel(status: string): string {
+  return STATUS_OPTIONS.find((item) => item.value === status)?.label || status || '草稿'
+}
+
 function getLane(entry: ForeshadowLedgerEntry, currentChapterNum: number): LedgerLaneKey {
   if (entry.status === 'resolved' || entry.status === 'archived') return 'resolved'
   const target = typeof entry.targetPayoffChapter === 'number' ? entry.targetPayoffChapter : null
@@ -182,8 +185,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updatingStatusId, setUpdatingStatusId] = useState<number | null>(null)
-  const [viewMode, setViewMode] = useState<LedgerViewMode>('board')
   const [laneFilter, setLaneFilter] = useState<'all' | LedgerLaneKey>('all')
+  const [keyword, setKeyword] = useState('')
   const [entries, setEntries] = useState<ForeshadowLedgerEntry[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [volumes, setVolumes] = useState<StoryVolume[]>([])
@@ -193,8 +196,11 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   const [segmentsLoading, setSegmentsLoading] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<ForeshadowLedgerEntry | null>(null)
+  const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const refreshRequestRef = React.useRef(0)
   const segmentsRequestRef = React.useRef(0)
+  const editorDirtyRef = React.useRef(false)
 
   const sourceChapterId = Form.useWatch('sourceChapterId', form)
 
@@ -254,9 +260,21 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
 
   const filteredTableRows = useMemo(() => {
     const sorted = [...entries].sort((left, right) => right.id - left.id)
-    if (laneFilter === 'all') return sorted
-    return sorted.filter((entry) => getLane(entry, currentChapterNum) === laneFilter)
-  }, [currentChapterNum, entries, laneFilter])
+    const normalizedKeyword = keyword.trim().toLowerCase()
+    return sorted.filter((entry) => {
+      if (laneFilter !== 'all' && getLane(entry, currentChapterNum) !== laneFilter) return false
+      if (!normalizedKeyword) return true
+      return [entry.title, entry.detail, entry.payoffSceneAction, entry.requiredEvidence]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedKeyword))
+    })
+  }, [currentChapterNum, entries, keyword, laneFilter])
+
+  const selectedEntry = useMemo(
+    () => filteredTableRows.find((entry) => entry.id === selectedEntryId) || filteredTableRows[0] || null,
+    [filteredTableRows, selectedEntryId],
+  )
+  const selectedEntryLane = selectedEntry ? getLane(selectedEntry, currentChapterNum) : null
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current
@@ -275,6 +293,9 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       setVolumes(volumeRows)
       setThreads(threadRows)
       setCommitments(commitmentRows)
+      setSelectedEntryId((current) => current && ledgerRows.some((entry) => entry.id === current)
+        ? current
+        : ledgerRows[0]?.id || null)
     } catch (error) {
       if (refreshRequestRef.current !== requestId) return
       console.error(error)
@@ -311,18 +332,41 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
     void loadSegments(sourceChapterId)
   }, [editorOpen, loadSegments, sourceChapterId])
 
+  useEffect(() => {
+    setSelectedEntryId((current) => filteredTableRows.some((entry) => entry.id === current)
+      ? current
+      : filteredTableRows[0]?.id || null)
+  }, [filteredTableRows])
+
   const openEditor = useCallback((entry?: ForeshadowLedgerEntry | null) => {
     const target = entry || null
     setEditingEntry(target)
+    editorDirtyRef.current = false
+    setHasUnsavedChanges(false)
     form.resetFields()
     form.setFieldsValue(toFormValues(target))
     setEditorOpen(true)
   }, [form])
 
-  const closeEditor = useCallback(() => {
-    setEditorOpen(false)
-    setEditingEntry(null)
-    setSegments([])
+  const closeEditor = useCallback((force = false) => {
+    const commit = () => {
+      editorDirtyRef.current = false
+      setHasUnsavedChanges(false)
+      setEditorOpen(false)
+      setEditingEntry(null)
+      setSegments([])
+    }
+    if (!force && editorDirtyRef.current) {
+      Modal.confirm({
+        title: '当前伏笔还有未保存修改',
+        content: '关闭编辑会丢弃当前修改，是否继续？',
+        okText: '放弃修改并关闭',
+        cancelText: '留下继续编辑',
+        onOk: commit,
+      })
+      return
+    }
+    commit()
   }, [])
 
   const handleSave = useCallback(async () => {
@@ -358,7 +402,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
         payload.id = editingEntry.id
       }
       await window.electron.foreshadow.upsertLedger(novelId, payload)
-      closeEditor()
+      closeEditor(true)
       await refresh()
       notifyWorkspaceMutation()
       message.success(getUserFacingMessage(editingEntry ? 'foreshadow.updated' : 'foreshadow.created'))
@@ -418,29 +462,28 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
     return () => registerEscapeHandler(null)
   }, [closeEditor, editorOpen, registerEscapeHandler])
 
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   return (
     <WorkspacePage
       className="novel-foreshadow-ledger-page"
       layout="wide"
       heroVariant="compact"
+      eyebrow="剧情与伏笔 / 回收账本"
       title="伏笔与回收账本"
       description="独立维护伏笔资产，支持章节/场景回写、回收状态追踪和终局绑定。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-            新建伏笔资产
-          </Button>
-          <Select
-            value={viewMode}
-            className="novel-foreshadow-ledger__view-select"
-            onChange={(value) => setViewMode(value as LedgerViewMode)}
-            options={[
-              { value: 'board', label: '看板视图' },
-              { value: 'table', label: '表格视图' },
-            ]}
-          />
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: { key: 'create-foreshadow', label: '新建伏笔资产', icon: <PlusOutlined />, onClick: () => openEditor() },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -470,185 +513,182 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
         />
       ) : null}
 
-      {viewMode === 'board' ? (
-        <div className="novel-foreshadow-ledger__board-grid">
-          {(['pending', 'dueSoon', 'overdue', 'resolved'] as LedgerLaneKey[]).map((lane) => {
-            const meta = laneMeta(lane)
-            const laneRows = laneBuckets[lane]
-            return (
-              <WorkspacePanel
-                key={lane}
-                title={`${meta.title} · ${laneRows.length}`}
-                description={meta.hint}
-              >
-                {laneRows.length <= 0 ? (
-                  <div className="novel-copy-block">当前没有条目。</div>
-                ) : (
-                  <div className="novel-note-list">
-                    {laneRows.map((entry) => {
-                      const chapter = entry.sourceChapterId ? chapterById.get(entry.sourceChapterId) : null
-                      return (
-                        <div key={entry.id} className="novel-note-list__item">
-                          <div className="novel-foreshadow-ledger__item-stack">
-                            <div className="novel-foreshadow-ledger__item-head">
-                              <strong>{entry.title}</strong>
-                              <Tag color={getStatusTagColor(entry.status)}>{entry.status || 'draft'}</Tag>
-                              {typeof entry.targetPayoffChapter === 'number' ? <Tag>{`目标第${entry.targetPayoffChapter}章`}</Tag> : null}
-                            </div>
-                            <div className="novel-foreshadow-ledger__muted">
-                              {chapter ? `埋设：第${chapter.chapterNum}章` : '埋设章节：未设置'}
-                              {entry.sourceSegmentId ? ` · 场景#${entry.sourceSegmentId}` : ''}
-                            </div>
-                            {entry.detail ? <div>{entry.detail}</div> : null}
-                            <div className="novel-foreshadow-ledger__item-actions">
-                              <Button size="small" onClick={() => openEditor(entry)}>编辑</Button>
-                              <Button
-                                size="small"
-                                loading={updatingStatusId === entry.id}
-                                disabled={entry.status === 'active'}
-                                onClick={() => void handleQuickStatusChange(entry, 'active')}
-                              >
-                                标记推进
-                              </Button>
-                              <Button
-                                size="small"
-                                loading={updatingStatusId === entry.id}
-                                disabled={entry.status === 'resolved'}
-                                onClick={() => void handleQuickStatusChange(entry, 'resolved')}
-                              >
-                                标记回收
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </WorkspacePanel>
-            )
-          })}
-        </div>
-      ) : (
+      <div className="novel-foreshadow-ledger__status-rail" data-foreshadow-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`novel-foreshadow-ledger__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '伏笔编辑器有未保存修改' : '账本与当前项目数据同步'}</strong>
+        <span>优先处理超期未收与即将到期的伏笔，再展开完整回收条件。</span>
+      </div>
+
+      <div className="novel-foreshadow-ledger__workspace">
         <WorkspacePanel
-          title="伏笔账本表格"
-          extra={(
+          title="伏笔目录"
+          description={`${filteredTableRows.length}/${entries.length} 条 · 到期风险已按当前章节计算`}
+          className="novel-foreshadow-ledger__list-panel"
+          bodyClassName="novel-foreshadow-ledger__list-body"
+        >
+          <div className="novel-foreshadow-ledger__filters" data-foreshadow-filters>
+            <Input
+              allowClear
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="搜索伏笔标题、说明或回收动作"
+              className="novel-foreshadow-ledger__search"
+            />
             <Select
               value={laneFilter}
               className="novel-foreshadow-ledger__filter-select"
               onChange={(value) => setLaneFilter(value as 'all' | LedgerLaneKey)}
               options={[
-                { value: 'all', label: '全部条目' },
+                { value: 'all', label: '全部风险' },
                 { value: 'pending', label: '待回收' },
                 { value: 'dueSoon', label: '即将到期' },
                 { value: 'overdue', label: '超期未收' },
                 { value: 'resolved', label: '已回收/归档' },
               ]}
             />
-          )}
-        >
-          <Table<ForeshadowLedgerEntry>
-            rowKey="id"
-            loading={loading}
-            pagination={{ pageSize: 12, showSizeChanger: false }}
-            dataSource={filteredTableRows}
-            columns={[
-              {
-                title: '伏笔',
-                dataIndex: 'title',
-                key: 'title',
-                width: 320,
-                render: (_value, record) => (
-                  <div className="novel-foreshadow-ledger__table-copy">
-                    <strong>{record.title}</strong>
-                    {record.detail ? <span className="novel-foreshadow-ledger__muted">{record.detail}</span> : null}
-                    {record.payoffSceneAction ? <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{`动作：${record.payoffSceneAction}`}</span> : null}
-                    {record.requiredEvidence ? <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{`证据：${record.requiredEvidence}`}</span> : null}
-                  </div>
-                ),
-              },
-              {
-                title: '埋设位置',
-                key: 'source',
-                width: 180,
-                render: (_value, record) => {
-                  const chapter = record.sourceChapterId ? chapterById.get(record.sourceChapterId) : null
-                  return (
-                    <div className="novel-foreshadow-ledger__table-meta">
-                      <span>{chapter ? `第${chapter.chapterNum}章` : '未设置章节'}</span>
-                      <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{record.sourceSegmentId ? `场景#${record.sourceSegmentId}` : '未设置场景'}</span>
+          </div>
+          <div className="novel-foreshadow-ledger__list-scroll" data-foreshadow-list>
+            <Table<ForeshadowLedgerEntry>
+              rowKey="id"
+              loading={loading}
+              pagination={{ pageSize: 12, showSizeChanger: false }}
+              dataSource={filteredTableRows}
+              rowClassName={(record) => record.id === selectedEntry?.id ? 'is-selected' : ''}
+              onRow={(record) => ({ onClick: () => setSelectedEntryId(record.id) })}
+              scroll={{ x: 860 }}
+              columns={[
+                {
+                  title: '伏笔资产',
+                  dataIndex: 'title',
+                  key: 'title',
+                  width: 280,
+                  render: (_value, record) => (
+                    <div className="novel-foreshadow-ledger__table-copy">
+                      <strong>{record.title}</strong>
+                      <span>{record.detail || record.payoffSceneAction || '尚未填写简述'}</span>
                     </div>
-                  )
+                  ),
                 },
-              },
-              {
-                title: '目标回收',
-                key: 'target',
-                width: 120,
-                render: (_value, record) => (typeof record.targetPayoffChapter === 'number' ? `第${record.targetPayoffChapter}章` : '未设置'),
-              },
-              {
-                title: '状态',
-                dataIndex: 'status',
-                key: 'status',
-                width: 180,
-                render: (value, record) => (
-                  <Space size={8}>
-                    <Tag color={getStatusTagColor(value)}>{value || 'draft'}</Tag>
-                    <Select
-                      size="small"
-                      value={value || 'draft'}
-                      className="novel-foreshadow-ledger__status-select"
-                      loading={updatingStatusId === record.id}
-                      onChange={(nextStatus) => {
-                        if (nextStatus !== record.status) {
-                          void handleQuickStatusChange(record, String(nextStatus))
-                        }
-                      }}
-                      options={STATUS_OPTIONS}
-                    />
-                  </Space>
-                ),
-              },
-              {
-                title: '绑定',
-                key: 'links',
-                width: 240,
-                render: (_value, record) => (
-                  <div className="novel-foreshadow-ledger__table-meta">
-                    <span>{record.linkedThreadId ? `线程：${threadById.get(record.linkedThreadId)?.title || `#${record.linkedThreadId}`}` : '线程：未绑定'}</span>
-                    <span>{record.linkedEndgameCommitmentId ? `终局：${commitmentById.get(record.linkedEndgameCommitmentId)?.title || `#${record.linkedEndgameCommitmentId}`}` : '终局：未绑定'}</span>
-                  </div>
-                ),
-              },
-              {
-                title: '操作',
-                key: 'actions',
-                width: 150,
-                render: (_value, record) => (
-                  <Space size={8}>
-                    <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
-                    <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)}>
-                      删除
-                    </Button>
-                  </Space>
-                ),
-              },
-            ]}
-          />
+                {
+                  title: '到期风险',
+                  key: 'risk',
+                  width: 130,
+                  render: (_value, record) => {
+                    const lane = getLane(record, currentChapterNum)
+                    return <Tag color={lane === 'overdue' ? 'error' : lane === 'dueSoon' ? 'warning' : lane === 'resolved' ? 'success' : 'processing'}>{laneMeta(lane).title}</Tag>
+                  },
+                },
+                {
+                  title: '埋设 / 回收',
+                  key: 'chapters',
+                  width: 170,
+                  render: (_value, record) => {
+                    const chapter = record.sourceChapterId ? chapterById.get(record.sourceChapterId) : null
+                    return <div className="novel-foreshadow-ledger__table-meta"><span>{chapter ? `埋设第${chapter.chapterNum}章` : '未设埋设章'}</span><span>{typeof record.targetPayoffChapter === 'number' ? `回收第${record.targetPayoffChapter}章` : '未设回收章'}</span></div>
+                  },
+                },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 170,
+                  render: (value, record) => (
+                    <Space size={8}>
+                      <Tag color={getStatusTagColor(value)}>{getStatusLabel(value)}</Tag>
+                      <Select
+                        size="small"
+                        value={value || 'draft'}
+                        className="novel-foreshadow-ledger__status-select"
+                        loading={updatingStatusId === record.id}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(nextStatus) => {
+                          if (nextStatus !== record.status) void handleQuickStatusChange(record, String(nextStatus))
+                        }}
+                        options={STATUS_OPTIONS}
+                      />
+                    </Space>
+                  ),
+                },
+                {
+                  title: '操作',
+                  key: 'actions',
+                  width: 140,
+                  render: (_value, record) => (
+                    <Space size={8}>
+                      <Button size="small" onClick={(event) => { event.stopPropagation(); openEditor(record) }}>编辑</Button>
+                      <Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除伏笔 ${record.title}`} onClick={(event) => { event.stopPropagation(); handleDelete(record) }}>删除</Button>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          </div>
         </WorkspacePanel>
-      )}
+
+        <WorkspacePanel
+          title={selectedEntry ? '当前伏笔详情' : '当前详情'}
+          description={selectedEntry ? `#${selectedEntry.id} · ${getStatusLabel(selectedEntry.status)}` : '从左侧目录选择一条伏笔'}
+          sticky
+          className="novel-foreshadow-ledger__detail-panel"
+          bodyClassName="novel-foreshadow-ledger__detail-body"
+        >
+          {selectedEntry ? (
+            <div data-foreshadow-current-detail>
+              <div className="novel-foreshadow-ledger__detail-heading">
+                <div>
+                  <span className="novel-kicker">{selectedEntryLane ? laneMeta(selectedEntryLane).title : '状态待计算'}</span>
+                  <h3>{selectedEntry.title}</h3>
+                </div>
+                {selectedEntryLane ? <Tag color={selectedEntryLane === 'overdue' ? 'error' : selectedEntryLane === 'dueSoon' ? 'warning' : selectedEntryLane === 'resolved' ? 'success' : 'processing'} data-foreshadow-due-risk>{laneMeta(selectedEntryLane).hint}</Tag> : null}
+              </div>
+              <div className="novel-foreshadow-ledger__detail-facts" data-foreshadow-chapter-mount>
+                <div><span>埋设位置</span><strong>{selectedEntry.sourceChapterId ? `第${chapterById.get(selectedEntry.sourceChapterId)?.chapterNum || '?'}章${selectedEntry.sourceSegmentId ? ` · 场景#${selectedEntry.sourceSegmentId}` : ''}` : '未绑定章节'}</strong></div>
+                <div><span>目标回收</span><strong>{typeof selectedEntry.targetPayoffChapter === 'number' ? `第${selectedEntry.targetPayoffChapter}章` : '未设章位'}</strong></div>
+                <div><span>显著度</span><strong>{SALIENCE_OPTIONS.find((item) => item.value === selectedEntry.salienceLevel)?.label || selectedEntry.salienceLevel}</strong></div>
+                <div><span>影响范围</span><strong>{IMPACT_SCOPE_OPTIONS.find((item) => item.value === selectedEntry.impactScope)?.label || selectedEntry.impactScope}</strong></div>
+                <div><span>关联线程</span><strong>{selectedEntry.linkedThreadId ? threadById.get(selectedEntry.linkedThreadId)?.title || `线程#${selectedEntry.linkedThreadId}` : '未绑定'}</strong></div>
+                <div><span>终局承诺</span><strong>{selectedEntry.linkedEndgameCommitmentId ? commitmentById.get(selectedEntry.linkedEndgameCommitmentId)?.title || `承诺#${selectedEntry.linkedEndgameCommitmentId}` : '未绑定'}</strong></div>
+              </div>
+              <details className="novel-foreshadow-ledger__detail-disclosure" open>
+                <summary>回收条件与正文动作</summary>
+                <div className="novel-foreshadow-ledger__detail-copy">
+                  <p>{selectedEntry.detail || '尚未填写伏笔说明。'}</p>
+                  <p><strong>埋设方式：</strong>{selectedEntry.plantMethod || '未填写'}</p>
+                  <p><strong>回收方式：</strong>{selectedEntry.payoffMethod || '未填写'}</p>
+                  <p><strong>场景动作：</strong>{selectedEntry.payoffSceneAction || '未填写'}</p>
+                  <p><strong>读者可见结果：</strong>{selectedEntry.readerVisibleOutcome || '未填写'}</p>
+                  <p><strong>必需证据：</strong>{selectedEntry.requiredEvidence || '未填写'}</p>
+                  {selectedEntry.allowedDelayReason ? <p><strong>允许延迟：</strong>{selectedEntry.allowedDelayReason}</p> : null}
+                </div>
+              </details>
+              <div className="novel-foreshadow-ledger__detail-actions">
+                <Button type="primary" onClick={() => openEditor(selectedEntry)}>编辑伏笔</Button>
+                <Button loading={updatingStatusId === selectedEntry.id} disabled={selectedEntry.status === 'active'} onClick={() => void handleQuickStatusChange(selectedEntry, 'active')}>标记推进</Button>
+                <Button loading={updatingStatusId === selectedEntry.id} disabled={selectedEntry.status === 'resolved'} onClick={() => void handleQuickStatusChange(selectedEntry, 'resolved')}>标记回收</Button>
+                <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(selectedEntry)}>删除</Button>
+              </div>
+            </div>
+          ) : <div className="novel-empty">当前没有可展示的伏笔详情。</div>}
+        </WorkspacePanel>
+      </div>
 
       <Modal
         width={860}
         title={editingEntry ? `编辑伏笔 #${editingEntry.id}` : '新建伏笔'}
         open={editorOpen}
-        onCancel={closeEditor}
+        onCancel={() => closeEditor()}
         onOk={() => void handleSave()}
         okText={editingEntry ? '保存修改' : '创建伏笔'}
         confirmLoading={saving}
       >
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          onValuesChange={() => {
+            editorDirtyRef.current = true
+            setHasUnsavedChanges(true)
+          }}
+        >
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <AIGenerateButton

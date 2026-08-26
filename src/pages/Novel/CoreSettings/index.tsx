@@ -49,6 +49,7 @@ import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getWorkspaceViewModeForNovel } from '../../../shared/operating-mode'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -224,7 +225,7 @@ export default function CoreSettings({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { registerClearHandler } = useNovelWorkspaceActions()
+  const { registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryDesignFormValues>()
   const [subplots, setSubplots] = useState<SubPlot[]>([])
   const [saving, setSaving] = useState(false)
@@ -232,9 +233,19 @@ export default function CoreSettings({ novelId }: Props) {
   const [generationProgress, setGenerationProgress] = useState<CoreSettingsGenerationProgressEvent | null>(null)
   const [subplotTaskId, setSubplotTaskId] = useState<number | null>(null)
   const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
+  const [draggedSubplotIndex, setDraggedSubplotIndex] = useState<number | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [activeTab, setActiveTab] = useState('anchors')
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_STATS)
   const isMountedRef = React.useRef(true)
+  const draftDirtyRef = React.useRef(false)
+
+  const setDraftDirty = React.useCallback((value: boolean) => {
+    draftDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markDraftDirty = React.useCallback(() => setDraftDirty(true), [setDraftDirty])
 
   const settings = useMemo(
     () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
@@ -262,7 +273,19 @@ export default function CoreSettings({ novelId }: Props) {
     })
     setSubplots(normalizeSubplots(settings.storyDesign.subPlotsList))
     setSelectedSubplotIndex(null)
-  }, [form, settings])
+    setDraggedSubplotIndex(null)
+    setDraftDirty(false)
+  }, [form, setDraftDirty, settings])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -336,7 +359,8 @@ export default function CoreSettings({ novelId }: Props) {
       setSubplots(normalizeSubplots(draft.subplots))
       setSelectedSubplotIndex(null)
     }
-  }, [form, settings.storyDesign.ending, settings.storyDesign.endingType, settings.storyDesign.coreConflict, settings.storyDesign.mainPlot, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, settings.storyDesign.storyGoal])
+    markDraftDirty()
+  }, [form, markDraftDirty, settings.storyDesign.ending, settings.storyDesign.endingType, settings.storyDesign.coreConflict, settings.storyDesign.mainPlot, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, settings.storyDesign.storyGoal])
   const { clearDraft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
     novelId,
     pageKey: 'story-design',
@@ -415,7 +439,7 @@ export default function CoreSettings({ novelId }: Props) {
     return lanes
   }, [estimatedChapterTotal, subplots])
 
-  const handleSave = async () => {
+  const handleSave = React.useCallback(async () => {
     const values = await form.validateFields().catch(() => null)
     if (!values) return
     setSaving(true)
@@ -455,6 +479,7 @@ export default function CoreSettings({ novelId }: Props) {
         subplots: normalizeSubplots(subplots),
       })
       await clearDraft()
+      setDraftDirty(false)
       message.success(getUserFacingMessage('coreSettings.saved'))
     } catch (error) {
       console.error(error)
@@ -462,7 +487,7 @@ export default function CoreSettings({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }
+  }, [batchCount, clearDraft, currentNovel?.settingsJson, finalizeDraft, form, novelId, setCurrentNovel, setDraftDirty, subplots])
 
   const clearStoryDesign = React.useCallback(() => {
     Modal.confirm({
@@ -485,10 +510,11 @@ export default function CoreSettings({ novelId }: Props) {
         })
         setSubplots([])
         setSelectedSubplotIndex(null)
+        markDraftDirty()
         message.success(getUserFacingMessage('coreSettings.designCleared'))
       },
     })
-  }, [form])
+  }, [form, markDraftDirty])
 
   const clearSubplots = () => {
     Modal.confirm({
@@ -500,6 +526,7 @@ export default function CoreSettings({ novelId }: Props) {
       onOk: () => {
         setSubplots([])
         setSelectedSubplotIndex(null)
+        markDraftDirty()
         message.success(getUserFacingMessage('coreSettings.subplotsCleared'))
       },
     })
@@ -523,6 +550,7 @@ export default function CoreSettings({ novelId }: Props) {
     })
     setSubplots(normalizeSubplots(result.sub_plots_list))
     setSelectedSubplotIndex(null)
+    markDraftDirty()
   }
 
   const waitForSubplotAutoGenerate = async (taskId: number) => {
@@ -609,6 +637,7 @@ export default function CoreSettings({ novelId }: Props) {
         const nextSubplots = normalizeSubplots(status.subplots)
         setSubplots(nextSubplots)
         setSelectedSubplotIndex(null)
+        markDraftDirty()
         void saveAppliedDraft({
           story_goal: normalizeText(values.story_goal),
           core_conflict: normalizeText(values.core_conflict),
@@ -688,6 +717,7 @@ export default function CoreSettings({ novelId }: Props) {
     setSubplots((current) => current.map((subplot, currentIndex) => (
       currentIndex === index ? { ...subplot, ...patch } : subplot
     )))
+    markDraftDirty()
   }
 
   const addSubplot = () => {
@@ -696,6 +726,7 @@ export default function CoreSettings({ novelId }: Props) {
       setSelectedSubplotIndex(next.length - 1)
       return next
     })
+    markDraftDirty()
   }
 
   const removeSubplot = (index: number) => {
@@ -705,7 +736,31 @@ export default function CoreSettings({ novelId }: Props) {
       if (current === index) return null
       return current > index ? current - 1 : current
     })
+    markDraftDirty()
   }
+
+  const moveSubplot = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= subplots.length || toIndex >= subplots.length) return
+    setSubplots((current) => {
+      const next = [...current]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+    setSelectedSubplotIndex((current) => {
+      if (current === null) return current
+      if (current === fromIndex) return toIndex
+      if (fromIndex < current && current <= toIndex) return current - 1
+      if (toIndex <= current && current < fromIndex) return current + 1
+      return current
+    })
+    markDraftDirty()
+  }
+
+  useEffect(() => {
+    registerSaveHandler(() => { void handleSave() })
+    return () => registerSaveHandler(null)
+  }, [handleSave, registerSaveHandler])
 
   const openSubplot = (index: number) => {
     setSelectedSubplotIndex(index)
@@ -713,22 +768,17 @@ export default function CoreSettings({ novelId }: Props) {
 
   const anchorsTabContent = (
     <>
-      <WorkspacePanel title="设计原则" description="先把剧情骨架写硬，再继续拆结构、时间轴和正文。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>只做骨架</strong></div>
-            <p>本页维护目标、冲突、推进链、支线作用和结局。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>支线必须有用</strong></div>
-            <p>每条支线都要直接作用于主线、人物关系或主题压力，不能游离成无关故事。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>语言必须自然</strong></div>
-            <p>禁止口号式总结、生造词、万能情绪句和违背常识的推进方式。</p>
-          </div>
+      <details className="story-design__advanced" data-story-design-guidance>
+        <summary>
+          <span><strong>设计原则</strong><small>只在需要时查看，默认把注意力留给当前剧情任务。</small></span>
+          <Tag>按需展开</Tag>
+        </summary>
+        <div className="story-design__guidance-grid">
+          <div><strong>只做骨架</strong><span>本页维护目标、冲突、推进链、支线作用和结局。</span></div>
+          <div><strong>支线必须有用</strong><span>每条支线都要作用于主线、人物关系或主题压力。</span></div>
+          <div><strong>语言必须自然</strong><span>禁止口号式总结、生造词和违背常识的推进方式。</span></div>
         </div>
-      </WorkspacePanel>
+      </details>
 
       <WorkspacePanel
         title="故事锚点"
@@ -784,8 +834,8 @@ export default function CoreSettings({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical">
-          <div className="story-design__anchor-grid">
+        <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
+          <div className="story-design__anchor-grid" data-story-design-anchor-fields>
             <div className="story-design__anchor-card">
               <Form.Item name="story_goal" label="故事核心目标" rules={[{ required: true, message: '请写清故事核心目标' }]}>
                 <Input.TextArea rows={6} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
@@ -823,7 +873,7 @@ export default function CoreSettings({ novelId }: Props) {
       description="长篇不要只盯着章数，先把三段比例定下来。"
       extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
         <div className="story-design__ratio-grid">
           <div className="story-design__ratio-card">
             <Form.Item name="rhythm_setup" label="前段铺垫">
@@ -854,7 +904,7 @@ export default function CoreSettings({ novelId }: Props) {
       description="先把支线当成项目卡片管理，而不是堆成长文本。点击卡片可在右侧抽屉细修。"
       extra={(
         <div className="story-design__toolbar">
-          <Form form={form} component={false}>
+          <Form form={form} component={false} onValuesChange={markDraftDirty}>
             <Form.Item name="subplot_batch_count" className="workspace-form-item-inline">
               <InputNumber min={MIN_SUBPLOT_BATCH_COUNT} max={MAX_SUBPLOT_BATCH_COUNT} />
             </Form.Item>
@@ -918,10 +968,27 @@ export default function CoreSettings({ novelId }: Props) {
                   key={`${lane.key}-${subplot.index}`}
                   type="button"
                   className="story-design__card"
+                  draggable
+                  data-story-design-subplot
+                  data-story-design-subplot-index={subplot.index}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', String(subplot.index))
+                    setDraggedSubplotIndex(subplot.index)
+                  }}
+                  onDragEnd={() => setDraggedSubplotIndex(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    const transferredIndex = Number(event.dataTransfer.getData('text/plain'))
+                    const sourceIndex = Number.isInteger(transferredIndex) ? transferredIndex : draggedSubplotIndex
+                    if (sourceIndex !== null) moveSubplot(sourceIndex, subplot.index)
+                    setDraggedSubplotIndex(null)
+                  }}
                   onClick={() => openSubplot(subplot.index)}
                 >
                   <div className="story-design__card-head">
-                    <strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong>
+                    <span className="story-design__card-title"><span className="story-design__drag-handle" aria-hidden="true">⋮⋮</span><strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong></span>
                     <Tag color={subplot.completeness === 100 ? 'success' : 'default'}>{subplot.completeness}%</Tag>
                   </div>
                   <div className="story-design__card-copy">
@@ -947,28 +1014,25 @@ export default function CoreSettings({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      chrome="shared"
       className="novel-story-design-page"
       layout="wide"
-      heroVariant="compact"
-      asidePlacement="side"
+      eyebrow="主线骨架"
       title="故事设计"
       description="这里专门负责主线目标、核心冲突、主推进链、支线布局、节奏比例和结局落点。背景、人物、地图、物品先在前面准备好，再来这里把剧情骨架压实。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存故事设计
-          </Button>
-          <Button icon={<RobotOutlined />} loading={generatingMode === 'all'} onClick={() => void handleGenerate('all')}>
-            AI 生成故事骨架
-          </Button>
-          <Button icon={<DeleteOutlined />} danger onClick={clearStoryDesign}>
-            清空当前设计
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, nextDesignPage))}>
-            {nextDesignPage === 'endgame' ? '去终局设计' : '去卷级设计'}
-          </Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: { key: 'save', label: '保存故事设计', icon: <SaveOutlined />, loading: saving, onClick: () => void handleSave() },
+        secondary: [
+          { key: 'next', label: nextDesignPage === 'endgame' ? '去终局设计' : '去卷级设计', icon: <ArrowRightOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, nextDesignPage)) },
+        ],
+        more: {
+          items: [
+            { key: 'generate', label: 'AI 生成故事骨架', icon: <RobotOutlined />, disabled: Boolean(generatingMode), onClick: () => void handleGenerate('all') },
+            { type: 'divider' },
+            { key: 'clear', label: '清空当前设计', icon: <DeleteOutlined />, danger: true, onClick: clearStoryDesign },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -987,25 +1051,13 @@ export default function CoreSettings({ novelId }: Props) {
           <WorkspaceMetric label="已保存版本" value={storyReady ? '存在' : '未保存'} />
         </>
       )}
-      aside={(
-          <div className="story-design__side-list">
-            <WorkspacePanel title="支线健康度" description="支线必须服务主线，不准游离。">
-            <div className="premise-page__summary-grid">
-              <div className="premise-page__summary-card premise-page__summary-card--accent">
-                <span>已挂主线</span>
-                <strong>{subplotLinkedCount}/{subplots.length}</strong>
-                <small>没有主线因果的支线，应优先删掉或改写。</small>
-              </div>
-              <div className="premise-page__summary-card">
-                <span>已排回收</span>
-                <strong>{subplotScheduledCount}/{subplots.length}</strong>
-                <small>没有回收章位的支线，后期失控风险最高。</small>
-              </div>
-            </div>
-          </WorkspacePanel>
-        </div>
-      )}
     >
+      <div className="story-design__status-rail" data-story-design-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`story-design__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前故事设计同步'}</strong>
+        <span>当前任务：先把主目标、冲突、推进链和结局方向压成可拆解骨架。</span>
+      </div>
+
       {!premiseReady ? (
         <Alert
           type="warning"

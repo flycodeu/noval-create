@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Select, Spin, Tag, message } from 'antd'
 import { ApartmentOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
@@ -134,6 +134,9 @@ export default function ResistancePage({ novelId }: Props) {
   const [selectedFactionId, setSelectedFactionId] = useState<number | null>(null)
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null)
   const [draft, setDraft] = useState<ResistanceTrackInput | null>(null)
+  const [keywordInput, setKeywordInput] = useState('')
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [saving, setSaving] = useState(false)
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)
@@ -150,6 +153,19 @@ export default function ResistancePage({ novelId }: Props) {
     status: 'logged',
   })
   const refreshRequestRef = useRef(0)
+  const draftDirtyRef = useRef(false)
+
+  const setDraftDirty = useCallback((value: boolean) => {
+    draftDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markDraftDirty = useCallback(() => setDraftDirty(true), [setDraftDirty])
+
+  const updateDraft = useCallback((patch: Partial<ResistanceTrackInput>) => {
+    markDraftDirty()
+    setDraft((current) => current ? { ...current, ...patch } : current)
+  }, [markDraftDirty])
 
   const refresh = useCallback(async (showLoading = false) => {
     const requestId = ++refreshRequestRef.current
@@ -194,6 +210,30 @@ export default function ResistancePage({ novelId }: Props) {
     || institutionTracks.find((item) => item.id === selectedTrackId)
     || null
 
+  const filteredCharacters = useMemo(() => {
+    const needle = keywordInput.trim().toLowerCase()
+    if (!needle) return characters
+    return characters.filter((item) => {
+      const track = characterTracks.find((entry) => entry.sourceId === item.id)
+      return [item.fullName, item.goals, track?.title, track?.goal, track?.currentPressureMode].filter(Boolean).join(' ').toLowerCase().includes(needle)
+    })
+  }, [characterTracks, characters, keywordInput])
+
+  const filteredFactions = useMemo(() => {
+    const needle = keywordInput.trim().toLowerCase()
+    if (!needle) return factions
+    return factions.filter((item) => {
+      const track = factionTracks.find((entry) => entry.sourceId === item.id)
+      return [item.name, item.goal, track?.title, track?.goal, track?.currentPressureMode].filter(Boolean).join(' ').toLowerCase().includes(needle)
+    })
+  }, [factionTracks, factions, keywordInput])
+
+  const filterTracks = useCallback((items: ResistanceTrack[]) => {
+    const needle = keywordInput.trim().toLowerCase()
+    if (!needle) return items
+    return items.filter((item) => [item.title, item.sourceName, item.goal, item.currentPressureMode, item.latestBeatSummary].filter(Boolean).join(' ').toLowerCase().includes(needle))
+  }, [keywordInput])
+
   useEffect(() => {
     if (!dashboard) return
     const nextTab = searchParams.get('tab')
@@ -229,11 +269,13 @@ export default function ResistancePage({ novelId }: Props) {
 
   useEffect(() => {
     if (!dashboard) return
+    if (draftDirtyRef.current) return
     if (tab === 'characters') {
       const character = characters.find((item) => item.id === selectedCharacterId)
       const track = characterTracks.find((item) => item.sourceId === selectedCharacterId)
       setDraft(track ? buildTrackDraft(track) : character ? buildSourceDraft(novelId, 'characters', character.id, character.fullName) : null)
       setSelectedTrackId(track?.id || null)
+      setDraftDirty(false)
       return
     }
     if (tab === 'factions') {
@@ -241,13 +283,25 @@ export default function ResistancePage({ novelId }: Props) {
       const track = factionTracks.find((item) => item.sourceId === selectedFactionId)
       setDraft(track ? buildTrackDraft(track) : faction ? buildSourceDraft(novelId, 'factions', faction.id, faction.name) : null)
       setSelectedTrackId(track?.id || null)
+      setDraftDirty(false)
       return
     }
     const scopedTracks = tab === 'environment' ? dashboard.environmentTracks : dashboard.institutionTracks
     const track = scopedTracks.find((item) => item.id === selectedTrackId) || scopedTracks[0] || null
     setDraft(track ? buildTrackDraft(track) : buildEnvironmentDraft(novelId, tab))
     setSelectedTrackId(track?.id || null)
-  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, novelId, selectedCharacterId, selectedFactionId, selectedTrackId, tab])
+    setDraftDirty(false)
+  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, novelId, selectedCharacterId, selectedFactionId, selectedTrackId, setDraftDirty, tab])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   const chapterOptions = useMemo(
     () => (dashboard?.chapters || []).map((item) => ({ value: item.id, label: `第${item.chapterNum}章 ${item.title}`.trim() })),
@@ -273,6 +327,7 @@ export default function ResistancePage({ novelId }: Props) {
     try {
       const saved = await window.electron.resistance.upsertTrack(draft)
       message.success(getUserFacingMessage('resistance.saved'))
+      setDraftDirty(false)
       if (saved.id) setSelectedTrackId(saved.id)
       await refresh()
     } catch (error) {
@@ -282,6 +337,84 @@ export default function ResistancePage({ novelId }: Props) {
       setSaving(false)
     }
   }
+
+  const confirmDraftNavigation = useCallback((action: () => void) => {
+    if (!draftDirtyRef.current) {
+      action()
+      return
+    }
+    Modal.confirm({
+      title: '当前阻力线还有未保存修改',
+      content: '切换来源或阻力类型会放弃当前编辑内容。要先保存，还是放弃修改继续？',
+      okText: '放弃并切换',
+      cancelText: '留下继续编辑',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        setDraftDirty(false)
+        action()
+      },
+    })
+  }, [setDraftDirty])
+
+  const selectCharacter = useCallback((id: number) => {
+    confirmDraftNavigation(() => {
+      setSelectedCharacterId(id)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', 'characters')
+        next.set('characterId', String(id))
+        next.delete('trackId')
+        return next
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
+  const selectFaction = useCallback((id: number) => {
+    confirmDraftNavigation(() => {
+      setSelectedFactionId(id)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', 'factions')
+        next.set('factionId', String(id))
+        next.delete('trackId')
+        return next
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
+  const selectTrack = useCallback((item: ResistanceTrack) => {
+    if (!item.id) return
+    confirmDraftNavigation(() => {
+      setSelectedTrackId(item.id || null)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', item.sourceType)
+        next.set('trackId', String(item.id))
+        return next
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
+  const switchTab = useCallback((next: ResistanceTab) => {
+    confirmDraftNavigation(() => {
+      setTab(next)
+      setKeywordInput('')
+      setSearchParams((current) => {
+        const nextParams = new URLSearchParams(current)
+        nextParams.set('tab', next)
+        return nextParams
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
+  const handleCreateStandalone = useCallback(() => {
+    if (tab !== 'environment' && tab !== 'institution') return
+    confirmDraftNavigation(() => {
+      setSelectedTrackId(null)
+      setDraft(buildEnvironmentDraft(novelId, tab))
+      setDraftDirty(false)
+    })
+  }, [confirmDraftNavigation, novelId, setDraftDirty, tab])
 
   const handleSaveBeat = async () => {
     if (!selectedTrack?.id) return
@@ -312,99 +445,80 @@ export default function ResistancePage({ novelId }: Props) {
   }
 
   const renderCharacterList = () => (
-    <div className="workspace-stack-10">
-      {characters.map((item) => {
+    <div className="workspace-stack-10 novel-resistance-page__list">
+      {filteredCharacters.map((item) => {
         const track = characterTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
             type="button"
-            className={`novel-list-card workspace-button-card ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`}
-            onClick={() => {
-              setSelectedCharacterId(item.id)
-              setSearchParams((current) => {
-                const next = new URLSearchParams(current)
-                next.set('tab', 'characters')
-                next.set('characterId', String(item.id))
-                return next
-              })
-            }}
+            data-resistance-list-row
+            className={`novel-list-card workspace-button-card novel-resistance-page__list-row ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`}
+            onClick={() => selectCharacter(item.id)}
           >
-            <div className="novel-list-card__title">
-              <span>{item.fullName}</span>
+            <div className="novel-resistance-page__row-main">
+              <strong>{item.fullName}</strong>
               <Tag color={track ? (track.currentStatus === 'resolved' ? 'success' : track.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>
-                {track ? track.currentStatus : '未建'}
+                {track ? STATUS_OPTIONS.find((option) => option.value === track.currentStatus)?.label || track.currentStatus : '未建'}
               </Tag>
             </div>
-            <div className="novel-list-card__desc">{track?.latestBeatSummary || track?.currentPressureMode || item.goals || '还没有拆成可持续升级的对抗轨迹。'}</div>
+            <span className="novel-resistance-page__row-meta">{[track?.title || '人物反派阻力线', track?.beatCount ? `${track.beatCount} 条推进` : '尚无推进'].join(' · ')}</span>
+            <span className="novel-resistance-page__row-desc">{track?.latestBeatSummary || track?.currentPressureMode || item.goals || '还没有拆成可持续升级的对抗轨迹。'}</span>
           </button>
         )
       })}
-      {characters.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先去角色系统建立反派角色。" /> : null}
+      {filteredCharacters.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={characters.length > 0 ? '当前搜索没有人物' : '先去角色系统建立反派角色。'} /> : null}
     </div>
   )
 
   const renderFactionList = () => (
-    <div className="workspace-stack-10">
-      {factions.map((item) => {
+    <div className="workspace-stack-10 novel-resistance-page__list">
+      {filteredFactions.map((item) => {
         const track = factionTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
             type="button"
-            className={`novel-list-card workspace-button-card ${selectedFactionId === item.id ? 'novel-list-card--active' : ''}`}
-            onClick={() => {
-              setSelectedFactionId(item.id)
-              setSearchParams((current) => {
-                const next = new URLSearchParams(current)
-                next.set('tab', 'factions')
-                next.set('factionId', String(item.id))
-                return next
-              })
-            }}
+            data-resistance-list-row
+            className={`novel-list-card workspace-button-card novel-resistance-page__list-row ${selectedFactionId === item.id ? 'novel-list-card--active' : ''}`}
+            onClick={() => selectFaction(item.id)}
           >
-            <div className="novel-list-card__title">
-              <span>{item.name}</span>
+            <div className="novel-resistance-page__row-main">
+              <strong>{item.name}</strong>
               <Tag color={track ? (track.currentStatus === 'resolved' ? 'success' : track.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>
-                {track ? track.currentStatus : '未建'}
+                {track ? STATUS_OPTIONS.find((option) => option.value === track.currentStatus)?.label || track.currentStatus : '未建'}
               </Tag>
             </div>
-            <div className="novel-list-card__desc">{track?.latestBeatSummary || track?.currentPressureMode || item.goal || '还没有拆成阶段性施压路径。'}</div>
+            <span className="novel-resistance-page__row-meta">{[track?.title || '势力反派阻力线', track?.beatCount ? `${track.beatCount} 条推进` : '尚无推进'].join(' · ')}</span>
+            <span className="novel-resistance-page__row-desc">{track?.latestBeatSummary || track?.currentPressureMode || item.goal || '还没有拆成阶段性施压路径。'}</span>
           </button>
         )
       })}
-      {factions.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先去势力系统建立对立势力。" /> : null}
+      {filteredFactions.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={factions.length > 0 ? '当前搜索没有势力' : '先去势力系统建立对立势力。'} /> : null}
     </div>
   )
 
   const renderStandaloneList = (items: ResistanceTrack[]) => (
-    <div className="workspace-stack-10">
-      {items.map((item) => (
+    <div className="workspace-stack-10 novel-resistance-page__list">
+      {filterTracks(items).map((item) => (
         <button
           key={item.id}
           type="button"
-          className={`novel-list-card workspace-button-card ${selectedTrackId === item.id ? 'novel-list-card--active' : ''}`}
-          onClick={() => {
-            if (!item.id) return
-            setSelectedTrackId(item.id)
-            setSearchParams((current) => {
-              const next = new URLSearchParams(current)
-              next.set('tab', item.sourceType)
-              next.set('trackId', String(item.id))
-              return next
-            })
-          }}
+          data-resistance-list-row
+          className={`novel-list-card workspace-button-card novel-resistance-page__list-row ${selectedTrackId === item.id ? 'novel-list-card--active' : ''}`}
+          onClick={() => selectTrack(item)}
         >
-          <div className="novel-list-card__title">
-            <span>{item.title}</span>
+          <div className="novel-resistance-page__row-main">
+            <strong>{item.title}</strong>
             <Tag color={item.currentStatus === 'resolved' ? 'success' : item.currentStatus === 'stalled' ? 'warning' : 'processing'}>
-              {item.currentStatus}
+              {STATUS_OPTIONS.find((option) => option.value === item.currentStatus)?.label || item.currentStatus}
             </Tag>
           </div>
-          <div className="novel-list-card__desc">{item.latestBeatSummary || item.currentPressureMode || item.goal || '等待补齐这一条阻力线。'}</div>
+          <span className="novel-resistance-page__row-meta">{[item.sourceName, item.beatCount ? `${item.beatCount} 条推进` : '尚无推进'].join(' · ')}</span>
+          <span className="novel-resistance-page__row-desc">{item.latestBeatSummary || item.currentPressureMode || item.goal || '等待补齐这一条阻力线。'}</span>
         </button>
       ))}
-      {items.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前还没有这类阻力线。" /> : null}
+      {filterTracks(items).length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={items.length > 0 ? '当前搜索没有阻力线' : '当前还没有这类阻力线。'} /> : null}
     </div>
   )
 
@@ -429,27 +543,23 @@ export default function ResistancePage({ novelId }: Props) {
   return (
     <>
       <WorkspacePage
+        chrome="shared"
+        className="novel-resistance-page"
         title="反派与阻力系统"
         description="把人物反派、势力反派、环境阻力和制度阻力统一放进同一个阻力工作台，并登记章节层面的真实出手。"
-        actions={(
-          <Space wrap>
-            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-              保存当前阻力线
-            </Button>
-            <Button icon={<PlusOutlined />} disabled={tab === 'characters' || tab === 'factions'} onClick={() => setDraft(buildEnvironmentDraft(novelId, tab as 'environment' | 'institution'))}>
-              新建本类阻力
-            </Button>
-            <Button icon={<PlusOutlined />} disabled={!selectedTrack?.id} onClick={() => setBeatOpen(true)}>
-              登记阻力推进
-            </Button>
-            <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>
-              去章节合同
-            </Button>
-            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>
-              刷新
-            </Button>
-          </Space>
-        )}
+        actionContract={{
+          primary: { key: 'save', label: '保存当前阻力线', icon: <SaveOutlined />, loading: saving, disabled: !draft, onClick: () => void handleSave() },
+          secondary: [
+            { key: 'beat', label: '登记阻力推进', icon: <PlusOutlined />, disabled: !selectedTrack?.id, onClick: () => setBeatOpen(true) },
+            { key: 'contracts', label: '去章节合同', icon: <EditOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'contracts')) },
+          ],
+          more: {
+            items: [
+              { key: 'new', label: '新建本类阻力', icon: <PlusOutlined />, disabled: tab === 'characters' || tab === 'factions', onClick: handleCreateStandalone },
+              { key: 'refresh', label: '刷新阻力数据', icon: <ReloadOutlined />, onClick: () => void refresh() },
+            ],
+          },
+        }}
         contextSummary={(
           <WorkspaceContextSummary
             items={[
@@ -478,6 +588,11 @@ export default function ResistancePage({ novelId }: Props) {
           />
         )}
       >
+        <div className="novel-resistance-page__status-rail" data-resistance-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+          <span className={`novel-resistance-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+          <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前阻力线同步'}</strong>
+          <span>{selectedSourceLabel ? `${selectedSourceLabel} · ${draft?.title || '阻力线'}` : '从左侧选择来源或新建阻力线'}</span>
+        </div>
         {refreshing ? <div className="novel-dashboard__refresh-indicator novel-resistance-page__refresh"><Spin size="small" /><span>正在同步阻力系统数据</span></div> : null}
         {dashboard?.tracks.length ? null : (
           <Alert
@@ -498,15 +613,7 @@ export default function ResistancePage({ novelId }: Props) {
             <Button
               key={value}
               type={tab === value ? 'primary' : 'default'}
-              onClick={() => {
-                const next = value as ResistanceTab
-                setTab(next)
-                setSearchParams((current) => {
-                  const nextParams = new URLSearchParams(current)
-                  nextParams.set('tab', next)
-                  return nextParams
-                })
-              }}
+              onClick={() => switchTab(value as ResistanceTab)}
             >
               {label}
             </Button>
@@ -515,16 +622,24 @@ export default function ResistancePage({ novelId }: Props) {
 
         <div className="novel-character-studio">
           <WorkspacePanel
-            className="novel-character-studio__sidebar"
+            className="novel-character-studio__sidebar novel-resistance-page__sidebar"
             title={tab === 'characters' ? '反派人物' : tab === 'factions' ? '阻力势力' : tab === 'environment' ? '环境阻力' : '制度阻力'}
             scrollable
             sticky
+            extra={(
+              <div className="novel-resistance-page__list-tools">
+                <Input.Search value={keywordInput} allowClear placeholder={tab === 'characters' ? '搜索人物、阻力或目标' : tab === 'factions' ? '搜索势力、阻力或目标' : '搜索阻力线、来源或目标'} onChange={(event) => setKeywordInput(event.target.value)} />
+                <span>{tab === 'characters' ? `${filteredCharacters.length} / ${characters.length} 人` : tab === 'factions' ? `${filteredFactions.length} / ${factions.length} 个势力` : `${filterTracks(tab === 'environment' ? environmentTracks : institutionTracks).length} / ${(tab === 'environment' ? environmentTracks : institutionTracks).length} 条`}</span>
+              </div>
+            )}
           >
-            {tab === 'characters'
-              ? renderCharacterList()
-              : tab === 'factions'
-                ? renderFactionList()
-                : renderStandaloneList(tab === 'environment' ? environmentTracks : institutionTracks)}
+            <div data-resistance-list>
+              {tab === 'characters'
+                ? renderCharacterList()
+                : tab === 'factions'
+                  ? renderFactionList()
+                  : renderStandaloneList(tab === 'environment' ? environmentTracks : institutionTracks)}
+            </div>
           </WorkspacePanel>
 
           <WorkspacePanel
@@ -581,6 +696,7 @@ export default function ResistancePage({ novelId }: Props) {
                 })}
                 onResult={(raw) => {
                   const result = parseDraftJson<Record<string, unknown>>(raw)
+                  markDraftDirty()
                   setDraft((current) => {
                     if (!current) return current
                     return {
@@ -606,64 +722,74 @@ export default function ResistancePage({ novelId }: Props) {
           >
             {draft ? (
               <>
-                <div className="guided-step__field-grid">
+                <div className="novel-resistance-page__selection-summary">
+                  <span>当前阻力线</span>
+                  <strong>{draft.title || selectedSourceLabel || '未命名阻力线'}</strong>
+                  <small>{selectedSourceLabel ? `${selectedSourceLabel} · ${tab === 'characters' ? '人物反派' : tab === 'factions' ? '势力反派' : tab === 'environment' ? '环境阻力' : '制度阻力'}` : '先确定压力来源，再拆出升级路径。'}</small>
+                </div>
+                <div className="guided-step__field-grid novel-resistance-page__field-grid--core">
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div className="novel-resistance-page__field-label">阻力标题</div>
-                    <Input value={draft.title} onChange={(event) => setDraft((current) => current ? { ...current, title: event.target.value } : current)} />
+                    <Input value={draft.title} onChange={(event) => updateDraft({ title: event.target.value })} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div className="novel-resistance-page__field-label">当前状态</div>
-                    <Select value={draft.currentStatus} onChange={(value) => setDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} />
+                    <Select value={draft.currentStatus} onChange={(value) => updateDraft({ currentStatus: value })} options={STATUS_OPTIONS} />
                   </div>
                   <div className="guided-step__field-card">
                     <div className="novel-resistance-page__field-label">阻力目标</div>
-                    <Input.TextArea rows={6} value={draft.goal} onChange={(event) => setDraft((current) => current ? { ...current, goal: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">情报来源</div>
-                    <Input.TextArea rows={6} value={draft.intelSource} onChange={(event) => setDraft((current) => current ? { ...current, intelSource: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">资源池</div>
-                    <Input.TextArea rows={6} value={draft.resourcePool} onChange={(event) => setDraft((current) => current ? { ...current, resourcePool: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">升级策略</div>
-                    <Input.TextArea rows={6} value={draft.escalationPlan} onChange={(event) => setDraft((current) => current ? { ...current, escalationPlan: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">主角认知变化</div>
-                    <Input.TextArea rows={6} value={draft.heroKnowledgeShift} onChange={(event) => setDraft((current) => current ? { ...current, heroKnowledgeShift: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">阶段胜利点</div>
-                    <Input.TextArea rows={6} value={draft.stageVictory} onChange={(event) => setDraft((current) => current ? { ...current, stageVictory: event.target.value } : current)} />
-                  </div>
-                  <div className="guided-step__field-card">
-                    <div className="novel-resistance-page__field-label">失败后反制</div>
-                    <Input.TextArea rows={6} value={draft.counterMove} onChange={(event) => setDraft((current) => current ? { ...current, counterMove: event.target.value } : current)} />
+                    <Input.TextArea rows={4} value={draft.goal} onChange={(event) => updateDraft({ goal: event.target.value })} />
                   </div>
                   <div className="guided-step__field-card">
                     <div className="novel-resistance-page__field-label">当前出手方式</div>
-                    <Input.TextArea rows={6} value={draft.currentPressureMode} onChange={(event) => setDraft((current) => current ? { ...current, currentPressureMode: event.target.value } : current)} />
+                    <Input.TextArea rows={4} value={draft.currentPressureMode} onChange={(event) => updateDraft({ currentPressureMode: event.target.value })} />
+                  </div>
+                </div>
+                <details className="novel-resistance-page__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+                  <summary><span>展开阻力线细节</span><small>情报、资源、升级、章节绑定和反制按需维护</small></summary>
+                  <div className="guided-step__field-grid">
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">情报来源</div>
+                    <Input.TextArea rows={4} value={draft.intelSource} onChange={(event) => updateDraft({ intelSource: event.target.value })} />
+                  </div>
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">资源池</div>
+                    <Input.TextArea rows={4} value={draft.resourcePool} onChange={(event) => updateDraft({ resourcePool: event.target.value })} />
+                  </div>
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">升级策略</div>
+                    <Input.TextArea rows={4} value={draft.escalationPlan} onChange={(event) => updateDraft({ escalationPlan: event.target.value })} />
+                  </div>
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">主角认知变化</div>
+                    <Input.TextArea rows={4} value={draft.heroKnowledgeShift} onChange={(event) => updateDraft({ heroKnowledgeShift: event.target.value })} />
+                  </div>
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">阶段胜利点</div>
+                    <Input.TextArea rows={4} value={draft.stageVictory} onChange={(event) => updateDraft({ stageVictory: event.target.value })} />
+                  </div>
+                  <div className="guided-step__field-card">
+                    <div className="novel-resistance-page__field-label">失败后反制</div>
+                    <Input.TextArea rows={4} value={draft.counterMove} onChange={(event) => updateDraft({ counterMove: event.target.value })} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div className="novel-resistance-page__field-label">最近出手章节</div>
-                    <Select allowClear value={draft.lastActionChapterId} onChange={(value) => setDraft((current) => current ? { ...current, lastActionChapterId: value } : current)} options={chapterOptions} />
+                    <Select allowClear value={draft.lastActionChapterId} onChange={(value) => updateDraft({ lastActionChapterId: value })} options={chapterOptions} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div className="novel-resistance-page__field-label">下一次升级章节</div>
-                    <Select allowClear value={draft.nextEscalationChapterId} onChange={(value) => setDraft((current) => current ? { ...current, nextEscalationChapterId: value } : current)} options={chapterOptions} />
+                    <Select allowClear value={draft.nextEscalationChapterId} onChange={(value) => updateDraft({ nextEscalationChapterId: value })} options={chapterOptions} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div className="novel-resistance-page__field-label">挂到卷级设计</div>
-                    <Select allowClear value={draft.linkedVolumeId} onChange={(value) => setDraft((current) => current ? { ...current, linkedVolumeId: value } : current)} options={volumeOptions} />
+                    <Select allowClear value={draft.linkedVolumeId} onChange={(value) => updateDraft({ linkedVolumeId: value })} options={volumeOptions} />
                   </div>
-                  <div className="guided-step__field-card">
+                  <div className="guided-step__field-card guided-step__field-card--full">
                     <div className="novel-resistance-page__field-label">备注</div>
-                    <Input.TextArea rows={6} value={draft.notes} onChange={(event) => setDraft((current) => current ? { ...current, notes: event.target.value } : current)} />
+                    <Input.TextArea rows={4} value={draft.notes} onChange={(event) => updateDraft({ notes: event.target.value })} />
                   </div>
-                </div>
+                  </div>
+                </details>
 
                 <div className="novel-resistance-page__beats">
                   <strong>推进记录</strong>

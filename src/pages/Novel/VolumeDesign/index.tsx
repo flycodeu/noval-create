@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Form, Input, Select, Space, Spin, Switch, Tag, message } from 'antd'
+import { Alert, Form, Input, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { SaveOutlined, BarsOutlined, LinkOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -29,6 +29,7 @@ import {
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -117,13 +118,20 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [designs, setDesigns] = useState<VolumeDesignAsset[]>([])
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
   const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
-  const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
+  const [activeVolumeId, setActiveVolumeId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    const stored = Number(window.sessionStorage.getItem(`novelforge-volume-design:${novelId}`))
+    return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+  })
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [auditing, setAuditing] = useState(false)
   const [syncingConstraints, setSyncingConstraints] = useState(false)
   const [createTasksOnAudit, setCreateTasksOnAudit] = useState(true)
   const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
   const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
   const loadRequestRef = useRef(0)
+  const draftDirtyRef = useRef(false)
+  const { registerSaveHandler, registerEscapeHandler } = useNovelWorkspaceActions()
 
   const loadData = useCallback(async (showLoading = false) => {
     const requestId = ++loadRequestRef.current
@@ -163,6 +171,10 @@ export default function VolumeDesignPage({ novelId }: Props) {
     void loadData(true)
   }, [loadData])
 
+  useEffect(() => {
+    if (activeVolumeId) window.sessionStorage.setItem(`novelforge-volume-design:${novelId}`, String(activeVolumeId))
+  }, [activeVolumeId, novelId])
+
   const activeVolume = useMemo(
     () => volumes.find((item) => item.id === activeVolumeId) || null,
     [activeVolumeId, volumes],
@@ -174,6 +186,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
   useEffect(() => {
     form.setFieldsValue(buildFormValues(activeDesign))
+    draftDirtyRef.current = false
+    setHasUnsavedChanges(false)
   }, [activeDesign, form])
 
   useEffect(() => {
@@ -216,7 +230,30 @@ export default function VolumeDesignPage({ novelId }: Props) {
   })), [resistanceTracks])
   const hasAuditBlockingRisk = (lastAuditResult?.summary.highCount || 0) > 0
 
-  const handleSave = async () => {
+  const markFormDirty = useCallback(() => {
+    draftDirtyRef.current = true
+    setHasUnsavedChanges(true)
+  }, [])
+
+  const selectVolume = useCallback((volumeId: number) => {
+    if (volumeId === activeVolumeId || !draftDirtyRef.current) {
+      setActiveVolumeId(volumeId)
+      return
+    }
+    Modal.confirm({
+      title: '切换当前卷？',
+      content: '当前卷还有未保存修改，切换后这些修改会留在表单中但不会写入数据库。',
+      okText: '切换卷',
+      cancelText: '留下继续编辑',
+      onOk: () => {
+        draftDirtyRef.current = false
+        setHasUnsavedChanges(false)
+        setActiveVolumeId(volumeId)
+      },
+    })
+  }, [activeVolumeId])
+
+  const handleSave = useCallback(async () => {
     if (!activeVolumeId) return
     const values = await form.validateFields().catch(() => null)
     if (!values) return
@@ -236,6 +273,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
         auditStatus: values.auditStatus,
       })
       message.success(getUserFacingMessage('volumeDesign.saved'))
+      draftDirtyRef.current = false
+      setHasUnsavedChanges(false)
       await loadData()
     } catch (error) {
       console.error(error)
@@ -243,7 +282,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }
+  }, [activeVolumeId, form, loadData])
 
   const handleRunAudit = async () => {
     if (!activeVolumeId) return
@@ -286,6 +325,31 @@ export default function VolumeDesignPage({ novelId }: Props) {
     }
   }
 
+  useEffect(() => {
+    registerSaveHandler(hasUnsavedChanges ? () => { void handleSave() } : null)
+    registerEscapeHandler(() => {
+      if (hasUnsavedChanges) {
+        draftDirtyRef.current = false
+        setHasUnsavedChanges(false)
+        form.setFieldsValue(buildFormValues(activeDesign))
+      }
+    })
+    return () => {
+      registerSaveHandler(null)
+      registerEscapeHandler(null)
+    }
+  }, [activeDesign, form, handleSave, hasUnsavedChanges, registerEscapeHandler, registerSaveHandler])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   if (loading && volumes.length === 0) {
     return (
       <WorkspacePage title="卷级设计中心">
@@ -303,40 +367,21 @@ export default function VolumeDesignPage({ novelId }: Props) {
       title="卷级设计中心"
       description="把终局承诺拆到各卷，让每卷都有自己的主题、闭环和必须服务的终局压力。"
       className="volume-design-page"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存当前卷设计
-          </Button>
-          <Button loading={refreshing} onClick={() => void loadData()}>
-            刷新卷设计
-          </Button>
-          <Button
-            icon={<LinkOutlined />}
-            loading={syncingConstraints}
-            disabled={!activeVolumeId}
-            onClick={() => void handleSyncConstraints()}
-          >
-            同步为章节硬约束
-          </Button>
-          <Space size={4}>
-            <Switch size="small" checked={createTasksOnAudit} onChange={setCreateTasksOnAudit} />
-            <span className="novel-ui-muted">审计后自动建修订任务</span>
-          </Space>
-          <Button
-            danger
-            icon={<SafetyCertificateOutlined />}
-            loading={auditing}
-            disabled={!activeVolumeId}
-            onClick={() => void handleRunAudit()}
-          >
-            卷后审计
-          </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'outline'))}>
-            去故事大纲
-          </Button>
-        </Space>
-      )}
+      eyebrow="卷章大纲 / 卷级闭环"
+      chrome="shared"
+      actionContract={{
+        primary: { key: 'save-volume-design', label: '保存当前卷设计', icon: <SaveOutlined />, loading: saving, disabled: !activeVolumeId, onClick: () => void handleSave() },
+        secondary: [
+          { key: 'refresh-volume-design', label: '刷新卷设计', loading: refreshing, onClick: () => void loadData() },
+          { key: 'sync-volume-constraints', label: '同步章节硬约束', icon: <LinkOutlined />, loading: syncingConstraints, disabled: !activeVolumeId, onClick: () => void handleSyncConstraints() },
+          { key: 'audit-volume', label: '执行卷后审计', icon: <SafetyCertificateOutlined />, loading: auditing, disabled: !activeVolumeId, danger: true, onClick: () => void handleRunAudit() },
+        ],
+        more: {
+          items: [
+            { key: 'go-outline', icon: <BarsOutlined />, label: '去故事大纲', onClick: () => navigate(buildWorkspaceRoute(novelId, 'outline')) },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -364,6 +409,11 @@ export default function VolumeDesignPage({ novelId }: Props) {
         />
       )}
     >
+      <div className="volume-design-page__status-rail" data-volume-design-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`volume-design-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '当前卷设计有未保存修改' : '当前卷设计与项目数据同步'}</strong>
+        <span>先选定一卷，再编辑闭环；绑定、审计和章节同步放在按需工具区。</span>
+      </div>
       {refreshing ? <div className="novel-dashboard__refresh-indicator workspace-alert-spaced"><Spin size="small" /><span>正在同步卷级设计数据</span></div> : null}
       {commitments.length <= 0 ? (
         <Alert
@@ -384,9 +434,10 @@ export default function VolumeDesignPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="卷章结构" className="volume-design-page__selector-panel">
+      <div className="volume-design-page__workspace">
+      <WorkspacePanel title="卷章目录" description={`${volumes.length} 卷 · 选择一个当前对象`} className="volume-design-page__selector-panel" bodyClassName="volume-design-page__selector-body">
         {volumes.length > 0 ? (
-          <div className="volume-design-page__volume-grid">
+          <div className="volume-design-page__volume-list" role="list" data-volume-design-list>
             {volumes.map((item) => {
               const design = designs.find((row) => row.volumeId === item.id) || null
               const completion = getVolumeDesignCompletion(design)
@@ -395,17 +446,17 @@ export default function VolumeDesignPage({ novelId }: Props) {
                 <button
                   key={item.id}
                   type="button"
-                  className={`volume-design-page__volume-card${isActive ? ' is-active' : ''}`}
-                  onClick={() => setActiveVolumeId(item.id)}
+                  className={`volume-design-page__volume-row${isActive ? ' is-active' : ''}`}
+                  onClick={() => selectVolume(item.id)}
+                  data-volume-design-volume-id={item.id}
                 >
-                  <span className="volume-design-page__volume-index">{`第 ${item.volumeNumber} 卷`}</span>
-                  <strong>{item.title || `第${item.volumeNumber}卷`}</strong>
-                  <span>{`${item.chapterCount} 章 · ${item.wordCount.toLocaleString()} 字`}</span>
-                  <div className="volume-design-page__volume-tags">
+                  <span className="volume-design-page__volume-index">{String(item.volumeNumber).padStart(2, '0')}</span>
+                  <span className="volume-design-page__volume-copy"><strong>{item.title || `第${item.volumeNumber}卷`}</strong><span>{`${item.chapterCount} 章 · ${item.wordCount.toLocaleString()} 字`}</span></span>
+                  <span className="volume-design-page__volume-tags">
                     <Tag color={isActive ? 'blue' : 'default'}>{getVolumeStatusLabel(item.status)}</Tag>
                     <Tag color={completion >= 6 ? 'success' : completion >= 3 ? 'gold' : 'default'}>{`闭环 ${completion}/6`}</Tag>
                     {design?.auditStatus ? <Tag>{design.auditStatus}</Tag> : null}
-                  </div>
+                  </span>
                 </button>
               )
             })}
@@ -420,6 +471,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
           </div>
         ) : null}
       </WorkspacePanel>
+
+      <div className="volume-design-page__detail-column" data-volume-design-current-detail>
 
       <WorkspacePanel
         title="卷级闭环"
@@ -482,7 +535,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical" className="volume-design-page__form">
+        <Form form={form} layout="vertical" className="volume-design-page__form" onValuesChange={markFormDirty}>
           <div className="guided-step__field-grid volume-design-page__field-grid volume-design-page__field-grid--closure">
             <div className="guided-step__field-card">
               <Form.Item name="volumeTheme" label="本卷主题">
@@ -518,6 +571,13 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
+      <details className="volume-design-page__advanced" data-volume-design-advanced>
+        <summary>终局绑定、线索与卷后工具</summary>
+        <div className="volume-design-page__advanced-body">
+        <div className="volume-design-page__advanced-toggle">
+          <span>审计后自动建立修订任务</span>
+          <Switch size="small" checked={createTasksOnAudit} onChange={setCreateTasksOnAudit} />
+        </div>
       <WorkspacePanel
         title="终局绑定与阻力清单"
         description="这一卷必须服务哪些终局承诺、主要阻力来源是什么，以及必须新增和回收哪些线索。"
@@ -592,7 +652,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical" className="volume-design-page__form">
+        <Form form={form} layout="vertical" className="volume-design-page__form" onValuesChange={markFormDirty}>
           <div className="guided-step__field-grid volume-design-page__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="linkedEndgameCommitmentIds" label="本卷绑定的终局承诺">
@@ -721,6 +781,10 @@ export default function VolumeDesignPage({ novelId }: Props) {
           />
         )}
       </WorkspacePanel>
+        </div>
+      </details>
+      </div>
+      </div>
     </WorkspacePage>
   )
 }

@@ -1,6 +1,15 @@
 .novel-timeline-page .novel-timeline-structure-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .novel-timeline-page .novel-timeline-structure-tags .ant-tag { margin-inline-end: 0; }
 .novel-timeline-page .novel-panel__extra { max-width: 100%; }
+.novel-timeline-page__workspace {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  align-items: start;
+}
+.novel-timeline-page__workspace > .novel-panel { min-width: 0; }
+.novel-timeline-page__list-panel,
+.novel-timeline-page__detail-panel { min-height: 520px; }
 .novel-timeline-page__filter-bar { width: min(100%, 980px); }
 .novel-timeline-page__list-shell { display: grid; gap: 10px; }
 .novel-timeline-page__editor-form { display: grid; gap: 12px; }
@@ -28,7 +37,47 @@
   min-width: 136px;
   max-width: none;
 }
+.novel-timeline-page__keyword {
+  flex: 1 1 220px;
+  min-width: 190px;
+}
+.novel-timeline-page__list-panel .novel-panel__header,
+.novel-timeline-page__detail-panel .novel-panel__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface, #fff);
+}
+.novel-timeline-page__detail-panel .novel-panel__body {
+  min-width: 0;
+}
+.novel-timeline-page__list-panel .novel-panel__body {
+  padding-top: 12px;
+}
+.novel-timeline-page__card-button {
+  width: 100%;
+  border: 1px solid transparent;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+.novel-timeline-page__card-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-primary, #1677ff) 35%, transparent);
+  outline-offset: 2px;
+}
+.novel-timeline-page__card-button:hover {
+  border-color: color-mix(in srgb, var(--color-primary, #1677ff) 28%, var(--border-color, #d9d9d9));
+}
+.novel-timeline-page__card-button[aria-current='true'] {
+  box-shadow: inset 3px 0 0 var(--color-primary, #1677ff);
+}
 
 @media (max-width: 1280px) {
   .novel-timeline-page__filter-bar { width: 100%; }
+}
+
+@media (max-width: 920px) {
+  .novel-timeline-page__workspace { grid-template-columns: minmax(0, 1fr); }
+  .novel-timeline-page__list-panel,
+  .novel-timeline-page__detail-panel { min-height: 0; }
+  .novel-timeline-page__list-panel .novel-panel__header,
+  .novel-timeline-page__detail-panel .novel-panel__header { position: static; }
 }

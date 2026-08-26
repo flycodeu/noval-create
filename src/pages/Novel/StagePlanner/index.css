@@ -474,3 +474,97 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.creative-stage-status-rail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--workspace-border);
+  border-left: 3px solid var(--workspace-accent);
+  background: color-mix(in srgb, var(--workspace-surface) 88%, var(--workspace-accent) 12%);
+  color: var(--workspace-ink-soft);
+}
+
+.creative-stage-status-rail strong {
+  color: var(--workspace-ink);
+  font-size: 13px;
+}
+
+.creative-stage-status-rail__dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #4d9b72;
+  box-shadow: 0 0 0 4px rgb(77 155 114 / 12%);
+}
+
+.creative-stage-layout {
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.55fr);
+}
+
+.creative-stage-layout > .novel-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.creative-stage-list {
+  max-height: min(680px, calc(100vh - 350px));
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.creative-stage-card {
+  grid-template-columns: 32px minmax(0, 1fr);
+  padding: 12px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--stage-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.creative-stage-card:hover,
+.creative-stage-card.is-selected {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--workspace-accent) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--workspace-accent);
+  transform: none;
+}
+
+.creative-stage-disclosure {
+  border-top: 1px solid var(--stage-line);
+}
+
+.creative-stage-disclosure > summary {
+  padding: 14px 2px;
+  color: var(--stage-ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.creative-stage-disclosure > .novel-panel {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1040px) {
+  .creative-stage-layout > .novel-panel {
+    position: static;
+  }
+
+  .creative-stage-list {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 720px) {
+  .creative-stage-status-rail {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

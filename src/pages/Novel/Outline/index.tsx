@@ -145,7 +145,11 @@ export default function Outline({ novelId }: Props) {
   const [arcForm] = Form.useForm<ArcFormValues>()
   const [arcModalOpen, setArcModalOpen] = useState(false)
   const [editingArc, setEditingArc] = useState<StoryArc | null>(null)
-  const [expandedArcId, setExpandedArcId] = useState<number | null>(null)
+  const [expandedArcId, setExpandedArcId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    const stored = Number(window.sessionStorage.getItem(`novelforge-outline-arc:${novelId}`))
+    return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+  })
   const [expandedChapterPage, setExpandedChapterPage] = useState(1)
   const [outlineBatchSize, setOutlineBatchSize] = useState(4)
   const [outlineTargetCount, setOutlineTargetCount] = useState(8)
@@ -163,6 +167,8 @@ export default function Outline({ novelId }: Props) {
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const loadRequestRef = React.useRef(0)
   const arcSaveActionRef = React.useRef(false)
+  const arcDirtyRef = React.useRef(false)
+  const [arcHasUnsavedChanges, setArcHasUnsavedChanges] = useState(false)
 
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -188,6 +194,9 @@ export default function Outline({ novelId }: Props) {
   }, [novelId, setChapters])
 
   useEffect(() => { void loadData() }, [loadData, mutationToken])
+  useEffect(() => {
+    if (expandedArcId) window.sessionStorage.setItem(`novelforge-outline-arc:${novelId}`, String(expandedArcId))
+  }, [expandedArcId, novelId])
 
   useEffect(() => {
     let cancelled = false
@@ -219,6 +228,8 @@ export default function Outline({ novelId }: Props) {
 
   const openCreateModal = () => {
     setEditingArc(null)
+    arcDirtyRef.current = false
+    setArcHasUnsavedChanges(false)
     arcForm.setFieldsValue({
       arcName: '',
       chapterStart: undefined,
@@ -249,6 +260,8 @@ export default function Outline({ novelId }: Props) {
       return result
     }, parsePhaseTargetValues(arc))
     setEditingArc(arc)
+    arcDirtyRef.current = false
+    setArcHasUnsavedChanges(false)
     arcForm.setFieldsValue({
       arcName: arc.arcName,
       chapterStart: arc.chapterStart,
@@ -492,6 +505,10 @@ export default function Outline({ novelId }: Props) {
       growthLedger: typeof draft.growthLedger === 'string' ? draft.growthLedger : currentValues.growthLedger,
       costLedger: typeof draft.costLedger === 'string' ? draft.costLedger : currentValues.costLedger,
     })
+    setEditingArc(null)
+    setArcHasUnsavedChanges(true)
+    arcDirtyRef.current = true
+    setArcModalOpen(true)
   }, [arcForm])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ArcFormValues>({
     novelId,
@@ -522,6 +539,8 @@ export default function Outline({ novelId }: Props) {
       }
       await finalizeDraft(values)
       await clearDraft()
+      arcDirtyRef.current = false
+      setArcHasUnsavedChanges(false)
       setArcModalOpen(false)
       setEditingArc(null)
       arcForm.resetFields()
@@ -537,10 +556,43 @@ export default function Outline({ novelId }: Props) {
     }
   }, [arcForm, arcs.length, clearDraft, editingArc, finalizeDraft, loadData, novelId, notifyWorkspaceMutation])
 
+  const closeArcModal = useCallback(() => {
+    if (arcSaveActionRef.current) return
+    if (!arcDirtyRef.current) {
+      setArcModalOpen(false)
+      arcForm.resetFields()
+      setEditingArc(null)
+      return
+    }
+    Modal.confirm({
+      title: '关闭当前故事弧编辑？',
+      content: '当前故事弧还有未保存修改，关闭后草稿会保留在本地恢复区。',
+      okText: '关闭并保留草稿',
+      cancelText: '留下继续编辑',
+      onOk: () => {
+        setArcModalOpen(false)
+        arcDirtyRef.current = false
+        setArcHasUnsavedChanges(false)
+        arcForm.resetFields()
+        setEditingArc(null)
+      },
+    })
+  }, [arcForm])
+
   useEffect(() => {
     registerSaveHandler(arcModalOpen ? () => { void handleSaveArc() } : null)
     return () => registerSaveHandler(null)
   }, [arcModalOpen, handleSaveArc, registerSaveHandler])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!arcDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
   const arcDraftButton = (
     <AIGenerateButton
       novelId={novelId}
@@ -599,11 +651,32 @@ export default function Outline({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      eyebrow="卷章大纲 / 故事骨架"
       title="故事大纲"
-      actions={(
-        <div className="novel-outline-page__toolbar">
-          <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建故事弧</Button>
+      description="先选一条故事弧作为当前对象，再在右侧维护章节顺序、分页和批量细纲。"
+      className="novel-outline-page"
+      chrome="shared"
+      actionContract={{
+        primary: { key: 'create-outline-arc', label: '新建故事弧', icon: <PlusOutlined />, onClick: openCreateModal },
+        secondary: [
+          { key: 'generate-outline-arcs', label: 'AI 生成故事弧', icon: <RobotOutlined />, loading: generating, onClick: () => void handleGenerateArcs() },
+        ],
+        more: {
+          items: [
+            { key: 'clear-outline', icon: <DeleteOutlined />, danger: true, label: '清空故事大纲', onClick: () => void handleClear() },
+          ],
+        },
+      }}
+      metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" /><WorkspaceMetric label="章节数" value={chapters.length} /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} /></>}
+    >
+      <div className="novel-outline-page__status-rail" data-outline-save-state={arcHasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`novel-outline-page__status-dot${arcHasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{arcHasUnsavedChanges ? '当前故事弧有未保存修改' : '故事弧目录与章节数据同步'}</strong>
+        <span>目录只负责定位；编辑、拖拽、批量操作都作用于当前展开的一条故事弧。</span>
+      </div>
+      <details className="novel-outline-page__tools-disclosure" data-outline-tools>
+        <summary>生成与阶段工具</summary>
+        <div className="novel-outline-page__tools-body">
           <CreativeStageScope
             novelId={novelId}
             value={creativeStageId}
@@ -619,11 +692,8 @@ export default function Outline({ novelId }: Props) {
             <span className="novel-outline-page__toolbar-label">本轮总数</span>
             <InputNumber min={1} max={24} value={outlineTargetCount} onChange={(value) => setOutlineTargetCount(Number(value) || 8)} className="novel-outline-page__count-input novel-outline-page__count-input--md" />
           </div>
-          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
         </div>
-      )}
-      metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" /><WorkspaceMetric label="章节数" value={chapters.length} /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} /></>}
-    >
+      </details>
       {outlineBatch.progress.phase !== 'idle' ? (
         <WorkspacePanel title="细纲批量生成">
           <div className="novel-outline-page__batch-progress">
@@ -698,11 +768,13 @@ export default function Outline({ novelId }: Props) {
         </WorkspacePanel>
       ) : null}
       {draft?.appliedAt ? (
-        <WorkspacePanel title="草稿恢复">
+        <div data-outline-draft-recovery>
+        <WorkspacePanel title="草稿恢复" className="novel-outline-page__draft-panel" >
           <div className="novel-note-list">
             <div className="novel-note-list__item">最近一次已应用但未保存的故事弧草稿已恢复到表单。保存故事弧后会自动清除。</div>
           </div>
         </WorkspacePanel>
+        </div>
       ) : null}
       {loading ? (
         <WorkspacePanel title="故事弧">
@@ -714,8 +786,9 @@ export default function Outline({ novelId }: Props) {
         </WorkspacePanel>
       ) : (
         <>
-          <WorkspacePanel title="故事弧">
-            <div className="novel-outline-track">
+          <div className="novel-outline-page__workspace">
+          <WorkspacePanel title="故事弧目录" description={`${arcs.length} 条故事弧 · 选择一条当前对象`} className="novel-outline-page__arc-panel">
+            <div className="novel-outline-track" data-outline-arc-list>
               {arcs.map((arc, index) => {
                 const arcChapters = getArcChapters(arc)
                 const arcSummary = arcProgressSummaryMap.get(arc.id)
@@ -791,7 +864,8 @@ export default function Outline({ novelId }: Props) {
             </div>
           </WorkspacePanel>
 
-          <WorkspacePanel title={expandedArc ? `章节细纲 · ${expandedArc.arcName}` : '章节细纲'} extra={expandedArc ? <Space><Button size="small" icon={<SwapOutlined />} type={reorderMode ? 'primary' : 'default'} onClick={() => setReorderMode(!reorderMode)}>{reorderMode ? '完成排序' : '拖拽排序'}</Button><Tag>{`第 ${expandedArc.chapterStart || '?'} ~ ${expandedArc.chapterEnd || '?'} 章`}</Tag></Space> : null}>
+          <div data-outline-current-detail>
+          <WorkspacePanel title={expandedArc ? `章节细纲 · ${expandedArc.arcName}` : '当前章节细纲'} className="novel-outline-page__current-panel" extra={expandedArc ? <Space><Button size="small" icon={<SwapOutlined />} type={reorderMode ? 'primary' : 'default'} onClick={() => setReorderMode(!reorderMode)}>{reorderMode ? '完成排序' : '拖拽排序'}</Button><Tag>{`第 ${expandedArc.chapterStart || '?'} ~ ${expandedArc.chapterEnd || '?'} 章`}</Tag></Space> : null}>
             {!expandedArc ? (
               <div className="novel-empty">先展开一条故事弧。</div>
             ) : expandedArcChapters.length === 0 ? (
@@ -923,14 +997,16 @@ export default function Outline({ novelId }: Props) {
               </>
             )}
           </WorkspacePanel>
+          </div>
+          </div>
         </>
       )}
 
-      <Modal title={editingArc ? '编辑故事弧' : '新建故事弧'} open={arcModalOpen} forceRender onCancel={() => { if (arcSaving) return; setArcModalOpen(false); arcForm.resetFields(); setEditingArc(null) }} onOk={() => void handleSaveArc()} okText="保存" confirmLoading={arcSaving} cancelButtonProps={{ disabled: arcSaving }} maskClosable={!arcSaving}>
+      <Modal title={editingArc ? '编辑故事弧' : '新建故事弧'} open={arcModalOpen} forceRender onCancel={closeArcModal} onOk={() => void handleSaveArc()} okText="保存" confirmLoading={arcSaving} cancelButtonProps={{ disabled: arcSaving }} maskClosable={!arcSaving}>
         <div className="novel-outline-page__modal-header">
           {arcDraftButton}
         </div>
-        <Form form={arcForm} layout="vertical">
+        <Form form={arcForm} layout="vertical" onValuesChange={() => { arcDirtyRef.current = true; setArcHasUnsavedChanges(true) }}>
           <Form.Item name="arcName" label="名称" rules={[{ required: true, message: '请填写故事弧名称' }]}><Input placeholder="例如：觉醒线、南境追击线" /></Form.Item>
           <div className="novel-outline-page__range-row">
             <Form.Item name="chapterStart" label="起始章节" className="novel-outline-page__range-field"><Input type="number" min={1} /></Form.Item>

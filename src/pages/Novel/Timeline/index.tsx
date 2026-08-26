@@ -18,7 +18,6 @@ import {
   type TimelinePageProps,
 } from './helpers'
 import {
-  TimelineBoardPanel,
   TimelineEditorPanel,
   TimelineGenerateModal,
   TimelineListPanel,
@@ -331,15 +330,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         />
       ) : null}
 
-      <TimelineBoardPanel
-        pageData={workspace.pageData}
-        laneItems={workspace.laneItems}
-        selectedId={workspace.selectedId}
-        onSelect={(event) => void workspace.handleSelect(event)}
-        getStructureTags={workspace.getStructureTagsForEvent}
-      />
-
-      <div className="novel-split novel-split--sidebar">
+      <div className="novel-timeline-page__workspace" data-timeline-workspace>
         <TimelineListPanel
           loading={workspace.loading}
           pageData={workspace.pageData}
@@ -347,6 +338,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           selectedIds={workspace.selectedIds}
           statusFilter={workspace.statusFilter}
           typeFilter={workspace.typeFilter}
+          keyword={workspace.keyword}
           volumeFilter={workspace.volumeFilter}
           partFilter={workspace.partFilter}
           chapterFilter={workspace.chapterFilter}
@@ -362,6 +354,10 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           }}
           onTypeChange={(value) => {
             workspace.setTypeFilter(value)
+            workspace.setPage(1)
+          }}
+          onKeywordChange={(value) => {
+            workspace.setKeyword(value)
             workspace.setPage(1)
           }}
           onVolumeChange={(value) => {

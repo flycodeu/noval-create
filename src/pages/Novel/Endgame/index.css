@@ -1,0 +1,190 @@
+.novel-endgame-page {
+  --endgame-ink: #2e241a;
+  --endgame-soft: #806e5a;
+}
+
+.novel-endgame-page .novel-workspace__main {
+  min-width: 0;
+}
+
+.endgame-page__status-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-height: 42px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(126, 92, 48, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 251, 244, 0.8);
+  color: var(--endgame-soft);
+  font-size: 12px;
+}
+
+.endgame-page__status-rail strong {
+  color: var(--endgame-ink);
+}
+
+.endgame-page__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a9b6d;
+  box-shadow: 0 0 0 4px rgba(74, 155, 109, 0.12);
+}
+
+.endgame-page__status-dot.is-unsaved {
+  background: #c47d32;
+  box-shadow: 0 0 0 4px rgba(196, 125, 50, 0.13);
+}
+
+.novel-endgame-page .novel-panel {
+  min-width: 0;
+}
+
+.novel-endgame-page .guided-step__field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.novel-endgame-page .guided-step__field-card {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.novel-endgame-page .guided-step__field-card textarea.ant-input {
+  min-height: 86px;
+}
+
+.endgame-page__advanced {
+  margin: 14px 0;
+  border: 1px solid rgba(126, 92, 48, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.84);
+}
+
+.endgame-page__advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 54px;
+  padding: 11px 15px;
+  color: var(--endgame-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.endgame-page__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.endgame-page__advanced > summary::before {
+  content: '+';
+  display: inline-grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid rgba(126, 92, 48, 0.2);
+  border-radius: 50%;
+  color: #87633d;
+  font-size: 15px;
+}
+
+.endgame-page__advanced[open] > summary::before {
+  content: '−';
+}
+
+.endgame-page__advanced > summary > span {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+}
+
+.endgame-page__advanced > summary small {
+  color: var(--endgame-soft);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.endgame-page__advanced--payoff > .novel-panel {
+  margin: 0 10px 10px;
+  border: 0;
+  box-shadow: none;
+}
+
+.endgame-page__advanced--payoff > .novel-panel .novel-panel__header {
+  padding: 10px 4px 0;
+}
+
+.endgame-page__advanced--payoff > .novel-panel .novel-panel__body {
+  padding: 14px 4px 4px;
+}
+
+.endgame-page__source-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 15px 15px 50px;
+}
+
+.endgame-page__source-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 12px;
+  border-left: 2px solid rgba(174, 124, 55, 0.38);
+  background: rgba(248, 242, 233, 0.62);
+}
+
+.endgame-page__source-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.endgame-page__source-head strong,
+.endgame-page__source-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.endgame-page__source-row span {
+  color: #594a39;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.endgame-page__source-row small,
+.endgame-page__source-foot {
+  color: var(--endgame-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.endgame-page__source-foot {
+  padding-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .novel-endgame-page .guided-step__field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .endgame-page__source-list {
+    padding-left: 15px;
+  }
+}
+
+[data-theme="dark"] .endgame-page__status-rail,
+[data-theme="dark"] .endgame-page__advanced,
+[data-theme="dark"] .endgame-page__source-row {
+  background: rgba(35, 29, 23, 0.78);
+  border-color: rgba(226, 190, 137, 0.2);
+}

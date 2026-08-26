@@ -114,6 +114,7 @@ export function useTimelineWorkspace(
 
   const [statusFilter, setStatusFilter] = useState<TimelineStatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [keyword, setKeyword] = useState('')
   const [volumeFilter, setVolumeFilter] = useState<NumericFilter>('all')
   const [partFilter, setPartFilter] = useState<NumericFilter>('all')
   const [chapterFilter, setChapterFilter] = useState<NumericFilter>('all')
@@ -194,8 +195,8 @@ export function useTimelineWorkspace(
   )
 
   const filterSummary = useMemo(
-    () => `${TIMELINE_TEXT.listSummaryPrefix}${pageData.total}${TIMELINE_TEXT.listSummaryMiddle}${pageData.items.length}${TIMELINE_TEXT.listSummarySuffix}`,
-    [pageData.items.length, pageData.total],
+    () => `${TIMELINE_TEXT.listSummaryPrefix}${pageData.total}${TIMELINE_TEXT.listSummaryMiddle}${pageData.items.length}${TIMELINE_TEXT.listSummarySuffix}${keyword.trim() ? ` · 搜索“${keyword.trim()}”` : ''}`,
+    [keyword, pageData.items.length, pageData.total],
   )
   const structureFilterSummary = useMemo(
     () => (volumeFilter === 'all' && partFilter === 'all' && chapterFilter === 'all' && segmentFilter === 'all'
@@ -431,13 +432,14 @@ export function useTimelineWorkspace(
     pageSize: 100,
     sortBy: 'timeSortValue',
     sortDirection: 'asc',
+    ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
     ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
     ...(typeFilter !== 'all' ? { eventType: typeFilter } : {}),
     ...(volumeFilter !== 'all' ? { volumeId: volumeFilter } : {}),
     ...(partFilter !== 'all' ? { partId: partFilter } : {}),
     ...(chapterFilter !== 'all' ? { chapterId: chapterFilter } : {}),
     ...(segmentFilter !== 'all' ? { segmentId: segmentFilter } : {}),
-  }), [chapterFilter, novelId, partFilter, segmentFilter, statusFilter, typeFilter, volumeFilter])
+  }), [chapterFilter, keyword, novelId, partFilter, segmentFilter, statusFilter, typeFilter, volumeFilter])
 
   const buildStatsQuery = useCallback((query: TimelineQueryInput) => {
     const { page: _page, pageSize: _pageSize, ...rest } = query
@@ -611,7 +613,7 @@ export function useTimelineWorkspace(
     }
 
     void refreshPage()
-  }, [page, statusFilter, typeFilter, volumeFilter, partFilter, chapterFilter, segmentFilter, refreshPage])
+  }, [page, keyword, statusFilter, typeFilter, volumeFilter, partFilter, chapterFilter, segmentFilter, refreshPage])
 
   useEffect(() => {
     if (volumeFilter === 'all') {
@@ -961,6 +963,7 @@ export function useTimelineWorkspace(
     handleSave,
     handleSelect,
     itemOptions,
+    keyword,
     laneItems,
     loading,
     locationOptions,
@@ -983,6 +986,7 @@ export function useTimelineWorkspace(
     selectedTimeMode,
     setChapterFilter,
     setGenerateOpen,
+    setKeyword,
     setPage,
     setPartFilter,
     setSegmentFilter,

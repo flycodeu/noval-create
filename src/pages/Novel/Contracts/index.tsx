@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, EditOutlined } from '@ant-design/icons'
+import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
 import type {
@@ -30,6 +31,7 @@ import {
   parseDraftJson,
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
+import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
 
@@ -56,6 +58,13 @@ interface ChapterContractFormValues {
   forbiddenActionsText: string
   acceptanceNotesText: string
   status: string
+}
+
+type ContractTab = 'chapter' | 'scene'
+type SceneKey = number | 'chapterless'
+
+function getSceneKey(scene: SceneContractAsset): SceneKey {
+  return typeof scene.segmentId === 'number' ? scene.segmentId : 'chapterless'
 }
 
 const OPENING_STYLE_OPTIONS = [
@@ -134,6 +143,11 @@ export default function ContractsPage({ novelId }: Props) {
   const [chapterContract, setChapterContract] = useState<ChapterContractAsset | null>(null)
   const [sceneContracts, setSceneContracts] = useState<SceneContractAsset[]>([])
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
+  const [activeSceneKey, setActiveSceneKey] = useState<SceneKey | null>(null)
+  const [contractTab, setContractTab] = useState<ContractTab>('chapter')
+  const [chapterKeyword, setChapterKeyword] = useState('')
+  const [chapterDirty, setChapterDirty] = useState(false)
+  const [sceneDirtyKeys, setSceneDirtyKeys] = useState<SceneKey[]>([])
   const [progressModalOpen, setProgressModalOpen] = useState(false)
   const [progressMode, setProgressMode] = useState<'character' | 'relationship' | 'resistance'>('character')
   const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
@@ -145,6 +159,11 @@ export default function ContractsPage({ novelId }: Props) {
     const parsed = Number(searchParams.get('chapterId'))
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
   }, [searchParams])
+  const routeSceneId = useMemo(() => {
+    const parsed = Number(searchParams.get('sceneId'))
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+  }, [searchParams])
+  const chapterListHeight = useResponsivePanelHeight({ minHeight: 280, maxHeight: 560, fallback: 360 })
 
   const loadBaseData = useCallback(async () => {
     const requestId = ++baseRequestRef.current
@@ -182,8 +201,16 @@ export default function ContractsPage({ novelId }: Props) {
     if (chapterRequestRef.current !== requestId) return
     setChapterContract(contract)
     setSceneContracts(scenes)
+    setActiveSceneKey((current) => {
+      const routeScene = routeSceneId ? scenes.find((scene) => scene.segmentId === routeSceneId) : undefined
+      if (routeScene) return getSceneKey(routeScene)
+      if (current && scenes.some((scene) => getSceneKey(scene) === current)) return current
+      return scenes[0] ? getSceneKey(scenes[0]) : null
+    })
+    setChapterDirty(false)
+    setSceneDirtyKeys([])
     form.setFieldsValue(buildChapterFormValues(contract))
-  }, [form])
+  }, [form, routeSceneId])
 
   const refreshAll = useCallback(async (showLoading = false) => {
     const requestId = baseRequestRef.current + 1
@@ -237,11 +264,50 @@ export default function ContractsPage({ novelId }: Props) {
     [activeChapterId, chapters],
   )
   const handleChapterChange = useCallback((chapterId: number) => {
-    setActiveChapterId(chapterId)
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('chapterId', String(chapterId))
-    setSearchParams(nextParams, { replace: true })
-  }, [searchParams, setSearchParams])
+    const apply = () => {
+      setActiveChapterId(chapterId)
+      setActiveSceneKey(null)
+      setContractTab('chapter')
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.set('chapterId', String(chapterId))
+      nextParams.delete('sceneId')
+      setSearchParams(nextParams, { replace: true })
+    }
+    if (chapterDirty || sceneDirtyKeys.length > 0) {
+      Modal.confirm({
+        title: '切换章节并放弃未保存合同？',
+        content: '当前章节或场景还有未保存修改，切换后这些修改不会写入数据库。',
+        okText: '继续切换',
+        cancelText: '留在当前章',
+        okType: 'danger',
+        onOk: apply,
+      })
+      return
+    }
+    apply()
+  }, [chapterDirty, sceneDirtyKeys.length, searchParams, setSearchParams])
+  const handleSceneSelect = useCallback((sceneKey: SceneKey) => {
+    const apply = () => {
+      setActiveSceneKey(sceneKey)
+      setContractTab('scene')
+      const nextParams = new URLSearchParams(searchParams)
+      if (typeof sceneKey === 'number') nextParams.set('sceneId', String(sceneKey))
+      else nextParams.delete('sceneId')
+      setSearchParams(nextParams, { replace: true })
+    }
+    if (sceneDirtyKeys.length > 0 && !sceneDirtyKeys.includes(sceneKey)) {
+      Modal.confirm({
+        title: '切换场景并放弃未保存合同？',
+        content: '当前场景还有未保存修改，切换后这些修改不会写入数据库。',
+        okText: '继续切换',
+        cancelText: '留在当前场景',
+        okType: 'danger',
+        onOk: apply,
+      })
+      return
+    }
+    apply()
+  }, [sceneDirtyKeys, searchParams, setSearchParams])
   const watchedContractValues = Form.useWatch([], form) as Partial<ChapterContractFormValues> | undefined
   const contractValues = useMemo<Partial<ChapterContractFormValues>>(
     () => watchedContractValues ?? {},
@@ -263,6 +329,15 @@ export default function ContractsPage({ novelId }: Props) {
     acceptanceNotesText: contractValues.acceptanceNotesText ?? (chapterContract?.acceptanceNotes || []).join('\n'),
     status: contractValues.status ?? chapterContract?.status ?? 'draft',
   }), [chapterContract, contractValues])
+  const visibleChapters = useMemo(() => {
+    const query = chapterKeyword.trim().toLowerCase()
+    if (!query) return chapters
+    return chapters.filter((chapter) => `${chapter.chapterNum} ${chapter.title || ''}`.toLowerCase().includes(query))
+  }, [chapterKeyword, chapters])
+  const activeScene = useMemo(
+    () => sceneContracts.find((scene) => getSceneKey(scene) === activeSceneKey) || null,
+    [activeSceneKey, sceneContracts],
+  )
   const threadOptions = useMemo(() => threads.map((item) => ({
     id: item.id,
     label: item.title,
@@ -326,6 +401,7 @@ export default function ContractsPage({ novelId }: Props) {
         status: values.status,
       })
       setChapterContract(result)
+      setChapterDirty(false)
       message.success(getUserFacingMessage('contracts.chapterSaved'))
     } catch (error) {
       console.error(error)
@@ -405,11 +481,13 @@ export default function ContractsPage({ novelId }: Props) {
     sceneId: number | undefined,
     patch: Partial<SceneContractAsset>,
   ) => {
+    const sceneKey = sceneId ?? 'chapterless'
     setSceneContracts((current) => current.map((item) => (
       item.segmentId === sceneId
         ? { ...item, ...patch }
         : item
     )))
+    setSceneDirtyKeys((current) => current.includes(sceneKey) ? current : [...current, sceneKey])
   }
 
   const handleSaveScene = async (scene: SceneContractAsset) => {
@@ -431,6 +509,7 @@ export default function ContractsPage({ novelId }: Props) {
         status: scene.status,
       })
       setSceneContracts(result)
+      setSceneDirtyKeys((current) => current.filter((key) => key !== getSceneKey(scene)))
       message.success(getUserFacingMessage('contracts.sceneSaved', {
         segmentLabel: scene.segmentOrder ? ` · 场景 ${scene.segmentOrder}` : '',
       }))
@@ -454,6 +533,7 @@ export default function ContractsPage({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      className="novel-contracts-page"
       title="章节合同与场景合同"
       description="把大纲前的约束变成显式合同，让写作链路优先遵守本章目标、终局承诺和场景限制。"
       actions={(
@@ -464,7 +544,11 @@ export default function ContractsPage({ novelId }: Props) {
           <Button loading={refreshing} onClick={() => void refreshAll()}>
             刷新合同
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
+          <Button
+            icon={<EditOutlined />}
+            disabled={!activeChapterId}
+            onClick={() => activeChapterId && navigate(buildWorkspaceRoute(novelId, `writing?chapterId=${activeChapterId}`))}
+          >
             去正文写作
           </Button>
         </Space>
@@ -507,18 +591,118 @@ export default function ContractsPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="章节选择" description="合同按章维护。写作前先把当前章的显式约束补齐。">
-        <Select
-          value={activeChapterId ?? undefined}
-          onChange={handleChapterChange}
-          className="novel-contracts-page__chapter-select"
-          options={chapters.map((item) => ({
-            value: item.id,
-            label: `第${item.chapterNum}章 ${item.title || ''}`.trim(),
-          }))}
-          placeholder="选择章节"
-        />
-      </WorkspacePanel>
+      <div className="novel-contracts-page__workspace" data-contract-workspace>
+        <aside className="novel-contracts-page__navigator" data-contract-navigator>
+          <WorkspacePanel
+            title="章节导航"
+            description="先定位章节，再在右侧只处理一个当前合同。"
+            className="novel-contracts-page__navigator-panel"
+          >
+            <Input
+              aria-label="搜索章节"
+              value={chapterKeyword}
+              allowClear
+              placeholder="搜索章节编号或标题"
+              className="novel-contracts-page__chapter-search"
+              onChange={(event) => setChapterKeyword(event.target.value)}
+            />
+            <Select
+              value={activeChapterId ?? undefined}
+              onChange={handleChapterChange}
+              className="novel-contracts-page__chapter-select"
+              options={chapters.map((item) => ({
+                value: item.id,
+                label: `第${item.chapterNum}章 ${item.title || ''}`.trim(),
+              }))}
+              placeholder="快速跳转章节"
+            />
+            <div className="novel-contracts-page__chapter-list" data-contract-chapter-list role="listbox" aria-label="章节列表">
+              {visibleChapters.length > 0 ? (
+                <VirtualList data={visibleChapters} height={chapterListHeight} itemHeight={56} itemKey="id">
+                  {(chapter: Chapter) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={activeChapterId === chapter.id}
+                      data-contract-chapter-id={chapter.id}
+                      className={`novel-contracts-page__chapter-item ${activeChapterId === chapter.id ? 'is-active' : ''}`}
+                      onClick={() => handleChapterChange(chapter.id)}
+                    >
+                      <span className="novel-contracts-page__chapter-number">{`第${chapter.chapterNum}章`}</span>
+                      <span className="novel-contracts-page__chapter-title">{chapter.title || '未命名章节'}</span>
+                      <span className="novel-contracts-page__chapter-status">{chapter.status}</span>
+                    </button>
+                  )}
+                </VirtualList>
+              ) : (
+                <div className="novel-empty">没有匹配章节</div>
+              )}
+            </div>
+          </WorkspacePanel>
+
+          <section className="novel-contracts-page__scene-navigator" data-contract-scene-list aria-label="场景合同列表">
+            <div className="novel-contracts-page__navigator-heading">
+              <div>
+                <div className="novel-contracts-page__navigator-kicker">当前章节</div>
+                <h2>{activeChapter ? `第${activeChapter.chapterNum}章 · 场景合同` : '先选择章节'}</h2>
+              </div>
+              <Tag color={sceneContracts.length > 0 ? 'blue' : 'default'}>{`${sceneContracts.length} 场`}</Tag>
+            </div>
+            {sceneContracts.length > 0 ? (
+              <div className="novel-contracts-page__scene-list">
+                {sceneContracts.map((scene) => {
+                  const sceneKey = getSceneKey(scene)
+                  return (
+                    <button
+                      type="button"
+                      key={sceneKey}
+                      className={`novel-contracts-page__scene-item ${activeSceneKey === sceneKey ? 'is-active' : ''}`}
+                      aria-pressed={activeSceneKey === sceneKey}
+                      data-contract-scene-id={scene.segmentId ?? 'chapterless'}
+                      onClick={() => handleSceneSelect(sceneKey)}
+                    >
+                      <span>{typeof scene.segmentOrder === 'number' ? `场景 ${scene.segmentOrder}` : '无序场景'}</span>
+                      <strong>{scene.segmentTitle}</strong>
+                      <Tag color={scene.status === 'locked' ? 'green' : scene.status === 'ready' ? 'blue' : 'default'}>{scene.status || 'draft'}</Tag>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="novel-contracts-page__navigator-empty">当前章节还没有可编辑的场景合同。</div>
+            )}
+          </section>
+        </aside>
+
+        <main className="novel-contracts-page__detail" data-contract-current-detail>
+          <div className="novel-contracts-page__mode-bar" data-contract-tabs role="tablist" aria-label="合同类型">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={contractTab === 'chapter'}
+              className={contractTab === 'chapter' ? 'is-active' : ''}
+              data-contract-tab="chapter"
+              onClick={() => setContractTab('chapter')}
+            >
+              章节合同
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={contractTab === 'scene'}
+              className={contractTab === 'scene' ? 'is-active' : ''}
+              data-contract-tab="scene"
+              disabled={sceneContracts.length === 0}
+              onClick={() => setContractTab('scene')}
+            >
+              当前场景合同
+            </button>
+            <span className={`novel-contracts-page__save-state ${chapterDirty || sceneDirtyKeys.length > 0 ? 'is-dirty' : 'is-saved'}`} data-contract-save-state>
+              {savingChapter ? '章节合同保存中…' : chapterDirty || sceneDirtyKeys.length > 0 ? '有未保存修改' : '已保存'}
+            </span>
+          </div>
+
+          <section hidden={contractTab !== 'chapter'} data-contract-chapter-detail>
 
       <WorkspacePanel
         title="章节合同"
@@ -632,7 +816,7 @@ export default function ContractsPage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" onValuesChange={() => setChapterDirty(true)}>
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="chapterGoal" label="本章目标">
@@ -850,13 +1034,18 @@ export default function ContractsPage({ novelId }: Props) {
           </div>
         </WorkspacePanel>
       ) : null}
+          </section>
 
-      <WorkspacePanel title="场景合同" description="按场景锁 POV、目标、障碍、揭示和结果状态。">
+          <section hidden={contractTab !== 'scene'} data-contract-scene-detail>
+          <WorkspacePanel
+            title={activeScene ? `场景合同 · ${activeScene.segmentTitle}` : '场景合同'}
+            description="按场景锁 POV、目标、障碍、揭示和结果状态；当前只展开导航中选中的场景。"
+          >
         {sceneContracts.length <= 0 ? (
           <Alert type="info" showIcon message="当前章节还没有场景" description="先在结构规划里拆好场景，再回来逐场景补合同。" />
         ) : (
           <div className="novel-contracts-page__section-stack">
-            {sceneContracts.map((scene) => (
+            {sceneContracts.filter((scene) => getSceneKey(scene) === activeSceneKey).map((scene) => (
               <div
                 key={scene.segmentId || scene.id || scene.segmentTitle}
                 className="novel-contracts-page__scene-card"
@@ -1045,6 +1234,9 @@ export default function ContractsPage({ novelId }: Props) {
           </div>
         )}
       </WorkspacePanel>
+          </section>
+        </main>
+      </div>
 
       <Modal
         title={progressMode === 'resistance' ? '登记本章阻力出手' : '登记本章弧线推进'}

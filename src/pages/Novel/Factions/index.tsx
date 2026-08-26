@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
-import { Alert, Button, Form, Input, InputNumber, List, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Select, Spin, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type {
   Character,
   Faction,
@@ -37,6 +37,8 @@ import './index.css'
 interface Props {
   novelId: number
 }
+
+type FactionFocusView = 'detail' | 'graph'
 
 interface FactionFormValues {
   name: string
@@ -154,12 +156,16 @@ function buildFormValues(item?: Faction | null): FactionFormValues {
 
 export default function FactionsPage({ novelId }: Props) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<FactionFormValues>()
   const [generateForm] = Form.useForm<FactionBatchGenerationOptions>()
   const [items, setItems] = useState<Faction[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [viewMode, setViewMode] = useState<FactionFocusView>('detail')
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [stats, setStats] = useState({ total: 0, withLeaderCount: 0, territoryBoundCount: 0, relationCount: 0 })
   const [workflowStats, setWorkflowStats] = useState({ characterCount: 0, mapCount: 0 })
   const [loading, setLoading] = useState(false)
@@ -178,6 +184,14 @@ export default function FactionsPage({ novelId }: Props) {
   const autoStatusRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const autoActionRef = useRef(false)
+  const draftDirtyRef = useRef(false)
+
+  const setDraftDirty = useCallback((value: boolean) => {
+    draftDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markDraftDirty = useCallback(() => setDraftDirty(true), [setDraftDirty])
 
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
   const selectedValues = Form.useWatch([], form) as FactionFormValues | undefined
@@ -186,12 +200,12 @@ export default function FactionsPage({ novelId }: Props) {
     [characterOptions],
   )
   const selectedCharacterIds = useMemo(() => {
-    if (!selectedItem) return []
-    const selectedName = selectedItem.name.trim()
+    const selectedName = (selectedValues?.name || selectedItem?.name || '').trim()
+    if (!selectedName) return []
     return characterOptions
       .filter((character) => parseStringArray(character.campFactionIdsJson).some((value) => value === selectedName))
       .map((character) => character.id)
-  }, [characterOptions, selectedItem])
+  }, [characterOptions, selectedItem, selectedValues?.name])
 
   const refreshAutoStatus = useCallback(async () => {
     const requestId = ++autoStatusRequestRef.current
@@ -262,7 +276,28 @@ export default function FactionsPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
   }, [refreshAutoStatus])
-  useEffect(() => { form.setFieldsValue(buildFormValues(selectedItem)) }, [form, selectedItem])
+  useEffect(() => {
+    const queryId = Number(searchParams.get('factionId') || '')
+    if (!creatingRef.current && queryId > 0 && items.some((item) => item.id === queryId)) {
+      setSelectedId((current) => current === queryId ? current : queryId)
+    }
+    const queryView = searchParams.get('view')
+    if (queryView === 'detail' || queryView === 'graph') setViewMode(queryView)
+  }, [items, searchParams])
+  useEffect(() => {
+    form.setFieldsValue(buildFormValues(selectedItem))
+    setDraftDirty(false)
+    setDetailsOpen(false)
+  }, [form, selectedItem, setDraftDirty])
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
   useEffect(() => {
     registerSaveHandler(() => { void handleSave() })
     return () => registerSaveHandler(null)
@@ -290,10 +325,67 @@ export default function FactionsPage({ novelId }: Props) {
     }
   }, [autoTask?.id, refresh, refreshAutoStatus, refreshGraph])
 
+  const updateFocusRoute = useCallback((id: number | null, nextView: FactionFocusView) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (id) next.set('factionId', String(id))
+      else next.delete('factionId')
+      next.set('view', nextView)
+      return next
+    })
+  }, [setSearchParams])
+
+  const commitFactionSelection = useCallback((id: number, nextView: FactionFocusView = viewMode) => {
+    creatingRef.current = false
+    setSelectedId(id)
+    setDraftDirty(false)
+    setDetailsOpen(false)
+    setViewMode(nextView)
+    updateFocusRoute(id, nextView)
+  }, [setDraftDirty, updateFocusRoute, viewMode])
+
+  const selectFaction = useCallback((id: number, nextView?: FactionFocusView) => {
+    if (id === selectedId && (!nextView || nextView === viewMode)) return
+    const commit = () => commitFactionSelection(id, nextView || viewMode)
+    if (!draftDirtyRef.current) {
+      commit()
+      return
+    }
+    Modal.confirm({
+      title: '当前势力还有未保存修改',
+      content: '切换后这些修改会被丢弃，是否继续？',
+      okText: '放弃修改并切换',
+      cancelText: '留下继续编辑',
+      onOk: commit,
+    })
+  }, [commitFactionSelection, selectedId, viewMode])
+
   const handleCreate = () => {
-    creatingRef.current = true
-    setSelectedId(null)
-    form.setFieldsValue(EMPTY_VALUES)
+    const commit = () => {
+      creatingRef.current = true
+      setSelectedId(null)
+      setDraftDirty(false)
+      setDetailsOpen(false)
+      setViewMode('detail')
+      updateFocusRoute(null, 'detail')
+      form.setFieldsValue(EMPTY_VALUES)
+    }
+    if (!draftDirtyRef.current) {
+      commit()
+      return
+    }
+    Modal.confirm({
+      title: '当前势力还有未保存修改',
+      content: '新建势力会清空当前编辑内容，是否继续？',
+      okText: '放弃修改并新建',
+      cancelText: '留下继续编辑',
+      onOk: commit,
+    })
+  }
+
+  const handleViewChange = (nextView: FactionFocusView) => {
+    setViewMode(nextView)
+    updateFocusRoute(selectedId, nextView)
   }
 
   const handleSave = async () => {
@@ -319,8 +411,10 @@ export default function FactionsPage({ novelId }: Props) {
       } else {
         const id = await window.electron.faction.create(novelId, payload)
         setSelectedId(id)
+        updateFocusRoute(id, 'detail')
       }
       creatingRef.current = false
+      setDraftDirty(false)
       notifyWorkspaceMutation()
       await Promise.all([refresh(), refreshGraph()])
       message.success(getUserFacingMessage('faction.saved'))
@@ -345,6 +439,8 @@ export default function FactionsPage({ novelId }: Props) {
           await window.electron.faction.delete(selectedItem.id)
           creatingRef.current = false
           setSelectedId(null)
+          setDraftDirty(false)
+          updateFocusRoute(null, 'detail')
           form.setFieldsValue(EMPTY_VALUES)
           notifyWorkspaceMutation()
           await Promise.all([refresh(), refreshGraph()])
@@ -372,6 +468,8 @@ export default function FactionsPage({ novelId }: Props) {
           await window.electron.faction.clear(novelId)
           creatingRef.current = false
           setSelectedId(null)
+          setDraftDirty(false)
+          updateFocusRoute(null, 'detail')
           form.setFieldsValue(EMPTY_VALUES)
           setGraphData(EMPTY_FACTION_GRAPH)
           setAutoTask(null)
@@ -385,7 +483,7 @@ export default function FactionsPage({ novelId }: Props) {
         }
       },
     })
-  }, [autoTask, form, novelId, notifyWorkspaceMutation, refresh, refreshAutoStatus])
+  }, [autoTask, form, novelId, notifyWorkspaceMutation, refresh, refreshAutoStatus, setDraftDirty, updateFocusRoute])
 
   useEffect(() => {
     registerClearHandler(() => {
@@ -474,41 +572,52 @@ export default function FactionsPage({ novelId }: Props) {
     Math.min(FACTION_AUTO_GENERATE_MAX_COUNT, generationPreset.count - existingFactionCount),
   )
 
+  const openGenerateDialog = () => {
+    generateForm.setFieldsValue({
+      count: recommendedGenerateCount,
+      batchSize: Math.max(1, Math.min(FACTION_AUTO_GENERATE_MAX_BATCH_SIZE, generationPreset.batchSize)),
+      relationshipDensity: 'balanced',
+      allowCharacterlessFactions: true,
+      preferExistingCharacters: true,
+      preferredTypes: ['organization', 'sect', 'family'],
+      specialRequirements: generationPreset.focus,
+    })
+    setGenerateOpen(true)
+  }
+
+  const refreshEverything = () => {
+    void refresh()
+    void refreshGraph()
+    void refreshAutoStatus().catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
+  }
+
   return (
     <WorkspacePage
+      chrome="shared"
       className="novel-factions-page"
       layout="wide"
+      eyebrow="阵营与组织"
       title="势力系统"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<RobotOutlined />} onClick={() => {
-            generateForm.setFieldsValue({
-              count: recommendedGenerateCount,
-              batchSize: Math.max(1, Math.min(FACTION_AUTO_GENERATE_MAX_BATCH_SIZE, generationPreset.batchSize)),
-              relationshipDensity: 'balanced',
-              allowCharacterlessFactions: true,
-              preferExistingCharacters: true,
-              preferredTypes: ['organization', 'sect', 'family'],
-              specialRequirements: generationPreset.focus,
-            })
-            setGenerateOpen(true)
-          }}>AI 生成·分批势力</Button>
-          {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
-          {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止任务</Button> : null}
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存势力</Button>
-          <Button icon={<ShareAltOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedItem ? `resistance?tab=factions&factionId=${selectedItem.id}` : 'resistance?tab=factions'))}>去反派与阻力</Button>
-          <Button icon={<PlusOutlined />} onClick={handleCreate}>新建势力</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => {
-            void refresh()
-            void refreshGraph()
-            void refreshAutoStatus().catch((error) => {
-              console.error(error)
-              message.error(getErrorMessage(error, 'common.loadFailed'))
-            })
-          }}>刷新</Button>
-          <Button danger icon={<DeleteOutlined />} disabled={!selectedItem} onClick={() => void handleDelete()}>删除势力</Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: { key: 'save', label: '保存势力', icon: <SaveOutlined />, loading: saving, onClick: () => void handleSave() },
+        secondary: [
+          { key: 'create', label: '新建势力', icon: <PlusOutlined />, onClick: handleCreate },
+          { key: 'resistance', label: '去反派与阻力', icon: <ShareAltOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, selectedItem ? `resistance?tab=factions&factionId=${selectedItem.id}` : 'resistance?tab=factions')) },
+        ],
+        more: {
+          items: [
+            { key: 'generate', label: 'AI 生成·分批势力', icon: <RobotOutlined />, onClick: openGenerateDialog },
+            ...(autoTask?.status === 'paused' ? [{ key: 'resume', label: '继续任务', icon: <ShareAltOutlined />, onClick: () => void handleResumeAutoGenerate() }] : []),
+            ...(hasRunningAutoTask ? [{ key: 'stop', label: '停止任务', icon: <StopOutlined />, danger: true, disabled: autoStopping, onClick: () => void handleStopAutoGenerate() }] : []),
+            { type: 'divider' },
+            { key: 'refresh', label: '刷新势力数据', icon: <ReloadOutlined />, onClick: refreshEverything },
+            { key: 'delete', label: '删除势力', icon: <DeleteOutlined />, danger: true, disabled: !selectedItem, onClick: () => void handleDelete() },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -538,45 +647,73 @@ export default function FactionsPage({ novelId }: Props) {
         />
       ) : null}
 
+      <div className="faction-workspace__status-rail" data-faction-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`faction-workspace__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前势力同步'}</strong>
+        <span>{selectedItem ? `当前：${selectedItem.name}` : '准备新建势力'}</span>
+      </div>
+
       <div className="faction-workspace">
-        <WorkspacePanel className="faction-workspace__sidebar" title="势力列表">
+        <WorkspacePanel
+          className="faction-workspace__sidebar"
+          title={<div className="faction-list-heading"><span>势力列表</span><small>{items.length} 个</small></div>}
+          description="先定位一个组织，再查看它的当前详情。"
+        >
           <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
-          <List
-            loading={loading}
-            size="small"
-            dataSource={items}
-            locale={{ emptyText: '当前没有势力记录' }}
-            renderItem={(item) => (
-              <List.Item className={`faction-list-card ${selectedId === item.id ? 'faction-list-card--active' : ''}`} onClick={() => { creatingRef.current = false; setSelectedId(item.id) }}>
-                <List.Item.Meta
-                  title={<div className="faction-list-card__title"><strong>{item.name}</strong><Tag>{getFactionTypeLabel(item.type)}</Tag></div>}
-                  description={<div className="faction-list-card__desc">{buildFactionListSummary(item, typeof item.leaderCharacterId === 'number' ? leaderNameMap.get(item.leaderCharacterId) : undefined)}</div>}
-                />
-              </List.Item>
-            )}
-          />
+          <div className="faction-list-scroll" data-faction-list>
+            {loading ? <div className="faction-workspace__empty"><Spin size="small" /></div> : null}
+            {!loading && items.length > 0 ? items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                data-faction-list-row
+                data-faction-id={item.id}
+                aria-pressed={selectedId === item.id}
+                className={`faction-list-card ${selectedId === item.id ? 'faction-list-card--active' : ''}`}
+                onClick={() => selectFaction(item.id, 'detail')}
+              >
+                <span className="faction-list-card__title"><strong>{item.name}</strong><Tag>{getFactionTypeLabel(item.type)}</Tag></span>
+                <span className="faction-list-card__desc">{buildFactionListSummary(item, typeof item.leaderCharacterId === 'number' ? leaderNameMap.get(item.leaderCharacterId) : undefined)}</span>
+              </button>
+            )) : null}
+            {!loading && items.length <= 0 ? <div className="faction-workspace__empty">当前没有势力记录</div> : null}
+          </div>
         </WorkspacePanel>
 
-        <div className="faction-workspace__main">
-          <WorkspacePanel
-            title="势力关系图谱"
-            extra={<Tag color="processing">{selectedId ? '当前聚焦已收窄' : '当前显示全局网络'}</Tag>}
-          >
-            {graphLoading ? <div className="faction-workspace__empty"><Spin /></div> : <FactionGraphCanvas data={graphData} selectedFactionId={selectedId} onFactionSelect={(id) => { creatingRef.current = false; setSelectedId(id) }} />}
-            {graphData.unalignedCharacters.length > 0 ? (
-              <div className="faction-workspace__orphans">
-                <strong>当前无固定势力的人物</strong>
-                <div className="faction-workspace__chips">
-                  {graphData.unalignedCharacters.slice(0, 10).map((character) => <Tag key={character.id}>{character.fullName}</Tag>)}
-                </div>
-              </div>
-            ) : null}
-          </WorkspacePanel>
+        <div className="faction-workspace__focus">
+          <div className="faction-workspace__view-switch" role="tablist" aria-label="势力工作视图">
+            <button type="button" role="tab" aria-selected={viewMode === 'detail'} className={viewMode === 'detail' ? 'is-active' : ''} onClick={() => handleViewChange('detail')}>当前详情</button>
+            <button type="button" role="tab" aria-selected={viewMode === 'graph'} className={viewMode === 'graph' ? 'is-active' : ''} onClick={() => handleViewChange('graph')}>关系图谱</button>
+            <span className="faction-workspace__view-note">一次只处理一个焦点</span>
+          </div>
 
-          <WorkspacePanel
-            title={selectedItem ? `编辑：${selectedItem.name}` : '新建势力'}
-            extra={(
-              <Space wrap>
+          {viewMode === 'graph' ? (
+            <WorkspacePanel
+              className="faction-workspace__view-panel"
+              title="势力关系图谱"
+              description="点击图谱中的势力可切换当前聚焦，相关成员与关系会被保留。"
+              extra={<Tag color="processing">{selectedId ? '当前聚焦已收窄' : '当前显示全局网络'}</Tag>}
+            >
+              <div data-faction-view="graph" className="faction-workspace__graph-view">
+                <div className="faction-workspace__graph-scroll">
+                  {graphLoading ? <div className="faction-workspace__empty"><Spin /></div> : <FactionGraphCanvas data={graphData} selectedFactionId={selectedId} onFactionSelect={(id) => selectFaction(id, 'graph')} />}
+                </div>
+                {graphData.unalignedCharacters.length > 0 ? (
+                  <div className="faction-workspace__orphans">
+                    <strong>当前无固定势力的人物</strong>
+                    <div className="faction-workspace__chips faction-workspace__chips--bounded" data-faction-orphans-scroll>
+                      {graphData.unalignedCharacters.slice(0, 40).map((character) => <Tag key={character.id}>{character.fullName}</Tag>)}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </WorkspacePanel>
+          ) : (
+            <WorkspacePanel
+              className="faction-workspace__view-panel"
+              title={selectedItem ? `当前详情：${selectedItem.name}` : '新建势力'}
+              description={selectedItem ? '只在这里编辑当前势力；关系图谱可随时切换查看。' : '先建立一个可被正文召回的组织主体。'}
+              extra={(
                 <AIGenerateButton
                   novelId={novelId}
                   label={selectedItem ? 'AI 补当前势力' : 'AI 生成势力草稿'}
@@ -619,66 +756,74 @@ export default function FactionsPage({ novelId }: Props) {
                       currentPhase: typeof draft.currentPhase === 'string' ? draft.currentPhase : values.currentPhase,
                       notes: typeof draft.notes === 'string' ? draft.notes : values.notes,
                     })
+                    markDraftDirty()
                   }}
                 />
-                <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存</Button>
-              </Space>
-            )}
-          >
-            <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} className="faction-editor">
-              <div className="faction-editor__grid">
-                <Form.Item name="name" label="势力名称" rules={[{ required: true, message: '请填写势力名称' }]}><Input placeholder="例如：沉灯会 / 北陵军府 / 清川盐盟" /></Form.Item>
-                <Form.Item
-                  name="type"
-                  label="势力类型"
-                  rules={[{ required: true, message: '请选择势力类型' }]}
-                >
-                  <Select
-                    options={[...new Set(items.map((item) => item.type).concat(FACTION_TYPE_OPTIONS.map((item) => item.value)))]
-                      .map((value) => ({ value, label: getFactionTypeLabel(value) }))}
-                  />
-                </Form.Item>
-                <Form.Item name="leaderCharacterId" label="领袖角色"><Select allowClear showSearch optionFilterProp="label" options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} placeholder="可留空" /></Form.Item>
-                <Form.Item name="territoryMapNodeIds" label="地盘节点"><Select mode="multiple" allowClear optionFilterProp="label" options={mapOptions.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
-                <Form.Item name="goal" label="目标"><Input.TextArea rows={6} /></Form.Item>
-                <Form.Item name="currentPhase" label="当前阶段"><Input.TextArea rows={6} /></Form.Item>
-                <Form.Item name="resources" label="资源"><Input.TextArea rows={6} /></Form.Item>
-                <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={6} /></Form.Item>
-                <Form.Item
-                  name="notes"
-                  label="召回别名 / 备注"
-                  className="faction-editor__full-row"
-                >
-                  <Input.TextArea
-                    rows={4}
-                    placeholder="例如：别名：影阁、暗阁；代号：夜灯。可补充公开称呼、隐秘代号和召回提示。"
-                  />
-                </Form.Item>
-                <Form.List name="externalRelations">
-                  {(fields, { add, remove }) => (
-                    <div className="faction-editor__relations">
-                      <div className="faction-editor__relations-title">外部关系</div>
-                      {fields.map((field) => (
-                        <div key={field.key} className="faction-editor__relation-row">
-                          <Form.Item name={[field.name, 'targetFactionName']} rules={[{ required: true, message: '请填写目标势力' }]}><Input placeholder="目标势力名称" /></Form.Item>
-                          <Form.Item name={[field.name, 'relation']} rules={[{ required: true, message: '请选择关系' }]}><Select options={FACTION_RELATION_TYPE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))} /></Form.Item>
-                          <Form.Item name={[field.name, 'note']}><Input placeholder="具体利益、旧怨、交易或秘密" /></Form.Item>
-                          <Button danger onClick={() => remove(field.name)}>删除</Button>
-                        </div>
-                      ))}
-                      <Button onClick={() => add({ relation: 'neutral' })}>新增关系</Button>
-                    </div>
-                  )}
-                </Form.List>
-              </div>
-            </Form>
+              )}
+            >
+              <div data-faction-view="detail" className="faction-workspace__detail-view">
+                <div className="faction-editor__selection-summary">
+                  <span>当前编辑对象</span>
+                  <strong>{selectedValues?.name || selectedItem?.name || '未命名势力'}</strong>
+                  <small>{selectedItem ? `${getFactionTypeLabel(selectedItem.type)} · 变更会在保存后写入正文召回上下文` : '保存后会成为可被人物、地图和阻力系统引用的组织主体。'}</small>
+                </div>
+                <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} className="faction-editor" onValuesChange={markDraftDirty}>
+                  <div className="faction-editor__grid faction-editor__grid--core">
+                    <Form.Item name="name" label="势力名称" rules={[{ required: true, message: '请填写势力名称' }]}><Input placeholder="例如：沉灯会 / 北陵军府 / 清川盐盟" /></Form.Item>
+                    <Form.Item name="type" label="势力类型" rules={[{ required: true, message: '请选择势力类型' }]}>
+                      <Select options={[...new Set(items.map((item) => item.type).concat(FACTION_TYPE_OPTIONS.map((item) => item.value)))].map((value) => ({ value, label: getFactionTypeLabel(value) }))} />
+                    </Form.Item>
+                    <Form.Item name="leaderCharacterId" label="领袖角色"><Select allowClear showSearch optionFilterProp="label" options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} placeholder="可留空" /></Form.Item>
+                    <Form.Item name="currentPhase" label="当前阶段"><Input placeholder="例如：扩张前夜 / 关系重组" /></Form.Item>
+                    <Form.Item name="goal" label="核心目标" className="faction-editor__full-row"><Input.TextArea rows={4} placeholder="写清现实目标、推进方向与不可退让的利益。" /></Form.Item>
+                  </div>
 
-            <div className="faction-editor__meta">
-              <div className="faction-editor__meta-block"><strong>关联人物</strong><div className="faction-workspace__chips">{selectedCharacters.length > 0 ? selectedCharacters.map((item) => <Tag key={item.id}>{item.fullName}</Tag>) : <span>当前还没有绑定人物。</span>}</div></div>
-              <div className="faction-editor__meta-block"><strong>关联地盘</strong><div className="faction-workspace__chips">{selectedTerritories.length > 0 ? selectedTerritories.map((item) => <Tag key={item.id}>{item.name}</Tag>) : <span>当前还没有绑定地图节点。</span>}</div></div>
-              <div className="faction-editor__meta-block"><strong>当前关系摘要</strong><div className="faction-workspace__chips">{selectedRelations.length > 0 ? selectedRelations.map((item, index) => <Tag key={`${item.targetFactionName}-${index}`}>{`${item.targetFactionName || '未命名对象'} · ${FACTION_RELATION_TYPE_OPTIONS.find((option) => option.value === item.relation)?.label || item.relation}`}</Tag>) : <span>当前还没有录入外部关系。</span>}</div></div>
-            </div>
-          </WorkspacePanel>
+                  <details className="faction-editor__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+                    <summary><span>展开势力细节</span><small>地盘、资源、成员规则、召回备注和外部关系按需维护</small></summary>
+                    <div className="faction-editor__grid">
+                      <Form.Item name="territoryMapNodeIds" label="地盘节点"><Select mode="multiple" allowClear optionFilterProp="label" options={mapOptions.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
+                      <Form.Item name="resources" label="资源"><Input.TextArea rows={4} /></Form.Item>
+                      <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={4} /></Form.Item>
+                      <Form.Item name="notes" label="召回别名 / 备注"><Input.TextArea rows={4} placeholder="例如：别名：影阁、暗阁；代号：夜灯。" /></Form.Item>
+                      <Form.List name="externalRelations">
+                        {(fields, { add, remove }) => (
+                          <div className="faction-editor__relations">
+                            <div className="faction-editor__relations-title"><span>外部关系</span><small>{fields.length} 条</small></div>
+                            <div className="faction-editor__relations-scroll" data-faction-relations-scroll>
+                              {fields.length > 0 ? fields.map((field) => (
+                                <div key={field.key} className="faction-editor__relation-row">
+                                  <Form.Item name={[field.name, 'targetFactionName']} rules={[{ required: true, message: '请填写目标势力' }]}><Input placeholder="目标势力名称" /></Form.Item>
+                                  <Form.Item name={[field.name, 'relation']} rules={[{ required: true, message: '请选择关系' }]}><Select options={FACTION_RELATION_TYPE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))} /></Form.Item>
+                                  <Form.Item name={[field.name, 'note']}><Input placeholder="具体利益、旧怨、交易或秘密" /></Form.Item>
+                                  <Button danger onClick={() => remove(field.name)}>删除</Button>
+                                </div>
+                              )) : <span className="faction-editor__empty">当前还没有录入外部关系。</span>}
+                            </div>
+                            <Button onClick={() => add({ relation: 'neutral' })}>新增关系</Button>
+                          </div>
+                        )}
+                      </Form.List>
+                    </div>
+                  </details>
+                </Form>
+
+                <div className="faction-editor__meta">
+                  <div className="faction-editor__meta-block faction-editor__meta-block--members">
+                    <div className="faction-editor__meta-heading"><strong>关联人物</strong><small>{selectedCharacters.length} 人</small></div>
+                    <div className="faction-workspace__chips faction-workspace__chips--bounded" data-faction-members-scroll>{selectedCharacters.length > 0 ? selectedCharacters.map((item) => <Tag key={item.id}>{item.fullName}</Tag>) : <span>当前还没有绑定人物。</span>}</div>
+                  </div>
+                  <div className="faction-editor__meta-block">
+                    <div className="faction-editor__meta-heading"><strong>关联地盘</strong><small>{selectedTerritories.length} 处</small></div>
+                    <div className="faction-workspace__chips faction-workspace__chips--bounded">{selectedTerritories.length > 0 ? selectedTerritories.map((item) => <Tag key={item.id}>{item.name}</Tag>) : <span>当前还没有绑定地图节点。</span>}</div>
+                  </div>
+                  <div className="faction-editor__meta-block faction-editor__meta-block--relations">
+                    <div className="faction-editor__meta-heading"><strong>当前关系摘要</strong><small>{selectedRelations.length} 条</small></div>
+                    <div className="faction-workspace__chips faction-workspace__chips--bounded" data-faction-relations-summary-scroll>{selectedRelations.length > 0 ? selectedRelations.map((item, index) => <Tag key={`${item.targetFactionName}-${index}`}>{`${item.targetFactionName || '未命名对象'} · ${FACTION_RELATION_TYPE_OPTIONS.find((option) => option.value === item.relation)?.label || item.relation}`}</Tag>) : <span>当前还没有录入外部关系。</span>}</div>
+                  </div>
+                </div>
+              </div>
+            </WorkspacePanel>
+          )}
         </div>
       </div>
 

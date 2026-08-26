@@ -351,6 +351,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchProgress, setBatchProgress] = useState<CharacterBatchProgress | null>(null)
   const [agentWorkflowOpen, setAgentWorkflowOpen] = useState(false)
@@ -368,6 +370,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const creatingRef = useRef(false)
   const pageRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
+  const formDirtyRef = useRef(false)
   const routeCharacterId = useMemo(() => parseRouteId(searchParams.get('characterId')), [searchParams])
   const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
   const [creativeStageContext, setCreativeStageContext] = useState<CreativeStageContext | null>(null)
@@ -384,6 +387,13 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [graphScope, setGraphScope] = useState<'all' | 'focus'>('all')
   const [graphRelationFilter, setGraphRelationFilter] = useState<string>('all')
   const [workspaceView, setWorkspaceView] = useState<'list' | 'graph'>(() => (searchParams.get('view') === 'graph' ? 'graph' : 'list'))
+
+  const setFormDirty = useCallback((value: boolean) => {
+    formDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markFormDirty = useCallback(() => setFormDirty(true), [setFormDirty])
 
   const handleCreativeStageChange = useCallback((stageId: number | null) => {
     const nextParams = new URLSearchParams(searchParams)
@@ -518,8 +528,37 @@ export default function CharacterWorkspace({ novelId }: Props) {
     setSelectedCharacter(character)
     setDetailContext(context)
     form.setFieldsValue(buildFormValues(character, context))
+    setFormDirty(false)
     setItemOptions(mergeById(baseItems, context.relatedItems))
-  }, [form, novelId])
+  }, [form, novelId, setFormDirty])
+
+  const requestCharacterDetail = useCallback((characterId: number) => {
+    if (!formDirtyRef.current || characterId === selectedIdRef.current) {
+      void loadCharacterDetail(characterId)
+      return
+    }
+    Modal.confirm({
+      title: '当前人物还有未保存修改',
+      content: '切换人物会放弃当前编辑内容。要先保存，还是放弃修改继续？',
+      okText: '放弃并切换',
+      cancelText: '留下继续编辑',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        setFormDirty(false)
+        void loadCharacterDetail(characterId)
+      },
+    })
+  }, [loadCharacterDetail, setFormDirty])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   const loadGraph = useCallback(async () => {
     setGraphLoading(true)
@@ -643,6 +682,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     setSelectedId(null)
     setSelectedCharacter(null)
     setDetailContext(EMPTY_DETAIL)
+    setFormDirty(false)
     form.setFieldsValue({
       roleType: 'major',
       entityType: '',
@@ -1072,29 +1112,29 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      chrome="shared"
       className="novel-characters-page"
       layout="wide"
       title="角色系统"
-      actions={(
-        <Space wrap>
-          <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
-          <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
-          <Button className="character-agent-workflow-trigger" icon={<SafetyCertificateOutlined />} loading={agentWorkflowLoading} onClick={() => void handleAgentWorkflowStart()}>
-            智能规划·审校后生成
-          </Button>
-          <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>按数量生成</Button>
-          <Button icon={<ApartmentOutlined />} loading={generating} onClick={() => { setWorkspaceView('graph'); void handleGenerateRelations() }}>AI 修复·关系网络</Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `arc-center?tab=characters&characterId=${selectedCharacter.id}` : 'arc-center'))}>
-            去人物弧线
-          </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `resistance?tab=characters&characterId=${selectedCharacter.id}` : 'resistance?tab=characters'))}>
-            去反派与阻力
-          </Button>
-          <Button icon={<UserAddOutlined />} onClick={handleNew}>新建人物</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => { void loadPage(selectedId, page); void loadGraph() }}>刷新</Button>
-          <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>清空人物</Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: { key: 'save', label: '保存并确认', icon: <SaveOutlined />, loading: saving, disabled: !selectedCharacter && !creating, onClick: () => void handleSave() },
+        secondary: [
+          { key: 'new', label: '新建人物', icon: <UserAddOutlined />, onClick: handleNew },
+          { key: 'arc', label: '去人物弧线', icon: <EditOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `arc-center?tab=characters&characterId=${selectedCharacter.id}` : 'arc-center')) },
+        ],
+        more: {
+          items: [
+            { key: 'protagonist', label: 'AI 生成·主角', icon: <RobotOutlined />, disabled: generating, onClick: () => setProtagonistOpen(true) },
+            { key: 'agent', label: '智能规划·审校后生成', icon: <SafetyCertificateOutlined />, disabled: agentWorkflowLoading, onClick: () => void handleAgentWorkflowStart() },
+            { key: 'batch', label: '按数量生成', icon: <TeamOutlined />, disabled: generating, onClick: () => { void searchItems(''); setBatchOpen(true) } },
+            { key: 'relations', label: 'AI 修复·关系网络', icon: <ApartmentOutlined />, disabled: generating, onClick: () => { setWorkspaceView('graph'); void handleGenerateRelations() } },
+            { key: 'resistance', label: '去反派与阻力', icon: <EditOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, selectedCharacter ? `resistance?tab=characters&characterId=${selectedCharacter.id}` : 'resistance?tab=characters')) },
+            { type: 'divider' },
+            { key: 'refresh', label: '刷新人物', icon: <ReloadOutlined />, onClick: () => { void loadPage(selectedId, page); void loadGraph() } },
+            { key: 'clear', label: '清空人物', icon: <DeleteOutlined />, danger: true, disabled: generating, onClick: () => void handleClear() },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -1115,6 +1155,11 @@ export default function CharacterWorkspace({ novelId }: Props) {
         </>
       )}
     >
+      <div className="novel-characters__status-rail" data-character-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`novel-characters__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前人物同步'}</strong>
+        <span>{selectedCharacter ? `当前编辑：${selectedCharacter.fullName}` : creating ? '正在新建人物' : '从左侧选择一名人物开始'}</span>
+      </div>
       <div className="novel-character-studio-shell">
         <div className="novel-character-studio__view-switch" role="tablist" aria-label="角色工作区视图">
           <button
@@ -1148,6 +1193,9 @@ export default function CharacterWorkspace({ novelId }: Props) {
               sticky
               extra={(
                 <div className="novel-filter-bar">
+                  <div className="novel-filter-bar__row novel-characters__stage-filter">
+                    <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
+                  </div>
                   <div className="novel-filter-bar__row">
                     <Input.Search allowClear placeholder="搜索姓名、目标、职业或矛盾" value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} onSearch={setKeywordInput} />
                   </div>
@@ -1178,19 +1226,20 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     <button
                       key={character.id}
                       type="button"
-                      className={`novel-list-card novel-character-list-card ${selectedId === character.id ? 'novel-list-card--active' : ''}`}
-                      onClick={() => void loadCharacterDetail(character.id)}
+                      data-character-list-row
+                      className={`novel-list-card novel-character-list-card novel-characters__list-row ${selectedId === character.id ? 'novel-list-card--active' : ''}`}
+                      onClick={() => requestCharacterDetail(character.id)}
                     >
                       <div className="novel-list-card__title">
-                        <span>{character.fullName}</span>
+                        <strong>{character.fullName}</strong>
                         {character.recordStatus === 'draft' ? <Tag color="processing">草稿</Tag> : null}
                       </div>
-                      <div className="novel-list-card__meta">
+                      <div className="novel-list-card__meta novel-characters__list-meta">
                         <Tag color={getRoleMeta(character.roleType).color}>{getRoleMeta(character.roleType).label}</Tag>
                         {character.species ? <Tag>{character.species}</Tag> : null}
                         {character.occupation ? <Tag color="blue">{character.occupation}</Tag> : null}
                       </div>
-                      <div className="novel-list-card__desc">{character.innerConflict || character.goals || character.firstImpression || character.background || '这个角色还没有核心信息。'}</div>
+                      <div className="novel-list-card__desc novel-characters__list-desc">{character.innerConflict || character.goals || character.firstImpression || character.background || '这个角色还没有核心信息。'}</div>
                     </button>
                   ))}
                   <Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} />
@@ -1202,7 +1251,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                   <div className="novel-character-draft-strip__title">本页草稿</div>
                   <div className="novel-character-draft-strip__body">
                     {draftRoster.slice(0, 4).map((item) => (
-                      <button key={item.id} type="button" className="novel-character-draft-chip" onClick={() => void loadCharacterDetail(item.id)}>
+                      <button key={item.id} type="button" className="novel-character-draft-chip" onClick={() => requestCharacterDetail(item.id)}>
                         {item.fullName}
                       </button>
                     ))}
@@ -1341,49 +1390,50 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 />
               ) : null}
 
-              <Form form={form} layout="vertical">
-                <div className="novel-grid novel-grid--3">
+              <Form form={form} layout="vertical" onValuesChange={markFormDirty}>
+                <div className="novel-characters__core-fields">
                   <Form.Item name="roleType" label="角色类型" rules={[{ required: true, message: '请选择角色类型' }]}><Select options={ROLE_OPTIONS as unknown as Array<{ value: Character['roleType']; label: string }>} /></Form.Item>
                   <Form.Item name="entityType" label="实体类型"><Select allowClear options={ENTITY_TYPE_OPTIONS} /></Form.Item>
                   <Form.Item name="species" label="种类 / 物种"><Select showSearch allowClear options={availableSpecies.map((item) => ({ value: item, label: item }))} /></Form.Item>
-                </div>
-                <div className="novel-grid novel-grid--3">
                   <Form.Item name="fullName" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}><Input /></Form.Item>
                   <Form.Item name="gender" label="性别"><Input placeholder="可留空" /></Form.Item>
                   <Form.Item name="age" label="年龄"><InputNumber min={0} className="novel-character-full-width-number" /></Form.Item>
-                </div>
-                <div className="novel-grid novel-grid--3">
                   <Form.Item name="occupation" label="职业 / 身份"><Input /></Form.Item>
+                </div>
+                <details className="novel-characters__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+                  <summary><span>展开人物档案细节</span><small>关系、资源、心理和外貌按需维护</small></summary>
+                  <div className="novel-grid novel-grid--3">
                   <Form.Item name="rankLevel" label="等级 / 职级"><Input /></Form.Item>
                   <Form.Item name="socialIdentity" label="社会位置"><Input /></Form.Item>
-                </div>
-                <div className="novel-grid novel-grid--2">
+                  </div>
+                  <div className="novel-grid novel-grid--2">
                   <Form.Item name="campFactions" label="所属势力"><Select mode="tags" allowClear options={factionOptions.map((item) => ({ value: item, label: item }))} /></Form.Item>
                   <Form.Item name="powerSystems" label="关联体系"><Select mode="tags" allowClear options={powerSystemOptions.map((item) => ({ value: item, label: item }))} /></Form.Item>
-                </div>
-                <Form.Item name="contextHooks" label="主线挂点"><Select mode="tags" allowClear placeholder="例如：掌握补给线、知道旧案真相、被关键势力追杀" /></Form.Item>
-                <div className="novel-grid novel-grid--2">
+                  </div>
+                  <Form.Item name="contextHooks" label="主线挂点"><Select mode="tags" allowClear placeholder="例如：掌握补给线、知道旧案真相、被关键势力追杀" /></Form.Item>
+                  <div className="novel-grid novel-grid--2">
                   <Form.Item name="ownedItemIds" label="当前持有物品">
                     <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void debouncedSearchItems(value)} placeholder="绑定当前持有或长期占有的物品" />
                   </Form.Item>
                   <Form.Item name="linkedItemIds" label="剧情关联物品">
                     <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void debouncedSearchItems(value)} placeholder="绑定争夺物、证据、信物、装备等" />
                   </Form.Item>
-                </div>
-                <Form.Item name="background" label="背景经历"><Input.TextArea rows={6} /></Form.Item>
-                <div className="novel-grid novel-grid--2">
+                  </div>
+                  <Form.Item name="background" label="背景经历"><Input.TextArea rows={4} /></Form.Item>
+                  <div className="novel-grid novel-grid--2">
                   <Form.Item name="goals" label="当前目标"><Input.TextArea rows={6} /></Form.Item>
                   <Form.Item name="firstImpression" label="第一印象"><Input.TextArea rows={6} /></Form.Item>
-                </div>
-                <div className="novel-grid novel-grid--2">
+                  </div>
+                  <div className="novel-grid novel-grid--2">
                   <Form.Item name="innerConflict" label="内在矛盾"><Input.TextArea rows={6} /></Form.Item>
                   <Form.Item name="relationshipTension" label="关系张力"><Input.TextArea rows={6} /></Form.Item>
-                </div>
-                <div className="novel-grid novel-grid--2">
+                  </div>
+                  <div className="novel-grid novel-grid--2">
                   <Form.Item name="resonancePoint" label="读者共情点"><Input.TextArea rows={6} /></Form.Item>
                   <Form.Item name="characterArc" label="后续弧光"><Input.TextArea rows={6} /></Form.Item>
-                </div>
-                <Form.Item name="appearance" label="可识别外貌"><Input.TextArea rows={6} /></Form.Item>
+                  </div>
+                  <Form.Item name="appearance" label="可识别外貌"><Input.TextArea rows={6} /></Form.Item>
+                </details>
               </Form>
 
               {selectedCharacter ? (

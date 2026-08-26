@@ -8,7 +8,6 @@ import {
   InputNumber,
   Modal,
   Select,
-  Space,
   Spin,
   Tag,
   message,
@@ -65,13 +64,6 @@ interface StoryFactAIDraft {
   notes: string
   isKeyTruth?: boolean | string
 }
-
-const STATUS_LANES: Array<{ key: StoryFact['status']; label: string; hint: string }> = [
-  { key: 'introduced', label: '已出现', hint: '读者已见到，但尚未形成完整解释。' },
-  { key: 'partial_reveal', label: '半揭示', hint: '已有关键信息泄露，但真相未闭环。' },
-  { key: 'pending_payoff', label: '待回收', hint: '线索或假线索需要后续章节回收。' },
-  { key: 'explained', label: '已解释', hint: '谜题已被完整解释或真相已落地。' },
-]
 
 const KIND_OPTIONS: Array<{ value: StoryFact['kind']; label: string }> = [
   { value: 'puzzle', label: '谜题' },
@@ -202,6 +194,14 @@ function kindTagColor(kind: StoryFact['kind']) {
   return 'processing'
 }
 
+function kindLabel(kind: StoryFact['kind']): string {
+  return KIND_OPTIONS.find((item) => item.value === kind)?.label || kind
+}
+
+function statusLabel(status: StoryFact['status']): string {
+  return STATUS_OPTIONS.find((item) => item.value === status)?.label || status
+}
+
 function normalizeFactKind(value: unknown, fallback: StoryFact['kind'] = 'clue'): StoryFact['kind'] {
   if (value === 'puzzle' || value === 'clue' || value === 'truth' || value === 'red_herring') return value
   const text = typeof value === 'string' ? value.trim() : ''
@@ -236,7 +236,13 @@ export default function InfoGapBoardPage({ novelId }: Props) {
   const [editingFact, setEditingFact] = useState<StoryFact | null>(null)
   const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
   const [ratioDraft, setRatioDraft] = useState<number | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [kindFilter, setKindFilter] = useState<'all' | StoryFact['kind']>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | StoryFact['status']>('all')
+  const [selectedFactId, setSelectedFactId] = useState<number | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const refreshRequestRef = React.useRef(0)
+  const draftDirtyRef = React.useRef(false)
 
   const sortedVolumes = useMemo(
     () => [...volumes].sort((left, right) => (left.volumeNumber || 0) - (right.volumeNumber || 0)),
@@ -257,7 +263,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     [activeVolumeId, volumeById],
   )
 
-  const filteredFacts = useMemo(() => {
+  const volumeFacts = useMemo(() => {
     if (!activeVolume) return facts
     return facts.filter((fact) => (
       (!fact.volumeId && !fact.plannedRevealVolume && !fact.forbiddenBeforeVolume)
@@ -266,6 +272,35 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       || fact.forbiddenBeforeVolume === activeVolume.volumeNumber
     ))
   }, [activeVolume, facts])
+  const filteredFacts = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase()
+    return volumeFacts.filter((fact) => {
+      if (kindFilter !== 'all' && fact.kind !== kindFilter) return false
+      if (statusFilter !== 'all' && fact.status !== statusFilter) return false
+      if (!normalizedKeyword) return true
+      return [fact.title, fact.summary, fact.notes]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedKeyword))
+    })
+  }, [kindFilter, keyword, statusFilter, volumeFacts])
+  const selectedFact = useMemo(
+    () => filteredFacts.find((fact) => fact.id === selectedFactId) || filteredFacts[0] || null,
+    [filteredFacts, selectedFactId],
+  )
+  const currentChapterNum = useMemo(
+    () => Math.max(0, ...chapters.map((chapter) => chapter.chapterNum || 0)),
+    [chapters],
+  )
+  const selectedFactRisk = useMemo(() => {
+    if (!selectedFact) return null
+    if (selectedFact.status === 'explained') return { label: '已完成', color: 'success' as const }
+    if (selectedFact.targetRevealChapterId) {
+      const targetChapter = chapters.find((chapter) => chapter.id === selectedFact.targetRevealChapterId)
+      if (targetChapter && targetChapter.chapterNum <= currentChapterNum) return { label: '揭示计划已到期', color: 'error' as const }
+    }
+    if (selectedFact.status === 'pending_payoff') return { label: '待回收', color: 'warning' as const }
+    return { label: '按计划推进', color: 'processing' as const }
+  }, [chapters, currentChapterNum, selectedFact])
   const displayedVolumeLabel = useMemo(
     () => (activeVolume ? activeVolume.title?.trim() || `第${activeVolume.volumeNumber}卷` : '全部卷'),
     [activeVolume],
@@ -304,6 +339,9 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       setVolumes(volumeRows)
       setChapters(chapterRows)
       setCharacters(characterRows)
+      setSelectedFactId((current) => current && factRows.some((fact) => fact.id === current)
+        ? current
+        : factRows[0]?.id || null)
       setActiveVolumeId((current) => {
         if (current && volumeRows.some((volume) => volume.id === current)) return current
         const firstVolume = [...volumeRows].sort((left, right) => left.volumeNumber - right.volumeNumber)[0]
@@ -326,17 +364,40 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     setRatioDraft(activeVolume?.maxTruthRevealRatio ?? null)
   }, [activeVolume?.id, activeVolume?.maxTruthRevealRatio])
 
+  useEffect(() => {
+    setSelectedFactId((current) => filteredFacts.some((fact) => fact.id === current)
+      ? current
+      : filteredFacts[0]?.id || null)
+  }, [filteredFacts])
+
   const openEditor = useCallback((fact?: StoryFact) => {
     const target = fact || null
     setEditingFact(target)
+    draftDirtyRef.current = false
+    setHasUnsavedChanges(false)
     form.resetFields()
     form.setFieldsValue(toFormValues(target))
     setEditorOpen(true)
   }, [form])
 
-  const closeEditor = useCallback(() => {
-    setEditorOpen(false)
-    setEditingFact(null)
+  const closeEditor = useCallback((force = false) => {
+    const commit = () => {
+      draftDirtyRef.current = false
+      setHasUnsavedChanges(false)
+      setEditorOpen(false)
+      setEditingFact(null)
+    }
+    if (!force && draftDirtyRef.current) {
+      Modal.confirm({
+        title: '当前信息点还有未保存修改',
+        content: '关闭编辑会丢弃当前修改，是否继续？',
+        okText: '放弃修改并关闭',
+        cancelText: '留下继续编辑',
+        onOk: commit,
+      })
+      return
+    }
+    commit()
   }, [])
 
   const handleDelete = useCallback((fact: StoryFact) => {
@@ -385,7 +446,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         await window.electron.storyFact.create(novelId, payload)
       }
 
-      closeEditor()
+      closeEditor(true)
       await refresh()
       notifyWorkspaceMutation()
       message.success(getUserFacingMessage(editingFact ? 'infoGapBoard.updated' : 'infoGapBoard.created'))
@@ -463,59 +524,31 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     return () => registerEscapeHandler(null)
   }, [closeEditor, editorOpen, registerEscapeHandler])
 
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   return (
     <WorkspacePage
       className="novel-info-gap-page"
       layout="wide"
       heroVariant="compact"
+      eyebrow="剧情与伏笔 / 信息差"
       title="信息差与谜题板"
       description="独立维护谜题、线索、真相、假线索，并控制“谁何时知道什么”。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-            新建信息点
-          </Button>
-          <AIGenerateButton
-            novelId={novelId}
-            label="AI 草拟信息差"
-            intent="generate"
-            isJson
-            buildMessages={() => buildDraftMessages({
-              task: '信息差与谜题板条目',
-              mode: 'replace',
-              context: [
-                { label: '小说名', value: currentNovel?.title || '' },
-                { label: '题材', value: currentNovel?.genreName || '' },
-                { label: '简介', value: currentNovel?.synopsis || '' },
-                { label: '当前卷', value: activeVolume ? activeVolume.title || `第${activeVolume.volumeNumber}卷` : displayedVolumeLabel },
-                { label: '已有信息点', value: facts.slice(0, 10).map((fact) => `${fact.title}(${fact.kind}/${fact.status})`).join('、') },
-                { label: '已有谜题', value: puzzleFacts.slice(0, 8).map((fact) => fact.title).join('、') },
-                { label: '可用章节', value: chapters.slice(0, 12).map((chapter) => `第${chapter.chapterNum}章:${chapter.title || '未命名'}`).join('、') },
-                { label: '主要人物', value: characters.slice(0, 10).map((character) => character.fullName).join('、') },
-              ],
-              fields: [
-                { key: 'kind', label: '信息类型', hint: '只能输出 puzzle、clue、truth、red_herring 之一。' },
-                { key: 'title', label: '标题', hint: '像小说策划里的真实谜题或线索名，不要写泛泛主题。' },
-                { key: 'summary', label: '摘要', hint: '写清它让读者知道什么、误会什么，或暂时不能知道什么。' },
-                { key: 'status', label: '状态', hint: '只能输出 introduced、partial_reveal、pending_payoff、explained 之一。' },
-                { key: 'plannedRevealVolume', label: '计划揭示卷号', type: 'number', hint: '没有明确卷号可输出 0。' },
-                { key: 'targetRevealChapterNum', label: '计划揭示章号', type: 'number', hint: '优先使用可用章节中的章号，没有明确章号可输出 0。' },
-                { key: 'isKeyTruth', label: '是否关键真相', hint: '输出 true 或 false。' },
-                { key: 'notes', label: '控制备注', hint: '说明如何避免提前泄露，以及它要服务的冲突或反转。' },
-              ],
-              requirements: [
-                '不要重复已有信息点或已有谜题。',
-                '必须服务当前小说的主线、人物选择或伏笔回收，不要生成无关设定。',
-                '真相、假线索、线索之间要有可执行的揭示顺序，避免一次性解释完。',
-              ],
-            })}
-            onResult={applyAIDraft}
-          />
-          <Button icon={<SaveOutlined />} onClick={() => void handleSaveVolumeRatio()} loading={savingVolumeRatio} disabled={!activeVolume}>
-            保存卷级比例
-          </Button>
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: { key: 'create-fact', label: '新建信息点', icon: <PlusOutlined />, onClick: () => openEditor() },
+        secondary: [
+          { key: 'save-volume-ratio', label: '保存卷级比例', icon: <SaveOutlined />, loading: savingVolumeRatio, disabled: !activeVolume, onClick: () => void handleSaveVolumeRatio() },
+        ],
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -545,96 +578,186 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="卷级真相揭示比例">
-        <div className="novel-info-gap-board__section-stack">
-          <div className="novel-info-gap-board__toolbar">
+      <div className="novel-info-gap-board__status-rail" data-info-gap-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`novel-info-gap-board__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '信息点编辑器有未保存修改' : '目录与当前项目数据同步'}</strong>
+        <span>先定位一个谜题或真相，再在右侧检查揭示边界与角色认知。</span>
+      </div>
+
+      <div className="novel-info-gap-board__workspace">
+        <WorkspacePanel
+          title="信息点目录"
+          description={`当前范围：${displayedVolumeLabel} · ${filteredFacts.length}/${volumeFacts.length} 条`}
+          className="novel-info-gap-board__directory-panel"
+          bodyClassName="novel-info-gap-board__directory-body"
+        >
+          <div className="novel-info-gap-board__directory-toolbar" data-info-gap-filters>
+            <Input
+              allowClear
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="搜索标题、摘要或控制备注"
+              className="novel-info-gap-board__search"
+            />
             <Select
-              className="novel-info-gap-board__volume-select"
-              value={activeVolumeId || undefined}
-              onChange={(value) => setActiveVolumeId(value)}
-              options={sortedVolumes.map((volume) => ({
-                value: volume.id,
-                label: volume.title?.trim() || `第${volume.volumeNumber}卷`,
-              }))}
-              placeholder="选择卷"
+              value={kindFilter}
+              onChange={(value) => setKindFilter(value as 'all' | StoryFact['kind'])}
+              options={[{ value: 'all', label: '全部类型' }, ...KIND_OPTIONS]}
+              className="novel-info-gap-board__filter-select"
             />
-            <InputNumber
-              min={0}
-              max={1}
-              step={0.05}
-              value={ratioDraft == null ? undefined : ratioDraft}
-              onChange={(value) => setRatioDraft(typeof value === 'number' ? value : null)}
-              placeholder="上限比例(0~1)"
-              className="novel-info-gap-board__ratio-input"
+            <Select
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value as 'all' | StoryFact['status'])}
+              options={[{ value: 'all', label: '全部状态' }, ...STATUS_OPTIONS]}
+              className="novel-info-gap-board__filter-select"
             />
-            <Tag color="blue">{activeVolume ? `当前卷：${activeVolume.title || `第${activeVolume.volumeNumber}卷`}` : '未选择卷'}</Tag>
+            <AIGenerateButton
+              novelId={novelId}
+              label="AI 草拟信息差"
+              intent="generate"
+              isJson
+              buildMessages={() => buildDraftMessages({
+                task: '信息差与谜题板条目',
+                mode: 'replace',
+                context: [
+                  { label: '小说名', value: currentNovel?.title || '' },
+                  { label: '题材', value: currentNovel?.genreName || '' },
+                  { label: '当前卷', value: displayedVolumeLabel },
+                  { label: '已有信息点', value: facts.slice(0, 10).map((fact) => `${fact.title}(${fact.kind}/${fact.status})`).join('、') },
+                  { label: '可用章节', value: chapters.slice(0, 12).map((chapter) => `第${chapter.chapterNum}章:${chapter.title || '未命名'}`).join('、') },
+                ],
+                fields: [
+                  { key: 'kind', label: '信息类型', hint: '只能输出 puzzle、clue、truth、red_herring 之一。' },
+                  { key: 'title', label: '标题', hint: '写成真实谜题或线索名。' },
+                  { key: 'summary', label: '摘要', hint: '写清读者知道什么、误会什么。' },
+                  { key: 'status', label: '状态', hint: '只能输出 introduced、partial_reveal、pending_payoff、explained 之一。' },
+                  { key: 'plannedRevealVolume', label: '计划揭示卷号', type: 'number' },
+                  { key: 'targetRevealChapterNum', label: '计划揭示章号', type: 'number' },
+                  { key: 'isKeyTruth', label: '是否关键真相', hint: '输出 true 或 false。' },
+                  { key: 'notes', label: '控制备注', hint: '说明如何避免提前泄露。' },
+                ],
+                requirements: ['不要重复已有信息点。', '必须服务当前主线、人物选择或伏笔回收。'],
+              })}
+              onResult={applyAIDraft}
+            />
           </div>
-          <div className="novel-note-list">
+          {loading ? (
+            <div className="novel-info-gap-board__loading"><Spin /></div>
+          ) : filteredFacts.length === 0 ? (
+            <div className="novel-empty">没有匹配的信息点。可以清空筛选，或新建一条谜题/线索。</div>
+          ) : (
+            <div className="novel-info-gap-board__directory" role="list" data-info-gap-list>
+              {filteredFacts.map((fact) => (
+                <button
+                  type="button"
+                  role="listitem"
+                  key={fact.id}
+                  className={`novel-info-gap-board__directory-row${selectedFact?.id === fact.id ? ' is-selected' : ''}`}
+                  onClick={() => setSelectedFactId(fact.id)}
+                >
+                  <span className="novel-info-gap-board__directory-index">{String(fact.id).padStart(3, '0')}</span>
+                  <span className="novel-info-gap-board__directory-copy">
+                    <strong>{fact.title}</strong>
+                    <span>{fact.summary || '暂无摘要'}</span>
+                  </span>
+                  <span className="novel-info-gap-board__directory-meta">
+                    <Tag color={kindTagColor(fact.kind)}>{kindLabel(fact.kind)}</Tag>
+                    <Tag>{statusLabel(fact.status)}</Tag>
+                    {fact.targetRevealChapterId ? <span>揭示章已设</span> : <span>未设揭示章</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </WorkspacePanel>
+
+        <WorkspacePanel
+          title={selectedFact ? '当前信息点' : '当前详情'}
+          description={selectedFact ? `#${selectedFact.id} · ${kindLabel(selectedFact.kind)}` : '从左侧目录选择一条信息点'}
+          sticky
+          className="novel-info-gap-board__detail-panel"
+          bodyClassName="novel-info-gap-board__detail-body"
+        >
+          {selectedFact ? (
+            <div data-info-gap-current-detail>
+              <div className="novel-info-gap-board__detail-heading">
+                <div>
+                  <span className="novel-kicker">{statusLabel(selectedFact.status)}</span>
+                  <h3>{selectedFact.title}</h3>
+                </div>
+                {selectedFactRisk ? <Tag color={selectedFactRisk.color} data-info-gap-due-risk>{selectedFactRisk.label}</Tag> : null}
+              </div>
+              <p className="novel-info-gap-board__detail-summary">{selectedFact.summary || '暂无摘要。'}</p>
+              <div className="novel-info-gap-board__detail-facts">
+                <div><span>所属卷</span><strong>{selectedFact.volumeId ? volumeById.get(selectedFact.volumeId)?.title || `第${volumeById.get(selectedFact.volumeId)?.volumeNumber || '?'}卷` : '未绑定'}</strong></div>
+                <div><span>计划揭示</span><strong>{selectedFact.plannedRevealVolume ? `第${selectedFact.plannedRevealVolume}卷` : '未安排'}</strong></div>
+                <div><span>揭示章节</span><strong>{selectedFact.targetRevealChapterId ? `第${chapters.find((chapter) => chapter.id === selectedFact.targetRevealChapterId)?.chapterNum || '?'}章` : '未安排'}</strong></div>
+                <div><span>读者认知</span><strong>{selectedFact.readerKnownChapterId ? `第${chapters.find((chapter) => chapter.id === selectedFact.readerKnownChapterId)?.chapterNum || '?'}章` : '未记录'}</strong></div>
+                <div><span>主角认知</span><strong>{selectedFact.protagonistKnownChapterId ? `第${chapters.find((chapter) => chapter.id === selectedFact.protagonistKnownChapterId)?.chapterNum || '?'}章` : '未记录'}</strong></div>
+                <div><span>关键真相</span><strong>{selectedFact.kind === 'truth' ? (selectedFact.isKeyTruth ? '计入比例' : '不计入比例') : '不适用'}</strong></div>
+              </div>
+              <details className="novel-info-gap-board__detail-disclosure" open>
+                <summary>控制说明与角色认知</summary>
+                <div className="novel-info-gap-board__detail-disclosure-body">
+                  <p>{selectedFact.notes || '尚未填写控制备注。'}</p>
+                  <div className="novel-info-gap-board__knowledge-list">
+                    {parseCharacterKnowledgeJson(selectedFact.characterKnowledgeJson).map((entry) => (
+                      <Tag key={`${entry.characterId}-${entry.knownChapterId || 'none'}`}>
+                        {characters.find((character) => character.id === entry.characterId)?.fullName || `角色#${entry.characterId}`}
+                        {entry.knownChapterId ? ` · 第${chapters.find((chapter) => chapter.id === entry.knownChapterId)?.chapterNum || '?'}章知晓` : ' · 未设知晓章'}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+              </details>
+              <div className="novel-info-gap-board__detail-actions">
+                <Button type="primary" onClick={() => openEditor(selectedFact)}>编辑信息点</Button>
+                <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(selectedFact)}>删除</Button>
+              </div>
+            </div>
+          ) : <div className="novel-empty">当前没有可展示的详情。</div>}
+        </WorkspacePanel>
+      </div>
+
+      <WorkspacePanel title="揭示节奏与真相比例" description="卷级限制保留为轻量控制条，详细统计按需展开。">
+        <div className="novel-info-gap-board__control-strip">
+          <Select
+            value={activeVolumeId || undefined}
+            onChange={(value) => setActiveVolumeId(value)}
+            options={sortedVolumes.map((volume) => ({
+              value: volume.id,
+              label: volume.title?.trim() || `第${volume.volumeNumber}卷`,
+            }))}
+            placeholder="选择卷"
+            className="novel-info-gap-board__volume-select"
+          />
+          <InputNumber
+            min={0}
+            max={1}
+            step={0.05}
+            value={ratioDraft == null ? undefined : ratioDraft}
+            onChange={(value) => setRatioDraft(typeof value === 'number' ? value : null)}
+            placeholder="上限比例(0~1)"
+            className="novel-info-gap-board__ratio-input"
+          />
+          <Tag color={currentVolumeMetrics?.overLimit ? 'error' : 'blue'}>
+            {activeVolume ? `当前卷 ${displayedVolumeLabel} · 真相 ${currentVolumeMetrics?.plannedTruths || 0}/${currentVolumeMetrics?.totalTruths || 0}` : '未选择卷'}
+          </Tag>
+        </div>
+        <details className="novel-info-gap-board__volume-disclosure" data-info-gap-volume-constraints>
+          <summary>展开各卷揭示比例与超限风险</summary>
+          <div className="novel-info-gap-board__volume-list">
             {volumeMetrics.map(({ volume, metrics }) => (
-              <div key={volume.id} className="novel-note-list__item novel-info-gap-board__volume-row">
+              <div key={volume.id} className="novel-info-gap-board__volume-row">
                 <strong>{volume.title?.trim() || `第${volume.volumeNumber}卷`}</strong>
-                <Tag>{`真相 ${metrics.plannedTruths}/${metrics.totalTruths}`}</Tag>
-                <Tag color={metrics.overLimit ? 'error' : 'processing'}>
-                  {`比例 ${toPercent(metrics.ratio)}`}
-                </Tag>
-                <Tag color={metrics.limit == null ? 'default' : 'gold'}>
-                  {metrics.limit == null ? '未设上限' : `上限 ${toPercent(metrics.limit)}`}
-                </Tag>
+                <span>{`真相 ${metrics.plannedTruths}/${metrics.totalTruths}`}</span>
+                <Tag color={metrics.overLimit ? 'error' : 'processing'}>{`比例 ${toPercent(metrics.ratio)}`}</Tag>
+                <Tag color={metrics.limit == null ? 'default' : 'gold'}>{metrics.limit == null ? '未设上限' : `上限 ${toPercent(metrics.limit)}`}</Tag>
                 {metrics.overLimit ? <Tag color="error">超限</Tag> : null}
               </div>
             ))}
           </div>
-        </div>
-      </WorkspacePanel>
-
-      <WorkspacePanel title="谜题板看板">
-        {loading ? (
-          <div className="novel-info-gap-board__loading"><Spin /></div>
-        ) : (
-          <div className="novel-info-gap-board__board-stack">
-            <div className="novel-info-gap-board__muted">
-              当前筛选：{displayedVolumeLabel}
-            </div>
-            <div className="novel-info-gap-board__lane-grid">
-              {STATUS_LANES.map((lane) => {
-                const laneFacts = filteredFacts.filter((fact) => fact.status === lane.key)
-                return (
-                  <section key={lane.key} className="novel-panel novel-info-gap-board__lane-card">
-                    <div>
-                      <div className="novel-kicker">{lane.label}</div>
-                      <strong>{laneFacts.length} 条</strong>
-                      <div className="novel-info-gap-board__lane-hint">{lane.hint}</div>
-                    </div>
-                    {laneFacts.length === 0 ? (
-                      <div className="novel-empty">当前没有条目。</div>
-                    ) : (
-                      laneFacts.map((fact) => (
-                        <article key={fact.id} className="novel-panel novel-info-gap-board__fact-card">
-                          <div className="novel-info-gap-board__fact-head">
-                            <strong>{fact.title}</strong>
-                            <Tag color={kindTagColor(fact.kind)}>{KIND_OPTIONS.find((item) => item.value === fact.kind)?.label || fact.kind}</Tag>
-                          </div>
-                          <div className="novel-info-gap-board__fact-summary">
-                            {fact.summary || '暂无摘要'}
-                          </div>
-                          <div className="novel-info-gap-board__fact-tags">
-                            {fact.plannedRevealVolume ? <Tag>{`计划揭示：第${fact.plannedRevealVolume}卷`}</Tag> : null}
-                            {fact.forbiddenBeforeVolume ? <Tag color="warning">{`禁止提前到第${fact.forbiddenBeforeVolume}卷`}</Tag> : null}
-                            {fact.kind === 'truth' ? <Tag color={fact.isKeyTruth ? 'gold' : 'default'}>{fact.isKeyTruth ? '计入比例' : '不计入比例'}</Tag> : null}
-                          </div>
-                          <div className="novel-info-gap-board__fact-actions">
-                            <Button size="small" onClick={() => openEditor(fact)}>编辑</Button>
-                            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(fact)}>删除</Button>
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </section>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        </details>
       </WorkspacePanel>
 
       <Modal
@@ -642,11 +765,19 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         open={editorOpen}
         width={860}
         destroyOnHidden
-        onCancel={closeEditor}
+        onCancel={() => closeEditor()}
         onOk={() => void handleSave()}
         confirmLoading={saving}
       >
-        <Form form={form} layout="vertical" initialValues={EMPTY_FACT_FORM}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={EMPTY_FACT_FORM}
+          onValuesChange={() => {
+            draftDirtyRef.current = true
+            setHasUnsavedChanges(true)
+          }}
+        >
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="kind" label="类型" rules={[{ required: true, message: '请选择类型' }]}>

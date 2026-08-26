@@ -112,6 +112,7 @@ interface TimelineListPanelProps {
   selectedIds: number[]
   statusFilter: TimelineStatusFilter
   typeFilter: string
+  keyword: string
   volumeFilter: number | 'all'
   partFilter: number | 'all'
   chapterFilter: number | 'all'
@@ -123,6 +124,7 @@ interface TimelineListPanelProps {
   filterSummary: string
   onStatusChange: (value: TimelineStatusFilter) => void
   onTypeChange: (value: string) => void
+  onKeywordChange: (value: string) => void
   onVolumeChange: (value: number | 'all') => void
   onPartChange: (value: number | 'all') => void
   onChapterChange: (value: number | 'all') => void
@@ -138,6 +140,7 @@ export function TimelineListPanel({
   selectedIds,
   statusFilter,
   typeFilter,
+  keyword,
   volumeFilter,
   partFilter,
   chapterFilter,
@@ -149,6 +152,7 @@ export function TimelineListPanel({
   filterSummary,
   onStatusChange,
   onTypeChange,
+  onKeywordChange,
   onVolumeChange,
   onPartChange,
   onChapterChange,
@@ -159,14 +163,23 @@ export function TimelineListPanel({
   const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
 
   return (
-    <section className="novel-panel">
+    <section className="novel-panel novel-timeline-page__list-panel" data-timeline-event-list>
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{TIMELINE_TEXT.listTitle}</h2>
+          <div className="novel-panel__desc">按时间顺序定位事件；右侧只保留当前事件的完整因果详情。</div>
         </div>
         <div className="novel-panel__extra">
           <div className="novel-filter-bar novel-timeline-page__filter-bar">
             <div className="novel-filter-bar__row">
+              <Input
+                aria-label="搜索时间轴事件"
+                value={keyword}
+                allowClear
+                placeholder="搜索事件标题、摘要或线索"
+                className="novel-timeline-page__keyword"
+                onChange={(event) => onKeywordChange(event.target.value)}
+              />
               <Select value={statusFilter} options={statusOptions} onChange={onStatusChange} />
               <Select value={typeFilter} options={eventTypeOptions} onChange={onTypeChange} />
               <Select
@@ -197,19 +210,23 @@ export function TimelineListPanel({
         ) : pageData.total === 0 ? (
           <div className="novel-empty">{TIMELINE_TEXT.listEmpty}</div>
         ) : (
-          <div className="novel-timeline-page__list-shell">
+          <div className="novel-timeline-page__list-shell" data-timeline-event-list-body>
             <VirtualList data={pageData.items} height={listHeight} itemHeight={118} itemKey="id">
-              {(event: TimelineEvent) => (
+              {(event: TimelineEvent) => {
+                const statusMeta = TIMELINE_STATUS_META[event.status] || TIMELINE_STATUS_META.planned
+                return (
                 <button
                   key={event.id}
                   type="button"
                   onClick={(nativeEvent) => onSelect(event, nativeEvent)}
                   className={`novel-list-card novel-timeline-page__card-button ${selectedId === event.id ? 'novel-list-card--active' : ''} ${selectedIds.includes(event.id) ? 'novel-list-card--selected' : ''}`}
+                  aria-current={selectedId === event.id ? 'true' : undefined}
+                  data-timeline-event-id={event.id}
                 >
                   <div className="novel-kicker">{event.timeLabel}</div>
                   <div className="novel-list-card__title">{event.eventTitle}</div>
                   <div className="novel-list-card__meta">
-                    <Tag color={TIMELINE_STATUS_META[event.status].color}>{TIMELINE_STATUS_META[event.status].label}</Tag>
+                    <Tag color={statusMeta.color}>{statusMeta.label}</Tag>
                     {event.eventType ? <Tag>{event.eventType}</Tag> : null}
                     {event.isMajorEvent ? <Tag color="gold">{TIMELINE_TEXT.majorEvent}</Tag> : null}
                   </div>
@@ -220,7 +237,8 @@ export function TimelineListPanel({
                     {event.eventSummary || event.eventResult || TIMELINE_TEXT.emptySummary}
                   </div>
                 </button>
-              )}
+                )
+              }}
             </VirtualList>
             <Pagination
               current={pageData.page}
@@ -229,6 +247,7 @@ export function TimelineListPanel({
               size="small"
               showSizeChanger={false}
               onChange={onPageChange}
+              data-timeline-pagination
             />
           </div>
         )}
@@ -303,7 +322,7 @@ export function TimelineEditorPanel({
       : TIMELINE_TEXT.detailEmptyTitle
 
   return (
-    <section className="novel-panel">
+    <section className="novel-panel novel-timeline-page__detail-panel" data-timeline-event-detail>
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{panelTitle}</h2>

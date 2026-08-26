@@ -76,6 +76,21 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/WorldRules/index.tsx',
   'src/pages/Novel/MapExplorer/MapExplorerPage.tsx',
   'src/pages/Novel/ItemsWorkspace/index.tsx',
+  'src/pages/Novel/Glossary/index.tsx',
+  'src/pages/Novel/SceneTemplates/index.tsx',
+  'src/pages/Novel/Characters/CharacterWorkspace.tsx',
+  'src/pages/Novel/CharacterArcCenter/index.tsx',
+  'src/pages/Novel/Resistance/index.tsx',
+  'src/pages/Novel/Factions/index.tsx',
+  'src/pages/Novel/CoreSettings/index.tsx',
+  'src/pages/Novel/StoryThreads/index.tsx',
+  'src/pages/Novel/Endgame/index.tsx',
+  'src/pages/Novel/InfoGapBoard/index.tsx',
+  'src/pages/Novel/ForeshadowLedger/index.tsx',
+  'src/pages/Novel/GrowthSystem/index.tsx',
+  'src/pages/Novel/VolumeDesign/index.tsx',
+  'src/pages/Novel/StagePlanner/index.tsx',
+  'src/pages/Novel/Outline/index.tsx',
 ])
 const invalidLegacyContracts = calls.filter(({ tag }) => !/\bchrome\s*=\s*["']shared["']/.test(tag) && /\bactionContract\s*=/.test(tag))
 const sharedWithoutContract = sharedCalls.filter(({ tag }) => !/\bactionContract\s*=/.test(tag))

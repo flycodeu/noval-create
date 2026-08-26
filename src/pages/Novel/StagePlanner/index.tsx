@@ -133,7 +133,11 @@ export default function StagePlanner({ novelId }: Props) {
   const [assets, setAssets] = useState<CreativeStageAssetBinding[]>([])
   const [handoffs, setHandoffs] = useState<CreativeStageHandoffArtifact[]>([])
   const [stageContext, setStageContext] = useState<CreativeStageContext | null>(null)
-  const [selectedStageId, setSelectedStageId] = useState<number | null>(null)
+  const [selectedStageId, setSelectedStageId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    const stored = Number(window.sessionStorage.getItem(`novelforge-stage-planner:${novelId}`))
+    return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+  })
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<CreativeStage | null>(null)
@@ -235,6 +239,9 @@ export default function StagePlanner({ novelId }: Props) {
   }, [novelId])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (selectedStageId) window.sessionStorage.setItem(`novelforge-stage-planner:${novelId}`, String(selectedStageId))
+  }, [novelId, selectedStageId])
   useEffect(() => { void loadAssets(selectedStage?.id || null) }, [loadAssets, selectedStage?.id])
   useEffect(() => {
     setStageQualityReport(null)
@@ -413,23 +420,23 @@ export default function StagePlanner({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      eyebrow="卷章大纲 / 阶段计划"
       title="阶段计划"
       description="把百万字长篇拆成可交接的创作窗口：先锁当前真正要用的角色和地点，再随剧情推进增量扩展。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openStageForm()}>建立阶段</Button>
-          {selectedStage ? (
-            <>
-              <Button icon={<ArrowRightOutlined />} onClick={() => window.location.hash = buildWorkspaceRoute(novelId, `characters?stageId=${selectedStage.id}`)}>
-                查看人物窗口
-              </Button>
-              <Button icon={<ArrowRightOutlined />} onClick={() => window.location.hash = buildWorkspaceRoute(novelId, `map?stageId=${selectedStage.id}`)}>
-                查看地图窗口
-              </Button>
-            </>
-          ) : null}
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: { key: 'create-stage', label: '建立阶段', icon: <PlusOutlined />, onClick: () => openStageForm() },
+        secondary: selectedStage ? [
+          { key: 'stage-characters', label: '查看人物窗口', icon: <ArrowRightOutlined />, onClick: () => { window.location.hash = buildWorkspaceRoute(novelId, `characters?stageId=${selectedStage.id}`) } },
+          { key: 'stage-map', label: '查看地图窗口', icon: <ArrowRightOutlined />, onClick: () => { window.location.hash = buildWorkspaceRoute(novelId, `map?stageId=${selectedStage.id}`) } },
+        ] : [],
+        more: {
+          items: selectedStage ? [
+            { key: 'stage-edit', icon: <EditOutlined />, label: '编辑当前阶段', onClick: () => openStageForm(selectedStage) },
+            { key: 'stage-archive', icon: <DeleteOutlined />, danger: true, label: '归档当前阶段', disabled: selectedStage.status === 'archived', onClick: () => void handleArchive(selectedStage) },
+          ] : [],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary items={[
           { label: '当前阶段', value: currentStatus },
@@ -457,15 +464,21 @@ export default function StagePlanner({ novelId }: Props) {
       className="creative-stage-page"
       layout="wide"
     >
+      <div className="creative-stage-status-rail" data-stage-save-state="saved">
+        <span className="creative-stage-status-rail__dot" aria-hidden="true" />
+        <strong>阶段目录与当前对象已分离</strong>
+        <span>先选一个章节窗口，正文召回包、质量快照和交接工件都只针对当前阶段。</span>
+      </div>
       <div className="creative-stage-layout">
-        <WorkspacePanel title="阶段序列" description="每个阶段都保留自己的章节范围、目标和交接条件。">
-          <div className="creative-stage-list" aria-busy={loading}>
+        <WorkspacePanel title="阶段目录" description={`${stages.length} 个阶段 · 选择一个当前对象`}>
+          <div className="creative-stage-list" aria-busy={loading} data-stage-list>
             {stages.map((stage) => (
               <button
                 type="button"
                 key={stage.id}
                 className={`creative-stage-card${selectedStage?.id === stage.id ? ' is-selected' : ''}`}
                 onClick={() => setSelectedStageId(stage.id)}
+                data-stage-id={stage.id}
               >
                 <span className="creative-stage-card__index">{String(stage.sequence).padStart(2, '0')}</span>
                 <span className="creative-stage-card__body">
@@ -490,7 +503,7 @@ export default function StagePlanner({ novelId }: Props) {
           </div>
         </WorkspacePanel>
 
-        <div className="creative-stage-detail-column">
+        <div className="creative-stage-detail-column" data-stage-current-detail>
           <WorkspacePanel
             title={selectedStage ? selectedStage.name : '阶段详情'}
             description={selectedStage ? `${stageKindLabel(selectedStage.kind)} · ${formatCreativeStageRange(selectedStage)}` : '选择一个阶段开始登记资产。'}
@@ -544,6 +557,8 @@ export default function StagePlanner({ novelId }: Props) {
                   </div>
                 ) : null}
                 {stageContext ? (
+                  <details className="creative-stage-disclosure" data-stage-quality>
+                    <summary>阶段质量快照与 AI 评审</summary>
                   <div className="creative-stage-quality">
                     <div className="creative-stage-quality__head">
                       <span>阶段质量快照</span>
@@ -630,11 +645,14 @@ export default function StagePlanner({ novelId }: Props) {
                       </div>
                     ) : null}
                   </div>
+                  </details>
                 ) : null}
               </>
             ) : <div className="creative-stage-empty">建立阶段后，这里会显示它的剧情边界和资产焦点。</div>}
           </WorkspacePanel>
 
+          <details className="creative-stage-disclosure" data-stage-handoff>
+            <summary>阶段交接工件</summary>
           <WorkspacePanel title="阶段交接工件" description="先记录变化、代价、未决问题和下一压力；审核通过后由作者确认，才会进入下一阶段召回。">
             {selectedStage ? (
               <>
@@ -681,7 +699,10 @@ export default function StagePlanner({ novelId }: Props) {
               </>
             )}
           </WorkspacePanel>
+          </details>
 
+          <details className="creative-stage-disclosure" data-stage-assets>
+            <summary>阶段资产焦点</summary>
           <WorkspacePanel title="阶段资产焦点" description="先登记最小可用信息；正文推进后再升级为完整正典卡片。">
             {selectedStage ? (
               <>
@@ -724,6 +745,7 @@ export default function StagePlanner({ novelId }: Props) {
               </>
             ) : <div className="creative-stage-assets__empty">选择阶段后，可在这里登记人物、地点和剧情线程。</div>}
           </WorkspacePanel>
+          </details>
         </div>
       </div>
 

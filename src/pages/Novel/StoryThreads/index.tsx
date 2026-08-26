@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
-import { ArrowRightOutlined, BarsOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, BarsOutlined, DeleteOutlined, DragOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import type { ForeshadowSnapshot, StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
@@ -173,6 +174,26 @@ function formatChapter(value?: number | null): string {
   return `第 ${value} 章`
 }
 
+function countJsonItems(raw?: string | null): number {
+  if (!raw) return 0
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
+
+function buildThreadReferenceSummary(thread: StoryThread): string {
+  const references = [
+    countJsonItems(thread.relatedCharacterIdsJson) > 0 ? `${countJsonItems(thread.relatedCharacterIdsJson)} 个角色` : '',
+    countJsonItems(thread.relatedItemIdsJson) > 0 ? `${countJsonItems(thread.relatedItemIdsJson)} 件物品` : '',
+    countJsonItems(thread.relatedTimelineEventIdsJson) > 0 ? `${countJsonItems(thread.relatedTimelineEventIdsJson)} 个事件` : '',
+  ].filter(Boolean)
+  if (references.length === 0 && typeof thread.lastReferencedChapter !== 'number') return '尚无引用来源'
+  return `来源：${references.join('、') || '章节挂载'}${typeof thread.lastReferencedChapter === 'number' ? ` · 最近第 ${thread.lastReferencedChapter} 章` : ''}`
+}
+
 function hasFilledValues(values: Array<string | undefined | null>): boolean {
   return values.some((value) => Boolean(value && value.trim()))
 }
@@ -184,6 +205,10 @@ interface StoryThreadRowProps {
   onEdit: (thread: StoryThread) => void
   onRegenerate: (thread: StoryThread) => void
   onDelete: (thread: StoryThread) => void
+  onDragStart: (thread: StoryThread) => void
+  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void
+  onDrop: (thread: StoryThread) => void
+  dragging: boolean
   regenerating: boolean
 }
 
@@ -194,19 +219,24 @@ const StoryThreadRow = React.forwardRef<HTMLDivElement, StoryThreadRowProps>(fun
   onEdit,
   onRegenerate,
   onDelete,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  dragging,
   regenerating,
 }, ref) {
   return (
-    <div ref={ref} className={`story-threads__row ${selected ? 'story-threads__row--selected' : ''}`}>
-      <Checkbox
-        checked={selected}
-        onChange={(e) => onSelect(thread.id, e.target.checked)}
-      />
+    <div ref={ref} data-story-thread-row data-story-thread-id={thread.id} className={`story-threads__row ${selected ? 'story-threads__row--selected' : ''}${dragging ? ' story-threads__row--dragging' : ''}`} onDragOver={onDragOver} onDrop={(event) => { event.preventDefault(); onDrop(thread) }}>
+      <button type="button" className="story-threads__drag-handle" draggable aria-label={`拖拽排序：${thread.title}`} title="拖拽调整顺序" onDragStart={() => onDragStart(thread)}>
+        <DragOutlined />
+      </button>
+      <Checkbox checked={selected} onChange={(e) => onSelect(thread.id, e.target.checked)} />
       <div className="story-threads__table-cell">
         <strong>{thread.title}</strong>
-        <div className="story-threads__table-copy">
+      <div className="story-threads__table-copy">
           {thread.summary || thread.premise || '还没有写清这条线程在持续推动什么。'}
-        </div>
+      </div>
+        <div className="story-threads__row-reference">{buildThreadReferenceSummary(thread)}</div>
       </div>
       <Tag>{THREAD_TYPE_OPTIONS.find((item) => item.value === thread.threadType)?.label || thread.threadType}</Tag>
       <Tag color={getStatusColor(thread.status)}>{THREAD_STATUS_OPTIONS.find((item) => item.value === thread.status)?.label || thread.status}</Tag>
@@ -301,11 +331,18 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [batchPriority, setBatchPriority] = useState<StoryThread['priority']>('medium')
   const [page, setPage] = useState(1)
   const [viewMode, setViewMode] = useState<'board' | 'foreshadow'>('board')
+  const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
+  const [threadTypeFilter, setThreadTypeFilter] = useState<StoryThread['threadType'] | undefined>()
+  const [statusFilter, setStatusFilter] = useState<StoryThread['status'] | undefined>()
+  const [draggingThreadId, setDraggingThreadId] = useState<number | null>(null)
+  const [editorDirty, setEditorDirty] = useState(false)
   const routeEditorRef = useRef<number | null>(null)
   const routeEditorRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
   const generationActionRef = useRef(false)
   const saveActionRef = useRef(false)
+  const editorDirtyRef = useRef(false)
+  const reorderActionRef = useRef(false)
   const routeThreadId = useMemo(() => parseRouteId(searchParams.get('threadId')), [searchParams])
   const routeAction = useMemo(() => searchParams.get('action'), [searchParams])
   const generationBlockers = useMemo(
@@ -349,13 +386,18 @@ export default function StoryThreadsPage({ novelId }: Props) {
     ...editorValues,
   }), [editingThread, editorValues])
 
+  const setEditorDraftDirty = useCallback((value: boolean) => {
+    editorDirtyRef.current = value
+    setEditorDirty(value)
+  }, [])
+
   const refresh = useCallback(async (targetPage = page) => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats] = await Promise.all([
-        window.electron.thread.query({ novelId, page: targetPage, pageSize: THREADS_PAGE_SIZE }),
-        window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
+        window.electron.thread.query({ novelId, page: targetPage, pageSize: THREADS_PAGE_SIZE, keyword, threadType: threadTypeFilter, status: statusFilter }),
+        window.electron.thread.getStats({ novelId, page: 1, pageSize: 1, keyword, threadType: threadTypeFilter, status: statusFilter }),
         window.electron.thread.getForeshadowSnapshot(novelId),
         loadWorkflowStats(novelId),
       ])
@@ -372,30 +414,61 @@ export default function StoryThreadsPage({ novelId }: Props) {
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [novelId, page])
+  }, [keyword, novelId, page, statusFilter, threadTypeFilter])
 
   useEffect(() => {
     void refresh()
   }, [mutationToken, refresh])
+
+  useEffect(() => {
+    setPage(1)
+    setSelectedRowKeys([])
+  }, [keyword, statusFilter, threadTypeFilter])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   const openEditor = useCallback((thread?: StoryThread) => {
     setEditingThread(thread || null)
     editorForm.resetFields()
     editorForm.setFieldsValue(buildEditorValues(thread))
+    setEditorDraftDirty(false)
     setEditorOpen(true)
-  }, [editorForm])
+  }, [editorForm, setEditorDraftDirty])
 
-  const closeEditor = useCallback(() => {
-    routeEditorRequestRef.current += 1
-    routeEditorRef.current = null
-    setEditorOpen(false)
-    setEditingThread(null)
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.delete('threadId')
-    nextParams.delete('action')
-    if (nextParams.toString() !== searchParams.toString()) {
-      setSearchParams(nextParams, { replace: true })
+  const closeEditor = useCallback((force = false) => {
+    const commit = () => {
+      routeEditorRequestRef.current += 1
+      routeEditorRef.current = null
+      setEditorDraftDirty(false)
+      setEditorOpen(false)
+      setEditingThread(null)
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('threadId')
+      nextParams.delete('action')
+      if (nextParams.toString() !== searchParams.toString()) {
+        setSearchParams(nextParams, { replace: true })
+      }
     }
-  }, [searchParams, setSearchParams])
+    if (!force && editorDirtyRef.current) {
+      Modal.confirm({
+        title: '当前线程还有未保存修改',
+        content: '关闭编辑会丢弃当前修改，是否继续？',
+        okText: '放弃修改并关闭',
+        cancelText: '留下继续编辑',
+        onOk: commit,
+      })
+      return
+    }
+    commit()
+  }, [searchParams, setEditorDraftDirty, setSearchParams])
 
   useEffect(() => {
     const requestId = ++routeEditorRequestRef.current
@@ -477,7 +550,8 @@ export default function StoryThreadsPage({ novelId }: Props) {
         message.success(getUserFacingMessage('storyThread.created'))
       }
 
-      closeEditor()
+      setEditorDraftDirty(false)
+      closeEditor(true)
       await refresh()
       notifyWorkspaceMutation()
     } catch (error) {
@@ -487,7 +561,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       saveActionRef.current = false
       setSaving(false)
     }
-  }, [closeEditor, editingThread, editorForm, novelId, notifyWorkspaceMutation, refresh])
+  }, [closeEditor, editingThread, editorForm, novelId, notifyWorkspaceMutation, refresh, setEditorDraftDirty])
 
   useEffect(() => {
     registerSaveHandler(editorOpen ? () => { void handleSave() } : null)
@@ -513,7 +587,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
           await window.electron.thread.clear(novelId)
           setSelectedRowKeys([])
           setPage(1)
-          closeEditor()
+          closeEditor(true)
           editorForm.resetFields()
           await refresh(1)
           notifyWorkspaceMutation()
@@ -649,28 +723,56 @@ export default function StoryThreadsPage({ novelId }: Props) {
     }
   }
 
+  const handleThreadDrop = async (targetThread: StoryThread) => {
+    const sourceId = draggingThreadId
+    setDraggingThreadId(null)
+    if (!sourceId || sourceId === targetThread.id || reorderActionRef.current) return
+    const fromIndex = threads.findIndex((thread) => thread.id === sourceId)
+    const toIndex = threads.findIndex((thread) => thread.id === targetThread.id)
+    if (fromIndex < 0 || toIndex < 0) return
+
+    const nextThreads = [...threads]
+    const [moved] = nextThreads.splice(fromIndex, 1)
+    nextThreads.splice(toIndex, 0, moved)
+    setThreads(nextThreads)
+    reorderActionRef.current = true
+    try {
+      await Promise.all(nextThreads.map((thread, index) => window.electron.thread.update(thread.id, {
+        sortOrder: ((page - 1) * THREADS_PAGE_SIZE) + index + 1,
+      })))
+      notifyWorkspaceMutation()
+      message.success('线程顺序已保存')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'storyThread.saveFailed'))
+      await refresh()
+    } finally {
+      reorderActionRef.current = false
+    }
+  }
+
   return (
     <WorkspacePage
+      chrome="shared"
       className="novel-story-threads-page"
       layout="wide"
-      heroVariant="compact"
+      eyebrow="剧情推进"
       title="故事线程"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-            新建线程
-          </Button>
-          <Button icon={<RobotOutlined />} loading={generating} onClick={() => void openGenerateModal()}>
-            AI 生成·批量线程
-          </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'resistance'))}>
-            去反派与阻力
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>
-            去故事设计
-          </Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: { key: 'create', label: '新建线程', icon: <PlusOutlined />, onClick: () => openEditor() },
+        secondary: [
+          { key: 'story-design', label: '去故事设计', icon: <ArrowRightOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'story-design')) },
+          { key: 'resistance', label: '去反派与阻力', icon: <BarsOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'resistance')) },
+        ],
+        more: {
+          items: [
+            { key: 'generate', label: 'AI 生成·批量线程', icon: <RobotOutlined />, disabled: generating, onClick: () => void openGenerateModal() },
+            { key: 'refresh', label: '刷新线程数据', icon: <ReloadOutlined />, onClick: () => void refresh() },
+            { type: 'divider' },
+            { key: 'clear', label: '清空故事线程', icon: <DeleteOutlined />, danger: true, onClick: handleClear },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -690,6 +792,11 @@ export default function StoryThreadsPage({ novelId }: Props) {
         </>
       )}
     >
+      <div className="story-threads__status-rail" data-story-threads-focus="list">
+        <span className="story-threads__status-dot" aria-hidden="true" />
+        <strong>当前任务：定位下一条要推进的线程</strong>
+        <span>{editorDirty ? '编辑抽屉有未保存修改。' : keyword || threadTypeFilter || statusFilter ? '当前列表已按筛选条件收窄。' : '拖拽排序只改变推进顺序，不改变线程内容。'}</span>
+      </div>
       {generationBlockers.length > 0 ? (
         <Alert
           type="warning"
@@ -738,6 +845,30 @@ export default function StoryThreadsPage({ novelId }: Props) {
               { value: 'foreshadow', label: '伏笔追踪' },
             ]}
           />
+          {viewMode === 'board' ? (
+            <div className="story-threads__filters" data-story-threads-filters>
+              <Input.Search
+                allowClear
+                value={keywordInput}
+                onChange={(event) => setKeywordInput(event.target.value)}
+                placeholder="搜索线程标题、摘要或当前状态"
+              />
+              <Select
+                allowClear
+                value={threadTypeFilter}
+                options={THREAD_TYPE_OPTIONS}
+                placeholder="全部类型"
+                onChange={(value) => setThreadTypeFilter(value)}
+              />
+              <Select
+                allowClear
+                value={statusFilter}
+                options={THREAD_STATUS_OPTIONS}
+                placeholder="全部状态"
+                onChange={(value) => setStatusFilter(value)}
+              />
+            </div>
+          ) : null}
         </div>
         {viewMode === 'foreshadow' ? (
           <div className="story-threads__foreshadow-grid">
@@ -784,6 +915,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
             ) : (
               <>
                 <div className="story-threads__row story-threads__row--header">
+                  <span>排序</span>
                   <Checkbox
                     checked={selectedRowKeys.length === threads.length && threads.length > 0}
                     indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < threads.length}
@@ -802,6 +934,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
                       key={thread.id}
                       thread={thread}
                       selected={selectedRowKeys.includes(thread.id)}
+                      dragging={draggingThreadId === thread.id}
+                      onDragStart={(item) => setDraggingThreadId(item.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(item) => void handleThreadDrop(item)}
                       onSelect={(id, checked) => {
                         setSelectedRowKeys((prev) =>
                           checked ? [...prev, id] : prev.filter((k) => k !== id),
@@ -831,17 +967,22 @@ export default function StoryThreadsPage({ novelId }: Props) {
         )}
       </WorkspacePanel>
 
-      <Modal
+      <Drawer
         title={editingThread ? '编辑故事线程' : '新建故事线程'}
         open={editorOpen}
         forceRender
-        onCancel={closeEditor}
-        onOk={() => void handleSave()}
-        confirmLoading={saving}
-        okText={editingThread ? '保存修改' : '创建线程'}
-        width={760}
+        onClose={() => closeEditor()}
+        width={580}
+        footer={(
+          <Space>
+            <Button onClick={() => closeEditor()}>取消</Button>
+            <Button type="primary" loading={saving} onClick={() => void handleSave()}>
+              {editingThread ? '保存修改' : '创建线程'}
+            </Button>
+          </Space>
+        )}
       >
-        <Form form={editorForm} layout="vertical" initialValues={EMPTY_EDITOR_VALUES}>
+        <Form form={editorForm} layout="vertical" initialValues={EMPTY_EDITOR_VALUES} onValuesChange={() => setEditorDraftDirty(true)}>
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <AIGenerateButton
@@ -968,9 +1109,20 @@ export default function StoryThreadsPage({ novelId }: Props) {
                 <Input.TextArea rows={6} placeholder="补充风险点、伏笔位置，或与其他线程的耦合关系。" />
               </Form.Item>
             </div>
+            <details className="story-threads__advanced" data-story-threads-references>
+              <summary>
+                <span><strong>章节挂载与引用来源</strong><small>只显示已建立的引用摘要，不把低频 ID 挤进编辑表单。</small></span>
+                <Tag>按需查看</Tag>
+              </summary>
+              <div className="story-threads__reference-summary">
+                <span>{editingThread ? buildThreadReferenceSummary(editingThread) : '新线程尚未建立章节或实体引用。'}</span>
+                <span>{editingThread?.startChapter ? `起始：${formatChapter(editingThread.startChapter)}` : '尚未设置起始章位'}</span>
+                <span>{editingThread?.targetPayoffChapter ? `目标回收：${formatChapter(editingThread.targetPayoffChapter)}` : '尚未设置目标回收章位'}</span>
+              </div>
+            </details>
           </div>
         </Form>
-      </Modal>
+      </Drawer>
 
       <Modal
         title="AI 生成·批量故事线程"

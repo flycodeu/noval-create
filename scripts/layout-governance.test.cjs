@@ -71,8 +71,11 @@ assertPass(
     && qualityDashboardCss.includes('width: 96px'),
 )
 assertPass(
-  'foreshadow board cards fit the available narrow width',
-  foreshadowLedgerCss.includes('minmax(min(100%, 280px), 1fr)'),
+  'foreshadow ledger keeps its table inside a bounded local scroll region',
+  foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll')
+    && foreshadowLedgerCss.includes('overflow-x: auto')
+    && foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll .ant-table-wrapper')
+    && foreshadowLedgerCss.includes('min-width: 860px'),
 )
 assertPass(
   'outline pagination keeps drag indices local to the rendered page',

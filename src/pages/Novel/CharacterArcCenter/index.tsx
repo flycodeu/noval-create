@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Select, Spin, Tag, message } from 'antd'
 import { ArrowRightOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
@@ -98,11 +98,32 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [selectedRelationKey, setSelectedRelationKey] = useState<string | null>(null)
   const [characterDraft, setCharacterDraft] = useState<CharacterArcInput | null>(null)
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipArcInput | null>(null)
+  const [keywordInput, setKeywordInput] = useState('')
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [saving, setSaving] = useState(false)
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)
   const [beatDraft, setBeatDraft] = useState<CharacterArcBeatInput>({ novelId, arcId: 0, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
   const refreshRequestRef = useRef(0)
+  const draftDirtyRef = useRef(false)
+
+  const setDraftDirty = useCallback((value: boolean) => {
+    draftDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markDraftDirty = useCallback(() => setDraftDirty(true), [setDraftDirty])
+
+  const updateCharacterDraft = useCallback((patch: Partial<CharacterArcInput>) => {
+    markDraftDirty()
+    setCharacterDraft((current) => current ? { ...current, ...patch } : current)
+  }, [markDraftDirty])
+
+  const updateRelationshipDraft = useCallback((patch: Partial<RelationshipArcInput>) => {
+    markDraftDirty()
+    setRelationshipDraft((current) => current ? { ...current, ...patch } : current)
+  }, [markDraftDirty])
 
   const refresh = useCallback(async (showLoading = false) => {
     const requestId = ++refreshRequestRef.current
@@ -157,8 +178,49 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
     }
   }, [characters, dashboard, keyCharacters, protagonistCharacters, relations, searchParams, selectedCharacterId, selectedRelationKey])
 
-  useEffect(() => { setCharacterDraft(buildCharacterDraft(selectedCharacter, dashboard)) }, [dashboard, selectedCharacter])
-  useEffect(() => { setRelationshipDraft(buildRelationshipDraft(novelId, selectedRelation, dashboard)) }, [dashboard, novelId, selectedRelation])
+  useEffect(() => {
+    if (draftDirtyRef.current) return
+    setCharacterDraft(buildCharacterDraft(selectedCharacter, dashboard))
+    setDraftDirty(false)
+  }, [dashboard, selectedCharacter, setDraftDirty])
+  useEffect(() => {
+    if (draftDirtyRef.current) return
+    setRelationshipDraft(buildRelationshipDraft(novelId, selectedRelation, dashboard))
+    setDraftDirty(false)
+  }, [dashboard, novelId, selectedRelation, setDraftDirty])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
+
+  const filteredCharacters = useMemo(() => {
+    const needle = keywordInput.trim().toLowerCase()
+    const source = tab === 'protagonist' ? protagonistCharacters : keyCharacters
+    if (!needle) return source
+    return source.filter((item) => [
+      item.fullName,
+      item.occupation,
+      item.goals,
+      item.innerConflict,
+      item.characterArc,
+    ].filter(Boolean).join(' ').toLowerCase().includes(needle))
+  }, [keyCharacters, keywordInput, protagonistCharacters, tab])
+
+  const filteredRelations = useMemo(() => {
+    const needle = keywordInput.trim().toLowerCase()
+    if (!needle) return relations
+    return relations.filter((item) => {
+      const charA = characters.find((entry) => entry.id === item.charAId)?.fullName || ''
+      const charB = characters.find((entry) => entry.id === item.charBId)?.fullName || ''
+      return [charA, charB, item.relationLabel, item.relationType, item.description].filter(Boolean).join(' ').toLowerCase().includes(needle)
+    })
+  }, [characters, keywordInput, relations])
 
   const chapterOptions = useMemo(() => (dashboard?.chapters || []).map((item) => ({ value: item.id, label: `第${item.chapterNum}章 ${item.title}`.trim() })), [dashboard])
   const timelineOptions = useMemo(() => (dashboard?.timelineEvents || []).map((item) => ({ value: item.id, label: `${item.eventTitle} · ${item.timeLabel}` })), [dashboard])
@@ -175,6 +237,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         await window.electron.characterArc.upsertCharacterArc(characterDraft)
         message.success(getUserFacingMessage('characterArc.characterSaved'))
       }
+      setDraftDirty(false)
       await refresh()
     } catch (error) {
       console.error(error)
@@ -201,20 +264,74 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
     }
   }
 
+  const confirmDraftNavigation = useCallback((action: () => void) => {
+    if (!draftDirtyRef.current) {
+      action()
+      return
+    }
+    Modal.confirm({
+      title: '当前弧线还有未保存修改',
+      content: '切换人物、关系或弧线类型会放弃当前编辑内容。要先保存，还是放弃修改继续？',
+      okText: '放弃并切换',
+      cancelText: '留下继续编辑',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        setDraftDirty(false)
+        action()
+      },
+    })
+  }, [setDraftDirty])
+
+  const selectCharacter = useCallback((id: number) => {
+    confirmDraftNavigation(() => {
+      setSelectedCharacterId(id)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', tab)
+        next.set('characterId', String(id))
+        next.delete('pair')
+        return next
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams, tab])
+
+  const selectRelation = useCallback((key: string) => {
+    confirmDraftNavigation(() => {
+      setSelectedRelationKey(key)
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', 'relationships')
+        next.set('pair', key)
+        next.delete('characterId')
+        return next
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
+  const switchTab = useCallback((next: typeof tab) => {
+    confirmDraftNavigation(() => {
+      setTab(next)
+      setKeywordInput('')
+      setSearchParams((current) => {
+        const params = new URLSearchParams(current)
+        params.set('tab', next)
+        return params
+      })
+    })
+  }, [confirmDraftNavigation, setSearchParams])
+
   const renderCharacterList = (items: Character[]) => (
     <div className="novel-character-arc-center__list">
       {items.map((item) => {
         const arc = dashboard?.characterArcs.find((entry) => entry.characterId === item.id)
         return (
-          <button key={item.id} type="button" className={`novel-list-card novel-character-arc-center__list-card ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`} onClick={() => {
-            setSelectedCharacterId(item.id)
-            setSearchParams((current) => { const next = new URLSearchParams(current); next.set('tab', tab); next.set('characterId', String(item.id)); return next })
-          }}>
-            <div className="novel-list-card__title">
-              <span>{item.fullName}</span>
-              <Tag color={arc ? (arc.currentStatus === 'completed' ? 'success' : arc.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>{arc ? arc.currentStatus : '未建弧'}</Tag>
+          <button key={item.id} type="button" data-character-arc-list-row className={`novel-list-card novel-character-arc-center__list-card ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`} onClick={() => selectCharacter(item.id)}>
+            <div className="novel-character-arc-center__row-main">
+              <strong>{item.fullName}</strong>
+              <Tag color={arc ? (arc.currentStatus === 'completed' ? 'success' : arc.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>{arc ? STATUS_OPTIONS.find((option) => option.value === arc.currentStatus)?.label || arc.currentStatus : '未建弧'}</Tag>
             </div>
-            <div className="novel-list-card__desc">{arc?.latestBeatSummary || arc?.changeEvent || item.characterArc || item.innerConflict || '还没有建立持续变化轨迹。'}</div>
+            <span className="novel-character-arc-center__row-meta">{[item.roleType === 'protagonist' ? '主角' : item.roleType === 'major' ? '主要人物' : '关键角色', arc?.lastProgressChapterLabel || '尚无推进章', arc ? `${arc.beatCount} 条记录` : '待建立'].join(' · ')}</span>
+            <span className="novel-character-arc-center__row-desc">{arc?.latestBeatSummary || arc?.changeEvent || item.characterArc || item.innerConflict || '还没有建立持续变化轨迹。'}</span>
           </button>
         )
       })}
@@ -224,25 +341,23 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
 
   const renderRelationList = () => (
     <div className="novel-character-arc-center__list">
-      {relations.map((item) => {
+      {filteredRelations.map((item) => {
         const currentKey = pairKey(item.charAId, item.charBId)
         const arc = dashboard?.relationshipArcs.find((entry) => pairKey(entry.charAId, entry.charBId) === currentKey)
         const charA = characters.find((entry) => entry.id === item.charAId)?.fullName || '未知角色'
         const charB = characters.find((entry) => entry.id === item.charBId)?.fullName || '未知角色'
         return (
-          <button key={currentKey} type="button" className={`novel-list-card novel-character-arc-center__list-card ${selectedRelationKey === currentKey ? 'novel-list-card--active' : ''}`} onClick={() => {
-            setSelectedRelationKey(currentKey)
-            setSearchParams((current) => { const next = new URLSearchParams(current); next.set('tab', 'relationships'); next.set('pair', currentKey); return next })
-          }}>
-            <div className="novel-list-card__title">
-              <span>{`${charA} × ${charB}`}</span>
-              <Tag color={arc ? (arc.currentStatus === 'completed' ? 'success' : arc.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>{arc ? arc.currentStatus : '未建弧'}</Tag>
+          <button key={currentKey} type="button" data-character-arc-list-row className={`novel-list-card novel-character-arc-center__list-card ${selectedRelationKey === currentKey ? 'novel-list-card--active' : ''}`} onClick={() => selectRelation(currentKey)}>
+            <div className="novel-character-arc-center__row-main">
+              <strong>{`${charA} × ${charB}`}</strong>
+              <Tag color={arc ? (arc.currentStatus === 'completed' ? 'success' : arc.currentStatus === 'stalled' ? 'warning' : 'processing') : 'default'}>{arc ? STATUS_OPTIONS.find((option) => option.value === arc.currentStatus)?.label || arc.currentStatus : '未建弧'}</Tag>
             </div>
-            <div className="novel-list-card__desc">{arc?.changeEvent || item.relationLabel || item.description || '还没有拆成阶段变化。'}</div>
+            <span className="novel-character-arc-center__row-meta">{[item.relationLabel || item.relationType || '未命名关系', arc?.lastProgressChapterLabel || '尚无推进章', arc?.id ? '已建立弧线' : '待建立'].join(' · ')}</span>
+            <span className="novel-character-arc-center__row-desc">{arc?.changeEvent || item.relationLabel || item.description || '还没有拆成阶段变化。'}</span>
           </button>
         )
       })}
-      {relations.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先去角色系统建立人物关系。" /> : null}
+      {filteredRelations.length <= 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={relations.length > 0 ? '当前搜索没有关系' : '先去角色系统建立人物关系。'} /> : null}
     </div>
   )
 
@@ -253,13 +368,27 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   return (
     <>
       <WorkspacePage
+        chrome="shared"
+        className="novel-character-arc-center"
         title="人物弧线中心"
         description="维护主角弧、关键角色弧和关系弧，并登记章节层面的实际推进。"
-        actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'contracts'))}>去章节合同</Button><Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>刷新</Button></Space>}
+        actionContract={{
+          primary: { key: 'save', label: '保存当前弧线', icon: <SaveOutlined />, loading: saving, disabled: !characterDraft && !relationshipDraft, onClick: () => void saveCurrent() },
+          secondary: [
+            { key: 'beat', label: '登记推进', icon: <PlusOutlined />, disabled: tab === 'relationships' || !selectedArc?.id, onClick: () => setBeatOpen(true) },
+            { key: 'contracts', label: '去章节合同', icon: <EditOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'contracts')) },
+          ],
+          more: { items: [{ key: 'refresh', label: '刷新弧线数据', icon: <ReloadOutlined />, onClick: () => void refresh() }] },
+        }}
         contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '主角弧', value: dashboard?.protagonistArc ? '已建立' : '待建立' }, { label: '角色弧', value: `${dashboard?.characterArcs.length || 0} 条` }, { label: '关系弧', value: `${dashboard?.relationshipArcs.length || 0} 条` }]} />}
         metrics={<><WorkspaceMetric label="停滞弧线" value={(dashboard?.stalledCharacterCount || 0) + (dashboard?.stalledRelationshipCount || 0)} tone="warm" /><WorkspaceMetric label="关键角色候选" value={keyCharacters.length} /><WorkspaceMetric label="关系候选" value={relations.length} tone="cool" /><WorkspaceMetric label="最近推进" value={selectedArc?.lastProgressChapterLabel || '未记录'} /></>}
         guide={<WorkspaceStepGuide steps={[{ title: '先补主角弧', description: '主角必须有初始状态、误信和改变事件。', status: 'focus' }, { title: '再补关键角色弧', description: '至少补齐一名关键角色的变化轨迹。', status: 'todo' }, { title: '最后绑定关系弧', description: '把重要双人关系拆成阶段，并在章节合同里引用。', status: 'todo' }]} />}
       >
+        <div className="novel-character-arc-center__status-rail" data-character-arc-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+          <span className={`novel-character-arc-center__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+          <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前弧线同步'}</strong>
+          <span>{tab === 'relationships' ? (selectedRelation ? `${selectedRelation.relationLabel || '当前关系'} · 关系弧` : '从左侧选择关系对') : (selectedCharacter ? `${selectedCharacter.fullName} · 人物弧` : '从左侧选择人物')}</span>
+        </div>
         {refreshing ? <div className="novel-dashboard__refresh-indicator novel-workspace__refresh"><Spin size="small" /><span>正在同步人物弧线数据</span></div> : null}
         {characters.length <= 0 ? <Alert type="warning" showIcon message="还没有角色资产" description="先去角色系统建立主角和关键人物，再回来补人物弧线。" /> : null}
         <div className="novel-character-arc-center__tabs">
@@ -267,10 +396,23 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
             ['protagonist', '主角弧'],
             ['characters', '关键角色弧'],
             ['relationships', '关系弧'],
-          ].map(([value, label]) => <Button key={value} type={tab === value ? 'primary' : 'default'} onClick={() => { const next = value as typeof tab; setTab(next); setSearchParams((current) => { const params = new URLSearchParams(current); params.set('tab', next); return params }) }}>{label}</Button>)}
+          ].map(([value, label]) => <Button key={value} type={tab === value ? 'primary' : 'default'} onClick={() => switchTab(value as typeof tab)}>{label}</Button>)}
         </div>
         <div className="novel-character-studio">
-          <WorkspacePanel className="novel-character-studio__sidebar" title={tab === 'relationships' ? '关系对' : tab === 'protagonist' ? '主角' : '关键角色'} scrollable sticky>{tab === 'relationships' ? renderRelationList() : renderCharacterList(tab === 'protagonist' ? protagonistCharacters : keyCharacters)}</WorkspacePanel>
+          <WorkspacePanel
+            className="novel-character-studio__sidebar novel-character-arc-center__sidebar"
+            title={tab === 'relationships' ? '关系对' : tab === 'protagonist' ? '主角' : '关键角色'}
+            scrollable
+            sticky
+            extra={(
+              <div className="novel-character-arc-center__list-tools">
+                <Input.Search value={keywordInput} allowClear placeholder={tab === 'relationships' ? '搜索人物、关系或描述' : '搜索姓名、目标或矛盾'} onChange={(event) => setKeywordInput(event.target.value)} />
+                <span>{tab === 'relationships' ? `${filteredRelations.length} / ${relations.length} 对` : `${filteredCharacters.length} / ${(tab === 'protagonist' ? protagonistCharacters : keyCharacters).length} 人`}</span>
+              </div>
+            )}
+          >
+            <div data-character-arc-list>{tab === 'relationships' ? renderRelationList() : renderCharacterList(filteredCharacters)}</div>
+          </WorkspacePanel>
           <WorkspacePanel
             className="novel-character-studio__editor"
             title={tab === 'relationships' ? '关系弧编辑' : '人物弧编辑'}
@@ -320,6 +462,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
                   })}
                   onResult={(raw) => {
                     const draft = parseDraftJson<Partial<RelationshipArcInput>>(raw)
+                    markDraftDirty()
                     setRelationshipDraft((current) => current ? {
                       ...current,
                       relationLabelSnapshot: typeof draft.relationLabelSnapshot === 'string' ? draft.relationLabelSnapshot : current.relationLabelSnapshot,
@@ -388,6 +531,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
                   })}
                   onResult={(raw) => {
                     const draft = parseDraftJson<Partial<CharacterArcInput>>(raw)
+                    markDraftDirty()
                     setCharacterDraft((current) => current ? {
                       ...current,
                       startState: typeof draft.startState === 'string' ? draft.startState : current.startState,
@@ -405,36 +549,57 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
               ) : undefined)}
           >
             {tab === 'relationships' ? (relationshipDraft ? (
-              <div className="guided-step__field-grid">
-                <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>关系称呼</FieldLabel><Input value={relationshipDraft.relationLabelSnapshot} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, relationLabelSnapshot: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>关系类型</FieldLabel><Input value={relationshipDraft.relationTypeSnapshot} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, relationTypeSnapshot: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><FieldLabel>初始状态</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.startState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><FieldLabel>第一次裂缝</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.crackPoint} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, crackPoint: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><FieldLabel>关键改变事件</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.changeEvent} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>绑定时间轴</FieldLabel><Select allowClear value={relationshipDraft.changeTimelineEventId} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, changeTimelineEventId: value } : current)} options={timelineOptions} /></div>
-                <div className="guided-step__field-card"><FieldLabel>最终状态</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.endState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={relationshipDraft.currentStatus} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} /></div>
-                <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>最近推进章节</FieldLabel><Select allowClear value={relationshipDraft.lastProgressChapterId} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, lastProgressChapterId: value } : current)} options={chapterOptions} /></div>
-                <div className="guided-step__field-card"><FieldLabel>停滞原因</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.stalledReason} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><FieldLabel>备注</FieldLabel><Input.TextArea rows={6} value={relationshipDraft.notes} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
-              </div>
+              <>
+                <div className="novel-character-arc-center__selection-summary">
+                  <span>当前关系</span>
+                  <strong>{selectedRelation ? `${selectedRelation.relationLabel || '未命名关系'} · ${characters.find((item) => item.id === selectedRelation.charAId)?.fullName || '角色A'} × ${characters.find((item) => item.id === selectedRelation.charBId)?.fullName || '角色B'}` : '关系弧编辑'}</strong>
+                </div>
+                <div className="guided-step__field-grid novel-character-arc-center__field-grid--core">
+                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>关系称呼</FieldLabel><Input value={relationshipDraft.relationLabelSnapshot} onChange={(event) => updateRelationshipDraft({ relationLabelSnapshot: event.target.value })} /></div>
+                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>关系类型</FieldLabel><Input value={relationshipDraft.relationTypeSnapshot} onChange={(event) => updateRelationshipDraft({ relationTypeSnapshot: event.target.value })} /></div>
+                  <div className="guided-step__field-card"><FieldLabel>初始状态</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.startState} onChange={(event) => updateRelationshipDraft({ startState: event.target.value })} /></div>
+                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={relationshipDraft.currentStatus} onChange={(value) => updateRelationshipDraft({ currentStatus: value })} options={STATUS_OPTIONS} /></div>
+                </div>
+                <details className="novel-character-arc-center__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+                  <summary><span>展开关系弧细节</span><small>裂缝、改变事件、终局与章节绑定按需维护</small></summary>
+                  <div className="guided-step__field-grid">
+                    <div className="guided-step__field-card"><FieldLabel>第一次裂缝</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.crackPoint} onChange={(event) => updateRelationshipDraft({ crackPoint: event.target.value })} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>关键改变事件</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.changeEvent} onChange={(event) => updateRelationshipDraft({ changeEvent: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>绑定时间轴</FieldLabel><Select allowClear value={relationshipDraft.changeTimelineEventId} onChange={(value) => updateRelationshipDraft({ changeTimelineEventId: value })} options={timelineOptions} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>最终状态</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.endState} onChange={(event) => updateRelationshipDraft({ endState: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>最近推进章节</FieldLabel><Select allowClear value={relationshipDraft.lastProgressChapterId} onChange={(value) => updateRelationshipDraft({ lastProgressChapterId: value })} options={chapterOptions} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>停滞原因</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.stalledReason} onChange={(event) => updateRelationshipDraft({ stalledReason: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--full"><FieldLabel>备注</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.notes} onChange={(event) => updateRelationshipDraft({ notes: event.target.value })} /></div>
+                  </div>
+                </details>
+              </>
             ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先从左侧选择一对关系。" />) : (characterDraft ? (
               <>
-                <div className="guided-step__field-grid">
-                  <div className="guided-step__field-card"><FieldLabel>初始状态</FieldLabel><Input.TextArea rows={6} value={characterDraft.startState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>角色想要什么</FieldLabel><Input.TextArea rows={6} value={characterDraft.surfaceWant} onChange={(event) => setCharacterDraft((current) => current ? { ...current, surfaceWant: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>角色真正需要什么</FieldLabel><Input.TextArea rows={6} value={characterDraft.deepNeed} onChange={(event) => setCharacterDraft((current) => current ? { ...current, deepNeed: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>核心恐惧</FieldLabel><Input.TextArea rows={6} value={characterDraft.coreFear} onChange={(event) => setCharacterDraft((current) => current ? { ...current, coreFear: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>误信</FieldLabel><Input.TextArea rows={6} value={characterDraft.misbelief} onChange={(event) => setCharacterDraft((current) => current ? { ...current, misbelief: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>第一次裂缝章节</FieldLabel><Select allowClear value={characterDraft.firstCrackChapterId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, firstCrackChapterId: value } : current)} options={chapterOptions} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>关键改变事件</FieldLabel><Input.TextArea rows={6} value={characterDraft.changeEvent} onChange={(event) => setCharacterDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>绑定时间轴</FieldLabel><Select allowClear value={characterDraft.changeTimelineEventId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, changeTimelineEventId: value } : current)} options={timelineOptions} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>最终状态</FieldLabel><Input.TextArea rows={6} value={characterDraft.endState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={characterDraft.currentStatus} onChange={(value) => setCharacterDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} /></div>
-                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>最近推进章节</FieldLabel><Select allowClear value={characterDraft.lastProgressChapterId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, lastProgressChapterId: value } : current)} options={chapterOptions} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>停滞原因</FieldLabel><Input.TextArea rows={6} value={characterDraft.stalledReason} onChange={(event) => setCharacterDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><FieldLabel>备注</FieldLabel><Input.TextArea rows={6} value={characterDraft.notes} onChange={(event) => setCharacterDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
+                <div className="novel-character-arc-center__selection-summary">
+                  <span>当前人物</span>
+                  <strong>{selectedCharacter?.fullName || '人物弧编辑'}</strong>
+                  <small>{selectedCharacter?.characterArc || selectedCharacter?.innerConflict || '先建立一个能被章节看见的变化方向。'}</small>
                 </div>
+                <div className="guided-step__field-grid novel-character-arc-center__field-grid--core">
+                  <div className="guided-step__field-card"><FieldLabel>初始状态</FieldLabel><Input.TextArea rows={4} value={characterDraft.startState} onChange={(event) => updateCharacterDraft({ startState: event.target.value })} /></div>
+                  <div className="guided-step__field-card"><FieldLabel>角色想要什么</FieldLabel><Input.TextArea rows={4} value={characterDraft.surfaceWant} onChange={(event) => updateCharacterDraft({ surfaceWant: event.target.value })} /></div>
+                  <div className="guided-step__field-card"><FieldLabel>真正需要什么</FieldLabel><Input.TextArea rows={4} value={characterDraft.deepNeed} onChange={(event) => updateCharacterDraft({ deepNeed: event.target.value })} /></div>
+                  <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={characterDraft.currentStatus} onChange={(value) => updateCharacterDraft({ currentStatus: value })} options={STATUS_OPTIONS} /></div>
+                </div>
+                <details className="novel-character-arc-center__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+                  <summary><span>展开人物弧细节</span><small>恐惧、裂缝、改变事件、终局与停滞原因按需维护</small></summary>
+                  <div className="guided-step__field-grid">
+                    <div className="guided-step__field-card"><FieldLabel>核心恐惧</FieldLabel><Input.TextArea rows={4} value={characterDraft.coreFear} onChange={(event) => updateCharacterDraft({ coreFear: event.target.value })} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>误信</FieldLabel><Input.TextArea rows={4} value={characterDraft.misbelief} onChange={(event) => updateCharacterDraft({ misbelief: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>第一次裂缝章节</FieldLabel><Select allowClear value={characterDraft.firstCrackChapterId} onChange={(value) => updateCharacterDraft({ firstCrackChapterId: value })} options={chapterOptions} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>关键改变事件</FieldLabel><Input.TextArea rows={4} value={characterDraft.changeEvent} onChange={(event) => updateCharacterDraft({ changeEvent: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>绑定时间轴</FieldLabel><Select allowClear value={characterDraft.changeTimelineEventId} onChange={(value) => updateCharacterDraft({ changeTimelineEventId: value })} options={timelineOptions} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>最终状态</FieldLabel><Input.TextArea rows={4} value={characterDraft.endState} onChange={(event) => updateCharacterDraft({ endState: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>最近推进章节</FieldLabel><Select allowClear value={characterDraft.lastProgressChapterId} onChange={(value) => updateCharacterDraft({ lastProgressChapterId: value })} options={chapterOptions} /></div>
+                    <div className="guided-step__field-card"><FieldLabel>停滞原因</FieldLabel><Input.TextArea rows={4} value={characterDraft.stalledReason} onChange={(event) => updateCharacterDraft({ stalledReason: event.target.value })} /></div>
+                    <div className="guided-step__field-card guided-step__field-card--full"><FieldLabel>备注</FieldLabel><Input.TextArea rows={4} value={characterDraft.notes} onChange={(event) => updateCharacterDraft({ notes: event.target.value })} /></div>
+                  </div>
+                </details>
                 <div className="novel-character-arc-center__beats">
                   <strong>推进记录</strong>
                   {selectedArc?.beats.length ? selectedArc.beats.map((beat) => <div key={beat.id} className="novel-note-list__item"><strong>{beat.title || '未命名节点'}</strong><div>{`${beat.beatType}${beat.chapterLabel ? ` · ${beat.chapterLabel}` : ''}`}</div>{beat.summary ? <small>{beat.summary}</small> : null}</div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有推进记录。" />}

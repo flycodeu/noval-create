@@ -1,5 +1,236 @@
 .novel-contracts-page__chapter-select {
   min-width: 320px;
+  width: 100%;
+}
+
+.novel-contracts-page__workspace {
+  display: grid;
+  grid-template-columns: minmax(276px, 0.34fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.novel-contracts-page__navigator,
+.novel-contracts-page__detail {
+  min-width: 0;
+}
+
+.novel-contracts-page__navigator {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  top: 16px;
+}
+
+.novel-contracts-page__navigator-panel,
+.novel-contracts-page__scene-navigator,
+.novel-contracts-page__detail > [data-contract-chapter-detail] > .novel-panel,
+.novel-contracts-page__detail > [data-contract-scene-detail] > .novel-panel {
+  min-width: 0;
+}
+
+.novel-contracts-page__navigator-panel .novel-panel__body {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.novel-contracts-page__chapter-search {
+  width: 100%;
+}
+
+.novel-contracts-page__chapter-list {
+  min-height: 0;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border-color, #d9d9d9) 80%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface, #fff) 88%, #f1f5f9);
+}
+
+.novel-contracts-page__chapter-item,
+.novel-contracts-page__scene-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.novel-contracts-page__chapter-item {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 9px 10px;
+}
+
+.novel-contracts-page__chapter-item:hover,
+.novel-contracts-page__scene-item:hover {
+  border-color: color-mix(in srgb, var(--color-primary, #1677ff) 26%, var(--border-color, #d9d9d9));
+  background: color-mix(in srgb, var(--color-primary, #1677ff) 7%, transparent);
+}
+
+.novel-contracts-page__chapter-item.is-active,
+.novel-contracts-page__scene-item.is-active {
+  border-color: color-mix(in srgb, var(--color-primary, #1677ff) 42%, var(--border-color, #d9d9d9));
+  background: color-mix(in srgb, var(--color-primary, #1677ff) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-primary, #1677ff);
+}
+
+.novel-contracts-page__chapter-item:focus-visible,
+.novel-contracts-page__scene-item:focus-visible,
+.novel-contracts-page__mode-bar button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-primary, #1677ff) 34%, transparent);
+  outline-offset: 2px;
+}
+
+.novel-contracts-page__chapter-number,
+.novel-contracts-page__scene-item > span,
+.novel-contracts-page__navigator-kicker {
+  color: var(--color-text-secondary, #667085);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.novel-contracts-page__chapter-title,
+.novel-contracts-page__scene-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary, #172033);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-contracts-page__chapter-status {
+  grid-column: 2;
+  color: var(--color-text-secondary, #667085);
+  font-size: 11px;
+}
+
+.novel-contracts-page__scene-navigator {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color, #d9d9d9) 86%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface, #fff) 94%, #f8fafc);
+}
+
+.novel-contracts-page__navigator-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.novel-contracts-page__navigator-heading h2 {
+  margin: 3px 0 0;
+  color: var(--color-text-primary, #172033);
+  font-size: 15px;
+}
+
+.novel-contracts-page__scene-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(42vh, 430px);
+  overflow-y: auto;
+  padding-right: 3px;
+  scrollbar-gutter: stable;
+}
+
+.novel-contracts-page__scene-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 9px 10px;
+}
+
+.novel-contracts-page__scene-item > span {
+  grid-column: 1 / -1;
+}
+
+.novel-contracts-page__scene-item .ant-tag {
+  grid-column: 2;
+  grid-row: 2;
+  margin-inline-end: 0;
+}
+
+.novel-contracts-page__navigator-empty {
+  padding: 14px 0 4px;
+  color: var(--color-text-secondary, #667085);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.novel-contracts-page__detail {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-contracts-page__mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--border-color, #d9d9d9) 86%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface, #fff) 92%, #f1f5f9);
+}
+
+.novel-contracts-page__mode-bar button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary, #667085);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.novel-contracts-page__mode-bar button:hover:not(:disabled) {
+  color: var(--color-text-primary, #172033);
+  background: color-mix(in srgb, var(--color-primary, #1677ff) 8%, transparent);
+}
+
+.novel-contracts-page__mode-bar button.is-active {
+  border-color: color-mix(in srgb, var(--color-primary, #1677ff) 30%, transparent);
+  background: var(--bg-surface, #fff);
+  color: var(--color-primary, #1677ff);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.novel-contracts-page__mode-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.novel-contracts-page__save-state {
+  margin-left: auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.novel-contracts-page__save-state.is-saved {
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+  color: #15803d;
+}
+
+.novel-contracts-page__save-state.is-dirty {
+  background: color-mix(in srgb, #d97706 16%, transparent);
+  color: #b45309;
+}
+
+.novel-contracts-page__detail > [hidden] {
+  display: none;
 }
 
 .novel-contracts-page__section-stack {
@@ -43,5 +274,22 @@
   .novel-contracts-page__chapter-select {
     min-width: 100%;
     width: 100%;
+  }
+
+  .novel-contracts-page__workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .novel-contracts-page__navigator {
+    position: static;
+  }
+
+  .novel-contracts-page__chapter-list {
+    max-height: 320px;
+  }
+
+  .novel-contracts-page__save-state {
+    flex-basis: 100%;
+    margin-left: 0;
   }
 }

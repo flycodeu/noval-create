@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
-import { ArrowRightOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
+import { Alert, Form, Input, Modal, Select, Tag, message } from 'antd'
+import { ArrowRightOutlined, DeleteOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
-import type { EndgameAssetSummary } from '../../../types'
+import type { EndgameAssetSummary, EndgameCommitment } from '../../../types'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
   buildStorySettingsPayload,
@@ -26,6 +26,7 @@ import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -129,10 +130,20 @@ export default function EndgamePage({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<EndgameFormValues>()
   const [saving, setSaving] = useState(false)
   const [assetSummary, setAssetSummary] = useState<EndgameAssetSummary | null>(null)
+  const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const draftDirtyRef = React.useRef(false)
+
+  const setDraftDirty = React.useCallback((value: boolean) => {
+    draftDirtyRef.current = value
+    setHasUnsavedChanges(value)
+  }, [])
+
+  const markDraftDirty = React.useCallback(() => setDraftDirty(true), [setDraftDirty])
 
   const settings = useMemo(
     () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
@@ -151,14 +162,29 @@ export default function EndgamePage({ novelId }: Props) {
 
   useEffect(() => {
     form.setFieldsValue(snapshot)
-  }, [form, snapshot])
+    setDraftDirty(false)
+  }, [form, setDraftDirty, snapshot])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
-    window.electron.endgameAsset.getSummary(novelId)
-      .then((summary) => {
-        if (!cancelled) setAssetSummary(summary)
-      })
+    Promise.all([
+      window.electron.endgameAsset.getSummary(novelId),
+      window.electron.endgameAsset.listCommitments(novelId),
+    ]).then(([summary, nextCommitments]) => {
+      if (cancelled) return
+      setAssetSummary(summary)
+      setCommitments(nextCommitments)
+    })
       .catch((error) => {
         console.error(error)
       })
@@ -184,7 +210,8 @@ export default function EndgamePage({ novelId }: Props) {
 
   const applyDraft = React.useCallback((draft: Partial<EndgameFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
-  }, [form, snapshot])
+    markDraftDirty()
+  }, [form, markDraftDirty, snapshot])
   const applyAnchorDraft = React.useCallback((draft: Partial<EndgameFormValues>) => {
     applyDraft({
       endingMode: draft.endingMode,
@@ -254,7 +281,7 @@ export default function EndgamePage({ novelId }: Props) {
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
-  const handleSave = async () => {
+  const handleSave = React.useCallback(async () => {
     const rawValues = await form.validateFields().catch(() => null)
     if (!rawValues) return
     const values = normalizeFormValues(rawValues)
@@ -282,6 +309,8 @@ export default function EndgamePage({ novelId }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      setDraftDirty(false)
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('endgame.savedWithAssets', { count: syncResult.summary.totalCount }))
     } catch (error) {
       console.error(error)
@@ -289,7 +318,7 @@ export default function EndgamePage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }
+  }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty])
 
   const handleImportFromStoryDesign = () => {
     const current = normalizeFormValues(buildCurrentFormValues(snapshot, form.getFieldsValue(true)))
@@ -341,37 +370,46 @@ export default function EndgamePage({ novelId }: Props) {
         const updated = await window.electron.novel.get(novelId)
         if (updated) setCurrentNovel(updated)
         form.setFieldsValue(EMPTY_ENDGAME_VALUES)
+        setDraftDirty(false)
         notifyWorkspaceMutation()
         message.success(getUserFacingMessage('endgame.cleared'))
       },
     })
-  }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
+  }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty])
 
   useEffect(() => {
     registerClearHandler(handleClear)
     return () => registerClearHandler(null)
   }, [handleClear, registerClearHandler])
 
+  useEffect(() => {
+    registerSaveHandler(() => { void handleSave() })
+    return () => registerSaveHandler(null)
+  }, [handleSave, registerSaveHandler])
+
   return (
     <WorkspacePage
+      chrome="shared"
       className="novel-endgame-page"
       layout="wide"
-      heroVariant="compact"
+      eyebrow="终局收束"
       title="终局设计"
       description="提前锁定最终冲突、兑现承诺和最后一幕，避免长篇只会向前扩写不会向后收束。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存终局设计
-          </Button>
-          <Button icon={<ImportOutlined />} onClick={handleImportFromStoryDesign}>
-            从故事设计导入初始化
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'map'))}>
-            去地图结构
-          </Button>
-        </Space>
-      )}
+      actionContract={{
+        primary: { key: 'save', label: '保存终局设计', icon: <SaveOutlined />, loading: saving, onClick: () => void handleSave() },
+        secondary: [
+          { key: 'story-design', label: '去故事设计', icon: <ArrowRightOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'story-design')) },
+          { key: 'volume-design', label: '去卷级设计', icon: <ArrowRightOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'volume-design')) },
+        ],
+        more: {
+          items: [
+            { key: 'import', label: '从故事设计导入初始化', icon: <ImportOutlined />, onClick: handleImportFromStoryDesign },
+            { key: 'map', label: '去地图结构', icon: <ArrowRightOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'map')) },
+            { type: 'divider' },
+            { key: 'clear', label: '清空终局设计', icon: <DeleteOutlined />, danger: true, onClick: handleClear },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -392,6 +430,12 @@ export default function EndgamePage({ novelId }: Props) {
         </>
       )}
     >
+      <div className="endgame-page__status-rail" data-endgame-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <span className={`endgame-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
+        <strong>{hasUnsavedChanges ? '有未保存修改' : '已与终局设计同步'}</strong>
+        <span>当前任务：先锁定最终冲突、主题答案和最后一幕，再补兑现清单。</span>
+      </div>
+
       {!currentNovel?.worldRulesJson ? (
         <Alert
           type="info"
@@ -419,22 +463,17 @@ export default function EndgamePage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel extra={<Tag color={readyCount >= 5 ? 'green' : 'blue'}>{readyCount >= 5 ? '可进入后续资产设计' : '建议先补关键终局锚点'}</Tag>}>
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>终局设计不等于一句结局说明</strong></div>
-            <p>这里要锁定的是“最后怎么收”“哪些承诺必须兑现”“哪些问题故意不解释”，不是再写一遍主线梗概。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>兑现链要具体</strong></div>
-            <p>“会回收伏笔”“会完成成长”这种句子没有约束力，必须写成可核对的承诺和回收清单。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>最后一幕要可视化</strong></div>
-            <p>终章意象和最后一幕写清后，后续卷级设计、时间轴和正文更容易对准同一落点。</p>
-          </div>
+      <details className="endgame-page__advanced" data-endgame-guidance>
+        <summary>
+          <span><strong>终局工作说明</strong><small>确认这页的边界，避免把故事设计再写一遍。</small></span>
+          <Tag color={readyCount >= 5 ? 'green' : 'blue'}>{readyCount >= 5 ? '锚点已成形' : '按需展开'}</Tag>
+        </summary>
+        <div className="endgame-page__guidance-grid">
+          <div><strong>锁定收束方式</strong><span>写清最后怎么收，不重复主线梗概。</span></div>
+          <div><strong>兑现链可核对</strong><span>承诺与回收写成后续可检查的条目。</span></div>
+          <div><strong>留白要有意图</strong><span>只保留少量明确的未解释项。</span></div>
         </div>
-      </WorkspacePanel>
+      </details>
 
       <WorkspacePanel
         title="终局锚点"
@@ -485,8 +524,8 @@ export default function EndgamePage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid">
+        <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
+          <div className="guided-step__field-grid" data-endgame-core-fields>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="endingMode" label="结局类型" rules={[{ required: true, message: '请选择结局类型' }]}>
                 <Select allowClear options={ENDGAME_MODE_OPTIONS} placeholder="选择终局收束方式" />
@@ -494,32 +533,37 @@ export default function EndgamePage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="finalConflict" label="最终冲突对象" rules={[{ required: true, message: '请写清最终冲突对象' }]}>
-                <Input.TextArea rows={6} placeholder="写清主角最后必须正面解决的核心对手、体制、真相或困局。" />
+                <Input.TextArea rows={4} placeholder="写清主角最后必须正面解决的核心对手、体制、真相或困局。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="themeAnswer" label="主题答案" rules={[{ required: true, message: '请写清主题答案' }]}>
-                <Input.TextArea rows={6} placeholder="写这本书最后给出的答案，不要写成空泛价值口号。" />
+                <Input.TextArea rows={4} placeholder="写这本书最后给出的答案，不要写成空泛价值口号。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="lastScene" label="最后一幕" rules={[{ required: true, message: '请写清最后一幕' }]}>
-                <Input.TextArea rows={6} placeholder="写终章最后停留在哪个场面、人物状态和情绪余波上。" />
+                <Input.TextArea rows={4} placeholder="写终章最后停留在哪个场面、人物状态和情绪余波上。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="finalImage" label="终章意象">
-                <Input.TextArea rows={6} placeholder="写会在结尾被看见或回响的意象、动作或空间画面。" />
+                <Input.TextArea rows={4} placeholder="写会在结尾被看见或回响的意象、动作或空间画面。" />
               </Form.Item>
             </div>
           </div>
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel
-        title="兑现与留白"
-        description="把必须兑现和故意保留的内容拆开写。"
-        extra={(
+      <details className="endgame-page__advanced endgame-page__advanced--payoff" data-endgame-payoff>
+        <summary>
+          <span><strong>兑现清单与留白</strong><small>核心锚点确认后，再展开整理承诺、回收点和有意留白。</small></span>
+          <Tag>{promiseCount + payoffCount} 条待核对</Tag>
+        </summary>
+        <WorkspacePanel
+          title="兑现与留白"
+          description="把必须兑现和故意保留的内容拆开写。"
+          extra={(
           <AIGenerateButton
             novelId={novelId}
             label="AI 生成·兑现与留白"
@@ -565,8 +609,8 @@ export default function EndgamePage({ novelId }: Props) {
             }}
           />
         )}
-      >
-        <Form form={form} layout="vertical">
+        >
+        <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
               <Form.Item name="mustDeliverPromises" label="必须兑现的承诺" rules={[{ required: true, message: '请写清必须兑现的承诺' }]}>
@@ -599,7 +643,30 @@ export default function EndgamePage({ novelId }: Props) {
             </div>
           </div>
         </Form>
-      </WorkspacePanel>
+        </WorkspacePanel>
+      </details>
+
+      <details className="endgame-page__advanced endgame-page__advanced--sources" data-endgame-sources>
+        <summary>
+          <span><strong>引用来源摘要</strong><small>只显示终局承诺被哪些卷、章节或伏笔引用，详情留给对应页面。</small></span>
+          <Tag color={commitments.length > 0 ? 'blue' : 'default'}>{commitments.length} 条承诺</Tag>
+        </summary>
+        <div className="endgame-page__source-list">
+          {commitments.length > 0 ? commitments.slice(0, 12).map((commitment) => (
+            <article key={commitment.id} className="endgame-page__source-row" data-endgame-source-row>
+              <div className="endgame-page__source-head">
+                <strong>{commitment.title}</strong>
+                <Tag color={commitment.overdue ? 'error' : commitment.derivedStatus === 'fulfilled' ? 'success' : 'default'}>
+                  {commitment.overdue ? '已超期' : commitment.derivedStatus === 'fulfilled' ? '已兑现' : commitment.commitmentKind === 'promise' ? '承诺' : '回收点'}
+                </Tag>
+              </div>
+              <span>{commitment.sourceText || commitment.description || '暂无来源摘要'}</span>
+              <small>{commitment.referenceCount > 0 ? `已被 ${commitment.referenceCount} 处引用` : '尚未被卷章结构引用'}{commitment.targetResolutionChapter ? ` · 目标第 ${commitment.targetResolutionChapter} 章` : ''}</small>
+            </article>
+          )) : <div className="novel-ui-empty-state">保存终局设计后，这里会显示承诺来源摘要。</div>}
+          {commitments.length > 12 ? <div className="endgame-page__source-foot">仅显示前 12 条摘要，完整引用关系请到卷级设计、章节合同或伏笔账本查看。</div> : null}
+        </div>
+      </details>
     </WorkspacePage>
   )
 }
