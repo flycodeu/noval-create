@@ -3,12 +3,11 @@ import {
   Alert,
   Button,
   Checkbox,
+  Drawer,
   Empty,
   Input,
   Popconfirm,
   Select,
-  Space,
-  Switch,
   Tabs,
   Tag,
   message,
@@ -16,6 +15,7 @@ import {
 import {
   DeleteOutlined,
   ExperimentOutlined,
+  PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
@@ -29,8 +29,6 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTrackedGeneration } from '../../../hooks/useTrackedGeneration'
 import {
-  WorkspaceContextSummary,
-  WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
@@ -137,6 +135,8 @@ export default function StyleLabPage({ novelId }: Props) {
   const [resolved, setResolved] = useState<ResolvedStyleFingerprintPayload | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [switchingId, setSwitchingId] = useState<number | null>(null)
+  const [activeView, setActiveView] = useState<'fingerprints' | 'ab'>('fingerprints')
+  const [drawerMode, setDrawerMode] = useState<'create' | 'ab' | null>(null)
 
   const [pasteName, setPasteName] = useState('')
   const [pasteText, setPasteText] = useState('')
@@ -161,6 +161,10 @@ export default function StyleLabPage({ novelId }: Props) {
       setFingerprints([...list].sort((left, right) => right.id - left.id))
       setResolved(resolvedPayload)
       setChapters(chapterList)
+      setAbFingerprintId((current) => {
+        if (current && list.some((item) => item.id === current)) return current
+        return resolvedPayload?.record.id || list[0]?.id || null
+      })
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'styleLab.loadFailed'))
@@ -256,6 +260,7 @@ export default function StyleLabPage({ novelId }: Props) {
     )
     if (result) {
       setAbResult(result)
+      setDrawerMode(null)
       message.success(getUserFacingMessage('styleLab.abTestDone'))
     }
   }
@@ -304,49 +309,81 @@ export default function StyleLabPage({ novelId }: Props) {
     ]
   }, [abResult])
 
+  const hasUnsavedCandidate = Boolean(
+    pasteName.trim()
+    || pasteText.trim()
+    || chapterName.trim()
+    || selectedChapterIds.length > 0
+    || sceneBrief.trim()
+    || abResult,
+  )
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedCandidate) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedCandidate])
+
   return (
     <WorkspacePage
       className="novel-style-lab-page"
       layout="wide"
       heroVariant="compact"
+      chrome="shared"
       title="文风实验室"
-      description="管理风格指纹、切换生效声线，并用 A/B 试写验证指纹对生成文本的真实影响。"
-      actions={(
-        <Button icon={<ReloadOutlined />} onClick={() => void loadData()}>
-          刷新
-        </Button>
-      )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-            {
-              label: '当前生效指纹',
-              value: resolved ? `${resolved.record.name}` : '暂无（生成时不注入风格约束）',
-            },
-            {
-              label: '生效来源',
-              value: resolved ? RESOLVE_SOURCE_LABEL[resolved.source] : '—',
-            },
-          ]}
-        />
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="本书指纹数" value={fingerprints.length} />
-          <WorkspaceMetric
-            label="生效方式"
-            value={resolved ? RESOLVE_SOURCE_LABEL[resolved.source] : '未生效'}
-            tone={resolved?.source === 'active' ? 'warm' : 'default'}
-
-          />
-        </>
-      )}
+      description="候选样本留在实验室；在指纹库与 A/B 对照之间切换，当前输入和结果不会重置。"
+      actionContract={{
+        primary: {
+          key: activeView === 'ab' ? 'ab-settings' : 'create-fingerprint',
+          label: activeView === 'ab' ? '设置试写参数' : '新建风格指纹',
+          icon: activeView === 'ab' ? <ExperimentOutlined /> : <PlusOutlined />,
+          onClick: () => setDrawerMode(activeView === 'ab' ? 'ab' : 'create'),
+        },
+        secondary: [
+          {
+            key: 'switch-view',
+            label: activeView === 'ab' ? '查看指纹库' : '进入 A/B 对照',
+            icon: <ExperimentOutlined />,
+            onClick: () => setActiveView(activeView === 'ab' ? 'fingerprints' : 'ab'),
+          },
+          {
+            key: 'refresh',
+            label: '刷新',
+            icon: <ReloadOutlined />,
+            onClick: () => void loadData(),
+          },
+        ],
+      }}
     >
+      <div className="style-lab__status-rail" data-style-lab-view={activeView}>
+        <div>
+          <strong>{activeView === 'ab' ? 'A/B 试写对照' : '风格指纹库'}</strong>
+          <span>{currentNovel?.title || '未命名小说'} · {currentNovel?.genreName || '未设置题材'}</span>
+        </div>
+        <div className="style-lab__status-meta">
+          <span>{fingerprints.length} 条指纹</span>
+          <span>{resolved ? `${RESOLVE_SOURCE_LABEL[resolved.source]} · ${resolved.record.name}` : '当前无生效指纹'}</span>
+        </div>
+      </div>
+
+      <Tabs
+        className="style-lab__view-tabs"
+        activeKey={activeView}
+        onChange={(key) => setActiveView(key as 'fingerprints' | 'ab')}
+        items={[
+          { key: 'fingerprints', label: `指纹库 ${fingerprints.length}` },
+          { key: 'ab', label: abResult ? 'A/B 对照 · 已生成' : 'A/B 对照' },
+        ]}
+      />
+
+      {activeView === 'fingerprints' ? (
       <WorkspacePanel
+        className="style-lab__main-surface"
         title="风格指纹库"
-        description="卡片展示每条指纹的来源与统计摘要；打开「设为当前」后写作流水线会注入该指纹。"
+        description="选择并确认后，写作流水线才会注入该指纹；诊断数据保持紧凑展示。"
       >
         {resolved && resolved.source !== 'active' ? (
           <Alert
@@ -359,7 +396,7 @@ export default function StyleLabPage({ novelId }: Props) {
         {fingerprints.length === 0 ? (
           <Empty description="还没有风格指纹。可以在下方粘贴范文或勾选章节生成第一条指纹。" />
         ) : (
-          <div className="style-lab__card-grid">
+          <div className="style-lab__fingerprint-list">
             {fingerprints.map((fingerprint) => {
               const stats = parseFingerprintCardStats(fingerprint)
               const sourceMeta = SOURCE_TYPE_META[fingerprint.sourceType || 'pasted'] || SOURCE_TYPE_META.pasted
@@ -367,7 +404,7 @@ export default function StyleLabPage({ novelId }: Props) {
               return (
                 <article
                   key={fingerprint.id}
-                  className={`style-lab__card${isActive ? ' style-lab__card--active' : ''}`}
+                  className={`style-lab__fingerprint-row${isActive ? ' is-active' : ''}`}
                 >
                   <div className="style-lab__card-head">
                     <strong className="style-lab__card-name">{fingerprint.name}</strong>
@@ -383,17 +420,17 @@ export default function StyleLabPage({ novelId }: Props) {
                   </div>
                   {stats.histogram ? <HistogramBar histogram={stats.histogram} /> : null}
                   <div className="style-lab__card-actions">
-                    <Space size={6}>
-                      <Switch
-                        size="small"
-                        checked={isActive}
-                        loading={switchingId === fingerprint.id}
-                        onChange={(next) => void handleToggleActive(fingerprint.id, next)}
-                      />
-                      <span className="style-lab__card-switch-label">
-                        {isActive ? '当前生效' : '设为当前'}
-                      </span>
-                    </Space>
+                    <Popconfirm
+                      title={isActive ? '停用当前风格指纹？' : `将「${fingerprint.name}」设为当前指纹？`}
+                      description={isActive ? '停用后会回退到最新指纹或题材默认声线。' : '确认后，后续写作流水线会注入这条指纹。'}
+                      okText={isActive ? '确认停用' : '确认生效'}
+                      cancelText="取消"
+                      onConfirm={() => void handleToggleActive(fingerprint.id, !isActive)}
+                    >
+                      <Button size="small" type={isActive ? 'default' : 'primary'} loading={switchingId === fingerprint.id}>
+                        {isActive ? '当前生效 · 停用' : '设为当前'}
+                      </Button>
+                    </Popconfirm>
                     <Popconfirm
                       title="删除这条风格指纹？"
                       description="删除后无法恢复；若它正在生效，会自动回退到兜底顺序。"
@@ -411,10 +448,13 @@ export default function StyleLabPage({ novelId }: Props) {
           </div>
         )}
       </WorkspacePanel>
+      ) : null}
 
-      <WorkspacePanel
+      <Drawer
         title="新建风格指纹"
-        description="两种来源：粘贴参考范文，或直接从本书章节采样。生成后可在上方列表中激活。"
+        width={680}
+        open={drawerMode === 'create'}
+        onClose={() => setDrawerMode(null)}
       >
         <Tabs
           defaultActiveKey="paste"
@@ -526,11 +566,13 @@ export default function StyleLabPage({ novelId }: Props) {
             },
           ]}
         />
-      </WorkspacePanel>
+      </Drawer>
 
+      {activeView === 'ab' ? (
       <WorkspacePanel
+        className="style-lab__main-surface style-lab__ab-surface"
         title="A/B 试写对照"
-        description="同一场景梗概生成两段约 400 字的文本：A 注入所选指纹约束，B 不注入，用统计指标验证指纹的真实影响。"
+        description="两段正文始终并排；试写参数和技术诊断按需打开。"
       >
         <div className="workspace-stack-16">
           {abGeneration.error ? (
@@ -546,33 +588,13 @@ export default function StyleLabPage({ novelId }: Props) {
               )}
             />
           ) : null}
-          <Space wrap>
-            <Select
-              className="style-lab__ab-select"
-              placeholder="选择用于对照的风格指纹"
-              value={abFingerprintId ?? undefined}
-              onChange={(value) => setAbFingerprintId(value)}
-              options={fingerprints.map((fingerprint) => ({
-                value: fingerprint.id,
-                label: fingerprint.name,
-              }))}
-            />
-            <Button
-              type="primary"
-              icon={<ExperimentOutlined />}
-              loading={abGeneration.running}
-              disabled={!abFingerprintId || !sceneBrief.trim()}
-              onClick={() => void handleRunAbTest()}
-            >
-              开始 A/B 试写
-            </Button>
-          </Space>
-          <Input.TextArea
-            rows={4}
-            placeholder="输入场景梗概，例如：主角在酒馆被三个人围住，他要在不惊动官府的情况下脱身。"
-            value={sceneBrief}
-            onChange={(event) => setSceneBrief(event.target.value)}
-          />
+          <div className="style-lab__ab-brief">
+            <div>
+              <strong>{fingerprints.find((item) => item.id === abFingerprintId)?.name || '尚未选择指纹'}</strong>
+              <span>{sceneBrief.trim() || '尚未填写试写场景；打开参数后再开始对照。'}</span>
+            </div>
+            <Button icon={<ExperimentOutlined />} onClick={() => setDrawerMode('ab')}>调整试写参数</Button>
+          </div>
           {abGeneration.running ? (
             <Alert type="info" showIcon message="正在生成两段对照文本，通常需要一到两分钟，请勿离开本页。" />
           ) : null}
@@ -593,8 +615,10 @@ export default function StyleLabPage({ novelId }: Props) {
                   <div className="style-lab__ab-text">{abResult.without.text}</div>
                 </div>
               </div>
-              <div className="style-lab__ab-table-wrap">
-                <table className="style-lab__ab-table">
+              <details className="style-lab__diagnostics">
+                <summary>查看对照诊断指标</summary>
+                <div className="style-lab__ab-table-wrap">
+                  <table className="style-lab__ab-table">
                   <thead>
                     <tr>
                       <th>指标</th>
@@ -613,12 +637,58 @@ export default function StyleLabPage({ novelId }: Props) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+              </details>
             </div>
-          ) : null}
+          ) : (
+            <div className="style-lab__ab-empty">
+              <span>A / B</span>
+              <strong>先确定指纹与场景，再生成第一组对照</strong>
+              <p>视图切换、打开或关闭参数面板都不会清空已经填写的候选内容。</p>
+              <Button type="primary" icon={<ExperimentOutlined />} onClick={() => setDrawerMode('ab')}>设置试写参数</Button>
+            </div>
+          )}
         </div>
       </WorkspacePanel>
+      ) : null}
+
+      <Drawer
+        title="A/B 试写参数"
+        width={620}
+        open={drawerMode === 'ab'}
+        onClose={() => setDrawerMode(null)}
+      >
+        <div className="style-lab__drawer-form">
+          <label htmlFor="style-lab-ab-fingerprint">对照指纹</label>
+          <Select
+            id="style-lab-ab-fingerprint"
+            className="style-lab__ab-select"
+            placeholder="选择用于对照的风格指纹"
+            value={abFingerprintId ?? undefined}
+            onChange={(value) => setAbFingerprintId(value)}
+            options={fingerprints.map((fingerprint) => ({ value: fingerprint.id, label: fingerprint.name }))}
+          />
+          <label htmlFor="style-lab-scene-brief">场景梗概</label>
+          <Input.TextArea
+            id="style-lab-scene-brief"
+            rows={7}
+            placeholder="例如：主角在酒馆被三个人围住，他要在不惊动官府的情况下脱身。"
+            value={sceneBrief}
+            onChange={(event) => setSceneBrief(event.target.value)}
+          />
+          {abGeneration.running ? <Alert type="info" showIcon message="正在生成两段对照文本，通常需要一到两分钟。" /> : null}
+          <Button
+            type="primary"
+            icon={<ExperimentOutlined />}
+            loading={abGeneration.running}
+            disabled={!abFingerprintId || !sceneBrief.trim()}
+            onClick={() => void handleRunAbTest()}
+          >
+            开始 A/B 试写
+          </Button>
+        </div>
+      </Drawer>
     </WorkspacePage>
   )
 }

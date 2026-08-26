@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, List, Modal, Select, Space, Tag, message } from 'antd'
-import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
+import { Alert, Button, Form, Input, Modal, Segmented, Select, Space, Tag, message } from 'antd'
+import { AppstoreAddOutlined, ArrowRightOutlined, ExperimentOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -27,13 +27,12 @@ import type {
   ThemeVoiceGenerationMode,
   ThemeVoiceGenerationResult,
 } from '../../../shared/theme-voice-generation'
+import type { Template } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
-  WorkspaceContextSummary,
-  WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
@@ -43,6 +42,7 @@ import {
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -241,16 +241,66 @@ function mergeGeneratedValues(
   }
 }
 
+interface StyleTemplateContent {
+  perspective?: string
+  sentence_style?: string
+  emotion_style?: string
+  dialogue_style?: string
+  description_style?: string
+  forbidden?: string[]
+  example_tone?: string
+}
+
+function parseStyleTemplate(template: Template): StyleTemplateContent {
+  if (!template.contentJson) return {}
+  try {
+    const parsed = JSON.parse(template.contentJson) as StyleTemplateContent
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function applyStyleTemplateValues(
+  current: ThemeVoiceFormValues,
+  template: Template,
+  mode: 'fill_blanks' | 'replace',
+): ThemeVoiceFormValues {
+  const content = parseStyleTemplate(template)
+  const pick = (existing: string, next?: string) => {
+    if (!next?.trim()) return existing
+    if (mode === 'fill_blanks' && existing.trim()) return existing
+    return next.trim()
+  }
+  const forbidden = Array.isArray(content.forbidden) ? content.forbidden.filter(Boolean).join('\n') : ''
+  return {
+    ...current,
+    emotionalCore: pick(current.emotionalCore, content.emotion_style),
+    narratorDistance: pick(current.narratorDistance, content.perspective),
+    voiceKeywords: pick(current.voiceKeywords, content.example_tone),
+    styleRules: pick(current.styleRules, content.sentence_style),
+    dialogueRules: pick(current.dialogueRules, content.dialogue_style),
+    descriptionRules: pick(current.descriptionRules, content.description_style),
+    forbiddenPhrases: pick(current.forbiddenPhrases, forbidden),
+    targetWorkSampleGuide: pick(current.targetWorkSampleGuide, content.example_tone),
+  }
+}
+
 export default function ThemeVoicePage({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ThemeVoiceFormValues>()
   const [saving, setSaving] = useState(false)
   const [generatingMode, setGeneratingMode] = useState<ThemeVoiceGenerationMode | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [stats, setStats] = useState({ totalWords: 0, revisionTaskCount: 0 })
+  const [styleTemplates, setStyleTemplates] = useState<Template[]>([])
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [templateApplyMode, setTemplateApplyMode] = useState<'fill_blanks' | 'replace'>('fill_blanks')
+  const [selectedStyleTemplateId, setSelectedStyleTemplateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
+  const [templateCandidateId, setTemplateCandidateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
 
   const snapshot = useMemo(
     () => parseThemeVoiceSnapshot(currentNovel?.themeVoiceJson),
@@ -260,6 +310,20 @@ export default function ThemeVoicePage({ novelId }: Props) {
   useEffect(() => {
     form.setFieldsValue(snapshot)
   }, [form, snapshot])
+
+  useEffect(() => {
+    setSelectedStyleTemplateId(currentNovel?.styleTemplateId || null)
+  }, [currentNovel?.styleTemplateId])
+
+  useEffect(() => {
+    let active = true
+    void window.electron.template.list('style').then((templates) => {
+      if (active) setStyleTemplates(templates.filter((template) => template.type === 'style'))
+    }).catch(console.error)
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -277,6 +341,18 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
   const watchedValues = (Form.useWatch([], form) as Partial<ThemeVoiceFormValues> | undefined) || {}
   const currentValues = buildCurrentFormValues(snapshot, watchedValues)
+  const persistedSignature = useMemo(() => JSON.stringify({
+    values: normalizeFormValues(snapshot),
+    styleTemplateId: currentNovel?.styleTemplateId || null,
+  }), [currentNovel?.styleTemplateId, snapshot])
+  const [lastSavedSignature, setLastSavedSignature] = useState(persistedSignature)
+  useEffect(() => {
+    setLastSavedSignature(persistedSignature)
+  }, [persistedSignature])
+  const hasUnsavedChanges = JSON.stringify({
+    values: normalizeFormValues(currentValues),
+    styleTemplateId: selectedStyleTemplateId,
+  }) !== lastSavedSignature
   const foundationCount = [
     currentValues.writingContractTags.length > 0,
     currentValues.theme,
@@ -356,14 +432,14 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     const rawValues = await form.validateFields().catch(() => null)
-    if (!rawValues) return
+    if (!rawValues) return false
     const values = normalizeFormValues(rawValues)
     const contractError = getWritingContractValidationError(values.writingContractTags)
     if (contractError) {
       message.warning(contractError)
-      return
+      return false
     }
 
     setSaving(true)
@@ -371,20 +447,80 @@ export default function ThemeVoicePage({ novelId }: Props) {
     try {
       await window.electron.novel.update(novelId, {
         themeVoiceJson: buildThemeVoicePayload(values, currentNovel?.themeVoiceJson),
+        styleTemplateId: selectedStyleTemplateId || undefined,
       })
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      setLastSavedSignature(JSON.stringify({ values, styleTemplateId: selectedStyleTemplateId }))
       await finalizeDraft(values)
       await clearDraft()
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('themeVoice.saved'))
+      return true
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'themeVoice.saveFailed'))
+      return false
     } finally {
       setSaving(false)
     }
+  }, [clearDraft, currentNovel?.themeVoiceJson, finalizeDraft, form, novelId, notifyWorkspaceMutation, selectedStyleTemplateId, setCurrentNovel])
+
+  const handleApplyTemplate = () => {
+    if (!templateCandidateId) {
+      message.warning('请先选择一个文风模板。')
+      return
+    }
+    const template = styleTemplates.find((item) => item.id === templateCandidateId)
+    if (!template) {
+      message.warning('所选文风模板已不可用，请刷新后重试。')
+      return
+    }
+    const nextValues = applyStyleTemplateValues(
+      buildCurrentFormValues(snapshot, form.getFieldsValue(true)),
+      template,
+      templateApplyMode,
+    )
+    form.setFieldsValue(nextValues)
+    setSelectedStyleTemplateId(template.id)
+    setTemplateOpen(false)
+    message.success(templateApplyMode === 'fill_blanks' ? '模板已补入空白文风字段，现有内容保持不变。' : '模板文风字段已覆盖到表单，保存后生效。')
   }
+
+  const navigateWithUnsavedGuard = (target: 'world-rules' | 'style-lab') => {
+    const leave = () => navigate(buildWorkspaceRoute(novelId, target))
+    if (!hasUnsavedChanges) {
+      leave()
+      return
+    }
+    Modal.confirm({
+      title: '主题与文风还有未保存修改',
+      content: '模板和规则都只在当前表单中，先保存再离开可避免内容丢失。',
+      okText: '保存并离开',
+      cancelText: '留在当前页',
+      onOk: async () => {
+        const saved = await handleSave()
+        if (saved) leave()
+      },
+    })
+  }
+
+  useEffect(() => {
+    registerSaveHandler(() => {
+      if (hasUnsavedChanges && !saving) void handleSave()
+    })
+    return () => registerSaveHandler(null)
+  }, [handleSave, hasUnsavedChanges, registerSaveHandler, saving])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges || saving) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges, saving])
 
   const handleGenerate = async (mode: ThemeVoiceGenerationMode) => {
     setGeneratingMode(mode)
@@ -459,50 +595,67 @@ export default function ThemeVoicePage({ novelId }: Props) {
       className="novel-theme-voice-page"
       layout="wide"
       heroVariant="compact"
+      chrome="shared"
       title="主题与文风"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存主题与文风
-          </Button>
-          <Button
-            icon={<RobotOutlined />}
-            loading={generatingMode === 'replace'}
-            disabled={Boolean(generatingMode)}
-            onClick={() => void handleGenerate('replace')}
-          >
-            AI 生成·首版
-          </Button>
-          <Button
-            loading={generatingMode === 'fill_blanks'}
-            disabled={Boolean(generatingMode)}
-            onClick={() => void handleGenerate('fill_blanks')}
-          >
-            AI 补全·空白字段
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'world-rules'))}>
-            去世界规则
-          </Button>
-        </Space>
-      )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '项目立项', value: currentNovel?.projectBriefJson ? '已存在' : '未设置' },
-            { label: '写作类型', value: formatWritingContractTags(currentValues.writingContractTags) || '待设定' },
-            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
-          ]}
-        />
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" />
-          <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} />
-          <WorkspaceMetric label="修订任务" value={stats.revisionTaskCount} />
-        </>
-      )}
+      description="确认全书长期执行的主题、视角、情绪与对白边界；实验候选留在文风实验室。"
+      actionContract={{
+        primary: {
+          key: 'save',
+          label: '保存主题与文风',
+          icon: <SaveOutlined />,
+          loading: saving,
+          onClick: () => void handleSave(),
+        },
+        secondary: [
+          {
+            key: 'template',
+            label: '应用文风模板',
+            icon: <AppstoreAddOutlined />,
+            onClick: () => {
+              setTemplateCandidateId(selectedStyleTemplateId || styleTemplates[0]?.id || null)
+              setTemplateOpen(true)
+            },
+          },
+          {
+            key: 'generate',
+            label: 'AI 生成·首版',
+            icon: <RobotOutlined />,
+            loading: generatingMode === 'replace',
+            disabled: Boolean(generatingMode),
+            onClick: () => void handleGenerate('replace'),
+          },
+          {
+            key: 'fill-blanks',
+            label: 'AI 补全·空白字段',
+            loading: generatingMode === 'fill_blanks',
+            disabled: Boolean(generatingMode),
+            onClick: () => void handleGenerate('fill_blanks'),
+          },
+          {
+            key: 'style-lab',
+            label: '去文风实验室',
+            icon: <ExperimentOutlined />,
+            onClick: () => navigateWithUnsavedGuard('style-lab'),
+          },
+          {
+            key: 'world-rules',
+            label: '去世界规则',
+            icon: <ArrowRightOutlined />,
+            onClick: () => navigateWithUnsavedGuard('world-rules'),
+          },
+        ],
+      }}
     >
+      <div className="theme-voice__status-rail" data-theme-voice-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+        <div>
+          <strong>{hasUnsavedChanges ? '有未保存修改' : '已确认的标准文风'}</strong>
+          <span>{formatWritingContractTags(currentValues.writingContractTags) || '待设定写作契约'} · 核心约束 {foundationCount}/8</span>
+        </div>
+        <div className="theme-voice__status-meta">
+          <span>高级细则 {detailCount}/12</span>
+          <span>修订任务 {stats.revisionTaskCount}</span>
+        </div>
+      </div>
       {!currentNovel?.projectBriefJson ? (
         <Alert
           type="info"
@@ -611,8 +764,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
                   }}
                 />
               </Space>
-              <div className="guided-step__field-grid">
-                <div className="guided-step__field-card guided-step__field-card--full">
+              <div className="theme-voice__core-grid" data-theme-voice-core-fields="visible">
+                <div className="theme-voice__field theme-voice__field--full">
                   <Form.Item
                     name="writingContractTags"
                     label="写作契约"
@@ -636,72 +789,53 @@ export default function ThemeVoicePage({ novelId }: Props) {
                     />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card">
+                <div className="theme-voice__field">
                   <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
-                    <Input.TextArea rows={6} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
+                    <Input.TextArea rows={4} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card">
-                  <Form.Item name="themeChapterTest" label="章节级主题验证">
-                    <Input.TextArea rows={6} placeholder="写每章冲突如何回应主题命题：选择、底线、代价或妥协必须如何落到现场。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
+                <div className="theme-voice__field">
                   <Form.Item name="emotionalCore" label="情感核心" rules={[{ required: true, message: '请写清情感核心' }]}>
-                    <Input.TextArea rows={6} placeholder="写读者最稳定收到的情绪回报和压强。" />
+                    <Input.TextArea rows={4} placeholder="写读者最稳定收到的情绪回报和压强。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--full">
-                  <Form.Item name="motifs" label="母题 / 重复意象">
-                    <Input.TextArea rows={6} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
+                <div className="theme-voice__field theme-voice__field--compact">
                   <Form.Item name="pov" label="叙事视角" rules={[{ required: true, message: '请选择叙事视角' }]}>
                     <Select options={POV_OPTIONS} placeholder="选择视角" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
+                <div className="theme-voice__field theme-voice__field--compact">
                   <Form.Item name="tense" label="时态" rules={[{ required: true, message: '请选择时态' }]}>
                     <Select options={TENSE_OPTIONS} placeholder="选择时态" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="protagonistCount" label="主角格局">
-                    <Select options={PROTAGONIST_COUNT_OPTIONS} placeholder="选择主角格局" allowClear />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="viewpointMode" label="视角调度">
-                    <Select options={VIEWPOINT_MODE_OPTIONS} placeholder="选择视角调度" allowClear />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="parallelTimelines" label="叙事线密度">
-                    <Select options={PARALLEL_TIMELINES_OPTIONS} placeholder="选择叙事线密度" allowClear />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="openingStyle" label="开篇方式">
-                    <Select options={OPENING_STYLE_OPTIONS} placeholder="选择开篇方式" allowClear />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--compact">
-                  <Form.Item name="flashbackPolicy" label="插叙策略">
-                    <Select options={FLASHBACK_POLICY_OPTIONS} placeholder="选择插叙策略" allowClear />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--full">
-                  <Form.Item name="narratorDistance" label="叙述距离">
-                    <Input.TextArea rows={6} placeholder="写叙述者与人物之间的距离，以及解释密度。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card guided-step__field-card--full">
-                  <Form.Item name="voiceKeywords" label="口吻关键词">
-                    <Input.TextArea rows={6} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" />
-                  </Form.Item>
-                </div>
               </div>
+              <details className="theme-voice__disclosure" data-theme-voice-disclosure="narrative-advanced">
+                <summary>
+                  <span>叙事调度与母题</span>
+                  <span>{compactText(currentValues.themeChapterTest || currentValues.motifs || currentValues.narratorDistance, 68)}</span>
+                  <b>按需展开</b>
+                </summary>
+                <div className="theme-voice__advanced-grid">
+                  <div className="theme-voice__field">
+                    <Form.Item name="themeChapterTest" label="章节级主题验证">
+                      <Input.TextArea rows={4} placeholder="写每章冲突如何回应主题命题：选择、底线、代价或妥协必须如何落到现场。" />
+                    </Form.Item>
+                  </div>
+                  <div className="theme-voice__field">
+                    <Form.Item name="motifs" label="母题 / 重复意象">
+                      <Input.TextArea rows={4} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
+                    </Form.Item>
+                  </div>
+                  <div className="theme-voice__field theme-voice__field--compact"><Form.Item name="protagonistCount" label="主角格局"><Select options={PROTAGONIST_COUNT_OPTIONS} placeholder="选择主角格局" allowClear /></Form.Item></div>
+                  <div className="theme-voice__field theme-voice__field--compact"><Form.Item name="viewpointMode" label="视角调度"><Select options={VIEWPOINT_MODE_OPTIONS} placeholder="选择视角调度" allowClear /></Form.Item></div>
+                  <div className="theme-voice__field theme-voice__field--compact"><Form.Item name="parallelTimelines" label="叙事线密度"><Select options={PARALLEL_TIMELINES_OPTIONS} placeholder="选择叙事线密度" allowClear /></Form.Item></div>
+                  <div className="theme-voice__field theme-voice__field--compact"><Form.Item name="openingStyle" label="开篇方式"><Select options={OPENING_STYLE_OPTIONS} placeholder="选择开篇方式" allowClear /></Form.Item></div>
+                  <div className="theme-voice__field theme-voice__field--compact"><Form.Item name="flashbackPolicy" label="插叙策略"><Select options={FLASHBACK_POLICY_OPTIONS} placeholder="选择插叙策略" allowClear /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="narratorDistance" label="叙述距离"><Input.TextArea rows={4} placeholder="写叙述者与人物之间的距离，以及解释密度。" /></Form.Item></div>
+                  <div className="theme-voice__field theme-voice__field--full"><Form.Item name="voiceKeywords" label="口吻关键词"><Input.TextArea rows={3} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" /></Form.Item></div>
+                </div>
+              </details>
             </div>
 
             <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--style">
@@ -768,186 +902,98 @@ export default function ThemeVoicePage({ novelId }: Props) {
                   }}
                 />
               </Space>
-              <div className="guided-step__field-grid">
-                <div className="guided-step__field-card">
+              <div className="theme-voice__core-grid theme-voice__core-grid--rules">
+                <div className="theme-voice__field">
                   <Form.Item name="styleRules" label="风格规则" rules={[{ required: true, message: '请补充风格规则' }]}>
-                    <Input.TextArea rows={5} placeholder="把句式、节奏和信息暴露方式写成规则，建议每行一条。" />
+                    <Input.TextArea rows={4} placeholder="把句式、节奏和信息暴露方式写成规则，建议每行一条。" />
                   </Form.Item>
                 </div>
-                <div className="guided-step__field-card">
+                <div className="theme-voice__field">
                   <Form.Item name="dialogueRules" label="对白规则" rules={[{ required: true, message: '请补充对白规则' }]}>
-                    <Input.TextArea rows={5} placeholder="写潜台词密度、句长控制、留白方式和人物区分度。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
-                  <Form.Item name="descriptionRules" label="描写规则">
-                    <Input.TextArea rows={6} placeholder="写场景、动作、心理描写的比例和取舍。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
-                  <Form.Item name="forbiddenPhrases" label="禁用表达">
-                    <Input.TextArea rows={6} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
-                  <Form.Item name="targetWorkSampleGuide" label="真实样章对照">
-                    <Input.TextArea rows={6} placeholder="写像不像目标作品时要核对的节奏、句式、对白比例、信息密度和现场质感。" />
-                  </Form.Item>
-                </div>
-                <div className="guided-step__field-card">
-                  <Form.Item name="humanStyleSampleLock" label="人工风格样本锁定">
-                    <Input.TextArea rows={6} placeholder="写人工样本必须保留的特征，以及哪些 AI 化偏移一出现就退回重写。" />
+                    <Input.TextArea rows={4} placeholder="写潜台词密度、句长控制、留白方式和人物区分度。" />
                   </Form.Item>
                 </div>
               </div>
+              <details className="theme-voice__disclosure" data-theme-voice-disclosure="style-advanced">
+                <summary>
+                  <span>描写、禁用表达与样本锁定</span>
+                  <span>{compactText(currentValues.descriptionRules || currentValues.forbiddenPhrases || currentValues.targetWorkSampleGuide, 68)}</span>
+                  <b>按需展开</b>
+                </summary>
+                <div className="theme-voice__advanced-grid">
+                  <div className="theme-voice__field"><Form.Item name="descriptionRules" label="描写规则"><Input.TextArea rows={4} placeholder="写场景、动作、心理描写的比例和取舍。" /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="forbiddenPhrases" label="禁用表达"><Input.TextArea rows={4} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="targetWorkSampleGuide" label="真实样章对照"><Input.TextArea rows={4} placeholder="写像不像目标作品时要核对的节奏、句式、对白比例、信息密度和现场质感。" /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="humanStyleSampleLock" label="人工风格样本锁定"><Input.TextArea rows={4} placeholder="写人工样本必须保留的特征，以及哪些 AI 化偏移一出现就退回重写。" /></Form.Item></div>
+                </div>
+              </details>
             </div>
           </div>
         </Form>
       </WorkspacePanel>
 
-      <StyleLearningPanel novelId={novelId} />
-    </WorkspacePage>
-  )
-}
-
-function StyleLearningPanel({ novelId }: { novelId: number }) {
-  const [referenceText, setReferenceText] = useState('')
-  const [fingerprintName, setFingerprintName] = useState('')
-  const [analyzing, setAnalyzing] = useState(false)
-  const [fingerprints, setFingerprints] = useState<Array<{
-    id: number
-    name: string
-    fingerprintJson: string | null
-    createdAt: string
-  }>>([])
-
-  const loadFingerprints = useCallback(async () => {
-    try {
-      const list = await window.electron.style.list(novelId)
-      setFingerprints(list)
-    } catch { /* ignore */ }
-  }, [novelId])
-
-  useEffect(() => { void loadFingerprints() }, [loadFingerprints])
-
-  const handleAnalyze = async () => {
-    if (!referenceText.trim() || referenceText.length < 500) {
-      message.warning(getUserFacingMessage('themeVoice.referenceTextTooShort'))
-      return
-    }
-    if (!fingerprintName.trim()) {
-      message.warning(getUserFacingMessage('themeVoice.styleNameRequired'))
-      return
-    }
-    setAnalyzing(true)
-    try {
-      await window.electron.style.create(novelId, fingerprintName.trim(), referenceText)
-      message.success(getUserFacingMessage('themeVoice.styleFingerprintApplied'))
-      setReferenceText('')
-      setFingerprintName('')
-      void loadFingerprints()
-    } catch (error) {
-      message.error(getUserFacingMessage('themeVoice.styleAnalysisFailed', {
-        detail: error instanceof Error ? error.message : '未知错误',
-      }))
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-  const handleDelete = (id: number, name: string) => {
-    Modal.confirm({
-      title: `删除风格指纹「${name}」？`,
-      content: '删除后无法恢复；如果它正在生效，系统会回退到兜底顺序。',
-      okText: '确认删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await window.electron.style.delete(id)
-          await loadFingerprints()
-          message.success(getUserFacingMessage('themeVoice.deleted'))
-        } catch (error) {
-          console.error(error)
-          message.error(getErrorMessage(error, 'common.deleteFailed'))
-        }
-      },
-    })
-  }
-
-  return (
-    <WorkspacePanel
-      title="风格学习"
-    >
-      <div className="workspace-stack-16">
-        <Input
-          placeholder={'风格名称，如"张三丰·冷硬派"'}
-          value={fingerprintName}
-          onChange={(e) => setFingerprintName(e.target.value)}
-          className="workspace-max-400"
-        />
-        <Input.TextArea
-          rows={8}
-          placeholder="粘贴参考文本（建议500字以上，越多越准）"
-          value={referenceText}
-          onChange={(e) => setReferenceText(e.target.value)}
-        />
+      <section className="theme-voice__lab-handoff">
         <div>
-          <Button
-            type="primary"
-            icon={<RobotOutlined />}
-            loading={analyzing}
-            onClick={() => void handleAnalyze()}
-            disabled={!referenceText.trim() || !fingerprintName.trim()}
-          >
-            分析并生成风格指纹
-          </Button>
-          <span className="workspace-text-small workspace-text-muted workspace-margin-left-12">
-            {referenceText.length} 字
-          </span>
+          <strong>实验风格与已确认规范分开管理</strong>
+          <span>样本采集、候选指纹和 A/B 试写已集中到文风实验室；这里仅保存最终确认的长期规则。</span>
         </div>
+        <Button icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>打开文风实验室</Button>
+      </section>
 
-        {fingerprints.length > 0 ? (
-          <div>
-            <div className="workspace-text-strong workspace-margin-bottom-8">已保存的风格指纹</div>
-            <List
-              size="small"
-              dataSource={fingerprints}
-              renderItem={(fp) => {
-                let preview = ''
-                if (fp.fingerprintJson) {
-                  try {
-                    const parsed = JSON.parse(fp.fingerprintJson)
-                    preview = [
-                      parsed.toneKeywords?.join('、'),
-                      parsed.paceProfile,
-                      parsed.dialogueStyle,
-                    ].filter(Boolean).join(' · ')
-                  } catch { /* ignore */ }
-                }
-                return (
-                  <List.Item
-                    actions={[
-                      <Button
-                        key="delete"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleDelete(fp.id, fp.name)}
-                      />,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={<Tag color="blue">{fp.name}</Tag>}
-                      description={preview || '无预览'}
-                    />
-                  </List.Item>
-                )
-              }}
+      <Modal
+        title="应用文风模板"
+        width={720}
+        open={templateOpen}
+        onCancel={() => setTemplateOpen(false)}
+        okText="应用到当前表单"
+        cancelText="取消"
+        okButtonProps={{ disabled: !templateCandidateId }}
+        onOk={handleApplyTemplate}
+      >
+        <div className="theme-voice__template-dialog" data-theme-template-mode={templateApplyMode}>
+          <div className="theme-voice__template-mode">
+            <span>应用方式</span>
+            <Segmented
+              value={templateApplyMode}
+              onChange={(value) => setTemplateApplyMode(value as 'fill_blanks' | 'replace')}
+              options={[
+                { value: 'fill_blanks', label: '只补空字段' },
+                { value: 'replace', label: '覆盖文风字段' },
+              ]}
             />
           </div>
-        ) : null}
-      </div>
-    </WorkspacePanel>
+          <p className="theme-voice__template-note">
+            {templateApplyMode === 'fill_blanks'
+              ? '推荐：只填补模板能提供且当前为空的字段，不改动已经写好的内容。'
+              : '仅覆盖模板明确提供的文风字段；主题、视角、写作契约等其他内容仍会保留。'}
+          </p>
+          <div className="theme-voice__template-list" role="radiogroup" aria-label="文风模板">
+            {styleTemplates.map((template) => {
+              const content = parseStyleTemplate(template)
+              const active = template.id === templateCandidateId
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`theme-voice__template-row${active ? ' is-active' : ''}`}
+                  onClick={() => setTemplateCandidateId(template.id)}
+                >
+                  <span className="theme-voice__template-copy">
+                    <strong>{template.name}</strong>
+                    <small>{template.description || '未填写模板说明'}</small>
+                  </span>
+                  <span className="theme-voice__template-preview">
+                    {content.sentence_style || content.dialogue_style || content.example_tone || '模板内容待补充'}
+                  </span>
+                  <Tag color={template.isBuiltin === 1 ? 'gold' : 'blue'}>{template.isBuiltin === 1 ? '内置' : '自定义'}</Tag>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </Modal>
+    </WorkspacePage>
   )
 }
