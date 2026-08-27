@@ -967,12 +967,33 @@ function OperatingModeObservabilityPanel({ observability }: { observability: Non
   )
 }
 
-function MillionRuntimeObservabilityPanel({ observability }: { observability: NonNullable<QualityDashboardData['millionRuntimeObservability']> }) {
-  const pressureTagColor = observability.runtimePressureLevel === 'high'
+function runtimePressureTagColor(runtimePressureLevel: NonNullable<QualityDashboardData['millionRuntimeObservability']>['runtimePressureLevel']): 'error' | 'warning' | 'success' {
+  return runtimePressureLevel === 'high'
     ? 'error'
-    : observability.runtimePressureLevel === 'medium'
+    : runtimePressureLevel === 'medium'
       ? 'warning'
       : 'success'
+}
+
+function precomputeQueueTagColor(status: NonNullable<QualityDashboardData['millionRuntimeObservability']>['precomputeQueueStatus'], idleColor: 'default' | 'success'): 'processing' | 'warning' | 'error' | 'default' | 'success' {
+  if (status === 'running') return 'processing'
+  if (status === 'queued') return 'warning'
+  if (status === 'failed') return 'error'
+  return idleColor
+}
+
+function writebackTagColor(failedCount: number, pendingCount: number): 'error' | 'warning' | 'success' {
+  if (failedCount > 0) return 'error'
+  return pendingCount > 0 ? 'warning' : 'success'
+}
+
+function recallTagColor(fallbackCount: number, pauseThreshold: number, degradedCount: number): 'error' | 'warning' | 'success' {
+  if (fallbackCount >= pauseThreshold) return 'error'
+  return degradedCount > 0 ? 'warning' : 'success'
+}
+
+function MillionRuntimeObservabilityPanel({ observability }: { observability: NonNullable<QualityDashboardData['millionRuntimeObservability']> }) {
+  const pressureTagColor = runtimePressureTagColor(observability.runtimePressureLevel)
   return (
     <div className="quality-dashboard-page__stack">
       <div className="quality-dashboard-page__pipeline-tags">
@@ -986,7 +1007,7 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
         <Tag color={observability.requireWritebackReady ? 'purple' : 'default'}>
           {observability.requireWritebackReady ? '回写前置闸门' : '回写非阻断'}
         </Tag>
-        <Tag color={observability.precomputeQueueStatus === 'running' ? 'processing' : observability.precomputeQueueStatus === 'queued' ? 'warning' : observability.precomputeQueueStatus === 'failed' ? 'error' : 'default'}>
+        <Tag color={precomputeQueueTagColor(observability.precomputeQueueStatus, 'default')}>
           {`预计算 ${precomputeQueueStatusLabel(observability.precomputeQueueStatus)}`}
         </Tag>
         <Tag color="geekblue">{`召回阈值 ${observability.recallPauseThreshold}`}</Tag>
@@ -1009,7 +1030,7 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
         <div className="quality-card">
           <div className="quality-dashboard-page__card-head">
             <strong>后台预计算</strong>
-            <Tag color={observability.precomputeQueueStatus === 'running' ? 'processing' : observability.precomputeQueueStatus === 'queued' ? 'warning' : observability.precomputeQueueStatus === 'failed' ? 'error' : 'success'}>
+            <Tag color={precomputeQueueTagColor(observability.precomputeQueueStatus, 'success')}>
               {precomputeQueueStatusLabel(observability.precomputeQueueStatus)}
             </Tag>
           </div>
@@ -1023,7 +1044,7 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
         <div className="quality-card">
           <div className="quality-dashboard-page__card-head">
             <strong>回写与检查点</strong>
-            <Tag color={observability.writebackFailedCount > 0 ? 'error' : observability.writebackPendingCount > 0 ? 'warning' : 'success'}>
+            <Tag color={writebackTagColor(observability.writebackFailedCount, observability.writebackPendingCount)}>
               {`待处理 ${observability.writebackPendingCount} / 失败 ${observability.writebackFailedCount}`}
             </Tag>
           </div>
@@ -1034,7 +1055,7 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
         <div className="quality-card">
           <div className="quality-dashboard-page__card-head">
             <strong>召回与阻断</strong>
-            <Tag color={observability.consecutiveRecallFallbackChapters >= observability.recallPauseThreshold ? 'error' : observability.recallDegradedChapterCount > 0 ? 'warning' : 'success'}>
+            <Tag color={recallTagColor(observability.consecutiveRecallFallbackChapters, observability.recallPauseThreshold, observability.recallDegradedChapterCount)}>
               {`连续降级 ${observability.consecutiveRecallFallbackChapters}`}
             </Tag>
           </div>

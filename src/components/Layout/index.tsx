@@ -7,7 +7,6 @@ import {
   AppstoreOutlined,
   ScheduleOutlined,
   MessageOutlined,
-  BulbOutlined,
   MoonOutlined,
   SunOutlined,
   HighlightOutlined,
@@ -74,7 +73,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, [isNovelWorkspace, location.pathname])
 
   return (
-    <Layout className="app-layout">
+    <Layout className="app-layout" data-ui-system="quiet-workspace">
       {!isNovelWorkspace ? <AppShellBar /> : null}
 
       {!isNovelWorkspace ? (

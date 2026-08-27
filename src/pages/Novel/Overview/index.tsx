@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Select, Space, message } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Select, message } from 'antd'
 import {
   EditOutlined,
   SaveOutlined,
@@ -13,43 +13,18 @@ import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../sh
 import { buildPremiseSummary, buildStoryDesignSummary, parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
-import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
 import { normalizeOptionalNumber, parseDraftJson, type DraftFieldDefinition } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
   WorkspaceContextSummary,
-  WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import StepAIAssistant, { type StepAIAssistantPatch } from '../components/StepAIAssistant'
-import type { QualityDashboardData } from '../../../types'
-import {
-  buildAuthorWorkflowSummary,
-  getAuthorWorkModeLabel,
-  resolveAuthorWorkflowHref,
-  resolveSuggestedAuthorWorkMode,
-} from '../author-workflow'
-import {
-  OVERVIEW_ZERO_STATE_ACTIONS,
-  resolveOverviewDisplayState,
-  resolveOverviewProductionReadiness,
-} from '../overview-presentation'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
-import {
-  useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context-core'
+import { useRegisterWorkspaceQualityController } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
-import {
-  EMPTY_WORKFLOW_STATS,
-  GUIDED_STEP_ORDER,
-  GUIDED_STEP_TARGET_ROUTE,
-  GUIDED_WORKFLOW_PHASES,
-  getAssetBloatSignal,
-  getGuidedStepProgressMap,
-  loadWorkflowStats,
-  type WorkflowStats,
-} from '../workflow'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -64,7 +39,6 @@ interface OverviewFormValues {
 }
 
 type OverviewAssistantPatch = StepAIAssistantPatch & Partial<OverviewFormValues>
-
 type PackagingDraft = NovelBlurbDocument
 
 const EMPTY_PACKAGING_DRAFT: PackagingDraft = {
@@ -111,20 +85,21 @@ function normalizeTargetWords(value: unknown): number {
   return Math.max(1000, next)
 }
 
+function hasText(value: unknown): boolean {
+  return typeof value === 'string' ? value.trim().length > 0 : Boolean(value)
+}
+
 export default function Overview({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
   const [packagingSaving, setPackagingSaving] = useState(false)
-  const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
   const [packagingGenerating, setPackagingGenerating] = useState(false)
-  const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
-  const authorMode = useAuthorWorkModeStore((state) => state.mode)
-  const syncSuggestedAuthorMode = useAuthorWorkModeStore((state) => state.syncSuggestedMode)
+  const [packagingExpanded, setPackagingExpanded] = useState(false)
 
   useEffect(() => {
     form.setFieldsValue({
@@ -139,32 +114,6 @@ export default function Overview({ novelId }: Props) {
   useEffect(() => {
     setPackagingDraft(parseNovelBlurbDocument(currentNovel?.blurbJson))
   }, [currentNovel?.blurbJson])
-
-  useEffect(() => {
-    let active = true
-
-    void loadWorkflowStats(novelId).then((workflowStats) => {
-      if (active) setStats(workflowStats)
-    }).catch(console.error)
-
-    void window.electron.quality.getDashboard(novelId)
-      .then((result) => {
-        if (!active) return
-        setQualitySummary({
-          productionReadiness: result.productionReadiness,
-          batchHealth: result.batchHealth,
-          continuityHealth: result.continuityHealth,
-        })
-      })
-      .catch((error) => {
-        console.warn('Failed to load overview quality summary', error)
-        if (active) setQualitySummary(null)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [novelId])
 
   const projectBrief = useMemo(
     () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
@@ -191,74 +140,31 @@ export default function Overview({ novelId }: Props) {
     [currentNovel?.blurbJson],
   )
   const packagingDirty = packagingPayload !== persistedPackagingPayload
-
-  const targetWords = currentNovel?.targetWords ?? 0
-  const wordProgress = targetWords > 0 ? Math.min(100, Math.round((stats.totalWords / targetWords) * 100)) : 0
-  const chapterProgress = stats.chapterCount > 0
-    ? Math.round((stats.completedChapterCount / stats.chapterCount) * 100)
-    : 0
-
-  const guidedProgressMap = useMemo(
-    () => getGuidedStepProgressMap(currentNovel, stats),
-    [currentNovel, stats],
-  )
-  const workflowStepReadyCount = GUIDED_STEP_ORDER.filter((stepKey) => guidedProgressMap[stepKey]?.isComplete).length
-  const workflowStageCards = useMemo(() => GUIDED_WORKFLOW_PHASES.map((phase, index) => {
-    const phaseProgress = phase.stepKeys.map((stepKey) => guidedProgressMap[stepKey])
-    const done = phaseProgress.filter((progress) => progress?.isComplete).length
-    const total = phase.stepKeys.length
-    const completedUnits = phaseProgress.reduce((sum, progress) => sum + (progress?.completedCount || 0), 0)
-    const totalUnits = phaseProgress.reduce((sum, progress) => sum + (progress?.totalCount || 0), 0)
-    const firstPendingStep = phase.stepKeys.find((stepKey) => !guidedProgressMap[stepKey]?.isComplete) || phase.stepKeys[0]
-
-    return {
-      key: phase.key,
-      title: `${index + 1}. ${phase.title}`,
-      summary: phase.summary,
-      ready: done >= total,
-      progressText: `${done}/${total}`,
-      detailText: totalUnits > 0 ? `${completedUnits}/${totalUnits} 项` : '待开始',
-      route: GUIDED_STEP_TARGET_ROUTE[firstPendingStep],
-    }
-  }), [guidedProgressMap])
-
-  const suggestedAuthorMode = useMemo(
-    () => resolveSuggestedAuthorWorkMode(currentNovel, stats, qualitySummary),
-    [currentNovel, qualitySummary, stats],
-  )
-  const selectedAuthorMode = authorMode || suggestedAuthorMode.mode
-  const authorWorkflow = useMemo(
-    () => buildAuthorWorkflowSummary(currentNovel, stats, qualitySummary, selectedAuthorMode),
-    [currentNovel, qualitySummary, selectedAuthorMode, stats],
-  )
-  const displayState = useMemo(
-    () => resolveOverviewDisplayState(stats, authorWorkflow),
-    [authorWorkflow, stats],
-  )
-  const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
-  const hasContextLag = stats.staleChapterCount > 0 || stats.staleCheckpointCount > 0 || stats.staleAssetCount > 0
-  const writingStageValue = displayState.isZeroState
-    ? '未开写'
-    : stats.chapterCount > 0
-      ? `已写 ${stats.completedChapterCount}/${stats.chapterCount} 章`
-      : '已开写'
-  const contextStatusValue = displayState.isZeroState
-    ? '未建立'
-    : hasContextLag
-      ? '待同步'
-      : '稳定'
-  const revisionRiskValue = authorWorkflow.blockers.some((item) => item.severity === 'high')
-    ? '有阻塞'
-    : stats.revisionTaskCount > 0
-      ? '待清理'
-      : '稳定'
-  const productionReadiness = qualitySummary
-    ? resolveOverviewProductionReadiness(qualitySummary.productionReadiness, stats)
-    : null
-
-  useEffect(() => {
-    syncSuggestedAuthorMode(suggestedAuthorMode.mode)
-  }, [suggestedAuthorMode.mode, syncSuggestedAuthorMode])
+  const overviewFormValues = Form.useWatch([], form) as Partial<OverviewFormValues> | undefined
+  const basicInfoDirty = useMemo(() => {
+    if (!currentNovel || !overviewFormValues) return false
+    return (
+      String(overviewFormValues.title || '').trim() !== String(currentNovel.title || '').trim()
+      || String(overviewFormValues.synopsis || '').trim() !== String(currentNovel.synopsis || '').trim()
+      || String(overviewFormValues.userBackground || '').trim() !== String(currentNovel.userBackground || '').trim()
+      || String(overviewFormValues.expandedBackground || '').trim() !== String(currentNovel.expandedBackground || '').trim()
+      || normalizeTargetWords(overviewFormValues.targetWords) !== normalizeTargetWords(currentNovel.targetWords)
+    )
+  }, [currentNovel, overviewFormValues])
+  const hasUnsavedChanges = basicInfoDirty || packagingDirty
+  const projectInfoFilledCount = [
+    overviewFormValues?.title,
+    overviewFormValues?.synopsis,
+    overviewFormValues?.userBackground,
+    overviewFormValues?.expandedBackground,
+    overviewFormValues?.targetWords,
+  ].filter(hasText).length
+  const packagingFilledCount = [
+    packagingDraft.titleCandidates.length > 0,
+    hasText(packagingDraft.oneLineHook),
+    Object.values(packagingDraft.platformBlurbs).some(hasText),
+    hasText(packagingDraft.volumeNamingStyle),
+  ].filter(Boolean).length
 
   const applyOverviewDraft = useCallback((draft: Partial<OverviewFormValues>) => {
     const currentValues = form.getFieldsValue(true)
@@ -278,8 +184,6 @@ export default function Overview({ novelId }: Props) {
     pageKey: 'overview',
     applyDraft: applyOverviewDraft,
   })
-
-  const overviewAssistantValues = Form.useWatch([], form) as OverviewAssistantPatch | undefined
 
   const handleApplyOverviewAssistantDraft = useCallback((patch: Partial<OverviewAssistantPatch>) => {
     const currentValues = form.getFieldsValue(true)
@@ -345,9 +249,9 @@ export default function Overview({ novelId }: Props) {
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
     const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (!values) return false
     setSaving(true)
 
     try {
@@ -365,14 +269,17 @@ export default function Overview({ novelId }: Props) {
       if (updated) setCurrentNovel(updated)
       await finalizeDraft(finalPayload)
       await clearDraft()
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('overview.saved'))
+      return true
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'overview.saveFailed'))
+      return false
     } finally {
       setSaving(false)
     }
-  }
+  }, [clearDraft, currentNovel?.blurbJson, finalizeDraft, form, notifyWorkspaceMutation, novelId, packagingDraft, setCurrentNovel])
 
   const handleSavePackaging = async () => {
     setPackagingSaving(true)
@@ -381,6 +288,7 @@ export default function Overview({ novelId }: Props) {
       await window.electron.novel.update(novelId, { blurbJson: packagingPayload })
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('overview.packagingSaved'))
     } catch (error) {
       console.error(error)
@@ -390,9 +298,94 @@ export default function Overview({ novelId }: Props) {
     }
   }
 
+  const handleGeneratePackaging = async () => {
+    setPackagingGenerating(true)
+    try {
+      const outputs = await window.electron.ai.runPrompt({
+        novelId,
+        modelConfigId: currentNovel?.modelConfigId,
+        messages: [{
+          role: 'user',
+          content: [
+            '你是中文网络小说包装编辑，只输出 JSON，不要解释，不要 Markdown。',
+            '番茄版简介优先写清开局处境、第一重冲突和持续追读问题；飞卢版简介优先写清开局冲突、能力/身份差、即时回报和连载爽点；不要用空泛的“精彩纷呈”“热血沸腾”填充。',
+            `书名：${form.getFieldValue('title') || currentNovel?.title || ''}`,
+            `一句话简介：${form.getFieldValue('synopsis') || currentNovel?.synopsis || ''}`,
+            `扩展背景：${form.getFieldValue('expandedBackground') || currentNovel?.expandedBackground || ''}`,
+            projectBrief.readyCount > 0 ? `项目立项：${buildProjectBriefSummary(projectBrief)}` : '',
+            storySettings.storyDesign.mainPlot ? `故事设计：${buildStoryDesignSummary(storySettings.storyDesign)}` : '',
+            themeVoice.readyCount > 0 ? `主题与文风：${buildThemeVoiceSummary(themeVoice)}` : '',
+            '返回：',
+            '- titleCandidates: 5 个可上架书名候选',
+            '- oneLineHook: 1 句导语',
+            '- platformBlurbs.qidian / tomato / feilu / publishing: 4 种平台简介',
+            '- volumeNamingStyle: 卷名风格规范',
+            '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","feilu":"","publishing":""},"volumeNamingStyle":""}',
+          ].filter(Boolean).join('\n'),
+        }],
+      })
+      const first = Array.isArray(outputs) ? outputs[0] : ''
+      if (!first) return
+      const parsed = parseDraftJson<PackagingDraft>(first)
+      setPackagingDraft((current) => ({
+        titleCandidates: Array.isArray(parsed.titleCandidates)
+          ? parsed.titleCandidates.filter((item): item is string => typeof item === 'string')
+          : current.titleCandidates,
+        oneLineHook: typeof parsed.oneLineHook === 'string' ? parsed.oneLineHook : current.oneLineHook,
+        platformBlurbs: {
+          qidian: typeof parsed.platformBlurbs?.qidian === 'string' ? parsed.platformBlurbs.qidian : current.platformBlurbs.qidian,
+          tomato: typeof parsed.platformBlurbs?.tomato === 'string' ? parsed.platformBlurbs.tomato : current.platformBlurbs.tomato,
+          feilu: typeof parsed.platformBlurbs?.feilu === 'string' ? parsed.platformBlurbs.feilu : current.platformBlurbs.feilu,
+          publishing: typeof parsed.platformBlurbs?.publishing === 'string' ? parsed.platformBlurbs.publishing : current.platformBlurbs.publishing,
+        },
+        volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
+      }))
+      setPackagingExpanded(true)
+      message.success(getUserFacingMessage('overview.packagingGenerated'))
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'overview.aiDraftFailed'))
+    } finally {
+      setPackagingGenerating(false)
+    }
+  }
+
+  const navigateToStudio = useCallback(() => {
+    if (!hasUnsavedChanges) {
+      navigate(buildWorkspaceRoute(novelId, 'guide'))
+      return
+    }
+    Modal.confirm({
+      title: '项目资料还有未保存修改',
+      content: '先保存当前项目资料，再回到创作控制台，避免书名、简介或包装信息丢失。',
+      okText: '保存并离开',
+      cancelText: '留在当前页',
+      onOk: async () => {
+        const saved = await handleSave()
+        if (saved) navigate(buildWorkspaceRoute(novelId, 'guide'))
+      },
+    })
+  }, [handleSave, hasUnsavedChanges, navigate, novelId])
+
+  useEffect(() => {
+    registerSaveHandler(() => {
+      if (hasUnsavedChanges && !saving) void handleSave()
+    })
+    return () => registerSaveHandler(null)
+  }, [handleSave, hasUnsavedChanges, registerSaveHandler, saving])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges || saving) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges, saving])
+
   const handleClear = useCallback(() => {
     Modal.confirm({
-      title: '清空基础信息？',
+      title: '清空项目资料？',
       content: '会清空书名、简介、背景、目标字数和包装信息，并直接保存为空白基线。',
       okText: '确认清空',
       okType: 'danger',
@@ -426,9 +419,7 @@ export default function Overview({ novelId }: Props) {
   }, [clearDraft, currentNovel?.blurbJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
 
   useEffect(() => {
-    registerClearHandler(() => {
-      handleClear()
-    })
+    registerClearHandler(handleClear)
     return () => registerClearHandler(null)
   }, [handleClear, registerClearHandler])
 
@@ -437,495 +428,268 @@ export default function Overview({ novelId }: Props) {
       className="novel-overview-page"
       layout="wide"
       heroVariant="compact"
-      title="项目总览"
-      description="统一查看基础设定、素材和下一步重点。"
-      actions={(
-        <Button
-          type="primary"
-          icon={<EditOutlined />}
-          onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}
-        >
-            {authorWorkflow.primaryTask.actionLabel}
-        </Button>
-      )}
+      chrome="shared"
+      eyebrow="项目资料"
+      title="项目资料"
+      description="维护书名、简介、背景和包装信息；推进判断统一回到创作控制台。"
       contextSummary={(
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
             { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
-            { label: '当前模式', value: getAuthorWorkModeLabel(selectedAuthorMode) },
+            { label: '资料状态', value: hasUnsavedChanges ? '有未保存修改' : `${projectInfoFilledCount}/5 项已填写` },
           ]}
         />
       )}
-      metrics={(
-        <>
-          <WorkspaceMetric
-            label="正文阶段"
-            value={writingStageValue}
-            tone="warm"
-          />
-          <WorkspaceMetric
-            label="流程完成"
-            value={`${workflowStepReadyCount}/${GUIDED_STEP_ORDER.length}`}
-          />
-          <WorkspaceMetric
-            label="上下文状态"
-            value={contextStatusValue}
-            tone="cool"
-          />
-          {displayState.showRevisionMetric ? (
-            <WorkspaceMetric
-              label="修订风险"
-              value={revisionRiskValue}
+      actionContract={{
+        primary: {
+          key: 'save',
+          label: '保存项目资料',
+          icon: <SaveOutlined />,
+          loading: saving,
+          onClick: () => void handleSave(),
+        },
+        secondary: [
+          {
+            key: 'studio',
+            label: '回到创作控制台',
+            icon: <EditOutlined />,
+            onClick: navigateToStudio,
+          },
+          {
+            key: 'packaging',
+            label: packagingExpanded ? '收起包装信息' : '展开包装信息',
+            onClick: () => setPackagingExpanded((current) => !current),
+          },
+        ],
+      }}
+    >
+      <div data-overview-responsibility="project-information" className="overview-page__body">
+        <div className="overview-page__alert-stack">
+          {projectInfoFilledCount < 4 ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="项目资料还不完整"
+              description={`当前已填写 ${projectInfoFilledCount}/5 项核心资料，保存前请补齐必填字段。`}
             />
           ) : null}
-        </>
-      )}
-    >
-      {!displayState.isZeroState && (!currentNovel?.synopsis || !currentNovel?.expandedBackground) ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="简介或扩展背景还不完整。"
-        />
-      ) : null}
-      {draft?.appliedAt ? (
-        <Alert
-          type="info"
-          showIcon
-          message="已恢复未保存的 AI 草稿，保存基础信息后自动生效"
-        />
-      ) : null}
-      {assetBloat.risk !== 'none' ? (
-        <Alert
-          type={assetBloat.risk === 'high' ? 'warning' : 'info'}
-          showIcon
-          message="素材增长过快提示"
-          action={(
-            <Button size="small" onClick={() => navigate(buildWorkspaceRoute(novelId, stats.outlineCount > 0 ? 'writing' : 'outline'))}>
-              {stats.outlineCount > 0 ? '进入正文' : '整理成大纲'}
-            </Button>
-          )}
-        />
-      ) : null}
-
-      <WorkspacePanel
-        className="novel-overview-page__focus-panel"
-        title={displayState.isZeroState ? '首章启动' : '今天最该做什么'}
-        extra={<div className="novel-pill">{getAuthorWorkModeLabel(selectedAuthorMode)}</div>}
-      >
-        <div className="workspace-stack-16">
-          <div className="guided-step__action-card">
-            <div className="guided-step__action-head">
-              <div className="guided-step__action-copy">
-                <strong>{authorWorkflow.primaryTask.title}</strong>
-                <span>{authorWorkflow.primaryTask.reason}</span>
-              </div>
-              <Space wrap>
-                <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
-                  {authorWorkflow.primaryTask.actionLabel}
-                </Button>
-                <Button onClick={() => navigate(buildWorkspaceRoute(novelId, 'guide'))}>
-                  打开创作向导
-                </Button>
-              </Space>
-            </div>
-          </div>
+          {draft?.appliedAt ? (
+            <Alert
+              type="info"
+              showIcon
+              message="已恢复未保存的 AI 草稿，保存项目资料后自动生效。"
+            />
+          ) : null}
         </div>
-      </WorkspacePanel>
 
-      {displayState.isZeroState ? (
-        <WorkspacePanel
-          className="novel-overview-page__alternate-panel"
-          title="首章启动路径"
-        >
-          <div className="guided-step__action-grid">
-            {OVERVIEW_ZERO_STATE_ACTIONS.map((task) => (
-              <div key={task.id} className="guided-step__action-card">
-                <div className="guided-step__action-copy">
-                  <strong>{task.title}</strong>
-                  <span>{task.description}</span>
+        <section data-overview-project-info className="overview-page__project-info">
+          <WorkspacePanel
+            title="核心资料"
+            description="这些字段构成项目对外身份与创作起点，始终保持可编辑。"
+            extra={(
+              <span className={`overview-page__save-state${hasUnsavedChanges ? ' is-unsaved' : ''}`} data-overview-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
+                {hasUnsavedChanges ? '有未保存修改' : '已与项目数据同步'}
+              </span>
+            )}
+          >
+            <Form form={form} layout="vertical">
+              <div className="overview-page__field-grid">
+                <div className="overview-page__field overview-page__field--title">
+                  <Form.Item name="title" label="书名" rules={[{ required: true, message: '请填写书名' }]}>
+                    <Input placeholder="例如：北境回潮" />
+                  </Form.Item>
                 </div>
-                <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
-                  {task.actionLabel}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </WorkspacePanel>
-      ) : authorWorkflow.alternateTasks.length > 0 ? (
-        <WorkspacePanel
-          className="novel-overview-page__alternate-panel"
-          title="备选路径"
-        >
-          <div className="guided-step__action-grid">
-            {authorWorkflow.alternateTasks.slice(0, 2).map((task) => (
-              <div key={task.id} className="guided-step__action-card">
-                <div className="guided-step__action-copy">
-                  <strong>{task.title}</strong>
-                  <span>{task.reason}</span>
+                <div className="overview-page__field overview-page__field--target">
+                  <Form.Item name="targetWords" label="目标字数" rules={[{ required: true, message: '请填写目标字数' }]}>
+                    <InputNumber min={1000} step={1000} className="workspace-input-number-full" />
+                  </Form.Item>
                 </div>
-                <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
-                  {task.actionLabel}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </WorkspacePanel>
-      ) : null}
-
-      {displayState.showBlockersPanel ? (
-        <WorkspacePanel
-          className="novel-overview-page__signal-panel"
-          title="当前阻塞项"
-        >
-          <div className="novel-issue-list">
-            {authorWorkflow.blockers.slice(0, 2).map((blocker) => (
-              <div key={blocker.id} className="novel-issue-item novel-issue-item--compact">
-                <div className="novel-issue-item__head novel-issue-item__head--inline">
-                  <strong>{blocker.title}</strong>
+                <div className="overview-page__field overview-page__field--wide">
+                  <Form.Item name="synopsis" label="一句话简介" rules={[{ required: true, message: '请填写简介' }]}>
+                    <Input.TextArea rows={3} placeholder="写清主角处境、目标和最大阻碍。" />
+                  </Form.Item>
                 </div>
-                <div className="novel-issue-item__desc novel-issue-item__desc--inline">{blocker.reason}</div>
-                <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
-                  {blocker.actionLabel}
-                </Button>
+                <div className="overview-page__field">
+                  <Form.Item name="userBackground" label="原始背景" rules={[{ required: true, message: '请填写原始背景' }]}>
+                    <Input.TextArea rows={5} placeholder="写灵感起点、氛围和人物困局。" />
+                  </Form.Item>
+                </div>
+                <div className="overview-page__field">
+                  <Form.Item name="expandedBackground" label="扩展背景" rules={[{ required: true, message: '请填写扩展背景' }]}>
+                    <Input.TextArea rows={5} placeholder="补齐环境压力、制度成本和社会结构。" />
+                  </Form.Item>
+                </div>
               </div>
-            ))}
-          </div>
-        </WorkspacePanel>
-      ) : null}
+            </Form>
 
-      {displayState.showImpactPanel ? (
-        <WorkspacePanel
-          className="novel-overview-page__signal-panel"
-          title="风险和影响"
-        >
-          <div className="novel-note-list">
-            {authorWorkflow.impactNotices.slice(0, 2).map((notice) => (
-              <div key={notice.id} className="novel-note-list__item">{`${notice.title}：${notice.reason}`}</div>
-            ))}
-          </div>
-        </WorkspacePanel>
-      ) : null}
-
-      {displayState.showProgressPanel ? (
-        <WorkspacePanel className="novel-overview-page__progress-panel" title="推进热度">
-          <div className="workspace-stack-16">
-            <div>
-              <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
-                <strong>字数进度</strong>
-                <span>{wordProgress}%</span>
-              </div>
-              <Progress percent={wordProgress} showInfo={false} />
-            </div>
-            <div>
-              <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
-                <strong>章节进度</strong>
-                <span>{chapterProgress}%</span>
-              </div>
-              <Progress percent={chapterProgress} showInfo={false} />
-            </div>
-          </div>
-        </WorkspacePanel>
-      ) : null}
-
-      {displayState.showHealthPanel && qualitySummary && productionReadiness ? (
-        <WorkspacePanel
-          className="novel-overview-page__health-panel"
-          title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
-        >
-          <div className="workspace-grid-auto-220">
-            <div className="guided-step__fact-card">
-              <span>生产就绪度</span>
-              <strong>{productionReadiness.readyRate}%</strong>
-              <small>{productionReadiness.summary}</small>
-            </div>
-            <div className="guided-step__fact-card">
-              <span>最近批次</span>
-              <strong>{qualitySummary.batchHealth.chapterIds.length > 0 ? `${qualitySummary.batchHealth.chapterIds.length} 章` : '空闲'}</strong>
-              <small>{qualitySummary.batchHealth.summary}</small>
-            </div>
-            <div className="guided-step__fact-card">
-              <span>连续性健康</span>
-              <strong>{`${qualitySummary.continuityHealth.staleCheckpointCount} / ${qualitySummary.continuityHealth.worldConflictCount}`}</strong>
-              <small>{`检查点待刷新 ${qualitySummary.continuityHealth.staleCheckpointCount}，世界冲突 ${qualitySummary.continuityHealth.worldConflictCount}。`}</small>
-            </div>
-          </div>
-        </WorkspacePanel>
-      ) : null}
-
-      <WorkspacePanel
-        className="novel-overview-page__basic-panel"
-        title="基础信息"
-        extra={(
-          <Space wrap>
-            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-              保存基础信息
-            </Button>
-          </Space>
-        )}
-      >
-        <StepAIAssistant<OverviewAssistantPatch>
-          novel={currentNovel}
-          novelId={novelId}
-          stepKey="basics"
-          stepTitle="小说基础信息"
-          fields={OVERVIEW_AI_FIELDS}
-          values={{
-            title: overviewAssistantValues?.title || currentNovel?.title || '',
-            synopsis: overviewAssistantValues?.synopsis || currentNovel?.synopsis || '',
-            userBackground: overviewAssistantValues?.userBackground || currentNovel?.userBackground || '',
-            expandedBackground: overviewAssistantValues?.expandedBackground || currentNovel?.expandedBackground || '',
-            targetWords: overviewAssistantValues?.targetWords || currentNovel?.targetWords || 200000,
-          }}
-          tools={OVERVIEW_AI_TOOLS}
-          extraContext={[
-            { label: '当前步骤', value: '创建/维护小说基础信息' },
-            { label: '项目立项摘要', value: buildProjectBriefSummary(projectBrief) },
-            { label: '基础设定摘要', value: buildPremiseSummary(storySettings.premise) },
-            { label: '故事设计摘要', value: buildStoryDesignSummary(storySettings.storyDesign) },
-            { label: '主题文风摘要', value: buildThemeVoiceSummary(themeVoice) },
-            {
-              label: '世界规则摘要',
-              value: [
-                worldRules.mapBlueprint.overview,
-                worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
-                worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
-              ].filter(Boolean).join('；'),
-            },
-            { label: '短篇测试上限', value: '临时测试可把目标字数控制在 50000 字以内' },
-          ]}
-          onApplyDraft={handleApplyOverviewAssistantDraft}
-        />
-        <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid guided-step__field-grid--basics">
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="title" label="书名" rules={[{ required: true, message: '请填写书名' }]}>
-                <Input placeholder="例如：北境回潮" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="targetWords" label="目标字数" rules={[{ required: true, message: '请填写目标字数' }]}>
-                <InputNumber min={1000} step={1000} className="workspace-input-number-full" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="synopsis" label="一句话简介" rules={[{ required: true, message: '请填写简介' }]}>
-                <Input.TextArea rows={6} placeholder="写清主角处境、目标和最大阻碍。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="userBackground" label="原始背景" rules={[{ required: true, message: '请填写原始背景' }]}>
-                <Input.TextArea rows={8} placeholder="写灵感起点、氛围和人物困局。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="expandedBackground" label="扩展背景" rules={[{ required: true, message: '请填写扩展背景' }]}>
-                <Input.TextArea rows={8} placeholder="补齐环境压力、制度成本和社会结构。" />
-              </Form.Item>
-            </div>
-          </div>
-        </Form>
-      </WorkspacePanel>
-
-      <WorkspacePanel
-        className="novel-overview-page__packaging-panel"
-        title="包装信息"
-        extra={(
-          <Space wrap>
-            <Button
-              loading={packagingGenerating}
-              onClick={() => void (async () => {
-                setPackagingGenerating(true)
-                try {
-                  const outputs = await window.electron.ai.runPrompt({
-                    novelId,
-                    modelConfigId: currentNovel?.modelConfigId,
-                    messages: [{
-                      role: 'user',
-                      content: [
-                        '你是中文网络小说包装编辑，只输出 JSON，不要解释，不要 Markdown。',
-                        '番茄版简介优先写清开局处境、第一重冲突和持续追读问题；飞卢版简介优先写清开局冲突、能力/身份差、即时回报和连载爽点；不要用空泛的“精彩纷呈”“热血沸腾”填充。',
-                        `书名：${form.getFieldValue('title') || currentNovel?.title || ''}`,
-                        `一句话简介：${form.getFieldValue('synopsis') || currentNovel?.synopsis || ''}`,
-                        `扩展背景：${form.getFieldValue('expandedBackground') || currentNovel?.expandedBackground || ''}`,
-                        projectBrief.readyCount > 0 ? `项目立项：${buildProjectBriefSummary(projectBrief)}` : '',
-                        storySettings.storyDesign.mainPlot ? `故事设计：${buildStoryDesignSummary(storySettings.storyDesign)}` : '',
-                        themeVoice.readyCount > 0 ? `主题与文风：${buildThemeVoiceSummary(themeVoice)}` : '',
-                        '返回：',
-                        '- titleCandidates: 5 个可上架书名候选',
-                        '- oneLineHook: 1 句导语',
-                        '- platformBlurbs.qidian / tomato / feilu / publishing: 4 种平台简介',
-                        '- volumeNamingStyle: 卷名风格规范',
-                        '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","feilu":"","publishing":""},"volumeNamingStyle":""}',
-                      ].filter(Boolean).join('\n'),
-                    }],
-                  })
-                  const first = Array.isArray(outputs) ? outputs[0] : ''
-                  if (!first) return
-                  const parsed = parseDraftJson<PackagingDraft>(first)
-                  setPackagingDraft((current) => ({
-                    titleCandidates: Array.isArray(parsed.titleCandidates)
-                      ? parsed.titleCandidates.filter((item): item is string => typeof item === 'string')
-                      : current.titleCandidates,
-                    oneLineHook: typeof parsed.oneLineHook === 'string' ? parsed.oneLineHook : current.oneLineHook,
-                    platformBlurbs: {
-                      qidian: typeof parsed.platformBlurbs?.qidian === 'string' ? parsed.platformBlurbs.qidian : current.platformBlurbs.qidian,
-                      tomato: typeof parsed.platformBlurbs?.tomato === 'string' ? parsed.platformBlurbs.tomato : current.platformBlurbs.tomato,
-                      feilu: typeof parsed.platformBlurbs?.feilu === 'string' ? parsed.platformBlurbs.feilu : current.platformBlurbs.feilu,
-                      publishing: typeof parsed.platformBlurbs?.publishing === 'string' ? parsed.platformBlurbs.publishing : current.platformBlurbs.publishing,
+            <details className="overview-page__assistant">
+              <summary>
+                <span>
+                  <strong>AI 辅助</strong>
+                  <small>读取上下文、生成候选稿或只更新指定字段</small>
+                </span>
+                <span>按需展开</span>
+              </summary>
+              <div data-overview-ai-assistant className="overview-page__assistant-body">
+                <StepAIAssistant<OverviewAssistantPatch>
+                  novel={currentNovel}
+                  novelId={novelId}
+                  stepKey="basics"
+                  stepTitle="项目核心资料"
+                  fields={OVERVIEW_AI_FIELDS}
+                  values={{
+                    title: overviewFormValues?.title || currentNovel?.title || '',
+                    synopsis: overviewFormValues?.synopsis || currentNovel?.synopsis || '',
+                    userBackground: overviewFormValues?.userBackground || currentNovel?.userBackground || '',
+                    expandedBackground: overviewFormValues?.expandedBackground || currentNovel?.expandedBackground || '',
+                    targetWords: overviewFormValues?.targetWords || currentNovel?.targetWords || 200000,
+                  }}
+                  tools={OVERVIEW_AI_TOOLS}
+                  extraContext={[
+                    { label: '当前步骤', value: '创建/维护项目核心资料' },
+                    { label: '项目立项摘要', value: buildProjectBriefSummary(projectBrief) },
+                    { label: '基础设定摘要', value: buildPremiseSummary(storySettings.premise) },
+                    { label: '故事设计摘要', value: buildStoryDesignSummary(storySettings.storyDesign) },
+                    { label: '主题文风摘要', value: buildThemeVoiceSummary(themeVoice) },
+                    {
+                      label: '世界规则摘要',
+                      value: [
+                        worldRules.mapBlueprint.overview,
+                        worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
+                        worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
+                      ].filter(Boolean).join('；'),
                     },
-                    volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
-                  }))
-                  message.success(getUserFacingMessage('overview.packagingGenerated'))
-                } catch (error) {
-                  console.error(error)
-                  message.error(getErrorMessage(error, 'overview.aiDraftFailed'))
-                } finally {
-                  setPackagingGenerating(false)
-                }
-              })()}
-            >
-              生成包装文案
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={packagingSaving}
-              disabled={!packagingDirty}
-              onClick={() => void handleSavePackaging()}
-            >
-              保存包装信息
-            </Button>
-          </Space>
-        )}
-      >
-        <div className="guided-step__field-grid novel-overview-page__packaging-grid">
-          <div className="guided-step__field-card guided-step__field-card--full">
-            <strong className="workspace-card-section-title">书名候选</strong>
-            <Select
-              mode="tags"
-              value={packagingDraft.titleCandidates}
-              onChange={(value: string[]) => setPackagingDraft((current) => ({ ...current, titleCandidates: value }))}
-              tokenSeparators={[',', '，', '、']}
-              placeholder="输入或微调候选书名"
-            />
-          </div>
-          <div className="guided-step__field-card guided-step__field-card--full">
-            <strong className="workspace-card-section-title">一句话钩子</strong>
-            <Input.TextArea
-              rows={6}
-              value={packagingDraft.oneLineHook}
-              onChange={(event) => setPackagingDraft((current) => ({ ...current, oneLineHook: event.target.value }))}
-              placeholder="一句话概括主角、目标和最大阻碍。"
-            />
-          </div>
-          <div className="guided-step__field-card">
-            <strong className="workspace-card-section-title">起点版简介</strong>
-            <Input.TextArea
-              rows={8}
-              value={packagingDraft.platformBlurbs.qidian}
-              onChange={(event) => setPackagingDraft((current) => ({
-                ...current,
-                platformBlurbs: { ...current.platformBlurbs, qidian: event.target.value },
-              }))}
-            />
-          </div>
-          <div className="guided-step__field-card">
-            <strong className="workspace-card-section-title">番茄版简介</strong>
-            <Input.TextArea
-              rows={8}
-              value={packagingDraft.platformBlurbs.tomato}
-              onChange={(event) => setPackagingDraft((current) => ({
-                ...current,
-                platformBlurbs: { ...current.platformBlurbs, tomato: event.target.value },
-              }))}
-            />
-          </div>
-          <div className="guided-step__field-card">
-            <strong className="workspace-card-section-title">飞卢版简介</strong>
-            <Input.TextArea
-              rows={8}
-              value={packagingDraft.platformBlurbs.feilu}
-              onChange={(event) => setPackagingDraft((current) => ({
-                ...current,
-                platformBlurbs: { ...current.platformBlurbs, feilu: event.target.value },
-              }))}
-              placeholder="突出开局冲突、即时回报和连续更新承诺。"
-            />
-          </div>
-          <div className="guided-step__field-card guided-step__field-card--full">
-            <strong className="workspace-card-section-title">出版版简介</strong>
-            <Input.TextArea
-              rows={6}
-              value={packagingDraft.platformBlurbs.publishing}
-              onChange={(event) => setPackagingDraft((current) => ({
-                ...current,
-                platformBlurbs: { ...current.platformBlurbs, publishing: event.target.value },
-              }))}
-            />
-          </div>
-          <div className="guided-step__field-card guided-step__field-card--full">
-            <strong className="workspace-card-section-title">卷名风格</strong>
-            <Input.TextArea
-              rows={6}
-              value={packagingDraft.volumeNamingStyle}
-              onChange={(event) => setPackagingDraft((current) => ({ ...current, volumeNamingStyle: event.target.value }))}
-              placeholder="例如：统一采用 地点 + 局势 / 代价 + 目标 的组合。"
-            />
-          </div>
-        </div>
-      </WorkspacePanel>
+                    { label: '短篇测试上限', value: '临时测试可把目标字数控制在 50000 字以内' },
+                  ]}
+                  onApplyDraft={handleApplyOverviewAssistantDraft}
+                />
+              </div>
+            </details>
+          </WorkspacePanel>
+        </section>
 
-      <WorkspacePanel className="novel-overview-page__summary-panel" title="创作流程概览">
-        <div className="novel-overview-page__summary-stack">
-          <div className="guided-step__fact-grid">
-            <div className="guided-step__fact-card">
-              <span>项目立项</span>
-              <strong>{projectBrief.readyCount}/6</strong>
-              <small>{projectBrief.readerPromise || '还没有写清读者承诺。'}</small>
+        <section data-overview-packaging className="overview-page__packaging">
+          <WorkspacePanel
+            title="包装信息"
+            description="书名候选、平台简介和卷名风格属于发布准备，默认收起。"
+            extra={(
+              <Button
+                size="small"
+                aria-expanded={packagingExpanded}
+                onClick={() => setPackagingExpanded((current) => !current)}
+              >
+                {packagingExpanded ? '收起包装信息' : '展开包装信息'}
+              </Button>
+            )}
+          >
+            <div className="overview-page__packaging-summary">
+              <div>
+                <strong>{packagingFilledCount > 0 ? `已填写 ${packagingFilledCount}/4 类包装资料` : '尚未填写包装资料'}</strong>
+                <span>展开后可编辑或生成平台版本；保存项目资料会一并保存当前草稿。</span>
+              </div>
+              {packagingDirty ? <span className="overview-page__packaging-dirty">有未保存修改</span> : null}
             </div>
-            <div className="guided-step__fact-card">
-              <span>基础设定</span>
-              <strong>{storySettings.premiseReadyCount}/5</strong>
-              <small>{storySettings.premise.constraints || '还没有写清底层约束。'}</small>
-            </div>
-            <div className="guided-step__fact-card">
-              <span>主题与文风</span>
-              <strong>{themeVoice.readyCount}/6</strong>
-              <small>{themeVoice.styleRules || '还没有固定文风与句式规则。'}</small>
-            </div>
-            <div className="guided-step__fact-card">
-              <span>世界规则</span>
-              <strong>{currentNovel?.worldRulesJson ? '已建立' : '待建立'}</strong>
-              <small>{worldRules.mapBlueprint.overview || '还没有统一地点层级和行动边界。'}</small>
-            </div>
-          </div>
 
-          <div className="novel-overview-page__entry-section">
-            <strong className="novel-overview-page__entry-title">阶段入口</strong>
-            <div className="novel-overview-page__entry-grid">
-              {workflowStageCards.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => navigate(buildWorkspaceRoute(novelId, item.route))}
-                  className="novel-overview-page__entry-card"
-                >
-                  <div className="novel-overview-page__entry-card-head">
-                    <strong>{item.title}</strong>
-                    <span>{item.progressText}</span>
+            {packagingExpanded ? (
+              <div data-overview-packaging-content className="overview-page__packaging-content">
+                <div className="overview-page__packaging-actions">
+                  <span>包装草稿不会改变核心资料。</span>
+                  <div>
+                    <Button loading={packagingGenerating} onClick={() => void handleGeneratePackaging()}>
+                      生成包装文案
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      loading={packagingSaving}
+                      disabled={!packagingDirty}
+                      onClick={() => void handleSavePackaging()}
+                    >
+                      保存包装信息
+                    </Button>
                   </div>
-                  <div className={`novel-overview-page__entry-status${item.ready ? ' is-ready' : ' is-pending'}`}>
-                    {item.ready ? '已就绪' : '待补齐'}
+                </div>
+                <div className="overview-page__packaging-grid">
+                  <div className="overview-page__packaging-field overview-page__packaging-field--wide">
+                    <strong>书名候选</strong>
+                    <Select
+                      mode="tags"
+                      value={packagingDraft.titleCandidates}
+                      onChange={(value: string[]) => setPackagingDraft((current) => ({ ...current, titleCandidates: value }))}
+                      tokenSeparators={[',', '，', '、']}
+                      placeholder="输入或微调候选书名"
+                    />
                   </div>
-                  <div className="novel-overview-page__entry-summary">{`${item.detailText} · ${item.summary}`}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </WorkspacePanel>
+                  <div className="overview-page__packaging-field overview-page__packaging-field--wide">
+                    <strong>一句话钩子</strong>
+                    <Input.TextArea
+                      rows={3}
+                      value={packagingDraft.oneLineHook}
+                      onChange={(event) => setPackagingDraft((current) => ({ ...current, oneLineHook: event.target.value }))}
+                      placeholder="一句话概括主角、目标和最大阻碍。"
+                    />
+                  </div>
+                  <div className="overview-page__packaging-field">
+                    <strong>起点版简介</strong>
+                    <Input.TextArea
+                      rows={5}
+                      value={packagingDraft.platformBlurbs.qidian || ''}
+                      onChange={(event) => setPackagingDraft((current) => ({
+                        ...current,
+                        platformBlurbs: { ...current.platformBlurbs, qidian: event.target.value },
+                      }))}
+                    />
+                  </div>
+                  <div className="overview-page__packaging-field">
+                    <strong>番茄版简介</strong>
+                    <Input.TextArea
+                      rows={5}
+                      value={packagingDraft.platformBlurbs.tomato || ''}
+                      onChange={(event) => setPackagingDraft((current) => ({
+                        ...current,
+                        platformBlurbs: { ...current.platformBlurbs, tomato: event.target.value },
+                      }))}
+                    />
+                  </div>
+                  <div className="overview-page__packaging-field">
+                    <strong>飞卢版简介</strong>
+                    <Input.TextArea
+                      rows={5}
+                      value={packagingDraft.platformBlurbs.feilu || ''}
+                      onChange={(event) => setPackagingDraft((current) => ({
+                        ...current,
+                        platformBlurbs: { ...current.platformBlurbs, feilu: event.target.value },
+                      }))}
+                      placeholder="突出开局冲突、即时回报和连续更新承诺。"
+                    />
+                  </div>
+                  <div className="overview-page__packaging-field">
+                    <strong>出版版简介</strong>
+                    <Input.TextArea
+                      rows={5}
+                      value={packagingDraft.platformBlurbs.publishing || ''}
+                      onChange={(event) => setPackagingDraft((current) => ({
+                        ...current,
+                        platformBlurbs: { ...current.platformBlurbs, publishing: event.target.value },
+                      }))}
+                    />
+                  </div>
+                  <div className="overview-page__packaging-field overview-page__packaging-field--wide">
+                    <strong>卷名风格</strong>
+                    <Input.TextArea
+                      rows={3}
+                      value={packagingDraft.volumeNamingStyle}
+                      onChange={(event) => setPackagingDraft((current) => ({ ...current, volumeNamingStyle: event.target.value }))}
+                      placeholder="例如：统一采用 地点 + 局势 / 代价 + 目标 的组合。"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </WorkspacePanel>
+        </section>
+      </div>
     </WorkspacePage>
   )
 }

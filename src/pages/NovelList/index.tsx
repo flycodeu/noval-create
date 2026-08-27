@@ -823,7 +823,7 @@ export default function NovelList() {
               description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
             />
           ) : (
-            <div className="novel-list-page__grid">
+            <div className="novel-list-page__grid" data-p3-04-project-grid>
               {filteredNovels.map((novel) => {
                 const snapshot = workspaceSnapshots[novel.id] || getWorkspaceSnapshot(novel, EMPTY_WORKFLOW_STATS, {
                   viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',

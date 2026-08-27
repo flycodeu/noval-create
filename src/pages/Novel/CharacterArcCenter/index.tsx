@@ -44,19 +44,19 @@ function buildCharacterDraft(character: Character | null, dashboard: CharacterAr
     id: arc?.id,
     novelId: character.novelId,
     characterId: character.id,
-    startState: arc?.startState || '',
-    surfaceWant: arc?.surfaceWant || character.surfaceDesire || '',
-    deepNeed: arc?.deepNeed || character.deepNeed || '',
-    coreFear: arc?.coreFear || character.coreFear || '',
-    misbelief: arc?.misbelief || character.selfDeception || '',
+    startState: firstTruthyText(arc?.startState),
+    surfaceWant: firstTruthyText(arc?.surfaceWant, character.surfaceDesire),
+    deepNeed: firstTruthyText(arc?.deepNeed, character.deepNeed),
+    coreFear: firstTruthyText(arc?.coreFear, character.coreFear),
+    misbelief: firstTruthyText(arc?.misbelief, character.selfDeception),
     firstCrackChapterId: arc?.firstCrackChapterId,
-    changeEvent: arc?.changeEvent || '',
+    changeEvent: firstTruthyText(arc?.changeEvent),
     changeTimelineEventId: arc?.changeTimelineEventId,
-    endState: arc?.endState || '',
+    endState: firstTruthyText(arc?.endState),
     currentStatus: arc?.currentStatus || 'draft',
     lastProgressChapterId: arc?.lastProgressChapterId,
-    stalledReason: arc?.stalledReason || '',
-    notes: arc?.notes || character.characterArc || '',
+    stalledReason: firstTruthyText(arc?.stalledReason),
+    notes: firstTruthyText(arc?.notes, character.characterArc),
   }
 }
 
@@ -68,18 +68,22 @@ function buildRelationshipDraft(novelId: number, relation: CharacterRelation | n
     novelId,
     charAId: relation.charAId,
     charBId: relation.charBId,
-    relationLabelSnapshot: arc?.relationLabelSnapshot || relation.relationLabel || '',
-    relationTypeSnapshot: arc?.relationTypeSnapshot || relation.relationType || '',
-    startState: arc?.startState || '',
-    crackPoint: arc?.crackPoint || '',
-    changeEvent: arc?.changeEvent || '',
+    relationLabelSnapshot: firstTruthyText(arc?.relationLabelSnapshot, relation.relationLabel),
+    relationTypeSnapshot: firstTruthyText(arc?.relationTypeSnapshot, relation.relationType),
+    startState: firstTruthyText(arc?.startState),
+    crackPoint: firstTruthyText(arc?.crackPoint),
+    changeEvent: firstTruthyText(arc?.changeEvent),
     changeTimelineEventId: arc?.changeTimelineEventId,
-    endState: arc?.endState || '',
+    endState: firstTruthyText(arc?.endState),
     currentStatus: arc?.currentStatus || 'draft',
     lastProgressChapterId: arc?.lastProgressChapterId,
-    stalledReason: arc?.stalledReason || '',
-    notes: arc?.notes || '',
+    stalledReason: firstTruthyText(arc?.stalledReason),
+    notes: firstTruthyText(arc?.notes),
   }
+}
+
+function firstTruthyText(...values: Array<string | null | undefined>): string {
+  return values.find((value) => Boolean(value)) || ''
 }
 
 function hasFilledValues(values: Array<string | undefined | null>): boolean {

@@ -262,6 +262,8 @@ export default function ProjectTopbar({
           </div>
         </div>
 
+        <div ref={onInformationTargetChange} className="project-topbar__information-slot" />
+
         <div className="project-topbar__toolbar">
           <TaskIndicator className="project-topbar__task-indicator" />
 
@@ -338,7 +340,6 @@ export default function ProjectTopbar({
           </div>
         </div>
       </div>
-      <div ref={onInformationTargetChange} className="project-topbar__information-slot" />
     </header>
   )
 }

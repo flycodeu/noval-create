@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
+import { Alert, Button, Form, Input, Modal, Select, Space, Tag, Tooltip, message } from 'antd'
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -158,6 +157,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionTask['status']>('all')
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
@@ -222,8 +222,18 @@ export default function RevisionCenterPage({ novelId }: Props) {
     [tasks],
   )
   const systemCount = tasks.length - manualCount
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) || tasks[0] || null,
+    [selectedTaskId, tasks],
+  )
 
   const hasActiveFilters = sourceFilter !== 'all' || statusFilter !== 'all' || Boolean(keyword.trim()) || Boolean(scopedFilterSummary)
+
+  useEffect(() => {
+    if (!tasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(tasks[0]?.id || null)
+    }
+  }, [selectedTaskId, tasks])
 
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all')
@@ -400,146 +410,30 @@ export default function RevisionCenterPage({ novelId }: Props) {
     navigate(buildRevisionTaskTargetPath(novelId, task))
   }, [navigate, novelId])
 
-  const columns = useMemo<ColumnsType<RevisionTask>>(() => [
-    {
-      title: '修订任务与说明',
-      key: 'title',
-      minWidth: 420,
-      render: (_, record) => (
-        <div className="revision-task-cell">
-          <div className="revision-task-cell__header">
-            <span className="revision-task-cell__title">{record.title}</span>
-            <Tag color={getSourceColor(record.taskSource)}>{getSourceLabel(record.taskSource)}</Tag>
-          </div>
-          {record.description ? (
-            <div className="revision-task-cell__desc">{record.description}</div>
+  const renderTaskActions = useCallback((task: RevisionTask) => (
+    <Space size={6} wrap>
+      <Tooltip title="跳转至对应工作区定位问题">
+        <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(task)}>定位</Button>
+      </Tooltip>
+      {task.taskSource === 'manual' ? (
+        <>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(task)}>编辑</Button>
+          {task.status !== 'resolved' ? (
+            <Button size="small" type="primary" icon={<CheckOutlined />} loading={actionKey === `status:${task.id}:resolved`} onClick={() => void handleQuickStatus(task, 'resolved')}>解决</Button>
           ) : null}
-          {record.fixBrief ? (
-            <div className="revision-task-cell__suggestion">
-              <strong>建议：</strong>
-              <span>{record.fixBrief}</span>
-            </div>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      title: '任务类型',
-      dataIndex: 'taskType',
-      key: 'taskType',
-      width: 105,
-      render: (value) => {
-        const label = TASK_TYPE_LABELS[value] || value || '连续性'
-        return <Tag color="geekblue">{label}</Tag>
-      },
-    },
-    {
-      title: '优先级',
-      dataIndex: 'severity',
-      key: 'severity',
-      width: 95,
-      render: (value) => <Tag color={getRevisionSeverityColor(value)}>{getRevisionSeverityLabel(value)}</Tag>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 95,
-      render: (value) => <Tag color={getStatusColor(value)}>{getStatusLabel(value)}</Tag>,
-    },
-    {
-      title: '定位模块',
-      dataIndex: 'relatedPage',
-      key: 'relatedPage',
-      width: 110,
-      render: (value) => {
-        const label = RELATED_PAGE_OPTIONS.find((item) => item.value === value)?.label || value || '正文写作'
-        return <Tag>{label}</Tag>
-      },
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updatedAt',
-      key: 'updatedAt',
-      width: 120,
-      render: (value) => <span className="workspace-text-muted workspace-text-small">{formatDate(value)}</span>,
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 200,
-      fixed: 'right',
-      render: (_, record) => (
-        <Space size={6} wrap>
-          <Tooltip title="跳转至对应工作区定位问题">
-            <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(record)}>
-              定位
-            </Button>
-          </Tooltip>
-          {record.taskSource === 'manual' ? (
-            <>
-              <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(record)}>
-                编辑
-              </Button>
-              {record.status !== 'resolved' ? (
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<CheckOutlined />}
-                  loading={actionKey === `status:${record.id}:resolved`}
-                  onClick={() => void handleQuickStatus(record, 'resolved')}
-                >
-                  解决
-                </Button>
-              ) : null}
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDelete(record)} />
-            </>
-          ) : (
-            <>
-              {record.autoFixable ? (
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<ToolOutlined />}
-                  loading={actionKey === `autofix:${record.id}`}
-                  onClick={() => void handleAutoFix(record)}
-                >
-                  AI 修复
-                </Button>
-              ) : null}
-              {record.status === 'ignored' ? (
-                <Button
-                  size="small"
-                  loading={actionKey === `status:${record.id}:open`}
-                  onClick={() => void handleQuickStatus(record, 'open')}
-                >
-                  恢复
-                </Button>
-              ) : (
-                <Button
-                  size="small"
-                  loading={actionKey === `status:${record.id}:ignored`}
-                  onClick={() => void handleQuickStatus(record, 'ignored')}
-                >
-                  忽略
-                </Button>
-              )}
-              {record.status !== 'resolved' ? (
-                <Button
-                  size="small"
-                  icon={<CheckOutlined />}
-                  loading={actionKey === `status:${record.id}:resolved`}
-                  onClick={() => void handleQuickStatus(record, 'resolved')}
-                >
-                  完成
-                </Button>
-              ) : null}
-            </>
-          )}
-        </Space>
-      ),
-    },
-  ], [actionKey, handleAutoFix, handleDelete, handleQuickStatus, openEditor, openRelatedPage])
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDelete(task)}>删除</Button>
+        </>
+      ) : (
+        <>
+          {task.autoFixable ? <Button size="small" type="primary" icon={<ToolOutlined />} loading={actionKey === `autofix:${task.id}`} onClick={() => void handleAutoFix(task)}>AI 修复</Button> : null}
+          <Button size="small" loading={actionKey === `status:${task.id}:${task.status === 'ignored' ? 'open' : 'ignored'}`} onClick={() => void handleQuickStatus(task, task.status === 'ignored' ? 'open' : 'ignored')}>
+            {task.status === 'ignored' ? '恢复' : '忽略'}
+          </Button>
+          {task.status !== 'resolved' ? <Button size="small" icon={<CheckOutlined />} loading={actionKey === `status:${task.id}:resolved`} onClick={() => void handleQuickStatus(task, 'resolved')}>完成</Button> : null}
+        </>
+      )}
+    </Space>
+  ), [actionKey, handleAutoFix, handleDelete, handleQuickStatus, openEditor, openRelatedPage])
 
   return (
     <WorkspacePage
@@ -548,19 +442,30 @@ export default function RevisionCenterPage({ novelId }: Props) {
       heroVariant="compact"
       title="修订中心"
       asidePlacement="below"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-            新建人工任务
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void refresh()}>
-            刷新诊断
-          </Button>
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
-            去正文页
-          </Button>
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'create-revision-task',
+          label: '新建人工任务',
+          icon: <PlusOutlined />,
+          onClick: () => openEditor(),
+        },
+        secondary: [
+          {
+            key: 'refresh-revision',
+            label: '刷新诊断',
+            icon: <ReloadOutlined />,
+            loading,
+            onClick: () => void refresh(),
+          },
+          {
+            key: 'open-writing',
+            label: '去正文页',
+            icon: <ArrowRightOutlined />,
+            onClick: () => navigate(buildWorkspaceRoute(novelId, 'writing')),
+          },
+        ],
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -626,8 +531,10 @@ export default function RevisionCenterPage({ novelId }: Props) {
         />
       ) : null}
 
-      {/* 主修订任务列表板 */}
-      <WorkspacePanel title="修订任务板">
+      <WorkspacePanel
+        title="待处理队列"
+        description="在这里选择一项问题、定位影响范围并完成修订；全书体检只保留在按需诊断中。"
+      >
         <div className="revision-toolbar">
           <div className="revision-toolbar__filters">
             <Select
@@ -665,66 +572,110 @@ export default function RevisionCenterPage({ novelId }: Props) {
           </div>
         </div>
 
-        <Table
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={tasks}
-          scroll={{ x: 1080 }}
-          pagination={{
-            current: page,
-            pageSize: REVISION_PAGE_SIZE,
-            total: taskTotal,
-            showSizeChanger: false,
-            onChange: setPage,
-          }}
-        />
+        <div className="revision-workspace" data-revision-workspace>
+          <aside className="revision-workspace__queue" aria-label="修订任务队列">
+            <div className="revision-workspace__queue-heading">
+              <span>当前结果</span>
+              <strong>{taskTotal} 项</strong>
+            </div>
+            <div className="revision-workspace__task-list" data-revision-task-list>
+              {tasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  data-revision-task-id={task.id}
+                  aria-current={selectedTask?.id === task.id ? 'true' : undefined}
+                  className={`revision-workspace__task${selectedTask?.id === task.id ? ' is-active' : ''}`}
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  <span className="revision-workspace__task-head">
+                    <Tag color={getRevisionSeverityColor(task.severity)}>{getRevisionSeverityLabel(task.severity)}</Tag>
+                    <Tag color={getStatusColor(task.status)}>{getStatusLabel(task.status)}</Tag>
+                  </span>
+                  <strong>{task.title}</strong>
+                  <span>{task.fixBrief || task.description || '尚未填写修订说明。'}</span>
+                </button>
+              ))}
+              {!loading && tasks.length === 0 ? (
+                <div className="revision-workspace__empty" data-revision-empty-queue>
+                  <strong>当前筛选下没有修订任务</strong>
+                  <span>可调整筛选，或新建一条人工修订任务。</span>
+                </div>
+              ) : null}
+            </div>
+            {taskTotal > REVISION_PAGE_SIZE ? (
+              <div className="revision-workspace__pagination">
+                <Button size="small" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button>
+                <span>{page} / {Math.max(1, Math.ceil(taskTotal / REVISION_PAGE_SIZE))}</span>
+                <Button size="small" disabled={page * REVISION_PAGE_SIZE >= taskTotal} onClick={() => setPage((current) => current + 1)}>下一页</Button>
+              </div>
+            ) : null}
+          </aside>
+
+          <article className="revision-workspace__detail" data-revision-current-task>
+            {selectedTask ? (
+              <>
+                <div className="revision-workspace__detail-head">
+                  <div>
+                    <span className="revision-workspace__kicker">当前问题</span>
+                    <h3>{selectedTask.title}</h3>
+                    <span className="revision-workspace__meta">{TASK_TYPE_LABELS[selectedTask.taskType] || selectedTask.taskType || '连续性'} · 更新于 {formatDate(selectedTask.updatedAt)}</span>
+                  </div>
+                  <Space size={6} wrap>
+                    <Tag color={getSourceColor(selectedTask.taskSource)}>{getSourceLabel(selectedTask.taskSource)}</Tag>
+                    <Tag color={getStatusColor(selectedTask.status)}>{getStatusLabel(selectedTask.status)}</Tag>
+                  </Space>
+                </div>
+                <div className="revision-workspace__problem">
+                  <span>问题与影响</span>
+                  <strong>{selectedTask.description || '此任务尚未补充问题描述，请先明确影响范围。'}</strong>
+                </div>
+                <div className="revision-workspace__fix">
+                  <span>修订方案</span>
+                  <p>{selectedTask.fixBrief || '暂未提供修订方案，可编辑任务补充检查清单。'}</p>
+                </div>
+                <div className="revision-workspace__detail-meta">
+                  <span>关联模块：{RELATED_PAGE_OPTIONS.find((item) => item.value === selectedTask.relatedPage)?.label || selectedTask.relatedPage || '正文写作'}</span>
+                  <span>优先级：{getRevisionSeverityLabel(selectedTask.severity)}</span>
+                </div>
+                <div className="revision-workspace__actions" data-revision-task-actions>{renderTaskActions(selectedTask)}</div>
+              </>
+            ) : (
+              <div className="revision-workspace__empty" data-revision-empty-detail>
+                <strong>选择一条修订任务</strong>
+                <span>队列中的每项任务都会在此处显示问题、方案与可执行动作。</span>
+              </div>
+            )}
+          </article>
+        </div>
       </WorkspacePanel>
 
-      {/* 系统体检与一致性诊断卡片 */}
       {consistencyReport ? (
-        <WorkspacePanel
-          title="系统健康体检"
-          description={consistencyReport.overview || '综合多维度设定与章节连续性的一致性检查报告'}
-        >
-          <div className="revision-health-grid">
-            <div className="revision-health-card">
-              <span className="revision-health-card__label">健康评分</span>
-              <span className="revision-health-card__value" style={{ color: consistencyReport.readinessScore >= 80 ? 'var(--success, #52c41a)' : 'var(--warning, #faad14)' }}>
-                {consistencyReport.readinessScore} 分
-              </span>
+        <details className="revision-diagnostics" data-revision-diagnostics>
+          <summary>
+            <span><strong>系统体检与诊断</strong><small>{consistencyReport.highCount} 个高优先问题 · 按需展开</small></span>
+          </summary>
+          <div className="revision-diagnostics__content">
+            <p>{consistencyReport.overview || '综合多维度设定与章节连续性的一致性检查报告'}</p>
+            <div className="revision-health-grid">
+              <div className="revision-health-card"><span className="revision-health-card__label">健康评分</span><span className="revision-health-card__value">{consistencyReport.readinessScore} 分</span></div>
+              <div className="revision-health-card"><span className="revision-health-card__label">高优先级风险</span><span className="revision-health-card__value">{consistencyReport.highCount} 项</span></div>
+              <div className="revision-health-card"><span className="revision-health-card__label">中优先级预警</span><span className="revision-health-card__value">{consistencyReport.mediumCount} 项</span></div>
+              <div className="revision-health-card"><span className="revision-health-card__label">低优先级提示</span><span className="revision-health-card__value">{consistencyReport.lowCount} 项</span></div>
             </div>
-            <div className="revision-health-card">
-              <span className="revision-health-card__label">高优先级风险</span>
-              <span className="revision-health-card__value" style={{ color: consistencyReport.highCount > 0 ? 'var(--danger, #ff4d4f)' : 'inherit' }}>
-                {consistencyReport.highCount} 项
-              </span>
-            </div>
-            <div className="revision-health-card">
-              <span className="revision-health-card__label">中优先级预警</span>
-              <span className="revision-health-card__value">{consistencyReport.mediumCount} 项</span>
-            </div>
-            <div className="revision-health-card">
-              <span className="revision-health-card__label">低优先级提示</span>
-              <span className="revision-health-card__value">{consistencyReport.lowCount} 项</span>
-            </div>
-          </div>
-
-          {consistencyReport.issues.length > 0 ? (
-            <div className="novel-issue-list" style={{ marginTop: 16 }}>
-              {consistencyReport.issues.slice(0, 8).map((issue) => (
-                <div key={issue.id} className="novel-issue-item">
-                  <div className="novel-issue-item__head">
-                    <Tag color={getConsistencySeverityColor(issue.severity)}>{getConsistencySeverityLabel(issue.severity)}</Tag>
-                    <strong>{issue.title}</strong>
+            {consistencyReport.issues.length > 0 ? (
+              <div className="novel-issue-list">
+                {consistencyReport.issues.slice(0, 8).map((issue) => (
+                  <div key={issue.id} className="novel-issue-item">
+                    <div className="novel-issue-item__head"><Tag color={getConsistencySeverityColor(issue.severity)}>{getConsistencySeverityLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div>
+                    <div className="novel-issue-item__desc">{issue.description}</div>
+                    <div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div>
                   </div>
-                  <div className="novel-issue-item__desc">{issue.description}</div>
-                  <div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </WorkspacePanel>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
 
       {/* 新建/编辑任务弹窗 */}

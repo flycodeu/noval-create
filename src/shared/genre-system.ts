@@ -2580,25 +2580,14 @@ function normalizeWritingConstraints(
     ? value as Record<string, unknown>
     : {}
 
-  const rawRealismLevel = asText(record.realismLevel) || asText(legacy?.realism_level)
-  const realismLevel = rawRealismLevel === 'strict-realism'
-    || rawRealismLevel === 'rule-realism'
-    || rawRealismLevel === 'stylized-fantasy'
-    ? rawRealismLevel
-    : fallback.realismLevel
+  const realismLevel = normalizeRealismLevel(record, legacy, fallback)
 
   return {
-    antiQuoteEmphasis: typeof record.antiQuoteEmphasis === 'boolean'
-      ? record.antiQuoteEmphasis
-      : fallback.antiQuoteEmphasis,
-    antiConceptSlogans: typeof record.antiConceptSlogans === 'boolean'
-      ? record.antiConceptSlogans
-      : fallback.antiConceptSlogans,
-    antiSymmetricLines: typeof record.antiSymmetricLines === 'boolean'
-      ? record.antiSymmetricLines
-      : fallback.antiSymmetricLines,
-    narrationStyle: asText(record.narrationStyle) || asText(legacy?.logic_constraints) || fallback.narrationStyle,
-    dialogueStyle: asText(record.dialogueStyle) || asText(legacy?.honorifics) || fallback.dialogueStyle,
+    antiQuoteEmphasis: normalizeBooleanConstraint(record.antiQuoteEmphasis, fallback.antiQuoteEmphasis),
+    antiConceptSlogans: normalizeBooleanConstraint(record.antiConceptSlogans, fallback.antiConceptSlogans),
+    antiSymmetricLines: normalizeBooleanConstraint(record.antiSymmetricLines, fallback.antiSymmetricLines),
+    narrationStyle: firstWritingConstraint(asText(record.narrationStyle), asText(legacy?.logic_constraints), fallback.narrationStyle),
+    dialogueStyle: firstWritingConstraint(asText(record.dialogueStyle), asText(legacy?.honorifics), fallback.dialogueStyle),
     forbiddenPhrases: dedupe([
       ...toStringArray(record.forbiddenPhrases),
       ...toStringArray(legacy?.forbidden_elements),
@@ -2610,8 +2599,8 @@ function normalizeWritingConstraints(
       ...fallback.extraRules,
     ]).slice(0, 12),
     realismLevel,
-    sciencePolicy: asText(record.sciencePolicy) || asText(legacy?.science_policy) || fallback.sciencePolicy,
-    physicsPolicy: asText(record.physicsPolicy) || asText(legacy?.physics_policy) || fallback.physicsPolicy,
+    sciencePolicy: firstWritingConstraint(asText(record.sciencePolicy), asText(legacy?.science_policy), fallback.sciencePolicy),
+    physicsPolicy: firstWritingConstraint(asText(record.physicsPolicy), asText(legacy?.physics_policy), fallback.physicsPolicy),
     commonSenseFocus: dedupe([
       ...toStringArray(record.commonSenseFocus),
       ...toStringArray(legacy?.common_sense_focus),
@@ -2623,6 +2612,25 @@ function normalizeWritingConstraints(
       ...fallback.contextAlignmentFocus,
     ]).slice(0, 8),
   }
+}
+
+function normalizeBooleanConstraint(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function firstWritingConstraint(...values: string[]): string {
+  return values.find((value) => Boolean(value)) || ''
+}
+
+function normalizeRealismLevel(
+  record: Record<string, unknown>,
+  legacy: Record<string, unknown> | undefined,
+  fallback: WritingConstraints,
+): WritingConstraints['realismLevel'] {
+  const value = firstWritingConstraint(asText(record.realismLevel), asText(legacy?.realism_level))
+  return ['strict-realism', 'rule-realism', 'stylized-fantasy'].includes(value)
+    ? value as WritingConstraints['realismLevel']
+    : fallback.realismLevel
 }
 
 export function normalizeWorldRules(raw: unknown, genreName?: string | null): GenreWorldRules {

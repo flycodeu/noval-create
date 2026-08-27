@@ -22,9 +22,7 @@ import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import WorkspaceChatAssistant from './components/WorkspaceChatAssistant'
-import {
-  WorkspaceChromePortalContext,
-} from '../../components/novel/workspace-layout/workspace-chrome'
+import { WorkspaceChromePortalContext } from '../../components/novel/workspace-layout/workspace-chrome-contract'
 import {
   EMPTY_WORKFLOW_STATS,
   loadWorkflowStats,

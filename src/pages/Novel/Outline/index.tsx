@@ -61,6 +61,21 @@ const PHASE_FIELD_CONFIG = [
   { key: 'phase_closure', label: '收束', ratio: 1, chapterField: 'phaseClosureChapter', beatField: 'phaseClosureBeat' },
 ] as const
 
+function arcProgressTagColor(progressRate: number): 'success' | 'warning' | 'error' {
+  if (progressRate >= 40) return 'success'
+  return progressRate >= 25 ? 'warning' : 'error'
+}
+
+function arcStallTagColor(stallRate: number): 'error' | 'warning' | 'default' {
+  if (stallRate >= 70) return 'error'
+  return stallRate >= 50 ? 'warning' : 'default'
+}
+
+function arcPhaseTagColor(missedPhaseCount: number, hitPhaseCount: number): 'error' | 'processing' | 'default' {
+  if (missedPhaseCount > 0) return 'error'
+  return hitPhaseCount > 0 ? 'processing' : 'default'
+}
+
 function buildDefaultPhaseTargets(chapterStart?: number, chapterEnd?: number): Map<string, number> {
   if (typeof chapterStart !== 'number' || typeof chapterEnd !== 'number' || chapterEnd < chapterStart) {
     return new Map()
@@ -816,13 +831,13 @@ export default function Outline({ novelId }: Props) {
                       <div className="novel-outline-arc__desc">{missingOutlineCount > 0 ? `待补细纲：${missingOutlineCount} 章` : '当前故事弧细纲已补齐'}</div>
                       {arcSummary ? (
                         <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
-                          <Tag color={arcSummary.progressRate >= 40 ? 'success' : arcSummary.progressRate >= 25 ? 'warning' : 'error'} className="novel-outline-page__tag-reset">
+                          <Tag color={arcProgressTagColor(arcSummary.progressRate)} className="novel-outline-page__tag-reset">
                             推进率 {arcSummary.progressRate}%
                           </Tag>
-                          <Tag color={arcSummary.stallRate >= 70 ? 'error' : arcSummary.stallRate >= 50 ? 'warning' : 'default'} className="novel-outline-page__tag-reset">
+                          <Tag color={arcStallTagColor(arcSummary.stallRate)} className="novel-outline-page__tag-reset">
                             空转率 {arcSummary.stallRate}%
                           </Tag>
-                          <Tag color={arcSummary.missedPhaseCount > 0 ? 'error' : arcSummary.hitPhaseCount > 0 ? 'processing' : 'default'} className="novel-outline-page__tag-reset">
+                          <Tag color={arcPhaseTagColor(arcSummary.missedPhaseCount, arcSummary.hitPhaseCount)} className="novel-outline-page__tag-reset">
                             阶段 {arcSummary.hitPhaseCount}/{arcSummary.phaseTargets.length}
                           </Tag>
                           {arcSummary.alerts.length > 0 ? <Tag color="error" className="novel-outline-page__tag-reset">{arcSummary.alerts.length} 条告警</Tag> : null}

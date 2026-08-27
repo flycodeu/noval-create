@@ -22,6 +22,11 @@ interface LanguageSectionProps {
   hasScoreData: boolean
 }
 
+function recurrenceSeverityColor(severity: string): 'error' | 'warning' | 'default' {
+  if (severity === 'high') return 'error'
+  return severity === 'medium' ? 'warning' : 'default'
+}
+
 /** 语言与对白 Tab：AI 味分解与角色对白辨识度。 */
 export default function LanguageSection({ data, filtered, hasScoreData }: LanguageSectionProps) {
   return (
@@ -171,7 +176,7 @@ function LanguageDriftPanel({
             <div key={item.ruleCode} className="quality-dashboard-page__detail-block">
               <div className="quality-dashboard-page__row quality-dashboard-page__row--between quality-dashboard-page__row--center">
                 <span className="quality-dashboard-page__row-label">{item.ruleTitle}</span>
-                <Tag color={item.severity === 'high' ? 'error' : item.severity === 'medium' ? 'warning' : 'default'} className="quality-dashboard-page__tag-reset">
+                <Tag color={recurrenceSeverityColor(item.severity)} className="quality-dashboard-page__tag-reset">
                   {`第 ${item.lastChapterNum} 章`}
                 </Tag>
               </div>
@@ -379,7 +384,7 @@ function LanguageDriftPanel({
               <div key={item.issueType} className="quality-dashboard-page__detail-block">
                 <div className="quality-dashboard-page__row quality-dashboard-page__row--between quality-dashboard-page__row--center">
                   <span className="quality-dashboard-page__row-label">{item.title}</span>
-                  <Tag color={item.severity === 'high' ? 'error' : item.severity === 'medium' ? 'warning' : 'default'} className="quality-dashboard-page__tag-reset">
+                  <Tag color={recurrenceSeverityColor(item.severity)} className="quality-dashboard-page__tag-reset">
                     {`第 ${item.lastChapterNum} 章`}
                   </Tag>
                 </div>

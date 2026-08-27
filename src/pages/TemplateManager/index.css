@@ -1,0 +1,17 @@
+.template-manager-page [data-template-builtin="true"] {
+  position: relative;
+}
+
+.template-manager-page [data-template-builtin="true"] .template-manager-card__action--primary {
+  color: var(--text-secondary);
+}
+
+.template-manager-page [data-template-builtin="true"] .template-manager-card__action--primary::after {
+  content: ' · 只读';
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.template-manager-page [data-template-builtin="false"] .template-manager-card__action--primary {
+  color: var(--accent);
+}

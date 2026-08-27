@@ -1,0 +1,287 @@
+.novel-overview-page {
+  --overview-ink: var(--workspace-ink, var(--text-primary));
+  --overview-copy: var(--workspace-ink-soft, var(--text-secondary));
+  --overview-border: color-mix(in srgb, var(--border-default) 82%, transparent 18%);
+  --overview-surface: color-mix(in srgb, var(--bg-surface) 96%, var(--bg-muted) 4%);
+  --overview-soft: color-mix(in srgb, var(--bg-muted) 58%, var(--bg-surface) 42%);
+  color: var(--overview-ink);
+}
+
+.overview-page__body {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* The legacy overview selector adds a two-column desktop grid to the shared
+ * main area. This page now owns one continuous information flow, so its body
+ * must span that grid instead of leaving an empty right-hand column. */
+.novel-overview-page .novel-workspace__main > .overview-page__body {
+  grid-column: 1 / -1;
+}
+
+.overview-page__alert-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.overview-page__project-info,
+.overview-page__packaging {
+  min-width: 0;
+}
+
+.overview-page__project-info .novel-panel,
+.overview-page__packaging .novel-panel {
+  background: var(--overview-surface);
+}
+
+/* The shared narrow-screen rule stacks panel headers. Keep this page's compact
+ * sync state beside the title until the page is genuinely phone-sized; the
+ * generic first-child flex basis would otherwise create a tall empty header. */
+.overview-page__project-info .novel-panel__header {
+  flex-direction: row;
+  align-items: center;
+}
+
+.overview-page__project-info .novel-panel__header > .novel-panel__copy {
+  flex: 1 1 auto;
+}
+
+.overview-page__save-state {
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.overview-page__save-state.is-unsaved,
+.overview-page__packaging-dirty {
+  color: var(--warning);
+}
+
+.overview-page__field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.42fr);
+  gap: 0 22px;
+  min-width: 0;
+}
+
+.overview-page__field {
+  min-width: 0;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--overview-border);
+}
+
+.overview-page__field--wide {
+  grid-column: 1 / -1;
+}
+
+.overview-page__field .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.overview-page__field .ant-form-item-label {
+  padding-bottom: 6px;
+}
+
+.overview-page__field .ant-input,
+.overview-page__field .ant-input-number,
+.overview-page__field .ant-input-number-input {
+  width: 100%;
+}
+
+.overview-page__field textarea.ant-input {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.overview-page__assistant {
+  margin-top: 18px;
+  border-top: 1px solid var(--overview-border);
+}
+
+.overview-page__assistant > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px 0 4px;
+  color: var(--overview-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.overview-page__assistant > summary::-webkit-details-marker {
+  display: none;
+}
+
+.overview-page__assistant > summary::after {
+  content: '+';
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--overview-border);
+  border-radius: 50%;
+  color: var(--overview-copy);
+  font-size: 18px;
+}
+
+.overview-page__assistant[open] > summary::after {
+  content: '−';
+}
+
+.overview-page__assistant > summary > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overview-page__assistant > summary strong {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.overview-page__assistant > summary small,
+.overview-page__assistant > summary > span:last-child {
+  color: var(--overview-copy);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.overview-page__assistant > summary > span:last-child {
+  flex: 0 0 auto;
+}
+
+.overview-page__assistant-body {
+  padding-top: 14px;
+}
+
+.overview-page__packaging-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--overview-border);
+  border-radius: 12px;
+  background: var(--overview-soft);
+}
+
+.overview-page__packaging-summary > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.overview-page__packaging-summary strong {
+  color: var(--overview-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.overview-page__packaging-summary span:not(.overview-page__packaging-dirty) {
+  color: var(--overview-copy);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.overview-page__packaging-dirty {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.overview-page__packaging-content {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--overview-border);
+}
+
+.overview-page__packaging-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--overview-copy);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.overview-page__packaging-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.overview-page__packaging-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 22px;
+}
+
+.overview-page__packaging-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--overview-border);
+}
+
+.overview-page__packaging-field--wide {
+  grid-column: 1 / -1;
+}
+
+.overview-page__packaging-field > strong {
+  color: var(--overview-ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.overview-page__packaging-field textarea.ant-input {
+  min-height: 92px;
+  resize: vertical;
+}
+
+[data-theme="dark"] .novel-overview-page {
+  --overview-border: rgba(212, 193, 161, 0.16);
+  --overview-surface: rgba(28, 34, 47, 0.92);
+  --overview-soft: rgba(36, 43, 57, 0.88);
+  --overview-copy: rgba(238, 242, 247, 0.72);
+}
+
+@media (max-width: 760px) {
+  .overview-page__project-info .novel-panel__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .overview-page__project-info .novel-panel__header > .novel-panel__copy {
+    flex: 0 1 auto;
+    width: 100%;
+  }
+
+  .overview-page__field-grid,
+  .overview-page__packaging-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-page__field--wide,
+  .overview-page__packaging-field--wide {
+    grid-column: auto;
+  }
+
+  .overview-page__packaging-summary,
+  .overview-page__packaging-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .overview-page__packaging-actions > div {
+    justify-content: flex-start;
+  }
+}

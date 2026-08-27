@@ -227,25 +227,29 @@ function serialize(values: ItemFormValues): Partial<StoryItem> {
     recordStatus: 'confirmed',
     itemKind: values.itemKind,
     parentItemId: values.itemKind === 'instance' ? values.parentItemId : undefined,
-    itemName: values.itemName.trim(),
-    category: values.category?.trim() || '',
-    subType: values.subType?.trim() || '',
-    rarity: values.rarity?.trim() || '',
+    itemName: normalizeItemText(values.itemName),
+    category: normalizeItemText(values.category),
+    subType: normalizeItemText(values.subType),
+    rarity: normalizeItemText(values.rarity),
     ownerCharacterId: values.ownerCharacterId,
     locationMapId: values.locationMapId,
     status: values.status,
-    summary: values.summary?.trim() || '',
-    acquisitionMethod: values.acquisitionMethod?.trim() || '',
-    usageMethod: values.usageMethod?.trim() || '',
-    cost: values.cost?.trim() || '',
-    risk: values.risk?.trim() || '',
-    plotFunction: values.plotFunction?.trim() || '',
-    appearance: values.appearance?.trim() || '',
-    factionHint: values.factionHint?.trim() || '',
+    summary: normalizeItemText(values.summary),
+    acquisitionMethod: normalizeItemText(values.acquisitionMethod),
+    usageMethod: normalizeItemText(values.usageMethod),
+    cost: normalizeItemText(values.cost),
+    risk: normalizeItemText(values.risk),
+    plotFunction: normalizeItemText(values.plotFunction),
+    appearance: normalizeItemText(values.appearance),
+    factionHint: normalizeItemText(values.factionHint),
     linkedCharacterIdsJson: JSON.stringify(values.linkedCharacterIds || []),
     linkedTimelineEventIdsJson: JSON.stringify(values.linkedTimelineEventIds || []),
     tagsJson: JSON.stringify((values.tags || []).map((item) => item.trim()).filter(Boolean)),
   }
+}
+
+function normalizeItemText(value?: string | null): string {
+  return value?.trim() || ''
 }
 
 function buildSourceLabel(source: StoryItemDetailContext['sourceContexts'][number]) {

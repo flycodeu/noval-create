@@ -12,6 +12,15 @@ const VIEWPORTS = [
   { width: 900, height: 760 },
 ]
 
+// P0-01 的全局页面不是项目工作区，不应被 shared/legacy portal 规则误判。
+// 这里保留独立的根节点与页面级溢出检查，确保全局入口也能承接同一套壳层密度。
+const GLOBAL_ROUTES = [
+  { key: 'models', hash: '#/models', selector: '.model-manager-page', label: '模型与搜索管理' },
+  { key: 'templates', hash: '#/templates', selector: '.template-manager-page', label: '文风与世界模板' },
+  { key: 'prompts', hash: '#/prompts', selector: '.prompt-manager-page', label: '提示词管理' },
+  { key: 'tasks', hash: '#/tasks', selector: '.task-center-page', label: '任务中心' },
+]
+
 function timestampId() {
   return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '')
 }
@@ -51,6 +60,18 @@ async function navigate(page, hash, workspaceLabel) {
     const currentLabel = document.querySelector('.project-topbar__workspace-name')?.textContent?.trim()
     return actualPath === expectedPath && currentLabel === label
   }, { label: workspaceLabel, expectedPath: hash }, { timeout: 12000 })
+  await page.waitForTimeout(500)
+}
+
+async function navigateGlobal(page, route) {
+  await page.evaluate(({ nextHash, storageKey }) => {
+    localStorage.setItem(storageKey, 'professional')
+    window.location.hash = nextHash
+  }, { nextHash: route.hash, storageKey: VIEW_MODE_STORAGE_KEY })
+  await page.waitForFunction(({ expectedPath, selector }) => {
+    const actualPath = window.location.hash.split('?')[0]
+    return actualPath === expectedPath && Boolean(document.querySelector(selector))
+  }, { expectedPath: route.hash, selector: route.selector }, { timeout: 12000 })
   await page.waitForTimeout(500)
 }
 
@@ -120,6 +141,41 @@ async function measure(page, kind) {
   }, kind)
 }
 
+async function measureGlobal(page, route) {
+  return page.evaluate(({ routeKey, selector }) => {
+    const root = document.querySelector(selector)
+    const documentRoot = document.documentElement
+    const body = document.body
+    const visible = (node) => {
+      if (!node) return false
+      const style = getComputedStyle(node)
+      const box = node.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.height > 0
+    }
+    const reasons = []
+    if (!root) reasons.push(`全局页面根节点不存在：${routeKey}`)
+    const scrollWidth = Math.max(documentRoot.scrollWidth, body?.scrollWidth || 0)
+    if (scrollWidth > documentRoot.clientWidth + 1) reasons.push('页面存在横向溢出')
+    if (document.querySelector('.novel-route-shell__error-card')) reasons.push('页面错误边界已触发')
+    const actions = [...document.querySelectorAll('.novel-hero__actions .ant-btn, .admin-toolbar__actions .ant-btn, .task-center-detail__actions .ant-btn')]
+      .filter(visible)
+    const boundedOverflow = [...(root?.querySelectorAll('[class*="list-scroll"], [class*="list-body"], [class*="log"], .ant-table-body') || [])]
+      .filter((node) => node.scrollHeight > node.clientHeight + 1).length
+    return {
+      status: reasons.length ? 'BLOCKED' : 'PASS',
+      reasons,
+      routeKey,
+      clientWidth: documentRoot.clientWidth,
+      scrollWidth,
+      pageHeight: Math.max(documentRoot.scrollHeight, body?.scrollHeight || 0),
+      actionCount: actions.length,
+      itemCount: root?.querySelectorAll('[data-model-config-card], [data-template-builtin], [data-p3-05-prompt-list] .prompt-manager-card, [data-p3-05-task-list] .novel-list-card').length || 0,
+      disclosureCount: root?.querySelectorAll('details, .ant-collapse-item').length || 0,
+      boundedOverflow,
+    }
+  }, { routeKey: route.key, selector: route.selector })
+}
+
 async function captureScreenshot(page, filePath) {
   await page.screenshot({
     path: filePath,
@@ -161,7 +217,7 @@ function buildReport({ runId, projectId, results }) {
     '',
     `- 运行编号：\`${runId}\``,
     `- Electron 项目：ID ${projectId}`,
-    '- 迁移样板：`project-brief`；隔离对照：`structure`。',
+    '- 迁移样板：`project-brief`；隔离对照：`structure`；全局入口：`/models`、`/templates`、`/prompts`、`/tasks`。',
     '- 契约：1 个主动作；桌面最多 2 个可见次动作；其余进入更多；窄屏次动作统一进入页面操作菜单。',
     '',
     '| 页面 | 视口 | 结果 | 共享标题 | 本地 Hero | 主动作 | 可见次动作 | 桌面更多 | 窄屏菜单 | 导航动作 | client/scroll | 截图 |',
@@ -170,7 +226,11 @@ function buildReport({ runId, projectId, results }) {
   for (const [key, viewports] of Object.entries(results)) {
     for (const [viewport, metric] of Object.entries(viewports)) {
       const result = metric.status === 'PASS' ? 'PASS' : `BLOCKED：${metric.reasons.join('；')}`
-      lines.push(`| ${key} | ${viewport} | ${result} | ${metric.sharedTitle || '-'} | ${metric.localHeroPresent ? '是' : '否'} | ${metric.primaryActionCount} | ${metric.visibleSecondaryActionCount} | ${metric.desktopMoreVisible ? '是' : '否'} | ${metric.compactMoreVisible ? '是' : '否'} | ${metric.navigationActionVerified ? '通过' : '-'} | ${metric.clientWidth}/${metric.scrollWidth} | [截图](runs/${runId}/screenshots/${key}-${viewport}.png) |`)
+      if (metric.kind === 'global') {
+        lines.push(`| ${key}（全局） | ${viewport} | ${result} | - | - | ${metric.actionCount} | ${metric.itemCount} | - | - | - | ${metric.clientWidth}/${metric.scrollWidth} | [截图](runs/${runId}/screenshots/${key}-${viewport}.png) |`)
+      } else {
+        lines.push(`| ${key} | ${viewport} | ${result} | ${metric.sharedTitle || '-'} | ${metric.localHeroPresent ? '是' : '否'} | ${metric.primaryActionCount} | ${metric.visibleSecondaryActionCount} | ${metric.desktopMoreVisible ? '是' : '否'} | ${metric.compactMoreVisible ? '是' : '否'} | ${metric.navigationActionVerified ? '通过' : '-'} | ${metric.clientWidth}/${metric.scrollWidth} | [截图](runs/${runId}/screenshots/${key}-${viewport}.png) |`)
+      }
     }
   }
   lines.push('')
@@ -224,6 +284,17 @@ async function main() {
       await navigate(page, `#/novels/${projectId}/structure`, '卷章结构')
       results.structure[size] = await measure(page, 'legacy')
       await captureScreenshot(page, path.join(screenshotsDir, `structure-${size}.png`))
+
+      for (const route of GLOBAL_ROUTES) {
+        const size = `${viewport.width}x${viewport.height}`
+        console.log(`[P0-01] ${size} ${route.key}`)
+        await navigateGlobal(page, route)
+        const metric = await measureGlobal(page, route)
+        metric.kind = 'global'
+        results[route.key] ||= {}
+        results[route.key][size] = metric
+        await captureScreenshot(page, path.join(screenshotsDir, `${route.key}-${size}.png`))
+      }
     }
     const measurements = Object.values(results).flatMap((item) => Object.values(item))
     const blocked = measurements.filter((item) => item.status !== 'PASS')
@@ -231,7 +302,7 @@ async function main() {
       runId,
       capturedAt: new Date().toISOString(),
       projectId,
-      pageCount: 2,
+      pageCount: 2 + GLOBAL_ROUTES.length,
       viewportCount: VIEWPORTS.length,
       measurementCount: measurements.length,
       passCount: measurements.length - blocked.length,

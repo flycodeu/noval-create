@@ -21,6 +21,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../Novel/components/WorkspaceShell'
+import './index.css'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = ['10', '20', '50']
@@ -548,7 +549,7 @@ export default function TaskCenter() {
       items.push({
         key: 'stream',
         label: '实时输出',
-        children: <div className="task-center-code">{selectedStream.content}</div>,
+        children: <div className="task-center-code" data-p3-05-task-log>{selectedStream.content}</div>,
       })
     }
 
@@ -556,7 +557,7 @@ export default function TaskCenter() {
       items.push({
         key: 'output',
         label: '结果输出',
-        children: <div className="task-center-code">{selectedTask.outputText}</div>,
+        children: <div className="task-center-code" data-p3-05-task-log>{selectedTask.outputText}</div>,
       })
     }
 
@@ -564,7 +565,7 @@ export default function TaskCenter() {
       items.push({
         key: 'input',
         label: '请求上下文',
-        children: <div className="task-center-code">{formatTaskPayload(selectedTask.inputJson)}</div>,
+        children: <div className="task-center-code" data-p3-05-task-log>{formatTaskPayload(selectedTask.inputJson)}</div>,
       })
     }
 
@@ -620,7 +621,7 @@ export default function TaskCenter() {
       items.push({
         key: 'observability',
         label: '草稿观测',
-        children: <div className="task-center-code">{[...observabilityLines, ...pipelineRoleLines].join('\n\n')}</div>,
+        children: <div className="task-center-code" data-p3-05-task-log>{[...observabilityLines, ...pipelineRoleLines].join('\n\n')}</div>,
       })
     }
 
@@ -721,7 +722,7 @@ export default function TaskCenter() {
             </Empty>
           ) : (
             <>
-              <div className="task-center-list">
+              <div className="task-center-list" data-p3-05-task-list>
                 {pageData.items.map((task) => {
                   const status = STATUS_LABELS[task.status] || STATUS_LABELS.pending
                   const stream = streams[task.id]

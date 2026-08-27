@@ -88,6 +88,11 @@ export type AuthorWorkflowQualitySummary = Pick<
   'productionReadiness' | 'batchHealth' | 'continuityHealth'
 > | null
 
+type AuthorWorkModeNovel = Pick<
+  Novel,
+  'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode' | 'operatingMode'
+>
+
 const MODE_LABELS: Record<AuthorWorkMode, string> = {
   quick_start: '快速启动',
   asset_building: '资产建设',
@@ -407,18 +412,30 @@ function buildImpactNotices(
   return notices.slice(0, 3)
 }
 
+function hasAuthorRevisionPressure(stats: WorkflowStats, qualitySummary: AuthorWorkflowQualitySummary): boolean {
+  return stats.revisionBlockerCount > 0
+    || stats.staleChapterCount > 0
+    || stats.staleAssetCount > 0
+    || stats.staleCheckpointCount > 0
+    || qualitySummary?.productionReadiness?.status === 'blocked'
+}
+
+function hasMissingFoundation(novel: AuthorWorkModeNovel | null | undefined): boolean {
+  return !isBasicsReady(novel)
+    && !isProjectBriefReady(novel)
+    && !isStoryCoreReady(novel)
+    && !isThemeVoiceReady(novel)
+    && !isWorldFoundationReady(novel)
+}
+
 export function resolveSuggestedAuthorWorkMode(
-  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode' | 'operatingMode'> | null | undefined,
+  novel: AuthorWorkModeNovel | null | undefined,
   stats: WorkflowStats,
   qualitySummary: AuthorWorkflowQualitySummary,
 ): { mode: AuthorWorkMode; reason: string } {
   const hasStartedWriting = stats.chapterCount > 0 || stats.totalWords > 0
   const assetBloat = getAssetBloatSignal(stats)
-  const hasRevisionPressure = stats.revisionBlockerCount > 0
-    || stats.staleChapterCount > 0
-    || stats.staleAssetCount > 0
-    || stats.staleCheckpointCount > 0
-    || qualitySummary?.productionReadiness?.status === 'blocked'
+  const hasRevisionPressure = hasAuthorRevisionPressure(stats, qualitySummary)
 
   if (hasRevisionPressure) {
     return {
@@ -442,11 +459,7 @@ export function resolveSuggestedAuthorWorkMode(
     chapterCount: stats.chapterCount,
   })
 
-  const hasNoFoundation = !isBasicsReady(novel)
-    && !isProjectBriefReady(novel)
-    && !isStoryCoreReady(novel)
-    && !isThemeVoiceReady(novel)
-    && !isWorldFoundationReady(novel)
+  const hasNoFoundation = hasMissingFoundation(novel)
 
   if (novel?.launchMode === 'fast_launch' || (operatingMode === 'shortform' && hasNoFoundation)) {
     return {

@@ -1,0 +1,543 @@
+/*
+ * Quiet workspace surface
+ *
+ * This is intentionally scoped to the WorkspacePage root. It supersedes the
+ * historical global card treatment without changing Ant Design or feature
+ * specific component contracts.
+ */
+.novel-workspace[data-workspace-surface="quiet"] {
+  --workspace-rule: color-mix(in srgb, var(--border-default) 82%, transparent 18%);
+  --workspace-rule-soft: color-mix(in srgb, var(--border-default) 58%, transparent 42%);
+  min-width: 0;
+  max-width: 100%;
+  padding: 16px clamp(16px, 2.2vw, 28px) 24px;
+  overflow-x: hidden;
+  background: var(--color-bg-primary);
+}
+
+.novel-workspace[data-workspace-surface="quiet"].novel-workspace--shared-chrome {
+  padding-top: 12px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-workspace__body {
+  gap: 16px;
+  min-width: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-workspace__main,
+.novel-workspace[data-workspace-surface="quiet"] .novel-workspace__aside {
+  min-width: 0;
+  gap: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-workspace__aside {
+  align-content: start;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin: 0 0 16px;
+  padding: 10px 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-rule);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero::before {
+  display: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__copy {
+  min-width: 0;
+  max-width: min(660px, 60%);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__eyebrow {
+  margin: 0 0 4px;
+  color: var(--workspace-accent);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__title {
+  color: var(--workspace-ink);
+  font-size: clamp(22px, 2.1vw, 28px);
+  line-height: 1.25;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__description {
+  display: -webkit-box;
+  max-width: 52ch;
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions {
+  flex: 0 1 auto;
+  align-items: center;
+  margin-left: auto;
+  padding-top: 1px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context,
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context {
+  flex: 1 1 280px;
+  max-width: min(520px, 42%);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context::-webkit-scrollbar {
+  display: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context .novel-context-summary {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  gap: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context .novel-context-summary__item {
+  display: grid;
+  align-content: center;
+  min-width: 128px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context .novel-context-summary__item:first-child {
+  border-left: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context .novel-context-summary__item dt {
+  font-size: 10px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__context .novel-context-summary__item dd {
+  margin: 3px 0 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics {
+  display: flex;
+  gap: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric {
+  min-width: 92px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-left: 1px solid var(--workspace-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric:first-child {
+  border-left: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-metrics {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: max-content;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more > summary,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-metrics > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--workspace-rule-soft);
+  border-radius: 999px;
+  color: var(--workspace-ink-soft);
+  font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more > summary::-webkit-details-marker,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-metrics > summary::-webkit-details-marker {
+  display: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more-grid,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-grid {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(128px, 1fr));
+  min-width: 280px;
+  padding: 8px;
+  border: 1px solid var(--workspace-rule);
+  background: var(--color-bg-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more-grid .novel-metric,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-grid .novel-metric {
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more-grid .novel-metric:nth-last-child(-n + 2),
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-grid .novel-metric:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric__label {
+  font-size: 10px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric__value {
+  font-size: 16px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel {
+  min-width: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel + .novel-panel {
+  border-top: 1px solid var(--workspace-rule-soft);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel--scrollable {
+  overflow: auto;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__header {
+  min-width: 0;
+  padding: 14px 0 9px;
+  border-bottom: 1px solid var(--workspace-rule-soft);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 7px;
+  min-width: 0;
+}
+
+/* The application shell gives panel headers a flexible two-column contract.
+   Reassert it on the quiet surface so a title and its optional tools do not
+   shrink into a narrow vertical strip at tablet widths. */
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__header > .novel-panel__copy {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__header > .novel-panel__extra {
+  flex: 0 1 auto;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__title {
+  color: var(--workspace-ink);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__body {
+  min-width: 0;
+  padding: 12px 0 18px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure {
+  display: inline-flex;
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--workspace-ink-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  list-style: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure > summary::before {
+  content: "ⓘ";
+  color: var(--workspace-accent);
+  font-size: 12px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure[open] > summary {
+  color: var(--workspace-ink);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__desc {
+  max-width: 72ch;
+  margin-top: 7px;
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+/* The generic .novel-panel__desc rule intentionally makes descriptions
+   visible for legacy inline panels. Native <details> needs an explicit
+   closed-state rule, otherwise its child can still reserve layout space. */
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__description-disclosure:not([open]) > .novel-panel__desc {
+  display: none;
+}
+
+/* Descriptions remain available without reserving a second heading row on
+   every panel. Opening the native disclosure returns the copy to normal flow. */
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__copy > .novel-panel__title + .novel-panel__description-disclosure {
+  display: inline-flex;
+  margin: 0 0 0 8px;
+  vertical-align: 2px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__copy > .novel-panel__title + .novel-panel__description-disclosure > summary {
+  padding: 1px 0;
+  font-size: 10px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__copy > .novel-panel__title + .novel-panel__description-disclosure[open] {
+  display: block;
+  grid-column: 1 / -1;
+  grid-row: auto;
+  margin: 7px 0 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__extra {
+  min-width: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-list-card,
+.novel-workspace[data-workspace-surface="quiet"] .novel-form-section {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-list-card {
+  border-color: var(--workspace-rule-soft);
+  border-width: 0 0 1px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-list-card:hover,
+.novel-workspace[data-workspace-surface="quiet"] .novel-list-card--active {
+  background: color-mix(in srgb, var(--workspace-accent-soft) 46%, transparent 54%);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-form-section {
+  margin-bottom: 14px;
+  padding: 12px 0 6px;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-rule-soft);
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-form-section__header {
+  margin-bottom: 10px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-tip-card {
+  padding: 10px 14px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--workspace-accent) 72%, transparent 28%);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--workspace-accent-soft) 38%, transparent 62%);
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-tip-card__title {
+  margin-bottom: 4px;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-note-list {
+  gap: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-note-list__item {
+  padding: 9px 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-empty {
+  min-height: 120px;
+  border: 1px dashed var(--workspace-rule);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide {
+  border: 0;
+  border-bottom: 1px solid var(--workspace-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__item {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Restore the rail's compact fact treatment after the generic metric rules. */
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail .novel-metric,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail .novel-context-summary__item {
+  min-height: 40px;
+  border: 0;
+  border-left: 1px solid var(--workspace-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail .novel-metric:first-child,
+.novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail .novel-context-summary__item:first-child {
+  border-left: 0;
+}
+
+@media (max-width: 900px) {
+  .novel-workspace[data-workspace-surface="quiet"] {
+    padding-inline: 16px;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero {
+    flex-wrap: wrap;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__copy {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions,
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__context,
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics {
+    margin-left: 0;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__context {
+    width: 100%;
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics {
+    width: 100%;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-panel__header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-panel__header > .novel-panel__copy,
+  .novel-workspace[data-workspace-surface="quiet"] .novel-panel__header > .novel-panel__extra {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-panel__header > .novel-panel__extra {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .novel-workspace[data-workspace-surface="quiet"] {
+    padding: 12px 12px 20px;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero {
+    gap: 10px;
+    padding-bottom: 12px;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__title {
+    font-size: 22px;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more-grid,
+  .novel-workspace[data-workspace-surface="quiet"] .workspace-information-rail__more-grid {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    min-width: 0;
+  }
+}
+
+/* A tablet-sized project shell must keep the map's list/detail relationship
+   readable. The container-query fallback intentionally keeps two columns for
+   wide content areas, but at 900px and below it would stretch the detail pane
+   across two grid rows and leave a misleading empty gap. */
+@media (max-width: 900px) {
+  .novel-workspace[data-workspace-surface="quiet"].novel-map-page .map-list-workspace {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .novel-workspace[data-workspace-surface="quiet"].novel-map-page .map-list-workspace > .map-list-panel--detail,
+  .novel-workspace[data-workspace-surface="quiet"].novel-map-page .map-list-workspace > .map-list-panel:nth-child(2) {
+    grid-column: auto;
+    grid-row: auto;
+    position: static;
+  }
+}

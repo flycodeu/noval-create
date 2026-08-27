@@ -14,6 +14,7 @@ import {
 } from '../../shared/prompt-library'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import './index.css'
 
 function normalizePromptText(text: string): string {
   return text
@@ -601,7 +602,8 @@ export default function PromptManager() {
       <div className="prompt-manager-shell">
         <WorkspacePanel
           className="prompt-manager-catalog"
-          title="链路目录"
+          title="运行时提示词"
+          description="选择一条链路后，在右侧查看全文、参数与编辑入口。"
           extra={(
             <div className="prompt-manager-filter-group">
               {PROMPT_CATEGORIES.map((category) => (
@@ -631,7 +633,7 @@ export default function PromptManager() {
           </div>
 
           {loading ? (
-            <div className="prompt-manager-card-grid">
+            <div className="prompt-manager-card-grid" data-p3-05-prompt-list>
               {Array.from({ length: 6 }).map((_, index) => (
                 <div key={index} className="prompt-manager-card">
                   <Skeleton active paragraph={{ rows: 4 }} />
@@ -639,12 +641,12 @@ export default function PromptManager() {
               ))}
             </div>
           ) : (
-            <div className="prompt-manager-card-grid">
+            <div className="prompt-manager-card-grid" data-p3-05-prompt-list>
               {filteredPrompts.length === 0 ? (
                 <div className="novel-empty">
                   当前筛选下没有匹配的提示词，请调整阶段、分类或搜索条件。
                 </div>
-              ) : filteredPrompts.map(({ prompt, meta, hasOverride, currentTemplate }) => (
+              ) : filteredPrompts.map(({ prompt, meta, hasOverride }) => (
                 <button
                   key={prompt.key}
                   type="button"
@@ -662,13 +664,10 @@ export default function PromptManager() {
                   <div className="prompt-manager-card__meta">
                     <Tag color="gold">{meta.lane}</Tag>
                     <Tag color="processing">{meta.stage}</Tag>
-                    <Tag>{prompt.category}</Tag>
                     <Tag>{`${prompt.params.length} 个参数`}</Tag>
                   </div>
 
-                  <div className="prompt-manager-card__goal">{meta.goal}</div>
-                  <div className="prompt-manager-card__risk">{`风险点：${meta.risk}`}</div>
-                  <div className="prompt-manager-card__preview">{currentTemplate}</div>
+                  <div className="prompt-manager-card__summary">{meta.goal}</div>
                 </button>
               ))}
             </div>
@@ -730,7 +729,9 @@ export default function PromptManager() {
                   <div className="prompt-manager-template-preview prompt-manager-template-preview--featured">{selectedPromptRow.currentTemplate}</div>
                 </div>
 
-                <div className="prompt-manager-inspector-grid">
+                <details className="prompt-manager-inspector-disclosure" data-p3-05-prompt-details>
+                  <summary>查看参数、风险与系统保留规则</summary>
+                  <div className="prompt-manager-inspector-grid">
                   <div className="prompt-manager-inspector-section">
                     <div className="prompt-manager-inspector-section__title">风险点</div>
                     <div className="prompt-manager-inspector-section__copy">{selectedPromptRow.meta.risk}</div>
@@ -773,7 +774,8 @@ export default function PromptManager() {
                       </div>
                     </div>
                   ) : null}
-                </div>
+                  </div>
+                </details>
 
               </div>
             ) : (

@@ -1,40 +1,17 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import { EllipsisOutlined } from '@ant-design/icons'
+import {
+  flattenWorkspaceNodes,
+  type WorkspaceActionContract,
+  type WorkspaceActionItem,
+} from './workspace-chrome-contract'
 import './workspace-chrome.css'
 
 const MAX_VISIBLE_SECONDARY_ACTIONS = 2
 
-export interface WorkspaceActionItem {
-  key: string
-  label: string
-  icon?: ReactNode
-  onClick: () => void
-  loading?: boolean
-  disabled?: boolean
-  danger?: boolean
-  ariaLabel?: string
-}
-
-export interface WorkspaceActionContract {
-  primary: WorkspaceActionItem
-  secondary?: WorkspaceActionItem[]
-  more?: MenuProps
-}
-
-export interface WorkspaceChromePortalTargets {
-  actionTarget: HTMLDivElement | null
-  informationTarget: HTMLDivElement | null
-}
-
-export const WorkspaceChromePortalContext = createContext<WorkspaceChromePortalTargets | null>(null)
-
-export function useWorkspaceChromePortal() {
-  return useContext(WorkspaceChromePortalContext)
-}
-
-export function partitionWorkspaceActions(contract: WorkspaceActionContract) {
+function partitionWorkspaceActions(contract: WorkspaceActionContract) {
   const secondary = contract.secondary || []
   return {
     visibleSecondary: secondary.slice(0, MAX_VISIBLE_SECONDARY_ACTIONS),
@@ -131,17 +108,35 @@ export function WorkspaceInformationRail({
   contextSummary?: ReactNode
   metrics?: ReactNode
 }) {
+  const metricItems = flattenWorkspaceNodes(metrics)
+  const visibleMetrics = metricItems.slice(0, 2)
+  const overflowMetrics = metricItems.slice(2)
+
   return (
-    <section className="workspace-information-rail" aria-label={`${title} 页面信息`}>
+    <section
+      className="workspace-information-rail"
+      aria-label={`${title} 页面信息${description ? `：${description}` : ''}`}
+      data-workspace-information="rail"
+    >
       <div className="workspace-information-rail__copy">
         {eyebrow ? <span className="workspace-information-rail__eyebrow">{eyebrow}</span> : null}
-        <div className="workspace-information-rail__heading">
+        <div className="workspace-information-rail__heading" title={description || title}>
           <h1>{title}</h1>
           {description ? <p>{description}</p> : null}
         </div>
       </div>
-      {contextSummary ? <div className="workspace-information-rail__context">{contextSummary}</div> : null}
-      {metrics ? <div className="workspace-information-rail__metrics">{metrics}</div> : null}
+      {contextSummary || visibleMetrics.length > 0 || overflowMetrics.length > 0 ? (
+        <div className="workspace-information-rail__facts">
+          {contextSummary ? <div className="workspace-information-rail__context">{contextSummary}</div> : null}
+          {visibleMetrics.length > 0 ? <div className="workspace-information-rail__metrics">{visibleMetrics}</div> : null}
+          {overflowMetrics.length > 0 ? (
+            <details className="workspace-information-rail__more-metrics">
+              <summary title="查看其余指标">更多 <span aria-hidden="true">{overflowMetrics.length}</span></summary>
+              <div className="workspace-information-rail__more-grid">{overflowMetrics}</div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }

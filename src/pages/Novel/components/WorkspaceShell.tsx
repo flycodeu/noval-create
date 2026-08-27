@@ -3,23 +3,16 @@ import { createPortal } from 'react-dom'
 import {
   WorkspaceContractActions,
   WorkspaceInformationRail,
-  useWorkspaceChromePortal,
-  type WorkspaceActionContract,
 } from '../../../components/novel/workspace-layout/workspace-chrome'
+import {
+  useWorkspaceChromePortal,
+  flattenWorkspaceNodes,
+  type WorkspaceActionContract,
+} from '../../../components/novel/workspace-layout/workspace-chrome-contract'
+import './workspace-simplification.css'
 
 function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
-}
-
-function countRenderableNodes(node: React.ReactNode): number {
-  if (node === null || node === undefined || typeof node === 'boolean') return 0
-  if (Array.isArray(node)) {
-    return node.reduce((total, child) => total + countRenderableNodes(child), 0)
-  }
-  if (React.isValidElement<{ children?: React.ReactNode }>(node) && node.type === React.Fragment) {
-    return countRenderableNodes(node.props.children)
-  }
-  return 1
 }
 
 interface WorkspacePageBaseProps {
@@ -75,10 +68,14 @@ export function WorkspacePage({
   children,
 }: WorkspacePageProps) {
   const hasAside = Boolean(aside)
-  const metricCount = countRenderableNodes(metrics)
+  const metricItems = flattenWorkspaceNodes(metrics)
+  const metricCount = metricItems.length
+  const visibleMetrics = metricItems.slice(0, 2)
+  const overflowMetrics = metricItems.slice(2)
   const inlineMetrics = metricCount > 0 && metricCount <= 2
   const portal = useWorkspaceChromePortal()
   const usesSharedChrome = chrome === 'shared'
+  const isProjectShell = Boolean(portal)
   const sharedInformation = usesSharedChrome ? (
     <WorkspaceInformationRail
       eyebrow={eyebrow}
@@ -110,9 +107,11 @@ export function WorkspacePage({
         usesSharedChrome && 'novel-workspace--shared-chrome',
         className,
       )}
+      data-workspace-surface="quiet"
       data-workspace-chrome={chrome}
       data-workspace-information-mounted={usesSharedChrome ? String(sharedInformationMounted) : 'legacy'}
       data-workspace-actions-mounted={usesSharedChrome ? String(sharedActionsMounted) : 'legacy'}
+      data-workspace-project-shell={String(isProjectShell)}
     >
       {!usesSharedChrome || !sharedInformationMounted ? <section
         className={joinClassNames(
@@ -133,7 +132,13 @@ export function WorkspacePage({
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {sharedActions && !sharedActionsMounted ? <div className="novel-hero__actions">{sharedActions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
-        {metrics ? <div className="novel-hero__metrics">{metrics}</div> : null}
+        {visibleMetrics.length > 0 ? <div className="novel-hero__metrics">{visibleMetrics}</div> : null}
+        {overflowMetrics.length > 0 ? (
+          <details className="novel-hero__metric-more">
+            <summary title="查看其余指标">更多指标 <span aria-hidden="true">{overflowMetrics.length}</span></summary>
+            <div className="novel-hero__metric-more-grid">{overflowMetrics}</div>
+          </details>
+        ) : null}
       </section> : null}
 
       {guide ? <div className="novel-workspace__guide">{guide}</div> : null}
@@ -179,6 +184,7 @@ export function WorkspacePanel({
   extra,
   scrollable = false,
   sticky = false,
+  descriptionMode = 'disclosure',
   className,
   bodyClassName,
   children,
@@ -188,10 +194,20 @@ export function WorkspacePanel({
   extra?: React.ReactNode
   scrollable?: boolean
   sticky?: boolean
+  descriptionMode?: 'disclosure' | 'inline'
   className?: string
   bodyClassName?: string
   children: React.ReactNode
 }) {
+  const descriptionContent = description ? descriptionMode === 'inline' ? (
+    <div className="novel-panel__desc">{description}</div>
+  ) : (
+    <details className="novel-panel__description-disclosure">
+      <summary title="查看说明">说明</summary>
+      <div className="novel-panel__desc">{description}</div>
+    </details>
+  ) : null
+
   return (
     <section
       className={joinClassNames(
@@ -206,9 +222,9 @@ export function WorkspacePanel({
           {title ? (
             <div className="novel-panel__copy">
               {title ? <h2 className="novel-panel__title">{title}</h2> : null}
-              {description ? <div className="novel-panel__desc">{description}</div> : null}
+              {descriptionContent}
             </div>
-          ) : description ? <div className="novel-panel__copy"><div className="novel-panel__desc">{description}</div></div> : null}
+          ) : description ? <div className="novel-panel__copy">{descriptionContent}</div> : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
         </div>
       ) : null}

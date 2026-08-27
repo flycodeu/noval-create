@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Spin, Table, Tag, message } from 'antd'
-import { CheckOutlined, EditOutlined, ReloadOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
+import { Alert, Button, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
+import {
+  CheckOutlined,
+  EditOutlined,
+  FilterOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { diffJson } from 'diff'
 import { getErrorMessage } from '@/utils/user-facing-message'
@@ -11,6 +18,7 @@ import type {
   ChapterWritebackCenterData,
   ChapterWritebackDiff,
 } from '../../../types'
+import type { WorkspaceActionContract } from '../../../components/novel/workspace-layout/workspace-chrome-contract'
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
@@ -135,24 +143,28 @@ function resolveExtractTitle(extract: ChapterFactExtract): string {
   return String(fact?.title || fact?.itemName || fact?.eventTitle || fact?.summary || `${assetLabel(extract.assetType)}事实`)
 }
 
+function confidenceLabel(value?: number | null): string {
+  return typeof value === 'number' ? `${Math.round(value * 100)}% 置信度` : '未记录置信度'
+}
+
 function JsonDiffViewer({ beforeJson, afterJson }: { beforeJson?: string | null, afterJson?: string | null }) {
   const beforeObj = parseJson(beforeJson) || {}
   const afterObj = parseJson(afterJson) || {}
   const diffResult = diffJson(beforeObj, afterObj)
 
   return (
-    <div className="novel-writeback-center-page__diff-viewer">
+    <div className="novel-writeback-center-page__diff-viewer" aria-label="当前候选 Diff">
       {diffResult.map((part, index) => {
-        const bg = part.added ? '#e6ffed' : part.removed ? '#ffeef0' : 'transparent'
-        const color = part.added ? '#22863a' : part.removed ? '#cb2431' : 'inherit'
+        const bg = part.added ? 'var(--writeback-diff-added)' : part.removed ? 'var(--writeback-diff-removed)' : 'transparent'
+        const color = part.added ? 'var(--writeback-diff-added-ink)' : part.removed ? 'var(--writeback-diff-removed-ink)' : 'inherit'
         const prefix = part.added ? '+ ' : part.removed ? '- ' : '  '
 
         return (
-          <div key={index} style={{ backgroundColor: bg, color, whiteSpace: 'pre-wrap', fontFamily: 'monospace', padding: '0 4px' }}>
-            {part.value.split('\n').map((line, i, arr) => (
-              (i === arr.length - 1 && line === '') ? null : (
-                <div key={i} style={{ display: 'flex' }}>
-                  <span style={{ userSelect: 'none', width: '20px', opacity: 0.5 }}>{prefix}</span>
+          <div key={index} style={{ backgroundColor: bg, color, whiteSpace: 'pre-wrap', padding: '0 8px' }}>
+            {part.value.split('\n').map((line, lineIndex, lines) => (
+              lineIndex === lines.length - 1 && line === '' ? null : (
+                <div key={lineIndex} className="novel-writeback-center-page__diff-line">
+                  <span className="novel-writeback-center-page__diff-prefix" aria-hidden="true">{prefix}</span>
                   <span>{line}</span>
                 </div>
               )
@@ -173,6 +185,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const [actionLoading, setActionLoading] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [centerData, setCenterData] = useState<ChapterWritebackCenterData | null>(null)
+  const [selectedDiffId, setSelectedDiffId] = useState<number | null>(null)
   const [assetFilter, setAssetFilter] = useState<'all' | ChapterWritebackAssetType>('all')
   const [decisionFilter, setDecisionFilter] = useState<'all' | ChapterWritebackDiff['canonDecision']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | ChapterWritebackDiff['writebackStatus']>('all')
@@ -194,11 +207,8 @@ export default function WritebackCenterPage({ novelId }: Props) {
 
   const refresh = useCallback(async (chapterIdArg?: number | null, runIdArg?: number | null, showLoading = false) => {
     const requestId = ++refreshRequestRef.current
-    if (showLoading || !loadedOnceRef.current) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
+    if (showLoading || !loadedOnceRef.current) setLoading(true)
+    else setRefreshing(true)
     try {
       const chapterRows = await window.electron.chapter.list(novelId)
       if (refreshRequestRef.current !== requestId) return
@@ -266,23 +276,28 @@ export default function WritebackCenterPage({ novelId }: Props) {
   )
   const filteredDiffs = useMemo(() => {
     const rows = centerData?.diffs || []
-    return rows.filter((item) => (assetFilter === 'all' || item.assetType === assetFilter))
-      .filter((item) => (decisionFilter === 'all' || item.canonDecision === decisionFilter))
-      .filter((item) => (statusFilter === 'all' || item.writebackStatus === statusFilter))
-      .filter((item) => (verificationFilter === 'all' || item.verificationStatus === verificationFilter))
+    return rows
+      .filter((item) => assetFilter === 'all' || item.assetType === assetFilter)
+      .filter((item) => decisionFilter === 'all' || item.canonDecision === decisionFilter)
+      .filter((item) => statusFilter === 'all' || item.writebackStatus === statusFilter)
+      .filter((item) => verificationFilter === 'all' || item.verificationStatus === verificationFilter)
   }, [assetFilter, centerData?.diffs, decisionFilter, statusFilter, verificationFilter])
-
   const filteredExtracts = useMemo(() => {
     const rows = centerData?.extracts || []
     return rows
       .filter((item) => assetFilter === 'all' || item.assetType === assetFilter)
       .filter((item) => verificationFilter === 'all' || item.verificationStatus === verificationFilter)
   }, [assetFilter, centerData?.extracts, verificationFilter])
-
   const coverageMap = useMemo(
     () => new Map((centerData?.coverage || []).map((item) => [item.assetType, item] as const)),
     [centerData?.coverage],
   )
+  const currentDiff = filteredDiffs.find((item) => item.id === selectedDiffId) || filteredDiffs[0] || null
+  const currentDiffIndex = currentDiff ? filteredDiffs.findIndex((item) => item.id === currentDiff.id) : -1
+
+  useEffect(() => {
+    setSelectedDiffId((current) => current && filteredDiffs.some((item) => item.id === current) ? current : filteredDiffs[0]?.id || null)
+  }, [filteredDiffs])
 
   const openEditModal = useCallback((diff: ChapterWritebackDiff) => {
     setEditingDiff(diff)
@@ -296,13 +311,18 @@ export default function WritebackCenterPage({ novelId }: Props) {
     setEditingReason('')
   }, [])
 
-  const runAction = useCallback(async (task: () => Promise<unknown>, successText: string, runIdToReload?: number | null) => {
+  const runAction = useCallback(async (
+    task: () => Promise<unknown>,
+    successText: string,
+    runIdToReload?: number | null,
+    refreshAfter = true,
+  ) => {
     if (actionInFlightRef.current) return false
     actionInFlightRef.current = true
     setActionLoading(true)
     try {
       await task()
-      await refresh(centerData?.chapter?.id, runIdToReload ?? activeRun?.id ?? null)
+      if (refreshAfter) await refresh(centerData?.chapter?.id, runIdToReload ?? activeRun?.id ?? null)
       notifyWorkspaceMutation()
       message.success(successText)
       return true
@@ -315,6 +335,14 @@ export default function WritebackCenterPage({ novelId }: Props) {
       setActionLoading(false)
     }
   }, [activeRun?.id, centerData?.chapter?.id, notifyWorkspaceMutation, refresh])
+
+  const prepareRun = useCallback(() => {
+    if (!centerData?.chapter?.id) return
+    void runAction(async () => {
+      const run = await window.electron.writeback.prepareRun(centerData.chapter?.id || 0, 'manual')
+      await refresh(centerData.chapter?.id, run.id)
+    }, '新的回写草案已生成。', null, false)
+  }, [centerData?.chapter?.id, refresh, runAction])
 
   const applyConfirmedRun = useCallback(() => {
     if (!activeRun) return
@@ -332,62 +360,86 @@ export default function WritebackCenterPage({ novelId }: Props) {
     })
   }, [activeRun, pendingDiffCount, pendingReviewCount, runAction])
 
-  const diffColumns = [
-    {
-      title: '资产',
-      width: 90,
-      render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color="geekblue">{assetLabel(row.assetType)}</Tag>,
+  const acceptCurrent = useCallback(() => {
+    if (!currentDiff) return
+    void runAction(() => window.electron.writeback.updateDecision(currentDiff.id, { canonDecision: 'accepted' }), '候选已接受。')
+  }, [currentDiff, runAction])
+
+  const rejectCurrent = useCallback(() => {
+    if (!currentDiff) return
+    void runAction(() => window.electron.writeback.updateDecision(currentDiff.id, { canonDecision: 'rejected' }), '候选已拒绝。')
+  }, [currentDiff, runAction])
+
+  const retryFailed = useCallback(() => {
+    if (!activeRun) return
+    void runAction(() => window.electron.writeback.retryFailed(activeRun.id), '失败项已重试。')
+  }, [activeRun, runAction])
+
+  const selectAdjacentDiff = useCallback((offset: -1 | 1) => {
+    if (currentDiffIndex < 0) return
+    const target = filteredDiffs[currentDiffIndex + offset]
+    if (target) setSelectedDiffId(target.id)
+  }, [currentDiffIndex, filteredDiffs])
+
+  const actionContract = useMemo<WorkspaceActionContract>(() => ({
+    primary: {
+      key: 'apply-confirmed',
+      label: '应用已确认项',
+      icon: <CheckOutlined />,
+      loading: actionLoading,
+      disabled: !activeRun,
+      onClick: applyConfirmedRun,
     },
-    {
-      title: '候选',
-      render: (_value: unknown, row: ChapterWritebackDiff) => (
-        <div className="novel-writeback-center-page__diff-copy">
-          <strong>{resolveDiffTitle(row)}</strong>
-          <span className="novel-writeback-center-page__muted">{row.diffReason || '未填写原因'}</span>
-        </div>
-      ),
+    secondary: [
+      {
+        key: 'prepare',
+        label: '重新抽取',
+        icon: <RobotOutlined />,
+        loading: actionLoading,
+        disabled: !centerData?.chapter?.id,
+        onClick: prepareRun,
+      },
+      {
+        key: 'retry',
+        label: '重试失败项',
+        icon: <ReloadOutlined />,
+        loading: actionLoading,
+        disabled: !activeRun,
+        onClick: retryFailed,
+      },
+    ],
+    more: {
+      items: [
+        {
+          key: 'bulk-accept',
+          label: '批量接受当前筛选',
+          icon: <CheckOutlined />,
+          disabled: !activeRun,
+          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'accepted', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量接受当前筛选结果。'),
+        },
+        {
+          key: 'bulk-reject',
+          label: '批量拒绝当前筛选',
+          icon: <StopOutlined />,
+          danger: true,
+          disabled: !activeRun,
+          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'rejected', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量拒绝当前筛选结果。'),
+        },
+        {
+          key: 'refresh',
+          label: '刷新回写数据',
+          icon: <ReloadOutlined />,
+          onClick: () => void refresh(centerData?.chapter?.id, activeRun?.id || null),
+        },
+      ],
     },
-    {
-      title: '验证',
-      width: 120,
-      render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={verificationColor(row.verificationStatus)}>{verificationLabel(row.verificationStatus)}</Tag>,
-    },
-    {
-      title: '正典',
-      width: 110,
-      render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={decisionColor(row.canonDecision)}>{decisionLabel(row.canonDecision)}</Tag>,
-    },
-    {
-      title: '回写',
-      width: 110,
-      render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={writebackColor(row.writebackStatus)}>{writebackLabel(row.writebackStatus)}</Tag>,
-    },
-    {
-      title: '操作',
-      width: 220,
-      render: (_value: unknown, row: ChapterWritebackDiff) => (
-        <Space wrap>
-          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<CheckOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'accepted' }), '候选已接受。')}>
-            接受
-          </Button>
-          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<StopOutlined />} onClick={() => void runAction(() => window.electron.writeback.updateDecision(row.id, { canonDecision: 'rejected' }), '候选已拒绝。')}>
-            拒绝
-          </Button>
-          <Button disabled={row.writebackStatus === 'applied'} size="small" icon={<EditOutlined />} onClick={() => openEditModal(row)}>
-            编辑
-          </Button>
-        </Space>
-      ),
-    },
-  ]
+  }), [actionLoading, activeRun, applyConfirmedRun, assetFilter, centerData?.chapter?.id, prepareRun, refresh, retryFailed, runAction])
 
   if (loading && !centerData) {
     return (
-      <WorkspacePage title="章后状态回写中心">
+      <WorkspacePage className="novel-writeback-center-page" title="章后状态回写中心">
         <WorkspacePanel title="正在加载回写中心">
-          <div className="novel-workspace__loading-card">
-            <Spin />
-          </div>
+          <div className="novel-workspace__loading-card"><Spin /></div>
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -398,194 +450,300 @@ export default function WritebackCenterPage({ novelId }: Props) {
       className="novel-writeback-center-page"
       layout="wide"
       heroVariant="compact"
+      eyebrow="正文生产 / Canon 同步"
       title="章后状态回写中心"
-      actions={(
-        <Space wrap>
-          <Button icon={<RobotOutlined />} loading={actionLoading} disabled={!centerData?.chapter?.id} onClick={() => void runAction(async () => {
-            const run = await window.electron.writeback.prepareRun(centerData?.chapter?.id || 0, 'manual')
-            await refresh(centerData?.chapter?.id, run.id)
-          }, '新的回写草案已生成。')}>
-            重新抽取
-          </Button>
-          <Button loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'accepted', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量接受当前筛选结果。')}>
-            批量接受
-          </Button>
-          <Button loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'rejected', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量拒绝当前筛选结果。')}>
-            批量拒绝
-          </Button>
-          <Button type="primary" loading={actionLoading} disabled={!activeRun} onClick={applyConfirmedRun}>
-            应用已确认项
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={actionLoading} disabled={!activeRun} onClick={() => void runAction(() => window.electron.writeback.retryFailed(activeRun?.id || 0), '失败项已重试。')}>
-            重试失败项
-          </Button>
-        </Space>
-      )}
+      description="只处理当前章节的一轮状态同步：先看 Diff，再决定是否进入正典；事实与诊断保持按需可见。"
+      chrome="shared"
+      actionContract={actionContract}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
             { label: '当前项目', value: currentNovel?.title || '未命名小说' },
             { label: '当前章节', value: centerData?.chapter ? `第${centerData.chapter.chapterNum}章 ${centerData.chapter.title || ''}`.trim() : '未选择' },
             { label: '当前运行', value: activeRun ? `#${activeRun.id}` : '暂无' },
-            { label: '运行状态', value: activeRun ? runStatusLabel(activeRun.status) : '未生成' },
-            { label: '正典状态', value: centerData?.writebackStatus.canonApplied ? '正典已应用' : centerData?.writebackStatus.candidateReady ? '候选已生成·待应用' : '暂无候选' },
+            { label: '同步状态', value: activeRun ? runStatusLabel(activeRun.status) : centerData?.writebackStatus.canonApplied ? '正典已同步' : '暂无候选' },
           ]}
         />
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="事实抽取" value={centerData?.extracts.length || 0} tone="cool" />
-          <WorkspaceMetric label="回写候选" value={centerData?.diffs.length || 0} />
-          <WorkspaceMetric label="候选状态" value={centerData?.writebackStatus.candidateReady ? '已生成' : '暂无'} tone={centerData?.writebackStatus.candidateReady ? 'warm' : 'cool'} />
-          <WorkspaceMetric label="待确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending').length} tone="warm" />
-          <WorkspaceMetric label="人工确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending' && item.verificationStatus !== 'auto_ready').length} tone="warm" />
+          <WorkspaceMetric label="当前 Diff" value={currentDiff ? `${currentDiffIndex + 1}/${filteredDiffs.length}` : '—'} tone="warm" />
+          <WorkspaceMetric label="待确认" value={pendingDiffCount} tone={pendingDiffCount > 0 ? 'warm' : 'cool'} />
           <WorkspaceMetric label="已写回" value={(centerData?.diffs || []).filter((item) => item.writebackStatus === 'applied').length} />
           <WorkspaceMetric label="失败项" value={(centerData?.diffs || []).filter((item) => item.writebackStatus === 'failed').length} tone="warm" />
         </>
       )}
     >
-      {refreshing ? (
-        <div className="novel-dashboard__refresh-indicator novel-writeback-center-page__refresh">
-          <Spin size="small" />
-          <span>正在同步章后回写数据</span>
-        </div>
-      ) : null}
-      {chapters.length <= 0 ? (
-        <Alert showIcon type="info" message="当前还没有章节" description="先去结构规划或正文写作创建章节，再进入章后状态回写中心。" />
-      ) : null}
-
-      <div className="novel-writeback-center-page__stack">
-        <WorkspacePanel title="运行与筛选" description="回写中心按章节和运行批次查看。">
-          <div className="novel-writeback-center-page__filters">
-            <Select
-              value={centerData?.chapter?.id}
-              placeholder="选择章节"
-              options={chapters.map((chapter) => ({ value: chapter.id, label: `第${chapter.chapterNum}章 ${chapter.title || ''}`.trim() }))}
-              onChange={(value) => void refresh(Number(value), null)}
-            />
-            <Select
-              value={activeRun?.id}
-              placeholder="选择运行"
-              options={(centerData?.runs || []).map((run) => ({
-                value: run.id,
-                label: `#${run.id} · ${runStatusLabel(run.status)} · ${run.triggerSource}`,
-              }))}
-              onChange={(value) => void refresh(centerData?.chapter?.id, Number(value))}
-            />
-            <Select
-              value={assetFilter}
-              options={[{ value: 'all', label: '全部资产' }, ...ALL_ASSET_TYPES.map((item) => ({ value: item, label: assetLabel(item) }))]}
-              onChange={(value) => setAssetFilter(value as 'all' | ChapterWritebackAssetType)}
-            />
-            <Select
-              value={decisionFilter}
-              options={[
-                { value: 'all', label: '全部确认状态' },
-                { value: 'pending', label: '待确认' },
-                { value: 'accepted', label: '已接受' },
-                { value: 'edited', label: '已编辑' },
-                { value: 'rejected', label: '已拒绝' },
-              ]}
-              onChange={(value) => setDecisionFilter(value as typeof decisionFilter)}
-            />
-            <Select
-              value={statusFilter}
-              options={[
-                { value: 'all', label: '全部回写状态' },
-                { value: 'pending', label: '待写回' },
-                { value: 'applied', label: '已写回' },
-                { value: 'failed', label: '失败' },
-                { value: 'skipped', label: '跳过' },
-              ]}
-              onChange={(value) => setStatusFilter(value as typeof statusFilter)}
-            />
-            <Select
-              value={verificationFilter}
-              options={[
-                { value: 'all', label: '全部验证状态' },
-                { value: 'auto_ready', label: '自动通过' },
-                { value: 'needs_review', label: '待人工确认' },
-                { value: 'conflicted', label: '冲突' },
-              ]}
-              onChange={(value) => setVerificationFilter(value as typeof verificationFilter)}
-            />
+      <div data-writeback-page data-writeback-responsibility="single-current-diff" className="novel-writeback-center-page__body">
+        {refreshing ? (
+          <div className="novel-writeback-center-page__refresh" role="status">
+            <Spin size="small" />
+            <span>正在同步章后回写数据</span>
           </div>
-          {activeRun ? (
-            <>
-              <div className="novel-writeback-center-page__run-summary">
-                <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag>
-                <span className="novel-writeback-center-page__muted">{activeRun.summaryText || '当前运行暂无摘要。'}</span>
-              </div>
-              {pendingDiffCount > 0 ? (
-                <Alert
-                  className="novel-writeback-center-page__pending-alert"
-                  type="warning"
-                  showIcon
-                  message={`还有 ${pendingDiffCount} 条候选未确认`}
-                  description={pendingReviewCount > 0
-                    ? `其中 ${pendingReviewCount} 条需要人工复核。应用动作只写回已接受或已编辑项，未确认项会被跳过。`
-                    : '应用动作只写回已接受或已编辑项，未确认项会被跳过。'}
-                />
-              ) : null}
-            </>
-          ) : (
-            <Alert className="novel-writeback-center-page__run-empty" type="info" showIcon message="当前章节还没有回写运行" description="点击“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
-          )}
-        </WorkspacePanel>
+        ) : null}
+        {chapters.length <= 0 ? (
+          <Alert showIcon type="info" message="当前还没有章节" description="先去结构规划或正文写作创建章节，再进入章后状态回写中心。" />
+        ) : null}
 
-        <WorkspacePanel title="八类资产覆盖" description="即使当前章没有命中某类资产，这里也会保持统一分组。">
-          <div className="novel-writeback-center-page__coverage-grid">
-            {ALL_ASSET_TYPES.map((assetType) => {
-              const item = coverageMap.get(assetType)
-              return (
-                <div key={assetType} className="novel-panel novel-writeback-center-page__coverage-card">
-                  <strong>{assetLabel(assetType)}</strong>
-                  <span>{`抽取 ${item?.extractCount || 0} 条`}</span>
-                  <span>{`候选 ${item?.diffCount || 0} 条`}</span>
-                  <span>{`已确认 ${((item?.acceptedCount || 0) + (item?.editedCount || 0))} 条`}</span>
-                  <span>{`已写回 ${item?.appliedCount || 0} 条`}</span>
+        <WorkspacePanel
+          className="novel-writeback-center-page__current-panel"
+          title="当前 Diff"
+          description={currentDiff ? `第 ${currentDiffIndex + 1} / ${filteredDiffs.length} 条候选 · 只展开当前一条的前后状态差异` : '当前章节还没有可对比的回写候选。'}
+          extra={activeRun ? <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag> : null}
+        >
+          <div className="novel-writeback-center-page__focus-grid">
+            <aside className="novel-writeback-center-page__candidate-rail" data-writeback-candidate-list aria-label="待确认候选列表">
+              <div className="novel-writeback-center-page__rail-heading">
+                <div>
+                  <span className="novel-writeback-center-page__kicker">待确认队列</span>
+                  <strong>{filteredDiffs.length ? `${filteredDiffs.length} 条候选` : '空队列'}</strong>
                 </div>
-              )
-            })}
+                {filteredDiffs.length > 1 ? <span className="novel-writeback-center-page__rail-hint">点击切换 Diff</span> : null}
+              </div>
+              <div className="novel-writeback-center-page__candidate-list">
+                {filteredDiffs.map((diff, index) => (
+                  <button
+                    key={diff.id}
+                    type="button"
+                    data-writeback-candidate-id={diff.id}
+                    aria-current={currentDiff?.id === diff.id ? 'true' : undefined}
+                    className={`novel-writeback-center-page__candidate${currentDiff?.id === diff.id ? ' is-active' : ''}`}
+                    onClick={() => setSelectedDiffId(diff.id)}
+                  >
+                    <span className="novel-writeback-center-page__candidate-index">{String(index + 1).padStart(2, '0')}</span>
+                    <span className="novel-writeback-center-page__candidate-copy">
+                      <strong>{resolveDiffTitle(diff)}</strong>
+                      <span>{diff.diffReason || '未填写变更原因'}</span>
+                    </span>
+                    <span className="novel-writeback-center-page__candidate-state">
+                      <Tag color={decisionColor(diff.canonDecision)}>{decisionLabel(diff.canonDecision)}</Tag>
+                    </span>
+                  </button>
+                ))}
+                {filteredDiffs.length === 0 ? (
+                  <div className="novel-writeback-center-page__candidate-empty" data-writeback-empty-candidate>
+                    <span className="novel-writeback-center-page__empty-mark">∅</span>
+                    <strong>没有待处理候选</strong>
+                    <span>可从页面动作重新抽取本章状态。</span>
+                  </div>
+                ) : null}
+              </div>
+            </aside>
+
+            <article data-writeback-current-diff className="novel-writeback-center-page__current-diff">
+              {currentDiff ? (
+                <>
+                  <div className="novel-writeback-center-page__diff-head">
+                    <div className="novel-writeback-center-page__diff-title-wrap">
+                      <span className="novel-writeback-center-page__kicker">候选对象</span>
+                      <h3>{resolveDiffTitle(currentDiff)}</h3>
+                      <span className="novel-writeback-center-page__muted">{currentDiff.entityType} · {confidenceLabel(currentDiff.confidence)}</span>
+                    </div>
+                    <div className="novel-writeback-center-page__tag-row">
+                      <Tag color="geekblue">{assetLabel(currentDiff.assetType)}</Tag>
+                      <Tag color={verificationColor(currentDiff.verificationStatus)}>{verificationLabel(currentDiff.verificationStatus)}</Tag>
+                      <Tag color={writebackColor(currentDiff.writebackStatus)}>{writebackLabel(currentDiff.writebackStatus)}</Tag>
+                    </div>
+                  </div>
+                  <div className="novel-writeback-center-page__reason">
+                    <span>为什么出现</span>
+                    <strong>{currentDiff.diffReason || '本章检测到状态变化，等待人工确认。'}</strong>
+                  </div>
+                  {currentDiff.writebackError ? <Alert showIcon type="error" message="上次写回失败" description={currentDiff.writebackError} /> : null}
+                  <div className="novel-writeback-center-page__diff-actions" data-writeback-decision-actions>
+                    <Button
+                      type="primary"
+                      icon={<CheckOutlined />}
+                      disabled={currentDiff.writebackStatus === 'applied'}
+                      loading={actionLoading}
+                      onClick={acceptCurrent}
+                    >
+                      接受候选
+                    </Button>
+                    <Button
+                      icon={<StopOutlined />}
+                      disabled={currentDiff.writebackStatus === 'applied'}
+                      loading={actionLoading}
+                      onClick={rejectCurrent}
+                    >
+                      拒绝候选
+                    </Button>
+                    <Button
+                      icon={<EditOutlined />}
+                      disabled={currentDiff.writebackStatus === 'applied'}
+                      onClick={() => openEditModal(currentDiff)}
+                    >
+                      编辑候选
+                    </Button>
+                    {filteredDiffs.length > 1 ? (
+                      <Space.Compact className="novel-writeback-center-page__diff-navigation">
+                        <Button
+                          type="text"
+                          disabled={currentDiffIndex <= 0}
+                          onClick={() => selectAdjacentDiff(-1)}
+                        >
+                          ← 上一条
+                        </Button>
+                        <Button
+                          type="text"
+                          disabled={currentDiffIndex < 0 || currentDiffIndex >= filteredDiffs.length - 1}
+                          onClick={() => selectAdjacentDiff(1)}
+                        >
+                          下一条 →
+                        </Button>
+                      </Space.Compact>
+                    ) : null}
+                  </div>
+                  <div className="novel-writeback-center-page__diff-caption">
+                    <span>前后状态对比</span>
+                    <span>绿色为新增 · 红色为移除</span>
+                  </div>
+                  <JsonDiffViewer beforeJson={currentDiff.beforeStateJson} afterJson={currentDiff.afterStateJson} />
+                </>
+              ) : (
+                <div className="novel-writeback-center-page__empty-diff" data-writeback-empty-diff>
+                  <div className="novel-writeback-center-page__empty-orbit" aria-hidden="true">◎</div>
+                  <span className="novel-writeback-center-page__kicker">当前章节</span>
+                  <h3>还没有可写回的 Diff</h3>
+                  <p>重新抽取会生成事实与状态候选；有候选后，这里只会聚焦一条当前 Diff。</p>
+                  <Button icon={<RobotOutlined />} onClick={prepareRun} disabled={!centerData?.chapter?.id} loading={actionLoading}>重新抽取本章</Button>
+                </div>
+              )}
+            </article>
           </div>
         </WorkspacePanel>
 
-        <div className="novel-writeback-center-page__content-grid">
-          <WorkspacePanel title={`事实抽取 · ${filteredExtracts.length}`}>
-            <div className="novel-writeback-center-page__extract-list">
+        <div className="novel-writeback-center-page__disclosure-stack">
+          <details data-writeback-facts className="novel-writeback-center-page__disclosure">
+            <summary>
+              <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon">01</span><strong>事实抽取与原始结果</strong></span>
+              <span className="novel-writeback-center-page__summary-meta">{filteredExtracts.length} 条 · 按需展开</span>
+            </summary>
+            <div className="novel-writeback-center-page__disclosure-content" data-writeback-raw-results>
               {filteredExtracts.length > 0 ? filteredExtracts.map((extract) => (
-                <div key={extract.id} className="novel-note-list__item novel-writeback-center-page__extract-item">
-                  <div className="novel-writeback-center-page__extract-head">
-                    <strong>{resolveExtractTitle(extract)}</strong>
-                    <Space size={6}>
-                      <Tag color="geekblue">{assetLabel(extract.assetType)}</Tag>
+                <article key={extract.id} className="novel-writeback-center-page__fact-item">
+                  <div className="novel-writeback-center-page__fact-head">
+                    <div>
+                      <span className="novel-writeback-center-page__kicker">{assetLabel(extract.assetType)}</span>
+                      <strong>{resolveExtractTitle(extract)}</strong>
+                    </div>
+                    <Space size={6} wrap>
                       <Tag color={verificationColor(extract.verificationStatus)}>{verificationLabel(extract.verificationStatus)}</Tag>
+                      <span className="novel-writeback-center-page__muted">{confidenceLabel(extract.confidence)}</span>
                     </Space>
                   </div>
-                  {extract.sourceText ? <div className="novel-writeback-center-page__muted">{extract.sourceText}</div> : null}
-                  <pre className="novel-writeback-center-page__json-block">{prettyJson(extract.factJson)}</pre>
-                </div>
+                  {extract.sourceText ? <p>{extract.sourceText}</p> : null}
+                  <pre>{prettyJson(extract.factJson)}</pre>
+                </article>
               )) : <div className="novel-copy-block">当前筛选下没有事实抽取结果。</div>}
             </div>
-          </WorkspacePanel>
+          </details>
 
-          <WorkspacePanel title={`回写候选 · ${filteredDiffs.length}`}>
-            <Table<ChapterWritebackDiff>
-              rowKey="id"
-              loading={actionLoading}
-              pagination={{ pageSize: 8, showSizeChanger: false }}
-              columns={diffColumns}
-              dataSource={filteredDiffs}
-              expandable={{
-                expandedRowRender: (row) => (
-                  <div className="novel-writeback-center-page__expanded-diff">
-                    <strong>变更详情 (Git Diff)</strong>
-                    <JsonDiffViewer beforeJson={row.beforeStateJson} afterJson={row.afterStateJson} />
+          <details data-writeback-coverage className="novel-writeback-center-page__disclosure">
+            <summary>
+              <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon">02</span><strong>八类资产覆盖</strong></span>
+              <span className="novel-writeback-center-page__summary-meta">{centerData?.coverage.length || 0}/8 类 · 按需展开</span>
+            </summary>
+            <div className="novel-writeback-center-page__disclosure-content">
+              <div className="novel-writeback-center-page__coverage-grid">
+                {ALL_ASSET_TYPES.map((assetType) => {
+                  const item = coverageMap.get(assetType)
+                  const confirmedCount = (item?.acceptedCount || 0) + (item?.editedCount || 0)
+                  return (
+                    <div key={assetType} className="novel-writeback-center-page__coverage-card">
+                      <div className="novel-writeback-center-page__coverage-head">
+                        <strong>{assetLabel(assetType)}</strong>
+                        <span>{item?.diffCount || 0} 候选</span>
+                      </div>
+                      <div className="novel-writeback-center-page__coverage-numbers">
+                        <span><b>{item?.extractCount || 0}</b>抽取</span>
+                        <span><b>{confirmedCount}</b>确认</span>
+                        <span><b>{item?.appliedCount || 0}</b>写回</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </details>
+
+          <details data-writeback-diagnostics className="novel-writeback-center-page__disclosure">
+            <summary>
+              <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon"><FilterOutlined /></span><strong>筛选与诊断</strong></span>
+              <span className="novel-writeback-center-page__summary-meta">章节、运行、状态过滤 · 按需展开</span>
+            </summary>
+            <div className="novel-writeback-center-page__diagnostics-content">
+              <div className="novel-writeback-center-page__filters">
+                <Select
+                  value={centerData?.chapter?.id}
+                  placeholder="选择章节"
+                  options={chapters.map((chapter) => ({ value: chapter.id, label: `第${chapter.chapterNum}章 ${chapter.title || ''}`.trim() }))}
+                  onChange={(value) => void refresh(Number(value), null)}
+                />
+                <Select
+                  value={activeRun?.id}
+                  placeholder="选择运行"
+                  options={(centerData?.runs || []).map((run) => ({ value: run.id, label: `#${run.id} · ${runStatusLabel(run.status)} · ${run.triggerSource}` }))}
+                  onChange={(value) => void refresh(centerData?.chapter?.id, Number(value))}
+                />
+                <Select
+                  value={assetFilter}
+                  options={[{ value: 'all', label: '全部资产' }, ...ALL_ASSET_TYPES.map((item) => ({ value: item, label: assetLabel(item) }))]}
+                  onChange={(value) => setAssetFilter(value as 'all' | ChapterWritebackAssetType)}
+                />
+                <Select
+                  value={decisionFilter}
+                  options={[
+                    { value: 'all', label: '全部确认状态' },
+                    { value: 'pending', label: '待确认' },
+                    { value: 'accepted', label: '已接受' },
+                    { value: 'edited', label: '已编辑' },
+                    { value: 'rejected', label: '已拒绝' },
+                  ]}
+                  onChange={(value) => setDecisionFilter(value as typeof decisionFilter)}
+                />
+                <Select
+                  value={statusFilter}
+                  options={[
+                    { value: 'all', label: '全部回写状态' },
+                    { value: 'pending', label: '待写回' },
+                    { value: 'applied', label: '已写回' },
+                    { value: 'failed', label: '失败' },
+                    { value: 'skipped', label: '跳过' },
+                  ]}
+                  onChange={(value) => setStatusFilter(value as typeof statusFilter)}
+                />
+                <Select
+                  value={verificationFilter}
+                  options={[
+                    { value: 'all', label: '全部验证状态' },
+                    { value: 'auto_ready', label: '自动通过' },
+                    { value: 'needs_review', label: '待人工确认' },
+                    { value: 'conflicted', label: '冲突' },
+                  ]}
+                  onChange={(value) => setVerificationFilter(value as typeof verificationFilter)}
+                />
+              </div>
+              {activeRun ? (
+                <div className="novel-writeback-center-page__diagnostic-summary">
+                  <div>
+                    <span className="novel-writeback-center-page__kicker">当前运行摘要</span>
+                    <strong>{activeRun.summaryText || '当前运行暂无摘要。'}</strong>
                   </div>
-                ),
-              }}
-            />
-          </WorkspacePanel>
+                  {pendingDiffCount > 0 ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={`还有 ${pendingDiffCount} 条候选未确认`}
+                      description={pendingReviewCount > 0 ? `其中 ${pendingReviewCount} 条需要人工复核。应用动作只写回已接受或已编辑项。` : '应用动作只写回已接受或已编辑项。'}
+                    />
+                  ) : <Tag color="green">当前运行已无待确认候选</Tag>}
+                </div>
+              ) : (
+                <Alert type="info" showIcon message="当前章节还没有回写运行" description="点击页面动作“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
+              )}
+            </div>
+          </details>
         </div>
       </div>
 

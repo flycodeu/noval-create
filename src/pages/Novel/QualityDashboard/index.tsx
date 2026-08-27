@@ -15,11 +15,11 @@ import {
   buildWorkspacePath,
   filterDashboardByVolume,
   findChapterByNum,
-  sourceCoverageLabel,
 } from './quality-dashboard-presentation'
 import type { QualityChapterEntry, QualityDashboardFilters } from './quality-dashboard-presentation'
 import ChapterDetailModal from './sections/ChapterDetailModal'
 import QualityFilterBar from './sections/QualityFilterBar'
+import QualityPriorityPanel from './sections/QualityPriorityPanel'
 
 const OverviewSection = React.lazy(() => import('./sections/OverviewSection'))
 const LanguageSection = React.lazy(() => import('./sections/LanguageSection'))
@@ -128,7 +128,19 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (loading && !data) {
     return (
-      <WorkspacePage title="质量监控">
+      <WorkspacePage
+        title="质量监控"
+        chrome="shared"
+        actionContract={{
+          primary: {
+            key: 'quality-refresh-loading',
+            label: '刷新质量数据',
+            loading: true,
+            disabled: true,
+            onClick: () => undefined,
+          },
+        }}
+      >
         <WorkspacePanel title="正在汇总质量数据">
           <Skeleton active paragraph={{ rows: 10 }} />
         </WorkspacePanel>
@@ -138,14 +150,24 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (loadError && !data) {
     return (
-      <WorkspacePage title="质量监控" description="质量数据暂时不可用，修复连接后再继续判断是否适合进入正文生产。">
+      <WorkspacePage
+        title="质量监控"
+        description="质量数据暂时不可用，修复连接后再继续判断是否适合进入正文生产。"
+        chrome="shared"
+        actionContract={{
+          primary: {
+            key: 'quality-retry',
+            label: '重试',
+            onClick: () => void loadData(true),
+          },
+        }}
+      >
         <WorkspacePanel title="质量数据加载失败">
           <Alert
             type="error"
             showIcon
             message="没有拿到可靠的质量数据"
             description={loadError}
-            action={<Button onClick={() => void loadData(true)}>重试</Button>}
           />
         </WorkspacePanel>
       </WorkspacePage>
@@ -166,14 +188,20 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData && !hasAgentQualityData)) {
     return (
-      <WorkspacePage title="质量监控">
+      <WorkspacePage
+        title="质量监控"
+        chrome="shared"
+        actionContract={{
+          primary: {
+            key: 'quality-open-writing',
+            label: '进入正文写作',
+            onClick: () => navigate(buildWorkspaceRoute(novelId, 'writing')),
+          },
+        }}
+      >
         <RecommendationGovernancePanel novelId={novelId} />
         <WorkspacePanel title="先产出首轮检测">
-          <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。">
-            <Button type="primary" onClick={() => navigate(buildWorkspaceRoute(novelId, 'writing'))}>
-              进入正文写作
-            </Button>
-          </Empty>
+          <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。" />
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -203,15 +231,23 @@ export default function QualityDashboard({ novelId }: Props) {
     message.info(getUserFacingMessage('qualityDashboard.locateChapterMissing'))
     navigate(buildWorkspacePath(novelId, 'writing'))
   }
+  const openRevisionQueue = () => {
+    navigate(buildWorkspaceRoute(novelId, 'revision'))
+  }
 
   return (
     <WorkspacePage
+      className="quality-dashboard-page"
       title="质量监控"
-      actions={(
-        <Button loading={refreshing} onClick={() => void loadData()}>
-          刷新质量数据
-        </Button>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'quality-refresh',
+          label: '刷新质量数据',
+          loading: refreshing,
+          onClick: () => void loadData(),
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -231,77 +267,62 @@ export default function QualityDashboard({ novelId }: Props) {
       ]}
     >
       {refreshing ? <div className="novel-dashboard__refresh-indicator quality-dashboard-page__refresh"><Spin size="small" /><span>正在同步质量监控数据</span></div> : null}
-      <QualityFilterBar filters={filters} onChange={setFilters} />
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
           {
             key: 'overview',
-            label: '总览',
+            label: '重点风险',
+            children: <QualityPriorityPanel data={data} pipelineStats={pipelineStats} filters={filters} onOpenRevisionQueue={openRevisionQueue} />,
+          },
+          {
+            key: 'analysis',
+            label: '完整诊断',
             children: (
-              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
-                <OverviewSection
-                  novelId={novelId}
-                  data={data}
-                  pipelineStats={pipelineStats}
-                  filtered={filtered}
-                  filters={filters}
-                  selectedVolumeMetrics={selectedVolumeMetrics}
-                  selectedVolumeId={selectedVolumeId}
-                  hasScoreData={hasScoreData}
-                  chapterListHeight={chapterListHeight}
-                  repairingActionId={repairingActionId}
-                  onSelectVolume={setSelectedVolumeId}
-                  onSelectRisk={handleRiskSelect}
-                  onRunAction={handleRepairAction}
-                  onSelectChapter={setSelectedChapter}
-                  onLocateChapter={locateChapterInWriting}
-                />
-              </React.Suspense>
+              <div className="quality-dashboard-page__analysis" data-quality-analysis>
+                <QualityFilterBar filters={filters} onChange={setFilters} />
+                <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
+                  <OverviewSection
+                    novelId={novelId}
+                    data={data}
+                    pipelineStats={pipelineStats}
+                    filtered={filtered}
+                    filters={filters}
+                    selectedVolumeMetrics={selectedVolumeMetrics}
+                    selectedVolumeId={selectedVolumeId}
+                    hasScoreData={hasScoreData}
+                    chapterListHeight={chapterListHeight}
+                    repairingActionId={repairingActionId}
+                    onSelectVolume={setSelectedVolumeId}
+                    onSelectRisk={handleRiskSelect}
+                    onRunAction={handleRepairAction}
+                    onSelectChapter={setSelectedChapter}
+                    onLocateChapter={locateChapterInWriting}
+                  />
+                </React.Suspense>
+              </div>
             ),
           },
           {
             key: 'language',
             label: '语言与对白',
             children: (
-              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
-                <LanguageSection data={data} filtered={filtered} hasScoreData={hasScoreData} />
-              </React.Suspense>
+              <div className="quality-dashboard-page__analysis"><QualityFilterBar filters={filters} onChange={setFilters} /><React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}><LanguageSection data={data} filtered={filtered} hasScoreData={hasScoreData} /></React.Suspense></div>
             ),
           },
           {
             key: 'structure',
             label: '结构与推进',
             children: (
-              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
-                <StructureSection
-                  data={data}
-                  filtered={filtered}
-                  filters={filters}
-                  selectedVolumeLabel={selectedVolumeMetrics?.volumeName}
-                  hasChapterGateData={hasChapterGateData}
-                  hasChapterFunctionData={hasChapterFunctionData}
-                  hasArcProgressData={hasArcProgressData}
-                  onSelectChapter={openChapterByNum}
-                  onLocateChapter={locateChapterInWriting}
-                />
-              </React.Suspense>
+              <div className="quality-dashboard-page__analysis"><QualityFilterBar filters={filters} onChange={setFilters} /><React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}><StructureSection data={data} filtered={filtered} filters={filters} selectedVolumeLabel={selectedVolumeMetrics?.volumeName} hasChapterGateData={hasChapterGateData} hasChapterFunctionData={hasChapterFunctionData} hasArcProgressData={hasArcProgressData} onSelectChapter={openChapterByNum} onLocateChapter={locateChapterInWriting} /></React.Suspense></div>
             ),
           },
           {
             key: 'stability',
             label: '召回与状态',
             children: (
-              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
-                <StabilitySection
-                  data={data}
-                  filtered={filtered}
-                  hasRecallData={hasRecallData}
-                  hasStateData={hasStateData}
-                  onLocateChapter={locateChapterInWriting}
-                />
-              </React.Suspense>
+              <div className="quality-dashboard-page__analysis"><QualityFilterBar filters={filters} onChange={setFilters} /><React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}><StabilitySection data={data} filtered={filtered} hasRecallData={hasRecallData} hasStateData={hasStateData} onLocateChapter={locateChapterInWriting} /></React.Suspense></div>
             ),
           },
         ]}

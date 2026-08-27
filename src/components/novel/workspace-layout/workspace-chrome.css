@@ -7,23 +7,26 @@
   position: relative;
   z-index: 1;
   -webkit-app-region: no-drag;
-  border-top: 1px solid color-mix(in srgb, var(--project-topbar-border) 72%, transparent);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 36%, transparent), transparent 34%),
-    color-mix(in srgb, var(--project-topbar-surface) 96%, transparent 4%);
+  display: flex;
+  align-items: center;
+  flex: 1 1 460px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .workspace-information-rail {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.2fr) minmax(0, 0.95fr);
+  display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
+  width: 100%;
   min-width: 0;
-  padding: 11px 18px 12px;
+  min-height: 46px;
+  padding: 0;
 }
 
 .workspace-information-rail__copy,
-.workspace-information-rail__heading {
+.workspace-information-rail__heading,
+.workspace-information-rail__facts {
   min-width: 0;
 }
 
@@ -31,6 +34,7 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
+  flex: 0 1 240px;
 }
 
 .workspace-information-rail__eyebrow {
@@ -54,18 +58,20 @@
 }
 
 .workspace-information-rail__heading p {
-  margin: 3px 0 0;
-  max-width: 58ch;
-  color: var(--project-topbar-text-soft);
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: nowrap;
+  display: none;
+}
+
+.workspace-information-rail__facts {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  gap: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .workspace-information-rail__context,
 .workspace-information-rail__metrics {
+  flex: 1 1 0;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -148,6 +154,7 @@
 .workspace-contract-actions__more.ant-btn {
   height: 34px;
   border-radius: 11px;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -220,5 +227,73 @@
   .workspace-contract-action--primary.ant-btn > span:not(.anticon):not(.ant-btn-icon) {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+/* The rail now lives inside ProjectTopbar__main-row. Keep its responsive
+   behavior inline with the same surface instead of creating a second header. */
+.workspace-information-rail__facts {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-information-rail__context,
+.workspace-information-rail__metrics {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.workspace-information-rail__heading p {
+  display: none;
+}
+
+@media (min-width: 1201px) {
+  /* Keep the page identity legible when the topbar also contains navigation
+     controls. Facts may scroll or collapse into "更多", but the title should
+     not be reduced to two or three characters. */
+  .workspace-information-rail__copy {
+    min-width: 168px;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace-information-rail {
+    gap: 10px;
+  }
+
+  .workspace-information-rail__copy {
+    flex: 0 1 180px;
+  }
+
+  .workspace-information-rail__heading h1 {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .workspace-information-rail {
+    display: flex;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0;
+  }
+
+  .workspace-information-rail__copy {
+    flex: 0 1 150px;
+    align-items: center;
+  }
+
+  .workspace-information-rail__facts {
+    flex: 1 1 auto;
+  }
+
+  .workspace-information-rail__metrics {
+    border-top: 0;
+    border-left: 1px solid color-mix(in srgb, var(--project-topbar-border) 72%, transparent);
+    padding-top: 0;
+    padding-left: 8px;
   }
 }

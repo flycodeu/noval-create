@@ -32,6 +32,15 @@ function compactText(value?: string | null, max = 900): string {
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
+function appendContextSection(
+  sections: DraftContextSection[],
+  include: boolean,
+  label: string,
+  value: string,
+): void {
+  if (include) sections.push({ label, value })
+}
+
 export function buildPlanningContextSections(
   novel: Novel | null | undefined,
   options: PlanningContextOptions = {},
@@ -48,57 +57,22 @@ export function buildPlanningContextSections(
     { label: '扩展背景', value: compactText(novel?.expandedBackground || novel?.userBackground, 1000) },
   ]
 
-  if (projectBrief.readyCount > 0) {
-    sections.push({
-      label: '项目立项',
-      value: compactText(buildProjectBriefSummary(projectBrief), 900),
-    })
-  }
-
-  if (storySettings.premiseReadyCount > 0) {
-    sections.push({
-      label: '基础设定',
-      value: compactText(buildPremiseSummary(storySettings.premise), 900),
-    })
-  }
-
-  if (storySettings.storyDesignReadyCount > 0 || storySettings.subPlotCount > 0) {
-    sections.push({
-      label: '故事设计',
-      value: compactText(buildStoryDesignSummary(storySettings.storyDesign, {
-        includeSubplots: options.includeSubplots,
-      }), options.includeSubplots === false ? 900 : 1200),
-    })
-  }
-
-  if (themeVoice.readyCount > 0) {
-    sections.push({
-      label: '主题与文风',
-      value: compactText(buildThemeVoiceSummary(themeVoice), 1000),
-    })
-  }
+  appendContextSection(sections, projectBrief.readyCount > 0, '项目立项', compactText(buildProjectBriefSummary(projectBrief), 900))
+  appendContextSection(sections, storySettings.premiseReadyCount > 0, '基础设定', compactText(buildPremiseSummary(storySettings.premise), 900))
+  appendContextSection(
+    sections,
+    storySettings.storyDesignReadyCount > 0 || storySettings.subPlotCount > 0,
+    '故事设计',
+    compactText(buildStoryDesignSummary(storySettings.storyDesign, {
+      includeSubplots: options.includeSubplots,
+    }), options.includeSubplots === false ? 900 : 1200),
+  )
+  appendContextSection(sections, themeVoice.readyCount > 0, '主题与文风', compactText(buildThemeVoiceSummary(themeVoice), 1000))
 
   const writingRulesSummary = buildWritingRulesSummary(storySettings.writingRules)
-  if (writingRulesSummary) {
-    sections.push({
-      label: '写作边界',
-      value: compactText(writingRulesSummary, 800),
-    })
-  }
-
-  if (options.includeWorldRules !== false && novel?.worldRulesJson) {
-    sections.push({
-      label: '世界规则',
-      value: compactText(buildWorldRulesSummary(worldRules), 1400),
-    })
-  }
-
-  if (storySettings.endgameReadyCount > 0) {
-    sections.push({
-      label: '终局设计',
-      value: compactText(buildEndgameDesignSummary(storySettings.endgameDesign), 900),
-    })
-  }
+  appendContextSection(sections, Boolean(writingRulesSummary), '写作边界', compactText(writingRulesSummary, 800))
+  appendContextSection(sections, options.includeWorldRules !== false && Boolean(novel?.worldRulesJson), '世界规则', compactText(buildWorldRulesSummary(worldRules), 1400))
+  appendContextSection(sections, storySettings.endgameReadyCount > 0, '终局设计', compactText(buildEndgameDesignSummary(storySettings.endgameDesign), 900))
 
   return sections.concat(options.extraSections || [])
 }

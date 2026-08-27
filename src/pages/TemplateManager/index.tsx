@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { Template } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import './index.css'
 
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
@@ -204,7 +205,7 @@ export default function TemplateManager() {
     key,
     label,
     children: (
-      <div className="admin-card-grid">
+      <div className="admin-card-grid" data-p3-04-template-grid>
         {loading ? (
           Array.from({ length: 6 }).map((_, index) => (
             <Card key={index} className="template-manager-card template-manager-card--skeleton">
@@ -219,7 +220,7 @@ export default function TemplateManager() {
             const usage = TEMPLATE_USAGE[tmpl.type]
 
             return (
-              <Card key={tmpl.id} className="template-manager-card">
+              <Card key={tmpl.id} className="template-manager-card" data-template-builtin={tmpl.isBuiltin === 1 ? 'true' : 'false'}>
                 <div className="template-manager-card__header">
                   <div className="template-manager-card__title-wrap">
                     <div className="template-manager-card__title-row">
@@ -249,6 +250,7 @@ export default function TemplateManager() {
                     className="template-manager-card__action template-manager-card__action--primary"
                     size="small"
                     icon={tmpl.isBuiltin ? <EyeOutlined /> : <EditOutlined />}
+                    aria-label={tmpl.isBuiltin ? `查看内置模板 ${tmpl.name}` : `编辑模板 ${tmpl.name}`}
                     onClick={() => handleEdit(tmpl)}
                   >
                     {tmpl.isBuiltin ? '查看' : '编辑'}

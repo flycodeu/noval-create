@@ -32,6 +32,7 @@ import type {
 } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import './index.css'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
 const MAX_MODEL_MAX_TOKENS = 1000000
@@ -490,12 +491,13 @@ export default function ModelManager() {
                 <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               </div>
             ) : (
-              <div className="admin-sidebar-list model-manager-config-list">
+              <div className="admin-sidebar-list model-manager-config-list" data-p3-04-model-list>
                 {configs.map((config) => (
                   <div
                     key={config.id}
                     role="button"
                     tabIndex={0}
+                    data-model-config-card
                     className={`admin-sidebar-item model-manager-config-card ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
                     onClick={() => selectConfig(config)}
                     onKeyDown={(event) => {
@@ -562,7 +564,7 @@ export default function ModelManager() {
                     <span>模型 ID</span>
                     <strong>{selected.modelId}</strong>
                   </div>
-                  <div className="source-search-config__status">
+                  <div className="source-search-config__status" data-model-api-key-status>
                     <span>API Key</span>
                     <strong>{selected.apiKey ? '已保存' : '未配置'}</strong>
                   </div>
@@ -603,12 +605,14 @@ export default function ModelManager() {
           </WorkspacePanel>
         </div>
 
-        <WorkspacePanel
-          className="model-manager-source-panel"
-          title="来源检索与 API Key"
-          description="联网检索来源配置。"
-          extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
-        >
+        <details className="model-manager-source-disclosure" data-model-source-disclosure>
+          <summary><strong>来源检索与 API Key</strong><span>联网检索配置按需展开，密钥只显示配置状态</span></summary>
+          <WorkspacePanel
+            className="model-manager-source-panel"
+            title="来源检索与 API Key"
+            description="联网检索来源配置。"
+            extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
+          >
           <div className="admin-detail-stack source-search-config">
             <div className="source-search-config__summary">
               <div className="source-search-config__summary-copy">
@@ -654,7 +658,8 @@ export default function ModelManager() {
               ) : null}
             </div>
           </div>
-        </WorkspacePanel>
+          </WorkspacePanel>
+        </details>
       </WorkspacePage>
 
       <Modal

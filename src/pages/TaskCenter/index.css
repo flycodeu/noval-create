@@ -1,0 +1,121 @@
+.app-layout .task-center-page .novel-split--sidebar {
+  gap: 16px;
+}
+
+.app-layout .task-center-page .task-center-list-panel,
+.app-layout .task-center-page .task-center-detail-panel {
+  min-width: 0;
+}
+
+.app-layout .task-center-page .task-center-list-panel .novel-panel__body,
+.app-layout .task-center-page .task-center-detail-panel .novel-panel__body {
+  padding-inline: 14px;
+}
+
+.app-layout .task-center-page .task-center-list {
+  gap: 5px;
+}
+
+.app-layout .task-center-page .novel-list-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.app-layout .task-center-page .task-center-card {
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout .task-center-page .task-center-card__header {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.app-layout .task-center-page .task-center-card__title,
+.app-layout .task-center-page .task-center-detail__title {
+  font-size: 14px;
+}
+
+.app-layout .task-center-page .task-center-card__meta {
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.app-layout .task-center-page .task-center-card__meta .ant-tag {
+  padding-inline: 6px;
+  font-size: 10px;
+}
+
+.app-layout .task-center-page .task-center-card__summary {
+  font-size: 11px;
+  line-height: 1.55;
+  -webkit-line-clamp: 2;
+}
+
+.app-layout .task-center-page .task-center-detail {
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout .task-center-page .task-center-detail__actions {
+  gap: 6px;
+}
+
+.app-layout .task-center-page .novel-note-list {
+  gap: 6px;
+}
+
+.app-layout .task-center-page .novel-note-list__item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.app-layout .task-center-page .task-context-health-card {
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.app-layout .task-center-page .task-center-code {
+  max-height: min(36dvh, 320px);
+  padding: 10px 12px;
+  border-radius: 10px;
+  line-height: 1.6;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.app-layout .task-center-page .ant-collapse > .ant-collapse-item {
+  margin-bottom: 6px;
+  border-radius: 10px;
+}
+
+.app-layout .task-center-page .ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+@media (min-width: 1100px) {
+  .app-layout .task-center-page .novel-split--sidebar {
+    grid-template-columns: minmax(300px, 0.76fr) minmax(0, 1.24fr);
+  }
+}
+
+@media (max-width: 960px) {
+  .app-layout .task-center-page .task-center-card__header {
+    flex-wrap: wrap;
+  }
+
+  .app-layout .task-center-page .task-center-card__meta {
+    justify-content: flex-start;
+  }
+}

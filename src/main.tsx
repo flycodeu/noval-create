@@ -4,6 +4,7 @@ import App from './App'
 import { isElectronRuntime, markRuntimeEnvironment } from './runtime/environment'
 import { installWebElectronBridge } from './runtime/web-electron-bridge'
 import './styles/global.css'
+import './styles/ui-simplification.css'
 
 markRuntimeEnvironment()
 

@@ -91,6 +91,14 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/VolumeDesign/index.tsx',
   'src/pages/Novel/StagePlanner/index.tsx',
   'src/pages/Novel/Outline/index.tsx',
+  'src/pages/Novel/Studio/index.tsx',
+  'src/pages/Novel/Overview/index.tsx',
+  'src/pages/Novel/WritebackCenter/index.tsx',
+  'src/pages/Novel/BatchWorkbench/index.tsx',
+  'src/pages/Novel/QualityDashboard/index.tsx',
+  'src/pages/Novel/Contracts/index.tsx',
+  'src/pages/Novel/Guide/index.tsx',
+  'src/pages/Novel/RevisionCenter/index.tsx',
 ])
 const invalidLegacyContracts = calls.filter(({ tag }) => !/\bchrome\s*=\s*["']shared["']/.test(tag) && /\bactionContract\s*=/.test(tag))
 const sharedWithoutContract = sharedCalls.filter(({ tag }) => !/\bactionContract\s*=/.test(tag))
@@ -98,7 +106,7 @@ const sharedWithoutContract = sharedCalls.filter(({ tag }) => !/\bactionContract
 assertPass('WorkspacePage call inventory is non-empty', calls.length > 0)
 assertPass(
   'Approved shared chrome migrations are explicit',
-  sharedCalls.length === approvedSharedFiles.size
+  sharedFiles.size === approvedSharedFiles.size
     && [...approvedSharedFiles].every((file) => sharedFiles.has(file)),
 )
 assertPass('Shared chrome requires an action contract', sharedWithoutContract.length === 0)

@@ -1,0 +1,173 @@
+/* Global entry surfaces use the same quiet hierarchy as project workspaces. */
+.app-layout[data-ui-system="quiet-workspace"] .admin-page {
+  padding: 18px clamp(18px, 2.4vw, 32px) 24px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-toolbar {
+  gap: 10px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-toolbar__actions {
+  gap: 6px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-list {
+  gap: 0;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-item {
+  padding: 11px 12px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-item:hover {
+  transform: none;
+  background: color-mix(in srgb, var(--accent-soft) 42%, transparent 58%);
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-item--active {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-default) 46%);
+  background: color-mix(in srgb, var(--accent-soft) 66%, transparent 34%);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-card-grid {
+  gap: 12px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .model-manager-page .model-manager-source-disclosure {
+  overflow: visible;
+  border-width: 1px 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .model-manager-page .model-manager-source-disclosure > summary {
+  min-height: 44px;
+  padding: 10px 0;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .model-manager-page .model-manager-source-disclosure > .novel-panel {
+  border-top: 1px solid var(--border-default);
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .source-search-config__summary,
+.app-layout[data-ui-system="quiet-workspace"] .template-usage-overview__item {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .source-search-config__summary {
+  padding: 12px 0;
+  border-width: 0 0 1px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .source-search-config__status {
+  padding: 9px 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-usage-overview {
+  gap: 0;
+  margin-bottom: 12px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-usage-overview__item {
+  padding: 10px 12px 10px 0;
+  border-width: 0 0 1px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card {
+  min-height: 0;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: none;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-default) 66%);
+  background: color-mix(in srgb, var(--accent-soft) 18%, var(--bg-surface) 82%);
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card .ant-card-body {
+  padding: 16px;
+  gap: 12px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card__preview {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-muted);
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-card {
+  padding: 11px 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-card--active {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border-default) 48%);
+  background: color-mix(in srgb, var(--accent-soft) 42%, transparent 58%);
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-inspector-meta__item,
+.app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-inspector-section,
+.app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-template-stage {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-split--sidebar {
+  gap: 16px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-list-card {
+  padding: 10px 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-list-card:hover,
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-list-card--active {
+  background: color-mix(in srgb, var(--accent-soft) 38%, transparent 62%);
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .task-context-health-card,
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .task-center-detail {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .task-center-page .ant-collapse > .ant-collapse-item {
+  margin-bottom: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+@media (max-width: 768px) {
+  .app-layout[data-ui-system="quiet-workspace"] .admin-page {
+    padding: 12px;
+  }
+
+  .app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card .ant-card-body {
+    padding: 14px;
+  }
+}

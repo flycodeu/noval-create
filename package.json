@@ -90,6 +90,12 @@
     "acceptance:p0-02": "node scripts/ui-acceptance/capture-p0-02.cjs",
     "acceptance:p1-01": "node scripts/ui-acceptance/capture-p1-01.cjs",
     "acceptance:p1-02": "node scripts/ui-acceptance/capture-p1-02.cjs",
+    "acceptance:p3-02": "node scripts/ui-acceptance/capture-p3-02.cjs",
+    "acceptance:p3-03": "node scripts/ui-acceptance/capture-p3-03.cjs",
+    "acceptance:p3-04": "node scripts/ui-acceptance/capture-p3-04.cjs",
+    "acceptance:p3-05": "node scripts/ui-acceptance/capture-p3-05.cjs",
+    "acceptance:simulated": "node scripts/ui-acceptance/capture-functional-simulated.cjs",
+    "acceptance:p3-06": "node scripts/ui-acceptance/capture-p3-06.cjs",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {

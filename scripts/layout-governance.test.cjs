@@ -24,6 +24,8 @@ const outlinePage = read('src/pages/Novel/Outline/index.tsx')
 const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
 const workspaceChrome = read('src/components/novel/workspace-layout/workspace-chrome.tsx')
 const workspaceChromeCss = read('src/components/novel/workspace-layout/workspace-chrome.css')
+const workspaceSimplificationCss = read('src/pages/Novel/components/workspace-simplification.css')
+const workspaceChromeContractSource = read('src/components/novel/workspace-layout/workspace-chrome-contract.ts')
 const projectBriefPage = read('src/pages/Novel/ProjectBrief/index.tsx')
 const workspaceChromeContract = read('scripts/workspace-chrome-contract.test.cjs')
 const destructiveActionPages = [
@@ -129,6 +131,22 @@ assertPass(
   workspaceChromeContract.includes('Approved shared chrome migrations are explicit')
     && workspaceChromeContract.includes('Legacy/default pages cannot pass actionContract')
     && workspaceChromeContract.includes('Portal provider wraps the route shell'),
+)
+assertPass(
+  'quiet workspace surface collapses repeated descriptions and legacy fact cards',
+  workspaceShell.includes('descriptionMode = \'disclosure\'')
+    && workspaceSimplificationCss.includes('.novel-panel__copy > .novel-panel__title + .novel-panel__description-disclosure')
+    && workspaceSimplificationCss.includes('.novel-panel__description-disclosure:not([open]) > .novel-panel__desc')
+    && workspaceSimplificationCss.includes('.novel-panel__header > .novel-panel__copy')
+    && workspaceSimplificationCss.includes('.novel-hero__context .novel-context-summary')
+    && workspaceSimplificationCss.includes('.novel-map-page .map-list-workspace'),
+)
+assertPass(
+  'workspace metrics cap the header and preserve overflow access',
+  workspaceShell.includes('const visibleMetrics = metricItems.slice(0, 2)')
+    && workspaceShell.includes('novel-hero__metric-more')
+    && workspaceChrome.includes('workspace-information-rail__more-metrics')
+    && workspaceChromeContractSource.includes('flattenWorkspaceNodes'),
 )
 
 console.log('layout governance tests passed')

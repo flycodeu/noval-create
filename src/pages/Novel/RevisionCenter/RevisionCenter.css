@@ -91,3 +91,258 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   color: var(--text-primary);
 }
+
+.novel-revision-center-page .revision-workspace {
+  display: grid;
+  grid-template-columns: minmax(250px, .38fr) minmax(0, 1fr);
+  min-height: 460px;
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-surface, #fff) 86%, transparent);
+}
+
+.novel-revision-center-page .revision-workspace__queue {
+  min-width: 0;
+  border-right: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-canvas, #fafafa) 82%, transparent);
+}
+
+.novel-revision-center-page .revision-workspace__queue-heading,
+.novel-revision-center-page .revision-workspace__detail-head,
+.novel-revision-center-page .revision-workspace__task-head,
+.novel-revision-center-page .revision-workspace__detail-meta,
+.novel-revision-center-page .revision-workspace__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.novel-revision-center-page .revision-workspace__queue-heading {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.novel-revision-center-page .revision-workspace__queue-heading strong,
+.novel-revision-center-page .revision-workspace__kicker {
+  color: var(--accent, #b8860b);
+  font-weight: 800;
+}
+
+.novel-revision-center-page .revision-workspace__task-list {
+  display: grid;
+  gap: 7px;
+  max-height: 530px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.novel-revision-center-page .revision-workspace__task {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.novel-revision-center-page .revision-workspace__task:hover,
+.novel-revision-center-page .revision-workspace__task.is-active {
+  border-color: color-mix(in srgb, var(--accent, #b8860b) 38%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-soft, #fdf6ec) 58%, transparent);
+}
+
+.novel-revision-center-page .revision-workspace__task.is-active {
+  box-shadow: inset 3px 0 0 var(--accent, #b8860b);
+}
+
+.novel-revision-center-page .revision-workspace__task .ant-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+}
+
+.novel-revision-center-page .revision-workspace__task strong {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.novel-revision-center-page .revision-workspace__task > span:last-child,
+.novel-revision-center-page .revision-workspace__meta,
+.novel-revision-center-page .revision-workspace__detail-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.novel-revision-center-page .revision-workspace__detail {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+  padding: 25px 28px;
+}
+
+.novel-revision-center-page .revision-workspace__detail-head > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.novel-revision-center-page .revision-workspace__kicker {
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.novel-revision-center-page .revision-workspace__detail h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display, serif);
+  font-size: clamp(21px, 2vw, 29px);
+  line-height: 1.25;
+}
+
+.novel-revision-center-page .revision-workspace__problem,
+.novel-revision-center-page .revision-workspace__fix {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent, #b8860b);
+  background: color-mix(in srgb, var(--accent-soft, #fdf6ec) 56%, transparent);
+}
+
+.novel-revision-center-page .revision-workspace__problem span,
+.novel-revision-center-page .revision-workspace__fix span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.novel-revision-center-page .revision-workspace__problem strong,
+.novel-revision-center-page .revision-workspace__fix p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.novel-revision-center-page .revision-workspace__detail-meta {
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.novel-revision-center-page .revision-workspace__actions {
+  padding-top: 2px;
+}
+
+.novel-revision-center-page .revision-workspace__pagination {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.novel-revision-center-page .revision-workspace__empty {
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  min-height: 240px;
+  padding: 24px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.novel-revision-center-page .revision-workspace__empty strong {
+  color: var(--text-primary);
+}
+
+.novel-revision-center-page .revision-diagnostics {
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.novel-revision-center-page .revision-diagnostics > summary {
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  padding: 12px 18px;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.novel-revision-center-page .revision-diagnostics > summary::-webkit-details-marker {
+  display: none;
+}
+
+.novel-revision-center-page .revision-diagnostics > summary::after {
+  content: '+';
+  margin-left: auto;
+  color: var(--accent, #b8860b);
+  font-size: 18px;
+}
+
+.novel-revision-center-page .revision-diagnostics[open] > summary::after {
+  content: '−';
+}
+
+.novel-revision-center-page .revision-diagnostics summary span {
+  display: grid;
+  gap: 3px;
+}
+
+.novel-revision-center-page .revision-diagnostics summary small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.novel-revision-center-page .revision-diagnostics__content {
+  display: grid;
+  gap: 14px;
+  padding: 0 18px 18px;
+  border-top: 1px solid var(--border-default);
+}
+
+.novel-revision-center-page .revision-diagnostics__content > p {
+  margin: 14px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.novel-revision-center-page .revision-diagnostics__content .novel-issue-list {
+  margin-top: 0;
+}
+
+@media (max-width: 860px) {
+  .novel-revision-center-page .revision-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-revision-center-page .revision-workspace__queue {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .novel-revision-center-page .revision-workspace__task-list {
+    max-height: 250px;
+  }
+
+  .novel-revision-center-page .revision-workspace__detail {
+    padding: 20px 16px;
+  }
+
+  .novel-revision-center-page .revision-workspace__detail-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

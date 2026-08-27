@@ -536,23 +536,33 @@ export default function ContractsPage({ novelId }: Props) {
       className="novel-contracts-page"
       title="章节合同与场景合同"
       description="把大纲前的约束变成显式合同，让写作链路优先遵守本章目标、终局承诺和场景限制。"
-      actions={(
-        <Space wrap>
-          <Button type="primary" icon={<SaveOutlined />} loading={savingChapter} onClick={() => void handleSaveChapterContract()}>
-            保存章节合同
-          </Button>
-          <Button loading={refreshing} onClick={() => void refreshAll()}>
-            刷新合同
-          </Button>
-          <Button
-            icon={<EditOutlined />}
-            disabled={!activeChapterId}
-            onClick={() => activeChapterId && navigate(buildWorkspaceRoute(novelId, `writing?chapterId=${activeChapterId}`))}
-          >
-            去正文写作
-          </Button>
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'save-contract',
+          label: '保存章节合同',
+          icon: <SaveOutlined />,
+          loading: savingChapter,
+          onClick: () => void handleSaveChapterContract(),
+        },
+        secondary: [
+          {
+            key: 'refresh-contract',
+            label: '刷新合同',
+            loading: refreshing,
+            onClick: () => void refreshAll(),
+          },
+          {
+            key: 'open-writing',
+            label: '去正文写作',
+            icon: <EditOutlined />,
+            disabled: !activeChapterId,
+            onClick: () => {
+              if (activeChapterId) navigate(buildWorkspaceRoute(novelId, `writing?chapterId=${activeChapterId}`))
+            },
+          },
+        ],
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[

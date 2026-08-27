@@ -981,28 +981,31 @@ export default function GuidePage({ novelId }: Props) {
       eyebrow="创作工作流"
       title="创作向导"
       description="按项目底盘、世界地点、人物阵营、剧情伏笔、卷章大纲、正文生产和回写质检推进。"
-      actions={(
-        <Space wrap>
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}
-          >
-            {authorWorkflow.primaryTask.actionLabel}
-          </Button>
-          <Button
-            icon={<ThunderboltOutlined />}
-            loading={Boolean(runningKey)}
-            disabled={Boolean(runningKey)}
-            onClick={runPipeline}
-          >
-            AI 铺设可自动骨架
-          </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, stats.revisionTaskCount > 0 ? 'revision' : 'writing'))}>
-            {stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作'}
-          </Button>
-        </Space>
-      )}
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'open-next-workflow-step',
+          label: authorWorkflow.primaryTask.actionLabel,
+          icon: <ThunderboltOutlined />,
+          onClick: () => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage)),
+        },
+        secondary: [
+          {
+            key: 'run-workflow-pipeline',
+            label: 'AI 铺设可自动骨架',
+            icon: <ThunderboltOutlined />,
+            loading: Boolean(runningKey),
+            disabled: Boolean(runningKey),
+            onClick: () => void runPipeline(),
+          },
+          {
+            key: 'open-revision-or-writing',
+            label: stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作',
+            icon: <EditOutlined />,
+            onClick: () => navigate(buildWorkspaceRoute(novelId, stats.revisionTaskCount > 0 ? 'revision' : 'writing')),
+          },
+        ],
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[

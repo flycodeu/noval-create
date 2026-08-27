@@ -34,6 +34,11 @@ function gateStatusLabel(status: RecommendationWorkspaceSnapshot['state']['statu
   return '可评估'
 }
 
+function recommendationStatusColor(status: RecommendationWorkspaceSnapshot['state']['status']): 'success' | 'processing' | 'error' {
+  if (status === 'passed') return 'success'
+  return status === 'eligible' ? 'processing' : 'error'
+}
+
 export default function RecommendationGovernancePanel({ novelId }: Props) {
   const [form] = Form.useForm<EvaluationFormValues>()
   const [snapshot, setSnapshot] = useState<RecommendationWorkspaceSnapshot | null>(null)
@@ -179,7 +184,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
   }
   if (!snapshot) return null
   const { state, latestPreflight } = snapshot
-  const statusColor = state.status === 'passed' ? 'success' : state.status === 'eligible' ? 'processing' : 'error'
+  const statusColor = recommendationStatusColor(state.status)
 
   return (
     <section className="recommendation-governance">

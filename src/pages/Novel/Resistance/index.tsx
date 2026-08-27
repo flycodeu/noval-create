@@ -236,33 +236,31 @@ export default function ResistancePage({ novelId }: Props) {
 
   useEffect(() => {
     if (!dashboard) return
+    const resolveSelectedId = (queryKey: 'characterId' | 'factionId', items: Array<{ id: number }>, currentId: number | null) => {
+      const requestedId = Number(searchParams.get(queryKey) || '')
+      if (Number.isFinite(requestedId) && items.some((item) => item.id === requestedId)) return requestedId
+      if (!currentId || !items.some((item) => item.id === currentId)) return items[0]?.id || null
+      return currentId
+    }
     const nextTab = searchParams.get('tab')
     if (nextTab === 'characters' || nextTab === 'factions' || nextTab === 'environment' || nextTab === 'institution') {
       setTab(nextTab)
     }
-    const characterId = Number(searchParams.get('characterId') || '')
-    if (Number.isFinite(characterId) && characters.some((item) => item.id === characterId)) {
-      setSelectedCharacterId(characterId)
-    } else if (!selectedCharacterId || !characters.some((item) => item.id === selectedCharacterId)) {
-      setSelectedCharacterId(characters[0]?.id || null)
-    }
-    const factionId = Number(searchParams.get('factionId') || '')
-    if (Number.isFinite(factionId) && factions.some((item) => item.id === factionId)) {
-      setSelectedFactionId(factionId)
-    } else if (!selectedFactionId || !factions.some((item) => item.id === selectedFactionId)) {
-      setSelectedFactionId(factions[0]?.id || null)
-    }
+    const nextCharacterId = resolveSelectedId('characterId', characters, selectedCharacterId)
+    if (nextCharacterId !== selectedCharacterId) setSelectedCharacterId(nextCharacterId)
+    const nextFactionId = resolveSelectedId('factionId', factions, selectedFactionId)
+    if (nextFactionId !== selectedFactionId) setSelectedFactionId(nextFactionId)
     const trackId = Number(searchParams.get('trackId') || '')
     if (Number.isFinite(trackId) && trackList.some((item) => item.id === trackId)) {
       setSelectedTrackId(trackId)
     } else if (!selectedTrackId || !trackList.some((item) => item.id === selectedTrackId)) {
-      const firstTrack = nextTab === 'institution'
-        ? institutionTracks[0]
-        : nextTab === 'environment'
-          ? environmentTracks[0]
-          : nextTab === 'factions'
-            ? factionTracks.find((item) => item.sourceId === (selectedFactionId || factions[0]?.id))
-            : characterTracks.find((item) => item.sourceId === (selectedCharacterId || characters[0]?.id))
+      const resolveFallbackTrack = () => {
+        if (nextTab === 'institution') return institutionTracks[0]
+        if (nextTab === 'environment') return environmentTracks[0]
+        if (nextTab === 'factions') return factionTracks.find((item) => item.sourceId === (selectedFactionId || factions[0]?.id))
+        return characterTracks.find((item) => item.sourceId === (selectedCharacterId || characters[0]?.id))
+      }
+      const firstTrack = resolveFallbackTrack()
       setSelectedTrackId(firstTrack?.id || null)
     }
   }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, searchParams, selectedCharacterId, selectedFactionId, selectedTrackId, trackList])
