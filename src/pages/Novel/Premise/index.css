@@ -177,12 +177,15 @@
 
 .premise-page__language-handoff {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
-  padding: 10px 0;
-  border-bottom: 1px dashed var(--premise-line);
+  margin: 8px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--premise-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface, #fff) 92%, var(--accent-soft, #f4eadb) 8%);
+  position: static;
 }
 
 .premise-page__language-handoff > div {

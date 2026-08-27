@@ -282,7 +282,6 @@ export default function TemplateManager() {
         layout="wide"
         heroVariant="compact"
         title="文风与世界模板"
-        description="管理新建小说时可选用的文风与世界设定模板。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
@@ -310,7 +309,6 @@ export default function TemplateManager() {
       >
         <WorkspacePanel
           title="模板目录"
-          description="查看内置模板与管理自定义创作模板。"
         >
           <div className="template-usage-overview">
             <div className="template-usage-overview__item">

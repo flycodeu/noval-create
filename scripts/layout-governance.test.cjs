@@ -133,13 +133,22 @@ assertPass(
     && workspaceChromeContract.includes('Portal provider wraps the route shell'),
 )
 assertPass(
-  'quiet workspace surface collapses repeated descriptions and legacy fact cards',
-  workspaceShell.includes('descriptionMode = \'disclosure\'')
-    && workspaceSimplificationCss.includes('.novel-panel__copy > .novel-panel__title + .novel-panel__description-disclosure')
-    && workspaceSimplificationCss.includes('.novel-panel__description-disclosure:not([open]) > .novel-panel__desc')
+  'quiet workspace surface does not render page or panel descriptions',
+  !workspaceShell.includes('novel-hero__description')
+    && !workspaceShell.includes('novel-panel__description-disclosure')
+    && !workspaceShell.includes('novel-panel__desc')
+    && workspaceShell.includes("descriptionMode = 'disclosure'")
     && workspaceSimplificationCss.includes('.novel-panel__header > .novel-panel__copy')
     && workspaceSimplificationCss.includes('.novel-hero__context .novel-context-summary')
     && workspaceSimplificationCss.includes('.novel-map-page .map-list-workspace'),
+)
+assertPass(
+  'project topbar keeps a single overflow-hidden layout and unified 32px controls',
+  projectTopbarCss.includes('overflow-x: hidden')
+    && projectTopbarCss.includes('--project-topbar-control-size: 32px')
+    && !projectTopbarCss.includes('max-width: 52%')
+    && projectTopbarCss.includes('min-width: max-content')
+    && (projectTopbarCss.match(/@media \(max-width: 1200px\)/g) || []).length === 0,
 )
 assertPass(
   'workspace metrics cap the header and preserve overflow access',

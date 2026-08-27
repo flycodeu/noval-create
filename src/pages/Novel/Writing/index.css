@@ -1304,3 +1304,29 @@
 [data-theme="dark"] .chapter-navigator__chapter-card.is-active .chapter-navigator__chapter-title {
   color: #f6c56f;
 }
+
+.novel-writing-console-page .chapter-console-page__editor-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.novel-writing-console-page .chapter-console-page__editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.novel-writing-console-page .chapter-console-page__editor-actions .ant-btn,
+.novel-writing-console-page .novel-action-bar .ant-btn {
+  height: 32px;
+}
+
+.novel-writing-console-page .chapter-console-page__editor-status .ant-select,
+.novel-writing-console-page .chapter-console-page__editor-status .creative-stage-scope {
+  min-width: 0;
+}

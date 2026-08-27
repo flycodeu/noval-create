@@ -632,7 +632,6 @@ export default function TaskCenter() {
     <WorkspacePage
       className="task-center-page"
       title="任务中心"
-      description="集中管理 AI 任务的执行状态、报错追踪与重试恢复。"
       heroVariant="compact"
       actions={(
         <div className="task-center-toolbar">

@@ -80,9 +80,23 @@
 }
 
 .app-layout .task-center-page .task-context-health-card {
-  gap: 10px;
-  padding: 12px;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.app-layout .task-center-page .task-context-health-card,
+.app-layout .task-center-page .task-context-health-card p,
+.app-layout .task-center-page .task-context-health-card__recovery {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.app-layout .task-center-page .task-context-health-card__recovery {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .app-layout .task-center-page .task-center-code {

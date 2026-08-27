@@ -77,12 +77,25 @@
 
 .app-layout[data-ui-system="quiet-workspace"] .template-usage-overview {
   gap: 0;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .template-usage-overview__item {
-  padding: 10px 12px 10px 0;
+  padding: 6px 10px 6px 0;
   border-width: 0 0 1px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-usage-overview__item span {
+  font-size: 11px;
+}
+
+.app-layout[data-ui-system="quiet-workspace"] .template-usage-overview__item strong {
+  font-size: 12px;
+  line-height: 1.4;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card {

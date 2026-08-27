@@ -36,8 +36,9 @@
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero {
   display: flex;
-  align-items: flex-start;
-  gap: 18px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin: 0 0 16px;
   padding: 10px 0 14px;
   border: 0;
@@ -45,7 +46,7 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  overflow: visible;
+  overflow-x: hidden;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero::before {
@@ -54,7 +55,7 @@
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__copy {
   min-width: 0;
-  max-width: min(660px, 60%);
+  max-width: 100%;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__eyebrow {
@@ -70,30 +71,34 @@
   line-height: 1.25;
 }
 
-.novel-workspace[data-workspace-surface="quiet"] .novel-hero__description {
-  display: -webkit-box;
-  max-width: 52ch;
-  margin: 5px 0 0;
-  overflow: hidden;
-  color: var(--workspace-ink-soft);
-  font-size: 12px;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__description,
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__desc,
+.novel-workspace[data-workspace-surface="quiet"] .novel-section-header__description {
+  display: none;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions {
-  flex: 0 1 auto;
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  margin-left: auto;
-  padding-top: 1px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-left: 0;
+  padding-top: 0;
+  overflow-x: hidden;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions .ant-btn,
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions .ant-input-search,
+.novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions .ant-input-affix-wrapper {
+  height: 32px;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__context,
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics {
   flex: 0 1 auto;
   min-width: 0;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__context {
@@ -510,7 +515,7 @@
 
   .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions {
     width: 100%;
-    overflow-x: auto;
+    overflow-x: hidden;
   }
 
   .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metric-more-grid,

@@ -567,7 +567,6 @@ export default function PromptManager() {
       className="prompt-manager-page"
       layout="wide"
       title="提示词控制台"
-      description="管理各生成链路的运行时提示词、风险控制与参数规范。"
       heroVariant="compact"
       actions={(
         <div className="prompt-manager-toolbar">
@@ -603,7 +602,6 @@ export default function PromptManager() {
         <WorkspacePanel
           className="prompt-manager-catalog"
           title="运行时提示词"
-          description="选择一条链路后，在右侧查看全文、参数与编辑入口。"
           extra={(
             <div className="prompt-manager-filter-group">
               {PROMPT_CATEGORIES.map((category) => (
@@ -678,7 +676,6 @@ export default function PromptManager() {
           <WorkspacePanel
             className="prompt-manager-inspector-panel"
             title={selectedPromptRow ? selectedPromptRow.prompt.name : '未选择提示词'}
-            description={selectedPromptRow ? selectedPromptRow.meta.goal : '请从左侧选择一条提示词查看详细参数。'}
             extra={selectedPromptRow ? (
               <div className="prompt-manager-inspector-actions">
                 <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopy(selectedPromptRow.currentTemplate)}>复制</Button>

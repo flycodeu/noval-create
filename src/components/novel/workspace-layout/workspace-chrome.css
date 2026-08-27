@@ -1,6 +1,12 @@
 .project-topbar__information-slot:empty,
 .project-topbar__page-actions:empty {
   display: none;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .project-topbar__information-slot {
@@ -9,7 +15,7 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
-  flex: 1 1 460px;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -17,10 +23,10 @@
 .workspace-information-rail {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 46px;
+  min-height: 32px;
   padding: 0;
 }
 
@@ -34,7 +40,8 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  flex: 0 1 240px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .workspace-information-rail__eyebrow {
@@ -64,7 +71,8 @@
 .workspace-information-rail__facts {
   display: flex;
   align-items: stretch;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   gap: 0;
   overflow: hidden;
 }
@@ -73,15 +81,7 @@
 .workspace-information-rail__metrics {
   flex: 1 1 0;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  overscroll-behavior-inline: contain;
-}
-
-.workspace-information-rail__context::-webkit-scrollbar,
-.workspace-information-rail__metrics::-webkit-scrollbar {
-  display: none;
+  overflow: hidden;
 }
 
 .workspace-information-rail .novel-context-summary,
@@ -89,17 +89,17 @@
   display: flex;
   align-items: stretch;
   gap: 0;
-  width: max-content;
-  min-width: 100%;
+  min-width: 0;
 }
 
 .workspace-information-rail .novel-context-summary__item,
 .workspace-information-rail .novel-metric {
   display: grid;
   align-content: center;
-  min-width: 108px;
-  min-height: 42px;
-  padding: 0 14px;
+  min-width: 0;
+  max-width: 140px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 0;
   border-left: 1px solid color-mix(in srgb, var(--project-topbar-border) 84%, transparent);
   border-radius: 0;
@@ -128,7 +128,7 @@
 .workspace-information-rail .novel-context-summary__item dd,
 .workspace-information-rail .novel-metric__value {
   margin: 3px 0 0;
-  max-width: 180px;
+  max-width: 140px;
   color: var(--project-topbar-text);
   font-size: 13px;
   font-weight: 700;
@@ -142,18 +142,20 @@
 .workspace-contract-actions__secondary {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 
 .workspace-contract-actions {
   max-width: 100%;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .workspace-contract-action.ant-btn,
 .workspace-contract-actions__more.ant-btn {
-  height: 34px;
-  border-radius: 11px;
+  height: 32px;
+  border-radius: 10px;
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -174,16 +176,6 @@
 }
 
 @media (max-width: 1200px) {
-  .workspace-information-rail {
-    grid-template-columns: minmax(190px, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.95fr);
-    gap: 12px;
-  }
-
-  .workspace-information-rail__metrics {
-    border-left: 1px solid color-mix(in srgb, var(--project-topbar-border) 72%, transparent);
-    padding-left: 8px;
-  }
-
   .workspace-contract-actions__secondary,
   .workspace-contract-actions__more--desktop {
     display: none;
@@ -196,28 +188,22 @@
 
 @media (max-width: 767px) {
   .workspace-information-rail {
-    grid-template-columns: minmax(0, 1fr);
-    padding-inline: 12px;
+    gap: 8px;
+    min-height: 32px;
+    padding: 0;
   }
 
   .workspace-information-rail__copy {
-    align-items: flex-start;
+    flex: 1 1 auto;
+    align-items: center;
   }
 
-  .workspace-information-rail__context,
-  .workspace-information-rail__metrics {
-    grid-column: 1;
+  .workspace-information-rail__heading h1 {
+    font-size: 16px;
   }
 
-  .workspace-information-rail__metrics {
-    border-top: 1px solid color-mix(in srgb, var(--project-topbar-border) 72%, transparent);
-    border-left: 0;
-    padding-top: 8px;
-    padding-left: 0;
-  }
-
-  .workspace-information-rail__heading p {
-    white-space: normal;
+  .workspace-information-rail__facts {
+    display: none;
   }
 
   .workspace-contract-action--primary.ant-btn {
@@ -227,73 +213,5 @@
   .workspace-contract-action--primary.ant-btn > span:not(.anticon):not(.ant-btn-icon) {
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-}
-
-/* The rail now lives inside ProjectTopbar__main-row. Keep its responsive
-   behavior inline with the same surface instead of creating a second header. */
-.workspace-information-rail__facts {
-  display: flex;
-  align-items: stretch;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.workspace-information-rail__context,
-.workspace-information-rail__metrics {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.workspace-information-rail__heading p {
-  display: none;
-}
-
-@media (min-width: 1201px) {
-  /* Keep the page identity legible when the topbar also contains navigation
-     controls. Facts may scroll or collapse into "更多", but the title should
-     not be reduced to two or three characters. */
-  .workspace-information-rail__copy {
-    min-width: 168px;
-  }
-}
-
-@media (max-width: 900px) {
-  .workspace-information-rail {
-    gap: 10px;
-  }
-
-  .workspace-information-rail__copy {
-    flex: 0 1 180px;
-  }
-
-  .workspace-information-rail__heading h1 {
-    font-size: 16px;
-  }
-}
-
-@media (max-width: 767px) {
-  .workspace-information-rail {
-    display: flex;
-    gap: 8px;
-    min-height: 40px;
-    padding: 0;
-  }
-
-  .workspace-information-rail__copy {
-    flex: 0 1 150px;
-    align-items: center;
-  }
-
-  .workspace-information-rail__facts {
-    flex: 1 1 auto;
-  }
-
-  .workspace-information-rail__metrics {
-    border-top: 0;
-    border-left: 1px solid color-mix(in srgb, var(--project-topbar-border) 72%, transparent);
-    padding-top: 0;
-    padding-left: 8px;
   }
 }

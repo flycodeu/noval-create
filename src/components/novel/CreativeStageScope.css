@@ -2,11 +2,14 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
-  padding: 4px 8px 4px 10px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px 0 10px;
   border: 1px solid rgba(189, 100, 63, 0.24);
   border-radius: 10px;
   background: rgba(255, 250, 243, 0.82);
+  box-sizing: border-box;
 }
 
 .creative-stage-scope__label {
@@ -19,16 +22,26 @@
 }
 
 .creative-stage-scope__select {
-  min-width: 220px;
+  min-width: 0;
+  width: min(220px, 32vw);
+}
+
+.creative-stage-scope .ant-select-selector,
+.creative-stage-scope .ant-btn {
+  height: 28px !important;
+  min-height: 28px !important;
 }
 
 @media (max-width: 900px) {
   .creative-stage-scope {
     width: 100%;
+    height: auto;
+    min-height: 32px;
   }
 
   .creative-stage-scope__select {
     flex: 1;
     min-width: 0;
+    width: auto;
   }
 }

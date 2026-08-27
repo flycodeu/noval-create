@@ -105,8 +105,8 @@
 }
 
 .app-layout .prompt-manager-page .prompt-manager-template-preview--featured {
-  min-height: 220px;
-  max-height: min(43dvh, 460px);
+  min-height: 120px;
+  max-height: min(32dvh, 280px);
   resize: vertical;
 }
 

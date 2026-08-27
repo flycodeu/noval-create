@@ -450,7 +450,6 @@ export default function ModelManager() {
         layout="wide"
         heroVariant="compact"
         title="模型与搜索管理"
-        description="管理 AI 模型接入、联网检索和连接测试。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
@@ -481,7 +480,6 @@ export default function ModelManager() {
             scrollable
             className="model-manager-list-panel"
             title="模型配置"
-            description="已保存的模型配置列表。"
             extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
           >
             {loading ? (
@@ -546,7 +544,6 @@ export default function ModelManager() {
           <WorkspacePanel
             className="model-manager-overview-panel"
             title="当前状态"
-            description="查看模型参数与连接测试。"
             extra={<Button icon={<SearchOutlined />} onClick={openSourceEditor}>配置搜索 API</Button>}
           >
             {selected ? (
@@ -610,7 +607,6 @@ export default function ModelManager() {
           <WorkspacePanel
             className="model-manager-source-panel"
             title="来源检索与 API Key"
-            description="联网检索来源配置。"
             extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
           >
           <div className="admin-detail-stack source-search-config">

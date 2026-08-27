@@ -98,7 +98,7 @@ export function WorkspaceContractActions({ contract }: { contract: WorkspaceActi
 export function WorkspaceInformationRail({
   eyebrow,
   title,
-  description,
+  description: _description,
   contextSummary,
   metrics,
 }: {
@@ -115,14 +115,13 @@ export function WorkspaceInformationRail({
   return (
     <section
       className="workspace-information-rail"
-      aria-label={`${title} 页面信息${description ? `：${description}` : ''}`}
+      aria-label={`${title} 页面信息`}
       data-workspace-information="rail"
     >
       <div className="workspace-information-rail__copy">
         {eyebrow ? <span className="workspace-information-rail__eyebrow">{eyebrow}</span> : null}
-        <div className="workspace-information-rail__heading" title={description || title}>
+        <div className="workspace-information-rail__heading" title={title}>
           <h1>{title}</h1>
-          {description ? <p>{description}</p> : null}
         </div>
       </div>
       {contextSummary || visibleMetrics.length > 0 || overflowMetrics.length > 0 ? (

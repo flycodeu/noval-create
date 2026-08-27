@@ -50,7 +50,7 @@ type WorkspacePageProps = WorkspacePageBaseProps & WorkspacePageChromeProps
 export function WorkspacePage({
   eyebrow,
   title,
-  description,
+  description: _description,
   chrome = 'legacy',
   actions,
   actionContract,
@@ -80,7 +80,6 @@ export function WorkspacePage({
     <WorkspaceInformationRail
       eyebrow={eyebrow}
       title={title}
-      description={description}
       contextSummary={contextSummary}
       metrics={metrics}
     />
@@ -127,7 +126,6 @@ export function WorkspacePage({
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
-          {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {sharedActions && !sharedActionsMounted ? <div className="novel-hero__actions">{sharedActions}</div> : null}
@@ -199,14 +197,8 @@ export function WorkspacePanel({
   bodyClassName?: string
   children: React.ReactNode
 }) {
-  const descriptionContent = description ? descriptionMode === 'inline' ? (
-    <div className="novel-panel__desc">{description}</div>
-  ) : (
-    <details className="novel-panel__description-disclosure">
-      <summary title="查看说明">说明</summary>
-      <div className="novel-panel__desc">{description}</div>
-    </details>
-  ) : null
+  void description
+  void descriptionMode
 
   return (
     <section
@@ -217,14 +209,13 @@ export function WorkspacePanel({
         className,
       )}
     >
-      {title || description || extra ? (
+      {title || extra ? (
         <div className="novel-panel__header">
           {title ? (
             <div className="novel-panel__copy">
-              {title ? <h2 className="novel-panel__title">{title}</h2> : null}
-              {descriptionContent}
+              <h2 className="novel-panel__title">{title}</h2>
             </div>
-          ) : description ? <div className="novel-panel__copy">{descriptionContent}</div> : null}
+          ) : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
         </div>
       ) : null}
