@@ -689,7 +689,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
       <WorkspacePanel
         className="novel-theme-voice-page__editor-panel"
-        extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}
+        extra={generatingMode ? <Tag color="gold">AI 生成中</Tag> : null}
       >
         <Form form={form} layout="vertical">
           <div className="workspace-stack-16">
@@ -933,11 +933,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       </WorkspacePanel>
 
       <section className="theme-voice__lab-handoff">
-        <div>
-          <strong>实验风格与已确认规范分开管理</strong>
-          <span>样本采集、候选指纹和 A/B 试写已集中到文风实验室；这里仅保存最终确认的长期规则。</span>
-        </div>
-        <Button icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>打开文风实验室</Button>
+        <Button type="link" icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>文风实验室</Button>
       </section>
 
       <Modal

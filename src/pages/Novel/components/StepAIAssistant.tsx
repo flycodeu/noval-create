@@ -334,7 +334,6 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
       <div className="step-ai-assistant__header">
         <div>
           <div className="step-ai-assistant__eyebrow">上下文 AI 助手</div>
-          <h2>边聊边补齐当前步骤</h2>
         </div>
         <Tooltip title="本面板只生成候选补丁，点击回填后才会写入表单。">
           <Tag icon={<ToolOutlined />} color="processing">工具受控</Tag>

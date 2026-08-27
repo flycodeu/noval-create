@@ -999,7 +999,7 @@ export default function NovelRouter() {
   const contextualChapter = currentPage === 'writing' ? currentChapter : null
   const sidebarStatusText = pendingPage && pendingPage !== currentPage
     ? `正在切换到 ${resolvePageMeta(pendingPage).label}`
-    : `${workspaceSnapshot.stage.label} · 模块完成 ${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`
+    : resolvePageMeta(currentPage).label
   const sidebarContent = (
     <ProjectSidebar
       stageLabel={workspaceSnapshot.stage.label}

@@ -192,11 +192,10 @@
 .theme-voice__lab-handoff {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin-top: 20px;
-  padding: 16px 0 4px;
-  border-top: 1px solid var(--theme-voice-line);
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 0 0;
 }
 
 .theme-voice__lab-handoff > div {

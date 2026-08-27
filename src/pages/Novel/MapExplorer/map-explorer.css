@@ -11,7 +11,44 @@
 }
 
 .novel-map-page .novel-filter-bar {
-  min-width: min(420px, 100%);
+  min-width: 0;
+}
+
+.novel-map-page .map-list-panel .novel-panel__header {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.novel-map-page .map-list-panel .novel-panel__copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.novel-map-page .map-list-panel .novel-panel__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-map-page .map-list-panel .novel-panel__extra {
+  flex: 0 0 auto;
+  min-width: 200px;
+  max-width: min(280px, 48%);
+}
+
+.novel-map-page .map-list-panel .map-list-panel__search.ant-input-search,
+.novel-map-page .map-list-panel .map-list-panel__search {
+  width: 100%;
+  min-width: 180px;
+}
+
+.novel-map-page .map-list-panel .novel-list-card {
+  border: 1px solid var(--border-default, var(--workspace-rule));
+  border-radius: 10px;
+  background: var(--bg-surface);
 }
 
 .map-graph-workspace {
@@ -79,12 +116,23 @@
 }
 
 .map-list-panel .novel-panel__body {
-  padding: 30px 32px 34px;
+  padding: 12px;
 }
 
 .map-list-panel__stack {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+}
+
+.map-list-panel__count {
+  color: var(--text-secondary, var(--workspace-ink-soft));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.map-auto-task-card--idle {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .map-list-panel__results {
@@ -772,7 +820,7 @@
 
   .map-graph-toolbar,
   .novel-map-page .novel-filter-bar {
-    min-width: 100%;
+    min-width: 0;
   }
 
   .map-graph-stage-brief {

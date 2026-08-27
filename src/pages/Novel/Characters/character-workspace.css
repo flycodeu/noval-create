@@ -81,6 +81,38 @@
   align-self: start;
 }
 
+.novel-characters-page .novel-character-studio__sidebar .novel-panel__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.novel-characters-page .novel-character-studio__sidebar .novel-panel__copy {
+  min-width: 0;
+}
+
+.novel-characters-page .novel-character-studio__sidebar .novel-panel__extra {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: stretch;
+}
+
+.novel-characters-page .novel-character-studio__sidebar .novel-filter-bar,
+.novel-characters-page .novel-character-studio__sidebar .novel-filter-bar__row {
+  width: 100%;
+  min-width: 0;
+}
+
+.novel-characters-page .novel-character-studio__sidebar .novel-filter-bar__row .ant-input-search,
+.novel-characters-page .novel-character-studio__sidebar .novel-filter-bar__row .ant-select {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
 .novel-character-list {
   display: grid;
   gap: 12px;
@@ -981,11 +1013,13 @@
 .novel-characters__list-row {
   display: grid;
   min-height: 88px;
+  align-content: start;
   gap: 5px;
   padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border-default, rgba(122, 93, 52, 0.14));
   border-radius: 10px;
-  background: transparent;
-  box-shadow: none;
+  background: var(--bg-surface, var(--character-surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--character-panel-ink) 6%, transparent);
 }
 
 .novel-characters__list-row:hover {

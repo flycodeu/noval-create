@@ -29,7 +29,6 @@ import {
 } from '../../../shared/novel-workspace'
 import type { ProjectBlocker } from '../../../shared/workspace-types'
 import {
-  WorkspaceContextSummary,
   WorkspacePage,
 } from '../components/WorkspaceShell'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
@@ -213,15 +212,6 @@ export default function StudioPage({ novelId }: Props) {
       eyebrow="创作控制台"
       title="现在做什么"
       description="只处理推荐下一步与当前阻塞；项目资料请在项目资料页维护。"
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '当前阶段', value: workspaceSnapshot.stage.label },
-            { label: '模块完成', value: `${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}` },
-            { label: '当前阻塞', value: visibleBlockers.length > 0 ? `${visibleBlockers.length} 项` : '无' },
-          ]}
-        />
-      )}
       actionContract={{
         primary: {
           key: 'recommended-next-step',

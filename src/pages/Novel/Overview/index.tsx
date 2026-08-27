@@ -436,8 +436,6 @@ export default function Overview({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
-            { label: '资料状态', value: hasUnsavedChanges ? '有未保存修改' : `${projectInfoFilledCount}/5 项已填写` },
           ]}
         />
       )}
@@ -527,7 +525,6 @@ export default function Overview({ novelId }: Props) {
               <summary>
                 <span>
                   <strong>AI 辅助</strong>
-                  <small>读取上下文、生成候选稿或只更新指定字段</small>
                 </span>
                 <span>按需展开</span>
               </summary>

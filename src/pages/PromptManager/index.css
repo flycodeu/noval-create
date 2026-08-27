@@ -30,12 +30,52 @@
   margin-top: 12px;
 }
 
+.app-layout .prompt-manager-page .prompt-manager-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search.ant-input-search,
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input-group,
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input-group-wrapper,
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input-affix-wrapper,
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input,
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input-search-button.ant-btn {
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input-affix-wrapper {
+  display: flex;
+  align-items: center;
+  padding-block: 0;
+  line-height: 32px;
+}
+
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 32px;
+  height: 32px;
+}
+
+.app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input::placeholder {
+  line-height: 32px;
+}
+
 .app-layout .prompt-manager-page .prompt-manager-card {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 5px 12px;
   padding: 12px 14px;
+  border: 1px solid var(--border-default);
   border-radius: 12px;
-  box-shadow: none;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
   background: var(--bg-surface);
 }
 

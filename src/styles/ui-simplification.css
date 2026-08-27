@@ -12,15 +12,15 @@
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-list {
-  gap: 0;
+  gap: 6px;
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-item {
-  padding: 11px 12px;
-  border-width: 0 0 1px;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
   transition: background 140ms ease, border-color 140ms ease;
 }
 
@@ -100,9 +100,10 @@
 
 .app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card {
   min-height: 0;
+  border: 1px solid var(--border-default);
   border-radius: 12px;
   background: var(--bg-surface);
-  box-shadow: none;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
   transition: border-color 140ms ease, background 140ms ease;
 }
 
@@ -125,10 +126,11 @@
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-card {
-  padding: 11px 0;
-  border-width: 0 0 1px;
-  border-radius: 0;
-  background: transparent;
+  padding: 12px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .prompt-manager-page .prompt-manager-card--active {
@@ -150,11 +152,11 @@
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-list-card {
-  padding: 10px 0;
-  border-width: 0 0 1px;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .task-center-page .novel-list-card:hover,
@@ -164,9 +166,10 @@
 
 .app-layout[data-ui-system="quiet-workspace"] .task-center-page .task-context-health-card,
 .app-layout[data-ui-system="quiet-workspace"] .task-center-page .task-center-detail {
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .task-center-page .ant-collapse > .ant-collapse-item {
@@ -183,4 +186,61 @@
   .app-layout[data-ui-system="quiet-workspace"] .template-manager-page .template-manager-card .ant-card-body {
     padding: 14px;
   }
+}
+
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics--compact,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-workspace__page-metrics .novel-hero__metrics {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  grid-template-columns: none;
+}
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-metric--compact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  box-shadow: none;
+}
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric__label,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-metric--compact .novel-metric__label {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__metrics .novel-metric__value,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-metric--compact .novel-metric__value {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions .ant-input-search .ant-input-affix-wrapper,
+.app-layout .novel-workspace[data-workspace-surface="quiet"] .novel-hero__actions .ant-input-search .ant-input {
+  height: 32px;
+  min-height: 32px;
+  padding-block: 0;
+  line-height: 32px;
 }

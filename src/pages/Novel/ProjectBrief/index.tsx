@@ -432,7 +432,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
               <div className="project-brief__section-header">
                 <div>
                   <h2>赛道与读者承诺</h2>
-                  <p>先把作品交付给谁、为什么值得追读说清楚。</p>
                 </div>
                 <div className="project-brief__section-actions">
                   <div className="project-brief__save-state" role="status" aria-live="polite">
@@ -583,7 +582,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
               <div className="project-brief__section-header">
                 <div>
                   <h2>边界与交付</h2>
-                  <p>把不能跑偏的方向和读者每章能得到的回报固定下来。</p>
                 </div>
                 <AIGenerateButton
                   novelId={novelId}

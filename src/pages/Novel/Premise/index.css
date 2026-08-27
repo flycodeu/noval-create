@@ -107,7 +107,16 @@
 }
 
 .premise-page__advanced-panel {
-  margin-top: 8px;
+  margin-top: 0;
+}
+
+.premise-page__advanced-panel .novel-panel__header {
+  padding: 0 0 8px;
+  min-height: 0;
+}
+
+.premise-page__advanced-panel .novel-panel__body {
+  padding-top: 0;
 }
 
 .premise-page__advanced {

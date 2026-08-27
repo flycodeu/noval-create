@@ -1,9 +1,7 @@
-import type { ReactNode } from 'react'
 import { Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import { EllipsisOutlined } from '@ant-design/icons'
 import {
-  flattenWorkspaceNodes,
   type WorkspaceActionContract,
   type WorkspaceActionItem,
 } from './workspace-chrome-contract'
@@ -98,20 +96,10 @@ export function WorkspaceContractActions({ contract }: { contract: WorkspaceActi
 export function WorkspaceInformationRail({
   eyebrow,
   title,
-  description: _description,
-  contextSummary,
-  metrics,
 }: {
   eyebrow?: string
   title: string
-  description?: string
-  contextSummary?: ReactNode
-  metrics?: ReactNode
 }) {
-  const metricItems = flattenWorkspaceNodes(metrics)
-  const visibleMetrics = metricItems.slice(0, 2)
-  const overflowMetrics = metricItems.slice(2)
-
   return (
     <section
       className="workspace-information-rail"
@@ -124,18 +112,6 @@ export function WorkspaceInformationRail({
           <h1>{title}</h1>
         </div>
       </div>
-      {contextSummary || visibleMetrics.length > 0 || overflowMetrics.length > 0 ? (
-        <div className="workspace-information-rail__facts">
-          {contextSummary ? <div className="workspace-information-rail__context">{contextSummary}</div> : null}
-          {visibleMetrics.length > 0 ? <div className="workspace-information-rail__metrics">{visibleMetrics}</div> : null}
-          {overflowMetrics.length > 0 ? (
-            <details className="workspace-information-rail__more-metrics">
-              <summary title="查看其余指标">更多 <span aria-hidden="true">{overflowMetrics.length}</span></summary>
-              <div className="workspace-information-rail__more-grid">{overflowMetrics}</div>
-            </details>
-          ) : null}
-        </div>
-      ) : null}
     </section>
   )
 }

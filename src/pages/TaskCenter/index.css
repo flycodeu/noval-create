@@ -16,9 +16,19 @@
   gap: 5px;
 }
 
+.app-layout .task-center-page .task-center-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .app-layout .task-center-page .novel-list-card {
   padding: 10px 12px;
+  border: 1px solid var(--border-default);
   border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 
 .app-layout .task-center-page .task-center-card {

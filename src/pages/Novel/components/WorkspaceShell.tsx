@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { cloneElement, isValidElement } from 'react'
 import { createPortal } from 'react-dom'
 import {
   WorkspaceContractActions,
@@ -55,7 +55,7 @@ export function WorkspacePage({
   actions,
   actionContract,
   metrics,
-  contextSummary,
+  contextSummary: _contextSummary,
   guide,
   aside,
   footerBar,
@@ -70,9 +70,20 @@ export function WorkspacePage({
   const hasAside = Boolean(aside)
   const metricItems = flattenWorkspaceNodes(metrics)
   const metricCount = metricItems.length
-  const visibleMetrics = metricItems.slice(0, 2)
-  const overflowMetrics = metricItems.slice(2)
-  const inlineMetrics = metricCount > 0 && metricCount <= 2
+  const compactMetrics = metricCount > 0
+    ? (
+      <div className="novel-hero__metrics novel-hero__metrics--compact" data-metric-count={metricCount}>
+        {metricItems.map((node, index) => (
+          isValidElement(node)
+            ? cloneElement(node as React.ReactElement<{ compact?: boolean }>, {
+                compact: true,
+                key: node.key ?? `metric-${index}`,
+              })
+            : node
+        ))}
+      </div>
+    )
+    : null
   const portal = useWorkspaceChromePortal()
   const usesSharedChrome = chrome === 'shared'
   const isProjectShell = Boolean(portal)
@@ -80,8 +91,6 @@ export function WorkspacePage({
     <WorkspaceInformationRail
       eyebrow={eyebrow}
       title={title}
-      contextSummary={contextSummary}
-      metrics={metrics}
     />
   ) : null
   const sharedActions = usesSharedChrome && actionContract
@@ -117,27 +126,23 @@ export function WorkspacePage({
           'novel-hero',
           heroVariant === 'compact' && 'novel-hero--compact',
           Boolean(actions || sharedActions) && 'novel-hero--has-actions',
-          Boolean(contextSummary) && 'novel-hero--has-context',
           Boolean(metrics) && 'novel-hero--has-metrics',
-          inlineMetrics && 'novel-hero--inline-metrics',
+          metricCount > 0 && 'novel-hero--compact-metrics',
         )}
         data-metric-count={metricCount || undefined}
       >
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
-          <h1 className="novel-hero__title">{title}</h1>
+          <div className="novel-hero__title-row">
+            <h1 className="novel-hero__title">{title}</h1>
+            {compactMetrics}
+          </div>
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {sharedActions && !sharedActionsMounted ? <div className="novel-hero__actions">{sharedActions}</div> : null}
-        {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
-        {visibleMetrics.length > 0 ? <div className="novel-hero__metrics">{visibleMetrics}</div> : null}
-        {overflowMetrics.length > 0 ? (
-          <details className="novel-hero__metric-more">
-            <summary title="查看其余指标">更多指标 <span aria-hidden="true">{overflowMetrics.length}</span></summary>
-            <div className="novel-hero__metric-more-grid">{overflowMetrics}</div>
-          </details>
-        ) : null}
-      </section> : null}
+      </section> : compactMetrics ? (
+        <div className="novel-workspace__page-metrics">{compactMetrics}</div>
+      ) : null}
 
       {guide ? <div className="novel-workspace__guide">{guide}</div> : null}
 
@@ -163,15 +168,17 @@ export function WorkspaceMetric({
   label,
   value,
   tone = 'default',
+  compact = false,
 }: {
   label: string
   value: React.ReactNode
   tone?: 'default' | 'warm' | 'cool'
+  compact?: boolean
 }) {
   return (
-    <div className={`novel-metric novel-metric--${tone}`}>
-      <div className="novel-metric__label">{label}</div>
-      <div className="novel-metric__value">{value}</div>
+    <div className={joinClassNames('novel-metric', `novel-metric--${tone}`, compact && 'novel-metric--compact')}>
+      <span className="novel-metric__label">{label}</span>
+      <span className="novel-metric__value">{value}</span>
     </div>
   )
 }

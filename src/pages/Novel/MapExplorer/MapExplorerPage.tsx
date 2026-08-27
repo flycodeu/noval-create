@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Switch, Tag, message } from 'antd'
-import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import CreativeStageScope from '../../../components/novel/CreativeStageScope'
@@ -127,19 +127,14 @@ function TaskStrip({
   defaultExpanded?: boolean
   onToggle?: (nextExpanded: boolean) => void
 }) {
-  const [innerExpanded, setInnerExpanded] = useState(defaultExpanded)
-  const resolvedExpanded = typeof expanded === 'boolean' ? expanded : innerExpanded
+  const resolvedExpanded = typeof expanded === 'boolean' ? expanded : defaultExpanded
   const palette = {
     info: { border: 'rgba(59, 109, 138, 0.22)', glow: 'rgba(18, 90, 124, 0.14)', pillBg: 'rgba(25, 112, 150, 0.12)', pillText: '#0C607B' },
     success: { border: 'rgba(63, 138, 96, 0.22)', glow: 'rgba(42, 108, 77, 0.14)', pillBg: 'rgba(49, 136, 87, 0.12)', pillText: '#236C47' },
     warning: { border: 'rgba(174, 124, 48, 0.22)', glow: 'rgba(136, 93, 30, 0.14)', pillBg: 'rgba(189, 137, 56, 0.14)', pillText: '#8E5E1B' },
     error: { border: 'rgba(176, 68, 68, 0.22)', glow: 'rgba(124, 40, 40, 0.14)', pillBg: 'rgba(183, 68, 68, 0.14)', pillText: '#8A3131' },
   }[tone]
-  const handleToggle = () => {
-    const nextExpanded = !resolvedExpanded
-    if (typeof expanded !== 'boolean') setInnerExpanded(nextExpanded)
-    onToggle?.(nextExpanded)
-  }
+  void onToggle
 
   return (
     <section
@@ -158,9 +153,6 @@ function TaskStrip({
         </div>
         <div className="map-graph-callout__actions">
           {actions}
-          <Button size="small" type="text" icon={resolvedExpanded ? <UpOutlined /> : <DownOutlined />} onClick={handleToggle}>
-            {resolvedExpanded ? '收起详情' : '展开详情'}
-          </Button>
         </div>
       </div>
       {resolvedExpanded ? <div className="map-graph-callout__body">{children}</div> : null}
@@ -1114,31 +1106,34 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const autoTaskSummary = autoTask
     ? `任务${autoTaskStatusText} · 第 ${autoStatus.targetDepth ?? '-'} 层 · 已处理 ${autoStatus.processedParentCount} · 待处理 ${autoStatus.pendingParentCount}${autoStatus.currentParentName ? ` · 当前对象 ${autoStatus.currentParentName}` : ''}`
-    : '暂未启动自动分批。启动后系统会按地图蓝图在后台持续补齐节点。'
+    : ''
   const autoTaskTitle = autoTask ? `自动分批 · ${autoTaskStatusText}` : '自动分批'
   const autoTaskMessage = autoTask
     ? (autoStatus.message || `自动分批${autoTaskStatusText}。`)
-    : '当前没有运行中的自动任务。'
+    : ''
   const autoTaskDescription = autoTask
-    ? (autoStatus.lastError || (autoStatus.currentParentName ? `当前处理对象：${autoStatus.currentParentName}` : '系统会逐批校验蓝图、补齐节点并刷新图谱。'))
-    : '需要时可展开查看进度，或直接从这里启动后台自动分批。'
+    ? (autoStatus.lastError || (autoStatus.currentParentName ? `当前处理对象：${autoStatus.currentParentName}` : ''))
+    : ''
 
   const renderAutoTaskStrip = (mode: 'graph' | 'list') => (
+    autoTask ? (
     <TaskStrip
       className={`map-auto-task-card map-auto-task-card--${mode}`}
       title={autoTaskTitle}
       summary={autoTaskSummary}
       actions={autoTaskActions}
       tone={autoTaskTone}
-      expanded={autoTaskCardExpanded}
+      expanded={autoTaskCardExpanded || autoTask.status === 'running' || autoTask.status === 'failed'}
       onToggle={setAutoTaskCardExpanded}
     >
+      {autoTaskMessage ? (
       <Alert
         type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' || autoTask?.status === 'cancelled' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
         showIcon
         message={autoTaskMessage}
-        description={autoTaskDescription}
+        description={autoTaskDescription || undefined}
       />
+      ) : null}
 
       <div className="map-auto-task-card__progress">
         <Progress percent={autoPercent} status={autoTask?.status === 'failed' ? 'exception' : autoTask?.status === 'success' ? 'success' : 'active'} />
@@ -1152,6 +1147,11 @@ export default function MapExplorerPage({ novelId }: Props) {
         </div>
       </div>
     </TaskStrip>
+    ) : (
+      <div className={`map-auto-task-card map-auto-task-card--${mode} map-auto-task-card--idle`}>
+        {autoTaskActions}
+      </div>
+    )
   )
 
   const detailActions = (
@@ -1356,7 +1356,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                 <div className="novel-kicker">{selectedNode ? '当前焦点' : '根层总览'}</div>
                 <strong>{selectedNode?.name || '未锁定焦点节点'}</strong>
                 <div className="map-graph-stage-brief__path">{pathLabel}</div>
-                <p>{selectedNodeLead || '默认展示整张地图树。拖动画布浏览，滚轮缩放，点击任意节点后可在右侧检查器查看具体信息。'}</p>
+                {selectedNodeLead ? <p>{selectedNodeLead}</p> : null}
                 <div className="map-graph-stage-brief__tags">
                   {selectedNode?.nodeType ? <Tag color="blue">{selectedNode.nodeType}</Tag> : null}
                   {selectedNode?.locationType ? <Tag>{selectedNode.locationType}</Tag> : null}
@@ -1584,15 +1584,18 @@ export default function MapExplorerPage({ novelId }: Props) {
             description={isSearching ? '关键词会在全部地图节点中检索，结果仍可作为图谱焦点继续展开。' : '根节点决定地图的最高层级结构，适合先建立主区域、主基地或主城市。'}
             scrollable
             extra={(
-              <div className="novel-filter-bar">
-                <div className="novel-filter-bar__row">
-                  <Input.Search allowClear placeholder="搜索名称、类型、简介" value={searchKeywordInput} onChange={(event) => setSearchKeywordInput(event.target.value)} onSearch={setSearchKeywordInput} />
-                </div>
-                <div className="novel-filter-bar__summary">{isSearching ? `搜索结果 ${rootData.total} 条` : `根节点共 ${rootData.total} 个`}</div>
-              </div>
+              <Input.Search
+                className="map-list-panel__search"
+                allowClear
+                placeholder="搜索名称、类型、简介"
+                value={searchKeywordInput}
+                onChange={(event) => setSearchKeywordInput(event.target.value)}
+                onSearch={setSearchKeywordInput}
+              />
             )}
           >
             <div className="map-list-panel__stack">
+              <div className="map-list-panel__count">{isSearching ? `搜索结果 ${rootData.total} 条` : `根节点共 ${rootData.total} 个`}</div>
               {renderAutoTaskStrip('list')}
 
               {loading ? (

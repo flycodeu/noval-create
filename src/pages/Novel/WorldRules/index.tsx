@@ -981,7 +981,6 @@ export default function WorldRules({ novelId }: Props) {
           }}
         />
         <span>当前编辑：{activeSectionMeta.label}</span>
-        <span>只在需要时展开后台运行明细</span>
       </div>
       {generationProgress ? (
         <Alert
@@ -1006,7 +1005,7 @@ export default function WorldRules({ novelId }: Props) {
               ? [autoStatus.currentSectionLabel ? `当前分区：${autoStatus.currentSectionLabel}` : '', `已完成 ${autoStatus.completedSectionCount}/${autoStatus.totalSections || WORLD_RULE_SECTION_ORDER.length}`, autoStatus.lastError || autoStatus.message || '']
                 .filter(Boolean)
                 .join(' · ')
-              : '需要时再启动，系统会按分区连续生成当前草稿。'}
+              : undefined}
           />
           {autoTask ? <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} /> : null}
           {autoTask ? (

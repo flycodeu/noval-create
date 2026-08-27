@@ -645,7 +645,6 @@ export default function StyleLabPage({ novelId }: Props) {
             <div className="style-lab__ab-empty">
               <span>A / B</span>
               <strong>先确定指纹与场景，再生成第一组对照</strong>
-              <p>视图切换、打开或关闭参数面板都不会清空已经填写的候选内容。</p>
               <Button type="primary" icon={<ExperimentOutlined />} onClick={() => setDrawerMode('ab')}>设置试写参数</Button>
             </div>
           )}

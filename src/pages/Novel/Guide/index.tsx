@@ -34,7 +34,6 @@ import {
 import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { formatWritingContractTags } from '../../../shared/writing-contract'
 import {
-  WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
@@ -80,14 +79,6 @@ interface StepConfig {
   ready: boolean
   icon: React.ReactNode
   action: React.ReactNode
-}
-
-const TIME_MODE_LABELS: Record<string, string> = {
-  gregorian: '公历时间',
-  regnal: '年号纪年',
-  'relative-disaster': '灾变相对时间',
-  'custom-era': '虚构纪元',
-  'future-date': '未来日期',
 }
 
 function getSeverityColor(severity: 'high' | 'medium' | 'low') {
@@ -1006,22 +997,6 @@ export default function GuidePage({ novelId }: Props) {
           },
         ],
       }}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
-            { label: '流程完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
-            {
-              label: '时间制度',
-              value: TIME_MODE_LABELS[worldRules.timelineConfig.calendarType] || worldRules.timelineConfig.calendarType,
-            },
-            { label: '待同步章节', value: staleChapterCount > 0 ? `${staleChapterCount} 章` : '全部最新' },
-            { label: '记忆检查点', value: staleCheckpointCount > 0 ? `${staleCheckpointCount} 份待刷新` : '已同步' },
-            { label: '资产新鲜度', value: staleAssetCount > 0 ? `${staleAssetCount} 类待校准` : '资产稳定' },
-          ]}
-        />
-      )}
       metrics={(
         <>
           <WorkspaceMetric

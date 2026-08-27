@@ -151,11 +151,41 @@ assertPass(
     && (projectTopbarCss.match(/@media \(max-width: 1200px\)/g) || []).length === 0,
 )
 assertPass(
-  'workspace metrics cap the header and preserve overflow access',
-  workspaceShell.includes('const visibleMetrics = metricItems.slice(0, 2)')
-    && workspaceShell.includes('novel-hero__metric-more')
-    && workspaceChrome.includes('workspace-information-rail__more-metrics')
+  'workspace metrics render as compact chips instead of a 2+overflow header rail',
+  workspaceShell.includes('novel-hero__metrics--compact')
+    && workspaceShell.includes('novel-metric--compact')
+    && workspaceShell.includes('flattenWorkspaceNodes(metrics)')
+    && !workspaceShell.includes('metricItems.slice(0, 2)')
+    && !workspaceShell.includes('novel-hero__metric-more')
     && workspaceChromeContractSource.includes('flattenWorkspaceNodes'),
+)
+assertPass(
+  'project topbar information slot is title-only and does not portal metrics or context summaries',
+  workspaceChrome.includes('export function WorkspaceInformationRail({')
+    && workspaceChrome.includes('eyebrow,')
+    && workspaceChrome.includes('title,')
+    && !workspaceChrome.includes('workspace-information-rail__more-metrics')
+    && !workspaceChrome.includes('contextSummary')
+    && !workspaceChrome.includes('flattenWorkspaceNodes')
+    && workspaceShell.includes('<WorkspaceInformationRail')
+    && !workspaceShell.includes('contextSummary={contextSummary}')
+    && !workspaceShell.includes('metrics={metrics}'),
+)
+assertPass(
+  'project topbar identity stays capped and mode switch does not shrink',
+  projectTopbarCss.includes('max-width: 220px')
+    && projectTopbarCss.includes('overflow-x: hidden')
+    && projectTopbarCss.includes('flex-shrink: 0'),
+)
+assertPass(
+  'novel workspace status text keeps current location only',
+  read('src/pages/Novel/index.tsx').includes('resolvePageMeta(currentPage).label')
+    && !read('src/pages/Novel/index.tsx').includes('模块完成 ${workspaceSnapshot.moduleDoneCount}'),
+)
+assertPass(
+  'quiet cards keep a visible surface edge',
+  workspaceSimplificationCss.includes('border: 1px solid var(--border-default, var(--workspace-rule))')
+    && workspaceSimplificationCss.includes('border-radius: 12px'),
 )
 
 console.log('layout governance tests passed')
