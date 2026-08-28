@@ -228,6 +228,11 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'creative_stages').has('chapter_start'))
   assert.ok(getColumns(db, 'creative_stages').has('handoff_summary'))
   assert.ok(getColumns(db, 'creative_stage_assets').has('detail_level'))
+  assert.ok(getColumns(db, 'character_location_binding').has('map_node_id'))
+  assert.ok(getColumns(db, 'character_location_binding').has('source_type'))
+  assert.ok(getColumns(db, 'narrative_map_layout_nodes').has('x'))
+  assert.ok(getColumns(db, 'narrative_map_layout_nodes').has('layout_key'))
+  assert.ok(getColumns(db, 'narrative_map_viewports').has('active_layers_json'))
   assert.ok(getColumns(db, 'creative_stage_assets').has('requested_fields_json'))
   assert.ok(getColumns(db, 'canon_commits').has('input_hash'))
   assert.ok(getColumns(db, 'canon_commits').has('context_version_after'))
@@ -507,6 +512,7 @@ function testFreshDbIsIdempotent() {
       '0060_thread_context_projection_indexes',
       '0061_entity_context_projection_indexes',
       '0062_map_travel_fields',
+      '0063_narrative_board_layout_and_location_bindings',
     ])
 
     runMigrations(db)
@@ -648,6 +654,7 @@ function testPartialSchemaCanResume() {
       '0060_thread_context_projection_indexes',
       '0061_entity_context_projection_indexes',
       '0062_map_travel_fields',
+      '0063_narrative_board_layout_and_location_bindings',
     ])
 
     const configs = db.prepare(`

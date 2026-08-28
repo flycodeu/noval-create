@@ -75,6 +75,7 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/StyleLab/index.tsx',
   'src/pages/Novel/WorldRules/index.tsx',
   'src/pages/Novel/MapExplorer/MapExplorerPage.tsx',
+  'src/pages/Novel/NarrativeBoard/index.tsx',
   'src/pages/Novel/ItemsWorkspace/index.tsx',
   'src/pages/Novel/Glossary/index.tsx',
   'src/pages/Novel/SceneTemplates/index.tsx',

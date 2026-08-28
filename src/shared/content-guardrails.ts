@@ -92,7 +92,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'ai_action_cliche',
     severity: 'medium',
     message: 'AI高频动作套路，缺乏角色特异性。',
-    pattern: /(深吸一口气|紧紧攥住|瞳孔骤然收缩|浑身一震|身体微微一僵|手不自觉地|下意识地握紧|猛地站了起来|瞪大了眼睛|僵在了原地|身躯微颤|牙关紧咬|双拳紧握|猛然抬头|身子一颤)/u,
+    pattern: /(深吸一口气|紧紧攥住|瞳孔骤然收缩|浑身一震|身体微微一僵|手不自觉地|下意识地握紧|猛地站了起来|瞪大了眼睛|僵在了原地|身躯微颤|牙关紧咬|双拳紧握|猛然抬头|身子一颤|眼神冷冽|冷冽如冰|清冽如寒潭)/u,
   },
   {
     code: 'ai_emotional_cliche',
@@ -104,7 +104,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'ai_description_cliche',
     severity: 'medium',
     message: 'AI高频描写套路，缺乏新鲜感。',
-    pattern: /(阳光洒在|月光洒在|夕阳的余晖|晨光熹微|星光点点|微风拂过|空气中弥漫着|寂静笼罩着|黑暗吞噬|阴影笼罩|光影交错|氤氲着|弥漫在空气中|笼罩在一片|淡淡的忧伤|浓浓的暖意)/u,
+    pattern: /(阳光洒在|月光洒在|夕阳的余晖|晨光熹微|星光点点|微风拂过|空气中弥漫着|寂静笼罩着|黑暗吞噬|阴影笼罩|光影交错|氤氲着|弥漫在空气中|笼罩在一片|淡淡的忧伤|浓浓的暖意|夜色浓稠|化不开的墨|夜色如墨|斑驳光影)/u,
   },
   {
     code: 'ai_dialogue_filler',
@@ -200,9 +200,22 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
   },
   {
     code: 'ai_ending_summary',
-    severity: 'low',
+    severity: 'medium',
     message: '段落结尾的总结升华句，像写读后感。',
-    pattern: /(而这一切.{0,10}才刚刚开始|故事.{0,6}远没有结束|一切.{0,6}才刚刚开始|新的篇章.{0,6}即将|黎明前的黑暗|暴风雨前的宁静|这只是.*开始)/u,
+    pattern: /(而这一切.{0,10}才刚刚开始|故事.{0,6}远没有结束|一切.{0,6}才刚刚开始|新的篇章.{0,6}即将|黎明前的黑暗|暴风雨前的宁静|这只是.*开始|天.{0,8}要变了|谁把.{2,20}当成了祭品)/u,
+  },
+
+  {
+    code: 'system_settlement_wall',
+    severity: 'medium',
+    message: '能力结算被写成游戏成就墙，金手指应落到感官和代价，而不是连续面板。',
+    pattern: /【(?:击杀|获得|吞噬|你的寿命|因果命盘|执行神罚|警告[！!]|判定成立)[^】]{0,48}】/u,
+  },
+  {
+    code: 'appearance_ad',
+    severity: 'medium',
+    message: '外貌广告词在替代人物怎么办事。',
+    pattern: /(面容绝美|绝美却如|万载玄冰|清冷如寒星|冰山队长|不带一丝人间烟火气)/u,
   },
   {
     code: 'ai_repetitive_structure',
@@ -417,6 +430,19 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     avoid: '不要把叙述打磨得毫无冗余，完全无赘字的洁净文本反而暴露机器痕迹。',
     prefer: '按人物口吻保留少量顿挫和偏口语的小词（倒是、竟、偏偏、横竖之类），一章三五处即可，不堆砌。',
   },
+  {
+    code: 'system_settlement_wall',
+    bucket: 'structure',
+    avoid: '不要连续输出【击杀】【吞噬】【获得】【警告】这类成就面板。广播可以保留机械口吻，金手指不要写成游戏结算墙。',
+    prefer: '能力写成三秒内能看见的具体画面，并立刻写出代价（寿命、神智、伤口）。收获写成烫/凉的实物、补回一截的身体感觉，不要弹成就。',
+  },
+  {
+    code: 'appearance_ad',
+    bucket: 'expression',
+    avoid: '不要用“绝美、万载玄冰、清冷如寒星、冰山队长”给人物做广告。',
+    prefer: '用办事方式区分人物：先看断口还是先问证件，先拍照还是先下令。',
+  },
+
 ]
 
 const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = {
@@ -474,6 +500,12 @@ const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = 
       bucket: 'structure',
       avoid: '都市异能/系统爽文不要只写奖励到账、全场震惊和反派跪求，不补现代社会规则、监控、舆论、执法和能力代价。',
       prefer: '让爽点落在可验证的身份、资源、证据、风险和反击路径上。',
+    },
+    {
+      code: 'system_settlement_wall',
+      bucket: 'structure',
+      avoid: '规则怪谈/都市异能不要把能力结算写成【击杀】【获得】连发。',
+      prefer: '预支写成三秒画面和太阳穴一沉；收获写成晶体烫凉、寿命补回、现场多标出的证据线。',
     },
   ],
   'western-fantasy': [
@@ -835,6 +867,20 @@ export function buildGenrePacingGuidance(genre?: string): string {
   ].join('\n')
 }
 
+
+function collectSystemSettlementWall(text: string): TextGuardrailFinding | null {
+  const panels = text.match(/【[^】]{1,48}】/gu) || []
+  if (panels.length < 3) return null
+  const rewardLike = panels.filter((item) => /击杀|获得|吞噬|寿命|神格|警告|执行神罚|判定成立/.test(item))
+  if (rewardLike.length < 2) return null
+  return {
+    code: 'system_settlement_wall',
+    severity: panels.length >= 5 || rewardLike.length >= 3 ? 'high' : 'medium',
+    message: '能力结算被写成游戏成就墙，金手指应落到感官和代价，而不是连续面板。',
+    excerpt: rewardLike.slice(0, 4).join(''),
+  }
+}
+
 export function collectQualityGuardrailFindings(
   text: string,
   genre?: string,
@@ -863,6 +909,7 @@ export function collectQualityGuardrailFindings(
   const endingImageryFinding = collectEndingLonelyImagery(content)
   const atmosphericImageryFinding = collectAtmosphericImageryOveruse(content)
   const uniformParagraphFinding = collectUniformParagraphRhythm(content)
+  const systemSettlementFinding = collectSystemSettlementWall(content)
   const allFindings = [
     ...patternFindings,
     ...(genreFinding ? [genreFinding] : []),
@@ -872,6 +919,7 @@ export function collectQualityGuardrailFindings(
     ...(endingImageryFinding ? [endingImageryFinding] : []),
     ...(atmosphericImageryFinding ? [atmosphericImageryFinding] : []),
     ...(uniformParagraphFinding ? [uniformParagraphFinding] : []),
+    ...(systemSettlementFinding ? [systemSettlementFinding] : []),
   ]
 
   return dedupeFindings(allFindings).slice(0, 8)
@@ -890,6 +938,9 @@ export function shouldForceRepair(findings: TextGuardrailFinding[]): boolean {
     'abstract_emotion_packaging',
     'ai_pseudo_philosophy',
     'zero_cost_resolution',
+    'ai_ending_summary',
+    'system_settlement_wall',
+    'appearance_ad',
   ])
   return highCount > 0
     || mediumCount >= 2

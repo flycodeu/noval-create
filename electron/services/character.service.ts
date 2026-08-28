@@ -725,6 +725,7 @@ function mapCharacterRecord(row: Record<string, unknown>) {
     gender: typeof row.gender === 'string' ? row.gender : undefined,
     age: row.age == null ? undefined : Number(row.age),
     birthplace: typeof row.birthplace === 'string' ? row.birthplace : undefined,
+    activeRegionsJson: typeof row.active_regions_json === 'string' ? row.active_regions_json : undefined,
     occupation: typeof row.occupation === 'string' ? row.occupation : undefined,
     rankLevel: typeof row.rank_level === 'string' ? row.rank_level : undefined,
     socialIdentity: typeof row.social_identity === 'string' ? row.social_identity : undefined,
@@ -982,6 +983,10 @@ function characterMatchesGraphFilters(
   row: Record<string, unknown>,
   filters: CharacterGraphFilters,
 ): boolean {
+  if (Array.isArray(filters.characterIds)) {
+    const characterIds = uniqueNumberArray(filters.characterIds)
+    if (characterIds.length === 0 || !characterIds.includes(Number(row.id))) return false
+  }
   const roleType = String(row.role_type || 'minor')
   const recordStatus = normalizeRecordStatus(row.record_status)
   if (filters.recordStatus && filters.recordStatus !== 'all' && recordStatus !== filters.recordStatus) return false
@@ -995,7 +1000,13 @@ function characterMatchesGraphFilters(
 
 export function getCharacterGraph(filters: CharacterGraphFilters) {
   const sqlite = getSqlite()
-  const relationWindowLimit = Math.max(12, Math.min(filters.limit || 24, 80))
+  // `limit: 0` is reserved for the narrative board's full-canvas request.
+  // Existing pages keep the conservative 24/80 window by default, while the
+  // board no longer truncates a large novel to 80 people or 320 relations.
+  const unlimited = filters.limit === 0
+  const relationWindowLimit = unlimited
+    ? Number.MAX_SAFE_INTEGER
+    : Math.max(12, Math.min(filters.limit || 24, 80))
   const requestedSeedIds = uniqueNumberArray([
     ...(filters.characterIds || []),
     ...(typeof filters.focusCharacterId === 'number' ? [filters.focusCharacterId] : []),
@@ -1023,14 +1034,17 @@ export function getCharacterGraph(filters: CharacterGraphFilters) {
     : filteredRows.slice(0, relationWindowLimit).map((row) => Number(row.id))
 
   if (typeof filters.focusCharacterId === 'number' && visibleIds.includes(filters.focusCharacterId)) {
-    const focusRelations = sqlite.prepare(`
+    const focusSql = `
       SELECT *
       FROM character_relations
       WHERE novel_id = ?
         AND (char_a_id = ? OR char_b_id = ?)
       ORDER BY id ASC
-      LIMIT ?
-    `).all(filters.novelId, filters.focusCharacterId, filters.focusCharacterId, relationWindowLimit) as Array<Record<string, unknown>>
+      ${unlimited ? '' : 'LIMIT ?'}
+    `
+    const focusParams: Array<number> = [filters.novelId, filters.focusCharacterId, filters.focusCharacterId]
+    if (!unlimited) focusParams.push(relationWindowLimit)
+    const focusRelations = sqlite.prepare(focusSql).all(...focusParams) as Array<Record<string, unknown>>
 
     const neighborIds = uniqueNumberArray(focusRelations.flatMap((row) => {
       const charAId = Number(row.char_a_id)
@@ -1052,15 +1066,18 @@ export function getCharacterGraph(filters: CharacterGraphFilters) {
   }
 
   const graphPlaceholders = graphCharacterIds.map(() => '?').join(', ')
-  const relationRows = sqlite.prepare(`
+  const relationSql = `
     SELECT *
     FROM character_relations
     WHERE novel_id = ?
       AND char_a_id IN (${graphPlaceholders})
       AND char_b_id IN (${graphPlaceholders})
     ORDER BY id ASC
-    LIMIT ?
-  `).all(filters.novelId, ...graphCharacterIds, ...graphCharacterIds, relationWindowLimit * 4) as Array<Record<string, unknown>>
+    ${unlimited ? '' : 'LIMIT ?'}
+  `
+  const relationParams: Array<number> = [filters.novelId, ...graphCharacterIds, ...graphCharacterIds]
+  if (!unlimited) relationParams.push(relationWindowLimit * 4)
+  const relationRows = sqlite.prepare(relationSql).all(...relationParams) as Array<Record<string, unknown>>
 
   const filteredRelations = relationRows.filter((row) => {
     if (!filters.relationTypes || filters.relationTypes.length === 0) return true

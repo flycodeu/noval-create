@@ -174,4 +174,11 @@ describe('anti-ai-rule.service', () => {
     ])
     expect(summary.topRepeatedRules[0]?.scope).toBe('style')
   })
+
+  it('injects system-settlement and chapter-end replacements into hard constraints', () => {
+    const context = buildAntiAiHardConstraintContext({ genre: '都市异能' })
+    expect(context).toContain('【击杀】')
+    expect(context).toContain('三秒')
+    expect(context).toMatch(/未完成动作|下一步选择/)
+  })
 })

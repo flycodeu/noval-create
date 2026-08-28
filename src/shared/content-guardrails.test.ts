@@ -89,4 +89,32 @@ describe('content guardrail repair threshold', () => {
 
     expect(findings.some((finding) => finding.code === 'high_frequency_repetition')).toBe(true)
   })
+
+  it('flags ink-night atmosphere and cold-gaze templates from 规则怪谈 drafts', () => {
+    const findings = collectQualityGuardrailFindings('夜色浓稠得像化不开的墨。空气中弥漫着福尔马林。苏临眼神冷冽如冰。')
+
+    expect(findings.some((finding) => finding.code === 'ai_description_cliche')).toBe(true)
+    expect(findings.some((finding) => finding.code === 'ai_action_cliche')).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(true)
+  })
+
+  it('flags stacked system settlement panels as a hard AI-flavor hit', () => {
+    const findings = collectQualityGuardrailFindings([
+      '【击杀B级怪谈‘血色巡考官’！】',
+      '【因果命盘吞噬神性力量……】',
+      '【获得：破碎的神格残片·因果目（一阶）！】',
+      '【你的寿命获得补充，因果视界解锁！】',
+    ].join('\n'))
+
+    expect(findings.some((finding) => finding.code === 'system_settlement_wall')).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(true)
+  })
+
+  it('flags appearance ads and chapter-end slogans', () => {
+    const findings = collectQualityGuardrailFindings('她面容绝美却如万载玄冰。青藤市的天，要变了。')
+
+    expect(findings.some((finding) => finding.code === 'appearance_ad')).toBe(true)
+    expect(findings.some((finding) => finding.code === 'ai_ending_summary')).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(true)
+  })
 })

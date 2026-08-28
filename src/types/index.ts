@@ -432,6 +432,8 @@ export interface Character {
   gender?: string
   age?: number
   birthplace?: string
+  /** JSON array of map node ids or legacy location names where the character is active. */
+  activeRegionsJson?: string
   occupation?: string
   rankLevel?: string
   socialIdentity?: string
@@ -917,6 +919,43 @@ export interface WorldMapItem {
   children?: WorldMapItem[]
 }
 
+export type CharacterLocationBindingType = 'presence' | 'home' | 'territory' | 'event' | 'route' | 'historical'
+export type CharacterLocationBindingSource = 'manual' | 'timeline_event' | 'legacy_json' | 'ai' | 'import'
+
+export interface CharacterLocationBinding {
+  id: number
+  novelId: number
+  characterId: number
+  mapNodeId: number
+  bindingType: CharacterLocationBindingType | string
+  chapterStartId?: number | null
+  chapterEndId?: number | null
+  sourceType: CharacterLocationBindingSource | string
+  sourceId?: number | null
+  confidence: number
+  isCanonical: number
+  notes?: string | null
+  contextVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterLocationBindingInput {
+  id?: number
+  novelId: number
+  characterId: number
+  mapNodeId: number
+  bindingType?: CharacterLocationBindingType | string
+  chapterStartId?: number | null
+  chapterEndId?: number | null
+  sourceType?: CharacterLocationBindingSource | string
+  sourceId?: number | null
+  confidence?: number
+  isCanonical?: number
+  notes?: string | null
+  contextVersion?: number
+}
+
 export interface Faction {
   id: number
   novelId: number
@@ -1111,6 +1150,66 @@ export interface MapNodeSummary {
   childCount: number
 }
 
+export type NarrativeMapLayerKey = 'regions' | 'routes' | 'events' | 'people' | 'factions'
+
+export interface MapBoardLayoutNode {
+  id: number
+  novelId: number
+  mapNodeId: number
+  layoutKey: string
+  x: number
+  y: number
+  width: number
+  height: number
+  layerKey: NarrativeMapLayerKey | string
+  visible: number
+  zIndex: number
+  layoutVersion: number
+  contextVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MapBoardLayoutNodeInput {
+  novelId: number
+  mapNodeId: number
+  layoutKey?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  layerKey?: NarrativeMapLayerKey | string
+  visible?: number
+  zIndex?: number
+  layoutVersion?: number
+  contextVersion?: number
+}
+
+export interface MapBoardViewport {
+  id?: number
+  novelId: number
+  layoutKey: string
+  centerX: number
+  centerY: number
+  zoom: number
+  activeLayers: NarrativeMapLayerKey[]
+  layoutVersion: number
+  contextVersion: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface MapBoardViewportInput {
+  novelId: number
+  layoutKey?: string
+  centerX?: number
+  centerY?: number
+  zoom?: number
+  activeLayers?: NarrativeMapLayerKey[]
+  layoutVersion?: number
+  contextVersion?: number
+}
+
 export interface MapRelation {
   id: number
   novelId: number
@@ -1198,6 +1297,54 @@ export interface MapStats {
   leafCount: number
   maxDepth: number
   countsByLevel: Array<{ level: number; count: number }>
+}
+
+export interface NarrativeBoardQueryInput {
+  novelId: number
+  stageId?: number
+  volumeId?: number
+  chapterStart?: number
+  chapterEnd?: number
+  storyThreadIds?: number[]
+  timelineEventId?: number
+  taskId?: number
+  mapNodeId?: number
+  characterIds?: number[]
+  factionIds?: number[]
+  keyword?: string
+  layoutKey?: string
+  strictAnchors?: boolean
+}
+
+export interface NarrativeBoardSnapshot {
+  novelId: number
+  scope: NarrativeBoardQueryInput
+  tree: WorldMapItem[]
+  mapRelations: MapRelation[]
+  mapLayout: MapBoardLayoutNode[]
+  viewport: MapBoardViewport
+  characterGraph: CharacterGraphPayload
+  characters: Character[]
+  bindings: CharacterLocationBinding[]
+  events: TimelineEvent[]
+  chapters: Chapter[]
+  tasks: Task[]
+  factions: Faction[]
+  threads: StoryThread[]
+  stages: CreativeStage[]
+  stageContext: CreativeStageContext | null
+  contextStatus: NovelContextStatus | null
+  quality: QualityDashboardData | null
+  novelStats: { totalChapters: number; completedChapters: number; totalWords: number; characterCount: number }
+  totals: {
+    map: number
+    characters: number
+    relations: number
+    events: number
+    tasks: number
+    threads: number
+    unresolvedAnchors: number
+  }
 }
 
 export interface MapBatchGenerateOptions {
@@ -6026,6 +6173,14 @@ declare global {
         getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
         resumeAutoGenerate: (taskId: number) => Promise<number>
         clear: (novelId: number) => Promise<void>
+      }
+      narrativeBoard: {
+        getSnapshot: (scope: NarrativeBoardQueryInput) => Promise<NarrativeBoardSnapshot>
+        getLayout: (novelId: number, layoutKey?: string, mapNodeIds?: number[]) => Promise<MapBoardLayoutNode[]>
+        upsertLayoutNode: (input: MapBoardLayoutNodeInput) => Promise<MapBoardLayoutNode>
+        saveViewport: (input: MapBoardViewportInput) => Promise<MapBoardViewport>
+        upsertLocationBinding: (input: CharacterLocationBindingInput) => Promise<CharacterLocationBinding>
+        listLocationBindings: (scope: { novelId: number; characterId?: number; mapNodeId?: number; stageId?: number; chapterStart?: number; chapterEnd?: number }) => Promise<CharacterLocationBinding[]>
       }
       creativeStage: {
         list: (novelId: number, includeArchived?: boolean) => Promise<CreativeStage[]>

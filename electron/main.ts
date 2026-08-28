@@ -29,9 +29,13 @@ import { DESKTOP_AGENT_TOOL_SCOPES } from '../src/shared/tool-contracts'
 import type {
   CharacterArcBeatInput,
   CharacterArcInput,
+  CharacterLocationBindingInput,
   CharacterRelationInput,
   CreativeStageHandoffInput,
   MapRelationInput,
+  MapBoardLayoutNodeInput,
+  MapBoardViewportInput,
+  NarrativeBoardQueryInput,
   NovelCreateInput,
   PlanningDraftPageKey,
   ResistanceBeatInput,
@@ -75,6 +79,7 @@ import * as parallelGenerationService from './services/parallel-generation.servi
 import * as batchWorkflowService from './services/batch-workflow.service'
 import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
+import * as narrativeBoardService from './services/narrative-board.service'
 import * as creativeStageService from './services/creative-stage.service'
 import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
@@ -848,6 +853,22 @@ function registerWorldbuildingIpcHandlers(handle: IpcHandle) {
   handle('map:resumeAutoGenerate', (event, taskId) =>
     workflowTaskService.resumeWorkflowTask(taskId, fromWebContents(event.sender)))
   handle('map:clear', (_, novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')))
+  handle('narrativeBoard:getSnapshot', (_, scope) =>
+    narrativeBoardService.getNarrativeBoardSnapshot(parseObjectPayload<NarrativeBoardQueryInput>(scope, 'scope')))
+  handle('narrativeBoard:getLayout', (_, novelId, layoutKey, mapNodeIds) =>
+    narrativeBoardService.getMapLayout(
+      requireId(novelId, 'novelId'),
+      typeof layoutKey === 'string' ? layoutKey : undefined,
+      Array.isArray(mapNodeIds) ? requireIds(mapNodeIds) : undefined,
+    ))
+  handle('narrativeBoard:upsertLayoutNode', (_, input) =>
+    narrativeBoardService.upsertMapLayoutNode(parseObjectPayload<MapBoardLayoutNodeInput>(input, 'input')))
+  handle('narrativeBoard:saveViewport', (_, input) =>
+    narrativeBoardService.saveMapViewport(parseObjectPayload<MapBoardViewportInput>(input, 'input')))
+  handle('narrativeBoard:upsertLocationBinding', (_, input) =>
+    narrativeBoardService.upsertLocationBinding(parseObjectPayload<CharacterLocationBindingInput>(input, 'input')))
+  handle('narrativeBoard:listLocationBindings', (_, scope) =>
+    narrativeBoardService.listLocationBindings(parseObjectPayload(scope, 'scope')))
   handle('creativeStage:list', (_, novelId, includeArchived) => creativeStageService.listCreativeStages(requireId(novelId, 'novelId'), includeArchived === true))
   handle('creativeStage:get', (_, stageId) => creativeStageService.getCreativeStage(requireId(stageId, 'stageId')))
   handle('creativeStage:create', (_, novelId, input) => creativeStageService.createCreativeStage(requireId(novelId, 'novelId'), input))

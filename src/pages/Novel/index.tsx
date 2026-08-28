@@ -99,6 +99,7 @@ const WORKSPACE_STAGE_LOADERS = {
   'world-rules': () => import('./WorldRules'),
   endgame: () => import('./Endgame'),
   map: () => import('./MapExplorer'),
+  'narrative-board': () => import('./NarrativeBoard'),
   factions: () => import('./Factions'),
   characters: () => import('./Characters'),
   'arc-center': () => import('./CharacterArcCenter'),
@@ -313,6 +314,15 @@ export default function NovelRouter() {
       }
     }
 
+    if (pageKey === 'narrative-board') {
+      return {
+        key: pageKey,
+        label: '叙事看板',
+        summary: '把地点、人物、剧情进度和上下文放在同一张战略桌上。',
+        route: pageKey,
+      }
+    }
+
     const meta = WORKSPACE_PAGE_META.get(pageKey)
     return {
       key: pageKey,
@@ -507,7 +517,7 @@ export default function NovelRouter() {
   // compact quick mode. Redirect immediately so the sidebar, progress order,
   // and current content never disagree about which workspace is active.
   useEffect(() => {
-    if (loading || !currentNovel || workspaceViewMode !== 'quick' || currentPage === 'guide') return
+    if (loading || !currentNovel || workspaceViewMode !== 'quick' || currentPage === 'guide' || currentPage === 'narrative-board') return
     if (orderedPages.includes(currentPage)) return
 
     const fallbackPage = orderedPages[0] || 'guide'
@@ -1150,11 +1160,16 @@ export default function NovelRouter() {
             },
           ],
         }}
-        showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'}
+        showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
         showWindowControls={showWindowControls}
         moreMenu={{
           items: [
+            {
+              key: 'narrative-board',
+              label: '叙事看板',
+              onClick: () => navigateWithinWorkspace('narrative-board'),
+            },
             {
               key: 'settings',
               label: '设置',
@@ -1208,7 +1223,7 @@ export default function NovelRouter() {
           onClose={() => setAssistantOpen(false)}
           onResizeStart={handleAssistantResizeStart}
           onApplied={notifyWorkspaceMutation}
-          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
+          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board'
             ? openWorkspaceQualityBoard
             : undefined}
         />
@@ -1251,16 +1266,16 @@ export default function NovelRouter() {
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
           onApplied={notifyWorkspaceMutation}
-          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
+          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board'
             ? openWorkspaceQualityBoard
             : undefined}
         />
       ) : null}
-      {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' ? (
+      {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board' ? (
         <WorkspaceAIQualityBoard
           open={qualityBoardOpen}
           onClose={() => setQualityBoardOpen(false)}
-          workspaceKey={currentPage as Exclude<ProWorkspaceKey, 'guide' | 'quality' | 'writeback' | 'batch-workbench'>}
+          workspaceKey={currentPage as Exclude<ProWorkspaceKey, 'guide' | 'quality' | 'writeback' | 'batch-workbench' | 'narrative-board'>}
           workspaceLabel={currentPageMeta?.label || currentPage}
           workspaceSummary={currentPageMeta?.summary || ''}
           novelId={novelId}

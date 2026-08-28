@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Skeleton, Spin, Tabs, message } from 'antd'
+import { Alert, Empty, Skeleton, Spin, Tabs, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import type { QualityDashboardData, QualityRepairAction, TaskPipelineStats } from '../../../types'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'

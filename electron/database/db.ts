@@ -404,6 +404,58 @@ export function runMigrations(sqlite: Database.Database) {
       sort_order INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS character_location_binding (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      map_node_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+      binding_type TEXT NOT NULL DEFAULT 'presence',
+      chapter_start_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      chapter_end_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_id INTEGER,
+      confidence REAL DEFAULT 1,
+      is_canonical INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      context_version INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS narrative_map_layout_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      map_node_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+      layout_key TEXT NOT NULL DEFAULT 'default',
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      width REAL NOT NULL DEFAULT 260,
+      height REAL NOT NULL DEFAULT 150,
+      layer_key TEXT NOT NULL DEFAULT 'regions',
+      visible INTEGER NOT NULL DEFAULT 1,
+      z_index INTEGER NOT NULL DEFAULT 0,
+      layout_version INTEGER NOT NULL DEFAULT 1,
+      context_version INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (novel_id, map_node_id, layout_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS narrative_map_viewports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      layout_key TEXT NOT NULL DEFAULT 'default',
+      center_x REAL NOT NULL DEFAULT 0,
+      center_y REAL NOT NULL DEFAULT 0,
+      zoom REAL NOT NULL DEFAULT 1,
+      active_layers_json TEXT NOT NULL DEFAULT '["regions","routes","events","people","factions"]',
+      layout_version INTEGER NOT NULL DEFAULT 1,
+      context_version INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (novel_id, layout_key)
+    );
+
     CREATE TABLE IF NOT EXISTS map_relations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -2862,6 +2914,208 @@ export function runMigrations(sqlite: Database.Database) {
       `)
     }
   })
+
+  runMigrationStep(sqlite, '0063_narrative_board_layout_and_location_bindings', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS character_location_binding (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        map_node_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+        binding_type TEXT NOT NULL DEFAULT 'presence',
+        chapter_start_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        chapter_end_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        source_type TEXT NOT NULL DEFAULT 'manual',
+        source_id INTEGER,
+        confidence REAL DEFAULT 1,
+        is_canonical INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        context_version INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS narrative_map_layout_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        map_node_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+        layout_key TEXT NOT NULL DEFAULT 'default',
+        x REAL NOT NULL DEFAULT 0,
+        y REAL NOT NULL DEFAULT 0,
+        width REAL NOT NULL DEFAULT 260,
+        height REAL NOT NULL DEFAULT 150,
+        layer_key TEXT NOT NULL DEFAULT 'regions',
+        visible INTEGER NOT NULL DEFAULT 1,
+        z_index INTEGER NOT NULL DEFAULT 0,
+        layout_version INTEGER NOT NULL DEFAULT 1,
+        context_version INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (novel_id, map_node_id, layout_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS narrative_map_viewports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        layout_key TEXT NOT NULL DEFAULT 'default',
+        center_x REAL NOT NULL DEFAULT 0,
+        center_y REAL NOT NULL DEFAULT 0,
+        zoom REAL NOT NULL DEFAULT 1,
+        active_layers_json TEXT NOT NULL DEFAULT '["regions","routes","events","people","factions"]',
+        layout_version INTEGER NOT NULL DEFAULT 1,
+        context_version INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (novel_id, layout_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_character_location_binding_novel_character
+        ON character_location_binding (novel_id, character_id, map_node_id);
+      CREATE INDEX IF NOT EXISTS idx_character_location_binding_novel_map
+        ON character_location_binding (novel_id, map_node_id, binding_type);
+      CREATE INDEX IF NOT EXISTS idx_character_location_binding_chapter
+        ON character_location_binding (novel_id, chapter_start_id, chapter_end_id);
+      CREATE INDEX IF NOT EXISTS idx_narrative_map_layout_nodes_lookup
+        ON narrative_map_layout_nodes (novel_id, layout_key, map_node_id);
+      CREATE INDEX IF NOT EXISTS idx_narrative_map_viewports_lookup
+        ON narrative_map_viewports (novel_id, layout_key);
+    `)
+
+    backfillNarrativeBoardBindings(sqlite)
+  })
+}
+
+function parseLegacyIdTokens(raw: unknown): Array<number | string> {
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => {
+        if (typeof item === 'number' && Number.isSafeInteger(item) && item > 0) return item
+        if (typeof item === 'string' && item.trim()) return item.trim()
+        return null
+      })
+      .filter((item): item is number | string => item !== null)
+  } catch {
+    return []
+  }
+}
+
+function normalizeLegacyMapName(value: string): string {
+  return value.replace(/\s+/gu, '').trim().toLocaleLowerCase()
+}
+
+/**
+ * 将旧的 active_regions_json 与时间轴在场人物投影为可追溯绑定。
+ * 迁移只新增记录，不删除或改写旧字段；重复执行由 NOT EXISTS 保证幂等。
+ */
+function backfillNarrativeBoardBindings(sqlite: Database.Database) {
+  if (!hasTable(sqlite, 'characters') || !hasTable(sqlite, 'world_map')) return
+
+  const mapRows = sqlite.prepare('SELECT id, novel_id, name FROM world_map').all() as Array<{ id: number; novel_id: number; name: string }>
+  const mapsByNovel = new Map<number, Map<string, number>>()
+  const mapIdsByNovel = new Map<number, Set<number>>()
+  mapRows.forEach((row) => {
+    const byName = mapsByNovel.get(Number(row.novel_id)) || new Map<string, number>()
+    byName.set(normalizeLegacyMapName(String(row.name || '')), Number(row.id))
+    mapsByNovel.set(Number(row.novel_id), byName)
+    const ids = mapIdsByNovel.get(Number(row.novel_id)) || new Set<number>()
+    ids.add(Number(row.id))
+    mapIdsByNovel.set(Number(row.novel_id), ids)
+  })
+
+  const novelVersionRows = sqlite.prepare('SELECT id, COALESCE(context_version, 1) AS context_version FROM novels').all() as Array<{ id: number; context_version: number }>
+  const contextVersionByNovel = new Map(novelVersionRows.map((row) => [Number(row.id), Number(row.context_version || 1)]))
+  const insert = sqlite.prepare(`
+    INSERT INTO character_location_binding (
+      novel_id, character_id, map_node_id, binding_type,
+      chapter_start_id, chapter_end_id, source_type, source_id,
+      confidence, is_canonical, notes, context_version
+    )
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM character_location_binding
+      WHERE novel_id = ? AND character_id = ? AND map_node_id = ?
+        AND binding_type = ? AND source_type = ?
+        AND COALESCE(source_id, 0) = COALESCE(?, 0)
+        AND COALESCE(chapter_start_id, 0) = COALESCE(?, 0)
+        AND COALESCE(chapter_end_id, 0) = COALESCE(?, 0)
+    )
+  `)
+
+  const characterRows = sqlite.prepare('SELECT id, novel_id, active_regions_json FROM characters WHERE active_regions_json IS NOT NULL').all() as Array<{ id: number; novel_id: number; active_regions_json?: string | null }>
+  characterRows.forEach((character) => {
+    const novelId = Number(character.novel_id)
+    const mapByName = mapsByNovel.get(novelId)
+    const mapIds = mapIdsByNovel.get(novelId)
+    if (!mapByName || !mapIds || !contextVersionByNovel.has(novelId)) return
+    parseLegacyIdTokens(character.active_regions_json).forEach((token) => {
+      const mapNodeId = typeof token === 'number' ? token : mapByName.get(normalizeLegacyMapName(token))
+      if (!mapNodeId || !mapIds.has(mapNodeId)) return
+      const version = contextVersionByNovel.get(novelId) || 1
+      insert.run(
+        novelId, Number(character.id), mapNodeId, 'presence', null, null,
+        'legacy_json', Number(character.id), 0.55, 0, '由 characters.active_regions_json 迁移', version,
+        novelId, Number(character.id), mapNodeId, 'presence', 'legacy_json', Number(character.id), null, null,
+      )
+    })
+  })
+
+  if (!hasTable(sqlite, 'timeline_events')) return
+  const characterIdsByNovel = new Map<number, Set<number>>()
+  const validCharacters = sqlite.prepare('SELECT id, novel_id FROM characters').all() as Array<{ id: number; novel_id: number }>
+  validCharacters.forEach((row) => {
+    const ids = characterIdsByNovel.get(Number(row.novel_id)) || new Set<number>()
+    ids.add(Number(row.id))
+    characterIdsByNovel.set(Number(row.novel_id), ids)
+  })
+  const chapterIdsByNovel = new Map<number, Set<number>>()
+  if (hasTable(sqlite, 'chapters')) {
+    const validChapters = sqlite.prepare('SELECT id, novel_id FROM chapters').all() as Array<{ id: number; novel_id: number }>
+    validChapters.forEach((row) => {
+      const ids = chapterIdsByNovel.get(Number(row.novel_id)) || new Set<number>()
+      ids.add(Number(row.id))
+      chapterIdsByNovel.set(Number(row.novel_id), ids)
+    })
+  }
+  const eventRows = sqlite.prepare(`
+    SELECT id, novel_id, location_map_id, chapter_start_id, chapter_end_id,
+      present_character_ids_json, affected_character_ids_json
+    FROM timeline_events
+    WHERE location_map_id IS NOT NULL
+  `).all() as Array<{
+    id: number
+    novel_id: number
+    location_map_id: number
+    chapter_start_id?: number | null
+    chapter_end_id?: number | null
+    present_character_ids_json?: string | null
+    affected_character_ids_json?: string | null
+  }>
+
+  eventRows.forEach((event) => {
+    const mapIds = mapIdsByNovel.get(Number(event.novel_id))
+    const characterIdsForNovel = characterIdsByNovel.get(Number(event.novel_id))
+    const chapterIds = chapterIdsByNovel.get(Number(event.novel_id))
+    if (!contextVersionByNovel.has(Number(event.novel_id)) || !mapIds?.has(Number(event.location_map_id)) || !characterIdsForNovel || !chapterIds) return
+    const chapterStartId = event.chapter_start_id != null && chapterIds.has(Number(event.chapter_start_id)) ? Number(event.chapter_start_id) : null
+    const chapterEndId = event.chapter_end_id != null && chapterIds.has(Number(event.chapter_end_id)) ? Number(event.chapter_end_id) : null
+    const characterIds = new Set<number>([
+      ...parseLegacyIdTokens(event.present_character_ids_json),
+      ...parseLegacyIdTokens(event.affected_character_ids_json),
+    ].filter((token): token is number => typeof token === 'number' && characterIdsForNovel.has(token)))
+    characterIds.forEach((characterId) => {
+      const version = contextVersionByNovel.get(Number(event.novel_id)) || 1
+      insert.run(
+        Number(event.novel_id), characterId, Number(event.location_map_id), 'event',
+        chapterStartId, chapterEndId,
+        'timeline_event', Number(event.id), 1, 1, '由 timeline_events 投影', version,
+        Number(event.novel_id), characterId, Number(event.location_map_id), 'event', 'timeline_event', Number(event.id),
+        chapterStartId, chapterEndId,
+      )
+    })
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -3030,6 +3284,30 @@ function validateRequiredSchema(
     {
       tableName: 'map_relations',
       columns: ['novel_id', 'map_a_id', 'map_b_id', 'bilateral', 'sort_order'],
+    },
+    {
+      tableName: 'character_location_binding',
+      columns: [
+        'novel_id',
+        'character_id',
+        'map_node_id',
+        'binding_type',
+        'chapter_start_id',
+        'chapter_end_id',
+        'source_type',
+        'source_id',
+        'confidence',
+        'is_canonical',
+        'context_version',
+      ],
+    },
+    {
+      tableName: 'narrative_map_layout_nodes',
+      columns: ['novel_id', 'map_node_id', 'layout_key', 'x', 'y', 'width', 'height', 'layer_key', 'visible', 'z_index', 'layout_version', 'context_version'],
+    },
+    {
+      tableName: 'narrative_map_viewports',
+      columns: ['novel_id', 'layout_key', 'center_x', 'center_y', 'zoom', 'active_layers_json', 'layout_version', 'context_version'],
     },
     {
       tableName: 'story_memory_checkpoints',

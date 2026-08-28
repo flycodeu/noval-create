@@ -13,6 +13,12 @@ function splitVendorChunk(id: string): string | undefined {
   if (/[\\/]node_modules[\\/]@hello-pangea[\\/]dnd[\\/]/.test(id)) {
     return 'vendor-dnd'
   }
+  if (/[\\/]node_modules[\\/]antd[\\/]/.test(id) || /[\\/]node_modules[\\/]@ant-design[\\/]/.test(id)) {
+    return 'vendor-antd'
+  }
+  if (/[\\/]node_modules[\\/]dayjs[\\/]/.test(id)) {
+    return 'vendor-dayjs'
+  }
   return undefined
 }
 

@@ -633,6 +633,62 @@ export const worldMap = sqliteTable('world_map', {
   sortOrder: integer('sort_order').default(0),
 })
 
+/**
+ * 人物与地区的规范化绑定。characters.active_regions_json 仍保留用于
+ * 兼容旧项目，但新写入应优先进入这张表，以便按章节/来源追溯。
+ */
+export const characterLocationBindings = sqliteTable('character_location_binding', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  characterId: integer('character_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
+  mapNodeId: integer('map_node_id').notNull().references(() => worldMap.id, { onDelete: 'cascade' }),
+  bindingType: text('binding_type').notNull().default('presence'),
+  chapterStartId: integer('chapter_start_id').references(() => chapters.id, { onDelete: 'set null' }),
+  chapterEndId: integer('chapter_end_id').references(() => chapters.id, { onDelete: 'set null' }),
+  sourceType: text('source_type').notNull().default('manual'),
+  sourceId: integer('source_id'),
+  confidence: real('confidence').default(1),
+  isCanonical: integer('is_canonical').notNull().default(0),
+  notes: text('notes'),
+  contextVersion: integer('context_version').default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+/** 语义地图的可持久化布局节点，不改变 world_map 的故事层级。 */
+export const narrativeMapLayoutNodes = sqliteTable('narrative_map_layout_nodes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  mapNodeId: integer('map_node_id').notNull().references(() => worldMap.id, { onDelete: 'cascade' }),
+  layoutKey: text('layout_key').notNull().default('default'),
+  x: real('x').notNull().default(0),
+  y: real('y').notNull().default(0),
+  width: real('width').notNull().default(260),
+  height: real('height').notNull().default(150),
+  layerKey: text('layer_key').notNull().default('regions'),
+  visible: integer('visible').notNull().default(1),
+  zIndex: integer('z_index').notNull().default(0),
+  layoutVersion: integer('layout_version').notNull().default(1),
+  contextVersion: integer('context_version').default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+/** 语义地图视口与图层开关，按小说和布局方案保存。 */
+export const narrativeMapViewports = sqliteTable('narrative_map_viewports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  layoutKey: text('layout_key').notNull().default('default'),
+  centerX: real('center_x').notNull().default(0),
+  centerY: real('center_y').notNull().default(0),
+  zoom: real('zoom').notNull().default(1),
+  activeLayersJson: text('active_layers_json').notNull().default('["regions","routes","events","people","factions"]'),
+  layoutVersion: integer('layout_version').notNull().default(1),
+  contextVersion: integer('context_version').default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const mapRelations = sqliteTable('map_relations', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),

@@ -158,6 +158,8 @@ const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   isolated_template_paragraph_rate_high: 'drift',
   atmospheric_imagery_overuse: 'expression',
   uniform_paragraph_rhythm: 'structure',
+  system_settlement_wall: 'structure',
+  appearance_ad: 'expression',
 }
 
 const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
@@ -248,8 +250,20 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
   ai_ending_summary: {
     title: '总结式章尾',
     scope: 'structure',
-    avoid: '不要用“而这一切才刚刚开始、故事远没有结束”这类总结式章尾。',
+    avoid: '不要用“而这一切才刚刚开始、故事远没有结束、谁把学校当祭品、天要变了”这类总结式章尾。',
     prefer: '让风险余波、未完成动作或下一步选择收尾。',
+  },
+  system_settlement_wall: {
+    title: '系统结算墙',
+    scope: 'structure',
+    avoid: '不要连续输出【击杀】【吞噬】【获得】【警告】这类成就面板。',
+    prefer: '把金手指写成三秒画面和寿命代价，收获写成实物感觉。',
+  },
+  appearance_ad: {
+    title: '外貌广告',
+    scope: 'expression',
+    avoid: '不要用“绝美、万载玄冰、清冷如寒星、冰山队长”给人物做广告。',
+    prefer: '用证件、断口、拍照、下令这些办事动作区分人物。',
   },
   ai_repetitive_structure: {
     title: '句式重复',
@@ -772,6 +786,8 @@ export function buildAntiAiHardConstraintContext(options: {
     'double_metaphor_or_simile_stack',
     'ai_transition_cliche',
     'ai_ending_summary',
+    'system_settlement_wall',
+    'appearance_ad',
   ])
   const priorityPositiveLines = promptRules
     .filter((rule) => priorityPositiveRuleCodes.has(rule.code))

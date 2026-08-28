@@ -16,12 +16,16 @@ import type {
 } from '../src/shared/tool-contracts'
 import type {
   CharacterRelationInput,
+  CharacterLocationBindingInput,
   CreativeStageAssetInput,
   CreativeStageCreateInput,
   CreativeStageHandoffArtifact,
   CreativeStageHandoffInput,
   CreativeStageUpdateInput,
   MapRelationInput,
+  MapBoardLayoutNodeInput,
+  MapBoardViewportInput,
+  NarrativeBoardQueryInput,
   MaintenanceWorkerStatus,
   NovelCreateInput,
 } from '../src/types'
@@ -350,6 +354,14 @@ const api = {
     getLatestAutoGenerateTask: (novelId: number) => invokeIpc('map:getLatestAutoGenerateTask', novelId),
     resumeAutoGenerate: (taskId: number) => invokeIpc('map:resumeAutoGenerate', taskId),
     clear: (novelId: number) => invokeIpc('map:clear', novelId),
+  },
+  narrativeBoard: {
+    getSnapshot: (scope: NarrativeBoardQueryInput) => invokeIpc('narrativeBoard:getSnapshot', scope),
+    getLayout: (novelId: number, layoutKey?: string, mapNodeIds?: number[]) => invokeIpc('narrativeBoard:getLayout', novelId, layoutKey, mapNodeIds),
+    upsertLayoutNode: (input: MapBoardLayoutNodeInput) => invokeIpc('narrativeBoard:upsertLayoutNode', input),
+    saveViewport: (input: MapBoardViewportInput) => invokeIpc('narrativeBoard:saveViewport', input),
+    upsertLocationBinding: (input: CharacterLocationBindingInput) => invokeIpc('narrativeBoard:upsertLocationBinding', input),
+    listLocationBindings: (scope: { novelId: number; characterId?: number; mapNodeId?: number; stageId?: number; chapterStart?: number; chapterEnd?: number }) => invokeIpc('narrativeBoard:listLocationBindings', scope),
   },
   creativeStage: {
     list: (novelId: number, includeArchived?: boolean) => invokeIpc('creativeStage:list', novelId, includeArchived),

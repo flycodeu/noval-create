@@ -135,6 +135,7 @@ function createRuntime() {
   const chapterService = requireProject('electron/services/chapter.service.ts')
   const characterService = requireProject('electron/services/character.service.ts')
   const mapService = requireProject('electron/services/map.service.ts')
+  const narrativeBoardService = requireProject('electron/services/narrative-board.service.ts')
   const creativeStageService = requireProject('electron/services/creative-stage.service.ts')
   const itemService = requireProject('electron/services/item.service.ts')
   const storyThreadService = requireProject('electron/services/story-thread.service.ts')
@@ -552,6 +553,18 @@ function createRuntime() {
       getLatestAutoGenerateTask: (novelId) => workflowTaskService.getLatestMapAutoGenerateTask(requireId(novelId, 'novelId')),
       resumeAutoGenerate: (taskId) => workflowTaskService.resumeWorkflowTask(requireId(taskId, 'taskId'), webEventSender),
       clear: (novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')),
+    },
+    narrativeBoard: {
+      getSnapshot: (scope) => narrativeBoardService.getNarrativeBoardSnapshot(requireObject(scope, 'scope')),
+      getLayout: (novelId, layoutKey, mapNodeIds) => narrativeBoardService.getMapLayout(
+        requireId(novelId, 'novelId'),
+        typeof layoutKey === 'string' ? layoutKey : undefined,
+        Array.isArray(mapNodeIds) ? mapNodeIds.map((id) => requireId(id, 'mapNodeId')) : undefined,
+      ),
+      upsertLayoutNode: (input) => narrativeBoardService.upsertMapLayoutNode(requireObject(input, 'input')),
+      saveViewport: (input) => narrativeBoardService.saveMapViewport(requireObject(input, 'input')),
+      upsertLocationBinding: (input) => narrativeBoardService.upsertLocationBinding(requireObject(input, 'input')),
+      listLocationBindings: (scope) => narrativeBoardService.listLocationBindings(requireObject(scope, 'scope')),
     },
     creativeStage: {
       list: (novelId, includeArchived) => creativeStageService.listCreativeStages(requireId(novelId, 'novelId'), includeArchived === true),

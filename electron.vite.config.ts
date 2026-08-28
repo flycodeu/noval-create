@@ -13,6 +13,9 @@ function splitRendererVendorChunk(id: string): string | undefined {
   if (/[\\/]node_modules[\\/]@hello-pangea[\\/]dnd[\\/]/.test(id)) {
     return 'vendor-dnd'
   }
+  if (/[\\/]node_modules[\\/]antd[\\/]/.test(id) || /[\\/]node_modules[\\/]@ant-design[\\/]/.test(id)) {
+    return 'vendor-antd'
+  }
   return undefined
 }
 

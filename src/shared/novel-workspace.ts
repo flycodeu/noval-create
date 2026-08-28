@@ -29,6 +29,7 @@ export type WorkspaceRouteKey =
   | 'world-rules'
   | 'endgame'
   | 'map'
+  | 'narrative-board'
   | 'factions'
   | 'characters'
   | 'arc-center'
@@ -64,7 +65,7 @@ export type WorkspaceGroupKey =
   | 'quality-control'
 
 export interface WorkspaceModuleDefinition {
-  key: Exclude<WorkspaceRouteKey, 'guide'>
+  key: Exclude<WorkspaceRouteKey, 'guide' | 'narrative-board'>
   label: string
   description: string
   groupKey: Exclude<WorkspaceGroupKey, 'project-status'>
@@ -73,7 +74,7 @@ export interface WorkspaceModuleDefinition {
 }
 
 export interface WorkspaceModuleSnapshot extends ModuleProgress {
-  key: Exclude<WorkspaceRouteKey, 'guide'>
+  key: Exclude<WorkspaceRouteKey, 'guide' | 'narrative-board'>
   label: string
   description: string
   groupKey: Exclude<WorkspaceGroupKey, 'project-status'>
@@ -200,6 +201,7 @@ const MODE_VISIBLE_KEYS: Record<WorkspaceViewMode, Set<WorkspaceModuleDefinition
 
 export const ALL_WORKSPACE_ROUTE_KEYS: WorkspaceRouteKey[] = [
   'guide',
+  'narrative-board',
   ...WORKSPACE_MODULE_DEFINITIONS.map((item) => item.key),
 ]
 
