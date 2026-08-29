@@ -719,7 +719,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         </WorkspacePanel>
       </div>
 
-      <WorkspacePanel title="揭示节奏与真相比例" description="卷级限制保留为轻量控制条，详细统计按需展开。">
+      <WorkspacePanel title="揭示节奏与真相比例" description="卷级限制保留为轻量控制条，统计明细在展开后查看。">
         <div className="novel-info-gap-board__control-strip">
           <Select
             value={activeVolumeId || undefined}

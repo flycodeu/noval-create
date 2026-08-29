@@ -19,7 +19,23 @@
 .novel-timeline-page__boolean-grid { align-items: start; }
 .novel-timeline-page__card-button { text-align: left; cursor: pointer; }
 .novel-timeline-page__alert-bottom { margin-bottom: 16px; }
-.novel-timeline-page__note-bottom { margin-bottom: 14px; }
+.novel-timeline-page__notice-list { display: grid; gap: 4px; line-height: 1.6; }
+.novel-timeline-page__notice-list strong { font-weight: 700; }
+.novel-timeline-page__time-hint {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent, #b66a45);
+  background: color-mix(in srgb, var(--bg-muted, #f5f5f5) 76%, transparent);
+  color: var(--text-secondary, #666);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.novel-timeline-page__time-hint span { color: var(--text-primary, #262626); font-weight: 600; }
+.novel-timeline-page__time-hint small { color: var(--text-secondary, #666); }
 .novel-timeline-page__modal-hints { margin-bottom: 16px; }
 .novel-timeline-page__input-full { width: 100%; }
 .novel-timeline-page__form-item-compact { margin-bottom: 0; }
@@ -51,6 +67,25 @@
 .novel-timeline-page__detail-panel .novel-panel__body {
   min-width: 0;
 }
+
+.novel-timeline-page__detail-panel .novel-panel__header,
+.novel-timeline-page__list-panel .novel-panel__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.novel-timeline-page__detail-panel .novel-panel__extra,
+.novel-timeline-page__list-panel .novel-panel__extra {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.novel-timeline-page__detail-panel .novel-panel__extra .ant-space {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
 .novel-timeline-page__list-panel .novel-panel__body {
   padding-top: 12px;
 }
@@ -80,4 +115,14 @@
   .novel-timeline-page__detail-panel { min-height: 0; }
   .novel-timeline-page__list-panel .novel-panel__header,
   .novel-timeline-page__detail-panel .novel-panel__header { position: static; }
+}
+
+@media (max-width: 560px) {
+  .novel-timeline-page__detail-panel .novel-panel__extra .ant-space {
+    width: 100%;
+  }
+
+  .novel-timeline-page__detail-panel .novel-panel__extra .ant-btn {
+    max-width: 100%;
+  }
 }

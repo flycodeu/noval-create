@@ -668,7 +668,7 @@ export default function Outline({ novelId }: Props) {
     <WorkspacePage
       eyebrow="卷章大纲 / 故事骨架"
       title="故事大纲"
-      description="先选一条故事弧作为当前对象，再在右侧维护章节顺序、分页和批量细纲。"
+      description="左侧定位故事弧，右侧维护当前弧的章节细纲。"
       className="novel-outline-page"
       chrome="shared"
       actionContract={{
@@ -819,8 +819,6 @@ export default function Outline({ novelId }: Props) {
                       <div className="novel-outline-arc__title">{arc.arcName}</div>
                       <div className="novel-outline-arc__meta">第 {arc.chapterStart || '?'} ~ {arc.chapterEnd || '?'} 章</div>
                       {arc.arcGoal ? <div className="novel-outline-arc__desc">{arc.arcGoal}</div> : null}
-                      {arc.growthLedger ? <div className="novel-outline-arc__desc">成长账本：{arc.growthLedger}</div> : null}
-                      {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
                       {arc.rhythmTemplateKey ? (
                         <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
                           <Tag color="geekblue" className="novel-outline-page__tag-reset">

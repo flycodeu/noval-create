@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Empty, Skeleton, Spin, Tabs, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import type { QualityDashboardData, QualityRepairAction, TaskPipelineStats } from '../../../types'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
@@ -37,6 +37,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -69,6 +70,7 @@ export default function QualityDashboard({ novelId }: Props) {
       if (loadRequestRef.current !== requestId) return
       setData(result)
       setPipelineStats(nextPipelineStats)
+      setLastSyncedAt(new Date())
       setLoadError(null)
       setSelectedChapter((current) => current
         ? result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId) || null
@@ -255,16 +257,10 @@ export default function QualityDashboard({ novelId }: Props) {
             { label: '题材支撑', value: data.genreGroundingObservability?.genreName || data.genreGroundingObservability?.resolvedGenreKey || '通用网文' },
             { label: '跟踪故事弧', value: `${data.storyArcProgressSummary.trackedArcCount} 组` },
             { label: '正文流水线', value: `${pipelineStats?.totalPipelineCount || 0} 批` },
+            { label: '最近同步', value: lastSyncedAt ? lastSyncedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '等待首次同步' },
           ]}
         />
       )}
-      metrics={[
-        <WorkspaceMetric key="ready" label="生产就绪度" value={`${data.productionReadiness.readyRate}%`} tone="warm" />,
-        <WorkspaceMetric key="scored" label="已评分章节" value={`${data.totalChaptersScored} 章`} />,
-        <WorkspaceMetric key="avg" label="平均总分" value={hasScoreData ? `${data.averageOverallScore} 分` : '暂无'} />,
-        <WorkspaceMetric key="style" label="风格预警" value={`${data.styleCompliance.warningCount + data.styleCompliance.rewriteCount} 项`} tone={data.styleCompliance.warningCount + data.styleCompliance.rewriteCount > 0 ? 'warm' : 'default'} />,
-        <WorkspaceMetric key="runtime-guardrail" label="运行时护栏" value={data.millionRuntimeObservability?.serialOnly ? '正文串行' : '正常'} tone={data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
-      ]}
     >
       {refreshing ? <div className="novel-dashboard__refresh-indicator quality-dashboard-page__refresh"><Spin size="small" /><span>正在同步质量监控数据</span></div> : null}
       <Tabs

@@ -19,6 +19,7 @@ interface WritingViewCompositionInput {
   > & {
     activeRoute: WritingRouteKey
     onNavigate: WritingWorkspaceLayoutProps['inspector']['onNavigate']
+    onExitWriting: WritingWorkspaceLayoutProps['onExitWriting']
   }
   chapter: ReturnType<typeof useWritingChapterController>
   generation: ReturnType<typeof useChapterGeneration>
@@ -49,6 +50,7 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
       currentChapter: workspace.currentChapter,
       pipelineItems: workspace.pipelineItems,
       insightPanelOpen: workspace.insightPanelOpen,
+      onExitWriting: workspace.onExitWriting,
       commandBindings,
       editor: {
         ...input.editor,

@@ -93,7 +93,6 @@
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-hero__description,
-.novel-workspace[data-workspace-surface="quiet"] .novel-panel__desc,
 .novel-workspace[data-workspace-surface="quiet"] .novel-section-header__description {
   display: none;
 }
@@ -370,6 +369,10 @@
   line-height: 1.65;
 }
 
+.novel-workspace[data-workspace-surface="quiet"] .novel-panel__desc--inline {
+  display: block;
+}
+
 /* The generic .novel-panel__desc rule intentionally makes descriptions
    visible for legacy inline panels. Native <details> needs an explicit
    closed-state rule, otherwise its child can still reserve layout space. */
@@ -474,6 +477,42 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__head-copy {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__eyebrow {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--workspace-rule-soft);
+  border-radius: 999px;
+  color: var(--workspace-accent);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__head-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Restore the rail's compact fact treatment after the generic metric rules. */

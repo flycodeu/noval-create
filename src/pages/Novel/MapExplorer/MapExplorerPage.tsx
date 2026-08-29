@@ -68,12 +68,12 @@ const RELATION_INTENSITY_TEXT: Record<string, string> = {
 }
 
 const AUTO_TASK_STATUS_TEXT: Record<string, string> = {
-  pending: '准备中',
-  running: '运行中',
-  cancel_requested: '停止中',
+  pending: '等待执行',
+  running: '执行中',
+  cancel_requested: '正在取消',
   paused: '已暂停',
-  cancelled: '已停止',
-  failed: '失败',
+  cancelled: '任务已取消',
+  failed: '执行失败',
   success: '已完成',
 }
 
@@ -203,6 +203,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [autoStatus, setAutoStatus] = useState(EMPTY_AUTO_STATUS)
   const [autoTaskCardExpanded, setAutoTaskCardExpanded] = useState(false)
   const routeNodeFocusRef = useRef<number | null>(null)
+  const routeClearPendingRef = useRef(false)
   const initialRefreshDoneRef = useRef(false)
   const rootsRequestRef = useRef(0)
   const branchRequestRef = useRef(0)
@@ -388,6 +389,8 @@ export default function MapExplorerPage({ novelId }: Props) {
   const selectNode = useCallback((node: MapNodeSummary | null, markIntent = true) => {
     if (markIntent) {
       selectionIntentRef.current += 1
+      routeNodeFocusRef.current = node?.id || null
+      routeClearPendingRef.current = !node
       syncNodeRoute(node?.id || null)
     }
     selectedNodeRef.current = node
@@ -519,11 +522,14 @@ export default function MapExplorerPage({ novelId }: Props) {
     const requestId = ++focusRequestRef.current
     const selectionIntentAtStart = selectionIntentRef.current
     if (!nodeId) {
+      routeNodeFocusRef.current = null
       setBranchPath([])
+      setRootPage(1)
       setBranchPage(1)
+      setSearchKeywordInput('')
       setSelectedRelation(null)
       selectNode(null)
-      await loadBranch(null, 1)
+      await Promise.all([loadRoots(1, ''), loadBranch(null, 1)])
       return
     }
 
@@ -535,7 +541,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     setBranchPage(1)
     selectNode(node)
     await loadBranch(node, 1)
-  }, [flattenedTree.byId, flattenedTree.pathById, loadBranch, selectNode])
+  }, [flattenedTree.byId, flattenedTree.pathById, loadBranch, loadRoots, selectNode, setSearchKeywordInput])
 
   useEffect(() => {
     if (initialRefreshDoneRef.current) return
@@ -546,7 +552,11 @@ export default function MapExplorerPage({ novelId }: Props) {
     })
   }, [refreshVisible])
   useEffect(() => {
-    if (!routeNodeId || routeNodeFocusRef.current === routeNodeId) return
+    if (!routeNodeId) {
+      routeClearPendingRef.current = false
+      return
+    }
+    if (routeClearPendingRef.current || routeNodeFocusRef.current === routeNodeId) return
     routeNodeFocusRef.current = routeNodeId
     void focusNodeById(routeNodeId).catch((error) => {
       console.error(error)
@@ -1215,7 +1225,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="地图结构"
-      description="列表与图谱只保留一个主视角；选中节点、路径和关系详情按需展开。"
+      description="列表与图谱只保留一个主视角；选中节点后查看路径和关系详情。"
       guide={(
         <WorkspaceStepGuide
           steps={[
@@ -1293,8 +1303,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     >
       <div className="novel-map-page__control-rail">
         <CreativeStageScope novelId={novelId} value={creativeStageId} onChange={handleCreativeStageChange} />
-        <span>{workspaceMode === 'list' ? '先选节点，再查看详情' : '先看地图，再按需展开检查器'}</span>
-        {selectedNode ? <span>当前焦点：{selectedNode.name}</span> : null}
+        <span>{selectedNode ? `当前焦点：${selectedNode.name}` : workspaceMode === 'list' ? '根层总览' : '地图总览'}</span>
       </div>
       {workspaceMode === 'graph' ? (
         <div className={`map-graph-workspace ${graphInspectorOpen ? 'map-graph-workspace--inspector-open' : 'map-graph-workspace--inspector-closed'} ${graphFullscreen ? 'map-graph-workspace--fullscreen' : ''}`}>
@@ -1628,8 +1637,9 @@ export default function MapExplorerPage({ novelId }: Props) {
             description={currentParent ? '展示当前节点的直属下级，可继续下钻，也可直接在右侧编辑。' : '先从左侧选择一个根节点，再查看它的下级结构。'}
             scrollable
             extra={branchPath.length > 0 ? (
-              <Space wrap>
+              <Space className="map-list-panel__breadcrumb" wrap>
                 {branchPath.map((item, index) => <Button key={item.id} size="small" type={index === branchPath.length - 1 ? 'primary' : 'default'} onClick={() => void handleBreadcrumb(index)}>{item.name}</Button>)}
+                <Button size="small" onClick={() => void focusNodeById(undefined)}>回到根层</Button>
               </Space>
             ) : null}
           >

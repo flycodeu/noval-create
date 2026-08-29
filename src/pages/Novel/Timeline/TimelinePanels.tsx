@@ -284,6 +284,7 @@ interface TimelineEditorPanelProps {
   onDelete: () => void
   onRegenerate: () => void
   onJumpToStructure: () => void
+  aiAction?: React.ReactNode
 }
 
 export function TimelineEditorPanel({
@@ -314,6 +315,7 @@ export function TimelineEditorPanel({
   onDelete,
   onRegenerate,
   onJumpToStructure,
+  aiAction,
 }: TimelineEditorPanelProps) {
   const panelTitle = selectedEvent
     ? `\u7f16\u8f91\uff1a${selectedEvent.eventTitle}`
@@ -329,6 +331,7 @@ export function TimelineEditorPanel({
         </div>
         <div className="novel-panel__extra">
           <Space>
+            {aiAction}
             {selectedEvent ? (
               <Button icon={<ReloadOutlined />} loading={regenerating} onClick={onRegenerate}>
                 AI 修复·重做事件
@@ -369,8 +372,9 @@ export function TimelineEditorPanel({
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionTimeTitle}</div>
               </div>
-              <div className="novel-note-list novel-timeline-page__note-bottom">
-                <div className="novel-note-list__item">{`${modeLabel}${'\u5199\u6cd5\u5efa\u8bae\uff1a'}${timeModeHint}`}</div>
+              <div className="novel-timeline-page__time-hint">
+                <span>{`时间口径：${modeLabel}`}</span>
+                <small>{timeModeHint}</small>
               </div>
               <div className="novel-grid novel-grid--3">
                 <Form.Item

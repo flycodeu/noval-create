@@ -103,12 +103,40 @@
   display: grid;
   flex: 1;
   gap: 2px;
+  min-width: 0;
 }
 
 .endgame-page__advanced > summary small {
   color: var(--endgame-soft);
   font-size: 12px;
   font-weight: 400;
+}
+
+.endgame-page__guidance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 15px 15px 50px;
+}
+
+.endgame-page__guidance-grid > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(126, 92, 48, 0.12);
+  background: rgba(248, 242, 233, 0.54);
+}
+
+.endgame-page__guidance-grid strong {
+  color: var(--endgame-ink);
+  font-size: 12px;
+}
+
+.endgame-page__guidance-grid span {
+  color: var(--endgame-soft);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .endgame-page__advanced--payoff > .novel-panel {
@@ -175,6 +203,11 @@
 @media (max-width: 760px) {
   .novel-endgame-page .guided-step__field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .endgame-page__guidance-grid {
+    grid-template-columns: 1fr;
+    padding-inline: 15px;
   }
 
   .endgame-page__source-list {

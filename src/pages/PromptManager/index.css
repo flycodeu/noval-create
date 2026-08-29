@@ -94,6 +94,7 @@
 }
 
 .app-layout .prompt-manager-page .prompt-manager-card__title-block {
+  min-width: 0;
   gap: 2px;
 }
 
@@ -103,6 +104,10 @@
 
 .app-layout .prompt-manager-page .prompt-manager-card__title-block span,
 .app-layout .prompt-manager-page .prompt-manager-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
   font-size: 12px;
   line-height: 1.55;
 }

@@ -90,11 +90,27 @@
 
 .novel-growth-system__table-scroll {
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .novel-growth-system__table-scroll .ant-table-wrapper {
-  min-width: 720px;
+  min-width: 0;
+}
+
+.novel-growth-system__table-scroll .ant-table {
+  table-layout: fixed;
+}
+
+.novel-growth-system__table-scroll .ant-table-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-growth-system__table-scroll .ant-space {
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .novel-growth-system__table-scroll .ant-table-tbody > tr {

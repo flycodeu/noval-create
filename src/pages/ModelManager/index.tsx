@@ -480,7 +480,6 @@ export default function ModelManager() {
             scrollable
             className="model-manager-list-panel"
             title="模型配置"
-            extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
           >
             {loading ? (
               <Skeleton active paragraph={{ rows: 8 }} />
@@ -519,22 +518,6 @@ export default function ModelManager() {
                         {`输出 ${formatTokenBudget(config.maxTokens)} · 上下文 ${formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))} · 并发 ${config.maxConcurrency || 1}`}
                       </div>
                     </div>
-                    <div
-                      className="model-manager-config-card__actions"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <Button size="small" icon={<EditOutlined />} onClick={() => openModelEditor(config)}>
-                        编辑
-                      </Button>
-                      <Button
-                        size="small"
-                        icon={config.isDefault ? <StarFilled /> : <StarOutlined />}
-                        onClick={() => void handleSetDefault(config)}
-                      >
-                        {config.isDefault ? '默认' : '设默认'}
-                      </Button>
-                      <Button size="small" icon={<DeleteOutlined />} danger onClick={() => void handleDelete(config)} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -544,7 +527,6 @@ export default function ModelManager() {
           <WorkspacePanel
             className="model-manager-overview-panel"
             title="当前状态"
-            extra={<Button icon={<SearchOutlined />} onClick={openSourceEditor}>配置搜索 API</Button>}
           >
             {selected ? (
               <div className="admin-detail-stack">
@@ -587,6 +569,9 @@ export default function ModelManager() {
                   <Button loading={testing} onClick={() => void handleTest()}>
                     测试连接
                   </Button>
+                  <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete(selected)}>
+                    删除模型
+                  </Button>
                   {testResult ? (
                     <span className={`source-search-config__test-result${testResult.success ? ' is-success' : ' is-error'}`}>
                       {testResult.success ? `连接成功 · ${testResult.latency}ms` : testResult.info}
@@ -603,11 +588,10 @@ export default function ModelManager() {
         </div>
 
         <details className="model-manager-source-disclosure" data-model-source-disclosure>
-          <summary><strong>来源检索与 API Key</strong><span>联网检索配置按需展开，密钥只显示配置状态</span></summary>
+          <summary><strong>来源检索与 API Key</strong><span>联网检索配置可在此编辑，密钥只显示配置状态</span></summary>
           <WorkspacePanel
             className="model-manager-source-panel"
             title="来源检索与 API Key"
-            extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
           >
           <div className="admin-detail-stack source-search-config">
             <div className="source-search-config__summary">

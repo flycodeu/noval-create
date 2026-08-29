@@ -199,37 +199,30 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   return (
     <WorkspacePage
       className="novel-timeline-page"
+      eyebrow={TIMELINE_TEXT.pageEyebrow}
       title={TIMELINE_TEXT.pageTitle}
-      actions={(
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => void workspace.refreshPage()}>
-            {TIMELINE_TEXT.refresh}
-          </Button>
-          <Button icon={<PlusOutlined />} onClick={workspace.handleNew}>
-            {TIMELINE_TEXT.create}
-          </Button>
-          <Button icon={<BarsOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'resistance'))}>
-            去反派与阻力
-          </Button>
-          {eventDraftButton}
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            loading={workspace.generating}
-            onClick={() => void workspace.openGenerateModal()}
-          >
-            {TIMELINE_TEXT.generate}
-          </Button>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            loading={workspace.generating}
-            onClick={workspace.handleClear}
-          >
-            {TIMELINE_TEXT.clear}
-          </Button>
-        </Space>
-      )}
+      description={TIMELINE_TEXT.pageDescription}
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'generate',
+          label: TIMELINE_TEXT.generate,
+          icon: <ThunderboltOutlined />,
+          loading: workspace.generating,
+          onClick: () => void workspace.openGenerateModal(),
+        },
+        secondary: [
+          { key: 'refresh', label: TIMELINE_TEXT.refresh, icon: <ReloadOutlined />, onClick: () => void workspace.refreshPage() },
+          { key: 'create', label: TIMELINE_TEXT.create, icon: <PlusOutlined />, onClick: workspace.handleNew },
+        ],
+        more: {
+          items: [
+            { key: 'resistance', label: '去反派与阻力', icon: <BarsOutlined />, onClick: () => navigate(buildWorkspaceRoute(novelId, 'resistance')) },
+            { type: 'divider' },
+            { key: 'clear', label: TIMELINE_TEXT.clear, icon: <DeleteOutlined />, danger: true, disabled: workspace.generating, onClick: workspace.handleClear },
+          ],
+        },
+      }}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -263,32 +256,18 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           <span>正在同步时间轴工作台</span>
         </div>
       ) : null}
-      {draftWarnings.length > 0 ? (
+      {draftWarnings.length > 0 || draft?.appliedAt || workspace.generationBlockers.length > 0 ? (
         <Alert
-          type="info"
+          type={workspace.generationBlockers.length > 0 ? 'warning' : 'info'}
           showIcon
-          message="本轮 AI 草稿附带修补提示"
-          description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
-        />
-      ) : null}
-      {draft?.appliedAt ? (
-        <Alert
-          type="info"
-          showIcon
-          message="已恢复最近一次未保存的 AI 草稿"
-          description="当前时间轴编辑表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
-        />
-      ) : null}
-      {workspace.generationBlockers.length > 0 ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="当前前置条件还不足以生成时间轴"
+          message={workspace.generationBlockers.length > 0 ? '时间轴生成前置条件需要处理' : '时间轴草稿状态'}
           description={(
-            <div>
+            <div className="novel-timeline-page__notice-list">
               {workspace.generationBlockers.map((blocker) => (
-                <div key={blocker}>{blocker}</div>
+                <div key={`blocker-${blocker}`}><strong>生成阻塞：</strong>{blocker}</div>
               ))}
+              {draftWarnings.map((warning) => <div key={`draft-${warning}`}><strong>草稿提示：</strong>{warning}</div>)}
+              {draft?.appliedAt ? <div><strong>未保存草稿：</strong>已恢复最近一次应用的 AI 结果，保存后清除。</div> : null}
             </div>
           )}
         />
@@ -411,6 +390,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           onDelete={workspace.handleDelete}
           onRegenerate={() => void workspace.handleRegenerate()}
           onJumpToStructure={workspace.openSelectedEventInStructure}
+          aiAction={eventDraftButton}
         />
       </div>
 

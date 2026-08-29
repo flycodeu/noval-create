@@ -27,6 +27,24 @@
   margin-bottom: 16px;
 }
 
+.project-brief__ai-assist {
+  display: grid;
+  gap: 14px;
+}
+
+.project-brief__ai-assist p {
+  margin: 0;
+  color: var(--project-brief-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.project-brief__ai-assist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .project-brief__form {
   display: grid;
   gap: 0;

@@ -1,5 +1,5 @@
 import { Button, Dropdown, Tag } from 'antd'
-import { BookOutlined, DownOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, BookOutlined, DownOutlined } from '@ant-design/icons'
 import type { Chapter } from '../../../../types'
 import { formatChapterNumber } from '../chapter-labels'
 import type { WritingSaveState } from '../useWritingEditorLifecycle'
@@ -15,6 +15,7 @@ export interface WritingStatusBarProps {
   currentStatusLabel: string
   saveState: WritingSaveState
   insightPanelOpen: boolean
+  onExitWriting(): void
   onOpenNavigator?(): void
   onToggleInspector(): void
   onNavigate(route: WritingRouteKey): void
@@ -32,6 +33,7 @@ export default function WritingStatusBar({
   currentStatusLabel,
   editorTitle,
   insightPanelOpen,
+  onExitWriting,
   onOpenNavigator,
   onNavigate,
   onToggleInspector,
@@ -48,13 +50,20 @@ export default function WritingStatusBar({
   return (
     <section className="chapter-console-page__editor-hero" data-writing-status-bar="compact">
       <div className="chapter-console-page__editor-identity">
+        <Button
+          className="chapter-console-page__exit-writing"
+          icon={<ArrowLeftOutlined />}
+          onClick={onExitWriting}
+        >
+          返回控制台
+        </Button>
         {onOpenNavigator ? (
           <Button className="chapter-console-page__navigator-trigger" icon={<BookOutlined />} onClick={onOpenNavigator}>
             章节
           </Button>
         ) : null}
         <div className="chapter-console-page__editor-title">
-          <strong>{currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${editorTitle}` : '请选择一个章节'}</strong>
+          <strong title={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${editorTitle}` : '请选择一个章节'}>{currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${editorTitle}` : '请选择一个章节'}</strong>
           <span>{currentChapter ? `${wordCount} 字 · ${currentStatusLabel}` : '从章节目录选择正文'}</span>
         </div>
       </div>

@@ -433,7 +433,6 @@ export default function EndgamePage({ novelId }: Props) {
       <div className="endgame-page__status-rail" data-endgame-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`endgame-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '有未保存修改' : '已与终局设计同步'}</strong>
-        <span>当前任务：先锁定最终冲突、主题答案和最后一幕，再补兑现清单。</span>
       </div>
 
       {!currentNovel?.worldRulesJson ? (
@@ -466,7 +465,7 @@ export default function EndgamePage({ novelId }: Props) {
       <details className="endgame-page__advanced" data-endgame-guidance>
         <summary>
           <span><strong>终局工作说明</strong><small>确认这页的边界，避免把故事设计再写一遍。</small></span>
-          <Tag color={readyCount >= 5 ? 'green' : 'blue'}>{readyCount >= 5 ? '锚点已成形' : '按需展开'}</Tag>
+          <Tag color={readyCount >= 5 ? 'green' : 'blue'}>{readyCount >= 5 ? '锚点已成形' : '查看细则'}</Tag>
         </summary>
         <div className="endgame-page__guidance-grid">
           <div><strong>锁定收束方式</strong><span>写清最后怎么收，不重复主线梗概。</span></div>

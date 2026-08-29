@@ -3,6 +3,7 @@ import { Modal } from 'antd'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
 import { type AiExecutionMode } from '../../../shared/ai-execution'
 import { parseStorySettingsSnapshot } from '../../../shared/story-settings'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type {
   Chapter,
   ChapterContextPreview,
@@ -598,6 +599,7 @@ export default function Writing({ novelId }: Props) {
       currentStatusLabel: editorHeader.statusLabel,
       saveState,
       insightPanelOpen,
+      onExitWriting: () => navigate(buildWorkspaceRoute(novelId, 'studio')),
       setInsightPanelOpen,
       onNavigate: navigateToWritingRoute,
     },
@@ -631,6 +633,7 @@ export default function Writing({ novelId }: Props) {
       insightPanelOpen,
       activeRoute: activeWritingRoute,
       onNavigate: navigateToWritingRoute,
+      onExitWriting: () => navigate(buildWorkspaceRoute(novelId, 'studio')),
     },
     chapter: chapterController,
     generation: chapterGeneration,

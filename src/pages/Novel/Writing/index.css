@@ -476,17 +476,17 @@
 }
 
 .novel-writing-console-page .chapter-console-page__grid {
-  grid-template-columns: clamp(250px, 20vw, 286px) minmax(0, 1fr);
+  grid-template-columns: clamp(286px, 22vw, 340px) minmax(0, 1fr);
   align-items: start;
 }
 
 .app-layout .novel-writing-console-page .chapter-console-page__grid,
 .app-layout .novel-writing-console-page .chapter-console-page__grid.is-assist-collapsed {
-  grid-template-columns: clamp(250px, 20vw, 286px) minmax(0, 1fr);
+  grid-template-columns: clamp(286px, 22vw, 340px) minmax(0, 1fr);
 }
 
 .app-layout .novel-writing-console-page .chapter-console-page__grid.has-assist-panel {
-  grid-template-columns: clamp(240px, 19vw, 280px) minmax(0, 1fr) minmax(300px, 340px);
+  grid-template-columns: clamp(276px, 20vw, 320px) minmax(0, 1fr) minmax(300px, 340px);
   gap: 16px;
 }
 
@@ -513,8 +513,17 @@
   gap: 8px;
 }
 
+.novel-writing-console-page .chapter-console-page__exit-writing {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-default));
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
 .novel-writing-console-page .chapter-console-page__editor-title {
   display: grid;
+  flex: 1 1 220px;
   min-width: 0;
   gap: 1px;
 }
@@ -712,6 +721,16 @@
   white-space: nowrap;
 }
 
+.novel-writing-console-page .chapter-navigator__chapter-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
 .novel-writing-console-page .chapter-console-page__route-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -756,7 +775,7 @@
   .app-layout .novel-writing-console-page .chapter-console-page__grid,
   .app-layout .novel-writing-console-page .chapter-console-page__grid.has-assist-panel,
   .app-layout .novel-writing-console-page .chapter-console-page__grid.is-assist-collapsed {
-    grid-template-columns: clamp(240px, 20vw, 276px) minmax(0, 1fr);
+    grid-template-columns: clamp(276px, 22vw, 320px) minmax(0, 1fr);
   }
 
   .novel-writing-console-page .chapter-console-page__column--right {
@@ -846,7 +865,8 @@
   }
 
   .novel-writing-console-page .chapter-console-page__editor-state {
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow-x: hidden;
     padding-bottom: 1px;
   }
 
@@ -904,6 +924,23 @@
   .writing-pipeline-strip__stage small,
   .novel-writing-console-page .chapter-console-page__version-count {
     display: none;
+  }
+
+  .novel-writing-console-page .chapter-console-page__editor-identity {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .novel-writing-console-page .chapter-console-page__editor-title {
+    flex-basis: 100%;
+  }
+
+  .novel-writing-console-page .chapter-console-page__editor-title strong {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
   }
 
   .novel-writing-console-page .chapter-console-page__editor-state .ant-tag {
@@ -1004,6 +1041,17 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.novel-writing-console-page .chapter-navigator__bottom-bar .novel-action-bar {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.novel-writing-console-page .chapter-navigator__bottom-bar .writing-layout-select-generation {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 100%;
 }
 
 .chapter-navigator__search-row {
@@ -1134,7 +1182,7 @@
 .chapter-navigator__chapter-card {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
   padding: 7px 8px;
@@ -1160,7 +1208,7 @@
 
 .chapter-navigator__chapter-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
   flex: 1;
@@ -1191,6 +1239,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: block;
+  line-height: 1.4;
+}
+
+.chapter-navigator__chapter-main .ant-tooltip-open {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .chapter-navigator__chapter-card.is-active .chapter-navigator__chapter-title {
@@ -1200,9 +1257,12 @@
 
 .chapter-navigator__chapter-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 4px;
   flex-shrink: 0;
+  max-width: 42%;
 }
 
 .chapter-navigator__chapter-words {

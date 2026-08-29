@@ -45,13 +45,13 @@ const EMPTY_TASK_STATS: TaskStats = {
 const ENDED_TASK_STATUSES = new Set<Task['status']>(['success', 'failed', 'cancelled'])
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pending: { label: '等待中', color: '#5c6378', icon: <ClockCircleOutlined /> },
-  running: { label: '运行中', color: '#2E86AB', icon: <LoadingOutlined spin /> },
-  cancel_requested: { label: '停止中', color: '#faad14', icon: <StopOutlined /> },
+  pending: { label: '等待执行', color: '#5c6378', icon: <ClockCircleOutlined /> },
+  running: { label: '执行中', color: '#2E86AB', icon: <LoadingOutlined spin /> },
+  cancel_requested: { label: '正在取消', color: '#faad14', icon: <StopOutlined /> },
   paused: { label: '已暂停', color: '#d48806', icon: <ClockCircleOutlined /> },
-  success: { label: '成功', color: '#52c41a', icon: <CheckCircleOutlined /> },
-  failed: { label: '失败', color: '#ff4d4f', icon: <CloseCircleOutlined /> },
-  cancelled: { label: '已取消', color: '#faad14', icon: <StopOutlined /> },
+  success: { label: '已完成', color: '#52c41a', icon: <CheckCircleOutlined /> },
+  failed: { label: '执行失败', color: '#ff4d4f', icon: <CloseCircleOutlined /> },
+  cancelled: { label: '任务已取消', color: '#faad14', icon: <StopOutlined /> },
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -117,10 +117,10 @@ const PIPELINE_ROLE_LABELS: Record<string, string> = {
 }
 
 const PIPELINE_STAGE_LABELS: Record<string, string> = {
-  pending: '待执行',
+  pending: '等待执行',
   running: '执行中',
   paused: '已暂停',
-  failed: '失败',
+  failed: '执行失败',
   success: '已完成',
   blocked: '已阻断',
 }
@@ -489,7 +489,7 @@ export default function TaskCenter() {
   const handleClearHistory = useCallback(() => {
     Modal.confirm({
       title: '清空历史任务记录？',
-      content: '只会清空当前筛选范围内已结束的任务记录，不影响运行中、等待中、停止中或已暂停的任务。',
+      content: '只会清空当前筛选范围内已结束的任务记录，不影响执行中、等待执行、正在取消或已暂停的任务。',
       okText: '确认清空',
       cancelText: '取消',
       okButtonProps: { danger: true },
@@ -651,10 +651,10 @@ export default function TaskCenter() {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" />
-          <WorkspaceMetric label="等待中" value={pendingCount} />
-          <WorkspaceMetric label="已成功" value={successCount} tone="warm" />
-          <WorkspaceMetric label="已失败" value={failedCount} />
+          <WorkspaceMetric label="执行中" value={runningCount} tone="cool" />
+          <WorkspaceMetric label="等待执行" value={pendingCount} />
+          <WorkspaceMetric label="已完成" value={successCount} tone="warm" />
+          <WorkspaceMetric label="执行失败" value={failedCount} />
         </>
       )}
     >
@@ -671,13 +671,13 @@ export default function TaskCenter() {
                   onChange={handleStatusFilterChange}
                   options={[
                     { value: 'all', label: '全部状态' },
-                    { value: 'running', label: '运行中' },
-                    { value: 'cancel_requested', label: '停止中' },
+                    { value: 'running', label: '执行中' },
+                    { value: 'cancel_requested', label: '正在取消' },
                     { value: 'paused', label: '已暂停' },
-                    { value: 'pending', label: '等待中' },
-                    { value: 'success', label: '成功' },
-                    { value: 'failed', label: '失败' },
-                    { value: 'cancelled', label: '已取消' },
+                    { value: 'pending', label: '等待执行' },
+                    { value: 'success', label: '已完成' },
+                    { value: 'failed', label: '执行失败' },
+                    { value: 'cancelled', label: '任务已取消' },
                   ]}
                 />
                 <Select

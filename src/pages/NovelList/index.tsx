@@ -765,17 +765,17 @@ export default function NovelList() {
             </Button>
           </div>
 
-          <div className="novel-list-page__stats">
+          <div className="novel-list-page__summary" aria-label="小说概览">
             {[
               { label: '项目总数', value: `${novels.length} 部` },
               { label: '写作中', value: `${writingCount} 部` },
               { label: '已完结', value: `${completedCount} 部` },
               { label: '累计字数', value: formatWordCount(totalWordCount) },
             ].map((item) => (
-              <div key={item.label} className="novel-list-page__stat-card">
-                <span className="novel-list-page__stat-label">{item.label}</span>
-                <strong className="novel-list-page__stat-value">{item.value}</strong>
-              </div>
+              <span key={item.label} className="novel-list-page__summary-item">
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </span>
             ))}
           </div>
 

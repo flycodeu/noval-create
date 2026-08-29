@@ -526,7 +526,7 @@ export default function Overview({ novelId }: Props) {
                 <span>
                   <strong>AI 辅助</strong>
                 </span>
-                <span>按需展开</span>
+                <span>查看辅助</span>
               </summary>
               <div data-overview-ai-assistant className="overview-page__assistant-body">
                 <StepAIAssistant<OverviewAssistantPatch>

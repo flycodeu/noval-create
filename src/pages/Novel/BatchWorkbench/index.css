@@ -143,6 +143,16 @@
   color: var(--batch-accent);
 }
 
+.novel-batch-workbench__task-status-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.novel-batch-workbench__task-status-copy span {
+  overflow-wrap: anywhere;
+}
+
 .novel-batch-workbench__empty-current {
   display: flex;
   align-items: center;

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Dropdown, Progress, Tag } from 'antd'
+import { Button, Dropdown, Tag } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   DeleteOutlined,
@@ -7,26 +7,15 @@ import {
   MoreOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/zh-cn'
 import type { Novel } from '../../../types'
 import type { WorkspaceSnapshot } from '../../../shared/novel-workspace'
 import './cards.css'
-
-dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
 
 const STATUS_META: Record<Novel['status'], { label: string }> = {
   draft: { label: '草稿' },
   writing: { label: '写作中' },
   completed: { label: '已完成' },
   archived: { label: '已归档' },
-}
-
-function formatWordCount(value: number) {
-  if (value >= 10000) return `${(value / 10000).toFixed(1)} 万`
-  return `${value.toLocaleString()} 字`
 }
 
 interface ProjectCardProps {
@@ -47,10 +36,6 @@ export default function ProjectCard({
   onStatusChange,
 }: ProjectCardProps) {
   const status = STATUS_META[novel.status]
-  const targetWords = typeof novel.targetWords === 'number' ? novel.targetWords : 0
-  const progress = targetWords > 0
-    ? Math.min(100, Math.round((novel.totalWords / targetWords) * 100))
-    : 0
   const menuItems: MenuProps['items'] = [
     { key: 'export-txt', icon: <ExportOutlined />, label: '导出 TXT', onClick: () => onExport('txt') },
     { key: 'export-md', icon: <ExportOutlined />, label: '导出 Markdown', onClick: () => onExport('md') },
@@ -80,10 +65,6 @@ export default function ProjectCard({
             >
               {status.label}
             </Tag>
-            <Tag className="novel-project-card__tag">{novel.genreName || '未分类'}</Tag>
-            {snapshot.blockers.length > 0 ? (
-              <Tag color="volcano" className="novel-project-card__tag">{`${snapshot.blockers.length} 个阻塞项`}</Tag>
-            ) : null}
           </div>
         </div>
         <div className="novel-project-card__menu" onClick={(event) => event.stopPropagation()}>
@@ -93,25 +74,15 @@ export default function ProjectCard({
         </div>
       </div>
 
-      <div className="novel-project-card__summary">
-        <div>阶段 <strong>{snapshot.stage.label}</strong></div>
-        <div>字数 <strong>{targetWords > 0 ? `${formatWordCount(novel.totalWords)} / ${formatWordCount(targetWords)}` : formatWordCount(novel.totalWords)}</strong></div>
-        <div>模块 <strong>{`${snapshot.moduleDoneCount}/${snapshot.moduleTotalCount}`}</strong></div>
-        <div>更新 <strong>{dayjs(novel.updatedAt).fromNow()}</strong></div>
-      </div>
-
-      <div className="novel-project-card__progress">
-        <div className="novel-project-card__progress-meta">
-          <span className="novel-project-card__progress-label">总进度</span>
-          <span className="novel-project-card__progress-value">{`${progress}%`}</span>
-        </div>
-        <Progress percent={progress} showInfo={false} strokeColor="var(--accent)" trailColor="rgba(166, 106, 43, 0.08)" size="small" />
-      </div>
-
       <div className="novel-project-card__next-step">
         <span className="novel-project-card__next-step-label">下一步</span>
-        <strong className="novel-project-card__next-step-title">{snapshot.nextStep.title}</strong>
-        <span className="novel-project-card__next-step-copy">{snapshot.nextStep.reason}</span>
+        <Tag
+          color="gold"
+          className="novel-project-card__next-step-tag"
+          title={snapshot.nextStep.reason}
+        >
+          {snapshot.nextStep.title}
+        </Tag>
       </div>
 
       <div className="novel-project-card__actions">

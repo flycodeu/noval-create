@@ -495,7 +495,6 @@ export default function GrowthSystemPage({ novelId }: Props) {
       <div className="novel-growth-system__status-rail" data-growth-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`novel-growth-system__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '成长编辑器有未保存修改' : '成长系统与当前项目数据同步'}</strong>
-        <span>先选定一条成长轨道、资源池或回写事件，再查看它的当前约束。</span>
       </div>
 
       <div className="novel-growth-system__workspace">
@@ -526,12 +525,11 @@ export default function GrowthSystemPage({ novelId }: Props) {
                 dataSource={tracks}
                 rowClassName={(record) => record.id === selectedTrack?.id ? 'is-selected' : ''}
                 onRow={(record) => ({ onClick: () => setSelectedTrackId(record.id) })}
-                scroll={{ x: 720 }}
                 columns={[
                   { title: '轨道', dataIndex: 'title', width: 230 },
-                  { title: '类型', dataIndex: 'trackType', width: 120, render: (value) => <Tag color={value === 'organization' ? 'purple' : value === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(value)}</Tag> },
-                  { title: '当前瓶颈', dataIndex: 'bottleneck', width: 220, render: (value) => value || '未设置' },
-                  { title: '操作', width: 140, render: (_value, record) => <Space><Button size="small" onClick={(event) => { event.stopPropagation(); openTrack(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除成长轨道 ${record.title}`} onClick={(event) => { event.stopPropagation(); handleDeleteTrack(record) }}>删除</Button></Space> },
+                  { title: '类型', dataIndex: 'trackType', width: 104, responsive: ['md'], render: (value) => <Tag color={value === 'organization' ? 'purple' : value === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(value)}</Tag> },
+                  { title: '当前瓶颈', dataIndex: 'bottleneck', width: 220, responsive: ['lg'], render: (value) => value || '未设置' },
+                  { title: '操作', width: 116, render: (_value, record) => <Space wrap><Button size="small" onClick={(event) => { event.stopPropagation(); openTrack(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除成长轨道 ${record.title}`} onClick={(event) => { event.stopPropagation(); handleDeleteTrack(record) }}>删除</Button></Space> },
                 ]}
               />
             </div>
@@ -545,13 +543,12 @@ export default function GrowthSystemPage({ novelId }: Props) {
                 dataSource={pools}
                 rowClassName={(record) => record.id === selectedPool?.id ? 'is-selected' : ''}
                 onRow={(record) => ({ onClick: () => setSelectedPoolId(record.id) })}
-                scroll={{ x: 780 }}
                 columns={[
                   { title: '资源池', dataIndex: 'name', width: 220 },
-                  { title: '类型', dataIndex: 'poolType', width: 110, render: (value) => poolTypeLabel(value) },
-                  { title: '稀缺度', dataIndex: 'scarcityLevel', width: 110, render: (value) => <Tag color={scarcityTone(value)}>{scarcityLabel(value)}</Tag> },
-                  { title: '补给路径', dataIndex: 'replenishPath', width: 240, render: (value) => value || '未设置' },
-                  { title: '操作', width: 140, render: (_value, record) => <Space><Button size="small" onClick={(event) => { event.stopPropagation(); openPool(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除资源池 ${record.name}`} onClick={(event) => { event.stopPropagation(); handleDeletePool(record) }}>删除</Button></Space> },
+                  { title: '类型', dataIndex: 'poolType', width: 104, responsive: ['md'], render: (value) => poolTypeLabel(value) },
+                  { title: '稀缺度', dataIndex: 'scarcityLevel', width: 104, responsive: ['md'], render: (value) => <Tag color={scarcityTone(value)}>{scarcityLabel(value)}</Tag> },
+                  { title: '补给路径', dataIndex: 'replenishPath', width: 220, responsive: ['lg'], render: (value) => value || '未设置' },
+                  { title: '操作', width: 116, render: (_value, record) => <Space wrap><Button size="small" onClick={(event) => { event.stopPropagation(); openPool(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除资源池 ${record.name}`} onClick={(event) => { event.stopPropagation(); handleDeletePool(record) }}>删除</Button></Space> },
                 ]}
               />
             </div>
@@ -565,13 +562,12 @@ export default function GrowthSystemPage({ novelId }: Props) {
                 dataSource={events}
                 rowClassName={(record) => record.id === selectedEvent?.id ? 'is-selected' : ''}
                 onRow={(record) => ({ onClick: () => setSelectedEventId(record.id) })}
-                scroll={{ x: 760 }}
                 columns={[
-                  { title: '章节', width: 100, render: (_value, record) => `第${record.chapterNumSnapshot || '?'}章` },
-                  { title: '类型', dataIndex: 'eventType', width: 100, render: (value) => <Tag color={value === 'cost' ? 'volcano' : value === 'bottleneck' ? 'orange' : 'green'}>{eventTypeLabel(value)}</Tag> },
+                  { title: '章节', width: 80, responsive: ['md'], render: (_value, record) => `第${record.chapterNumSnapshot || '?'}章` },
+                  { title: '类型', dataIndex: 'eventType', width: 90, responsive: ['md'], render: (value) => <Tag color={value === 'cost' ? 'volcano' : value === 'bottleneck' ? 'orange' : 'green'}>{eventTypeLabel(value)}</Tag> },
                   { title: '回写事件', dataIndex: 'title', width: 230 },
-                  { title: '状态', dataIndex: 'costResolutionState', width: 120, render: (value) => eventStateLabel(value) },
-                  { title: '操作', width: 140, render: (_value, record) => <Space><Button size="small" onClick={(event) => { event.stopPropagation(); openEvent(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除回写事件 ${record.title}`} onClick={(event) => { event.stopPropagation(); handleDeleteEvent(record) }}>删除</Button></Space> },
+                  { title: '状态', dataIndex: 'costResolutionState', width: 120, responsive: ['lg'], render: (value) => eventStateLabel(value) },
+                  { title: '操作', width: 116, render: (_value, record) => <Space wrap><Button size="small" onClick={(event) => { event.stopPropagation(); openEvent(record) }}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} aria-label={`删除回写事件 ${record.title}`} onClick={(event) => { event.stopPropagation(); handleDeleteEvent(record) }}>删除</Button></Space> },
                 ]}
               />
             </div>

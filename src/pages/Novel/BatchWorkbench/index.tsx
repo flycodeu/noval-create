@@ -15,6 +15,7 @@ import type {
   BatchRollbackMode,
   BatchWorkbenchData,
   GlobalLockLibrary,
+  Task,
 } from '../../../types'
 import type { WorkspaceActionContract } from '../../../components/novel/workspace-layout/workspace-chrome-contract'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -91,6 +92,39 @@ function snapshotStatusLabel(status?: BatchWorkbenchData['snapshots'][number]['s
   if (status === 'rolled_back') return '已回滚'
   if (status === 'active') return '当前批次'
   return '未记录'
+}
+
+function taskStatusLabel(status?: Task['status']): string {
+  if (status === 'pending') return '等待执行'
+  if (status === 'running') return '执行中'
+  if (status === 'success') return '已完成'
+  if (status === 'failed') return '执行失败'
+  if (status === 'cancelled') return '任务已取消'
+  if (status === 'cancel_requested') return '正在取消'
+  if (status === 'paused') return '已暂停'
+  if (status === 'blocked') return '已阻塞'
+  return '未记录'
+}
+
+function taskStatusAlertType(status?: Task['status']): 'error' | 'warning' | 'info' {
+  if (status === 'failed') return 'error'
+  if (status === 'cancelled' || status === 'cancel_requested' || status === 'paused' || status === 'blocked') return 'warning'
+  return 'info'
+}
+
+function taskRecoveryHint(status?: Task['status']): string {
+  if (status === 'cancelled') return '可恢复动作：重新预演当前批次，确认影响后再执行恢复。'
+  if (status === 'failed') return '可恢复动作：先重试失败任务，或重新生成影响预演后再恢复。'
+  if (status === 'paused' || status === 'blocked') return '可恢复动作：到任务中心继续任务，或重新预演当前批次。'
+  return ''
+}
+
+function taskStatusReason(status?: Task['status'], message?: string): string {
+  const normalized = message?.trim() || ''
+  if (status === 'cancelled' && (!normalized || /^(task\s+)?cancelled[.!]?$/i.test(normalized))) {
+    return '取消原因：用户主动停止了任务。'
+  }
+  return normalized
 }
 
 function inspectionStatusColor(status: BatchInspectionStatus): string {
@@ -345,6 +379,8 @@ export default function BatchWorkbench({ novelId }: Props) {
     ],
   }), [activeSnapshot, handlePreviewRollback, handleSaveLocks, loadData, loading, lockDraft, previewLoading, savingLocks])
 
+  const latestTaskReason = taskStatusReason(activeSnapshot?.latestTaskStatus, activeSnapshot?.latestTaskMessage)
+
   return (
     <WorkspacePage
       className="novel-batch-workbench-page"
@@ -393,7 +429,7 @@ export default function BatchWorkbench({ novelId }: Props) {
                 </div>
                 <div className="novel-batch-workbench__current-badge">
                   <SafetyCertificateOutlined />
-                  <span>{activeSnapshot.latestTaskStatus ? `任务 ${activeSnapshot.latestTaskStatus}` : '快照已保留'}</span>
+                  <span>{activeSnapshot.latestTaskStatus ? `任务 ${taskStatusLabel(activeSnapshot.latestTaskStatus)}` : '快照已保留'}</span>
                 </div>
               </div>
               <div className="novel-batch-workbench__current-facts">
@@ -402,7 +438,19 @@ export default function BatchWorkbench({ novelId }: Props) {
                 <div><span>检查记录</span><strong>{data?.inspections.length || 0} 条</strong></div>
                 <div><span>历史回滚</span><strong>{data?.rollbacks.length || 0} 次</strong></div>
               </div>
-              {activeSnapshot.latestTaskMessage ? <Alert type="info" showIcon message="最近任务状态" description={activeSnapshot.latestTaskMessage} /> : null}
+              {activeSnapshot.latestTaskStatus || activeSnapshot.latestTaskMessage ? (
+                <Alert
+                  type={taskStatusAlertType(activeSnapshot.latestTaskStatus)}
+                  showIcon
+                  message={activeSnapshot.latestTaskStatus ? `最近任务：${taskStatusLabel(activeSnapshot.latestTaskStatus)}` : '最近任务状态'}
+                  description={(
+                    <div className="novel-batch-workbench__task-status-copy">
+                      {latestTaskReason ? <span>{latestTaskReason}</span> : null}
+                      {taskRecoveryHint(activeSnapshot.latestTaskStatus) ? <span>{taskRecoveryHint(activeSnapshot.latestTaskStatus)}</span> : null}
+                    </div>
+                  )}
+                />
+              ) : null}
               <div className="novel-batch-workbench__current-strip">
                 <span><SafetyCertificateOutlined /> 全局锁定库：{lockCount > 0 ? `${lockCount} 条规则已锁定` : '尚未设置条目'}</span>
                 <span><CheckCircleOutlined /> 恢复准备：{hasPreviewForCurrentMode ? '已有当前模式预演' : '请先生成影响预演'}</span>

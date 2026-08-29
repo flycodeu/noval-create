@@ -163,6 +163,9 @@
 }
 
 .novel-project-card__next-step {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 16px;
   border: none;
@@ -184,6 +187,14 @@
   line-height: 1.4;
   font-weight: 600;
   color: var(--novel-card-text);
+}
+
+.novel-project-card__next-step-tag {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .novel-project-card__next-step-copy {

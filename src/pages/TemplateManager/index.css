@@ -15,3 +15,59 @@
 .template-manager-page [data-template-builtin="false"] .template-manager-card__action--primary {
   color: var(--accent);
 }
+
+.template-manager-page .template-usage-overview {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.template-manager-page .template-usage-overview strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.template-manager-page .template-usage-overview__label {
+  color: var(--text-muted);
+}
+
+.template-manager-page .template-usage-overview__separator {
+  color: var(--accent);
+}
+
+.template-manager-page .template-usage-details {
+  margin: 8px 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.template-manager-page .template-usage-details summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.template-manager-page .template-usage-details p {
+  max-width: 860px;
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.template-manager-page .template-manager-card__desc,
+.template-manager-page .template-manager-card__preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.template-manager-page .template-manager-card__desc {
+  line-height: 1.55;
+}

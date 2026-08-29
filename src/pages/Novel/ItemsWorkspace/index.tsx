@@ -1387,7 +1387,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="物品与装备工作台"
-      description="模板与实例共用一套列表—详情工作区；关联、生成和清理操作按需展开。"
+      description="模板与实例共用一套列表—详情工作区；关联、生成和清理操作收在详情与更多菜单中。"
       actionContract={{
         primary: {
           key: 'save',
@@ -1587,7 +1587,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           )}
         >
           {!selectedItem && !creating && !loading ? (
-            <div className="novel-empty">从左侧选择一条记录，或直接新建模板 / 实例。</div>
+            <div className="novel-empty novel-items__empty-inline">从列表选择记录，或新建模板 / 实例。</div>
           ) : (
             <>
               <div className="novel-items__editor-intro">

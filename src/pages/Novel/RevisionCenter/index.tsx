@@ -653,7 +653,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
       {consistencyReport ? (
         <details className="revision-diagnostics" data-revision-diagnostics>
           <summary>
-            <span><strong>系统体检与诊断</strong><small>{consistencyReport.highCount} 个高优先问题 · 按需展开</small></span>
+            <span><strong>系统体检与诊断</strong><small>{consistencyReport.highCount} 个高优先问题 · 查看诊断</small></span>
           </summary>
           <div className="revision-diagnostics__content">
             <p>{consistencyReport.overview || '综合多维度设定与章节连续性的一致性检查报告'}</p>

@@ -173,6 +173,18 @@ function laneMeta(lane: LedgerLaneKey): { title: string; hint: string } {
   return { title: '已回收', hint: '已登记回收/归档。' }
 }
 
+function compareLedgerEntries(left: ForeshadowLedgerEntry, right: ForeshadowLedgerEntry, currentChapterNum: number): number {
+  const laneRank: Record<LedgerLaneKey, number> = { overdue: 0, dueSoon: 1, pending: 2, resolved: 3 }
+  const leftLane = getLane(left, currentChapterNum)
+  const rightLane = getLane(right, currentChapterNum)
+  if (laneRank[leftLane] !== laneRank[rightLane]) return laneRank[leftLane] - laneRank[rightLane]
+
+  const leftTarget = typeof left.targetPayoffChapter === 'number' ? left.targetPayoffChapter : Number.MAX_SAFE_INTEGER
+  const rightTarget = typeof right.targetPayoffChapter === 'number' ? right.targetPayoffChapter : Number.MAX_SAFE_INTEGER
+  if (leftTarget !== rightTarget) return leftTarget - rightTarget
+  return right.id - left.id
+}
+
 function hasFilledValues(values: Array<string | undefined | null>): boolean {
   return values.some((value) => Boolean(value && value.trim()))
 }
@@ -259,7 +271,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   }, [currentChapterNum, entries])
 
   const filteredTableRows = useMemo(() => {
-    const sorted = [...entries].sort((left, right) => right.id - left.id)
+    const sorted = [...entries].sort((left, right) => compareLedgerEntries(left, right, currentChapterNum))
     const normalizedKeyword = keyword.trim().toLowerCase()
     return sorted.filter((entry) => {
       if (laneFilter !== 'all' && getLane(entry, currentChapterNum) !== laneFilter) return false
@@ -295,7 +307,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       setCommitments(commitmentRows)
       setSelectedEntryId((current) => current && ledgerRows.some((entry) => entry.id === current)
         ? current
-        : ledgerRows[0]?.id || null)
+        : [...ledgerRows].sort((left, right) => compareLedgerEntries(left, right, currentChapterNum))[0]?.id || null)
     } catch (error) {
       if (refreshRequestRef.current !== requestId) return
       console.error(error)
@@ -303,7 +315,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [novelId])
+  }, [currentChapterNum, novelId])
 
   const loadSegments = useCallback(async (chapterId?: number) => {
     const requestId = ++segmentsRequestRef.current
@@ -516,13 +528,12 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       <div className="novel-foreshadow-ledger__status-rail" data-foreshadow-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`novel-foreshadow-ledger__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '伏笔编辑器有未保存修改' : '账本与当前项目数据同步'}</strong>
-        <span>优先处理超期未收与即将到期的伏笔，再展开完整回收条件。</span>
       </div>
 
       <div className="novel-foreshadow-ledger__workspace">
         <WorkspacePanel
           title="伏笔目录"
-          description={`${filteredTableRows.length}/${entries.length} 条 · 到期风险已按当前章节计算`}
+          description={`${filteredTableRows.length}/${entries.length} 条 · 超期与即将到期排在前面`}
           className="novel-foreshadow-ledger__list-panel"
           bodyClassName="novel-foreshadow-ledger__list-body"
         >
@@ -555,13 +566,12 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
               dataSource={filteredTableRows}
               rowClassName={(record) => record.id === selectedEntry?.id ? 'is-selected' : ''}
               onRow={(record) => ({ onClick: () => setSelectedEntryId(record.id) })}
-              scroll={{ x: 860 }}
               columns={[
                 {
                   title: '伏笔资产',
                   dataIndex: 'title',
                   key: 'title',
-                  width: 280,
+                  width: 230,
                   render: (_value, record) => (
                     <div className="novel-foreshadow-ledger__table-copy">
                       <strong>{record.title}</strong>
@@ -572,7 +582,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 {
                   title: '到期风险',
                   key: 'risk',
-                  width: 130,
+                  width: 104,
                   render: (_value, record) => {
                     const lane = getLane(record, currentChapterNum)
                     return <Tag color={lane === 'overdue' ? 'error' : lane === 'dueSoon' ? 'warning' : lane === 'resolved' ? 'success' : 'processing'}>{laneMeta(lane).title}</Tag>
@@ -581,7 +591,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 {
                   title: '埋设 / 回收',
                   key: 'chapters',
-                  width: 170,
+                  width: 136,
+                  responsive: ['md'],
                   render: (_value, record) => {
                     const chapter = record.sourceChapterId ? chapterById.get(record.sourceChapterId) : null
                     return <div className="novel-foreshadow-ledger__table-meta"><span>{chapter ? `埋设第${chapter.chapterNum}章` : '未设埋设章'}</span><span>{typeof record.targetPayoffChapter === 'number' ? `回收第${record.targetPayoffChapter}章` : '未设回收章'}</span></div>
@@ -591,7 +602,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                   title: '状态',
                   dataIndex: 'status',
                   key: 'status',
-                  width: 170,
+                  width: 142,
+                  responsive: ['md'],
                   render: (value, record) => (
                     <Space size={8}>
                       <Tag color={getStatusTagColor(value)}>{getStatusLabel(value)}</Tag>
@@ -612,7 +624,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 {
                   title: '操作',
                   key: 'actions',
-                  width: 140,
+                  width: 116,
                   render: (_value, record) => (
                     <Space size={8}>
                       <Button size="small" onClick={(event) => { event.stopPropagation(); openEditor(record) }}>编辑</Button>

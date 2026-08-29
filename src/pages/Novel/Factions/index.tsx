@@ -657,7 +657,7 @@ export default function FactionsPage({ novelId }: Props) {
         <WorkspacePanel
           className="faction-workspace__sidebar"
           title={<div className="faction-list-heading"><span>势力列表</span><small>{items.length} 个</small></div>}
-          description="先定位一个组织，再查看它的当前详情。"
+            description="列表定位组织，详情区维护当前组织。"
         >
           <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
           <div className="faction-list-scroll" data-faction-list>

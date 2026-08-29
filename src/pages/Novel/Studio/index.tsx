@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, Spin, Tag, message } from 'antd'
+import { Alert, Empty, Spin, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
   ClockCircleOutlined,
@@ -149,10 +149,12 @@ export default function StudioPage({ novelId }: Props) {
     [currentNovel, qualitySummary, stats],
   )
 
-  const visibleBlockers = useMemo(
+  const availableBlockers = useMemo(
     () => workspaceSnapshot.blockers.filter((item) => !ignoredBlockerIds.includes(item.id)),
     [ignoredBlockerIds, workspaceSnapshot.blockers],
   )
+  const visibleBlockers = availableBlockers.slice(0, 3)
+  const deferredBlockers = availableBlockers.slice(3)
 
   const queryPanel = useMemo(
     () => new URLSearchParams(location.search).get('panel'),
@@ -275,9 +277,7 @@ export default function StudioPage({ novelId }: Props) {
           </div>
           <div className="studio-page__next-step-footer">
             <span>{workspaceSnapshot.nextStep.estimatedMinutes ? `预计 ${workspaceSnapshot.nextStep.estimatedMinutes} 分钟` : '预计耗时未记录'}</span>
-            <Button type="primary" icon={<ThunderboltOutlined />} onClick={openRecommendedStep}>
-              {workspaceSnapshot.nextStep.actionLabel}
-            </Button>
+            <span className="studio-page__primary-hint">使用顶部主操作进入</span>
           </div>
         </section>
 
@@ -288,10 +288,10 @@ export default function StudioPage({ novelId }: Props) {
           <SectionHeader
             eyebrow="需要先处理"
             title="当前阻塞"
-            description="阻塞项单独列出；处理完后再回到推荐下一步。"
-            extra={visibleBlockers.length > 0 ? <Tag color="volcano">{`${visibleBlockers.length} 项`}</Tag> : null}
+            description="先处理最影响推进的项目，其余问题收进展开区。"
+            extra={availableBlockers.length > 0 ? <Tag color="volcano">{`${availableBlockers.length} 项`}</Tag> : null}
           />
-          {visibleBlockers.length > 0 ? (
+          {availableBlockers.length > 0 ? (
             <div className="studio-page__blocker-list">
               {visibleBlockers.map((blocker: ProjectBlocker) => (
                 <div key={blocker.id} data-studio-blocker>
@@ -304,6 +304,24 @@ export default function StudioPage({ novelId }: Props) {
                   />
                 </div>
               ))}
+              {deferredBlockers.length > 0 ? (
+                <details className="studio-page__deferred-blockers">
+                  <summary>展开其余 {deferredBlockers.length} 项阻塞</summary>
+                  <div className="studio-page__blocker-list studio-page__blocker-list--deferred">
+                    {deferredBlockers.map((blocker: ProjectBlocker) => (
+                      <div key={blocker.id} data-studio-blocker>
+                        <BlockerCard
+                          blocker={blocker}
+                          onOpen={(item) => navigate(buildWorkspaceRoute(novelId, item.suggestedAction.targetPage))}
+                          onIgnore={blocker.canIgnoreOnce
+                            ? (item) => setIgnoredBlockerIds((current) => [...current, item.id])
+                            : undefined}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </div>
           ) : (
             <Alert
@@ -347,7 +365,7 @@ export default function StudioPage({ novelId }: Props) {
         >
           <summary>
             <span>
-              <span className="studio-page__eyebrow">按需展开</span>
+              <span className="studio-page__eyebrow">辅助诊断</span>
               <strong>诊断与活动</strong>
             </span>
             <span className="studio-page__diagnostics-summary">

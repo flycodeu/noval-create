@@ -130,6 +130,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [generatingMode, setGeneratingMode] = useState<ProjectBriefGenerationMode | null>(null)
+  const [aiAssistOpen, setAiAssistOpen] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
   const [stats, setStats] = useState({ threadCount: 0, outlineCount: 0, timelineCount: 0, chapterCount: 0 })
 
@@ -356,19 +357,12 @@ export default function ProjectBriefPage({ novelId }: Props) {
         },
         secondary: [
           {
-            key: 'generate-first',
-            label: 'AI 生成·首版',
+            key: 'ai-assist',
+            label: 'AI 辅助',
             icon: <RobotOutlined />,
-            loading: generatingMode === 'replace',
+            loading: Boolean(generatingMode),
             disabled: Boolean(generatingMode),
-            onClick: () => void handleGenerate('replace'),
-          },
-          {
-            key: 'fill-blanks',
-            label: 'AI 补全·空白字段',
-            loading: generatingMode === 'fill_blanks',
-            disabled: Boolean(generatingMode),
-            onClick: () => void handleGenerate('fill_blanks'),
+            onClick: () => setAiAssistOpen(true),
           },
           {
             key: 'next-settings',
@@ -467,7 +461,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
                       ],
                     }),
                     fields: [
-                      { key: 'platformMode', label: '目标平台', value: currentValues.platformMode, hint: '可选番茄、飞卢或通用网文/出版；平台会约束后续开局、节奏和质量门。' },
+                      { key: 'platformMode', label: '目标平台', value: currentValues.platformMode, hint: '选择平台策略，详情在下方“平台策略”中查看。' },
                       { key: 'targetAudience', label: '目标赛道', value: currentValues.targetAudience, hint: '写清题材、受众和市场位置。' },
                       { key: 'targetReader', label: '目标读者', value: currentValues.targetReader, hint: '写读者偏好、节奏预期和情绪需求。' },
                       { key: 'readerPromise', label: '读者承诺', value: currentValues.readerPromise, hint: '说明读者会稳定收到什么体验回报。' },
@@ -573,7 +567,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
                 </div>
               ) : (
                 <div className="project-brief__platform-detail project-brief__platform-detail--empty">
-                  先选择目标平台，再查看对应的开局、节奏、包装和质量门建议。
+                  选择目标平台后显示策略摘要。
                 </div>
               )}
             </details>
@@ -643,6 +637,40 @@ export default function ProjectBriefPage({ novelId }: Props) {
           </div>
         </Form>
       </WorkspacePanel>
+      <Modal
+        title="AI 辅助"
+        open={aiAssistOpen}
+        onCancel={() => setAiAssistOpen(false)}
+        footer={null}
+        width={520}
+      >
+        <div className="project-brief__ai-assist">
+          <p>选择本轮对项目立项的作用方式；分区定向生成仍保留在对应区标题。</p>
+          <div className="project-brief__ai-assist-actions">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={generatingMode === 'replace'}
+              onClick={() => {
+                setAiAssistOpen(false)
+                void handleGenerate('replace')
+              }}
+            >
+              生成整份首版
+            </Button>
+            <Button
+              icon={<RobotOutlined />}
+              loading={generatingMode === 'fill_blanks'}
+              onClick={() => {
+                setAiAssistOpen(false)
+                void handleGenerate('fill_blanks')
+              }}
+            >
+              补全空白字段
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </WorkspacePage>
   )
 }

@@ -868,7 +868,7 @@ export default function PremisePage({ novelId }: Props) {
               <span className="premise-page__disclosure-summary">
                 {compactText(currentFormValues.languageGuardrails || currentFormValues.antiAiFlavor || currentFormValues.commonSenseRules, 72)}
               </span>
-              <span className="premise-page__disclosure-action">按需展开</span>
+              <span className="premise-page__disclosure-action">查看详情</span>
             </summary>
             <div className="premise-page__advanced-content">
               <div className="premise-page__language-handoff">

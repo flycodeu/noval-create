@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Segmented, Select, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Segmented, Select, Tag, message } from 'antd'
 import { AppstoreAddOutlined, ArrowRightOutlined, ExperimentOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import {
@@ -29,8 +28,6 @@ import type {
 } from '../../../shared/theme-voice-generation'
 import type { Template } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
-import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
-import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
   WorkspacePage,
@@ -69,6 +66,23 @@ interface ThemeVoiceFormValues {
   forbiddenPhrases: string
   targetWorkSampleGuide: string
   humanStyleSampleLock: string
+}
+
+type ThemeVoiceGenerationTarget = 'all' | 'narrative' | 'style'
+
+const THEME_VOICE_TARGET_FIELDS: Record<ThemeVoiceGenerationTarget, Array<keyof ThemeVoiceFormValues>> = {
+  all: [
+    'writingContractTags', 'theme', 'themeChapterTest', 'motifs', 'emotionalCore', 'pov', 'tense',
+    'protagonistCount', 'viewpointMode', 'parallelTimelines', 'openingStyle', 'flashbackPolicy',
+    'narratorDistance', 'voiceKeywords', 'styleRules', 'dialogueRules', 'descriptionRules',
+    'forbiddenPhrases', 'targetWorkSampleGuide', 'humanStyleSampleLock',
+  ],
+  narrative: [
+    'writingContractTags', 'theme', 'themeChapterTest', 'motifs', 'emotionalCore', 'pov', 'tense',
+    'protagonistCount', 'viewpointMode', 'parallelTimelines', 'openingStyle', 'flashbackPolicy',
+    'narratorDistance', 'voiceKeywords',
+  ],
+  style: ['styleRules', 'dialogueRules', 'descriptionRules', 'forbiddenPhrases', 'targetWorkSampleGuide', 'humanStyleSampleLock'],
 }
 
 const POV_OPTIONS: Array<{ value: ThemeVoicePov; label: string }> = [
@@ -177,10 +191,6 @@ function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues
   }
 }
 
-function hasFilledValues(values: Array<string | undefined | null>): boolean {
-  return values.some((value) => Boolean(value && value.trim()))
-}
-
 function buildCurrentFormValues(
   snapshot: ThemeVoiceFormValues,
   formValues: Partial<ThemeVoiceFormValues>,
@@ -203,6 +213,7 @@ function mergeGeneratedValues(
   current: ThemeVoiceFormValues,
   result: ThemeVoiceGenerationResult,
   mode: ThemeVoiceGenerationMode,
+  target: ThemeVoiceGenerationTarget = 'all',
 ): ThemeVoiceFormValues {
   const pick = (existing?: string | null, next?: string | null) => {
     const currentValue = normalizeText(existing)
@@ -217,7 +228,7 @@ function mergeGeneratedValues(
     return nextTags.length > 0 ? nextTags : currentTags
   }
 
-  return {
+  const merged: ThemeVoiceFormValues = {
     writingContractTags: pickTags(),
     theme: pick(current.theme, result.theme),
     themeChapterTest: pick(current.themeChapterTest, result.themeChapterTest),
@@ -239,6 +250,12 @@ function mergeGeneratedValues(
     targetWorkSampleGuide: pick(current.targetWorkSampleGuide, result.targetWorkSampleGuide),
     humanStyleSampleLock: pick(current.humanStyleSampleLock, result.humanStyleSampleLock),
   }
+
+  if (target === 'all') return merged
+  return THEME_VOICE_TARGET_FIELDS[target].reduce<ThemeVoiceFormValues>(
+    (next, key) => ({ ...next, [key]: merged[key] }),
+    current,
+  )
 }
 
 interface StyleTemplateContent {
@@ -301,6 +318,9 @@ export default function ThemeVoicePage({ novelId }: Props) {
   const [templateApplyMode, setTemplateApplyMode] = useState<'fill_blanks' | 'replace'>('fill_blanks')
   const [selectedStyleTemplateId, setSelectedStyleTemplateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
   const [templateCandidateId, setTemplateCandidateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
+  const [aiAssistOpen, setAiAssistOpen] = useState(false)
+  const [aiTarget, setAiTarget] = useState<ThemeVoiceGenerationTarget>('all')
+  const [aiMode, setAiMode] = useState<ThemeVoiceGenerationMode>('fill_blanks')
 
   const snapshot = useMemo(
     () => parseThemeVoiceSnapshot(currentNovel?.themeVoiceJson),
@@ -522,7 +542,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges, saving])
 
-  const handleGenerate = async (mode: ThemeVoiceGenerationMode) => {
+  const handleGenerate = async (mode: ThemeVoiceGenerationMode, target: ThemeVoiceGenerationTarget = 'all') => {
     setGeneratingMode(mode)
     setWarnings([])
 
@@ -537,11 +557,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
         buildCurrentFormValues(snapshot, form.getFieldsValue(true)),
         result,
         mode,
+        target,
       )
       form.setFieldsValue(merged)
       setWarnings(result.warnings)
       void saveAppliedDraft(merged, result.warnings, 'theme-voice', {
-        inputSummary: `${mode === 'fill_blanks' ? '补空白' : '首版'} · ${currentNovel?.title || '未命名小说'}`,
+        inputSummary: `${target === 'all' ? '全部区域' : target === 'narrative' ? '主题与叙事调度' : '文风执行规则'} · ${mode === 'fill_blanks' ? '补空白' : '首版'} · ${currentNovel?.title || '未命名小说'}`,
       }).catch(console.error)
 
       if (result.warnings.length > 0) {
@@ -557,6 +578,11 @@ export default function ThemeVoicePage({ novelId }: Props) {
     } finally {
       setGeneratingMode(null)
     }
+  }
+
+  const handleAIAssistGenerate = async () => {
+    setAiAssistOpen(false)
+    await handleGenerate(aiMode, aiTarget)
   }
 
   const handleClear = useCallback(() => {
@@ -617,19 +643,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
             },
           },
           {
-            key: 'generate',
-            label: 'AI 生成·首版',
+            key: 'ai-assist',
+            label: 'AI 辅助',
             icon: <RobotOutlined />,
-            loading: generatingMode === 'replace',
+            loading: Boolean(generatingMode),
             disabled: Boolean(generatingMode),
-            onClick: () => void handleGenerate('replace'),
-          },
-          {
-            key: 'fill-blanks',
-            label: 'AI 补全·空白字段',
-            loading: generatingMode === 'fill_blanks',
-            disabled: Boolean(generatingMode),
-            onClick: () => void handleGenerate('fill_blanks'),
+            onClick: () => setAiAssistOpen(true),
           },
           {
             key: 'style-lab',
@@ -694,76 +713,10 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <Form form={form} layout="vertical">
           <div className="workspace-stack-16">
             <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--narrative">
-              <Space wrap align="center">
+              <div className="theme-voice__section-heading">
                 <strong className="workspace-card-section-title">主题与叙事调度</strong>
-                <AIGenerateButton
-                  novelId={novelId}
-                  label="AI 生成·主题与调度"
-                  intent={hasFilledValues([
-                    currentValues.theme,
-                    currentValues.motifs,
-                    currentValues.emotionalCore,
-                    currentValues.narratorDistance,
-                    currentValues.voiceKeywords,
-                  ]) ? 'complete' : 'generate'}
-                  isJson
-                  buildMessages={() => buildDraftMessages({
-                    task: '主题与叙事调度',
-                    mode: hasFilledValues([
-                      currentValues.theme,
-                      currentValues.motifs,
-                      currentValues.emotionalCore,
-                      currentValues.narratorDistance,
-                      currentValues.voiceKeywords,
-                    ]) ? 'optimize' : 'replace',
-                    context: buildPlanningContextSections(currentNovel, {
-                      includeSubplots: false,
-                      extraSections: [
-                        { label: '当前写作类型', value: formatWritingContractTags(currentValues.writingContractTags) },
-                      ],
-                    }),
-                    fields: [
-                      { key: 'writingContractTags', label: '写作类型', type: 'string[]', value: currentValues.writingContractTags, hint: '可包含爽文、写实等短标签。' },
-                      { key: 'theme', label: '主题', value: currentValues.theme, hint: '写作品持续回答的命题，不要写宣传口号。' },
-                      { key: 'themeChapterTest', label: '章节级主题验证', value: currentValues.themeChapterTest, hint: '写每章冲突如何回应主题命题，而不是只推进事件。' },
-                      { key: 'motifs', label: '母题 / 重复意象', value: currentValues.motifs, hint: '建议每行一条，写会反复出现的母题和意象。' },
-                      { key: 'emotionalCore', label: '情感核心', value: currentValues.emotionalCore, hint: '写读者稳定收到的情绪回报和压强。' },
-                      { key: 'pov', label: '叙事视角', value: currentValues.pov, hint: '只用 first_person、third_limited、third_omniscient、multi_pov 之一。' },
-                      { key: 'tense', label: '时态', value: currentValues.tense, hint: '只用 past、present、mixed 之一。' },
-                      { key: 'protagonistCount', label: '主角格局', value: currentValues.protagonistCount, hint: '只用 single、dual、ensemble 之一。' },
-                      { key: 'viewpointMode', label: '视角调度', value: currentValues.viewpointMode, hint: '只用 fixed、rotating、free_switch 之一。' },
-                      { key: 'parallelTimelines', label: '叙事线密度', value: currentValues.parallelTimelines, hint: '只用 none、light、heavy 之一。' },
-                      { key: 'openingStyle', label: '开篇方式', value: currentValues.openingStyle, hint: '只用 hook、daily、incident、flashback 之一。' },
-                      { key: 'flashbackPolicy', label: '插叙策略', value: currentValues.flashbackPolicy, hint: '只用 forbidden、limited、allowed 之一。' },
-                      { key: 'narratorDistance', label: '叙述距离', value: currentValues.narratorDistance, hint: '写叙述者与人物之间的距离，以及解释密度。' },
-                      { key: 'voiceKeywords', label: '口吻关键词', value: currentValues.voiceKeywords, hint: '建议 4 到 8 个词，描述整体口吻。' },
-                    ],
-                    requirements: [
-                      '不要脱离题材、世界规则和人物状态。',
-                      '标签与叙事调度要能相互支撑，不能互相打架。',
-                    ],
-                  })}
-                  onResult={(raw) => {
-                    const draft = parseDraftJson<Partial<ThemeVoiceFormValues>>(raw)
-                    applyThemeVoiceDraft({
-                      writingContractTags: Array.isArray(draft.writingContractTags) ? draft.writingContractTags : undefined,
-                      theme: typeof draft.theme === 'string' ? draft.theme : undefined,
-                      themeChapterTest: typeof draft.themeChapterTest === 'string' ? draft.themeChapterTest : undefined,
-                      motifs: typeof draft.motifs === 'string' ? draft.motifs : undefined,
-                      emotionalCore: typeof draft.emotionalCore === 'string' ? draft.emotionalCore : undefined,
-                      pov: draft.pov,
-                      tense: draft.tense,
-                      protagonistCount: draft.protagonistCount,
-                      viewpointMode: draft.viewpointMode,
-                      parallelTimelines: draft.parallelTimelines,
-                      openingStyle: draft.openingStyle,
-                      flashbackPolicy: draft.flashbackPolicy,
-                      narratorDistance: typeof draft.narratorDistance === 'string' ? draft.narratorDistance : undefined,
-                      voiceKeywords: typeof draft.voiceKeywords === 'string' ? draft.voiceKeywords : undefined,
-                    })
-                  }}
-                />
-              </Space>
+                <span>AI 辅助已统一到页面顶部，可选择回填范围。</span>
+              </div>
               <div className="theme-voice__core-grid" data-theme-voice-core-fields="visible">
                 <div className="theme-voice__field theme-voice__field--full">
                   <Form.Item
@@ -814,7 +767,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <summary>
                   <span>叙事调度与母题</span>
                   <span>{compactText(currentValues.themeChapterTest || currentValues.motifs || currentValues.narratorDistance, 68)}</span>
-                  <b>按需展开</b>
+                  <b>查看详情</b>
                 </summary>
                 <div className="theme-voice__advanced-grid">
                   <div className="theme-voice__field">
@@ -839,69 +792,10 @@ export default function ThemeVoicePage({ novelId }: Props) {
             </div>
 
             <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--style">
-              <Space wrap align="center">
+              <div className="theme-voice__section-heading">
                 <strong className="workspace-card-section-title">文风执行规则</strong>
-                <AIGenerateButton
-                  novelId={novelId}
-                  label="AI 生成·文风规则"
-                  intent={hasFilledValues([
-                    currentValues.styleRules,
-                    currentValues.dialogueRules,
-                    currentValues.descriptionRules,
-                    currentValues.forbiddenPhrases,
-                    currentValues.targetWorkSampleGuide,
-                    currentValues.humanStyleSampleLock,
-                  ]) ? 'complete' : 'generate'}
-                  isJson
-                  buildMessages={() => buildDraftMessages({
-                    task: '文风执行规则',
-                    mode: hasFilledValues([
-                      currentValues.styleRules,
-                      currentValues.dialogueRules,
-                      currentValues.descriptionRules,
-                      currentValues.forbiddenPhrases,
-                      currentValues.targetWorkSampleGuide,
-                      currentValues.humanStyleSampleLock,
-                    ]) ? 'optimize' : 'replace',
-                    context: buildPlanningContextSections(currentNovel, {
-                      includeSubplots: false,
-                      extraSections: [
-                        { label: '当前主题与调度', value: [
-                          currentValues.theme ? `主题：${currentValues.theme}` : '',
-                          currentValues.themeChapterTest ? `章节级主题验证：${currentValues.themeChapterTest}` : '',
-                          currentValues.emotionalCore ? `情感核心：${currentValues.emotionalCore}` : '',
-                          currentValues.pov ? `视角：${currentValues.pov}` : '',
-                          currentValues.tense ? `时态：${currentValues.tense}` : '',
-                          currentValues.narratorDistance ? `叙述距离：${currentValues.narratorDistance}` : '',
-                        ].filter(Boolean).join('\n') },
-                      ],
-                    }),
-                    fields: [
-                      { key: 'styleRules', label: '风格规则', value: currentValues.styleRules, hint: '把句式、节奏和信息暴露方式写成规则，建议每行一条。' },
-                      { key: 'dialogueRules', label: '对白规则', value: currentValues.dialogueRules, hint: '写潜台词密度、句长控制、留白方式和人物区分度。' },
-                      { key: 'descriptionRules', label: '描写规则', value: currentValues.descriptionRules, hint: '写场景、动作、心理描写的比例和取舍。' },
-                      { key: 'forbiddenPhrases', label: '禁用表达', value: currentValues.forbiddenPhrases, hint: '写应避免的总结腔、模板句、空泛抒情和引号强调。' },
-                      { key: 'targetWorkSampleGuide', label: '真实样章对照', value: currentValues.targetWorkSampleGuide, hint: '写像不像目标作品时要看哪些句式、节奏、对白比例和信息密度。' },
-                      { key: 'humanStyleSampleLock', label: '人工风格样本锁定', value: currentValues.humanStyleSampleLock, hint: '写人工样本必须保留的特征，以及出现哪些 AI 化偏移要退回。' },
-                    ],
-                    requirements: [
-                      '规则必须可执行，可直接用于写作与审校。',
-                      '不要写抽象价值口号，也不要和当前写作类型相冲突。',
-                    ],
-                  })}
-                  onResult={(raw) => {
-                    const draft = parseDraftJson<Partial<ThemeVoiceFormValues>>(raw)
-                    applyThemeVoiceDraft({
-                      styleRules: typeof draft.styleRules === 'string' ? draft.styleRules : undefined,
-                      dialogueRules: typeof draft.dialogueRules === 'string' ? draft.dialogueRules : undefined,
-                      descriptionRules: typeof draft.descriptionRules === 'string' ? draft.descriptionRules : undefined,
-                      forbiddenPhrases: typeof draft.forbiddenPhrases === 'string' ? draft.forbiddenPhrases : undefined,
-                      targetWorkSampleGuide: typeof draft.targetWorkSampleGuide === 'string' ? draft.targetWorkSampleGuide : undefined,
-                      humanStyleSampleLock: typeof draft.humanStyleSampleLock === 'string' ? draft.humanStyleSampleLock : undefined,
-                    })
-                  }}
-                />
-              </Space>
+                <span>规则、对白与样本约束统一由页面顶部 AI 辅助处理。</span>
+              </div>
               <div className="theme-voice__core-grid theme-voice__core-grid--rules">
                 <div className="theme-voice__field">
                   <Form.Item name="styleRules" label="风格规则" rules={[{ required: true, message: '请补充风格规则' }]}>
@@ -918,7 +812,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <summary>
                   <span>描写、禁用表达与样本锁定</span>
                   <span>{compactText(currentValues.descriptionRules || currentValues.forbiddenPhrases || currentValues.targetWorkSampleGuide, 68)}</span>
-                  <b>按需展开</b>
+                  <b>查看详情</b>
                 </summary>
                 <div className="theme-voice__advanced-grid">
                   <div className="theme-voice__field"><Form.Item name="descriptionRules" label="描写规则"><Input.TextArea rows={4} placeholder="写场景、动作、心理描写的比例和取舍。" /></Form.Item></div>
@@ -935,6 +829,46 @@ export default function ThemeVoicePage({ novelId }: Props) {
       <section className="theme-voice__lab-handoff">
         <Button type="link" icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>文风实验室</Button>
       </section>
+
+      <Modal
+        title="AI 辅助"
+        open={aiAssistOpen}
+        width={520}
+        onCancel={() => setAiAssistOpen(false)}
+        onOk={() => void handleAIAssistGenerate()}
+        okText="开始处理"
+        cancelText="取消"
+        confirmLoading={Boolean(generatingMode)}
+      >
+        <div className="theme-voice__ai-dialog">
+          <div className="theme-voice__ai-dialog-field">
+            <span>目标区域</span>
+            <Segmented
+              block
+              value={aiTarget}
+              onChange={(value) => setAiTarget(value as ThemeVoiceGenerationTarget)}
+              options={[
+                { value: 'all', label: '全部主题与文风' },
+                { value: 'narrative', label: '主题与叙事调度' },
+                { value: 'style', label: '文风执行规则' },
+              ]}
+            />
+          </div>
+          <div className="theme-voice__ai-dialog-field">
+            <span>处理方式</span>
+            <Segmented
+              block
+              value={aiMode}
+              onChange={(value) => setAiMode(value as ThemeVoiceGenerationMode)}
+              options={[
+                { value: 'fill_blanks', label: '只补空字段' },
+                { value: 'replace', label: '生成首版并覆盖目标区' },
+              ]}
+            />
+          </div>
+          <p>结果先回填到当前表单，不会自动保存；其他区域保持不变。</p>
+        </div>
+      </Modal>
 
       <Modal
         title="应用文风模板"

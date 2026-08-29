@@ -20,6 +20,7 @@ const projectTopbarCss = read('src/components/novel/layout/ProjectTopbar.css')
 const globalCss = read('src/styles/global.css')
 const qualityDashboardCss = read('src/pages/Novel/QualityDashboard/index.css')
 const foreshadowLedgerCss = read('src/pages/Novel/ForeshadowLedger/index.css')
+const foreshadowLedgerPage = read('src/pages/Novel/ForeshadowLedger/index.tsx')
 const outlinePage = read('src/pages/Novel/Outline/index.tsx')
 const workspaceShell = read('src/pages/Novel/components/WorkspaceShell.tsx')
 const workspaceChrome = read('src/components/novel/workspace-layout/workspace-chrome.tsx')
@@ -73,11 +74,13 @@ assertPass(
     && qualityDashboardCss.includes('width: 96px'),
 )
 assertPass(
-  'foreshadow ledger keeps its table inside a bounded local scroll region',
+  'foreshadow ledger uses a responsive bounded table layout',
   foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll')
-    && foreshadowLedgerCss.includes('overflow-x: auto')
+    && foreshadowLedgerCss.includes('overflow-x: hidden')
     && foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll .ant-table-wrapper')
-    && foreshadowLedgerCss.includes('min-width: 860px'),
+    && foreshadowLedgerCss.includes('min-width: 0')
+    && foreshadowLedgerCss.includes('table-layout: fixed')
+    && foreshadowLedgerPage.includes("responsive: ['md']"),
 )
 assertPass(
   'outline pagination keeps drag indices local to the rendered page',
@@ -133,12 +136,13 @@ assertPass(
     && workspaceChromeContract.includes('Portal provider wraps the route shell'),
 )
 assertPass(
-  'quiet workspace surface does not render page or panel descriptions',
+  'quiet workspace surface keeps descriptions in closed disclosures',
   !workspaceShell.includes('novel-hero__description')
-    && !workspaceShell.includes('novel-panel__description-disclosure')
-    && !workspaceShell.includes('novel-panel__desc')
+    && workspaceShell.includes('novel-panel__description-disclosure')
+    && workspaceShell.includes('novel-panel__desc')
     && workspaceShell.includes("descriptionMode = 'disclosure'")
     && workspaceSimplificationCss.includes('.novel-panel__header > .novel-panel__copy')
+    && workspaceSimplificationCss.includes('.novel-panel__description-disclosure:not([open]) > .novel-panel__desc')
     && workspaceSimplificationCss.includes('.novel-hero__context .novel-context-summary')
     && workspaceSimplificationCss.includes('.novel-map-page .map-list-workspace'),
 )

@@ -392,14 +392,6 @@ export default function WritebackCenterPage({ novelId }: Props) {
     },
     secondary: [
       {
-        key: 'prepare',
-        label: '重新抽取',
-        icon: <RobotOutlined />,
-        loading: actionLoading,
-        disabled: !centerData?.chapter?.id,
-        onClick: prepareRun,
-      },
-      {
         key: 'retry',
         label: '重试失败项',
         icon: <ReloadOutlined />,
@@ -410,6 +402,14 @@ export default function WritebackCenterPage({ novelId }: Props) {
     ],
     more: {
       items: [
+        {
+          key: 'prepare',
+          label: '重新抽取本章',
+          icon: <RobotOutlined />,
+          loading: actionLoading,
+          disabled: !centerData?.chapter?.id,
+          onClick: prepareRun,
+        },
         {
           key: 'bulk-accept',
           label: '批量接受当前筛选',
@@ -605,8 +605,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
                   <div className="novel-writeback-center-page__empty-orbit" aria-hidden="true">◎</div>
                   <span className="novel-writeback-center-page__kicker">当前章节</span>
                   <h3>还没有可写回的 Diff</h3>
-                  <p>重新抽取会生成事实与状态候选；有候选后，这里只会聚焦一条当前 Diff。</p>
-                  <Button icon={<RobotOutlined />} onClick={prepareRun} disabled={!centerData?.chapter?.id} loading={actionLoading}>重新抽取本章</Button>
+                  <p>从页面顶部“更多”菜单重新抽取，会生成事实与状态候选；有候选后，这里只聚焦一条当前 Diff。</p>
                 </div>
               )}
             </article>
@@ -617,7 +616,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <details data-writeback-facts className="novel-writeback-center-page__disclosure">
             <summary>
               <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon">01</span><strong>事实抽取与原始结果</strong></span>
-              <span className="novel-writeback-center-page__summary-meta">{filteredExtracts.length} 条 · 按需展开</span>
+              <span className="novel-writeback-center-page__summary-meta">{filteredExtracts.length} 条 · 查看详情</span>
             </summary>
             <div className="novel-writeback-center-page__disclosure-content" data-writeback-raw-results>
               {filteredExtracts.length > 0 ? filteredExtracts.map((extract) => (
@@ -642,7 +641,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <details data-writeback-coverage className="novel-writeback-center-page__disclosure">
             <summary>
               <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon">02</span><strong>八类资产覆盖</strong></span>
-              <span className="novel-writeback-center-page__summary-meta">{centerData?.coverage.length || 0}/8 类 · 按需展开</span>
+              <span className="novel-writeback-center-page__summary-meta">{centerData?.coverage.length || 0}/8 类 · 查看详情</span>
             </summary>
             <div className="novel-writeback-center-page__disclosure-content">
               <div className="novel-writeback-center-page__coverage-grid">
@@ -670,7 +669,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <details data-writeback-diagnostics className="novel-writeback-center-page__disclosure">
             <summary>
               <span className="novel-writeback-center-page__summary-main"><span className="novel-writeback-center-page__summary-icon"><FilterOutlined /></span><strong>筛选与诊断</strong></span>
-              <span className="novel-writeback-center-page__summary-meta">章节、运行、状态过滤 · 按需展开</span>
+              <span className="novel-writeback-center-page__summary-meta">章节、运行、状态过滤 · 查看诊断</span>
             </summary>
             <div className="novel-writeback-center-page__diagnostics-content">
               <div className="novel-writeback-center-page__filters">

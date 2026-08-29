@@ -1,12 +1,10 @@
 import React from 'react'
 import { Alert, Button, Drawer, Dropdown, Form, Input, InputNumber, Modal, Progress, Segmented, Space, Spin, Tag, message } from 'antd'
 import {
-  BranchesOutlined,
   EllipsisOutlined,
   LinkOutlined,
   MenuOutlined,
   PlusOutlined,
-  RobotOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { parseSceneTemplateStringList } from '../../../shared/scene-templates'
@@ -1023,22 +1021,13 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           })}>
             新建卷
           </Button>
-          <Button icon={<RobotOutlined />} onClick={() => setPlannerOpen(true)}>
-            AI 批量规划
-          </Button>
-          <Button
-            type="primary"
-            icon={<BranchesOutlined />}
-            disabled={!selection.chapterId}
-            onClick={() => runGuardedAction(compileChapter)}
-          >
-            编译章节
-          </Button>
           <Dropdown
             trigger={['click']}
             menu={{
               items: [
                 { key: 'batch', label: '批量新增' },
+                { key: 'planner', label: 'AI 批量规划' },
+                { key: 'compile', label: '编译当前章节', disabled: !selection.chapterId },
                 { key: 'event', label: '创建关联事件', disabled: !selection.volumeId },
                 { key: 'linkage', label: '补齐结构联动' },
                 { key: 'memory', label: '刷新检查点' },
@@ -1048,6 +1037,8 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               ],
               onClick: ({ key }) => {
                 if (key === 'batch') setBatchDrawerOpen(true)
+                if (key === 'planner') setPlannerOpen(true)
+                if (key === 'compile') runGuardedAction(compileChapter)
                 if (key === 'event') runGuardedAction(openCreateEvent)
                 if (key === 'linkage') runGuardedAction(handleSyncLinkage)
                 if (key === 'memory') runGuardedAction(refreshMemory)

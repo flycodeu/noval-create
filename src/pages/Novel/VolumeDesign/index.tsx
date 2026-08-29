@@ -412,7 +412,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
       <div className="volume-design-page__status-rail" data-volume-design-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`volume-design-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '当前卷设计有未保存修改' : '当前卷设计与项目数据同步'}</strong>
-        <span>先选定一卷，再编辑闭环；绑定、审计和章节同步放在按需工具区。</span>
       </div>
       {refreshing ? <div className="novel-dashboard__refresh-indicator workspace-alert-spaced"><Spin size="small" /><span>正在同步卷级设计数据</span></div> : null}
       {commitments.length <= 0 ? (

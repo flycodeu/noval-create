@@ -771,7 +771,7 @@ export default function CoreSettings({ novelId }: Props) {
       <details className="story-design__advanced" data-story-design-guidance>
         <summary>
           <span><strong>设计原则</strong><small>只在需要时查看，默认把注意力留给当前剧情任务。</small></span>
-          <Tag>按需展开</Tag>
+          <Tag>查看设计原则</Tag>
         </summary>
         <div className="story-design__guidance-grid">
           <div><strong>只做骨架</strong><span>本页维护目标、冲突、推进链、支线作用和结局。</span></div>
@@ -1058,24 +1058,25 @@ export default function CoreSettings({ novelId }: Props) {
         <span>当前任务：先把主目标、冲突、推进链和结局方向压成可拆解骨架。</span>
       </div>
 
-      {!premiseReady ? (
+      {!premiseReady || generationBlockers.length > 0 ? (
         <Alert
           type="warning"
           showIcon
-          message="基础设定未完成"
-        />
-      ) : null}
-
-      {generationBlockers.length > 0 ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="当前还不适合生成故事设计"
+          message="故事设计的生成前置条件待补齐"
           description={(
-            <div>
+            <div className="story-design__prerequisite-alert">
+              {!premiseReady ? <div>基础设定未完成，请先补齐项目立项中的核心资料。</div> : null}
               {generationBlockers.map((blocker) => (
                 <div key={blocker}>{blocker}</div>
               ))}
+              <Button
+                type="link"
+                size="small"
+                icon={<ArrowRightOutlined />}
+                onClick={() => navigate(buildWorkspaceRoute(novelId, 'project-brief'))}
+              >
+                去项目立项补齐前置条件
+              </Button>
             </div>
           )}
         />

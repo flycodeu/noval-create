@@ -311,19 +311,15 @@ export default function TemplateManager() {
           title="模板目录"
         >
           <div className="template-usage-overview">
-            <div className="template-usage-overview__item">
-              <span>在哪里选</span>
-              <strong>{activeUsage.entry}</strong>
-            </div>
-            <div className="template-usage-overview__item">
-              <span>用在哪里</span>
-              <strong>{activeUsage.appliedTo}</strong>
-            </div>
-            <div className="template-usage-overview__item template-usage-overview__item--wide">
-              <span>编辑提示</span>
-              <strong>{activeUsage.fieldGuide}</strong>
-            </div>
+            <span className="template-usage-overview__label">当前应用</span>
+            <strong>{activeUsage.entry}</strong>
+            <span className="template-usage-overview__separator" aria-hidden="true">·</span>
+            <span>{activeUsage.appliedTo}</span>
           </div>
+          <details className="template-usage-details">
+            <summary>查看编辑提示</summary>
+            <p>{activeUsage.fieldGuide}</p>
+          </details>
           {refreshing ? (
             <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
               <Spin size="small" />

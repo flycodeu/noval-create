@@ -201,6 +201,7 @@ export const TIMELINE_BOARD_COLUMNS: TimelineEvent['status'][] = [
 
 export const TIME_MODE_OPTIONS = [
   { value: 'gregorian', label: '\u516c\u5386\u65f6\u95f4' },
+  { value: 'modern-date', label: '\u73b0\u4ee3\u65e5\u671f' },
   { value: 'regnal', label: '\u5e74\u53f7 / \u738b\u671d\u7eaa\u5e74' },
   { value: 'relative-disaster', label: '\u707e\u53d8\u540e\u76f8\u5bf9\u65f6\u95f4' },
   { value: 'custom-era', label: '\u865a\u6784\u7eaa\u5143' },
@@ -209,6 +210,7 @@ export const TIME_MODE_OPTIONS = [
 
 export const TIME_MODE_EXAMPLES: Record<string, string> = {
   gregorian: '\u793a\u4f8b\uff1a2026\u5e743\u67087\u65e5 21:00',
+  'modern-date': '\u5148\u7edf\u4e00\u53e3\u5f84\uff0c\u518d\u5199\u5177\u4f53\u4e8b\u4ef6\u3002',
   regnal: '\u793a\u4f8b\uff1a\u662d\u5b81\u4e09\u5e74\u79cb / \u738b\u5386\u5341\u4e8c\u5e74\u51ac',
   'relative-disaster': '\u793a\u4f8b\uff1a\u707e\u53d8\u540e\u7b2c7\u5929 / \u65ad\u7535\u540e\u7b2c3\u5468',
   'custom-era': '\u793a\u4f8b\uff1a\u7384\u66dc\u7eaa\u4e09\u767e\u4e8c\u5341\u4e03\u5e74 / \u7b2c\u516d\u6b21\u5f00\u8352\u5b63',

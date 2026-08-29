@@ -445,13 +445,13 @@ export default function StagePlanner({ novelId }: Props) {
           { label: '当前项目', value: currentNovel?.title || '未命名小说' },
         ]} />
       )}
-      metrics={(
+      metrics={stages.length > 0 ? (
         <>
           <WorkspaceMetric label="当前工作段" value={activeCount} tone="warm" />
           <WorkspaceMetric label="待推进阶段" value={plannedCount} tone="cool" />
         </>
-      )}
-      guide={(
+      ) : null}
+      guide={stages.length > 0 ? (
         <WorkspaceStepGuide
           title="阶段规划流程"
           steps={[
@@ -460,15 +460,25 @@ export default function StagePlanner({ novelId }: Props) {
             { title: '交接给正文', description: '阶段结束时写明状态变化和下一阶段必须继承的事实。', status: selectedStage?.handoffSummary ? 'done' : 'todo' },
           ]}
         />
-      )}
+      ) : null}
       className="creative-stage-page"
       layout="wide"
     >
-      <div className="creative-stage-status-rail" data-stage-save-state="saved">
-        <span className="creative-stage-status-rail__dot" aria-hidden="true" />
-        <strong>阶段目录与当前对象已分离</strong>
-        <span>先选一个章节窗口，正文召回包、质量快照和交接工件都只针对当前阶段。</span>
-      </div>
+      {stages.length > 0 ? (
+        <div className="creative-stage-status-rail" data-stage-save-state="saved">
+          <span className="creative-stage-status-rail__dot" aria-hidden="true" />
+          <strong>阶段目录与当前对象已分离</strong>
+          <span>当前阶段驱动正文召回、质量快照与交接工件。</span>
+        </div>
+      ) : null}
+      {!loading && stages.length === 0 ? (
+        <div className="creative-stage-empty creative-stage-empty--page" data-stage-empty>
+          <CompassOutlined />
+          <strong>还没有阶段</strong>
+          <span>建立一个章节窗口后，人物、地点和正文召回都会有明确边界。</span>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openStageForm()}>建立第一个阶段</Button>
+        </div>
+      ) : (
       <div className="creative-stage-layout">
         <WorkspacePanel title="阶段目录" description={`${stages.length} 个阶段 · 选择一个当前对象`}>
           <div className="creative-stage-list" aria-busy={loading} data-stage-list>
@@ -492,14 +502,6 @@ export default function StagePlanner({ novelId }: Props) {
                 </span>
               </button>
             ))}
-            {!loading && stages.length === 0 ? (
-              <div className="creative-stage-empty">
-                <CompassOutlined />
-                <strong>还没有阶段</strong>
-                <span>先建立“第 1–100 章”这样的窗口，后续生成会有明确边界。</span>
-                <Button type="link" onClick={() => openStageForm()}>建立第一个阶段</Button>
-              </div>
-            ) : null}
           </div>
         </WorkspacePanel>
 
@@ -748,6 +750,7 @@ export default function StagePlanner({ novelId }: Props) {
           </details>
         </div>
       </div>
+      )}
 
       <Modal title={editingStage ? '编辑创作阶段' : '建立创作阶段'} open={createOpen} onCancel={() => { setCreateOpen(false); setEditingStage(null) }} onOk={() => void handleSaveStage()} confirmLoading={saving} okText={editingStage ? '保存阶段' : '建立阶段'} cancelText="取消" width={620}>
         <Form form={createForm} layout="vertical" initialValues={{ kind: 'chapter-window', status: 'planned' }}>

@@ -350,7 +350,7 @@ export default function GlossaryPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="设定词典"
-      description="把术语、阶位、材料、事件和种族名词固定成可检索资产；列表负责定位，详情按需展开。"
+      description="把术语、阶位、材料、事件和种族名词固定成可检索资产；列表负责定位，详情区维护完整内容。"
       actionContract={{
         primary: {
           key: 'save',

@@ -349,6 +349,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
     () => getWorkflowBlockers('threads', currentNovel, workflowStats),
     [currentNovel, workflowStats],
   )
+  const threadPrerequisiteIssues = useMemo(
+    () => [
+      ...(!currentNovel?.settingsJson ? ['故事设计未完成，请先建立主线骨架。'] : []),
+      ...generationBlockers,
+    ],
+    [currentNovel?.settingsJson, generationBlockers],
+  )
   const worldRules = useMemo(
     () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
     [currentNovel?.genreName, currentNovel?.worldRulesJson],
@@ -792,31 +799,25 @@ export default function StoryThreadsPage({ novelId }: Props) {
         </>
       )}
     >
-      <div className="story-threads__status-rail" data-story-threads-focus="list">
-        <span className="story-threads__status-dot" aria-hidden="true" />
-        <strong>当前任务：定位下一条要推进的线程</strong>
-        <span>{editorDirty ? '编辑抽屉有未保存修改。' : keyword || threadTypeFilter || statusFilter ? '当前列表已按筛选条件收窄。' : '拖拽排序只改变推进顺序，不改变线程内容。'}</span>
-      </div>
-      {generationBlockers.length > 0 ? (
+      {threadPrerequisiteIssues.length > 0 || editorDirty || keyword || threadTypeFilter || statusFilter ? (
         <Alert
-          type="warning"
+          type={threadPrerequisiteIssues.length > 0 || editorDirty ? 'warning' : 'info'}
           showIcon
-          message="当前还不适合批量生成故事线程"
+          message={threadPrerequisiteIssues.length > 0 ? '故事线程的生成前置条件待补齐' : editorDirty ? '编辑抽屉有未保存修改' : '当前列表已按筛选条件收窄'}
           description={(
-            <div>
-              {generationBlockers.map((blocker) => (
+            <div className="story-threads__status-description">
+              {threadPrerequisiteIssues.map((blocker) => (
                 <div key={blocker}>{blocker}</div>
               ))}
+              {editorDirty ? <div>保存后再离开当前线程，避免编辑内容丢失。</div> : null}
+              <div>拖拽排序只改变推进顺序，不改变线程内容。</div>
             </div>
           )}
-        />
-      ) : null}
-
-      {!currentNovel?.settingsJson ? (
-        <Alert
-          type="info"
-          showIcon
-          message="故事设计未完成"
+          action={threadPrerequisiteIssues.length > 0 ? (
+            <Button size="small" type="link" icon={<ArrowRightOutlined />} onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>
+              去故事设计
+            </Button>
+          ) : null}
         />
       ) : null}
 

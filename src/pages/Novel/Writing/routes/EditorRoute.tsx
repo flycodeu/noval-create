@@ -98,7 +98,7 @@ function PipelineSnapshot({ model }: { model: ChapterInspectorViewModel }) {
 
 function DiagnosticCards({ model, actions }: Pick<Props, 'model' | 'actions'>) {
   return (
-    <InsightCard title="更多诊断与回写" eyebrow="上下文 / 资产 / 伏笔 / 世界规则 · 按需展开" tone="soft" collapsible>
+    <InsightCard title="更多诊断与回写" eyebrow="上下文 / 资产 / 伏笔 / 世界规则 · 查看诊断" tone="soft" collapsible>
       <div className="novel-writing-shell__insight-stack novel-writing-shell__insight-stack--nested">
         {model.contextPreviewError ? <Alert type="error" showIcon message="章节上下文预览不可用" description={model.contextPreviewError} /> : null}
         {model.contextPreview?.contractReady === false ? (

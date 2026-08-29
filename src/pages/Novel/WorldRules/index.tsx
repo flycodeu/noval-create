@@ -70,6 +70,7 @@ const ENTITY_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
 
 const CALENDAR_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'gregorian', label: '公历' },
+  { value: 'modern-date', label: '现代日期' },
   { value: 'regnal', label: '年号 / 王朝纪年' },
   { value: 'relative-disaster', label: '灾变相对时间' },
   { value: 'custom-era', label: '自定义纪元' },
@@ -147,6 +148,28 @@ function getProgressType(progress: WorldRulesGenerationProgressEvent | null): 'i
   if (progress.status === 'failed') return 'error'
   if (progress.status === 'success') return 'success'
   return 'info'
+}
+
+function autoTaskStatusLabel(status?: Task['status']): string {
+  switch (status) {
+    case 'pending': return '等待执行'
+    case 'running': return '执行中'
+    case 'success': return '已完成'
+    case 'failed': return '执行失败'
+    case 'cancelled': return '任务已取消'
+    case 'cancel_requested': return '正在取消'
+    case 'paused': return '已暂停'
+    case 'blocked': return '已阻塞'
+    default: return '未运行'
+  }
+}
+
+function autoTaskRecoveryHint(status?: Task['status']): string {
+  if (status === 'failed') return '保留已完成分区，可查看失败分区后重试。'
+  if (status === 'cancelled') return '任务已取消，可从当前进度继续生成。'
+  if (status === 'paused') return '任务已暂停，可继续生成或查看失败分区。'
+  if (status === 'blocked') return '请先补齐当前分区的前置资料，再重新执行。'
+  return ''
 }
 
 export default function WorldRules({ novelId }: Props) {
@@ -995,33 +1018,42 @@ export default function WorldRules({ novelId }: Props) {
       ) : (
         <div className="novel-pill novel-world-rules-page__status-pill">{tokenCount > 0 ? `当前规则体量约 ${tokenCount}` : '当前规则体量尚未形成'}</div>
       )}
-      <WorkspacePanel title="后台连续生成" extra={autoTaskActions}>
-        <div className="novel-world-rules-page__progress-copy">
-          <Alert
-            type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
-            showIcon
-            message={autoTask ? `状态：${autoTask.status || 'idle'}` : '当前没有后台任务'}
-            description={autoTask
-              ? [autoStatus.currentSectionLabel ? `当前分区：${autoStatus.currentSectionLabel}` : '', `已完成 ${autoStatus.completedSectionCount}/${autoStatus.totalSections || WORLD_RULE_SECTION_ORDER.length}`, autoStatus.lastError || autoStatus.message || '']
-                .filter(Boolean)
-                .join(' · ')
-              : undefined}
-          />
-          {autoTask ? <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} /> : null}
-          {autoTask ? (
+      {autoTask ? (
+        <WorkspacePanel title="后台连续生成" extra={autoTaskActions}>
+          <div className="novel-world-rules-page__progress-copy">
+            <Alert
+              type={autoTask.status === 'failed' ? 'error' : autoTask.status === 'paused' ? 'warning' : autoTask.status === 'success' ? 'success' : 'info'}
+              showIcon
+              message={'状态：' + autoTaskStatusLabel(autoTask.status)}
+              description={[
+                autoStatus.currentSectionLabel ? '当前分区：' + autoStatus.currentSectionLabel : '',
+                '已完成 ' + autoStatus.completedSectionCount + '/' + (autoStatus.totalSections || WORLD_RULE_SECTION_ORDER.length),
+                autoStatus.lastError || autoStatus.message || '',
+                autoTaskRecoveryHint(autoTask.status),
+              ].filter(Boolean).join(' · ')}
+            />
+            <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} />
             <details className="novel-world-rules-page__auto-details" open={autoTask.status === 'failed' || autoTask.status === 'paused'}>
               <summary>查看运行明细</summary>
               {autoStatus.failedSections.length > 0 ? (
                 <div className="novel-note-list">
                   {autoStatus.failedSections.map((item) => (
-                    <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>
+                    <div key={item.key} className="novel-note-list__item">{item.label + '：' + item.error}</div>
                   ))}
                 </div>
               ) : <div className="novel-world-rules-page__auto-note">暂无失败分区，关闭明细不会停止后台任务。</div>}
             </details>
-          ) : null}
+          </div>
+        </WorkspacePanel>
+      ) : (
+        <div className="novel-world-rules-page__auto-idle-row">
+          <div>
+            <span className="novel-world-rules-page__auto-idle-kicker">后台连续生成</span>
+            <strong>当前没有后台任务</strong>
+          </div>
+          {autoTaskActions}
         </div>
-      </WorkspacePanel>
+      )}
       <WorkspacePanel title="分区编辑器" extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}>
         <AiPatchEditor
           target={{ type: 'world_rules_section', id: novelId, novelId, sectionKey: activeTab }}

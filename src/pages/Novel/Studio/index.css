@@ -108,6 +108,11 @@
   font-size: 12px;
 }
 
+.studio-page__primary-hint {
+  color: var(--studio-copy);
+  font-size: 11px;
+}
+
 .studio-page__blockers,
 .studio-page__entrances {
   padding: 22px 24px 24px;
@@ -126,6 +131,25 @@
 .studio-page__blocker-list .novel-blocker-card {
   border-radius: 14px;
   box-shadow: none;
+}
+
+.studio-page__deferred-blockers {
+  margin-top: 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--studio-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--studio-surface) 72%, transparent);
+}
+
+.studio-page__deferred-blockers > summary {
+  color: var(--studio-copy);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.studio-page__blocker-list--deferred {
+  margin-top: 10px;
 }
 
 .studio-page__entrance-list {

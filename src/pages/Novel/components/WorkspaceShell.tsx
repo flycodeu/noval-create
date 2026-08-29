@@ -204,8 +204,7 @@ export function WorkspacePanel({
   bodyClassName?: string
   children: React.ReactNode
 }) {
-  void description
-  void descriptionMode
+  const hasDescription = description !== undefined && description !== null && description !== ''
 
   return (
     <section
@@ -216,11 +215,29 @@ export function WorkspacePanel({
         className,
       )}
     >
-      {title || extra ? (
+      {title || hasDescription || extra ? (
         <div className="novel-panel__header">
           {title ? (
             <div className="novel-panel__copy">
               <h2 className="novel-panel__title">{title}</h2>
+              {hasDescription && descriptionMode === 'disclosure' ? (
+                <details className="novel-panel__description-disclosure">
+                  <summary>查看说明</summary>
+                  <div className="novel-panel__desc">{description}</div>
+                </details>
+              ) : null}
+              {hasDescription && descriptionMode === 'inline' ? (
+                <div className="novel-panel__desc novel-panel__desc--inline">{description}</div>
+              ) : null}
+            </div>
+          ) : hasDescription ? (
+            <div className="novel-panel__copy">
+              {descriptionMode === 'disclosure' ? (
+                <details className="novel-panel__description-disclosure">
+                  <summary>查看说明</summary>
+                  <div className="novel-panel__desc">{description}</div>
+                </details>
+              ) : <div className="novel-panel__desc novel-panel__desc--inline">{description}</div>}
             </div>
           ) : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
@@ -244,7 +261,7 @@ export function WorkspaceStepGuide({
     <details className="novel-step-guide">
       <summary className="novel-step-guide__head">
         <div className="novel-step-guide__head-copy">
-          <div className="novel-step-guide__eyebrow">按需展开</div>
+          <span className="novel-step-guide__eyebrow">流程提示</span>
           <strong>{title}</strong>
         </div>
         <span className="novel-step-guide__progress">{`${completedCount}/${steps.length}`}</span>

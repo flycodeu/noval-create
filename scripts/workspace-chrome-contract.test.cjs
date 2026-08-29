@@ -97,6 +97,7 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/WritebackCenter/index.tsx',
   'src/pages/Novel/BatchWorkbench/index.tsx',
   'src/pages/Novel/QualityDashboard/index.tsx',
+  'src/pages/Novel/Timeline/index.tsx',
   'src/pages/Novel/Contracts/index.tsx',
   'src/pages/Novel/Guide/index.tsx',
   'src/pages/Novel/RevisionCenter/index.tsx',

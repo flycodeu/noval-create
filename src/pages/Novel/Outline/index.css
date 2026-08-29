@@ -47,7 +47,7 @@
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 2;
 }
 
 .novel-outline-page .novel-outline-arc__actions {
@@ -411,6 +411,11 @@
 
 .novel-outline-page__current-panel {
   min-width: 0;
+}
+
+.novel-outline-page__workspace > [data-outline-current-detail] .novel-empty {
+  min-height: 128px;
+  padding: 28px 16px;
 }
 
 @media (max-width: 1040px) {

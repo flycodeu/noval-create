@@ -458,12 +458,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
       value: character.id,
       label: character.fullName + (character.roleType ? ' · ' + getRoleMeta(character.roleType).label : ''),
     })), [relationCharacterOptions, selectedCharacter?.id])
-  const selectedLead = selectedCharacter
-    ? selectedCharacter.innerConflict || selectedCharacter.goals || selectedCharacter.firstImpression || selectedCharacter.background || '先把这个角色的动机、关系和资源绑紧。'
-    : creating
-      ? '先定角色类型、身份位置和物品关联，再补心理和关系。'
-      : '先从左侧选择一个角色，或直接新建。'
-
   const relationStats = useMemo(() => {
     const counts = new Map<string, number>()
     graphData.relations.forEach((relation) => {
@@ -1267,9 +1261,9 @@ export default function CharacterWorkspace({ novelId }: Props) {
               sticky
               extra={(
                 <Space wrap>
-              <AIGenerateButton
-                novelId={novelId}
-                label={selectedCharacter ? 'AI 补全·当前人物' : 'AI 生成·人物草稿'}
+                  <AIGenerateButton
+                    novelId={novelId}
+                    label={selectedCharacter ? 'AI 补全·当前人物' : 'AI 生成·人物草稿'}
                   isJson
                   disabled={!selectedCharacter && !creating}
                   buildMessages={() => {
@@ -1336,7 +1330,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                       appearance: typeof draft.appearance === 'string' ? draft.appearance : values.appearance,
                     })
                   }}
-                />
+                  />
                   {selectedCharacter ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 修复·重做人物</Button> : null}
                   {selectedCharacter ? <Button icon={<ApartmentOutlined />} onClick={() => { void openRelationModal() }}>编辑关系</Button> : null}
                   {selectedCharacter ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
@@ -1346,19 +1340,18 @@ export default function CharacterWorkspace({ novelId }: Props) {
             >
               {!selectedCharacter && !creating && !loading ? <div className="novel-empty">从左侧选中一个角色后再编辑。</div> : (
                 <>
-              <div className="novel-characters__editor-intro">
-                <div className="novel-characters__editor-intro-copy">
-                  <div className="novel-kicker">{selectedCharacter?.recordStatus === 'draft' ? '待确认草稿' : selectedCharacter ? '当前人物' : '新建档案'}</div>
-                  <strong>{selectedCharacter ? selectedCharacter.fullName : '从身份、目标和资源开始'}</strong>
-                  <span>{selectedLead}</span>
+                  <div className="novel-characters__editor-intro">
+                  <div className="novel-characters__editor-intro-copy">
+                    <div className="novel-kicker">{selectedCharacter?.recordStatus === 'draft' ? '待确认草稿' : selectedCharacter ? '当前人物' : '新建档案'}</div>
+                    <strong>{selectedCharacter ? selectedCharacter.fullName : '从身份、目标和资源开始'}</strong>
+                  </div>
+                  <div className="novel-characters__editor-tags">
+                    {selectedCharacter ? <Tag color={getRoleMeta(selectedCharacter.roleType).color}>{getRoleMeta(selectedCharacter.roleType).label}</Tag> : null}
+                    {selectedCharacter?.recordStatus === 'draft' ? <Tag color="processing">来自自动发现</Tag> : null}
+                    {detailContext.relatedItems.length > 0 ? <Tag icon={<AppstoreOutlined />}>{detailContext.relatedItems.length} 个关联物品</Tag> : null}
+                    {detailContext.relatedRelations.length > 0 ? <Tag icon={<ApartmentOutlined />}>{detailContext.relatedRelations.length} 条关系</Tag> : null}
+                  </div>
                 </div>
-                <div className="novel-characters__editor-tags">
-                  {selectedCharacter ? <Tag color={getRoleMeta(selectedCharacter.roleType).color}>{getRoleMeta(selectedCharacter.roleType).label}</Tag> : null}
-                  {selectedCharacter?.recordStatus === 'draft' ? <Tag color="processing">来自自动发现</Tag> : null}
-                  {detailContext.relatedItems.length > 0 ? <Tag icon={<AppstoreOutlined />}>{detailContext.relatedItems.length} 个关联物品</Tag> : null}
-                  {detailContext.relatedRelations.length > 0 ? <Tag icon={<ApartmentOutlined />}>{detailContext.relatedRelations.length} 条关系</Tag> : null}
-                </div>
-              </div>
 
               {selectedCharacter?.recordStatus === 'draft' && sourceContexts.length > 0 ? (
                 <Alert

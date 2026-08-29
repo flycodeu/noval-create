@@ -41,6 +41,11 @@
   color: var(--workspace-ink);
 }
 
+.story-threads__status-description {
+  display: grid;
+  gap: 4px;
+}
+
 .story-threads__status-dot {
   width: 8px;
   height: 8px;

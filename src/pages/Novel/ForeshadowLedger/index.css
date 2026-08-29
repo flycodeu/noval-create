@@ -75,11 +75,25 @@
 
 .novel-foreshadow-ledger__list-scroll {
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .novel-foreshadow-ledger__list-scroll .ant-table-wrapper {
-  min-width: 860px;
+  min-width: 0;
+}
+
+.novel-foreshadow-ledger__list-scroll .ant-table {
+  table-layout: fixed;
+}
+
+.novel-foreshadow-ledger__list-scroll .ant-table-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.novel-foreshadow-ledger__list-scroll .ant-space {
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .novel-foreshadow-ledger__list-scroll .ant-table-tbody > tr {
@@ -118,6 +132,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.novel-foreshadow-ledger__detail-heading > .ant-tag {
+  max-width: 42%;
+  white-space: normal;
+  text-align: right;
 }
 
 .novel-foreshadow-ledger__detail-heading h3 {
@@ -216,5 +236,9 @@
 
   .novel-foreshadow-ledger__detail-facts {
     grid-template-columns: 1fr;
+  }
+
+  .novel-foreshadow-ledger__list-scroll .ant-table-cell {
+    padding-inline: 6px;
   }
 }
