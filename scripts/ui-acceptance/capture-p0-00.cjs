@@ -34,7 +34,8 @@ const PROJECT_ROUTES = [
   ['theme-voice', '主题文风', 'src/pages/Novel/ThemeVoice/index.tsx', '设定表单', '约束主题、情绪、视角与对白'],
   ['style-lab', '文风实验室', 'src/pages/Novel/StyleLab/index.tsx', '对照实验', '比较风格指纹与试写结果'],
   ['world-rules', '世界规则', 'src/pages/Novel/WorldRules/index.tsx', '规则工作台', '维护世界制度、能力边界和口径'],
-  ['map', '地点场景', 'src/pages/Novel/MapExplorer/index.tsx', '树图工作台', '管理地点层级、关系和事件锚点'],
+  ['narrative-board', '小说地图', 'src/pages/Novel/NarrativeBoard/index.tsx', '空间叙事工作台', '按区域查看人物、事件、路线和生成上下文'],
+  ['map', '地点资料', 'src/pages/Novel/MapExplorer/index.tsx', '树图工作台', '维护地点层级、关系和增量生成'],
   ['items', '物品线索', 'src/pages/Novel/ItemsWorkspace/index.tsx', '资产目录', '管理道具、资源流通与证据'],
   ['glossary', '设定词典', 'src/pages/Novel/Glossary/index.tsx', '术语目录', '统一名词、术语和标准口径'],
   ['scene-templates', '场景模板', 'src/pages/Novel/SceneTemplates/index.tsx', '模板目录', '维护可复用场景结构和检查项'],
@@ -98,10 +99,11 @@ function verifyRouteInventorySources() {
   const missingGlobals = GLOBAL_ROUTES.filter(([, routePath]) => !appSource.includes(`path=\"${routePath}`)).map(([key]) => key)
   const definitionBlock = workspaceSource.split('export const WORKSPACE_MODULE_DEFINITIONS')[1]?.split('const GROUP_ROUTE_MAP')[0] || ''
   const sourceKeys = [...definitionBlock.matchAll(/\{\s*key:\s*'([^']+)'/g)].map((match) => match[1])
-  const expectedProjectKeys = PROJECT_ROUTES.filter(([key]) => key !== 'guide').map(([key]) => key)
+  const expectedProjectKeys = PROJECT_ROUTES.filter(([key]) => key !== 'guide' && key !== 'narrative-board').map(([key]) => key)
   const missingProjectKeys = expectedProjectKeys.filter((key) => !sourceKeys.includes(key))
   const extraProjectKeys = sourceKeys.filter((key) => !expectedProjectKeys.includes(key))
-  if (ROUTES.length !== 37 || missingGlobals.length || missingProjectKeys.length || extraProjectKeys.length) {
+  const narrativeBoardRegistered = workspaceSource.includes("'narrative-board'")
+  if (ROUTES.length !== 38 || !narrativeBoardRegistered || missingGlobals.length || missingProjectKeys.length || extraProjectKeys.length) {
     throw new Error(`路由清单与源码不一致：count=${ROUTES.length}, missingGlobals=${missingGlobals.join(',')}, missingProject=${missingProjectKeys.join(',')}, extraProject=${extraProjectKeys.join(',')}`)
   }
   return {

@@ -296,10 +296,17 @@ export default function NovelRouter() {
     const stored = readBrowserStorage(WORKSPACE_RECENT_PAGE_STORAGE_KEY)
     return stored && stored !== currentNavKey ? stored : null
   }, [currentNavKey])
-  const orderedPages = useMemo<ProWorkspaceKey[]>(
-    () => ['guide', ...workspaceSnapshot.modules.map((item) => item.key)],
-    [workspaceSnapshot.modules],
-  )
+  const orderedPages = useMemo<ProWorkspaceKey[]>(() => {
+    const moduleKeys = workspaceSnapshot.modules.map((item) => item.key)
+    const mapIndex = moduleKeys.indexOf('map')
+    if (mapIndex < 0) return ['guide', 'narrative-board', ...moduleKeys]
+    return [
+      'guide',
+      ...moduleKeys.slice(0, mapIndex),
+      'narrative-board',
+      ...moduleKeys.slice(mapIndex),
+    ]
+  }, [workspaceSnapshot.modules])
   const currentPageIndex = useMemo(
     () => orderedPages.findIndex((item) => item === currentPage),
     [currentPage, orderedPages],
@@ -317,8 +324,8 @@ export default function NovelRouter() {
     if (pageKey === 'narrative-board') {
       return {
         key: pageKey,
-        label: '叙事看板',
-        summary: '把地点、人物、剧情进度和上下文放在同一张战略桌上。',
+        label: '小说地图',
+        summary: '按区域查看人物、事件、路线和生成上下文。',
         route: pageKey,
       }
     }
@@ -699,8 +706,8 @@ export default function NovelRouter() {
           id: `map-${node.id}`,
           type: 'map' as const,
           label: node.name,
-          description: node.description || node.plotRelevance || '跳到地图页',
-          route: buildWorkspaceRoute(novelId, `map?nodeId=${node.id}`),
+          description: node.description || node.plotRelevance || '在小说地图中定位',
+          route: buildWorkspaceRoute(novelId, `narrative-board?mapNodeId=${node.id}`),
         })),
       ]
 
@@ -1165,11 +1172,6 @@ export default function NovelRouter() {
         showWindowControls={showWindowControls}
         moreMenu={{
           items: [
-            {
-              key: 'narrative-board',
-              label: '叙事看板',
-              onClick: () => navigateWithinWorkspace('narrative-board'),
-            },
             {
               key: 'settings',
               label: '设置',

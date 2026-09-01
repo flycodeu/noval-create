@@ -14,7 +14,6 @@ import {
   message,
 } from 'antd'
 import {
-  ApartmentOutlined,
   ArrowLeftOutlined,
   ArrowRightOutlined,
   BranchesOutlined,
@@ -42,7 +41,6 @@ import type {
   CreativeStageContext,
   Faction,
   MapRelation,
-  MapBoardLayoutNode,
   MapBoardViewport,
   NarrativeBoardSnapshot,
   QualityDashboardData,
@@ -77,7 +75,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import '../Characters/character-workspace.css'
@@ -116,7 +113,6 @@ interface BoardData {
   mapTotal: number
   characterTotal: number
   bindings: CharacterLocationBinding[]
-  mapLayout: MapBoardLayoutNode[]
   viewport: MapBoardViewport | null
   unresolvedAnchorCount: number
 }
@@ -130,9 +126,11 @@ interface NarrativeBoardViewModel {
   scopeSummary: string
   stageId?: number
   selectedMapId?: number
+  mapViewNodeId?: number
   selectedThreadId?: number
   stageFilteredTree: WorldMapItem[]
   mapCanvasNodes: WorldMapItem[]
+  mapViewNode: WorldMapItem | null
   mapPath: WorldMapItem[]
   selectedMap: WorldMapItem | null
   flatMap: WorldMapItem[]
@@ -171,7 +169,6 @@ const EMPTY_DATA: BoardData = {
   mapTotal: 0,
   characterTotal: 0,
   bindings: [],
-  mapLayout: [],
   viewport: null,
   unresolvedAnchorCount: 0,
 }
@@ -394,10 +391,6 @@ function aiRateMetricTone(rate?: AiRatePoint): 'warm' | 'cool' {
   return rate && rate.rate >= 35 ? 'warm' : 'cool'
 }
 
-function guideStepStatus(active: boolean, completed: boolean): 'todo' | 'focus' | 'done' {
-  return completed ? 'done' : active ? 'focus' : 'todo'
-}
-
 export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { notifyWorkspaceMutation } = useNovelWorkspaceActions()
@@ -424,6 +417,7 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
       ...route.scope,
       novelId,
       keyword: searchParams.get('keyword') || undefined,
+      layoutKey: 'atlas-v1',
       strictAnchors: true,
     }), null as NarrativeBoardSnapshot | null)
     if (requestIdRef.current !== requestId) return
@@ -451,7 +445,6 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
       mapTotal: Number(snapshot.totals.map || flattenWorldMapTree(snapshot.tree).length),
       characterTotal: Number(snapshot.totals.characters || snapshot.characters.length),
       bindings: snapshot.bindings,
-      mapLayout: snapshot.mapLayout,
       viewport: snapshot.viewport,
       unresolvedAnchorCount: Number(snapshot.totals.unresolvedAnchors || 0),
     })
@@ -480,12 +473,17 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
   const mapTree = useMemo(() => filterMapTreeByKeyword(stageFilteredTree, searchParams.get('keyword') || ''), [searchParams, stageFilteredTree])
   const flatMap = useMemo(() => flattenWorldMapTree(stageFilteredTree), [stageFilteredTree])
   const selectedMap = useMemo(() => findWorldMapNode(stageFilteredTree, selectedMapId), [selectedMapId, stageFilteredTree])
-  const mapPath = useMemo(() => getWorldMapPath(stageFilteredTree, selectedMapId), [selectedMapId, stageFilteredTree])
+  const mapViewNode = useMemo(() => {
+    const explicit = findWorldMapNode(mapTree, route.mapViewNodeId)
+    if (explicit) return explicit
+    return selectedMap?.parentId ? findWorldMapNode(mapTree, selectedMap.parentId) : null
+  }, [mapTree, route.mapViewNodeId, selectedMap])
+  const mapPath = useMemo(() => getWorldMapPath(mapTree, mapViewNode?.id), [mapTree, mapViewNode])
   const mapCanvasNodes = useMemo(() => {
-    if (selectedMap?.children?.length) return selectedMap.children
-    if (selectedMap) return [selectedMap]
+    if (mapViewNode?.children?.length) return mapViewNode.children
+    if (mapViewNode) return [mapViewNode]
     return mapTree
-  }, [mapTree, selectedMap])
+  }, [mapTree, mapViewNode])
 
   const chapterNumbers = useMemo(() => chapterNumMap(data.chapters), [data.chapters])
   const effectiveScope = useMemo<NarrativeScope>(() => ({
@@ -538,10 +536,18 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
     updateRoute('mapNodeId', node?.id || null)
   }, [updateRoute])
 
+  const openMapLevel = useCallback((node: WorldMapItem | null) => {
+    setSearchParams((current) => {
+      let next = setNarrativeBoardParam(current.toString(), 'mapViewNodeId', node?.id || null)
+      next = setNarrativeBoardParam(next.toString(), 'mapNodeId', node?.id || null)
+      next = setNarrativeBoardParam(next.toString(), 'mode', null)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
   const enterMapNode = useCallback((node: WorldMapItem) => {
-    selectMap(node)
-    setMode('map')
-  }, [selectMap, setMode])
+    openMapLevel(node)
+  }, [openMapLevel])
 
   const selectCharacter = useCallback((characterId: number | null) => {
     updateRoute('focusCharacterId', characterId)
@@ -597,9 +603,11 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
     scopeSummary,
     stageId,
     selectedMapId,
+    mapViewNodeId: mapViewNode?.id,
     selectedThreadId,
     stageFilteredTree,
     mapCanvasNodes,
+    mapViewNode,
     mapPath,
     selectedMap,
     flatMap,
@@ -624,19 +632,26 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
     <WorkspacePage
       chrome="shared"
       actionContract={{
-        primary: { key: 'refresh', label: '刷新看板', icon: <ReloadOutlined />, loading: refreshing, onClick: () => void refresh(true) },
+        primary: {
+          key: 'expand-map',
+          label: '管理 / 扩展地点',
+          icon: <BranchesOutlined />,
+          onClick: () => {
+            const query = selectedMap ? `?nodeId=${selectedMap.id}` : ''
+            window.location.hash = buildWorkspaceRoute(novelId, `map${query}`)
+          },
+        },
         secondary: [
-          { key: 'map', label: '地点结构', icon: <CompassOutlined />, onClick: () => { window.location.hash = buildWorkspaceRoute(novelId, 'map') } },
+          { key: 'refresh', label: '刷新', icon: <ReloadOutlined />, loading: refreshing, onClick: () => void refresh(true) },
           { key: 'characters', label: '人物档案', icon: <TeamOutlined />, onClick: () => { window.location.hash = buildWorkspaceRoute(novelId, 'characters') } },
         ],
       }}
-      eyebrow="叙事战略桌"
-      title="叙事看板"
+      eyebrow="空间叙事"
+      title="小说地图"
       layout="wide"
       scrollMode="document"
       heroVariant="compact"
       metrics={<NarrativeBoardMetrics data={data} latestAiRate={latestAiRate} />}
-      guide={<NarrativeBoardGuide mode={route.mode} hasScope={Boolean(stageId || effectiveScope.chapterStart || selectedThreadId)} />}
       bodyClassName="narrative-board-page__body"
       className="narrative-board-page"
     >
@@ -651,6 +666,7 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
         setLayout={setLayout}
         selectMap={selectMap}
         enterMapNode={enterMapNode}
+        openMapLevel={openMapLevel}
         selectCharacter={selectCharacter}
         openMapEditor={openMapEditor}
       />
@@ -670,6 +686,7 @@ interface NarrativeBoardContentProps {
   setLayout: (layout: CharacterBoardLayout) => void
   selectMap: (node: WorldMapItem | null) => void
   enterMapNode: (node: WorldMapItem) => void
+  openMapLevel: (node: WorldMapItem | null) => void
   selectCharacter: (characterId: number | null) => void
   openMapEditor: () => void
 }
@@ -685,6 +702,7 @@ function NarrativeBoardContent({
   setLayout,
   selectMap,
   enterMapNode,
+  openMapLevel,
   selectCharacter,
   openMapEditor,
 }: NarrativeBoardContentProps) {
@@ -700,12 +718,12 @@ function NarrativeBoardContent({
         novelId={novelId}
         selectMap={selectMap}
         enterMapNode={enterMapNode}
+        openMapLevel={openMapLevel}
         selectCharacter={selectCharacter}
         openMapEditor={openMapEditor}
         updateRoute={updateRoute}
         setMode={setMode}
       />
-      <NarrativeBoardFooter model={model} />
     </div>
   )
 }
@@ -717,15 +735,6 @@ function NarrativeBoardMetrics({ data, latestAiRate }: { data: BoardData; latest
     <WorkspaceMetric label="关系" value={`${data.characterGraph.relations.length}`} />
     <WorkspaceMetric label="AI 味" value={aiRateMetricValue(latestAiRate)} tone={aiRateMetricTone(latestAiRate)} />
   </>
-}
-
-function NarrativeBoardGuide({ mode, hasScope }: { mode: NarrativeBoardMode; hasScope: boolean }) {
-  return <WorkspaceStepGuide title="看板使用顺序" steps={[
-    { title: '锁定范围', description: '选择当前创作阶段、章节窗口或剧情线程。', status: guideStepStatus(hasScope, false) },
-    { title: '看空间', description: '点击区域查看人物、事件和任务，再进入下一级地点。', status: guideStepStatus(mode === 'map', false) },
-    { title: '看人物', description: '切换关系、阵营或地区演员表，聚焦一跳关系。', status: guideStepStatus(mode === 'characters', false) },
-    { title: '看进度', description: '结合事件、任务、上下文和 AI 味趋势决定下一步。', status: guideStepStatus(mode === 'progress', false) },
-  ]} />
 }
 
 function MapEditModal({
@@ -824,7 +833,7 @@ function NarrativeBoardToolbar({
   return (
     <section className="narrative-board__toolbar" aria-label="看板视图">
       <Radio.Group value={model.route.mode} onChange={(event) => setMode(event.target.value)} optionType="button" buttonStyle="solid" size="small">
-        <Radio.Button value="map"><CompassOutlined /> 空间地图</Radio.Button>
+        <Radio.Button value="map"><CompassOutlined /> 小说地图</Radio.Button>
         <Radio.Button value="characters"><TeamOutlined /> 人物关系</Radio.Button>
         <Radio.Button value="progress"><BranchesOutlined /> 剧情进度</Radio.Button>
       </Radio.Group>
@@ -845,6 +854,7 @@ function NarrativeBoardWorkbench({
   novelId,
   selectMap,
   enterMapNode,
+  openMapLevel,
   selectCharacter,
   openMapEditor,
   updateRoute,
@@ -854,6 +864,7 @@ function NarrativeBoardWorkbench({
   novelId: number
   selectMap: (node: WorldMapItem | null) => void
   enterMapNode: (node: WorldMapItem) => void
+  openMapLevel: (node: WorldMapItem | null) => void
   selectCharacter: (characterId: number | null) => void
   openMapEditor: () => void
   updateRoute: NarrativeBoardContentProps['updateRoute']
@@ -862,7 +873,7 @@ function NarrativeBoardWorkbench({
   return (
     <div className="narrative-board__workbench">
       <main className="narrative-board__canvas" aria-label={model.route.mode === 'map' ? '空间剧情地图' : model.route.mode === 'characters' ? '人物关系图谱' : '剧情进度'}>
-        <NarrativeBoardCanvas model={model} selectMap={selectMap} enterMapNode={enterMapNode} selectCharacter={selectCharacter} updateRoute={updateRoute} setMode={setMode} />
+        <NarrativeBoardCanvas model={model} selectMap={selectMap} enterMapNode={enterMapNode} openMapLevel={openMapLevel} selectCharacter={selectCharacter} updateRoute={updateRoute} setMode={setMode} />
       </main>
       <aside className="narrative-board__inspector" aria-label="当前对象检查器">
         <NarrativeBoardInspector model={model} novelId={novelId} selectCharacter={selectCharacter} enterMapNode={enterMapNode} openMapEditor={openMapEditor} updateRoute={updateRoute} setMode={setMode} />
@@ -875,6 +886,7 @@ function NarrativeBoardCanvas({
   model,
   selectMap,
   enterMapNode,
+  openMapLevel,
   selectCharacter,
   updateRoute,
   setMode,
@@ -882,12 +894,13 @@ function NarrativeBoardCanvas({
   model: NarrativeBoardViewModel
   selectMap: (node: WorldMapItem | null) => void
   enterMapNode: (node: WorldMapItem) => void
+  openMapLevel: (node: WorldMapItem | null) => void
   selectCharacter: (characterId: number | null) => void
   updateRoute: NarrativeBoardContentProps['updateRoute']
   setMode: (mode: NarrativeBoardMode) => void
 }) {
   if (model.route.mode === 'map') {
-    return <MapBoard nodes={model.mapCanvasNodes} selectedId={model.selectedMapId} path={model.mapPath} mapRelations={model.data.mapRelations} allMapNodes={model.flatMap} events={model.visibleEvents} characters={model.visibleCharacters} bindings={model.data.bindings} layout={model.data.mapLayout} viewport={model.data.viewport} onSelect={selectMap} onEnter={enterMapNode} onBack={() => selectMap(model.selectedMap?.parentId ? findWorldMapNode(model.stageFilteredTree, model.selectedMap.parentId) : null)} />
+    return <MapBoard novelId={model.route.scope.novelId} nodes={model.mapCanvasNodes} selectedId={model.selectedMapId} path={model.mapPath} mapRelations={model.data.mapRelations} events={model.visibleEvents} characters={model.visibleCharacters} bindings={model.data.bindings} viewport={model.data.viewport} onSelect={selectMap} onEnter={enterMapNode} onOpenLevel={openMapLevel} onBack={() => openMapLevel(model.mapViewNode?.parentId ? findWorldMapNode(model.stageFilteredTree, model.mapViewNode.parentId) : null)} />
   }
   if (model.route.mode === 'characters') {
     return <CharacterBoard layout={model.route.layout} data={model.graphData} characters={model.visibleCharacters} flatMap={model.flatMap} events={model.visibleEvents} bindings={model.data.bindings} selectedCharacterId={model.selectedCharacter?.id || null} onSelect={selectCharacter} factionNameById={model.factionNameById} />
@@ -929,64 +942,35 @@ function NarrativeBoardInspector({
   return <ContextInspector contextStatus={model.data.contextStatus} quality={model.data.quality} contextVersion={model.contextVersion} />
 }
 
-function NarrativeBoardFooter({ model }: { model: NarrativeBoardViewModel }) {
-  const selectedMapEventCount = model.selectedMap
-    ? model.visibleEvents.filter((event) => event.locationMapId && getWorldMapDescendantIds(model.selectedMap as WorldMapItem).includes(event.locationMapId)).length
-    : 0
-  const copy = model.selectedMap
-    ? `当前地区「${model.selectedMap.name}」关联 ${model.selectedMapPeople.length} 人、${selectedMapEventCount} 个时间轴事件。`
-    : model.selectedCharacter
-      ? `当前人物「${model.selectedCharacter.fullName}」位于 ${model.selectedCharacterLocations.join('、') || '未绑定地区'}，关系网中有 ${model.selectedCharacterRelations.length} 条直接关系。`
-      : '点击地图区域或人物节点，右侧会显示可追溯的地点、事件、关系和任务。'
-
-  return (
-    <section className="narrative-board__footer-rail" aria-label="联动信息">
-      <div className="narrative-board__footer-title"><LinkOutlined /> 联动提示</div>
-      <div className="narrative-board__footer-copy">{copy}</div>
-      {model.data.stageContext?.health.hardBlockers.length ? <Tag color="error">阶段有 {model.data.stageContext.health.hardBlockers.length} 个阻塞</Tag> : null}
-      {model.data.contextStatus?.staleAssetCount ? <Tag color="warning">{model.data.contextStatus.staleAssetCount} 个资产待同步</Tag> : null}
-      {model.data.unresolvedAnchorCount > 0 ? <Tag color="warning">{model.data.unresolvedAnchorCount} 个事件锚点未解析，已从章节范围排除</Tag> : null}
-      {model.latestAiRate ? <Tag color={model.latestAiRate.rate >= 35 ? 'warning' : 'success'}>AI 味 {model.latestAiRate.rate}%{model.aiRateDelta ? ` · ${model.aiRateDelta > 0 ? '+' : ''}${model.aiRateDelta}pt` : ''}</Tag> : null}
-    </section>
-  )
-}
-
 function MapBoard({
+  novelId,
   nodes,
   selectedId,
   path,
   mapRelations,
-  allMapNodes,
   events,
   characters,
   bindings,
-  layout,
   viewport,
   onSelect,
   onEnter,
+  onOpenLevel,
   onBack,
 }: {
+  novelId: number
   nodes: WorldMapItem[]
   selectedId?: number
   path: WorldMapItem[]
   mapRelations: MapRelation[]
-  allMapNodes: WorldMapItem[]
   events: TimelineEvent[]
   characters: Character[]
   bindings: CharacterLocationBinding[]
-  layout: MapBoardLayoutNode[]
   viewport: MapBoardViewport | null
   onSelect: (node: WorldMapItem | null) => void
   onEnter: (node: WorldMapItem) => void
+  onOpenLevel: (node: WorldMapItem | null) => void
   onBack: () => void
 }) {
-  const nodeById = useMemo(() => new Map(allMapNodes.map((node) => [node.id, node])), [allMapNodes])
-  const visibleNodeIds = useMemo(() => new Set(allMapNodes.map((node) => node.id)), [allMapNodes])
-  const relationRows = useMemo(() => mapRelations
-    .filter((relation) => visibleNodeIds.has(relation.mapAId) && visibleNodeIds.has(relation.mapBId))
-    .filter((relation) => !selectedId || relation.mapAId === selectedId || relation.mapBId === selectedId)
-    .slice(0, 8), [mapRelations, selectedId, visibleNodeIds])
-
   return (
     <div className="narrative-map-board">
       <div className="narrative-map-board__head">
@@ -996,25 +980,18 @@ function MapBoard({
             {path.length > 0 ? path.map((item, index) => (
               <React.Fragment key={item.id}>
                 {index > 0 ? <span>/</span> : null}
-                <button type="button" onClick={() => onSelect(item)}>{item.name}</button>
+                 <button type="button" onClick={() => onOpenLevel(item)}>{item.name}</button>
               </React.Fragment>
             )) : <span>世界总览</span>}
           </div>
         </div>
-        {selectedId ? <Button size="small" icon={<ArrowLeftOutlined />} onClick={onBack}>返回上层</Button> : null}
-      </div>
-      <div className="narrative-map-board__legend">
-        <span><i className="narrative-map-board__legend-dot narrative-map-board__legend-dot--region" />区域</span>
-        <span><i className="narrative-map-board__legend-dot narrative-map-board__legend-dot--event" />事件</span>
-        <span><i className="narrative-map-board__legend-dot narrative-map-board__legend-dot--people" />人物聚合</span>
-        <span className="narrative-map-board__legend-note">自动语义布局 · 点击查看检查器 · 双击进入区域</span>
+        {selectedId || path.length > 0 ? <Button size="small" icon={<ArrowLeftOutlined />} onClick={onBack}>返回上层</Button> : null}
       </div>
       <NarrativeMapCanvas
-        key={`${viewport?.layoutKey || 'default'}:${viewport?.updatedAt || ''}:${allMapNodes.map((item) => item.id).join(',')}`}
+        key={`${viewport?.layoutKey || 'atlas-v1'}:${viewport?.updatedAt || ''}:${nodes.map((item) => item.id).join(',')}`}
+        novelId={novelId}
         nodes={nodes}
-        allNodes={allMapNodes}
         mapRelations={mapRelations}
-        layout={layout}
         viewport={viewport}
         events={events}
         characters={characters}
@@ -1023,62 +1000,6 @@ function MapBoard({
         onSelect={onSelect}
         onEnter={onEnter}
       />
-      {nodes.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前范围没有可展示的地点" />
-      ) : (
-        <div className="narrative-map-board__canvas" role="list" aria-label="地点区域">
-          {nodes.map((node, index) => {
-            const descendantIds = new Set(getWorldMapDescendantIds(node))
-            const nodeEvents = events.filter((event) => event.locationMapId && descendantIds.has(event.locationMapId))
-            const nodePeople = getMapNodePeople(node, characters, events, bindings)
-            const relationCount = mapRelations.filter((relation) => visibleNodeIds.has(relation.mapAId) && visibleNodeIds.has(relation.mapBId) && (descendantIds.has(relation.mapAId) || descendantIds.has(relation.mapBId))).length
-            const tone = index % 4
-            return (
-              <button
-                key={node.id}
-                type="button"
-                role="listitem"
-                className={`narrative-map-region narrative-map-region--tone-${tone}${selectedId === node.id ? ' is-selected' : ''}`}
-                onClick={() => onSelect(node)}
-                onDoubleClick={() => onEnter(node)}
-                aria-label={`${node.name}，${node.children?.length || 0} 个下级地点`}
-              >
-                <span className="narrative-map-region__contour" aria-hidden="true" />
-                <span className="narrative-map-region__header">
-                  <span className="narrative-map-region__level">{node.locationType || node.nodeType || `L${node.level}`}</span>
-                  {node.dangerLevel ? <span className="narrative-map-region__danger">{node.dangerLevel}</span> : null}
-                </span>
-                <strong>{node.name}</strong>
-                <span className="narrative-map-region__summary">{truncate(node.plotRelevance || node.description || '尚未补充区域剧情作用。', 88)}</span>
-                <span className="narrative-map-region__stats">
-                  <span><ApartmentOutlined /> {node.children?.length || 0} 下级</span>
-                  <span><TeamOutlined /> {nodePeople.length} 人</span>
-                  <span><FieldTimeOutlined /> {nodeEvents.length} 事</span>
-                  <span><BranchesOutlined /> {relationCount} 线</span>
-                </span>
-                {node.children?.length ? (
-                  <span className="narrative-map-region__children">
-                    {node.children.slice(0, 4).map((child) => <span key={child.id}>{child.name}</span>)}
-                    {node.children.length > 4 ? <span>+{node.children.length - 4}</span> : null}
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-        </div>
-      )}
-      <div className="narrative-map-board__routes">
-        <div className="narrative-map-board__routes-head"><span><BranchesOutlined /> 当前范围的路线与边界</span><small>{relationRows.length} 条显示</small></div>
-        {relationRows.length === 0 ? <span className="narrative-board__muted">还没有地点关系，或当前区域没有直接连接。</span> : relationRows.map((relation) => (
-          <div key={relation.id} className="narrative-map-route">
-            <span>{nodeById.get(relation.mapAId)?.name || `地点#${relation.mapAId}`}</span>
-            <ArrowRightOutlined />
-            <span>{nodeById.get(relation.mapBId)?.name || `地点#${relation.mapBId}`}</span>
-            <Tag>{relation.relationLabel || relation.relationType || '关系'}</Tag>
-            {relation.travelHours ? <small>{relation.travelHours}h{relation.travelMode ? ` · ${relation.travelMode}` : ''}</small> : null}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
@@ -1315,7 +1236,7 @@ function MapInspector({
       <div className="narrative-inspector narrative-inspector--empty">
         <div className="narrative-inspector__empty-mark"><CompassOutlined /></div>
         <h2>选择一个地区</h2>
-        <p>地图卡片会把地点、在场人物、时间轴事件和待办任务串在一起。双击区域可以继续向下钻取。</p>
+        <p>区域块会把地点、在场人物、时间轴事件和待办任务串在一起。单击查看详情，双击有下级区域时继续向下钻取。</p>
         <Button type="link" icon={<LinkOutlined />} onClick={onOpenMapPage}>打开地点结构页</Button>
       </div>
     )

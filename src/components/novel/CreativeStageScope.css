@@ -1,10 +1,13 @@
 .creative-stage-scope {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  flex: 1 1 380px;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 8px;
   min-width: 0;
   min-height: 32px;
-  height: 32px;
+  height: auto;
   padding: 0 8px 0 10px;
   border: 1px solid rgba(189, 100, 63, 0.24);
   border-radius: 10px;
@@ -15,6 +18,8 @@
 .creative-stage-scope__label {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
   gap: 6px;
   color: #80604f;
   font-size: 12px;
@@ -22,8 +27,24 @@
 }
 
 .creative-stage-scope__select {
+  flex: 1 1 220px;
+  max-width: 100%;
   min-width: 0;
-  width: min(220px, 32vw);
+  width: auto;
+}
+
+.creative-stage-scope .ant-select-selector {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.creative-stage-scope .ant-tag {
+  min-width: 0;
+  max-width: 220px;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .creative-stage-scope .ant-select-selector,
@@ -34,14 +55,50 @@
 
 @media (max-width: 900px) {
   .creative-stage-scope {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
     width: 100%;
     height: auto;
     min-height: 32px;
+    padding: 7px 8px;
+  }
+
+  .creative-stage-scope__label {
+    grid-column: 1 / -1;
   }
 
   .creative-stage-scope__select {
-    flex: 1;
+    grid-column: 1;
+    width: 100%;
     min-width: 0;
-    width: auto;
+  }
+
+  .creative-stage-scope .ant-tag {
+    grid-column: 2;
+    max-width: min(220px, 30vw);
+  }
+
+  .creative-stage-scope > .ant-btn {
+    grid-column: 3;
+  }
+}
+
+@media (max-width: 520px) {
+  .creative-stage-scope {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .creative-stage-scope__select {
+    grid-column: 1 / -1;
+  }
+
+  .creative-stage-scope .ant-tag {
+    grid-column: 1;
+    max-width: 100%;
+  }
+
+  .creative-stage-scope > .ant-btn {
+    grid-column: 2;
   }
 }

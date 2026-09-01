@@ -2983,6 +2983,35 @@ export function runMigrations(sqlite: Database.Database) {
 
     backfillNarrativeBoardBindings(sqlite)
   })
+
+  runMigrationStep(sqlite, '0064_semantic_memory_source_range_repair', () => {
+    if (hasTable(sqlite, 'semantic_memory_entries')) {
+      ensureColumn(sqlite, 'semantic_memory_entries', 'source_chapter_start', 'INTEGER')
+      ensureColumn(sqlite, 'semantic_memory_entries', 'source_chapter_end', 'INTEGER')
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_semantic_memory_source_range
+          ON semantic_memory_entries(novel_id, source_type, source_chapter_start, source_chapter_end);
+      `)
+    }
+
+    if (hasTable(sqlite, 'semantic_memory_outbox')) {
+      sqlite.prepare(`
+        UPDATE semantic_memory_outbox
+        SET status = 'pending',
+            attempts = 0,
+            available_at = CURRENT_TIMESTAMP,
+            locked_at = NULL,
+            processed_at = NULL,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'dead_letter'
+          AND last_error IN (
+            'no such column: source_chapter_start',
+            'no such column: source_chapter_end'
+          )
+      `).run()
+    }
+  })
 }
 
 function parseLegacyIdTokens(raw: unknown): Array<number | string> {

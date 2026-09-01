@@ -17,6 +17,8 @@ const characterCss = read('src/pages/Novel/Characters/character-workspace.css')
 const factionCss = read('src/pages/Novel/Factions/index.css')
 const writingCss = read('src/pages/Novel/Writing/index.css')
 const projectTopbarCss = read('src/components/novel/layout/ProjectTopbar.css')
+const creativeStageScopeCss = read('src/components/novel/CreativeStageScope.css')
+const narrativeAtlasSource = read('src/pages/Novel/NarrativeBoard/NarrativeMapCanvas.tsx')
 const globalCss = read('src/styles/global.css')
 const qualityDashboardCss = read('src/pages/Novel/QualityDashboard/index.css')
 const foreshadowLedgerCss = read('src/pages/Novel/ForeshadowLedger/index.css')
@@ -63,6 +65,26 @@ assertPass(
 assertPass(
   'project topbar mode switch keeps its width on narrow screens',
   /@media \(max-width: 767px\)[\s\S]*?\.project-topbar__mode-switch\s*\{[\s\S]*?flex:\s*0 0 auto;/.test(projectTopbarCss),
+)
+assertPass(
+  'project topbar preserves a readable page title at compact desktop widths',
+  /@media \(max-width: 1080px\)[\s\S]*?\.project-topbar__title-group\s*\{[\s\S]*?display:\s*none;/.test(projectTopbarCss)
+    && /@media \(max-width: 1080px\)[\s\S]*?\.project-topbar__information-slot:not\(:empty\)\s*\{[\s\S]*?min-width:\s*72px;/.test(projectTopbarCss)
+    && /@media \(max-width: 1080px\)[\s\S]*?\.project-topbar__control--accent\.ant-btn\s*\{[\s\S]*?width:\s*var\(--project-topbar-control-size\);/.test(projectTopbarCss),
+)
+assertPass(
+  'generation scope separates label, selector and actions at compact widths',
+  creativeStageScopeCss.includes('@media (max-width: 900px)')
+    && creativeStageScopeCss.includes('grid-template-columns: minmax(0, 1fr) auto auto')
+    && creativeStageScopeCss.includes('@media (max-width: 520px)')
+    && creativeStageScopeCss.includes('grid-column: 1 / -1')
+    && creativeStageScopeCss.includes('overflow: hidden'),
+)
+assertPass(
+  'narrative board uses selectable SVG territories with separated map levels',
+  narrativeAtlasSource.includes('data-atlas-territory')
+    && narrativeAtlasSource.includes('onDoubleClick')
+    && narrativeAtlasSource.includes('layoutKey: ATLAS_LAYOUT_KEY'),
 )
 assertPass(
   'workspace child content can shrink below its min-content width',

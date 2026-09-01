@@ -986,7 +986,7 @@
 
 .novel-map-page__control-rail {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 10px 16px;
   min-width: 0;
@@ -995,6 +995,13 @@
   border-bottom: 1px solid rgba(122, 93, 52, 0.14);
   color: var(--workspace-ink-soft, #766b5f);
   font-size: 12px;
+}
+
+.novel-map-page__control-rail > span {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 
 .novel-map-page__control-rail > span + span {

@@ -511,6 +511,8 @@ export function saveMapViewport(input: MapBoardViewportInput): MapBoardViewport 
   const novelId = positiveId(input.novelId)
   if (!novelId) throw new Error('地图视口需要有效的 novelId')
   const sqlite = getSqlite()
+  const novel = sqlite.prepare('SELECT id FROM novels WHERE id = ? LIMIT 1').get(novelId) as { id: number } | undefined
+  if (!novel) throw new Error('地图视口对应的项目不存在')
   const key = normalizeLayoutKey(input.layoutKey)
   const version = getNovelContextVersion(novelId)
   const centerX = boundedNumber(input.centerX, 0, -100000, 100000)

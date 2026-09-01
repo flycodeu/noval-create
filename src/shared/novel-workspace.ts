@@ -156,7 +156,7 @@ export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
   { key: 'theme-voice', label: '主题文风', description: '主题、情绪核心、视角和对白边界。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'style-lab', label: '文风实验室', description: '风格指纹、题材声线与 A/B 试写对照。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: false },
   { key: 'world-rules', label: '世界规则', description: '时间制度、力量边界与世界口径。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
-  { key: 'map', label: '地点场景', description: '地点层级、活动半径与事件发生地。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
+  { key: 'map', label: '地点资料', description: '维护地点层级、类型、关系与增量生成。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
   { key: 'items', label: '物品线索', description: '资源流通、道具证据和争夺物。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
   { key: 'glossary', label: '设定词典', description: '名词、术语和标准口径。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: false },
   { key: 'scene-templates', label: '场景模板', description: '可复用场景结构与检查项。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: false },
@@ -1216,7 +1216,7 @@ function buildReadinessSummary(
       key: 'world-building',
       label: '世界地点完整度',
       score: findScore('world-rules', 'map', 'items', 'glossary', 'scene-templates'),
-      summary: '世界规则、地点场景、物品线索、术语和场景模板。',
+      summary: '世界规则、小说地图、地点资料、物品线索、术语和场景模板。',
     },
     {
       key: 'cast-factions',
@@ -1448,20 +1448,36 @@ function buildNavGroups(
       }
     }
 
+    const moduleItems = group.modules.map<WorkspaceNavItem>((item) => ({
+      key: item.key,
+      label: item.label,
+      route: item.route,
+      status: item.status,
+      progress: { done: item.requiredDone, total: item.requiredTotal },
+      meta: formatNavMeta(item),
+      hasBlocker: item.blockerCount > 0,
+    }))
+    const mapModule = group.modules.find((item) => item.key === 'map')
+    const items = group.key === 'world-building'
+      ? [
+          {
+            key: 'narrative-board',
+            label: '小说地图',
+            route: 'narrative-board',
+            status: mapModule?.status || 'not_started',
+            meta: '区域、人物与事件联动',
+            hasBlocker: Boolean(mapModule?.blockerCount),
+          } satisfies WorkspaceNavItem,
+          ...moduleItems,
+        ]
+      : moduleItems
+
     return {
       key: group.key,
       title: group.title,
       route: group.route,
       progress: { done: group.completedCount, total: group.totalCount },
-      items: group.modules.map<WorkspaceNavItem>((item) => ({
-        key: item.key,
-        label: item.label,
-        route: item.route,
-        status: item.status,
-        progress: { done: item.requiredDone, total: item.requiredTotal },
-        meta: formatNavMeta(item),
-        hasBlocker: item.blockerCount > 0,
-      })),
+      items,
     }
   })
 }

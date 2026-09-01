@@ -26,6 +26,8 @@ export interface NarrativeScope {
 export interface ParsedNarrativeBoardRoute {
   mode: NarrativeBoardMode
   layout: CharacterBoardLayout
+  /** 当前地图看板正在浏览哪一层；与 scope.mapNodeId 的选中对象分离。 */
+  mapViewNodeId?: number
   scope: NarrativeScope
 }
 
@@ -52,6 +54,7 @@ export function parseNarrativeBoardRoute(search: string, novelId: number): Parse
   const timelineEventId = positiveInt(params.get('eventId'))
   const taskId = positiveInt(params.get('taskId'))
   const mapNodeId = positiveInt(params.get('mapNodeId')) || positiveInt(params.get('nodeId'))
+  const mapViewNodeId = positiveInt(params.get('mapViewNodeId'))
   const focusCharacterId = positiveInt(params.get('focusCharacterId')) || positiveInt(params.get('characterId'))
   const storyThreadIds = positiveIntArray(params.get('threadIds')) || positiveIntArray(params.get('threadId'))
   const modeValue = params.get('mode')
@@ -62,6 +65,7 @@ export function parseNarrativeBoardRoute(search: string, novelId: number): Parse
   return {
     mode,
     layout,
+    ...(mapViewNodeId ? { mapViewNodeId } : {}),
     scope: {
       novelId,
       stageId,

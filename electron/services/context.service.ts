@@ -84,6 +84,7 @@ import {
   type CharacterMentionCatalogRow,
   type LocationMentionCatalogRow,
 } from './context-entity-projection'
+import { loadBoundLocationNamesForCharacters } from './context-location-projection'
 import {
   buildEmptyRecallDiagnostics,
   compactRecallLine,
@@ -3519,6 +3520,18 @@ export async function collectChapterContextRawData(
     ...explicitlyRequiredLocationNames,
     ...mentionedLocationNames,
   ], Math.max(mentionedEntityLimits.locations, explicitlyRequiredLocationNames.length))
+  const boundLocationNames = loadBoundLocationNamesForCharacters({
+    novelId,
+    chapterNum,
+    characterIds: [...mentionedCharacterNames]
+      .map((name) => entityCatalogLookups.characterIdByName.get(name.trim().replace(/\s+/g, '').toLowerCase()))
+      .filter((id): id is number => typeof id === 'number'),
+    limit: mentionedEntityLimits.locations,
+  })
+  const contextualLocationNames = dedupe([
+    ...mergedMentionedLocationNames,
+    ...boundLocationNames,
+  ], Math.max(mentionedEntityLimits.locations, explicitlyRequiredLocationNames.length))
   const factionMentionLimit = Math.max(8, Math.ceil(mentionedEntityLimits.characters / 2))
   const mentionedFactionNames = collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
@@ -3545,7 +3558,7 @@ export async function collectChapterContextRawData(
       signalText: chapterSignalText,
       mentionedCharacters: [...mentionedCharacterNames],
       mentionedItems: mentionedItemNames,
-      mentionedLocations: mergedMentionedLocationNames,
+      mentionedLocations: contextualLocationNames,
       mentionedFactions: mentionedFactionNames,
     },
   ).map(toChapterWithContinuity)
@@ -3556,7 +3569,7 @@ export async function collectChapterContextRawData(
   const entityProjection = resolveChapterEntityContextProjection(entityCatalogs, {
     mentionedCharacterNames: [...mentionedCharacterNames],
     mentionedItemNames,
-    mentionedLocationNames: mergedMentionedLocationNames,
+    mentionedLocationNames: contextualLocationNames,
     mentionedFactionNames,
     relationFocusText: [
       currentChapter?.outline,
@@ -3770,7 +3783,7 @@ export async function collectChapterContextRawData(
       ].filter(Boolean).join('\n'),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       worldRules: worldRulesContext,
-      mapSummary: buildMapContextSummary(allLocations, mergedMentionedLocationNames, mentionedEntityLimits.locations),
+      mapSummary: buildMapContextSummary(allLocations, contextualLocationNames, mentionedEntityLimits.locations),
       itemSummary,
       longTermMemory,
       characterStates: buildCharacterStates(
@@ -3784,7 +3797,7 @@ export async function collectChapterContextRawData(
         signalText: chapterSignalText,
         mentionedCharacters: [...mentionedCharacterNames],
         mentionedItems: mentionedItemNames,
-        mentionedLocations: mergedMentionedLocationNames,
+        mentionedLocations: contextualLocationNames,
         mentionedFactions: mentionedFactionNames,
       }),
       timelineSummary: timelineContext.timelineSummary,
@@ -3847,7 +3860,7 @@ export async function collectChapterContextRawData(
     storyThreadsSummary: profile.storyThreadsSummary,
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
-    mentionedLocations: mergedMentionedLocationNames,
+    mentionedLocations: contextualLocationNames,
     mentionedFactions: mentionedFactionNames,
     mentionValidationCharacters,
     mentionValidationItems,
@@ -3865,7 +3878,7 @@ export async function collectChapterContextRawData(
     activeThreadPressureCount: activeThreadsContext.pressureCount,
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
-    mentionedLocations: mergedMentionedLocationNames,
+    mentionedLocations: contextualLocationNames,
     mentionedFactions: mentionedFactionNames,
     contextParts: {
       ...baseContext.contextParts,

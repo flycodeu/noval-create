@@ -513,6 +513,7 @@ function testFreshDbIsIdempotent() {
       '0061_entity_context_projection_indexes',
       '0062_map_travel_fields',
       '0063_narrative_board_layout_and_location_bindings',
+      '0064_semantic_memory_source_range_repair',
     ])
 
     runMigrations(db)
@@ -655,6 +656,7 @@ function testPartialSchemaCanResume() {
       '0061_entity_context_projection_indexes',
       '0062_map_travel_fields',
       '0063_narrative_board_layout_and_location_bindings',
+      '0064_semantic_memory_source_range_repair',
     ])
 
     const configs = db.prepare(`
@@ -897,6 +899,49 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
   }
 }
 
+function testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns() {
+  const db = openDb('legacy-semantic-memory-range-repair.db')
+  try {
+    runMigrations(db)
+    const novelId = Number(db.prepare(`
+      INSERT INTO novels (title, context_version)
+      VALUES ('Semantic range repair', 1)
+    `).run().lastInsertRowid)
+    db.prepare(`
+      INSERT INTO semantic_memory_outbox (
+        novel_id, source_type, source_id, operation, status,
+        revision, attempts, context_version, available_at, last_error
+      ) VALUES (?, 'map', 99, 'upsert', 'dead_letter', 1, 8, 1, NULL, 'no such column: source_chapter_start')
+    `).run(novelId)
+
+    db.exec(`
+      DROP INDEX IF EXISTS idx_semantic_memory_source_range;
+      ALTER TABLE semantic_memory_entries DROP COLUMN source_chapter_start;
+      ALTER TABLE semantic_memory_entries DROP COLUMN source_chapter_end;
+      DELETE FROM _schema_migrations WHERE id = '0064_semantic_memory_source_range_repair';
+    `)
+
+    runMigrations(db)
+
+    const columns = getColumns(db, 'semantic_memory_entries')
+    assert.ok(columns.has('source_chapter_start'))
+    assert.ok(columns.has('source_chapter_end'))
+    assert.ok(db.prepare('PRAGMA index_list(semantic_memory_entries)').all().some((row) => row.name === 'idx_semantic_memory_source_range'))
+    assert.deepEqual(db.prepare(`
+      SELECT status, attempts, available_at IS NOT NULL AS available, last_error
+      FROM semantic_memory_outbox
+      WHERE novel_id = ? AND source_type = 'map' AND source_id = 99
+    `).get(novelId), {
+      status: 'pending',
+      attempts: 0,
+      available: 1,
+      last_error: null,
+    })
+  } finally {
+    db.close()
+  }
+}
+
 function testRecommendationGovernanceTriggers() {
   const db = openDb('recommendation-governance.db')
   try {
@@ -972,6 +1017,7 @@ function runAllTests() {
   testPartialSchemaCanResume()
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
   testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()
+  testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns()
   testRecommendationGovernanceTriggers()
   console.log('migration-safety tests passed')
 }

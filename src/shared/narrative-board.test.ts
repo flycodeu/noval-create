@@ -79,6 +79,13 @@ describe('narrative-board scope helpers', () => {
     expect(next.toString()).toBe('mode=progress')
   })
 
+  it('keeps the selected map region separate from the level being browsed', () => {
+    const parsed = parseNarrativeBoardRoute('?mapNodeId=4&mapViewNodeId=3', 9)
+
+    expect(parsed.mapViewNodeId).toBe(3)
+    expect(parsed.scope.mapNodeId).toBe(4)
+  })
+
   it('keeps map hierarchy navigable and preserves only selected branches', () => {
     expect(flattenWorldMapTree(tree).map((item) => item.id)).toEqual([1, 2, 3, 4])
     expect(findWorldMapNode(tree, 4)?.name).toBe('旧塔')
