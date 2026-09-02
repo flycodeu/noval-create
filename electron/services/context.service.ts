@@ -383,6 +383,14 @@ export interface PreviousChapterFeedSource {
   reviewNotesJson?: string | null
 }
 
+export interface ChapterContextRawDataOptions {
+  /**
+   * Structure bootstrapping belongs to an explicit write/generation path.
+   * Reads and previews must not create or renumber rows as a side effect.
+   */
+  ensureStructure?: boolean
+}
+
 export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
 export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
 export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'chapter_bridge' | 'recent_summary' | 'vector_recall'
@@ -3140,9 +3148,15 @@ export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapte
     }
   }
 
-  const previousChapterContext = formatPreviousChapterContextText(segments)
+  const fullyInjected = sourceChars > 0 && sourceChars < 1000
+  // The ending is a dedicated prompt slot. Keep it out of the general prior
+  // context so the same tail/seed is not injected twice into every stage.
+  const priorContextSegments = segments.filter((segment) => (
+    segment.type !== 'tail' && segment.type !== 'seed'
+  ))
+  const previousChapterContext = formatPreviousChapterContextText(priorContextSegments)
   const lastChapterEnding = [
-    extractTextWindow(sourceText, 'tail', 300),
+    fullyInjected ? '' : extractTextWindow(sourceText, 'tail', 300),
     seedText,
   ].filter(Boolean).join('\n')
   const sampledChars = calculatePreviousChapterSampledChars(segments)
@@ -3156,7 +3170,7 @@ export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapte
     sampledChars,
     coverageRate: sourceChars > 0 ? Math.round((coverageBase / sourceChars) * 1000) / 10 : 0,
     segmentCount: segments.length,
-    fullyInjected: sourceChars > 0 && sourceChars < 1000,
+    fullyInjected,
     segments,
   }
 
@@ -3389,9 +3403,10 @@ export async function collectChapterContextRawData(
   novelId: number,
   chapterNum: number,
   stageId?: number,
+  options: ChapterContextRawDataOptions = {},
 ): Promise<ChapterContextRawData> {
   const db = getDb()
-  ensureStoryStructure(novelId)
+  if (options.ensureStructure === true) ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 

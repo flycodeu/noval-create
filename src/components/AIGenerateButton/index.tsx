@@ -4,6 +4,7 @@ import { CheckOutlined, RobotOutlined } from '@ant-design/icons'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { cleanAiFieldText } from '../../utils/text'
 import type { AiExecutionMode } from '../../shared/ai-execution'
+import { inferDraftFieldDefinitions, parseDraftJson } from '../../pages/Novel/shared/ai-draft'
 
 type AttemptStatus = 'running' | 'retrying' | 'failed' | 'succeeded'
 
@@ -109,6 +110,7 @@ export default function AIGenerateButton({
 
     try {
       const messages = buildMessages()
+      const draftFields = isJson ? inferDraftFieldDefinitions(messages) : null
       const count = Math.max(1, Math.min(drawCount, 3))
       const retryConfig = resolveRetryConfig(intent, retry)
       const maxRetries = Math.max(0, retryConfig?.max ?? 0)
@@ -164,6 +166,7 @@ export default function AIGenerateButton({
       const outputs = rawOutputs
         .map((output) => {
           const normalized = String(output || '').trim()
+          if (isJson && draftFields) parseDraftJson(normalized, draftFields)
           return isJson ? normalized : cleanOutput(normalized)
         })
         .filter(Boolean)

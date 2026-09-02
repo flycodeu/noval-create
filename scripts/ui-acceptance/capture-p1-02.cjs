@@ -344,7 +344,7 @@ function navigatorPanel(page, level) {
 
 async function verifyCrudPaginationCompileAndDrag(page, projectId, originalVolumes, marker) {
   await navigate(page, projectId)
-  const root = page.locator('.novel-structure-page')
+  const root = page.locator('.novel-structure-page:visible').last()
   const originalIds = originalVolumes.map((item) => item.id)
   const chapterMode = page.locator('.novel-structure-detail-bar .ant-segmented-item').filter({ hasText: '章节' })
   if (await chapterMode.count()) await chapterMode.click().catch(() => undefined)
@@ -414,7 +414,16 @@ async function verifyCrudPaginationCompileAndDrag(page, projectId, originalVolum
     await window.electron.structure.updateSegment(segments[1].id, { title: `编译场景B-${marker}`, content: `编译正文B-${marker}` })
   }, { segments, marker })
   await navigate(page, projectId, { volumeId: newVolume.id, partId, chapterId, segmentId: segments[0].id })
-  await root.locator('.novel-structure-page__top-actions .ant-btn').filter({ hasText: '编译章节' }).click()
+  const structureActions = root.locator('.novel-structure-page__top-actions')
+  const moreButton = structureActions.locator('.ant-dropdown-trigger').last()
+  await moreButton.waitFor({ state: 'visible', timeout: 8000 })
+  await moreButton.click()
+  const compileMenuItem = page
+    .locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item')
+    .filter({ hasText: '编译当前章节' })
+    .last()
+  await compileMenuItem.waitFor({ state: 'visible', timeout: 8000 })
+  await compileMenuItem.click()
   await page.waitForFunction(async ({ chapterId, marker }) => String((await window.electron.chapter.get(chapterId))?.content || '').includes(marker), { chapterId, marker })
   const compiled = await page.evaluate(async ({ chapterId, marker }) => String((await window.electron.chapter.get(chapterId))?.content || '').includes(marker), { chapterId, marker })
 

@@ -159,6 +159,24 @@ describe('chapter pipeline planner', () => {
     expect(output.sceneDesignFieldGaps[0]).toContain('hidden_agendas 为空')
   })
 
+  it('uses the deterministic fallback when a valid JSON array violates the scene-plan schema', () => {
+    const fallback = [sceneFixture({ scene_title: '确定性场景' })]
+    const persistScenePlan = vi.fn()
+
+    const output = resolvePlannerModelOutput({
+      chapterId: 103,
+      novelId: 7,
+      rawOutput: JSON.stringify([{ scene_title: '只有标题' }]),
+      fallbackScenePlan: fallback,
+      contractSeeds: [],
+      persistScenePlan,
+      writeBackDesignFields: vi.fn(() => 0),
+    })
+
+    expect(output.scenePlan[0].scene_title).toBe('确定性场景')
+    expect(persistScenePlan).toHaveBeenCalledWith(fallback)
+  })
+
   it('loads an immutable reusable planner snapshot or returns null when absent', () => {
     const scene = sceneFixture()
     const reusable = loadReusablePlannerOutput(JSON.stringify([scene]), [sceneFixture({ scene_title: 'fallback' })])

@@ -112,7 +112,6 @@ async function measure(page, kind) {
       if (localHero) reasons.push('迁移页仍渲染本地 Hero')
       if (primaryActions.length !== 1) reasons.push(`主动作数量为 ${primaryActions.length}`)
       if (visibleSecondary.length > 2) reasons.push(`可见次动作超过 2 个：${visibleSecondary.length}`)
-      if (innerWidth > 1200 && !isVisible(desktopMore)) reasons.push('桌面更多操作未显示')
       if (innerWidth <= 1200 && !isVisible(compactMore)) reasons.push('窄屏页面操作菜单未显示')
     } else {
       if (workspaceRoot?.dataset.workspaceChrome !== 'legacy') reasons.push('对照页未保持 legacy chrome')
@@ -190,7 +189,9 @@ async function inspectPageActionMenu(page, viewportWidth) {
   const selector = viewportWidth > 1200
     ? '.workspace-contract-actions__more--desktop'
     : '.workspace-contract-actions__more--compact'
-  await page.locator(selector).click()
+  const moreButton = page.locator(selector)
+  if (await moreButton.count() === 0 || !(await moreButton.isVisible().catch(() => false))) return []
+  await moreButton.click()
   await page.waitForTimeout(200)
   const labels = await page.locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-title-content').allTextContents()
   await page.keyboard.press('Escape')
@@ -198,14 +199,20 @@ async function inspectPageActionMenu(page, viewportWidth) {
 }
 
 async function verifyCoreSettingsNavigation(page, viewportWidth, projectId) {
+  if (viewportWidth > 1200) {
+    const directAction = page.getByRole('button', { name: '去基础设定', exact: true })
+    await directAction.waitFor({ state: 'visible', timeout: 8000 })
+    await directAction.click()
+  } else {
   const selector = viewportWidth > 1200
     ? '.workspace-contract-actions__more--desktop'
     : '.workspace-contract-actions__more--compact'
-  await page.locator(selector).click()
-  const navigationItem = page
-    .locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item')
-    .filter({ hasText: '去基础设定' })
-  await navigationItem.click()
+    await page.locator(selector).click()
+    const navigationItem = page
+      .locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item')
+      .filter({ hasText: '去基础设定' })
+    await navigationItem.click()
+  }
   const expectedPath = `#/novels/${projectId}/core-settings`
   await page.waitForFunction((path) => window.location.hash.split('?')[0] === path, expectedPath, { timeout: 12000 })
   return expectedPath
@@ -267,8 +274,8 @@ async function main() {
       const menuLabels = await inspectPageActionMenu(page, viewport.width)
       results['project-brief'][size].menuLabels = menuLabels
       const expectedMenuLabels = viewport.width > 1200
-        ? ['去基础设定']
-        : ['AI 生成·首版', 'AI 补全·空白字段', '去基础设定']
+        ? []
+        : ['AI 辅助', '去基础设定']
       const missingMenuLabels = expectedMenuLabels.filter((label) => !menuLabels.includes(label))
       if (missingMenuLabels.length > 0) {
         results['project-brief'][size].status = 'BLOCKED'

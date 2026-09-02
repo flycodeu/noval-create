@@ -64,7 +64,13 @@ assertPass(
 )
 assertPass(
   'project topbar mode switch keeps its width on narrow screens',
-  /@media \(max-width: 767px\)[\s\S]*?\.project-topbar__mode-switch\s*\{[\s\S]*?flex:\s*0 0 auto;/.test(projectTopbarCss),
+  /@media \(max-width: 899px\)[\s\S]*?\.project-topbar__mode-switch\s*\{[\s\S]*?flex:\s*0 0 auto;/.test(projectTopbarCss),
+)
+assertPass(
+  'project topbar keeps task and page actions on one compact toolbar row',
+  /@media \(max-width: 899px\)[\s\S]*?grid-template-areas:\s*"identity information"\s*"toolbar toolbar"/.test(projectTopbarCss)
+    && /@media \(max-width: 899px\)[\s\S]*?\.project-topbar__task-indicator\s*\{[\s\S]*?flex:\s*0 0 var\(--project-topbar-control-size\);/.test(projectTopbarCss)
+    && /@media \(max-width: 899px\)[\s\S]*?\.project-topbar__action-cluster\s*\{[\s\S]*?flex:\s*1 1 auto;/.test(projectTopbarCss),
 )
 assertPass(
   'project topbar preserves a readable page title at compact desktop widths',
@@ -98,7 +104,8 @@ assertPass(
 assertPass(
   'foreshadow ledger uses a responsive bounded table layout',
   foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll')
-    && foreshadowLedgerCss.includes('overflow-x: hidden')
+    && foreshadowLedgerCss.includes('overflow-x: auto')
+    && foreshadowLedgerCss.includes('overflow-y: hidden')
     && foreshadowLedgerCss.includes('.novel-foreshadow-ledger__list-scroll .ant-table-wrapper')
     && foreshadowLedgerCss.includes('min-width: 0')
     && foreshadowLedgerCss.includes('table-layout: fixed')

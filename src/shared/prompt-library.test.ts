@@ -51,4 +51,27 @@ describe('buildScenePlanPrompt 设计层约束', () => {
     const prompt = buildScenePlanPrompt(buildInput())
     expect(prompt).not.toContain('设计对齐矫正')
   })
+
+  it('hard constraint 已覆盖字段时不再重复注入普通上下文段', () => {
+    const prompt = buildScenePlanPrompt(buildInput({
+      chapterGoal: '重复目标不应再次出现',
+      writingContractSummary: '重复合同不应再次出现',
+      relationSummary: '重复关系不应再次出现',
+      hardConstraintContext: [
+        '章节目标:',
+        '- 硬约束目标',
+        '写作合同/章节合同:',
+        '- 硬约束合同',
+        '关键人物关系:',
+        '- 硬约束关系',
+      ].join('\n'),
+    }))
+
+    expect(prompt).not.toContain('【本章目标】')
+    expect(prompt).not.toContain('【写作类型】')
+    expect(prompt).not.toContain('重复目标不应再次出现')
+    expect(prompt).not.toContain('重复合同不应再次出现')
+    expect(prompt).not.toContain('重复关系不应再次出现')
+    expect(prompt).toContain('【硬约束】')
+  })
 })

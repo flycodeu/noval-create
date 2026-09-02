@@ -657,7 +657,6 @@ export default function FactionsPage({ novelId }: Props) {
         <WorkspacePanel
           className="faction-workspace__sidebar"
           title={<div className="faction-list-heading"><span>势力列表</span><small>{items.length} 个</small></div>}
-            description="列表定位组织，详情区维护当前组织。"
         >
           <Input.Search value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
           <div className="faction-list-scroll" data-faction-list>
@@ -691,7 +690,6 @@ export default function FactionsPage({ novelId }: Props) {
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title="势力关系图谱"
-              description="点击图谱中的势力可切换当前聚焦，相关成员与关系会被保留。"
               extra={<Tag color="processing">{selectedId ? '当前聚焦已收窄' : '当前显示全局网络'}</Tag>}
             >
               <div data-faction-view="graph" className="faction-workspace__graph-view">
@@ -712,7 +710,6 @@ export default function FactionsPage({ novelId }: Props) {
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title={selectedItem ? `当前详情：${selectedItem.name}` : '新建势力'}
-              description={selectedItem ? '只在这里编辑当前势力；关系图谱可随时切换查看。' : '先建立一个可被正文召回的组织主体。'}
               extra={(
                 <AIGenerateButton
                   novelId={novelId}

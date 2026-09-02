@@ -12,4 +12,8 @@ describe('Writing route state helpers', () => {
     expect(resolveWritingRouteKey('/novels/8/writing/review')).toBe('review')
     expect(resolveWritingRouteKey('/novels/8/writing/unknown')).toBe('editor')
   })
+
+  it('uses the same route segment for persisted writing views', () => {
+    expect(resolveWritingRouteKey('/novels/8/writing/context')).toBe('context')
+  })
 })

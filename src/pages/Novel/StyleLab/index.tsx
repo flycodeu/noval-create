@@ -334,7 +334,6 @@ export default function StyleLabPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="文风实验室"
-      description="候选样本留在实验室；在指纹库与 A/B 对照之间切换，当前输入和结果不会重置。"
       actionContract={{
         primary: {
           key: activeView === 'ab' ? 'ab-settings' : 'create-fingerprint',
@@ -383,7 +382,6 @@ export default function StyleLabPage({ novelId }: Props) {
       <WorkspacePanel
         className="style-lab__main-surface"
         title="风格指纹库"
-        description="选择并确认后，写作流水线才会注入该指纹；诊断数据保持紧凑展示。"
       >
         {resolved && resolved.source !== 'active' ? (
           <Alert
@@ -572,7 +570,6 @@ export default function StyleLabPage({ novelId }: Props) {
       <WorkspacePanel
         className="style-lab__main-surface style-lab__ab-surface"
         title="A/B 试写对照"
-        description="两段正文始终并排；试写参数和技术诊断按需打开。"
       >
         <div className="workspace-stack-16">
           {abGeneration.error ? (

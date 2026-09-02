@@ -380,12 +380,18 @@ async function verifyContractInteractions(page, projectId, density) {
   await root.locator('[data-contract-tab="chapter"]').click()
   const chapterDetail = root.locator('[data-contract-chapter-detail]')
   await chapterDetail.getByLabel('本章目标', { exact: true }).fill(`${density.marker}-章节目标-已编辑`)
-  await root.getByRole('button', { name: /保存章节合同/ }).click()
+  const sharedActions = page.locator('.project-topbar__page-actions')
+  await sharedActions.getByRole('button', { name: /保存章节合同/ }).click()
   await page.waitForFunction(async ({ chapterId, expected }) => (await window.electron.contract.getChapter(chapterId))?.chapterGoal === expected, { chapterId: secondChapterId, expected: `${density.marker}-章节目标-已编辑` }, { timeout: 12000 })
   result.contractChapterSaved = true
   result.contractSaveState = await root.locator('[data-contract-save-state]').textContent().then((value) => value?.includes('已保存') === true)
-  await root.getByRole('button', { name: /去正文写作/ }).click()
+  await sharedActions.getByRole('button', { name: /去正文写作/ }).click()
   await page.waitForFunction(({ chapterId }) => window.location.hash.includes(`/writing/editor?chapterId=${chapterId}`), { chapterId: secondChapterId }, { timeout: 12000 })
+  await page.waitForFunction(({ chapterId }) => (
+    Boolean(document.querySelector('.novel-writing-console-page'))
+    && Boolean(document.querySelector(`[data-writing-chapter-row="${chapterId}"].is-active`))
+  ), { chapterId: secondChapterId }, { timeout: 12000 })
+  await page.waitForTimeout(600)
   result.contractWritingJump = true
   return result
 }
@@ -439,13 +445,37 @@ async function main() {
   const staticContracts = PHASE === 'after' ? assertStaticContracts() : []
   const snapshot = PREPARE_DENSITY ? await snapshotAcceptanceDatabase() : null
   let app
+  const consoleErrors = []
+  const consoleErrorTasks = []
   try {
     app = await launchProductionApp()
     const page = await app.firstWindow({ timeout: 30000 })
     page.on('dialog', (dialog) => dialog.dismiss().catch(() => undefined))
     page.on('pageerror', (error) => console.error(`[P2-09] pageerror: ${error.message}`))
     page.on('console', (message) => {
-      if (message.type() === 'error') console.error(`[P2-09] console.error: ${message.text()}`)
+      if (message.type() !== 'error') return
+      const task = Promise.all(message.args().map(async (argument) => {
+        try {
+          return await argument.evaluate((value) => {
+            if (!value || typeof value !== 'object') return value
+            const error = value
+            return {
+              name: error.name,
+              message: error.message,
+              code: error.code,
+              detail: error.detail,
+              stack: error.stack,
+            }
+          })
+        } catch {
+          return undefined
+        }
+      })).then((details) => {
+        const entry = { text: message.text(), details }
+        consoleErrors.push(entry)
+        console.error(`[P2-09] console.error: ${entry.text} ${JSON.stringify(entry.details)}`)
+      })
+      consoleErrorTasks.push(task)
     })
     await page.waitForLoadState('domcontentloaded')
     const density = PREPARE_DENSITY
@@ -479,6 +509,10 @@ async function main() {
     if (PHASE === 'before' && density.marker) {
       writeJson(path.join(runDir, 'density.json'), density)
       writeJson(path.join(EVIDENCE_ROOT, 'before-density.json'), density)
+    }
+    await Promise.all(consoleErrorTasks)
+    if (consoleErrors.length > 0) {
+      throw new Error(`P2-09 页面产生 ${consoleErrors.length} 条 console.error：${consoleErrors.map((item) => item.text).join('；')}`)
     }
     const report = buildReport(runId, PROJECT_ID, results, staticContracts, interactions, density)
     writeJson(path.join(runDir, 'metrics.json'), results)

@@ -9,6 +9,7 @@ import {
   normalizeScenePlan,
   writeBackSceneDesignFields,
   type ScenePlanStep,
+  validateScenePlanModelOutput,
 } from './chapter-scene-plan'
 import type { ChapterComplexity } from './chapter-pipeline-context'
 import { reconcileScenePlanForContracts } from './scene-plan-reconciliation'
@@ -136,7 +137,11 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
       stage: 'scene-plan',
     },
   })
-  const normalized = parsed.success
+  const shape = parsed.success ? validateScenePlanModelOutput(parsed.data) : { valid: false, issue: 'JSON 解析失败' }
+  if (parsed.success && !shape.valid) {
+    console.warn(`[chapter:plan] 模型场景计划结构不完整 chapter=${input.chapterId}：${shape.issue}`)
+  }
+  const normalized = parsed.success && shape.valid
     ? normalizeScenePlan(parsed.data, input.fallbackScenePlan)
     : input.fallbackScenePlan
   const reconciliation = reconcileScenePlanForContracts(

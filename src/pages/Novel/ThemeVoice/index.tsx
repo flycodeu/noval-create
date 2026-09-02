@@ -489,12 +489,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
   const handleApplyTemplate = () => {
     if (!templateCandidateId) {
-      message.warning('请先选择一个文风模板。')
+      message.warning(getUserFacingMessage('themeVoice.selectTemplateFirst'))
       return
     }
     const template = styleTemplates.find((item) => item.id === templateCandidateId)
     if (!template) {
-      message.warning('所选文风模板已不可用，请刷新后重试。')
+      message.warning(getUserFacingMessage('themeVoice.templateUnavailable'))
       return
     }
     const nextValues = applyStyleTemplateValues(
@@ -623,7 +623,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="主题与文风"
-      description="确认全书长期执行的主题、视角、情绪与对白边界；实验候选留在文风实验室。"
       actionContract={{
         primary: {
           key: 'save',

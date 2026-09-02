@@ -588,10 +588,9 @@ export default function ModelManager() {
         </div>
 
         <details className="model-manager-source-disclosure" data-model-source-disclosure>
-          <summary><strong>来源检索与 API Key</strong><span>联网检索配置可在此编辑，密钥只显示配置状态</span></summary>
+          <summary><strong>来源检索与 API Key</strong></summary>
           <WorkspacePanel
             className="model-manager-source-panel"
-            title="来源检索与 API Key"
           >
           <div className="admin-detail-stack source-search-config">
             <div className="source-search-config__summary">

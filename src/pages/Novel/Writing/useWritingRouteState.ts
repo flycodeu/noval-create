@@ -13,6 +13,10 @@ export function resolveWritingRouteKey(pathname: string): WritingRouteKey {
   return routeKey === 'context' || routeKey === 'review' || routeKey === 'history' ? routeKey : 'editor'
 }
 
+export function resolveWritingViewFromPathname(pathname: string): WritingRouteKey {
+  return resolveWritingRouteKey(pathname)
+}
+
 /** Keeps Writing route parsing and query-param updates from diverging. */
 export function useWritingRouteState(novelId: number) {
   const [searchParams, setSearchParams] = useSearchParams()

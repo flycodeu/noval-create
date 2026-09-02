@@ -25,6 +25,20 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function configureElectronProfile(root, role) {
+  // Chromium locks the Electron user-data directory before app.whenReady().
+  // Keep that profile private per process, then point the database layer at
+  // the shared test root after startup so the workers can race on one SQLite
+  // file without serialising Electron startup.
+  const startupProfile = path.join(root, '.electron-profiles', `${role}-${process.pid}`)
+  fs.mkdirSync(startupProfile, { recursive: true })
+  app.setPath('userData', startupProfile)
+}
+
+function useSharedDatabaseRoot(root) {
+  app.setPath('userData', root)
+}
+
 async function waitForBarrier(barrierPath) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     if (fs.existsSync(barrierPath)) return
@@ -47,10 +61,11 @@ async function runWorker() {
 
   process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
   app.setName('NovelForge Agent Conflict Stress Worker')
-  app.setPath('userData', root)
+  configureElectronProfile(root, `worker-${agentId}`)
   app.commandLine.appendSwitch('disable-gpu')
   registerProjectTsRuntime(workspaceRoot)
   await app.whenReady()
+  useSharedDatabaseRoot(root)
 
   const { closeDb, initDb } = project('electron/database/db.ts')
   const artifactService = project('electron/services/artifact.service.ts')
@@ -144,11 +159,12 @@ async function runMain() {
   fs.mkdirSync(tempRoot, { recursive: true })
   process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
   app.setName('NovelForge Agent Conflict Stress')
-  app.setPath('userData', tempRoot)
+  configureElectronProfile(tempRoot, 'main')
   app.commandLine.appendSwitch('disable-gpu')
   registerProjectTsRuntime(workspaceRoot)
 
   await app.whenReady()
+  useSharedDatabaseRoot(tempRoot)
   const { closeDb, getSqlite, initDb } = project('electron/database/db.ts')
   const novelService = project('electron/services/novel.service.ts')
   initDb()

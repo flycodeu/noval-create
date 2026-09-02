@@ -75,7 +75,9 @@
 
 .novel-foreshadow-ledger__list-scroll {
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .novel-foreshadow-ledger__list-scroll .ant-table-wrapper {

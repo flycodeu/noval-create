@@ -296,7 +296,7 @@ async function verifyCharacters(page, projectId, marker) {
   const unsaved = await page.evaluate(() => document.querySelector('[data-character-save-state]')?.getAttribute('data-character-save-state') === 'unsaved')
   await rows.nth(Math.min(1, initialCount - 1)).click({ force: true })
   const leaveDialog = page.getByRole('dialog').filter({ hasText: '当前人物还有未保存修改' }).last()
-  const leaveProtection = await leaveDialog.isVisible().catch(() => false)
+  const leaveProtection = await leaveDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
   if (leaveProtection) await leaveDialog.getByRole('button', { name: '留下继续编辑' }).click()
   await page.locator('.novel-character-studio__editor').getByRole('button', { name: '保存并确认' }).last().click()
   await page.waitForFunction(() => document.querySelector('[data-character-save-state]')?.getAttribute('data-character-save-state') === 'saved', null, { timeout: 8000 })
@@ -342,7 +342,7 @@ async function verifyArc(page, projectId, marker) {
     await page.getByRole('button', { name: '关系弧', exact: true }).click()
   }
   const leaveDialog = page.getByRole('dialog').filter({ hasText: '当前弧线还有未保存修改' }).last()
-  const leaveProtection = await leaveDialog.isVisible().catch(() => false)
+  const leaveProtection = await leaveDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
   if (leaveProtection) await leaveDialog.getByRole('button', { name: '留下继续编辑' }).click()
   return { characterCount, relationCount, characterId: Boolean(characterId), pair: Boolean(pair), detailsOpened, unsaved, leaveProtection }
 }
@@ -362,7 +362,7 @@ async function verifyResistance(page, projectId, marker) {
   const unsaved = await page.evaluate(() => document.querySelector('[data-resistance-save-state]')?.getAttribute('data-resistance-save-state') === 'unsaved')
   if (rowCount > 1) await rows.nth(1).click({ force: true })
   const leaveDialog = page.getByRole('dialog').filter({ hasText: '当前阻力线还有未保存修改' }).last()
-  const leaveProtection = await leaveDialog.isVisible().catch(() => false)
+  const leaveProtection = await leaveDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
   if (leaveProtection) await leaveDialog.getByRole('button', { name: '留下继续编辑' }).click()
   await page.getByRole('button', { name: '保存当前阻力线', exact: true }).click()
   await page.waitForFunction(() => document.querySelector('[data-resistance-save-state]')?.getAttribute('data-resistance-save-state') === 'saved', null, { timeout: 8000 })

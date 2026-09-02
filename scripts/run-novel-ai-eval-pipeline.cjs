@@ -16,6 +16,9 @@
 //   NOVELFORGE_EVAL_REHYDRATE_EXISTING=1   对已有正文补跑摘要/连续性/索引回写（默认不调用模型）
 //   NOVELFORGE_EVAL_MODEL_TIMEOUT_MS=180000 评测内每次模型请求上限；默认 180 秒
 //   NOVELFORGE_EVAL_MODEL_RETRY_COUNT=0     评测内单次模型请求的网络重试次数；默认 0，避免超时重复拖住整章
+//   NOVELFORGE_EVAL_REAL_MODEL=1            明确允许真实模型/网络调用（必填）
+//   NOVELFORGE_EVAL_USER_DATA_DIR=...       隔离评测数据库目录（推荐，目录中需已有模型配置）
+//   NOVELFORGE_EVAL_ALLOW_LIVE_DB=1         明确允许直接写入当前应用数据库（不推荐）
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -106,6 +109,22 @@ const PROJECT_FILTER = new Set(
     .map((item) => item.trim())
     .filter(Boolean),
 )
+const EVAL_REAL_MODEL_ENABLED = process.env.NOVELFORGE_EVAL_REAL_MODEL === '1'
+const EVAL_USER_DATA_DIR = String(process.env.NOVELFORGE_EVAL_USER_DATA_DIR || '').trim()
+const EVAL_ALLOW_LIVE_DB = process.env.NOVELFORGE_EVAL_ALLOW_LIVE_DB === '1'
+const EVAL_ALLOW_ALL_PROJECTS = process.env.NOVELFORGE_EVAL_ALLOW_ALL_PROJECTS === '1'
+
+function assertRealModelConsent() {
+  if (!EVAL_REAL_MODEL_ENABLED) {
+    throw new Error('真实模型评测已阻止：请设置 NOVELFORGE_EVAL_REAL_MODEL=1，并优先使用 acceptance:real-model 入口。')
+  }
+  if (PROJECT_FILTER.size === 0 && !EVAL_ALLOW_ALL_PROJECTS) {
+    throw new Error('真实模型评测必须显式指定 NOVELFORGE_EVAL_PROJECTS；如确需全量运行，请额外设置 NOVELFORGE_EVAL_ALLOW_ALL_PROJECTS=1。')
+  }
+  if (!EVAL_USER_DATA_DIR && !EVAL_ALLOW_LIVE_DB) {
+    throw new Error('真实模型评测默认禁止写入当前数据库：请设置 NOVELFORGE_EVAL_USER_DATA_DIR 使用隔离副本，或明确设置 NOVELFORGE_EVAL_ALLOW_LIVE_DB=1。')
+  }
+}
 
 const PROJECTS = [
   {
@@ -745,7 +764,13 @@ function ensureEvaluationStage(creativeStageService, db, project, saved, scaffol
 }
 
 async function main() {
+  assertRealModelConsent()
   await app.whenReady()
+
+  if (EVAL_USER_DATA_DIR) {
+    fs.mkdirSync(EVAL_USER_DATA_DIR, { recursive: true })
+    app.setPath('userData', path.resolve(EVAL_USER_DATA_DIR))
+  }
 
   const { initDb, getDb } = requireProject('electron/database/db.ts')
   const schema = requireProject('electron/database/schema.ts')

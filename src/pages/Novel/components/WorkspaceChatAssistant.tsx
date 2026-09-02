@@ -130,6 +130,8 @@ const ASSISTANT_INTENTS: AssistantIntent[] = [
   },
 ]
 
+const MAX_ASSISTANT_MESSAGES = 24
+
 function isWorkspaceQualityRouteKey(value: string): value is WorkspaceQualityRouteKey {
   return QUALITY_ROUTE_KEYS.includes(value as WorkspaceQualityRouteKey)
 }
@@ -520,7 +522,7 @@ export default function WorkspaceChatAssistant({
       intent,
       createdAt: Date.now(),
     }
-    setMessages((current) => [...current, userMessage])
+    setMessages((current) => [...current, userMessage].slice(-MAX_ASSISTANT_MESSAGES))
     setInput('')
     setLoading(true)
 
@@ -572,7 +574,7 @@ export default function WorkspaceChatAssistant({
         ...current,
         {
           id: createMessageId(),
-          role: 'assistant',
+          role: 'assistant' as const,
           content: repairPreview
             ? `${answer}\n\n已生成 ${repairPreview.fieldPatches.length + repairPreview.entityPatches.length} 项可应用修改。检查后可点击“应用本次修改”。`
             : answer,
@@ -581,7 +583,7 @@ export default function WorkspaceChatAssistant({
           repairPreview,
           baseSnapshot: repairPreview ? promptContext.snapshot || undefined : undefined,
         },
-      ])
+      ].slice(-MAX_ASSISTANT_MESSAGES))
     } catch (error) {
       if (conversationVersionRef.current !== conversationVersion) return
       console.error(error)
@@ -750,10 +752,7 @@ export default function WorkspaceChatAssistant({
 
       <div className="workspace-chat-assistant__history">
         {messages.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="输入评审、修复、扩写或去 AI 味目标。"
-          >
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无对话">
             {onOpenQuality ? (
               <Button size="small" icon={<BarChartOutlined />} onClick={onOpenQuality}>
                 打开质量看板

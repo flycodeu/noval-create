@@ -660,7 +660,6 @@ export default function PremisePage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="基础设定"
-      description="固定故事发动机与不可违背的边界；语言风格在下一步单独确认。"
       actionContract={{
         primary: {
           key: 'save',
@@ -735,7 +734,6 @@ export default function PremisePage({ novelId }: Props) {
         <WorkspacePanel
           className="premise-page__editor"
           title="故事发动机"
-          description="先锁定开局、钩子、定位和底层约束；这些字段始终可见。"
           extra={(
             <AIGenerateButton
             novelId={novelId}

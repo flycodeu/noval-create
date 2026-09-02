@@ -346,7 +346,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="项目立项"
-      description="把读者承诺、平台方向和创作边界压成一份可执行简报。"
       actionContract={{
         primary: {
           key: 'save',
@@ -528,7 +527,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
                 <span className="project-brief__disclosure-summary">
                   {selectedPlatform
                     ? `${selectedPlatform.label} · ${selectedPlatform.positioning}`
-                    : '选择平台后显示开局、节奏和包装摘要'}
+                    : '尚未选择平台'}
                 </span>
                 <span className="project-brief__disclosure-action">查看详情</span>
               </summary>

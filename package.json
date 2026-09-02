@@ -67,6 +67,8 @@
     "soak:export-chapter-report": "electron scripts/export-chapter-soak-report.cjs",
     "eval:novel": "electron scripts/run-novel-ai-eval.cjs",
     "eval:novel:pipeline": "electron scripts/run-novel-ai-eval-pipeline.cjs",
+    "acceptance:real-model:preflight": "node scripts/real-model-acceptance.cjs --preflight",
+    "acceptance:real-model": "node scripts/real-model-acceptance.cjs --run",
     "eval:novel:flow": "electron scripts/run-novel-flow-audit.cjs",
     "eval:humanization": "node scripts/run-humanization-eval.cjs",
     "eval:humanization:repair": "node scripts/run-humanization-repair-eval.cjs",

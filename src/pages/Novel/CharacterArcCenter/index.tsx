@@ -14,7 +14,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
@@ -375,7 +375,6 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         chrome="shared"
         className="novel-character-arc-center"
         title="人物弧线中心"
-        description="维护主角弧、关键角色弧和关系弧，并登记章节层面的实际推进。"
         actionContract={{
           primary: { key: 'save', label: '保存当前弧线', icon: <SaveOutlined />, loading: saving, disabled: !characterDraft && !relationshipDraft, onClick: () => void saveCurrent() },
           secondary: [
@@ -386,7 +385,6 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         }}
         contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '主角弧', value: dashboard?.protagonistArc ? '已建立' : '待建立' }, { label: '角色弧', value: `${dashboard?.characterArcs.length || 0} 条` }, { label: '关系弧', value: `${dashboard?.relationshipArcs.length || 0} 条` }]} />}
         metrics={<><WorkspaceMetric label="停滞弧线" value={(dashboard?.stalledCharacterCount || 0) + (dashboard?.stalledRelationshipCount || 0)} tone="warm" /><WorkspaceMetric label="关键角色候选" value={keyCharacters.length} /><WorkspaceMetric label="最近推进" value={selectedArc?.lastProgressChapterLabel || '未记录'} tone="cool" /></>}
-        guide={<WorkspaceStepGuide steps={[{ title: '先补主角弧', description: '主角必须有初始状态、误信和改变事件。', status: 'focus' }, { title: '再补关键角色弧', description: '至少补齐一名关键角色的变化轨迹。', status: 'todo' }, { title: '最后绑定关系弧', description: '把重要双人关系拆成阶段，并在章节合同里引用。', status: 'todo' }]} />}
       >
         <div className="novel-character-arc-center__status-rail" data-character-arc-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
           <span className={`novel-character-arc-center__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />

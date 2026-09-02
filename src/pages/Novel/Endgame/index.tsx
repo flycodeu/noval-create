@@ -394,7 +394,6 @@ export default function EndgamePage({ novelId }: Props) {
       layout="wide"
       eyebrow="终局收束"
       title="终局设计"
-      description="提前锁定最终冲突、兑现承诺和最后一幕，避免长篇只会向前扩写不会向后收束。"
       actionContract={{
         primary: { key: 'save', label: '保存终局设计', icon: <SaveOutlined />, loading: saving, onClick: () => void handleSave() },
         secondary: [
@@ -476,7 +475,6 @@ export default function EndgamePage({ novelId }: Props) {
 
       <WorkspacePanel
         title="终局锚点"
-        description="先固定最终冲突、主题答案和最后一幕。"
         extra={(
           <AIGenerateButton
             novelId={novelId}
@@ -561,7 +559,6 @@ export default function EndgamePage({ novelId }: Props) {
         </summary>
         <WorkspacePanel
           title="兑现与留白"
-          description="把必须兑现和故意保留的内容拆开写。"
           extra={(
           <AIGenerateButton
             novelId={novelId}

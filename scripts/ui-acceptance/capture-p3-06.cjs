@@ -88,7 +88,7 @@ function staticContracts() {
       `${key} 已完成并有独立证据`,
       plan.includes(`[x] ${key} ACCEPTED`) && fs.existsSync(path.join(ROOT, `docs/ui-acceptance/${key}/after.md`)),
     ]),
-    ['37 页路由清单来源可验证', ROUTES.length === 37 && verifyRouteInventorySources().total === 37],
+    [`${ROUTES.length} 页路由清单来源可验证`, verifyRouteInventorySources().total === ROUTES.length],
     ['共享壳层暴露验收标记', shell.includes('data-workspace-chrome={chrome}')],
     ['768px 兼容要求仍在设计基线中', plan.includes('768–899px') && plan.includes('共享壳层及正文、结构、人物、地图、表单类代表页')],
     ['P3-06 禁止新增设计原语', plan.includes('P3-06 只做收口和缺陷记录')],
@@ -366,13 +366,16 @@ async function checkOverviewProtection(page, id) {
 
 async function checkDangerousAction(page, id) {
   await navigate(page, ROUTES.find((route) => route.key === 'overview'), id)
+  await page.keyboard.press('Escape').catch(() => undefined)
   const more = page.getByRole('button', { name: '更多操作', exact: true })
+  await more.waitFor({ state: 'visible', timeout: 3000 }).catch(() => undefined)
   if (await more.count() !== 1) return false
   await more.click({ force: true }).catch(() => undefined)
-  const clear = page.locator('.ant-dropdown-menu-item').filter({ hasText: '清空步骤' }).last()
+  const clear = page.locator('.ant-dropdown-menu-item:visible').filter({ hasText: '清空步骤' }).last()
+  await clear.waitFor({ state: 'visible', timeout: 2000 }).catch(() => undefined)
   if (await clear.count() !== 1) return false
-  await clear.evaluate((element) => (element instanceof HTMLElement ? element.click() : undefined)).catch(() => undefined)
-  await page.waitForTimeout(150)
+  await clear.click({ force: true }).catch(() => clear.evaluate((element) => (element instanceof HTMLElement ? element.click() : undefined)))
+  await page.locator('.ant-modal-wrap:visible').waitFor({ state: 'visible', timeout: 2000 }).catch(() => undefined)
   const confirmed = await page.getByText('清空项目资料？', { exact: true }).count() >= 1
   const cancel = page.locator('.ant-modal-wrap:visible button').filter({ hasText: /取\s*消|取消/ }).last()
   if (await cancel.count() === 1) {
@@ -391,7 +394,8 @@ async function interactionChecks(page, id, stub) {
   await navigate(page, ROUTES.find((route) => route.key === 'novels'), id)
   result.globalNavigation = await page.getByText('提示词', { exact: true }).count() >= 1 && await page.getByText('任务中心', { exact: true }).count() >= 1
   await navigate(page, ROUTES.find((route) => route.key === 'tasks'), id)
-  result.taskStatusVisible = await page.locator('.task-center-page').count() === 1 && await page.getByText('运行中', { exact: true }).count() >= 1
+  result.taskStatusVisible = await page.locator('.task-center-page').count() === 1
+    && await page.getByText(/^(执行中|等待执行|正在取消|已暂停|已完成|执行失败|任务已取消)$/, { exact: true }).count() >= 1
   result.taskFilterVisible = await page.locator('.task-center-filter-control').count() === 2
   await navigate(page, ROUTES.find((route) => route.key === 'prompts'), id)
   result.promptReadOnlyPreview = await page.locator('[data-p3-05-prompt-list] .prompt-manager-card').count() > 0

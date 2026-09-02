@@ -54,7 +54,7 @@ function assertStaticContracts() {
     ['基础设定具备保存与离开保护', premise.includes("addEventListener('beforeunload'") && premise.includes('保存并离开')],
     ['主题文风核心与高级字段分层', themeVoice.includes('data-theme-voice-core-fields="visible"') && themeVoice.includes('data-theme-voice-disclosure="narrative-advanced"') && themeVoice.includes('data-theme-voice-disclosure="style-advanced"')],
     ['文风模板默认只补空字段', themeVoice.includes("useState<'fill_blanks' | 'replace'>('fill_blanks')") && themeVoice.includes('applyStyleTemplateValues')],
-    ['主题文风不再重复采集风格样本', !themeVoice.includes('function StyleLearningPanel') && themeVoice.includes('打开文风实验室')],
+    ['主题文风不再重复采集风格样本', !themeVoice.includes('function StyleLearningPanel') && themeVoice.includes('文风实验室') && themeVoice.includes("navigateWithUnsavedGuard('style-lab')")],
     ['实验室使用指纹与 A/B 单焦点切换', styleLab.includes("useState<'fingerprints' | 'ab'>('fingerprints')") && styleLab.includes('data-style-lab-view={activeView}')],
     ['实验室新建与试写参数进入抽屉', styleLab.includes("drawerMode === 'create'") && styleLab.includes("drawerMode === 'ab'")],
     ['实验室候选输入具备离开保护', styleLab.includes('hasUnsavedCandidate') && styleLab.includes("addEventListener('beforeunload'")],

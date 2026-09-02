@@ -782,7 +782,6 @@ export default function CoreSettings({ novelId }: Props) {
 
       <WorkspacePanel
         title="故事锚点"
-        description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。"
         extra={(
           <AIGenerateButton
             novelId={novelId}
@@ -870,7 +869,6 @@ export default function CoreSettings({ novelId }: Props) {
   const rhythmTabContent = (
     <WorkspacePanel
       title="节奏与结局"
-      description="长篇不要只盯着章数，先把三段比例定下来。"
       extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
     >
       <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
@@ -901,7 +899,6 @@ export default function CoreSettings({ novelId }: Props) {
   const subplotsTabContent = (
     <WorkspacePanel
       title="支线看板"
-      description="先把支线当成项目卡片管理，而不是堆成长文本。点击卡片可在右侧抽屉细修。"
       extra={(
         <div className="story-design__toolbar">
           <Form form={form} component={false} onValuesChange={markDraftDirty}>
@@ -1019,7 +1016,6 @@ export default function CoreSettings({ novelId }: Props) {
       layout="wide"
       eyebrow="主线骨架"
       title="故事设计"
-      description="这里专门负责主线目标、核心冲突、主推进链、支线布局、节奏比例和结局落点。背景、人物、地图、物品先在前面准备好，再来这里把剧情骨架压实。"
       actionContract={{
         primary: { key: 'save', label: '保存故事设计', icon: <SaveOutlined />, loading: saving, onClick: () => void handleSave() },
         secondary: [

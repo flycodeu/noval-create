@@ -213,7 +213,6 @@ export default function StudioPage({ novelId }: Props) {
       chrome="shared"
       eyebrow="创作控制台"
       title="现在做什么"
-      description="只处理推荐下一步与当前阻塞；项目资料请在项目资料页维护。"
       actionContract={{
         primary: {
           key: 'recommended-next-step',
@@ -288,7 +287,6 @@ export default function StudioPage({ novelId }: Props) {
           <SectionHeader
             eyebrow="需要先处理"
             title="当前阻塞"
-            description="先处理最影响推进的项目，其余问题收进展开区。"
             extra={availableBlockers.length > 0 ? <Tag color="volcano">{`${availableBlockers.length} 项`}</Tag> : null}
           />
           {availableBlockers.length > 0 ? (
@@ -328,7 +326,6 @@ export default function StudioPage({ novelId }: Props) {
               type="success"
               showIcon
               message="当前没有阻塞"
-              description="可以直接执行上面的推荐下一步。"
             />
           )}
         </section>
@@ -337,7 +334,6 @@ export default function StudioPage({ novelId }: Props) {
           <SectionHeader
             eyebrow="直接进入"
             title="生产链路入口"
-            description="常用入口保持在这里，不与推荐下一步争夺注意力。"
           />
           <div className="studio-page__entrance-list">
             {keyEntrances.map((item) => (
@@ -374,7 +370,7 @@ export default function StudioPage({ novelId }: Props) {
           </summary>
           <div className="studio-page__diagnostics-grid">
             <section className="studio-page__diagnostic-section">
-              <SectionHeader title="最近活动" description="修改、生成、修订和回滚记录。" />
+              <SectionHeader title="最近活动" />
               {recentActivities.length > 0 ? (
                 <div className="studio-page__activity-list">
                   {recentActivities.map((activity) => (
@@ -391,7 +387,7 @@ export default function StudioPage({ novelId }: Props) {
             </section>
 
             <section className="studio-page__diagnostic-section">
-              <SectionHeader title="风险信号" description="结构体检、上下文和生产健康的高价值信号。" />
+              <SectionHeader title="风险信号" />
               {riskItems.length > 0 ? (
                 <div className="studio-page__risk-list">
                   {riskItems.map((item) => (
@@ -405,7 +401,7 @@ export default function StudioPage({ novelId }: Props) {
             </section>
 
             <section className="studio-page__diagnostic-section">
-              <SectionHeader title="修订反推" description="从质量问题回到对应页面处理。" />
+              <SectionHeader title="修订反推" />
               {topRevisionTasks.length > 0 ? (
                 <div className="studio-page__revision-list">
                   {topRevisionTasks.map((task) => (
@@ -429,7 +425,7 @@ export default function StudioPage({ novelId }: Props) {
             </section>
 
             <section className="studio-page__diagnostic-section">
-              <SectionHeader title="生产健康" description="仅在需要诊断时查看，不占用首屏。" />
+              <SectionHeader title="生产健康" />
               <div className="studio-page__health-list">
                 <div>
                   <ClockCircleOutlined />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildDraftMessages, inspectDraftQuality, parseDraftJson } from './ai-draft'
+import { buildDraftMessages, inferDraftFieldDefinitions, inspectDraftQuality, parseDraftJson } from './ai-draft'
 
 describe('buildDraftMessages', () => {
   it('adds stable, low-AI-flavor constraints to form draft prompts', () => {
@@ -59,5 +59,21 @@ describe('buildDraftMessages', () => {
     )
 
     expect(parsed.hook).toContain('{旧档案-07}')
+  })
+
+  it('rejects fields and types outside the requested JSON contract', () => {
+    const messages = buildDraftMessages({
+      task: '测试格式',
+      context: [],
+      fields: [
+        { key: 'title', label: '标题', value: '' },
+        { key: 'tags', label: '标签', type: 'string[]', value: [] },
+      ],
+    })
+    const fields = inferDraftFieldDefinitions(messages)
+
+    expect(fields?.map((field) => field.type)).toEqual(['string', 'string[]'])
+    expect(() => parseDraftJson('{"title":12,"tags":[],"extra":"禁止"}', fields || undefined))
+      .toThrow('AI 输出格式不符合字段要求')
   })
 })

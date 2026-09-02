@@ -286,23 +286,34 @@ async function verifyInteractions(page, projectId, density) {
   await navigate(page, projectId, threadRoute)
   const search = page.getByPlaceholder('搜索线程标题、摘要或当前状态')
   await search.fill(density.marker)
-  await page.waitForTimeout(700)
+  await page.waitForFunction(({ marker, expectedTotal }) => {
+    const rows = [...document.querySelectorAll('[data-story-thread-row]')]
+    return rows.length > 0
+      && rows.every((row) => row.textContent?.includes(marker))
+      && expectedTotal > 0
+  }, { marker: density.marker, expectedTotal: density.threads }, { timeout: 12000 })
   const rows = page.locator('[data-story-thread-row]')
   const filteredRows = await rows.count()
   const filteredRowTexts = await rows.allTextContents()
-  const filteredTotal = page.locator('.novel-context-summary__item').filter({ hasText: '线程总数' }).getByText(String(density.threads), { exact: true })
-  console.log(`[P2-06] interaction threads: filtered rows=${filteredRows}, total=${density.threads}`)
+  const filteredStats = await page.evaluate(({ novelId, marker }) => window.electron.thread.getStats({
+    novelId,
+    page: 1,
+    pageSize: 1,
+    keyword: marker,
+  }), { novelId: projectId, marker: density.marker })
+  console.log(`[P2-06] interaction threads: visible rows=${filteredRows}, filtered total=${filteredStats.total}, expected=${density.threads}`)
   result.threadFilter = filteredRows > 0
     && filteredRowTexts.every((text) => text.includes(density.marker))
-    && await filteredTotal.count() > 0
+    && filteredStats.total === density.threads
   result.threadDrag = false
   const handles = page.locator('.story-threads__drag-handle')
   if (await handles.count() >= 2) {
     console.log('[P2-06] interaction threads: drag start')
     await dragElement(page, handles.first(), handles.nth(1))
     console.log('[P2-06] interaction threads: drag finished')
-    await page.getByText('线程顺序已保存', { exact: true }).waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
-    result.threadDrag = (await page.getByText('线程顺序已保存', { exact: true }).count()) > 0
+    const orderMessage = page.locator('.ant-message-notice-content').filter({ hasText: '线程顺序已保存' }).last()
+    await orderMessage.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
+    result.threadDrag = await orderMessage.isVisible().catch(() => false)
   }
   const firstRow = rows.filter({ hasText: density.marker }).first()
   console.log('[P2-06] interaction threads: locate edit')

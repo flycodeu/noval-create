@@ -41,6 +41,7 @@ import * as storyThreadService from './story-thread.service'
 import * as taskService from './task.service'
 import * as timelineService from './timeline.service'
 import * as novelService from './novel.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const DEFAULT_LAYOUT_KEY = 'default'
 const DEFAULT_LAYERS: MapBoardViewport['activeLayers'] = ['regions', 'routes', 'events', 'people', 'factions']
@@ -217,7 +218,7 @@ function getOrCreateViewport(novelId: number, layoutKey: string): MapBoardViewpo
   const created = sqlite.prepare(`
     SELECT * FROM narrative_map_viewports WHERE novel_id = ? AND layout_key = ? LIMIT 1
   `).get(novelId, layoutKey) as DbRow | undefined
-  if (!created) throw new Error('无法创建地图视口')
+  if (!created) throwUserFacingError('narrativeBoard.viewportCreateFailed')
   return mapViewportRow(created)
 }
 
@@ -476,10 +477,10 @@ export function getMapLayout(novelId: number, layoutKey = DEFAULT_LAYOUT_KEY, ma
 export function upsertMapLayoutNode(input: MapBoardLayoutNodeInput): MapBoardLayoutNode {
   const novelId = positiveId(input.novelId)
   const mapNodeId = positiveId(input.mapNodeId)
-  if (!novelId || !mapNodeId) throw new Error('地图布局需要有效的 novelId 和 mapNodeId')
+  if (!novelId || !mapNodeId) throwUserFacingError('narrativeBoard.layoutInvalid')
   const sqlite = getSqlite()
   const map = sqlite.prepare('SELECT id, novel_id FROM world_map WHERE id = ? LIMIT 1').get(mapNodeId) as { id: number; novel_id: number } | undefined
-  if (!map || Number(map.novel_id) !== novelId) throw new Error('地图节点不属于当前项目')
+  if (!map || Number(map.novel_id) !== novelId) throwUserFacingError('narrativeBoard.mapNodeWrongNovel')
   const key = normalizeLayoutKey(input.layoutKey)
   const version = getNovelContextVersion(novelId)
   const values = {
@@ -503,16 +504,16 @@ export function upsertMapLayoutNode(input: MapBoardLayoutNodeInput): MapBoardLay
       updated_at = CURRENT_TIMESTAMP
   `).run(novelId, mapNodeId, key, values.x, values.y, values.width, values.height, values.layerKey, values.visible, values.zIndex, values.layoutVersion, version)
   const row = sqlite.prepare(`SELECT * FROM narrative_map_layout_nodes WHERE novel_id = ? AND map_node_id = ? AND layout_key = ?`).get(novelId, mapNodeId, key) as DbRow | undefined
-  if (!row) throw new Error('地图布局保存失败')
+  if (!row) throwUserFacingError('narrativeBoard.layoutSaveFailed')
   return mapBoardLayoutRow(row)
 }
 
 export function saveMapViewport(input: MapBoardViewportInput): MapBoardViewport {
   const novelId = positiveId(input.novelId)
-  if (!novelId) throw new Error('地图视口需要有效的 novelId')
+  if (!novelId) throwUserFacingError('narrativeBoard.viewportNovelIdInvalid')
   const sqlite = getSqlite()
   const novel = sqlite.prepare('SELECT id FROM novels WHERE id = ? LIMIT 1').get(novelId) as { id: number } | undefined
-  if (!novel) throw new Error('地图视口对应的项目不存在')
+  if (!novel) throwUserFacingError('narrativeBoard.viewportNovelNotFound')
   const key = normalizeLayoutKey(input.layoutKey)
   const version = getNovelContextVersion(novelId)
   const centerX = boundedNumber(input.centerX, 0, -100000, 100000)
@@ -530,7 +531,7 @@ export function saveMapViewport(input: MapBoardViewportInput): MapBoardViewport 
       context_version = excluded.context_version, updated_at = CURRENT_TIMESTAMP
   `).run(novelId, key, centerX, centerY, zoom, JSON.stringify(activeLayers), layoutVersion, version)
   const row = sqlite.prepare('SELECT * FROM narrative_map_viewports WHERE novel_id = ? AND layout_key = ? LIMIT 1').get(novelId, key) as DbRow | undefined
-  if (!row) throw new Error('地图视口保存失败')
+  if (!row) throwUserFacingError('narrativeBoard.viewportSaveFailed')
   return mapViewportRow(row)
 }
 
@@ -549,11 +550,11 @@ export function upsertLocationBinding(input: CharacterLocationBindingInput): Cha
   const novelId = positiveId(input.novelId)
   const characterId = positiveId(input.characterId)
   const mapNodeId = positiveId(input.mapNodeId)
-  if (!novelId || !characterId || !mapNodeId) throw new Error('人物地区绑定参数无效')
+  if (!novelId || !characterId || !mapNodeId) throwUserFacingError('narrativeBoard.bindingParamsInvalid')
   const sqlite = getSqlite()
   const character = sqlite.prepare('SELECT id, novel_id FROM characters WHERE id = ? LIMIT 1').get(characterId) as { id: number; novel_id: number } | undefined
   const map = sqlite.prepare('SELECT id, novel_id FROM world_map WHERE id = ? LIMIT 1').get(mapNodeId) as { id: number; novel_id: number } | undefined
-  if (!character || !map || Number(character.novel_id) !== novelId || Number(map.novel_id) !== novelId) throw new Error('人物或地区不属于当前项目')
+  if (!character || !map || Number(character.novel_id) !== novelId || Number(map.novel_id) !== novelId) throwUserFacingError('narrativeBoard.bindingWrongNovel')
   const contextVersion = getNovelContextVersion(novelId)
   const bindingType = typeof input.bindingType === 'string' && input.bindingType.trim() ? input.bindingType.trim().slice(0, 40) : 'presence'
   const sourceType = typeof input.sourceType === 'string' && input.sourceType.trim() ? input.sourceType.trim().slice(0, 40) : 'manual'
@@ -593,7 +594,7 @@ export function upsertLocationBinding(input: CharacterLocationBindingInput): Cha
       AND COALESCE(chapter_end_id, 0) = COALESCE(?, 0)
     ORDER BY id DESC LIMIT 1
   `).get(novelId, characterId, mapNodeId, bindingType, sourceType, sourceId, startId, endId) as DbRow | undefined
-  if (!row) throw new Error('人物地区绑定保存失败')
+  if (!row) throwUserFacingError('narrativeBoard.bindingSaveFailed')
   return mapBindingRow(row)
 }
 

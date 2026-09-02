@@ -541,7 +541,6 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="剧情与伏笔 / 信息差"
       title="信息差与谜题板"
-      description="独立维护谜题、线索、真相、假线索，并控制“谁何时知道什么”。"
       chrome="shared"
       actionContract={{
         primary: { key: 'create-fact', label: '新建信息点', icon: <PlusOutlined />, onClick: () => openEditor() },
@@ -587,7 +586,6 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       <div className="novel-info-gap-board__workspace">
         <WorkspacePanel
           title="信息点目录"
-          description={`当前范围：${displayedVolumeLabel} · ${filteredFacts.length}/${volumeFacts.length} 条`}
           className="novel-info-gap-board__directory-panel"
           bodyClassName="novel-info-gap-board__directory-body"
         >
@@ -673,7 +671,6 @@ export default function InfoGapBoardPage({ novelId }: Props) {
 
         <WorkspacePanel
           title={selectedFact ? '当前信息点' : '当前详情'}
-          description={selectedFact ? `#${selectedFact.id} · ${kindLabel(selectedFact.kind)}` : '从左侧目录选择一条信息点'}
           sticky
           className="novel-info-gap-board__detail-panel"
           bodyClassName="novel-info-gap-board__detail-body"
@@ -719,7 +716,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         </WorkspacePanel>
       </div>
 
-      <WorkspacePanel title="揭示节奏与真相比例" description="卷级限制保留为轻量控制条，统计明细在展开后查看。">
+      <WorkspacePanel title="揭示节奏与真相比例">
         <div className="novel-info-gap-board__control-strip">
           <Select
             value={activeVolumeId || undefined}

@@ -350,7 +350,6 @@ export default function GlossaryPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="设定词典"
-      description="把术语、阶位、材料、事件和种族名词固定成可检索资产；列表负责定位，详情区维护完整内容。"
       actionContract={{
         primary: {
           key: 'save',
@@ -412,7 +411,6 @@ export default function GlossaryPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="词典清单"
-        description="用关键词或规范状态缩小范围；选择一行后，在右侧编辑当前条目。"
         extra={<span className="novel-glossary__result-count">{items.length} / {stats.total} 条当前结果</span>}
       >
         <div className="novel-glossary__layout">

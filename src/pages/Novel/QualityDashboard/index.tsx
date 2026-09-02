@@ -154,7 +154,6 @@ export default function QualityDashboard({ novelId }: Props) {
     return (
       <WorkspacePage
         title="质量监控"
-        description="质量数据暂时不可用，修复连接后再继续判断是否适合进入正文生产。"
         chrome="shared"
         actionContract={{
           primary: {

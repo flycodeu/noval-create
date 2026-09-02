@@ -828,8 +828,6 @@ export interface PreparedChapterPipelineStageContexts {
   draftResolution: StageContextResolverPayload
   scenePlanContext: ChapterContext
   draftContext: ChapterContext
-  reviewContext: ChapterContext
-  rewriteContext: ChapterContext
   contextVersion: number
 }
 
@@ -1022,27 +1020,10 @@ export async function prepareChapterPipelineStageContexts(
     complexity,
     sharedOptions,
   )
+  // Review and rewrite depend on the actual Writer/Critic artifacts. Resolve
+  // them at their stage boundary instead of pre-building stale copies here;
+  // this keeps one authoritative context snapshot per stage.
   const downstreamRawContext = draftResolution.effectiveRawContext
-  const downstreamOptions = {
-    ...sharedOptions,
-    upstreamArtifacts: {
-      contractVersionSummary: buildContractVersionArtifactSummary(options.contractVersion),
-    },
-  }
-  const reviewResolution = await resolveStageContextForPipeline(
-    'review',
-    chapter,
-    downstreamRawContext,
-    complexity,
-    downstreamOptions,
-  )
-  const rewriteResolution = await resolveStageContextForPipeline(
-    'rewrite',
-    chapter,
-    downstreamRawContext,
-    complexity,
-    downstreamOptions,
-  )
   return {
     activePromptOverrideKeys,
     complexity,
@@ -1050,8 +1031,6 @@ export async function prepareChapterPipelineStageContexts(
     draftResolution,
     scenePlanContext: scenePlanResolution.context,
     draftContext: draftResolution.context,
-    reviewContext: reviewResolution.context,
-    rewriteContext: rewriteResolution.context,
     contextVersion: downstreamRawContext.novel.contextVersion || 1,
   }
 }

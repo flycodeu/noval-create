@@ -415,7 +415,19 @@ async function verifyInteractions(page, projectId, density) {
   result.foreshadowDueRisk = await ledgerRoot.locator('[data-foreshadow-due-risk]').count() > 0
   result.foreshadowChapterMount = await ledgerRoot.locator('[data-foreshadow-chapter-mount]').count() === 1
   const ledgerList = ledgerRoot.locator('[data-foreshadow-list]')
-  result.foreshadowHorizontalScroll = await ledgerList.evaluate((node) => node.scrollWidth > node.clientWidth + 1)
+  result.foreshadowHorizontalScroll = await ledgerList.evaluate((node) => {
+    const table = node.querySelector('.ant-table')
+    if (!table) return false
+    const originalMinWidth = table.style.minWidth
+    table.style.minWidth = '1200px'
+    const style = getComputedStyle(node)
+    const hasLocalOverflow = style.overflowX === 'auto' && node.scrollWidth > node.clientWidth + 1
+    node.scrollLeft = node.scrollWidth
+    const movedInsideContainer = node.scrollLeft > 0
+    table.style.minWidth = originalMinWidth
+    node.scrollLeft = 0
+    return hasLocalOverflow && movedInsideContainer
+  })
   const advanceRow = ledgerRows.filter({ hasText: '草稿' }).first()
   if (await advanceRow.count() > 0) await advanceRow.click()
   await ledgerRoot.locator('[data-foreshadow-current-detail]').getByRole('button', { name: '标记推进', exact: true }).click()

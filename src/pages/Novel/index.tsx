@@ -36,6 +36,7 @@ import {
 import type { RegisteredWorkspaceQualityController } from './workspace-quality-context-core'
 import type { Chapter, ChapterQualityAnalysisStatus, OperationLog, PlatformFormat, PlatformFormatResult, PlatformFormatScope } from '../../types'
 import { readBrowserStorage, writeBrowserStorage } from '../../utils/browser-storage'
+import { resolveWritingViewFromPathname } from './Writing/useWritingRouteState'
 
 type ProWorkspaceKey = WorkspaceRouteKey
 interface WorkspaceStageProps {
@@ -751,7 +752,7 @@ export default function NovelRouter() {
   useEffect(() => {
     writeBrowserStorage(WORKSPACE_RECENT_PAGE_STORAGE_KEY, currentNavKey)
     if (currentPage === 'writing') {
-      const writingView = location.pathname.split('/').filter(Boolean)[4] || 'editor'
+      const writingView = resolveWritingViewFromPathname(location.pathname)
       writeBrowserStorage(WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY, writingView)
     }
   }, [currentNavKey, currentPage, location.pathname])

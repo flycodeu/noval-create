@@ -388,7 +388,6 @@ export default function BatchWorkbench({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="正文生产 / 安全恢复"
       title="批次回滚工作台"
-      description="只围绕当前批次做恢复决策；锁定库、检查记录和历史放进诊断层，危险影响必须先预演再确认。"
       chrome="shared"
       actionContract={actionContract}
       contextSummary={(
@@ -416,7 +415,6 @@ export default function BatchWorkbench({ novelId }: Props) {
         <WorkspacePanel
           className="novel-batch-workbench__current-panel"
           title="当前批次"
-          description={activeSnapshot ? '当前批次是唯一默认工作对象；恢复动作紧接在下方。' : '批次快照由章节批量生成流程自动创建。'}
           extra={activeSnapshot ? <Tag color={snapshotStatusColor(activeSnapshot.status)}>{snapshotStatusLabel(activeSnapshot.status)}</Tag> : null}
         >
           {activeSnapshot ? (
@@ -472,7 +470,6 @@ export default function BatchWorkbench({ novelId }: Props) {
           <WorkspacePanel
             className="novel-batch-workbench__recovery-panel"
             title="恢复动作"
-            description="默认建议先生成影响预演；只有预演与当前模式一致时，危险执行按钮才会解锁。"
             extra={<Tag color="gold">先预演 · 后确认</Tag>}
           >
             <div data-batch-recovery className="novel-batch-workbench__recovery">

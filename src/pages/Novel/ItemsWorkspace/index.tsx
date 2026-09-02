@@ -1387,7 +1387,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="物品与装备工作台"
-      description="模板与实例共用一套列表—详情工作区；关联、生成和清理操作收在详情与更多菜单中。"
       actionContract={{
         primary: {
           key: 'save',

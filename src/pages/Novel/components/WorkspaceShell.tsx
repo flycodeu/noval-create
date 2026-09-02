@@ -18,7 +18,6 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
 interface WorkspacePageBaseProps {
   eyebrow?: string
   title: string
-  description?: string
   metrics?: React.ReactNode
   contextSummary?: React.ReactNode
   guide?: React.ReactNode
@@ -50,7 +49,6 @@ type WorkspacePageProps = WorkspacePageBaseProps & WorkspacePageChromeProps
 export function WorkspacePage({
   eyebrow,
   title,
-  description: _description,
   chrome = 'legacy',
   actions,
   actionContract,

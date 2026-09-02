@@ -1066,7 +1066,8 @@ async function finalizeGeneratedChapterContent(
 
 export function listChapters(novelId: number) {
   const db = getDb()
-  ensureStoryStructure(novelId)
+  // Listing is a read path. Structure/bootstrap writes belong to explicit
+  // create/update/generation flows so opening a page cannot mutate the novel.
   return db.select().from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
 }
 
@@ -1074,7 +1075,6 @@ export function getChapter(id: number) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
   if (!chapter) return null
-  ensureStoryStructure(chapter.novelId)
   return chapter
 }
 
@@ -3392,7 +3392,9 @@ async function loadChapterGenerationRawContext(
   chapter: typeof chapters.$inferSelect,
   stageId?: number,
 ) {
-  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, stageId)
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, stageId, {
+    ensureStructure: true,
+  })
   if (stageId && rawContext.creativeStageContext) {
     assertCreativeStageContextReadyForGeneration(rawContext.creativeStageContext)
   }
@@ -3569,7 +3571,6 @@ async function generateChapterContentInternal(
     } = preparedContexts
     let { scenePlanContext } = preparedContexts
     const { draftContext } = preparedContexts
-    const { reviewContext: initialReviewContext, rewriteContext } = preparedContexts
     state.expectedContextVersion = preparedContexts.contextVersion
     runtime.adoptSnapshot(state.snapshot)
     state.snapshot = runtime.checkpointContext(state.expectedContextVersion)
@@ -3591,9 +3592,7 @@ async function generateChapterContentInternal(
     const criticChatOpts = buildChatOptionsFromRoute(stageReports[2].route)
     logConstraintInjectionStatus('scenePlan', scenePlanContext)
     logConstraintInjectionStatus('draft', draftContext)
-    logConstraintInjectionStatus('review', initialReviewContext)
-    logConstraintInjectionStatus('rewrite', rewriteContext)
-    const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
+    const storyCore = buildStoryCore(profile, draftContext.storyCore || scenePlanContext.storyCore)
     const currentArcRow = rawContext.currentArc
     const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
     const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)

@@ -822,7 +822,10 @@ describe('allocateChapterContext', () => {
     expect(feed.previousChapterSampleReport.fullyInjected).toBe(true)
     expect(feed.previousChapterSampleReport.coverageRate).toBe(100)
     expect(feed.previousChapterContext).toContain('上一章全文')
-    expect(feed.previousChapterContext).toContain('地下层的灯忽然亮了')
+    expect(feed.previousChapterContext).toContain('副手压着伤口')
+    expect(feed.previousChapterContext).not.toContain('下章引子')
+    expect(feed.previousChapterContext).not.toContain('衔接提示')
+    expect(feed.lastChapterEnding).toContain('地下层的灯忽然亮了')
   })
 
   it('samples a long previous chapter into structured prior segments', () => {
@@ -901,7 +904,30 @@ describe('allocateChapterContext', () => {
     expect(feed.previousChapterSampleReport.sampledChars).toBe(sourceSampledChars)
     expect(feed.previousChapterSampleReport.sampledChars).toBe(740)
     expect(feed.previousChapterSampleReport.coverageRate).toBe(61.7)
-    expect(feed.previousChapterContext.length).toBeGreaterThan(feed.previousChapterSampleReport.sampledChars)
+    expect(
+      feed.previousChapterContext.length + feed.lastChapterEnding.length,
+    ).toBeGreaterThan(feed.previousChapterSampleReport.sampledChars)
+  })
+
+  it('keeps the previous chapter ending in one dedicated prompt field', () => {
+    vi.mocked(getDb).mockReturnValue(createMockSelectDb([[], []]) as never)
+
+    const previousChapter = {
+      id: 12,
+      chapterNum: 12,
+      content: `${'开场'.repeat(300)}${'结尾证据'.repeat(120)}`,
+      nextChapterSeed: '下一章必须先核对这份证据。',
+      summary: '上一章留下证据。',
+      continuityStateJson: '',
+      scenePlanJson: '',
+      reviewNotesJson: '',
+    } as never
+
+    const feed = buildPreviousChapterContextFeed(previousChapter)
+    expect(feed.lastChapterEnding).toContain('结尾证据')
+    expect(feed.lastChapterEnding).toContain('下一章必须先核对这份证据')
+    expect(feed.previousChapterContext).not.toContain('上章结尾原文')
+    expect(feed.previousChapterContext).not.toContain('下章引子')
   })
 
   it('expands the recent context window and carries forward older key chapters when current signals require them', () => {

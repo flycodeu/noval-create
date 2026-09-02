@@ -205,10 +205,14 @@ async function verifyInteractions(page, projectId) {
 
   const guideRoute = ROUTES[0]
   await navigate(page, projectId, guideRoute)
-  const nextStepButton = page.locator('[data-studio-next-step]').getByRole('button').first()
+  // The recommended action is rendered by the shared chrome portal. The
+  // content section intentionally remains informational and points users to
+  // that single primary action.
+  const nextStepButton = page.locator('.project-topbar__page-actions .workspace-contract-action--primary:visible').first()
+  await nextStepButton.waitFor({ state: 'visible', timeout: 8000 })
   const nextStepTarget = await page.locator('[data-studio-next-step]').getAttribute('data-target-route')
   await nextStepButton.click()
-  await page.waitForTimeout(450)
+  await page.waitForFunction(({ projectId }) => window.location.hash !== `#/novels/${projectId}/guide`, { projectId }, { timeout: 12000 })
   result.recommendedActionNavigates = (await windowHash(page)) !== `#/novels/${projectId}/guide`
   result.recommendedTargetDeclared = Boolean(nextStepTarget)
 

@@ -929,7 +929,6 @@ export default function WorldRules({ novelId }: Props) {
         heroVariant="compact"
         chrome="shared"
         title="世界规则"
-        description="先固定当前分区的规则，生成、扩写与后台诊断按需打开。"
         actionContract={{
           primary: {
             key: 'save',

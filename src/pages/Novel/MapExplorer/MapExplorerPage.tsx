@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Switch, Tag, message } from 'antd'
-import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import CreativeStageScope from '../../../components/novel/CreativeStageScope'
@@ -13,7 +13,7 @@ import { parseTaskEventId, parseTaskStatusEvent } from '../../../shared/task-str
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { scaleMapLayerCounts } from '../../../shared/creation-tools'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import '../components/boards.css'
 import './map-explorer.css'
@@ -134,8 +134,6 @@ function TaskStrip({
     warning: { border: 'rgba(174, 124, 48, 0.22)', glow: 'rgba(136, 93, 30, 0.14)', pillBg: 'rgba(189, 137, 56, 0.14)', pillText: '#8E5E1B' },
     error: { border: 'rgba(176, 68, 68, 0.22)', glow: 'rgba(124, 40, 40, 0.14)', pillBg: 'rgba(183, 68, 68, 0.14)', pillText: '#8A3131' },
   }[tone]
-  void onToggle
-
   return (
     <section
       className={`${className} map-graph-callout`}
@@ -153,6 +151,16 @@ function TaskStrip({
         </div>
         <div className="map-graph-callout__actions">
           {actions}
+          {onToggle ? (
+            <Button
+              type="text"
+              size="small"
+              icon={resolvedExpanded ? <UpOutlined /> : <DownOutlined />}
+              onClick={() => onToggle(!resolvedExpanded)}
+              aria-expanded={resolvedExpanded}
+              aria-label={resolvedExpanded ? '收起任务详情' : '展开任务详情'}
+            />
+          ) : null}
         </div>
       </div>
       {resolvedExpanded ? <div className="map-graph-callout__body">{children}</div> : null}
@@ -1225,16 +1233,6 @@ export default function MapExplorerPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="地图结构"
-      description="列表与图谱只保留一个主视角；选中节点后查看路径和关系详情。"
-      guide={(
-        <WorkspaceStepGuide
-          steps={[
-            { title: '先定位层级或焦点节点', description: '优先从根层、路径或节点定位开始，不再先滚过整页表单再找地图位置。', status: 'focus' },
-            { title: '再看关系或节点详情', description: '图谱模式右侧检查器只负责焦点、关系、详情三件事；列表模式则固定在右侧编辑当前节点。', status: 'todo' },
-            { title: '最后再执行生成或修补', description: 'AI 入口只补当前节点或按层级生成，不直接挤占主画布。', status: 'todo' },
-          ]}
-        />
-      )}
       actionContract={{
         primary: {
           key: 'save-node',
@@ -1312,7 +1310,6 @@ export default function MapExplorerPage({ novelId }: Props) {
               className="map-graph-stage-panel"
               bodyClassName="map-graph-stage-panel__body"
               title="地图图谱"
-              description="图谱优先展示上下级、关联关系和节点简介；右侧信息区只在需要时展开，让主画布保持完整和可拖拽。"
               extra={(
                 <div className="map-graph-toolbar">
                   <div className="map-graph-toolbar__row">
@@ -1424,7 +1421,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               </div>
 
               {graphInspectorTab === 'focus' ? (
-                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title="焦点概览" description="显示当前节点的定位、标签和关系摘要。" scrollable sticky>
+                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title="焦点概览" scrollable sticky>
                   <div className="map-graph-focus-card">
                     <div className="map-graph-focus-card__title">
                       <div>
@@ -1495,7 +1492,6 @@ export default function MapExplorerPage({ novelId }: Props) {
                   className="map-graph-inspector-panel"
                   bodyClassName="map-graph-inspector-panel__body"
                   title={selectedRelation ? `关系详情 · ${getRelationLabelText(selectedRelation)}` : selectedNode ? `节点关系 · ${selectedNode.name}` : '节点关系'}
-                  description="维护选中节点的显式关系，并快速查看两端节点之间的连接说明。"
                   scrollable
                   sticky
                 >
@@ -1574,7 +1570,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               ) : null}
 
               {graphInspectorTab === 'detail' ? (
-                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="编辑焦点节点的基础信息，右侧表单不会再压缩主图谱视图。" scrollable sticky>
+                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} scrollable sticky>
                   <div className="map-graph-detail-actions">{detailActions}</div>
                   {!selectedNode ? (
                     <div className="novel-empty">从图谱中选择一个节点开始编辑。</div>
@@ -1590,7 +1586,6 @@ export default function MapExplorerPage({ novelId }: Props) {
           <WorkspacePanel
             className="map-list-panel"
             title={isSearching ? '搜索结果' : '根节点'}
-            description={isSearching ? '关键词会在全部地图节点中检索，结果仍可作为图谱焦点继续展开。' : '根节点决定地图的最高层级结构，适合先建立主区域、主基地或主城市。'}
             scrollable
             extra={(
               <Input.Search
@@ -1634,7 +1629,6 @@ export default function MapExplorerPage({ novelId }: Props) {
           <WorkspacePanel
             className="map-list-panel"
             title={currentParent ? `分支下级 · ${currentParent.name}` : '分支下级'}
-            description={currentParent ? '展示当前节点的直属下级，可继续下钻，也可直接在右侧编辑。' : '先从左侧选择一个根节点，再查看它的下级结构。'}
             scrollable
             extra={branchPath.length > 0 ? (
               <Space className="map-list-panel__breadcrumb" wrap>
@@ -1672,7 +1666,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             )}
           </WorkspacePanel>
 
-          <WorkspacePanel className="map-list-panel map-list-panel--detail" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="图谱与列表共用同一套详情表单，方便随时补充简介、上下级和关系信息。" extra={detailActions} scrollable sticky>
+          <WorkspacePanel className="map-list-panel map-list-panel--detail" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} extra={detailActions} scrollable sticky>
             {!selectedNode ? (
               <div className="novel-empty">从左侧选择一条节点记录，或先新建。</div>
             ) : null}

@@ -88,7 +88,7 @@ export default function OverviewSection({
   return (
     <>
       <RecommendationGovernancePanel novelId={novelId} />
-      <WorkspacePanel title="百万字健康指标" description="把继续扩批前最关键的生产、连续性、合同和批次回查信号收在一起。">
+      <WorkspacePanel title="百万字健康指标">
         <div className="quality-dashboard-page__stack">
           <div className="quality-dashboard-page__grid-220">
             <div className="quality-card">
@@ -154,7 +154,7 @@ export default function OverviewSection({
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="修复引擎摘要" description="把六类高价值质量指标压缩成可执行动作，优先处理最影响正文继续推进的问题。">
+        <WorkspacePanel title="修复引擎摘要">
         <div className="quality-dashboard-page__stack">
           {data.dashboardNotes?.length ? (
             <div className="quality-dashboard-page__note-list">
@@ -222,7 +222,7 @@ export default function OverviewSection({
       ) : null}
 
       {data.agentQualityObservability ? (
-        <WorkspacePanel title="智能体质量工件" description="把 Agent 的质量报告、修复计划、章节候选 Diff、独立审校证据和报告比较集中到同一条可追溯链路。">
+        <WorkspacePanel title="智能体质量工件">
           <AgentQualityObservabilityPanel snapshot={data.agentQualityObservability} />
         </WorkspacePanel>
       ) : null}

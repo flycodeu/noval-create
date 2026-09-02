@@ -460,7 +460,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
             ],
             fields: [
               { key: 'summary', label: '规划摘要', value: '', hint: isChunked ? '概括本分块在全书中的功能，不要概括全书全部细节。' : '先用几句话概括整套卷部章场景结构。' },
-              { key: 'volumes', label: '卷结构', value: '', hint: '按卷 > 部 > 章 > 场景输出嵌套 JSON。' },
+              { key: 'volumes', label: '卷结构', type: 'object[]', value: '', hint: '按卷 > 部 > 章 > 场景输出嵌套 JSON。' },
             ],
             requirements: [
               isChunked
@@ -770,7 +770,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       cancelText: '留在当前对象',
       onOk: async () => {
         const saved = await saveActiveEditor()
-        if (!saved) throw new Error('当前结构对象保存失败')
+        if (!saved) throw new Error(getUserFacingMessage('structure.currentObjectSaveFailed'))
         await action()
       },
     })

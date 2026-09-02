@@ -10,6 +10,7 @@ import type {
   TimelineEvent,
   WorldMapItem,
 } from '../../../types'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildAtlasRouteLinks, buildAtlasTerritories, type AtlasTerritory } from './narrative-atlas-layout'
 
 interface NarrativeMapCanvasProps {
@@ -198,7 +199,7 @@ export default function NarrativeMapCanvas({
       }).catch(() => {
         if (!saveErrorShownRef.current) {
           saveErrorShownRef.current = true
-          message.error('地图视图保存失败，请稍后重试')
+          message.error(getUserFacingMessage('map.saveFailed'))
         }
       })
     }, 420)

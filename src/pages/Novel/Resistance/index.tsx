@@ -19,7 +19,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import {
   buildDraftMessages,
@@ -544,7 +543,6 @@ export default function ResistancePage({ novelId }: Props) {
         chrome="shared"
         className="novel-resistance-page"
         title="反派与阻力系统"
-        description="把人物反派、势力反派、环境阻力和制度阻力统一放进同一个阻力工作台，并登记章节层面的真实出手。"
         actionContract={{
           primary: { key: 'save', label: '保存当前阻力线', icon: <SaveOutlined />, loading: saving, disabled: !draft, onClick: () => void handleSave() },
           secondary: [
@@ -575,15 +573,6 @@ export default function ResistancePage({ novelId }: Props) {
             <WorkspaceMetric label="推进记录" value={selectedTrack?.beatCount || 0} tone="cool" />
             <WorkspaceMetric label="下次升级" value={selectedTrack?.nextEscalationChapterLabel || '未设'} />
           </>
-        )}
-        guide={(
-          <WorkspaceStepGuide
-            steps={[
-              { title: '先补主要阻力来源', description: '至少建立一条人物反派或势力反派线。', status: 'focus' },
-              { title: '再写升级与反制', description: '把情报、资源、升级策略和失败后反制写成结构字段。', status: 'todo' },
-              { title: '最后绑到卷与章', description: '把阻力线挂到卷级设计和章节合同，写完章后回写本章是否出手。', status: 'todo' },
-            ]}
-          />
         )}
       >
         <div className="novel-resistance-page__status-rail" data-resistance-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>

@@ -26,10 +26,63 @@ interface PlanningContextOptions {
   extraSections?: DraftContextSection[]
 }
 
+export const PLANNING_CONTEXT_MAX_CHARS = 12000
+const PLANNING_CONTEXT_MAX_SECTION_CHARS = 1800
+
 function compactText(value?: string | null, max = 900): string {
   const text = value?.trim() || ''
   if (!text) return ''
   return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+function compactContextValue(value: DraftContextSection['value']): string {
+  if (Array.isArray(value)) {
+    return compactText(value.filter(Boolean).join('、'), PLANNING_CONTEXT_MAX_SECTION_CHARS)
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : ''
+  }
+  return compactText(value, PLANNING_CONTEXT_MAX_SECTION_CHARS)
+}
+
+function normalizeContextSections(sections: DraftContextSection[]): DraftContextSection[] {
+  const result: DraftContextSection[] = []
+  const seenLabels = new Set<string>()
+  const seenValues = new Set<string>()
+  let usedChars = 0
+
+  sections.forEach((section) => {
+    const label = section.label?.trim()
+    if (!label) return
+
+    const labelKey = label.replace(/\s+/g, '')
+    if (seenLabels.has(labelKey)) return
+
+    const value = compactContextValue(section.value)
+    if (!value) {
+      result.push({ label, value: '' })
+      seenLabels.add(labelKey)
+      return
+    }
+
+    const valueKey = value.replace(/\s+/g, '')
+    if (valueKey.length >= 20 && seenValues.has(valueKey)) return
+
+    const remaining = PLANNING_CONTEXT_MAX_CHARS - usedChars - label.length - 4
+    if (remaining <= 0) return
+
+    const boundedValue = value.length > remaining
+      ? `${value.slice(0, Math.max(0, remaining - 3))}...`
+      : value
+    if (!boundedValue) return
+
+    result.push({ label, value: boundedValue })
+    seenLabels.add(labelKey)
+    if (valueKey.length >= 20) seenValues.add(valueKey)
+    usedChars += label.length + boundedValue.length + 4
+  })
+
+  return result
 }
 
 function appendContextSection(
@@ -74,5 +127,5 @@ export function buildPlanningContextSections(
   appendContextSection(sections, options.includeWorldRules !== false && Boolean(novel?.worldRulesJson), '世界规则', compactText(buildWorldRulesSummary(worldRules), 1400))
   appendContextSection(sections, storySettings.endgameReadyCount > 0, '终局设计', compactText(buildEndgameDesignSummary(storySettings.endgameDesign), 900))
 
-  return sections.concat(options.extraSections || [])
+  return normalizeContextSections(sections.concat(options.extraSections || []))
 }

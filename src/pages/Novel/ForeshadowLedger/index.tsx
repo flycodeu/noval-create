@@ -491,7 +491,6 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="剧情与伏笔 / 回收账本"
       title="伏笔与回收账本"
-      description="独立维护伏笔资产，支持章节/场景回写、回收状态追踪和终局绑定。"
       chrome="shared"
       actionContract={{
         primary: { key: 'create-foreshadow', label: '新建伏笔资产', icon: <PlusOutlined />, onClick: () => openEditor() },
@@ -533,7 +532,6 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       <div className="novel-foreshadow-ledger__workspace">
         <WorkspacePanel
           title="伏笔目录"
-          description={`${filteredTableRows.length}/${entries.length} 条 · 超期与即将到期排在前面`}
           className="novel-foreshadow-ledger__list-panel"
           bodyClassName="novel-foreshadow-ledger__list-body"
         >
@@ -639,7 +637,6 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
 
         <WorkspacePanel
           title={selectedEntry ? '当前伏笔详情' : '当前详情'}
-          description={selectedEntry ? `#${selectedEntry.id} · ${getStatusLabel(selectedEntry.status)}` : '从左侧目录选择一条伏笔'}
           sticky
           className="novel-foreshadow-ledger__detail-panel"
           bodyClassName="novel-foreshadow-ledger__detail-body"

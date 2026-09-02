@@ -2,7 +2,7 @@ import { cleanAiValue } from '../../../utils/text'
 import { getUserFacingMessage } from '../../../utils/user-facing-message'
 
 export type DraftMode = 'replace' | 'fill_blanks' | 'optimize'
-export type DraftFieldType = 'string' | 'number' | 'string[]'
+export type DraftFieldType = 'string' | 'number' | 'string[]' | 'object[]'
 
 export interface DraftContextSection {
   label: string
@@ -64,13 +64,14 @@ function describeMode(mode: DraftMode): string {
 function describeType(type: DraftFieldType): string {
   if (type === 'number') return '整数'
   if (type === 'string[]') return '字符串数组'
+  if (type === 'object[]') return '对象数组'
   return '字符串'
 }
 
 function buildJsonSkeleton(fields: DraftFieldDefinition[]): string {
   const rows = fields.map((field) => {
     if (field.type === 'number') return `  "${field.key}": 0`
-    if (field.type === 'string[]') return `  "${field.key}": []`
+    if (field.type === 'string[]' || field.type === 'object[]') return `  "${field.key}": []`
     return `  "${field.key}": ""`
   })
 
@@ -288,12 +289,76 @@ function extractJsonObject(raw: string): string {
   throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
 }
 
-export function parseDraftJson<T extends object>(raw: string): Partial<T> {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function getDraftShapeIssue(value: unknown, fields: DraftFieldDefinition[]): string | null {
+  if (!isPlainRecord(value)) return '根节点必须是 JSON 对象'
+
+  const allowedKeys = new Set(fields.map((field) => field.key))
+  const unknownKey = Object.keys(value).find((key) => !allowedKeys.has(key))
+  if (unknownKey) return `出现未要求的字段“${unknownKey}”`
+
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(value, field.key)) continue
+    const current = value[field.key]
+    if (current === null || current === undefined) continue
+
+    if (field.type === 'number' && (typeof current !== 'number' || !Number.isSafeInteger(current))) {
+      return `字段“${field.key}”必须是整数`
+    }
+    if (field.type === 'string' && typeof current !== 'string') {
+      return `字段“${field.key}”必须是字符串`
+    }
+    if (field.type === 'string[]') {
+      if (!Array.isArray(current) || current.some((item) => typeof item !== 'string')) {
+        return `字段“${field.key}”必须是字符串数组`
+      }
+    }
+    if (field.type === 'object[]') {
+      if (!Array.isArray(current) || current.some((item) => !isPlainRecord(item))) {
+        return `字段“${field.key}”必须是对象数组`
+      }
+    }
+  }
+
+  return null
+}
+
+export function inferDraftFieldDefinitions(
+  messages: Array<{ role?: string; content: string }>,
+): DraftFieldDefinition[] | null {
+  const content = messages
+    .slice()
+    .reverse()
+    .find((message) => typeof message.content === 'string')?.content || ''
+  const fields = [...content.matchAll(/^\s*-\s*.+?（([^，）]+)，(字符串|整数|字符串数组|对象数组)）/gmu)]
+    .map((match) => ({
+      key: match[1].trim(),
+      label: match[1].trim(),
+      type: match[2] === '整数'
+        ? 'number'
+        : match[2] === '字符串数组'
+          ? 'string[]'
+          : match[2] === '对象数组'
+            ? 'object[]'
+            : 'string',
+    } satisfies DraftFieldDefinition))
+
+  return fields.length > 0 ? fields : null
+}
+
+export function parseDraftJson<T extends object>(raw: string, fields?: DraftFieldDefinition[]): Partial<T> {
   let parsed: unknown
   try {
     parsed = cleanAiValue(JSON.parse(extractJsonObject(raw)))
   } catch {
     throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
+  }
+  if (fields) {
+    const shapeIssue = getDraftShapeIssue(parsed, fields)
+    if (shapeIssue) throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: shapeIssue }))
   }
   assertDraftQuality(parsed)
   return parsed as Partial<T>

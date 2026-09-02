@@ -37,6 +37,118 @@ export interface ScenePlanStep {
   theme_consequence?: string
 }
 
+const SCENE_PLAN_ALLOWED_KEYS = new Set([
+  'scene_order',
+  'scene_title',
+  'purpose',
+  'location',
+  'time_anchor',
+  'present_characters',
+  'key_items',
+  'conflict',
+  'beat',
+  'must_cover',
+  'climax_variant',
+  'exit_hook',
+  'hidden_agendas',
+  'irony_gap',
+  'audience',
+  'theme_question',
+  'theme_choice',
+  'theme_cost',
+  'theme_consequence',
+])
+
+const SCENE_PLAN_REQUIRED_KEYS = [
+  'scene_order',
+  'scene_title',
+  'purpose',
+  'location',
+  'time_anchor',
+  'present_characters',
+  'key_items',
+  'conflict',
+  'beat',
+  'must_cover',
+  'climax_variant',
+  'exit_hook',
+  'hidden_agendas',
+  'irony_gap',
+  'audience',
+] as const
+
+const SCENE_PLAN_STRING_KEYS = new Set([
+  'scene_title',
+  'purpose',
+  'location',
+  'time_anchor',
+  'conflict',
+  'beat',
+  'climax_variant',
+  'exit_hook',
+  'irony_gap',
+  'audience',
+  'theme_question',
+  'theme_choice',
+  'theme_cost',
+  'theme_consequence',
+])
+
+const SCENE_PLAN_ARRAY_KEYS = new Set([
+  'present_characters',
+  'key_items',
+  'must_cover',
+  'hidden_agendas',
+])
+
+/**
+ * The planner may normalize a valid partial legacy snapshot, but live model
+ * output must first pass the declared scene-plan shape. Otherwise a missing
+ * field is silently turned into an empty value and the next stage cannot tell
+ * whether the model followed the contract.
+ */
+export function validateScenePlanModelOutput(raw: unknown): { valid: boolean; issue?: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { valid: false, issue: '根节点必须是非空 JSON 数组' }
+  }
+
+  for (const [index, item] of raw.entries()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { valid: false, issue: `第 ${index + 1} 个场景必须是对象` }
+    }
+
+    const record = item as Record<string, unknown>
+    const unknownKey = Object.keys(record).find((key) => !SCENE_PLAN_ALLOWED_KEYS.has(key))
+    if (unknownKey) {
+      return { valid: false, issue: `第 ${index + 1} 个场景包含未声明字段“${unknownKey}”` }
+    }
+
+    const missingKey = SCENE_PLAN_REQUIRED_KEYS.find((key) => !Object.prototype.hasOwnProperty.call(record, key))
+    if (missingKey) {
+      return { valid: false, issue: `第 ${index + 1} 个场景缺少字段“${missingKey}”` }
+    }
+
+    if (typeof record.scene_order !== 'number' || !Number.isSafeInteger(record.scene_order) || record.scene_order < 1) {
+      return { valid: false, issue: `第 ${index + 1} 个场景的 scene_order 必须是正整数` }
+    }
+
+    for (const key of SCENE_PLAN_STRING_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(record, key) && typeof record[key] !== 'string') {
+        return { valid: false, issue: `第 ${index + 1} 个场景的 ${key} 必须是字符串` }
+      }
+    }
+
+    for (const key of SCENE_PLAN_ARRAY_KEYS) {
+      const value = record[key]
+      if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+        return { valid: false, issue: `第 ${index + 1} 个场景的 ${key} 必须是字符串数组` }
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
 export function getDefaultChapterTitle(chapterNum: number): string {
   return `第${chapterNum}章`
 }

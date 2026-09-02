@@ -668,7 +668,6 @@ export default function Outline({ novelId }: Props) {
     <WorkspacePage
       eyebrow="卷章大纲 / 故事骨架"
       title="故事大纲"
-      description="左侧定位故事弧，右侧维护当前弧的章节细纲。"
       className="novel-outline-page"
       chrome="shared"
       actionContract={{
@@ -802,7 +801,7 @@ export default function Outline({ novelId }: Props) {
       ) : (
         <>
           <div className="novel-outline-page__workspace">
-          <WorkspacePanel title="故事弧目录" description={`${arcs.length} 条故事弧 · 选择一条当前对象`} className="novel-outline-page__arc-panel">
+          <WorkspacePanel title="故事弧目录" className="novel-outline-page__arc-panel">
             <div className="novel-outline-track" data-outline-arc-list>
               {arcs.map((arc, index) => {
                 const arcChapters = getArcChapters(arc)

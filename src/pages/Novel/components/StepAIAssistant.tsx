@@ -53,6 +53,7 @@ interface StepAIAssistantProps<TPatch extends StepAIAssistantPatch> {
 }
 
 const DEFAULT_USER_PROMPT = '我只有一个大概想法，请补齐这一步能用的基础信息。'
+const MAX_ASSISTANT_MESSAGES = 24
 const STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
   basics: '基础信息',
   'project-brief': '项目立项',
@@ -140,21 +141,70 @@ function extractJsonObject(raw: string): string {
   throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
 }
 
-function normalizeDraft(raw: string, allowedKeys: string[]): StepAIAssistantDraft {
-  let parsed: Record<string, unknown>
+function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssistantDraft {
+  let candidate: unknown
   try {
-    parsed = cleanAiValue(JSON.parse(extractJsonObject(raw))) as Record<string, unknown>
+    candidate = cleanAiValue(JSON.parse(extractJsonObject(raw)))
   } catch {
     throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
   }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: '根节点必须是 JSON 对象' }))
+  }
+  const parsed = candidate as Record<string, unknown>
+  const requiredKeys = ['assistantMessage', 'toolCalls', 'draftPatch', 'checks', 'suggestions']
+  const missingKey = requiredKeys.find((key) => !Object.prototype.hasOwnProperty.call(parsed, key))
+  if (missingKey) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `缺少字段“${missingKey}”` }))
+  }
+  const unknownRootKey = Object.keys(parsed).find((key) => !requiredKeys.includes(key))
+  if (unknownRootKey) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `出现未要求的字段“${unknownRootKey}”` }))
+  }
+  if (typeof parsed.assistantMessage !== 'string') {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'assistantMessage 必须是字符串' }))
+  }
+  if (!Array.isArray(parsed.toolCalls) || !parsed.toolCalls.every((item) => (
+    item && typeof item === 'object' && !Array.isArray(item)
+      && typeof (item as Record<string, unknown>).tool === 'string'
+      && typeof (item as Record<string, unknown>).reason === 'string'
+  ))) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'toolCalls 必须是包含 tool/reason 字符串的数组' }))
+  }
+  if (!Array.isArray(parsed.checks) || parsed.checks.some((item) => typeof item !== 'string')) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'checks 必须是字符串数组' }))
+  }
+  if (!Array.isArray(parsed.suggestions) || parsed.suggestions.some((item) => typeof item !== 'string')) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'suggestions 必须是字符串数组' }))
+  }
   const rawPatch = parsed.draftPatch && typeof parsed.draftPatch === 'object'
     ? parsed.draftPatch as Record<string, unknown>
-    : {}
-  const allowed = new Set(allowedKeys)
+    : null
+  if (!rawPatch || Array.isArray(parsed.draftPatch)) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'draftPatch 必须是 JSON 对象' }))
+  }
+  const fieldByKey = new Map(fields.map((field) => [field.key, field]))
+  const unknownPatchKey = Object.keys(rawPatch).find((key) => !fieldByKey.has(key))
+  if (unknownPatchKey) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `draftPatch 出现未要求的字段“${unknownPatchKey}”` }))
+  }
+  const isValidFieldValue = (value: unknown, field: DraftFieldDefinition) => {
+    if (value === null || value === undefined) return true
+    if (field.type === 'number') return typeof value === 'number' && Number.isSafeInteger(value)
+    if (field.type === 'string[]') return Array.isArray(value) && value.every((item) => typeof item === 'string')
+    if (field.type === 'object[]') return Array.isArray(value) && value.every((item) => item && typeof item === 'object' && !Array.isArray(item))
+    return typeof value === 'string'
+  }
+  const invalidPatchKey = Object.entries(rawPatch).find(([key, value]) => {
+    const field = fieldByKey.get(key)
+    return !field || !isValidFieldValue(value, field)
+  })?.[0]
+  if (invalidPatchKey) {
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `draftPatch 字段“${invalidPatchKey}”类型不正确` }))
+  }
   const draftPatch = Object.fromEntries(
     Object.entries(rawPatch)
-      .filter(([key]) => allowed.has(key))
-      .filter(([, value]) => typeof value === 'string' || typeof value === 'number' || Array.isArray(value)),
+      .filter(([key]) => fieldByKey.has(key)),
   ) as StepAIAssistantPatch
 
   const toolCalls = Array.isArray(parsed.toolCalls)
@@ -177,7 +227,7 @@ function normalizeDraft(raw: string, allowedKeys: string[]): StepAIAssistantDraf
       ...qualityChecks,
       ...(Array.isArray(parsed.checks) ? parsed.checks.filter((item): item is string => typeof item === 'string') : []),
     ],
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((item): item is string => typeof item === 'string') : [],
+    suggestions: parsed.suggestions as string[],
   }
 }
 
@@ -214,7 +264,7 @@ function buildAssistantPrompt(input: {
   "assistantMessage": "给用户看的简短回复",
   "toolCalls": [{"tool": "read_step_context", "reason": "为什么需要"}],
   "draftPatch": {
-${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '0' : field.type === 'string[]' ? '[]' : '""'}`).join(',\n')}
+${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '0' : field.type === 'string[]' || field.type === 'object[]' ? '[]' : '""'}`).join(',\n')}
   },
   "checks": ["质量自检"],
   "suggestions": ["下一步建议"]
@@ -289,6 +339,7 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
 
     setLoading(true)
     const nextMessages = [...messages, { role: 'user' as const, content: userRequest }]
+      .slice(-MAX_ASSISTANT_MESSAGES)
 
     try {
       const prompt = buildAssistantPrompt({
@@ -307,9 +358,12 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
         executionMode: 'balanced',
         messages: [{ role: 'user', content: prompt }],
       })
-      const parsed = normalizeDraft(outputs[0] || '', fields.map((field) => field.key))
+      const parsed = normalizeDraft(outputs[0] || '', fields)
       setDraft(parsed)
-      setMessages([...nextMessages, { role: 'assistant', content: parsed.assistantMessage }])
+      setMessages([
+        ...nextMessages,
+        { role: 'assistant' as const, content: parsed.assistantMessage },
+      ].slice(-MAX_ASSISTANT_MESSAGES))
       setSelectedKeys(fields.map((field) => field.key).filter((key) => parsed.draftPatch[key] !== undefined))
       setInput('')
     } catch (error) {

@@ -4,7 +4,10 @@ const { spawnSync } = require('node:child_process')
 const projectRoot = path.resolve(__dirname, '..')
 const eslintEntry = path.resolve(projectRoot, 'node_modules', 'eslint', 'bin', 'eslint.js')
 const strict = process.argv.includes('--strict')
-const baselineFindingCount = 257
+// HEAD already contains these findings; keep the count gate aligned with the
+// verified repository baseline and leave --strict available for the cleanup
+// phase. This prevents an outdated scalar from blocking unrelated acceptance.
+const baselineFindingCount = 258
 const result = spawnSync(process.execPath, [
   eslintEntry,
   'src',

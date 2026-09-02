@@ -335,7 +335,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
         isBuiltin: 0,
       })
       const copiedItem = await window.electron.sceneTemplate.get(id)
-      if (!copiedItem) throw new Error('复制后的模板无法读取。')
+      if (!copiedItem) throw new Error(getUserFacingMessage('sceneTemplate.copyReadFailed'))
       creatingRef.current = false
       setCreating(false)
       setSelectedId(id)
@@ -344,7 +344,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       setDetailsOpen(true)
       setScope('all')
       setItems((current) => [copiedItem, ...current.filter((item) => item.id !== copiedItem.id)])
-      message.success('已复制为自定义模板。')
+      message.success(getUserFacingMessage('sceneTemplate.copied'))
       notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
@@ -359,7 +359,6 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       heroVariant="compact"
       chrome="shared"
       title="场景模板库"
-      description="把高频场景沉淀成可复用骨架；列表负责定位，内置模板只读，复制后再编辑。"
       actionContract={{
         primary: {
           key: 'save',
@@ -426,7 +425,6 @@ export default function SceneTemplatesPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="模板清单"
-        description="用关键词或作用域缩小范围；选择一行后，在右侧查看或编辑当前模板。"
         extra={<span className="novel-scene-templates__result-count">{items.length} / {stats.total} 条当前结果</span>}
       >
         <div className="novel-scene-templates__layout">

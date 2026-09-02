@@ -533,7 +533,6 @@ export default function RevisionCenterPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="待处理队列"
-        description="在这里选择一项问题、定位影响范围并完成修订；全书体检只保留在按需诊断中。"
       >
         <div className="revision-toolbar">
           <div className="revision-toolbar__filters">

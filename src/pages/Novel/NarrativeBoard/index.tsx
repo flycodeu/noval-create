@@ -76,6 +76,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import '../Characters/character-workspace.css'
 import './narrative-board.css'
@@ -579,9 +580,9 @@ export default function NarrativeBoardPage({ novelId }: { novelId: number }) {
       setEditMapOpen(false)
       await refresh(true)
       notifyWorkspaceMutation()
-      message.success('地区信息已保存')
+      message.success(getUserFacingMessage('map.saved'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '地区信息保存失败')
+      message.error(getErrorMessage(error, 'map.saveFailed'))
     }
   }, [editMapValues, notifyWorkspaceMutation, refresh, selectedMap])
 

@@ -431,7 +431,6 @@ export default function Overview({ novelId }: Props) {
       chrome="shared"
       eyebrow="项目资料"
       title="项目资料"
-      description="维护书名、简介、背景和包装信息；推进判断统一回到创作控制台。"
       contextSummary={(
         <WorkspaceContextSummary
           items={[
@@ -484,7 +483,6 @@ export default function Overview({ novelId }: Props) {
         <section data-overview-project-info className="overview-page__project-info">
           <WorkspacePanel
             title="核心资料"
-            description="这些字段构成项目对外身份与创作起点，始终保持可编辑。"
             extra={(
               <span className={`overview-page__save-state${hasUnsavedChanges ? ' is-unsaved' : ''}`} data-overview-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
                 {hasUnsavedChanges ? '有未保存修改' : '已与项目数据同步'}
@@ -569,7 +567,6 @@ export default function Overview({ novelId }: Props) {
         <section data-overview-packaging className="overview-page__packaging">
           <WorkspacePanel
             title="包装信息"
-            description="书名候选、平台简介和卷名风格属于发布准备，默认收起。"
             extra={(
               <Button
                 size="small"
@@ -583,7 +580,6 @@ export default function Overview({ novelId }: Props) {
             <div className="overview-page__packaging-summary">
               <div>
                 <strong>{packagingFilledCount > 0 ? `已填写 ${packagingFilledCount}/4 类包装资料` : '尚未填写包装资料'}</strong>
-                <span>展开后可编辑或生成平台版本；保存项目资料会一并保存当前草稿。</span>
               </div>
               {packagingDirty ? <span className="overview-page__packaging-dirty">有未保存修改</span> : null}
             </div>

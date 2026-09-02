@@ -479,7 +479,6 @@ export default function GrowthSystemPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="剧情与伏笔 / 成长代价"
       title="成长资源代价系统"
-      description="统一维护阶段目标、瓶颈、获取路径、消耗机制与失败代价，并把收益/代价回写绑定到合同与卷级节奏。"
       chrome="shared"
       actionContract={{
         primary: { key: 'create-track', label: '新建成长轨道', icon: <PlusOutlined />, onClick: () => openTrack() },
@@ -500,7 +499,6 @@ export default function GrowthSystemPage({ novelId }: Props) {
       <div className="novel-growth-system__workspace">
         <WorkspacePanel
           title="成长系统目录"
-          description="一次只处理一个对象，避免轨道、资源池和回写事件互相抢占注意力。"
           className="novel-growth-system__list-panel"
           bodyClassName="novel-growth-system__list-body"
         >
@@ -576,7 +574,6 @@ export default function GrowthSystemPage({ novelId }: Props) {
 
         <WorkspacePanel
           title="当前详情"
-          description={activeSection === 'tracks' ? selectedTrack?.title || '选择一条成长轨道' : activeSection === 'pools' ? selectedPool?.name || '选择一个资源池' : selectedEvent?.title || '选择一条章节回写'}
           sticky
           className="novel-growth-system__detail-panel"
           bodyClassName="novel-growth-system__detail-body"

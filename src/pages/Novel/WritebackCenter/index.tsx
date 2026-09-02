@@ -452,7 +452,6 @@ export default function WritebackCenterPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="正文生产 / Canon 同步"
       title="章后状态回写中心"
-      description="只处理当前章节的一轮状态同步：先看 Diff，再决定是否进入正典；事实与诊断保持按需可见。"
       chrome="shared"
       actionContract={actionContract}
       contextSummary={(
@@ -488,7 +487,6 @@ export default function WritebackCenterPage({ novelId }: Props) {
         <WorkspacePanel
           className="novel-writeback-center-page__current-panel"
           title="当前 Diff"
-          description={currentDiff ? `第 ${currentDiffIndex + 1} / ${filteredDiffs.length} 条候选 · 只展开当前一条的前后状态差异` : '当前章节还没有可对比的回写候选。'}
           extra={activeRun ? <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag> : null}
         >
           <div className="novel-writeback-center-page__focus-grid">

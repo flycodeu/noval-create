@@ -748,7 +748,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         sortOrder: ((page - 1) * THREADS_PAGE_SIZE) + index + 1,
       })))
       notifyWorkspaceMutation()
-      message.success('线程顺序已保存')
+      message.success(getUserFacingMessage('storyThread.orderUpdated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.saveFailed'))

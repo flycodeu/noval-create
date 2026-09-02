@@ -971,7 +971,6 @@ export default function GuidePage({ novelId }: Props) {
       layout="wide"
       eyebrow="创作工作流"
       title="创作向导"
-      description="按项目底盘、世界地点、人物阵营、剧情伏笔、卷章大纲、正文生产和回写质检推进。"
       chrome="shared"
       actionContract={{
         primary: {

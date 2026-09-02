@@ -33,7 +33,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import './index.css'
 
@@ -422,7 +421,6 @@ export default function StagePlanner({ novelId }: Props) {
     <WorkspacePage
       eyebrow="卷章大纲 / 阶段计划"
       title="阶段计划"
-      description="把百万字长篇拆成可交接的创作窗口：先锁当前真正要用的角色和地点，再随剧情推进增量扩展。"
       chrome="shared"
       actionContract={{
         primary: { key: 'create-stage', label: '建立阶段', icon: <PlusOutlined />, onClick: () => openStageForm() },
@@ -451,16 +449,6 @@ export default function StagePlanner({ novelId }: Props) {
           <WorkspaceMetric label="待推进阶段" value={plannedCount} tone="cool" />
         </>
       ) : null}
-      guide={stages.length > 0 ? (
-        <WorkspaceStepGuide
-          title="阶段规划流程"
-          steps={[
-            { title: '先定章节窗口', description: '例如第 1–100 章，只描述此段会真正出场的人物和地点。', status: selectedStage ? 'done' : 'focus' },
-            { title: '登记资产角色', description: '核心人物做完整卡，功能人物只先登记动机、关系和出场任务。', status: assets.length > 0 ? 'done' : selectedStage ? 'focus' : 'todo' },
-            { title: '交接给正文', description: '阶段结束时写明状态变化和下一阶段必须继承的事实。', status: selectedStage?.handoffSummary ? 'done' : 'todo' },
-          ]}
-        />
-      ) : null}
       className="creative-stage-page"
       layout="wide"
     >
@@ -480,7 +468,7 @@ export default function StagePlanner({ novelId }: Props) {
         </div>
       ) : (
       <div className="creative-stage-layout">
-        <WorkspacePanel title="阶段目录" description={`${stages.length} 个阶段 · 选择一个当前对象`}>
+        <WorkspacePanel title="阶段目录">
           <div className="creative-stage-list" aria-busy={loading} data-stage-list>
             {stages.map((stage) => (
               <button
@@ -508,7 +496,6 @@ export default function StagePlanner({ novelId }: Props) {
         <div className="creative-stage-detail-column" data-stage-current-detail>
           <WorkspacePanel
             title={selectedStage ? selectedStage.name : '阶段详情'}
-            description={selectedStage ? `${stageKindLabel(selectedStage.kind)} · ${formatCreativeStageRange(selectedStage)}` : '选择一个阶段开始登记资产。'}
             extra={selectedStage ? (
               <Space>
                 <Select
@@ -655,7 +642,7 @@ export default function StagePlanner({ novelId }: Props) {
 
           <details className="creative-stage-disclosure" data-stage-handoff>
             <summary>阶段交接工件</summary>
-          <WorkspacePanel title="阶段交接工件" description="先记录变化、代价、未决问题和下一压力；审核通过后由作者确认，才会进入下一阶段召回。">
+          <WorkspacePanel title="阶段交接工件">
             {selectedStage ? (
               <>
                 <div className="creative-stage-handoff__status">
@@ -705,7 +692,7 @@ export default function StagePlanner({ novelId }: Props) {
 
           <details className="creative-stage-disclosure" data-stage-assets>
             <summary>阶段资产焦点</summary>
-          <WorkspacePanel title="阶段资产焦点" description="先登记最小可用信息；正文推进后再升级为完整正典卡片。">
+          <WorkspacePanel title="阶段资产焦点">
             {selectedStage ? (
               <>
                 <Form form={assetForm} layout="vertical" className="creative-stage-asset-form">

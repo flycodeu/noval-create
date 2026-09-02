@@ -22,7 +22,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import {
   buildDraftMessages,
@@ -535,7 +534,6 @@ export default function ContractsPage({ novelId }: Props) {
     <WorkspacePage
       className="novel-contracts-page"
       title="章节合同与场景合同"
-      description="把大纲前的约束变成显式合同，让写作链路优先遵守本章目标、终局承诺和场景限制。"
       chrome="shared"
       actionContract={{
         primary: {
@@ -581,15 +579,6 @@ export default function ContractsPage({ novelId }: Props) {
           <WorkspaceMetric label="章节绑定推进线" value={(chapterContract?.requiredCharacterArcIds.length || 0) + (chapterContract?.requiredRelationshipArcIds.length || 0) + (chapterContract?.requiredResistanceTrackIds.length || 0)} />
         </>
       )}
-      guide={(
-        <WorkspaceStepGuide
-          steps={[
-            { title: '先定本章目标', description: '先把本章目标、禁止事项和验收要求写清。', status: 'focus' },
-            { title: '绑定终局与伏笔', description: '直接选择本章必须服务的终局承诺和伏笔账本条目。', status: 'todo' },
-            { title: '逐场景拆合同', description: '每个场景至少锁 POV、目标、障碍和结果状态。', status: 'todo' },
-          ]}
-        />
-      )}
     >
       {refreshing ? <div className="novel-dashboard__refresh-indicator novel-workspace__refresh"><Spin size="small" /><span>正在同步合同面板数据</span></div> : null}
       {commitments.length <= 0 ? (
@@ -605,7 +594,6 @@ export default function ContractsPage({ novelId }: Props) {
         <aside className="novel-contracts-page__navigator" data-contract-navigator>
           <WorkspacePanel
             title="章节导航"
-            description="先定位章节，再在右侧只处理一个当前合同。"
             className="novel-contracts-page__navigator-panel"
           >
             <Input
@@ -716,7 +704,6 @@ export default function ContractsPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="章节合同"
-        description="本章必须完成什么、不能做什么、验收时要看什么。"
         extra={(
           <AIGenerateButton
             novelId={novelId}
@@ -993,7 +980,7 @@ export default function ContractsPage({ novelId }: Props) {
       </WorkspacePanel>
 
       {activeChapter ? (
-        <WorkspacePanel title="本章推进回写" description="写完一章后，在这里把实际推进回写到人物弧线、关系弧和阻力线。">
+        <WorkspacePanel title="本章推进回写">
           <div className="novel-contracts-page__section-stack">
             {(chapterContract?.requiredCharacterArcIds || []).map((arcId) => {
               const arc = characterArcs.find((item) => item.id === arcId)
@@ -1049,7 +1036,6 @@ export default function ContractsPage({ novelId }: Props) {
           <section hidden={contractTab !== 'scene'} data-contract-scene-detail>
           <WorkspacePanel
             title={activeScene ? `场景合同 · ${activeScene.segmentTitle}` : '场景合同'}
-            description="按场景锁 POV、目标、障碍、揭示和结果状态；当前只展开导航中选中的场景。"
           >
         {sceneContracts.length <= 0 ? (
           <Alert type="info" showIcon message="当前章节还没有场景" description="先在结构规划里拆好场景，再回来逐场景补合同。" />

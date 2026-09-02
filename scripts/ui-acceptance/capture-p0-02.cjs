@@ -191,12 +191,19 @@ async function verifySaveLifecycle(app, page, projectId) {
     })))
     throw error
   }
-  const moreButton = page.locator('.workspace-contract-actions__more--desktop')
-  console.log('[P0-02] lifecycle opening more actions')
-  await moreButton.click()
-  console.log('[P0-02] lifecycle more actions open')
-  console.log('[P0-02] lifecycle menu items', await page.getByRole('menuitem').allTextContents())
-  await page.getByRole('menuitem', { name: '去基础设定' }).click()
+  const directSettingsAction = page.getByRole('button', { name: '去基础设定', exact: true })
+  if (await directSettingsAction.isVisible().catch(() => false)) {
+    console.log('[P0-02] lifecycle opening direct settings action')
+    await directSettingsAction.click()
+  } else {
+    const desktopMore = page.locator('.workspace-contract-actions__more--desktop')
+    const compactMore = page.locator('.workspace-contract-actions__more--compact')
+    const moreButton = await desktopMore.isVisible().catch(() => false) ? desktopMore : compactMore
+    console.log('[P0-02] lifecycle opening page actions menu')
+    await moreButton.click()
+    console.log('[P0-02] lifecycle menu items', await page.getByRole('menuitem').allTextContents())
+    await page.getByRole('menuitem', { name: '去基础设定' }).click()
+  }
   console.log('[P0-02] lifecycle leave action clicked')
   const routeLeaveGuardVisible = await page.locator('.ant-modal-confirm').filter({ hasText: '项目立项还有未保存修改' }).isVisible({ timeout: 5000 }).catch(() => false)
   console.log('[P0-02] lifecycle route guard', routeLeaveGuardVisible)

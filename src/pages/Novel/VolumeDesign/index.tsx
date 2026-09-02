@@ -19,7 +19,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import {
   buildDraftMessages,
@@ -365,7 +364,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
   return (
     <WorkspacePage
       title="卷级设计中心"
-      description="把终局承诺拆到各卷，让每卷都有自己的主题、闭环和必须服务的终局压力。"
       className="volume-design-page"
       eyebrow="卷章大纲 / 卷级闭环"
       chrome="shared"
@@ -399,15 +397,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           <WorkspaceMetric label="必须回收线索" value={activeDesign?.mustResolveClues.length || 0} tone="cool" />
         </>
       )}
-      guide={(
-        <WorkspaceStepGuide
-          steps={[
-            { title: '先选卷', description: '先确认当前在设计哪一卷，不要把全书目标和卷级目标混写。', status: 'focus' },
-            { title: '绑定终局与主阻力', description: '把这一卷明确要服务的终局承诺和主要阻力来源直接挂上。', status: 'todo' },
-            { title: '写清本卷闭环', description: '至少把本卷承诺、主冲突、高潮和卷末状态变化写完整。', status: 'todo' },
-          ]}
-        />
-      )}
+
     >
       <div className="volume-design-page__status-rail" data-volume-design-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`volume-design-page__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
@@ -434,7 +424,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
       ) : null}
 
       <div className="volume-design-page__workspace">
-      <WorkspacePanel title="卷章目录" description={`${volumes.length} 卷 · 选择一个当前对象`} className="volume-design-page__selector-panel" bodyClassName="volume-design-page__selector-body">
+      <WorkspacePanel title="卷章目录" className="volume-design-page__selector-panel" bodyClassName="volume-design-page__selector-body">
         {volumes.length > 0 ? (
           <div className="volume-design-page__volume-list" role="list" data-volume-design-list>
             {volumes.map((item) => {
@@ -475,7 +465,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="卷级闭环"
-        description="写当前卷为什么值得读完，以及它怎么向终局继续施压。"
         extra={(
           <AIGenerateButton
             novelId={novelId}
@@ -579,7 +568,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </div>
       <WorkspacePanel
         title="终局绑定与阻力清单"
-        description="这一卷必须服务哪些终局承诺、主要阻力来源是什么，以及必须新增和回收哪些线索。"
         extra={(
           <AIGenerateButton
             novelId={novelId}
@@ -729,7 +717,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="卷后审计结果" description="审计会输出未回收线索、弧线停滞和推进不足清单；可选自动生成修订任务。">
+      <WorkspacePanel title="卷后审计结果">
         {lastAuditResult ? (
           <Space direction="vertical" className="workspace-full-width" size={12}>
             <Alert
@@ -756,7 +744,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         )}
       </WorkspacePanel>
 
-      <WorkspacePanel title="硬约束同步回执" description="把卷级目标同步到本卷各章节合同的必用资产与验收要点里。">
+      <WorkspacePanel title="硬约束同步回执">
         {lastSyncResult ? (
           <Space direction="vertical" className="workspace-full-width" size={12}>
             <Alert
