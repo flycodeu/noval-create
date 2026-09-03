@@ -55,8 +55,17 @@ export default function App() {
       try {
         const status = await window.electron.app.getLocalBackendStatus?.()
         if (!disposed && status) setLocalBackendStatus(status)
-      } catch {
-        if (!disposed) setLocalBackendStatus(null)
+      } catch (error) {
+        if (!disposed) {
+          setLocalBackendStatus((current) => current
+            ? {
+                ...current,
+                status: 'unavailable',
+                connected: false,
+                lastError: error instanceof Error ? error.message : String(error || ''),
+              }
+            : current)
+        }
       } finally {
         requestInFlight = false
       }

@@ -116,7 +116,7 @@ export function buildGenerationPreflight(input: {
     : ''
   const messages = [
     !input.writability.ready ? input.writability.summary : '',
-    ...input.writability.risks,
+    ...(input.writability.ready ? [] : input.writability.risks),
     writebackMessage,
   ].filter(Boolean)
 

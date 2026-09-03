@@ -62,10 +62,9 @@ interface OverviewSectionProps {
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
   onSelectChapter: (entry: QualityChapterEntry) => void
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }
 
-/** 总览 Tab：健康指标、修复引擎、观测面板与章节详情列表。 */
 export default function OverviewSection({
   novelId,
   data,
@@ -352,7 +351,7 @@ export default function OverviewSection({
                       size="small"
                       onClick={(event) => {
                         event.stopPropagation()
-                        onLocateChapter(entry.chapterNum)
+                        onLocateChapter(entry.chapterNum, entry.volumeId, entry.chapterId)
                       }}
                     >
                       定位
@@ -556,7 +555,7 @@ function NovelHealthOverviewPanel({
   onClearVolume: () => void
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
   repairingActionId: string | null
 }) {
   return (
@@ -696,7 +695,7 @@ function VolumeHealthPanel({
   onSelectVolume: (volumeId: number | null) => void
   onSelectRisk: (risk: QualityRiskEntry) => void
   onRunAction: (action: QualityRepairAction) => void
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
   repairingActionId: string | null
 }) {
   return (

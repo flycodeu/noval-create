@@ -30,6 +30,7 @@ export function useChapterWriteback(options: UseChapterWritebackOptions) {
 
   const updateRevealConstraints = useCallback(async (nextAllowedIds: number[], nextRevealedIds: number[]) => {
     if (!currentChapter) return
+    const chapterId = currentChapter.id
     const normalizedAllowed = normalizeIdArray(nextAllowedIds)
     const normalizedRevealed = normalizeIdArray(nextRevealedIds.filter((id) => normalizedAllowed.includes(id)))
     const patch = {
@@ -38,14 +39,14 @@ export function useChapterWriteback(options: UseChapterWritebackOptions) {
     }
     setUpdatingRevealConstraints(true)
     try {
-      await window.electron.chapter.update(currentChapter.id, patch, {
+      await window.electron.chapter.update(chapterId, patch, {
         skipStaleTracking: true,
         versionSource: false,
       })
-      setCurrentChapter((previous) => previous && previous.id === currentChapter.id
+      setCurrentChapter((previous) => previous && previous.id === chapterId
         ? { ...previous, ...patch }
         : previous)
-      updateChapter(currentChapter.id, patch)
+      updateChapter(chapterId, patch)
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -56,14 +57,15 @@ export function useChapterWriteback(options: UseChapterWritebackOptions) {
 
   const createForeshadowWriteback = useCallback(async (data: Partial<ForeshadowLedgerEntry>) => {
     if (!currentChapter) return
+    const chapter = currentChapter
     setUpdatingForeshadowWriteback(true)
     try {
       const nextRows = await window.electron.foreshadow.upsertLedger(novelId, {
         ...data,
-        sourceChapterId: currentChapter.id,
+        sourceChapterId: chapter.id,
       })
       setForeshadowLedger(nextRows)
-      await refreshForeshadowSnapshot(currentChapter)
+      await refreshForeshadowSnapshot(chapter, () => true)
       notifyWorkspaceMutation()
       message.success(getUserFacingMessage('writing.foreshadowCreated'))
     } catch (error) {
@@ -77,11 +79,12 @@ export function useChapterWriteback(options: UseChapterWritebackOptions) {
 
   const patchForeshadowWriteback = useCallback(async (id: number, data: Partial<ForeshadowLedgerEntry>) => {
     if (!currentChapter) return
+    const chapter = currentChapter
     setUpdatingForeshadowWriteback(true)
     try {
       const nextRows = await window.electron.foreshadow.upsertLedger(novelId, { id, ...data })
       setForeshadowLedger(nextRows)
-      await refreshForeshadowSnapshot(currentChapter)
+      await refreshForeshadowSnapshot(chapter, () => true)
       notifyWorkspaceMutation()
       message.success(getUserFacingMessage('writing.foreshadowUpdated'))
     } catch (error) {
@@ -98,12 +101,13 @@ export function useChapterWriteback(options: UseChapterWritebackOptions) {
       content: '删除后会从伏笔账本移除，本章回写记录也会同步消失。',
       okType: 'danger',
       onOk: async () => {
-        if (!currentChapter) return
+        const chapter = currentChapter
+        if (!chapter) return
         setUpdatingForeshadowWriteback(true)
         try {
           const nextRows = await window.electron.foreshadow.deleteLedger(novelId, entry.id)
           setForeshadowLedger(nextRows)
-          await refreshForeshadowSnapshot(currentChapter)
+          await refreshForeshadowSnapshot(chapter, () => true)
           notifyWorkspaceMutation()
           message.success(getUserFacingMessage('writing.foreshadowDeleted'))
         } catch (error) {

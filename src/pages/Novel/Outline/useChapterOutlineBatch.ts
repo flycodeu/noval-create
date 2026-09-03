@@ -4,7 +4,6 @@ import type { OutlineChapterBatchGenerationResult } from '../../../types'
 export interface OutlineBatchProgress {
   phase: 'idle' | 'running' | 'failed' | 'done'
   arcId: number | null
-  /** Chapters generated in the current run. */
   generated: number
   target: number
   batchIndex: number

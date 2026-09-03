@@ -51,7 +51,7 @@ import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharact
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
 import AiPatchEditor from '../components/AiPatchEditor'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { getWorkflowBlockers, loadWorkflowStats } from '../workflow'
 import '../components/boards.css'
 import './character-workspace.css'
@@ -353,6 +353,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [creating, setCreating] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchProgress, setBatchProgress] = useState<CharacterBatchProgress | null>(null)
   const [agentWorkflowOpen, setAgentWorkflowOpen] = useState(false)
@@ -1047,6 +1048,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     setRelationSaving(true)
     try {
       await window.electron.character.upsertRelation({
+        id: editingRelation?.id,
         novelId,
         charAId: selectedCharacter.id,
         charBId: values.charBId,
@@ -1214,7 +1216,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 />
               ) : null}
 
-              {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有角色。</div> : (
+              {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">{keyword.trim() || roleFilter !== 'all' || speciesFilter !== 'all' || entityTypeFilter !== 'all' || recordStatusFilter !== 'confirmed' ? '当前筛选下还没有角色。' : '当前还没有角色。'}</div> : (
                 <div className="novel-character-list">
                   {pageData.items.map((character) => (
                     <button
@@ -1487,7 +1489,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     selectedCharacterId={selectedId}
                     onCharacterSelect={(characterId) => {
                       setWorkspaceView('list')
-                      void loadCharacterDetail(characterId)
+                      requestCharacterDetail(characterId)
                     }}
                     onCanvasClick={() => {
                       if (graphScope === 'focus') setGraphScope('all')

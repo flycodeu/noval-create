@@ -12,10 +12,6 @@ const SEVERITY_META: Record<GateItemSeverity, { color: string; label: string }> 
   info: { color: 'blue', label: '参考' },
 }
 
-/**
- * 统一质检报告：每个门一个折叠区，通过绿标 / 未通过红标，
- * 条目按 severity（blocker/warning/info）着色，附建议动作。
- */
 export default function QualityGateReport({ reports }: QualityGateReportProps) {
   if (reports.length === 0) return null
 

@@ -82,6 +82,7 @@ export const USER_FACING_MESSAGES = {
   'taskCenter.resumed': '后台流程已继续执行。',
   'taskCenter.resumeFailed': '继续任务失败，请稍后再试。',
   'taskCenter.retryFailed': '重试任务失败，请稍后再试。',
+  'taskCenter.cancelFailed': '取消任务失败，请稍后再试。',
   'taskCenter.historyCleared': '已清空 {{count}} 条历史任务。',
   'taskCenter.historyNothingToClear': '当前筛选下暂无可清理的历史任务。',
   'taskCenter.clearHistoryFailed': '清空历史任务失败，请稍后再试。',

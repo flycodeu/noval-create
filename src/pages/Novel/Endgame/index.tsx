@@ -25,7 +25,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -136,6 +136,7 @@ export default function EndgamePage({ novelId }: Props) {
   const [assetSummary, setAssetSummary] = useState<EndgameAssetSummary | null>(null)
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const draftDirtyRef = React.useRef(false)
 
   const setDraftDirty = React.useCallback((value: boolean) => {

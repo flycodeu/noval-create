@@ -37,7 +37,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 import './index.css'
 
@@ -373,6 +373,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     values: normalizeFormValues(currentValues),
     styleTemplateId: selectedStyleTemplateId,
   }) !== lastSavedSignature
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const foundationCount = [
     currentValues.writingContractTags.length > 0,
     currentValues.theme,
@@ -714,7 +715,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
             <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--narrative">
               <div className="theme-voice__section-heading">
                 <strong className="workspace-card-section-title">主题与叙事调度</strong>
-                <span>AI 辅助已统一到页面顶部，可选择回填范围。</span>
               </div>
               <div className="theme-voice__core-grid" data-theme-voice-core-fields="visible">
                 <div className="theme-voice__field theme-voice__field--full">
@@ -793,7 +793,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
             <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--style">
               <div className="theme-voice__section-heading">
                 <strong className="workspace-card-section-title">文风执行规则</strong>
-                <span>规则、对白与样本约束统一由页面顶部 AI 辅助处理。</span>
               </div>
               <div className="theme-voice__core-grid theme-voice__core-grid--rules">
                 <div className="theme-voice__field">

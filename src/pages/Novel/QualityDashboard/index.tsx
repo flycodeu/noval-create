@@ -16,7 +16,7 @@ import {
   filterDashboardByVolume,
   findChapterByNum,
 } from './quality-dashboard-presentation'
-import type { QualityChapterEntry, QualityDashboardFilters } from './quality-dashboard-presentation'
+import type { QualityChapterEntry, QualityDashboardFilters, QualityRiskEntry } from './quality-dashboard-presentation'
 import ChapterDetailModal from './sections/ChapterDetailModal'
 import QualityFilterBar from './sections/QualityFilterBar'
 import QualityPriorityPanel from './sections/QualityPriorityPanel'
@@ -73,7 +73,9 @@ export default function QualityDashboard({ novelId }: Props) {
       setLastSyncedAt(new Date())
       setLoadError(null)
       setSelectedChapter((current) => current
-        ? result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId) || null
+        ? result.chapterDetails.find((entry) => entry.chapterId === current.chapterId)
+          || result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId)
+          || null
         : null)
       loadedOnceRef.current = true
     } catch (error) {
@@ -212,8 +214,8 @@ export default function QualityDashboard({ novelId }: Props) {
     ? data.volumeQualityMetrics.find((entry) => entry.volumeId === selectedVolumeId) || null
     : null
   const filtered = applyQualityDashboardFilters(filterDashboardByVolume(data, selectedVolumeMetrics), filters)
-  const openChapterByNum = (chapterNum: number) => {
-    const matched = findChapterByNum(data.chapterDetails, chapterNum)
+  const openChapterByNum = (chapterNum: number, volumeId?: number | null, chapterId?: number) => {
+    const matched = findChapterByNum(data.chapterDetails, chapterNum, volumeId, chapterId)
     if (!matched) return
     if (typeof matched.volumeId === 'number') setSelectedVolumeId(matched.volumeId)
     setSelectedChapter(matched)
@@ -221,10 +223,10 @@ export default function QualityDashboard({ novelId }: Props) {
   const handleRiskSelect = (risk: QualityDashboardData['novelQualityMetrics']['topRisks'][number]) => {
     if (typeof risk.volumeId === 'number') setSelectedVolumeId(risk.volumeId)
     const chapterNum = risk.chapterNums[0]
-    if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
+    if (typeof chapterNum === 'number') openChapterByNum(chapterNum, risk.volumeId)
   }
-  const locateChapterInWriting = (chapterNum?: number) => {
-    const matched = typeof chapterNum === 'number' ? findChapterByNum(data.chapterDetails, chapterNum) : null
+  const locateChapterInWriting = (chapterNum?: number, volumeId?: number | null, chapterId?: number) => {
+    const matched = findChapterByNum(data.chapterDetails, chapterNum, volumeId, chapterId)
     if (matched) {
       navigate(buildWorkspacePath(novelId, 'writing', { chapterId: String(matched.chapterId) }))
       return
@@ -232,8 +234,12 @@ export default function QualityDashboard({ novelId }: Props) {
     message.info(getUserFacingMessage('qualityDashboard.locateChapterMissing'))
     navigate(buildWorkspacePath(novelId, 'writing'))
   }
-  const openRevisionQueue = () => {
-    navigate(buildWorkspaceRoute(novelId, 'revision'))
+  const openRevisionQueue = (risk?: QualityRiskEntry) => {
+    const action = risk?.suggestedActions[0]
+    const targetPath = action
+      ? buildRepairActionTargetPath(novelId, action.targetPage, action.navigationQuery)
+      : null
+    navigate(targetPath || buildWorkspaceRoute(novelId, 'revision'))
   }
 
   return (
@@ -323,7 +329,7 @@ export default function QualityDashboard({ novelId }: Props) {
         ]}
       />
 
-      <ChapterDetailModal chapter={selectedChapter} onClose={() => setSelectedChapter(null)} />
+      <ChapterDetailModal chapter={selectedChapter} onClose={() => setSelectedChapter(null)} onLocateChapter={locateChapterInWriting} />
     </WorkspacePage>
   )
 }

@@ -13,7 +13,7 @@ import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { loadWorkflowStats } from '../workflow'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import './index.css'
 
@@ -125,6 +125,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     genreScoped: formValues.genreScoped ?? buildFormValues(selectedItem).genreScoped,
   }), [formValues, selectedItem])
   const hasUnsavedChanges = Boolean(selectedItem || creating) && serializeFormValues(currentFormValues) !== persistedFormSignature
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const routeTemplateId = useMemo(() => parseRouteId(searchParams.get('templateId')), [searchParams])
 
   const refresh = useCallback(async () => {
@@ -170,7 +171,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     if (selectedItem) {
       setPersistedFormSignature(serializeFormValues(buildFormValues(selectedItem)))
     }
-  }, [form, selectedItem])
+  }, [form, selectedId, selectedItem?.id])
 
   const syncTemplateRoute = useCallback((id: number | null) => {
     const nextParams = new URLSearchParams(searchParams)

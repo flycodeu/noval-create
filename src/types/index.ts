@@ -4450,7 +4450,6 @@ export interface StoryMemorySnapshot {
 
 export type SubPlot = SubPlotDraft
 
-// AI 评分结果类型
 export interface AIScoreDimension {
   name: string
   score: number
@@ -5878,7 +5877,6 @@ export interface MaintenanceWorkerStatus {
   checkpointRefreshScheduled: number
 }
 
-// 扩展 window 类型
 declare global {
   interface Window {
     electron: {
@@ -6123,6 +6121,7 @@ declare global {
         bulkUpdateDecisions: (runId: number, patch: {
           canonDecision: Exclude<ChapterWritebackDecision, 'pending'>
           assetType?: ChapterWritebackAssetType
+          diffIds?: number[]
         }) => Promise<ChapterWritebackDiff[]>
         applyRun: (runId: number, options?: ChapterWritebackApplyOptions) => Promise<ChapterWritebackCenterData>
         retryFailed: (runId: number, options?: ChapterWritebackApplyOptions) => Promise<ChapterWritebackCenterData>

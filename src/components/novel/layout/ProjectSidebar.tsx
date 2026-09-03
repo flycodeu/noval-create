@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import StatusTag from '../common/StatusTag'
@@ -35,12 +35,19 @@ export default function ProjectSidebar({
   )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
+  useEffect(() => {
+    if (!activeGroup) return
+    setOpenGroups((current) => {
+      if (current[activeGroup] === false) return { ...current, [activeGroup]: true }
+      return current
+    })
+  }, [activeGroup])
+
   const handleNavigate = (route: string) => {
     onNavigate(route)
     onDismissDrawer?.()
   }
 
-  // 计算整体进度百分比
   const progressPercent = useMemo(() => {
     const match = progressText.match(/(\d+)\s*\/\s*(\d+)/)
     if (match) {
@@ -53,7 +60,6 @@ export default function ProjectSidebar({
 
   return (
     <div className="project-sidebar">
-      {/* 顶部阶段与进度 */}
       <div className="project-sidebar__summary">
         <div className="project-sidebar__summary-header">
           <span className="project-sidebar__summary-badge">{stageLabel}</span>
@@ -73,7 +79,6 @@ export default function ProjectSidebar({
         ) : null}
       </div>
 
-      {/* 模块导航分组列表 */}
       <div className="project-sidebar__groups">
         {navGroups.map((group, groupIndex) => {
           const isOpen = openGroups[group.key] ?? group.key === activeGroup

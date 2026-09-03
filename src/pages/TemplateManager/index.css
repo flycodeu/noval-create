@@ -71,3 +71,30 @@
 .template-manager-page .template-manager-card__desc {
   line-height: 1.55;
 }
+
+.app-layout .template-manager-page .novel-hero__title-row {
+  flex-wrap: wrap;
+  align-items: center;
+  overflow: visible;
+}
+
+.app-layout .template-manager-page .novel-hero__metrics,
+.app-layout .template-manager-page .novel-hero__metrics--compact {
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: visible;
+}
+
+.app-layout .template-manager-page .novel-hero__metrics .novel-metric,
+.app-layout .template-manager-page .novel-metric--compact {
+  min-height: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.app-layout .template-manager-page .novel-hero__metrics .novel-metric__value,
+.app-layout .template-manager-page .novel-metric--compact .novel-metric__value {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+}

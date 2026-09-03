@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Empty,
@@ -195,22 +195,29 @@ export default function ModelManager() {
   const selectedConfigProvider = selected?.provider
   const selectedSourceProvider = Form.useWatch('provider', sourceForm)
 
+  const configsRequestRef = useRef(0)
+  const loadingRequestRef = useRef(0)
+
   const refreshConfigs = useCallback(async () => {
+    const requestId = ++configsRequestRef.current
     const list = await window.electron.model.list()
-    setConfigs(list)
+    if (configsRequestRef.current === requestId) setConfigs(list)
     return list
   }, [])
 
   const loadConfigs = useCallback(async () => {
+    const loadingId = ++loadingRequestRef.current
+    const requestId = ++configsRequestRef.current
     setLoading(true)
     try {
-      await refreshConfigs()
+      const list = await window.electron.model.list()
+      if (configsRequestRef.current === requestId) setConfigs(list)
     } catch (error) {
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (loadingRequestRef.current === loadingId) message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (loadingRequestRef.current === loadingId) setLoading(false)
     }
-  }, [refreshConfigs])
+  }, [])
 
   const loadSourceSettings = useCallback(async () => {
     try {
@@ -339,6 +346,7 @@ export default function ModelManager() {
           message.success(getUserFacingMessage('model.deleted'))
         } catch (error) {
           message.error(getErrorMessage(error, 'common.deleteFailed'))
+          throw error
         }
       },
     })
@@ -362,6 +370,23 @@ export default function ModelManager() {
   const handleTest = async () => {
     if (!selected && !isNew) return
     if (isNew) {
+      message.info(getUserFacingMessage('model.saveFirst'))
+      return
+    }
+    const values = form.getFieldsValue(true)
+    const apiKeyChanged = Boolean(values.apiKey && values.apiKey !== MASKED_KEY)
+    const formChanged = selected && (
+      values.name !== selected.name
+      || values.provider !== selected.provider
+      || values.modelId !== selected.modelId
+      || values.baseUrl !== selected.baseUrl
+      || values.temperature !== selected.temperature
+      || values.maxTokens !== selected.maxTokens
+      || (values.maxContextTokens ?? undefined) !== (selected.maxContextTokens ?? undefined)
+      || values.maxConcurrency !== selected.maxConcurrency
+      || apiKeyChanged
+    )
+    if (formChanged) {
       message.info(getUserFacingMessage('model.saveFirst'))
       return
     }
@@ -411,9 +436,23 @@ export default function ModelManager() {
   }
 
   const handleSourceTest = async () => {
+    const values = await sourceForm.validateFields().catch(() => null)
+    if (!values) return
+    const tavilyChanged = Boolean(values.tavilyApiKey && values.tavilyApiKey !== MASKED_KEY)
+    const braveChanged = Boolean(values.braveApiKey && values.braveApiKey !== MASKED_KEY)
+    const providerChanged = values.provider !== sourceSettings?.provider
     setSourceTesting(true)
     setSourceTestResult(null)
     try {
+      if (tavilyChanged || braveChanged || providerChanged) {
+        const settings = await window.electron.sourceSearch.updateSettings(values)
+        setSourceSettings(settings)
+        sourceForm.setFieldsValue({
+          provider: settings.provider,
+          tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
+          braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
+        })
+      }
       setSourceTestResult(await window.electron.sourceSearch.test())
     } catch (error) {
       setSourceTestResult({

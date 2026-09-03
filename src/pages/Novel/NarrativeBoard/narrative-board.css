@@ -990,7 +990,6 @@
   --character-graph-canvas: #202a36;
 }
 
-/* 持久化语义地图画布 */
 .narrative-map-canvas {
   margin: 0 0 20px;
   overflow: hidden;

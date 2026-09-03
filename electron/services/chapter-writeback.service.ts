@@ -1836,18 +1836,22 @@ export async function updateChapterWritebackDecision(
 
 export async function bulkUpdateChapterWritebackDecisions(
   runId: number,
-  patch: { canonDecision: Exclude<ChapterWritebackDecision, 'pending'>; assetType?: ChapterWritebackAssetType },
+  patch: { canonDecision: Exclude<ChapterWritebackDecision, 'pending'>; assetType?: ChapterWritebackAssetType; diffIds?: number[] },
 ): Promise<AppChapterWritebackDiff[]> {
   const decision = parseDecision(patch.canonDecision)
   if (!decision || decision === 'pending') throwUserFacingError('chapterWriteback.decisionInvalid')
   const assetType = patch.assetType === undefined ? undefined : normalizeAssetType(patch.assetType)
   if (patch.assetType !== undefined && !assetType) throwUserFacingError('chapterWriteback.assetTypeInvalid')
+  const diffIdSet = Array.isArray(patch.diffIds) && patch.diffIds.length > 0
+    ? new Set(patch.diffIds.filter((value) => Number.isSafeInteger(value) && value > 0))
+    : null
 
   return runImmediateTransaction(() => {
     const run = getRunRow(runId)
     if (run.status === 'applying' || run.status === 'applied') throwUserFacingError('chapterWriteback.decisionLocked')
     const rows = loadDiffRows(run.id)
       .filter((item) => !assetType || item.assetType === assetType)
+      .filter((item) => !diffIdSet || diffIdSet.has(item.id))
       .filter((item) => item.writebackStatus !== 'applied')
     const updatedAt = new Date().toISOString()
     rows.forEach((row) => {

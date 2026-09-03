@@ -34,7 +34,6 @@ import {
   type WorkflowStats,
 } from '../workflow'
 import {
-  WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
@@ -45,7 +44,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getWorkspaceViewModeForNovel } from '../../../shared/operating-mode'
@@ -185,6 +184,12 @@ function resolveLane(endChapter: string, estimatedTotal: number): SubplotLaneKey
   return 'payoff'
 }
 
+function chapterMarkerForLane(lane: SubplotLaneKey, estimatedTotal: number): string {
+  if (lane === 'unscheduled') return ''
+  const ratio = lane === 'setup' ? 0.18 : lane === 'escalation' ? 0.4 : lane === 'pressure' ? 0.7 : 0.92
+  return `第${Math.max(1, Math.round(estimatedTotal * ratio))}章`
+}
+
 function getSubplotCompleteness(subplot: SubPlot): number {
   const fields = [subplot.name, subplot.characters, subplot.conflict, subplot.mainlineLink, subplot.endChapter]
   const completed = fields.filter((field) => field && field.trim()).length
@@ -225,7 +230,7 @@ export default function CoreSettings({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const { registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryDesignFormValues>()
   const [subplots, setSubplots] = useState<SubPlot[]>([])
   const [saving, setSaving] = useState(false)
@@ -235,6 +240,7 @@ export default function CoreSettings({ novelId }: Props) {
   const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
   const [draggedSubplotIndex, setDraggedSubplotIndex] = useState<number | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [activeTab, setActiveTab] = useState('anchors')
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_STATS)
   const isMountedRef = React.useRef(true)
@@ -260,6 +266,7 @@ export default function CoreSettings({ novelId }: Props) {
   }, [])
 
   useEffect(() => {
+    if (draftDirtyRef.current) return
     form.setFieldsValue({
       story_goal: settings.storyDesign.storyGoal,
       core_conflict: settings.storyDesign.coreConflict,
@@ -344,23 +351,24 @@ export default function CoreSettings({ novelId }: Props) {
   const subplotScheduledCount = subplots.filter((subplot) => Boolean(parseChapterMarker(subplot.endChapter))).length
   const selectedSubplot = selectedSubplotIndex === null ? null : subplots[selectedSubplotIndex] || null
   const applyStoryDesignDraft = React.useCallback((draft: Partial<StoryDesignFormValues> & { subplots?: SubPlot[] }) => {
+    const currentValues = form.getFieldsValue(true) as Partial<StoryDesignFormValues>
     form.setFieldsValue({
-      story_goal: typeof draft.story_goal === 'string' ? draft.story_goal : settings.storyDesign.storyGoal,
-      core_conflict: typeof draft.core_conflict === 'string' ? draft.core_conflict : settings.storyDesign.coreConflict,
-      main_plot: typeof draft.main_plot === 'string' ? draft.main_plot : settings.storyDesign.mainPlot,
-      rhythm_setup: typeof draft.rhythm_setup === 'number' ? draft.rhythm_setup : settings.storyDesign.rhythmSetup ?? 30,
-      rhythm_conflict: typeof draft.rhythm_conflict === 'number' ? draft.rhythm_conflict : settings.storyDesign.rhythmConflict ?? 50,
-      rhythm_ending: typeof draft.rhythm_ending === 'number' ? draft.rhythm_ending : settings.storyDesign.rhythmEnding ?? 20,
-      ending_type: typeof draft.ending_type === 'string' ? draft.ending_type : settings.storyDesign.endingType ?? '',
-      ending: typeof draft.ending === 'string' ? draft.ending : settings.storyDesign.ending,
-      subplot_batch_count: clampBatchCount(draft.subplot_batch_count),
+      story_goal: typeof draft.story_goal === 'string' ? draft.story_goal : currentValues.story_goal,
+      core_conflict: typeof draft.core_conflict === 'string' ? draft.core_conflict : currentValues.core_conflict,
+      main_plot: typeof draft.main_plot === 'string' ? draft.main_plot : currentValues.main_plot,
+      rhythm_setup: typeof draft.rhythm_setup === 'number' ? draft.rhythm_setup : currentValues.rhythm_setup ?? 30,
+      rhythm_conflict: typeof draft.rhythm_conflict === 'number' ? draft.rhythm_conflict : currentValues.rhythm_conflict ?? 50,
+      rhythm_ending: typeof draft.rhythm_ending === 'number' ? draft.rhythm_ending : currentValues.rhythm_ending ?? 20,
+      ending_type: typeof draft.ending_type === 'string' ? draft.ending_type : currentValues.ending_type ?? '',
+      ending: typeof draft.ending === 'string' ? draft.ending : currentValues.ending,
+      subplot_batch_count: clampBatchCount(draft.subplot_batch_count ?? currentValues.subplot_batch_count),
     })
     if (Array.isArray(draft.subplots)) {
       setSubplots(normalizeSubplots(draft.subplots))
       setSelectedSubplotIndex(null)
     }
     markDraftDirty()
-  }, [form, markDraftDirty, settings.storyDesign.ending, settings.storyDesign.endingType, settings.storyDesign.coreConflict, settings.storyDesign.mainPlot, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, settings.storyDesign.storyGoal])
+  }, [form, markDraftDirty])
   const { clearDraft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
     novelId,
     pageKey: 'story-design',
@@ -480,6 +488,7 @@ export default function CoreSettings({ novelId }: Props) {
       })
       await clearDraft()
       setDraftDirty(false)
+      notifyWorkspaceMutation()
       message.success(getUserFacingMessage('coreSettings.saved'))
     } catch (error) {
       console.error(error)
@@ -487,7 +496,7 @@ export default function CoreSettings({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [batchCount, clearDraft, currentNovel?.settingsJson, finalizeDraft, form, novelId, setCurrentNovel, setDraftDirty, subplots])
+  }, [batchCount, clearDraft, currentNovel?.settingsJson, finalizeDraft, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty, subplots])
 
   const clearStoryDesign = React.useCallback(() => {
     Modal.confirm({
@@ -739,21 +748,29 @@ export default function CoreSettings({ novelId }: Props) {
     markDraftDirty()
   }
 
-  const moveSubplot = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= subplots.length || toIndex >= subplots.length) return
+  const dropSubplot = (fromIndex: number, laneKey: SubplotLaneKey, toIndex: number | null = null) => {
+    if (fromIndex < 0 || fromIndex >= subplots.length) return
+    const marker = chapterMarkerForLane(laneKey, estimatedChapterTotal)
+    const shouldReorder = toIndex != null && toIndex !== fromIndex && toIndex >= 0 && toIndex < subplots.length
     setSubplots((current) => {
-      const next = [...current]
+      if (fromIndex < 0 || fromIndex >= current.length) return current
+      const next = current.map((item, index) => (
+        index === fromIndex ? { ...item, endChapter: marker } : item
+      ))
+      if (!shouldReorder || toIndex == null) return next
       const [moved] = next.splice(fromIndex, 1)
       next.splice(toIndex, 0, moved)
       return next
     })
-    setSelectedSubplotIndex((current) => {
-      if (current === null) return current
-      if (current === fromIndex) return toIndex
-      if (fromIndex < current && current <= toIndex) return current - 1
-      if (toIndex <= current && current < fromIndex) return current + 1
-      return current
-    })
+    if (shouldReorder && toIndex != null) {
+      setSelectedSubplotIndex((current) => {
+        if (current === null) return current
+        if (current === fromIndex) return toIndex
+        if (fromIndex < current && current <= toIndex) return current - 1
+        if (toIndex <= current && current < fromIndex) return current + 1
+        return current
+      })
+    }
     markDraftDirty()
   }
 
@@ -957,7 +974,17 @@ export default function CoreSettings({ novelId }: Props) {
               <Tag>{lane.items.length}</Tag>
             </div>
 
-            <div className="story-design__lane-body">
+            <div
+              className="story-design__lane-body"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                const transferredIndex = Number(event.dataTransfer.getData('text/plain'))
+                const sourceIndex = Number.isInteger(transferredIndex) ? transferredIndex : draggedSubplotIndex
+                if (sourceIndex !== null) dropSubplot(sourceIndex, lane.key)
+                setDraggedSubplotIndex(null)
+              }}
+            >
               {lane.items.length === 0 ? (
                 <div className="story-design__lane-empty">当前还没有落在这一阶段的支线。</div>
               ) : lane.items.map((subplot) => (
@@ -977,12 +1004,16 @@ export default function CoreSettings({ novelId }: Props) {
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => {
                     event.preventDefault()
+                    event.stopPropagation()
                     const transferredIndex = Number(event.dataTransfer.getData('text/plain'))
                     const sourceIndex = Number.isInteger(transferredIndex) ? transferredIndex : draggedSubplotIndex
-                    if (sourceIndex !== null) moveSubplot(sourceIndex, subplot.index)
+                    if (sourceIndex !== null) dropSubplot(sourceIndex, lane.key, subplot.index)
                     setDraggedSubplotIndex(null)
                   }}
-                  onClick={() => openSubplot(subplot.index)}
+                  onClick={() => {
+                    if (draggedSubplotIndex !== null) return
+                    openSubplot(subplot.index)
+                  }}
                 >
                   <div className="story-design__card-head">
                     <span className="story-design__card-title"><span className="story-design__drag-handle" aria-hidden="true">⋮⋮</span><strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong></span>
@@ -1029,16 +1060,6 @@ export default function CoreSettings({ novelId }: Props) {
           ],
         },
       }}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
-            { label: '基础设定', value: premiseReady ? '已就绪' : '待补齐' },
-            { label: '预计章数', value: `约 ${estimatedChapterTotal} 章` },
-          ]}
-        />
-      )}
       metrics={(
         <>
           <WorkspaceMetric label="剧情锚点" value={`${anchorReadyCount}/4`} tone="warm" />
@@ -1069,7 +1090,7 @@ export default function CoreSettings({ novelId }: Props) {
                 type="link"
                 size="small"
                 icon={<ArrowRightOutlined />}
-                onClick={() => navigate(buildWorkspaceRoute(novelId, 'project-brief'))}
+                onClick={() => navigate(buildWorkspaceRoute(novelId, 'core-settings'))}
               >
                 去项目立项补齐前置条件
               </Button>
@@ -1108,6 +1129,7 @@ export default function CoreSettings({ novelId }: Props) {
           {
             key: 'anchors',
             label: '锚点',
+            forceRender: true,
             children: (
               <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
                 <AnchorsTab content={anchorsTabContent} />
@@ -1117,6 +1139,7 @@ export default function CoreSettings({ novelId }: Props) {
           {
             key: 'rhythm',
             label: '节奏',
+            forceRender: true,
             children: (
               <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
                 <RhythmTab content={rhythmTabContent} />
@@ -1126,6 +1149,7 @@ export default function CoreSettings({ novelId }: Props) {
           {
             key: 'subplots',
             label: '支线',
+            forceRender: true,
             children: (
               <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
                 <SubplotsTab content={subplotsTabContent} />

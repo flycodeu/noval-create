@@ -23,7 +23,7 @@ import {
   TimelineListPanel,
 } from './TimelinePanels'
 import { useTimelineWorkspace } from './useTimelineWorkspace'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import '../components/boards.css'
@@ -35,6 +35,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   const workspace = useTimelineWorkspace(novelId, {
     onCleared: notifyWorkspaceMutation,
   })
+  useRegisterWorkspaceLeaveGuard(workspace.hasUnsavedChanges)
   const {
     clearSelection,
     creating,
@@ -65,7 +66,8 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       openThreads: normalizeStringArray(draft.openThreads ?? currentValues.openThreads),
       notes: typeof draft.notes === 'string' ? draft.notes : currentValues.notes,
     })
-  }, [workspace.form])
+    workspace.handleFormValuesChange({}, workspace.form.getFieldsValue(true))
+  }, [workspace.form, workspace.handleFormValuesChange])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
     novelId,
     pageKey: 'timeline',
@@ -316,7 +318,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           selectedIds={workspace.selectedIds}
           statusFilter={workspace.statusFilter}
           typeFilter={workspace.typeFilter}
-          keyword={workspace.keyword}
+          keyword={workspace.keywordInput}
           volumeFilter={workspace.volumeFilter}
           partFilter={workspace.partFilter}
           chapterFilter={workspace.chapterFilter}
@@ -336,7 +338,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           }}
           onKeywordChange={(value) => {
             workspace.setKeyword(value)
-            workspace.setPage(1)
           }}
           onVolumeChange={(value) => {
             workspace.setVolumeFilter(value)
@@ -357,7 +358,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
             workspace.setPage(1)
           }}
           onPageChange={workspace.setPage}
-          onSelect={(event) => void workspace.handleSelect(event)}
+          onSelect={(event, nativeEvent) => void workspace.handleSelect(event, nativeEvent)}
           getStructureTags={workspace.getStructureTagsForEvent}
         />
 

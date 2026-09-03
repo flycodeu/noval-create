@@ -14,7 +14,7 @@ import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, 
 import { scaleMapLayerCounts } from '../../../shared/creation-tools'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import '../components/boards.css'
 import './map-explorer.css'
 import MapGraphCanvas from './MapGraphCanvas'
@@ -169,7 +169,7 @@ function TaskStrip({
 }
 
 export default function MapExplorerPage({ novelId }: Props) {
-  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [detailForm] = Form.useForm<DetailFormValues>()
@@ -177,6 +177,11 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [relationForm] = Form.useForm<RelationFormValues>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const hasUnsavedChangesRef = useRef(false)
+  const skippingFormChangeRef = useRef(false)
+  hasUnsavedChangesRef.current = hasUnsavedChanges
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [autoLoading, setAutoLoading] = useState(false)
   const [autoStopping, setAutoStopping] = useState(false)
   const [relationSaving, setRelationSaving] = useState(false)
@@ -394,7 +399,15 @@ export default function MapExplorerPage({ novelId }: Props) {
     setSearchParams(nextParams, { replace: true })
   }, [searchParams, setSearchParams])
 
-  const selectNode = useCallback((node: MapNodeSummary | null, markIntent = true) => {
+  const hydrateDetailForm = useCallback((node: MapNodeSummary | null) => {
+    skippingFormChangeRef.current = true
+    if (node) detailForm.setFieldsValue(toFormValues(node))
+    else detailForm.resetFields()
+    skippingFormChangeRef.current = false
+    setHasUnsavedChanges(false)
+  }, [detailForm])
+
+  const applyNodeSelection = useCallback((node: MapNodeSummary | null, markIntent: boolean) => {
     if (markIntent) {
       selectionIntentRef.current += 1
       routeNodeFocusRef.current = node?.id || null
@@ -408,8 +421,37 @@ export default function MapExplorerPage({ novelId }: Props) {
       if (!node) return null
       return current.mapAId === node.id || current.mapBId === node.id ? current : null
     })
-    if (node) detailForm.setFieldsValue(toFormValues(node))
-  }, [detailForm, syncNodeRoute])
+    hydrateDetailForm(node)
+  }, [hydrateDetailForm, syncNodeRoute])
+
+  const selectNode = useCallback((node: MapNodeSummary | null, markIntent = true) => {
+    const currentId = selectedNodeRef.current?.id ?? null
+    const nextId = node?.id ?? null
+    if (currentId === nextId) {
+      if (markIntent) {
+        selectionIntentRef.current += 1
+        routeNodeFocusRef.current = nextId
+        routeClearPendingRef.current = !node
+        syncNodeRoute(nextId)
+      }
+      selectedNodeRef.current = node
+      setSelectedNode(node)
+      if (!hasUnsavedChangesRef.current) hydrateDetailForm(node)
+      return
+    }
+    const commit = () => applyNodeSelection(node, markIntent)
+    if (!hasUnsavedChangesRef.current) {
+      commit()
+      return
+    }
+    Modal.confirm({
+      title: '当前节点还有未保存修改',
+      content: '切换后这些修改会被丢弃，是否继续？',
+      okText: '放弃修改并切换',
+      cancelText: '留下继续编辑',
+      onOk: commit,
+    })
+  }, [applyNodeSelection, hydrateDetailForm, syncNodeRoute])
 
   const loadGraph = useCallback(async () => {
     const requestId = ++graphRequestRef.current
@@ -460,9 +502,11 @@ export default function MapExplorerPage({ novelId }: Props) {
     setEditingRelation(null)
     setAutoTask(null)
     setAutoStatus(EMPTY_AUTO_STATUS)
-    selectNode(null)
+    hasUnsavedChangesRef.current = false
+    setHasUnsavedChanges(false)
+    applyNodeSelection(null, true)
     resetBatchForm()
-  }, [resetBatchForm, selectNode, setSearchKeywordInput])
+  }, [applyNodeSelection, resetBatchForm, setSearchKeywordInput])
 
   const refreshVisible = useCallback(async (options: RefreshVisibleOptions = {}) => {
     const requestId = ++visibleRequestRef.current
@@ -733,7 +777,15 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const handleSave = async () => {
     if (!selectedNode) return
-    const values = detailForm.getFieldsValue()
+    const values = detailForm.getFieldsValue(true) as DetailFormValues
+    if (!String(values.name || '').trim()) {
+      message.error('请输入名称')
+      if (workspaceMode === 'graph') {
+        setGraphInspectorOpen(true)
+        setGraphInspectorTab('detail')
+      }
+      return
+    }
     setSaving(true)
     try {
       await window.electron.map.update(selectedNode.id, {
@@ -741,6 +793,8 @@ export default function MapExplorerPage({ novelId }: Props) {
         tagsJson: JSON.stringify(values.tags || []),
         affiliatedFactionIdsJson: JSON.stringify(values.affiliatedFactions || []),
       })
+      hasUnsavedChangesRef.current = false
+      setHasUnsavedChanges(false)
       await refreshVisible({ preferredId: selectedNode.id })
       message.success(getUserFacingMessage('map.saved'))
     } catch (error) {
@@ -761,7 +815,9 @@ export default function MapExplorerPage({ novelId }: Props) {
         await window.electron.map.delete(selectedNode.id)
         setSelectedRelation(null)
         setBranchPath((current) => current.filter((item) => item.id !== selectedNode.id))
-        selectNode(null)
+        hasUnsavedChangesRef.current = false
+        setHasUnsavedChanges(false)
+        applyNodeSelection(null, true)
         await refreshVisible({ preferredId: null })
         message.success(getUserFacingMessage('map.nodeDeleted'))
       },
@@ -861,6 +917,13 @@ export default function MapExplorerPage({ novelId }: Props) {
     })
     return () => registerClearHandler(null)
   }, [handleClear, registerClearHandler])
+
+  useEffect(() => {
+    registerSaveHandler(() => {
+      void handleSave()
+    })
+    return () => registerSaveHandler(null)
+  })
 
   const handleStartAutoGenerate = async () => {
     if (autoActionRef.current) return
@@ -1072,6 +1135,7 @@ export default function MapExplorerPage({ novelId }: Props) {
           tags: normalizeStringArray(draft.tags ?? currentValues.tags),
           affiliatedFactions: normalizeStringArray(draft.affiliatedFactions ?? currentValues.affiliatedFactions),
         })
+        setHasUnsavedChanges(true)
       }}
     />
   ) : null
@@ -1183,7 +1247,15 @@ export default function MapExplorerPage({ novelId }: Props) {
   )
 
   const detailFormContent = (
-    <Form form={detailForm} layout="vertical">
+    <Form
+      form={detailForm}
+      layout="vertical"
+      preserve
+      onValuesChange={() => {
+        if (skippingFormChangeRef.current) return
+        setHasUnsavedChanges(true)
+      }}
+    >
       <div className="novel-grid novel-grid--3">
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
           <Input />
@@ -1420,7 +1492,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                 <Button type={graphInspectorTab === 'detail' ? 'primary' : 'default'} disabled={!selectedNode} onClick={() => setGraphInspectorTab('detail')}>详情</Button>
               </div>
 
-              {graphInspectorTab === 'focus' ? (
+              <div hidden={graphInspectorTab !== 'focus'}>
                 <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title="焦点概览" scrollable sticky>
                   <div className="map-graph-focus-card">
                     <div className="map-graph-focus-card__title">
@@ -1485,9 +1557,9 @@ export default function MapExplorerPage({ novelId }: Props) {
                     </div>
                   </div>
                 </WorkspacePanel>
-              ) : null}
+              </div>
 
-              {graphInspectorTab === 'relations' ? (
+              <div hidden={graphInspectorTab !== 'relations'}>
                 <WorkspacePanel
                   className="map-graph-inspector-panel"
                   bodyClassName="map-graph-inspector-panel__body"
@@ -1567,9 +1639,9 @@ export default function MapExplorerPage({ novelId }: Props) {
                     <div className="novel-empty">先选择一个节点，再查看或维护它的地图关系。</div>
                   )}
                 </WorkspacePanel>
-              ) : null}
+              </div>
 
-              {graphInspectorTab === 'detail' ? (
+              <div hidden={graphInspectorTab !== 'detail'}>
                 <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} scrollable sticky>
                   <div className="map-graph-detail-actions">{detailActions}</div>
                   {!selectedNode ? (
@@ -1577,7 +1649,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                   ) : null}
                   <div hidden={!selectedNode}>{detailFormContent}</div>
                 </WorkspacePanel>
-              ) : null}
+              </div>
             </div>
           ) : null}
         </div>

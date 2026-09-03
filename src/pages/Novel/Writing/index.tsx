@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react'
-import { Modal } from 'antd'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Modal, message } from 'antd'
+import { getErrorMessage } from '@/utils/user-facing-message'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
 import { type AiExecutionMode } from '../../../shared/ai-execution'
 import { parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -68,7 +69,7 @@ const getPublishCheckAlertType = (check: ChapterPublishCheck | null) => {
   return 'success'
 }
 export default function Writing({ novelId }: Props) {
-  const { activeWritingRoute, creativeStageId, navigate, navigateToWritingRoute, routeChapterId, setCreativeStageId } = useWritingRouteState(novelId)
+  const { activeWritingRoute, creativeStageId, navigate, navigateToWritingRoute, routeChapterId, setCreativeStageId, setRouteChapterId } = useWritingRouteState(novelId)
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
@@ -124,12 +125,20 @@ export default function Writing({ novelId }: Props) {
     setOptimizeModalOpen,
     setPublishCheck,
     setRewriteModalOpen,
+    setOptimizationResult,
   } = reviewState
+  useEffect(() => {
+    setOptimizeModalOpen(false)
+    setOptimizationResult(null)
+    setRewriteModalOpen(false)
+    setAiResult(null)
+  }, [currentChapter?.id, setOptimizeModalOpen, setOptimizationResult, setRewriteModalOpen])
   const storySettings = useMemo(() => parseStorySettingsSnapshot(currentNovel?.settingsJson), [currentNovel?.settingsJson])
   const defaultAiExecutionMode = storySettings.aiDefaultMode
   const effectiveAiExecutionMode = generationExecutionModeOverride === 'follow_default' ? defaultAiExecutionMode : generationExecutionModeOverride
   const isHistoryRoute = activeWritingRoute === 'history'
   const hasMultiSegments = hasMultipleChapterSegments(currentChapter)
+  const preserveEditorContentRef = useRef(false)
   const workspaceRefresh = useWritingWorkspaceRefreshController({
     novelId,
     creativeStageId,
@@ -182,6 +191,7 @@ export default function Writing({ novelId }: Props) {
     onChapterLoaded: handleWorkspaceChapterLoaded,
     onEmptyWorkspace: handleEmptyWorkspace,
     refreshWorkspaceMetadata,
+    shouldPreserveEditorContent: () => preserveEditorContentRef.current,
   })
   const {
     chapters,
@@ -213,6 +223,8 @@ export default function Writing({ novelId }: Props) {
   const {
     applyChapterContent,
     getEditorText,
+    handleCompositionEnd,
+    handleCompositionStart,
     handleContentChange,
     handleSaveCurrentChapter,
     hasUnsavedChanges,
@@ -221,6 +233,7 @@ export default function Writing({ novelId }: Props) {
     saveNow,
     syncSelectedSnippet,
   } = editorLifecycle
+  preserveEditorContentRef.current = hasUnsavedChanges
   const chapterCrud = useWritingChapterCrudController({
     novelId,
     chapters,
@@ -235,8 +248,12 @@ export default function Writing({ novelId }: Props) {
   const {
     addChapter: handleAddChapter,
     deleteChapter: handleDeleteChapter,
-    selectChapter: handleSelectChapter,
+    selectChapter: selectWorkspaceChapterById,
   } = chapterCrud
+  const handleSelectChapter = useCallback(async (chapterId: number) => {
+    setRouteChapterId(chapterId)
+    await selectWorkspaceChapterById(chapterId)
+  }, [selectWorkspaceChapterById, setRouteChapterId])
   const handleGuardedSelectChapter = useCallback((chapterId: number) => {
     if (!hasUnsavedChanges || currentChapter?.id === chapterId) {
       void handleSelectChapter(chapterId)
@@ -253,6 +270,22 @@ export default function Writing({ novelId }: Props) {
       },
     })
   }, [currentChapter?.id, handleSaveCurrentChapter, handleSelectChapter, hasUnsavedChanges])
+  const handleGuardedAddChapter = useCallback((volumeId?: number | null) => {
+    if (!hasUnsavedChanges) {
+      void handleAddChapter(volumeId)
+      return
+    }
+    Modal.confirm({
+      title: '正文还有未保存修改',
+      content: '保存当前章节后再新建，避免刚输入的正文丢失。',
+      okText: '保存并新建',
+      cancelText: '留在当前章',
+      onOk: async () => {
+        const saved = await handleSaveCurrentChapter()
+        if (saved) await handleAddChapter(volumeId)
+      },
+    })
+  }, [handleAddChapter, handleSaveCurrentChapter, hasUnsavedChanges])
 
   const presentation = useWritingPresentationModel({
     currentChapter,
@@ -344,6 +377,16 @@ export default function Writing({ novelId }: Props) {
     refreshMeta,
     refreshQualityDashboard,
     showPreflightWarning: generationPreflightWarning,
+    flushEditor: async (chapterId, text) => {
+      try {
+        await saveNow(chapterId, text)
+        return true
+      } catch (error) {
+        console.error(error)
+        message.error(getErrorMessage(error, 'writing.saveFailed'))
+        return false
+      }
+    },
   })
   const {
     activeGeneration,
@@ -394,12 +437,14 @@ export default function Writing({ novelId }: Props) {
   const chapterReview = useChapterReview({
     novelId,
     currentChapter,
+    currentChapterIdRef,
     selectedSnippet,
     hasMultiSegments,
     editorText: getEditorText,
     modelConfigId: currentNovel?.modelConfigId,
     effectiveAiExecutionMode,
     selectedVersionId,
+    selectedVersion,
     ...reviewState,
     setCurrentChapter,
     setAiResult,
@@ -562,7 +607,7 @@ export default function Writing({ novelId }: Props) {
       executionModeOverride: generationExecutionModeOverride,
       setExecutionMode: setGenerationExecutionModeOverride,
       selectChapter: async (chapterId) => handleGuardedSelectChapter(chapterId),
-      addChapter: handleAddChapter,
+      addChapter: handleGuardedAddChapter,
       deleteChapter: handleDeleteChapter,
       navigate,
     },
@@ -647,6 +692,8 @@ export default function Writing({ novelId }: Props) {
       actionError,
       segments: chapterSegments,
       onInput: handleContentChange,
+      onCompositionStart: handleCompositionStart,
+      onCompositionEnd: handleCompositionEnd,
       onSyncSelection: syncSelectedSnippet,
     },
     inspector,

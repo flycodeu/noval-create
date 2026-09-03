@@ -125,7 +125,6 @@ function formatObjectEntry(key: string, entry: Record<string, unknown>): string 
   return stringifyEntry(entry)
 }
 
-/** Convert any field value into display lines. Empty values yield []. */
 export function reviewNoteValueToTexts(key: string, value: unknown): string[] {
   if (value === null || value === undefined) return []
   if (typeof value === 'string') {

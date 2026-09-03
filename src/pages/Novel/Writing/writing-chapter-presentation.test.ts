@@ -63,4 +63,19 @@ describe('writing chapter presentation', () => {
     expect(result.ready).toBe(false)
     expect(result.messages[0]).toContain('候选已生成·待正典确认')
   })
+
+  it('does not treat leftover writability risks as generate blockers when ready', () => {
+    const result = buildGenerationPreflight({
+      chapter: { id: 7 } as Parameters<typeof buildGenerationPreflight>[0]['chapter'],
+      writability: {
+        ...writability,
+        ready: true,
+        risks: ['伏笔尚未回收'],
+      },
+      writebackStatus: null,
+    })
+
+    expect(result.ready).toBe(true)
+    expect(result.messages).toEqual([])
+  })
 })

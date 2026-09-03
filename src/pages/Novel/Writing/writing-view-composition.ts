@@ -25,7 +25,7 @@ interface WritingViewCompositionInput {
   generation: ReturnType<typeof useChapterGeneration>
   runtime: ReturnType<typeof useWritingEditorRuntimePresentation>
   commandBindings: WritingCommandBindings
-  editor: Omit<WritingEditorPaneProps, 'commandBar' | keyof WritingCommandBindings['editorActions'] | 'title' | 'subtitle' | 'generating' | 'streamTaskId'>
+  editor: Omit<WritingEditorPaneProps, 'commandBar' | keyof WritingCommandBindings['editorActions'] | 'title' | 'generating' | 'streamTaskId'>
   inspector: ReturnType<typeof useWritingInspectorComposition>
   contracts: ReturnType<typeof useWritingContractSections>
   history: ReturnType<typeof useWritingHistoryLifecycle>
@@ -55,7 +55,6 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
       editor: {
         ...input.editor,
         title: chapter.editor.title,
-        subtitle: chapter.editor.subtitle,
         generating: runtime.generating,
         streamTaskId: generation.activeGeneration.streamTaskId,
         ...commandBindings.editorActions,

@@ -16,10 +16,9 @@ interface StabilitySectionProps {
   filtered: VolumeFilteredDashboard
   hasRecallData: boolean
   hasStateData: boolean
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }
 
-/** 召回与状态 Tab：召回可靠性与世界状态稳定性。 */
 export default function StabilitySection({ data, filtered, hasRecallData, hasStateData, onLocateChapter }: StabilitySectionProps) {
   return (
     <>
@@ -59,7 +58,7 @@ function RecallReliabilityPanel({
   summary: QualityDashboardData['recallSummary']
   alerts: QualityDashboardData['recentRecallAlerts']
   volumeEntries: QualityDashboardData['volumeRecallDiagnostics']
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.analyzedChapterCount === 0 && alerts.length === 0) {
     return <Empty description="先产出召回样本，可靠性数据会在这里汇总" />
@@ -137,7 +136,7 @@ function RecallReliabilityPanel({
                       </Tag>
                     ) : null}
                     <span className="quality-dashboard-page__row-label">第{alert.chapterNum}章 · {alert.title}</span>
-                    <Button size="small" onClick={() => onLocateChapter(alert.chapterNum)}>定位</Button>
+                    <Button size="small" onClick={() => onLocateChapter(alert.chapterNum, undefined, alert.chapterId)}>定位</Button>
                   </div>
                   <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.detail}</div>
                 </div>
@@ -195,7 +194,7 @@ function WorldStateStabilityPanel({
   conflictEntities: QualityDashboardData['worldConflictEntities']
   summary: QualityDashboardData['worldStateSummary']
   volumeEntries: QualityDashboardData['volumeWorldStateStability']
-  onLocateChapter: (chapterNum?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.trackedEntityCount === 0 && alerts.length === 0) {
     return <Empty description="先积累状态回写样本，再看稳定性数据" />
@@ -246,7 +245,7 @@ function WorldStateStabilityPanel({
               <div className="quality-dashboard-page__row quality-dashboard-page__row--center">
                 <Tag color={worldStateSeverityColor(alert.severity)} className="quality-dashboard-page__tag-reset">{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
                 <span className="quality-dashboard-page__row-label">{worldStateEntityLabel(alert.entityType)} · {alert.entityName}</span>
-                <Button size="small" onClick={() => onLocateChapter(alert.chapterNum)}>定位</Button>
+                <Button size="small" onClick={() => onLocateChapter(alert.chapterNum, undefined, alert.chapterId)}>定位</Button>
               </div>
               <div className="quality-dashboard-page__body-copy--tiny-strong">{alert.summary}</div>
             </div>

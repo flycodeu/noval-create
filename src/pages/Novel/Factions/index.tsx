@@ -30,7 +30,7 @@ import { parseTaskEventId } from '../../../shared/task-stream-events'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import FactionGraphCanvas from './FactionGraphCanvas'
 import './index.css'
 
@@ -166,6 +166,7 @@ export default function FactionsPage({ novelId }: Props) {
   const [viewMode, setViewMode] = useState<FactionFocusView>('detail')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [stats, setStats] = useState({ total: 0, withLeaderCount: 0, territoryBoundCount: 0, relationCount: 0 })
   const [workflowStats, setWorkflowStats] = useState({ characterCount: 0, mapCount: 0 })
   const [loading, setLoading] = useState(false)
@@ -288,7 +289,7 @@ export default function FactionsPage({ novelId }: Props) {
     form.setFieldsValue(buildFormValues(selectedItem))
     setDraftDirty(false)
     setDetailsOpen(false)
-  }, [form, selectedItem, setDraftDirty])
+  }, [form, selectedId, selectedItem?.id, setDraftDirty])
   useEffect(() => {
     if (!hasUnsavedChanges) return
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -675,7 +676,7 @@ export default function FactionsPage({ novelId }: Props) {
                 <span className="faction-list-card__desc">{buildFactionListSummary(item, typeof item.leaderCharacterId === 'number' ? leaderNameMap.get(item.leaderCharacterId) : undefined)}</span>
               </button>
             )) : null}
-            {!loading && items.length <= 0 ? <div className="faction-workspace__empty">当前没有势力记录</div> : null}
+            {!loading && items.length <= 0 ? <div className="faction-workspace__empty">{keyword.trim() ? '没有匹配的势力' : '当前没有势力记录'}</div> : null}
           </div>
         </WorkspacePanel>
 
@@ -686,7 +687,7 @@ export default function FactionsPage({ novelId }: Props) {
             <span className="faction-workspace__view-note">一次只处理一个焦点</span>
           </div>
 
-          {viewMode === 'graph' ? (
+          <div hidden={viewMode !== 'graph'}>
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title="势力关系图谱"
@@ -706,7 +707,8 @@ export default function FactionsPage({ novelId }: Props) {
                 ) : null}
               </div>
             </WorkspacePanel>
-          ) : (
+          </div>
+          <div hidden={viewMode !== 'detail'}>
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title={selectedItem ? `当前详情：${selectedItem.name}` : '新建势力'}
@@ -820,7 +822,7 @@ export default function FactionsPage({ novelId }: Props) {
                 </div>
               </div>
             </WorkspacePanel>
-          )}
+          </div>
         </div>
       </div>
 

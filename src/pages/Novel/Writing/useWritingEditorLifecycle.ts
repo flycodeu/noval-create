@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type CompositionEvent, type FormEvent, type RefObject } from 'react'
 import { message } from 'antd'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { Chapter } from '../../../types'
 import { countChapterWords, normalizeEditorText } from './useChapterEditor'
 import { createChapterSaveCoordinator } from './chapter-save-coordinator'
 import { persistWritingChapter, type WritingChapterVersionSource } from './writing-editor-lifecycle'
+import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 
 interface UseWritingEditorLifecycleInput {
   currentChapter: Chapter | null
@@ -76,7 +77,18 @@ function useEditorMutations(input: UseWritingEditorLifecycleInput, queueSave: Re
     undoEditor,
     updateChapter,
   } = input
+  const composingRef = useRef(false)
   const handleContentChange = useCallback((event: FormEvent<HTMLDivElement>) => {
+    if ((currentChapter?.segmentCount || 0) > 1) return
+    if (composingRef.current || (event.nativeEvent as InputEvent).isComposing) return
+    const text = applyEditorInput(event.currentTarget.innerText || '')
+    if (currentChapter) queueSave(currentChapter.id, text)
+  }, [applyEditorInput, currentChapter, queueSave])
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true
+  }, [])
+  const handleCompositionEnd = useCallback((event: CompositionEvent<HTMLDivElement>) => {
+    composingRef.current = false
     if ((currentChapter?.segmentCount || 0) > 1) return
     const text = applyEditorInput(event.currentTarget.innerText || '')
     if (currentChapter) queueSave(currentChapter.id, text)
@@ -103,7 +115,16 @@ function useEditorMutations(input: UseWritingEditorLifecycleInput, queueSave: Re
     updateChapter(currentChapter.id, { content: next, wordCount: countChapterWords(next) })
   }, [currentChapter, queueSave, redoEditor, updateChapter])
   const getEditorText = useCallback(() => normalizeEditorText(editorRef.current?.innerText || content), [content, editorRef])
-  return { applyChapterContent, getEditorText, handleContentChange, handleRedoEditor, handleUndoEditor, syncSelectedSnippet }
+  return {
+    applyChapterContent,
+    getEditorText,
+    handleCompositionEnd,
+    handleCompositionStart,
+    handleContentChange,
+    handleRedoEditor,
+    handleUndoEditor,
+    syncSelectedSnippet,
+  }
 }
 
 function useEditorLifecycleEffects(
@@ -114,7 +135,7 @@ function useEditorLifecycleEffects(
   handleRedoEditor: () => void,
   hasUnsavedChanges: boolean,
 ) {
-  const { clearChapterArtifacts, currentChapter, registerSaveHandler } = input
+  const { clearChapterArtifacts, currentChapter, editorRef, registerSaveHandler } = input
   useEffect(() => {
     registerSaveHandler(handleSaveCurrentChapter)
     return () => registerSaveHandler(null)
@@ -128,6 +149,8 @@ function useEditorLifecycleEffects(
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((currentChapter?.segmentCount || 0) > 1 || !(event.metaKey || event.ctrlKey)) return
+      const target = event.target as Node | null
+      if (!editorRef.current || !target || !editorRef.current.contains(target)) return
       const key = event.key.toLowerCase()
       if (key === 'z' && !event.shiftKey) {
         event.preventDefault()
@@ -139,7 +162,7 @@ function useEditorLifecycleEffects(
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentChapter?.segmentCount, handleRedoEditor, handleUndoEditor])
+  }, [currentChapter?.segmentCount, editorRef, handleRedoEditor, handleUndoEditor])
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!hasUnsavedChanges) return
@@ -152,14 +175,17 @@ function useEditorLifecycleEffects(
 
 export function useWritingEditorLifecycle(input: UseWritingEditorLifecycleInput) {
   const { content, currentChapter, editorRef } = input
-  const [saveRecord, setSaveRecord] = useState<{ chapterId: number; state: WritingSaveState } | null>(null)
+  const [saveStates, setSaveStates] = useState<Record<number, WritingSaveState>>({})
   const setCurrentSaveState = useCallback((chapterId: number, state: WritingSaveState) => {
-    setSaveRecord({ chapterId, state })
+    setSaveStates((current) => (
+      current[chapterId] === state ? current : { ...current, [chapterId]: state }
+    ))
   }, [])
   const { queueSave, saveCoordinator, saveNow } = useChapterPersistence(input, setCurrentSaveState)
   const editor = useEditorMutations(input, queueSave)
-  const saveState = saveRecord && currentChapter && saveRecord.chapterId === currentChapter.id ? saveRecord.state : 'saved'
+  const saveState = currentChapter ? (saveStates[currentChapter.id] || 'saved') : 'saved'
   const hasUnsavedChanges = saveState !== 'saved'
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const handleSaveCurrentChapter = useCallback(async () => {
     if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return false
     const latestText = normalizeEditorText(editorRef.current?.innerText || content)

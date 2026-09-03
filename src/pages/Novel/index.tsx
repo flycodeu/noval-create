@@ -204,6 +204,9 @@ export default function NovelRouter() {
   const saveHandlerRef = useRef<(() => void) | null>(null)
   const clearHandlerRef = useRef<(() => void) | null>(null)
   const escapeHandlerRef = useRef<(() => void) | null>(null)
+  const leaveGuardRef = useRef<(() => boolean) | null>(null)
+  const skipHashGuardRef = useRef(false)
+  const currentWorkspaceHashRef = useRef(typeof window === 'undefined' ? '' : window.location.hash)
   const contentBodyRef = useRef<HTMLDivElement | null>(null)
   const routeShellRef = useRef<HTMLDivElement | null>(null)
   const quickSearchRequestRef = useRef(0)
@@ -211,6 +214,7 @@ export default function NovelRouter() {
   const assistantResizeCleanupRef = useRef<(() => void) | null>(null)
   const prefetchedPagesRef = useRef<Set<ProWorkspaceKey>>(new Set())
   const scrollPositionsRef = useRef<Partial<Record<ProWorkspaceKey, number>>>({})
+  const viewModeSeededNovelIdRef = useRef<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false)
@@ -246,10 +250,8 @@ export default function NovelRouter() {
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
   const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
   const [batchAnalyzingChapters, setBatchAnalyzingChapters] = useState(false)
-  const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
-    const stored = readBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY)
-    return stored === 'quick' || stored === 'professional' ? stored : 'quick'
-  })
+  const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>('professional')
+  const [workspaceViewModeReady, setWorkspaceViewModeReady] = useState(false)
   const showWindowControls = isElectronRuntime()
 
   const novelId = Number(id || 0)
@@ -505,32 +507,96 @@ export default function NovelRouter() {
     escapeHandlerRef.current = handler
   }, [])
 
+  const registerLeaveGuard = useCallback((isDirty: (() => boolean) | null) => {
+    leaveGuardRef.current = isDirty
+  }, [])
+
   const transitionNavigate = useCallback((to: string, options?: NavigateOptions) => {
     startTransition(() => {
       navigate(to, options)
     })
   }, [navigate])
 
-  const navigateWithinWorkspace = useCallback((route: string, options?: NavigateOptions) => {
-    const pageKey = resolveWorkspacePageKey(route)
-    if (pageKey && pageKey !== currentPage) {
-      setPendingPage(pageKey)
+  const navigateWithinWorkspace = useCallback((route: string, options?: NavigateOptions & { skipLeaveGuard?: boolean }) => {
+    const { skipLeaveGuard, ...navigateOptions } = options || {}
+    const go = () => {
+      skipHashGuardRef.current = true
+      const pageKey = resolveWorkspacePageKey(route)
+      if (pageKey && pageKey !== currentPage) {
+        setPendingPage(pageKey)
+      }
+      warmWorkspacePage(route)
+      transitionNavigate(buildWorkspaceRoute(novelId, route), navigateOptions)
     }
-    warmWorkspacePage(route)
-
-    transitionNavigate(buildWorkspaceRoute(novelId, route), options)
+    if (skipLeaveGuard || !leaveGuardRef.current?.()) {
+      go()
+      return
+    }
+    Modal.confirm({
+      title: '当前页面还有未保存修改',
+      content: '离开后未保存内容会丢失。要先保存再离开，还是放弃修改继续？',
+      okText: '放弃并离开',
+      okButtonProps: { danger: true },
+      cancelText: '留下继续编辑',
+      onOk: () => {
+        go()
+      },
+    })
   }, [currentPage, novelId, resolveWorkspacePageKey, transitionNavigate, warmWorkspacePage])
 
   // A professional-only page can remain in the URL after switching to the
   // compact quick mode. Redirect immediately so the sidebar, progress order,
   // and current content never disagree about which workspace is active.
   useEffect(() => {
-    if (loading || !currentNovel || workspaceViewMode !== 'quick' || currentPage === 'guide' || currentPage === 'narrative-board') return
+    if (!workspaceViewModeReady || loading || !currentNovel || workspaceViewMode !== 'quick' || currentPage === 'guide' || currentPage === 'narrative-board') return
     if (orderedPages.includes(currentPage)) return
 
     const fallbackPage = orderedPages[0] || 'guide'
-    navigateWithinWorkspace(fallbackPage, { replace: true })
-  }, [currentNovel, currentPage, loading, navigateWithinWorkspace, orderedPages, workspaceViewMode])
+    navigateWithinWorkspace(fallbackPage, { replace: true, skipLeaveGuard: true })
+  }, [currentNovel, currentPage, loading, navigateWithinWorkspace, orderedPages, workspaceViewMode, workspaceViewModeReady])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const workspaceGuardKey = (hash: string) => {
+      const raw = hash.replace(/^#/, '')
+      const [pathPart, query = ''] = raw.split('?')
+      const path = pathPart.replace(/\/writing(?:\/editor|\/review|\/history|\/context)?$/, '/writing')
+      return `${path}?${query}`
+    }
+    const handleHashChange = () => {
+      const nextHash = window.location.hash
+      const previousHash = currentWorkspaceHashRef.current
+      if (skipHashGuardRef.current) {
+        skipHashGuardRef.current = false
+        currentWorkspaceHashRef.current = nextHash
+        return
+      }
+      if (workspaceGuardKey(previousHash) === workspaceGuardKey(nextHash) || !leaveGuardRef.current?.()) {
+        currentWorkspaceHashRef.current = nextHash
+        return
+      }
+      skipHashGuardRef.current = true
+      window.location.hash = previousHash
+      Modal.confirm({
+        title: '当前页面还有未保存修改',
+        content: '离开后未保存内容会丢失。',
+        okText: '放弃并离开',
+        okButtonProps: { danger: true },
+        cancelText: '留下继续编辑',
+        onOk: () => {
+          skipHashGuardRef.current = true
+          window.location.hash = nextHash
+        },
+        onCancel: () => {
+          currentWorkspaceHashRef.current = previousHash
+        },
+      })
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   const notifyWorkspaceMutation = useCallback(() => {
     setWorkspaceMutationToken((current) => current + 1)
@@ -630,9 +696,9 @@ export default function NovelRouter() {
     const list = await ensureChapterListLoaded()
     const target = list.find((chapter) => chapter.id === chapterId)
     if (!target) return
-    transitionNavigate(buildWorkspaceRoute(novelId, `writing?chapterId=${chapterId}`))
+    navigateWithinWorkspace(`writing?chapterId=${chapterId}`)
     setChapterJumpOpen(false)
-  }, [ensureChapterListLoaded, novelId, transitionNavigate])
+  }, [ensureChapterListLoaded, navigateWithinWorkspace])
 
   const performQuickSearch = useCallback(async (keyword: string, requestId: number) => {
     const trimmed = keyword.trim()
@@ -738,8 +804,9 @@ export default function NovelRouter() {
   }, [chapterJumpKeyword, chapters])
 
   useEffect(() => {
-    writeBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)
-  }, [workspaceViewMode])
+    if (!workspaceViewModeReady || !hasValidNovelId) return
+    writeBrowserStorage(`${WORKSPACE_VIEW_MODE_STORAGE_KEY}:${novelId}`, workspaceViewMode)
+  }, [hasValidNovelId, novelId, workspaceViewMode, workspaceViewModeReady])
 
   useEffect(() => {
     writeBrowserStorage(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY, assistantOpen ? '1' : '0')
@@ -784,12 +851,23 @@ export default function NovelRouter() {
   }, [isCompactShell])
 
   useEffect(() => {
-    if (!currentNovel) return
-    if (readBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
-    if (getWorkspaceViewModeForNovel(currentNovel) === 'quick') {
-      setWorkspaceViewMode('quick')
+    if (viewModeSeededNovelIdRef.current !== novelId) {
+      viewModeSeededNovelIdRef.current = null
+      setWorkspaceViewModeReady(false)
     }
-  }, [currentNovel, setWorkspaceViewMode])
+    if (!currentNovel || currentNovel.id !== novelId) return
+    if (viewModeSeededNovelIdRef.current === novelId) return
+    const stored = readBrowserStorage(`${WORKSPACE_VIEW_MODE_STORAGE_KEY}:${novelId}`)
+    const legacy = readBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY)
+    const resolved = stored === 'quick' || stored === 'professional'
+      ? stored
+      : (legacy === 'quick' || legacy === 'professional')
+        ? legacy
+        : getWorkspaceViewModeForNovel(currentNovel)
+    viewModeSeededNovelIdRef.current = novelId
+    setWorkspaceViewMode(resolved)
+    setWorkspaceViewModeReady(true)
+  }, [currentNovel, novelId])
 
   useEffect(() => {
     if (!hasValidNovelId) {
@@ -881,6 +959,7 @@ export default function NovelRouter() {
       }
 
       if (isMeta && key === 'f') {
+        if (editable) return
         event.preventDefault()
         setQuickSearchOpen(true)
         return
@@ -901,7 +980,7 @@ export default function NovelRouter() {
           const nextIndex = key === 'arrowleft' ? currentIndex - 1 : currentIndex + 1
           const nextChapter = list[nextIndex]
           if (nextChapter) {
-            transitionNavigate(buildWorkspaceRoute(novelId, `writing?chapterId=${nextChapter.id}`))
+            navigateWithinWorkspace(`writing?chapterId=${nextChapter.id}`)
           }
         }).catch(console.error)
         return
@@ -920,10 +999,9 @@ export default function NovelRouter() {
     currentChapterId,
     ensureChapterListLoaded,
     location.search,
-    novelId,
+    navigateWithinWorkspace,
     quickSearchOpen,
     shortcutHelpOpen,
-    transitionNavigate,
   ])
 
   useEffect(() => {
@@ -1046,12 +1124,13 @@ export default function NovelRouter() {
   }
 
   return (
-    <WorkspaceErrorBoundary resetKey={String(novelId)}>
+    <WorkspaceErrorBoundary resetKey={`${novelId}:${currentPage}`}>
       <NovelWorkspaceActionsProvider value={{
         mutationToken: workspaceMutationToken,
         registerSaveHandler,
         registerClearHandler,
         registerEscapeHandler,
+        registerLeaveGuard,
         notifyWorkspaceMutation,
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>

@@ -20,12 +20,6 @@ function ItemLines({ item }: { item: ReviewNotesViewItem }) {
   )
 }
 
-/**
- * 审校意见三层信息架构：
- * - critical：默认展开的红色 Alert 列表（必须处理）
- * - advisory：Collapse + 计数徽标（建议处理）
- * - reference：抽屉内表格（仅参考，含未知字段兜底）
- */
 export default function ReviewNotesPanel({ notes }: ReviewNotesPanelProps) {
   const model = useMemo(() => buildReviewNotesViewModel(notes), [notes])
   const [referenceOpen, setReferenceOpen] = useState(false)

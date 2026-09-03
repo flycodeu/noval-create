@@ -17,7 +17,6 @@ interface OptimizeCandidateModalProps {
   onApply: () => void
 }
 
-/** 整章 AI 优化候选稿 Modal：含质量门报告，应用前不覆盖正文。 */
 export default function OptimizeCandidateModal({
   open,
   result,

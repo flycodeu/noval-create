@@ -44,7 +44,6 @@ interface InsightPanelProps {
   children: React.ReactNode
 }
 
-/** 写作页右栏辅助区：合同 / 上下文 / 审校 / 版本 tab 切换 + 各 insight 内容。 */
 export default function InsightPanel({
   open,
   activeRoute,

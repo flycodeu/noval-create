@@ -151,6 +151,9 @@
 }
 
 .app-shell-bar__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
@@ -265,4 +268,9 @@
     justify-content: center;
     font-size: 14px;
   }
+}
+
+.app-shell-bar__task-indicator {
+  flex: 0 0 auto;
+  margin-left: auto;
 }

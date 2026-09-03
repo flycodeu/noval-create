@@ -34,7 +34,7 @@
 .novel-project-card:hover {
   transform: translateY(-4px);
   box-shadow: var(--shadow-lg);
-  border-color: rgba(0, 102, 204, 0.15); /* Subtly highlight accent color on hover */
+  border-color: rgba(0, 102, 204, 0.15);
 }
 
 .novel-project-card__head,

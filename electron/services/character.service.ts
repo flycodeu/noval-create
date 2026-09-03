@@ -1315,6 +1315,7 @@ export function getCharacterRelations(novelId: number) {
 }
 
 export function upsertRelation(data: {
+  id?: number
   novelId: number
   charAId: number
   charBId: number
@@ -1328,14 +1329,20 @@ export function upsertRelation(data: {
   subtextRule?: string
 }, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const existing = getCharacterRelations(data.novelId).find((relation) => {
+  const existingById = typeof data.id === 'number' && data.id > 0
+    ? getCharacterRelations(data.novelId).find((relation) => relation.id === data.id)
+    : null
+  const existing = existingById || getCharacterRelations(data.novelId).find((relation) => {
     const sameDirection = relation.charAId === data.charAId && relation.charBId === data.charBId
     const reverseDirection = relation.charAId === data.charBId && relation.charBId === data.charAId
     return sameDirection || reverseDirection
   })
 
   const payload = {
-    ...data,
+    novelId: data.novelId,
+    charAId: data.charAId,
+    charBId: data.charBId,
+    relationType: data.relationType,
     relationLabel: data.relationLabel?.trim() || null,
     description: data.description?.trim() || null,
     bilateral: data.bilateral ? 1 : 0,

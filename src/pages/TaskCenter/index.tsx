@@ -265,6 +265,7 @@ export default function TaskCenter() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedContextStatus, setSelectedContextStatus] = useState<NovelContextStatus | null>(null)
+  const [selectedContextStatusError, setSelectedContextStatusError] = useState(false)
   const { streams, clearStream } = useTaskStore()
 
   const buildTaskQueryInput = useCallback((overrides: Partial<TaskQueryInput> = {}): TaskQueryInput => ({
@@ -349,43 +350,55 @@ export default function TaskCenter() {
     ? [
         {
           title: '章节同步',
-          value: selectedContextStatus
-            ? selectedContextStatus.staleChapterCount > 0
-              ? `${selectedContextStatus.staleChapterCount} 章待同步`
-              : selectedContextStatus.totalChapterCount > 0
-                ? `已同步到第 ${selectedContextStatus.totalChapterCount} 章`
-                : '尚未生成章节'
-            : '加载中',
-          desc: selectedContextStatus
-            ? selectedContextStatus.staleChapterCount > 0
-              ? '当前任务关联小说里仍有章节挂着旧上下文。'
-              : '当前正文与最新设定保持一致。'
-            : '正在读取当前小说的章节同步状态。',
-          hint: selectedContextStatus
-            ? selectedContextStatus.staleChapterCount > 0
-              ? '需要先回查相关章节。'
-              : '章节层不需要额外回补，可以继续当前任务。'
-            : '稍后会自动补全状态。',
+          value: selectedContextStatusError
+            ? '无法读取'
+            : selectedContextStatus
+              ? selectedContextStatus.staleChapterCount > 0
+                ? `${selectedContextStatus.staleChapterCount} 章待同步`
+                : selectedContextStatus.totalChapterCount > 0
+                  ? `已同步到第 ${selectedContextStatus.totalChapterCount} 章`
+                  : '尚未生成章节'
+              : '加载中',
+          desc: selectedContextStatusError
+            ? '上下文健康状态读取失败。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleChapterCount > 0
+                ? '当前任务关联小说里仍有章节挂着旧上下文。'
+                : '当前正文与最新设定保持一致。'
+              : '正在读取当前小说的章节同步状态。',
+          hint: selectedContextStatusError
+            ? '请稍后重试，或回到对应功能页查看。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleChapterCount > 0
+                ? '需要先回查相关章节。'
+                : '章节层不需要额外回补，可以继续当前任务。'
+              : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleChapterCount ? 'stale' : 'ok',
           tags: [] as string[],
         },
         {
           title: '记忆检查点',
-          value: selectedContextStatus
-            ? selectedContextStatus.staleCheckpointCount > 0
-              ? `${selectedContextStatus.staleCheckpointCount} 份待刷新`
-              : '检查点已同步'
-            : '加载中',
-          desc: selectedContextStatus
-            ? selectedContextStatus.staleCheckpointCount > 0
-              ? '长期记忆还是旧版本，恢复流程后会继续引用旧长程记忆。'
-              : '长期记忆检查点已跟上当前设定。'
-            : '正在读取长期记忆检查点状态。',
-          hint: selectedContextStatus
-            ? selectedContextStatus.staleCheckpointCount > 0
-              ? '需要先刷新故事记忆。'
-              : '当前可以直接继续恢复或查看后续结果。'
-            : '稍后会自动补全状态。',
+          value: selectedContextStatusError
+            ? '无法读取'
+            : selectedContextStatus
+              ? selectedContextStatus.staleCheckpointCount > 0
+                ? `${selectedContextStatus.staleCheckpointCount} 份待刷新`
+                : '检查点已同步'
+              : '加载中',
+          desc: selectedContextStatusError
+            ? '上下文健康状态读取失败。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleCheckpointCount > 0
+                ? '长期记忆还是旧版本，恢复流程后会继续引用旧长程记忆。'
+                : '长期记忆检查点已跟上当前设定。'
+              : '正在读取长期记忆检查点状态。',
+          hint: selectedContextStatusError
+            ? '请稍后重试，或回到对应功能页查看。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleCheckpointCount > 0
+                ? '需要先刷新故事记忆。'
+                : '当前可以直接继续恢复或查看后续结果。'
+              : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleCheckpointCount
             ? (isPausedWorkflowTask ? 'stale' : 'warn')
             : 'ok',
@@ -393,21 +406,27 @@ export default function TaskCenter() {
         },
         {
           title: '资产校准',
-          value: selectedContextStatus
-            ? selectedContextStatus.staleAssetCount > 0
-              ? `${selectedContextStatus.staleAssetCount} 类待校准`
-              : '资产状态最新'
-            : '加载中',
-          desc: selectedContextStatus
-            ? selectedContextStatus.staleAssetCount > 0
-              ? '相关世界资产可能还挂着旧设定，继续流程会把旧资产带进后续结果。'
-              : '关键世界资产没有发现明显的设定滞后。'
-            : '正在读取资产新鲜度状态。',
-          hint: selectedContextStatus
-            ? selectedContextStatus.staleAssetCount > 0
-              ? '需要先处理相关资产。'
-              : '当前资产可以继续支撑该任务。'
-            : '稍后会自动补全状态。',
+          value: selectedContextStatusError
+            ? '无法读取'
+            : selectedContextStatus
+              ? selectedContextStatus.staleAssetCount > 0
+                ? `${selectedContextStatus.staleAssetCount} 类待校准`
+                : '资产状态最新'
+              : '加载中',
+          desc: selectedContextStatusError
+            ? '上下文健康状态读取失败。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleAssetCount > 0
+                ? '相关世界资产可能还挂着旧设定，继续流程会把旧资产带进后续结果。'
+                : '关键世界资产没有发现明显的设定滞后。'
+              : '正在读取资产新鲜度状态。',
+          hint: selectedContextStatusError
+            ? '请稍后重试，或回到对应功能页查看。'
+            : selectedContextStatus
+              ? selectedContextStatus.staleAssetCount > 0
+                ? '需要先处理相关资产。'
+                : '当前资产可以继续支撑该任务。'
+              : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleAssetCount
             ? (isPausedWorkflowTask ? 'stale' : 'warn')
             : 'ok',
@@ -421,15 +440,24 @@ export default function TaskCenter() {
     const novelId = selectedTask?.novelId
     if (!novelId) {
       setSelectedContextStatus(null)
+      setSelectedContextStatusError(false)
       return () => {
         active = false
       }
     }
 
+    setSelectedContextStatus(null)
+    setSelectedContextStatusError(false)
     void window.electron.novel.getContextStatus(novelId).then((status) => {
-      if (active) setSelectedContextStatus(status)
+      if (active) {
+        setSelectedContextStatus(status)
+        setSelectedContextStatusError(false)
+      }
     }).catch(() => {
-      if (active) setSelectedContextStatus(null)
+      if (active) {
+        setSelectedContextStatus(null)
+        setSelectedContextStatusError(true)
+      }
     })
 
     return () => {
@@ -457,8 +485,12 @@ export default function TaskCenter() {
   }
 
   const handleCancel = async (taskId: number) => {
-    await window.electron.task.cancel(taskId)
-    await loadTasks({ silent: true })
+    try {
+      await window.electron.task.cancel(taskId)
+      await loadTasks({ silent: true })
+    } catch (error) {
+      message.error(getErrorMessage(error, 'taskCenter.cancelFailed'))
+    }
   }
 
   const handleRetry = async (taskId: number) => {
@@ -944,6 +976,7 @@ export default function TaskCenter() {
               ) : null}
 
               <Collapse
+                key={selectedTask.id}
                 items={detailSections}
                 defaultActiveKey={selectedStream?.content ? ['stream'] : selectedTask.outputText ? ['output'] : undefined}
               />

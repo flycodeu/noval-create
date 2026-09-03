@@ -50,7 +50,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 
@@ -206,6 +206,13 @@ export default function WorldRules({ novelId }: Props) {
     () => normalizeFormRules((watchedValues || parsedRules) as unknown as Record<string, unknown>, currentNovel?.genreName),
     [currentNovel?.genreName, parsedRules, watchedValues],
   )
+  const worldRulesDirty = useMemo(
+    () => JSON.stringify(liveRules) !== JSON.stringify(parsedRules),
+    [liveRules, parsedRules],
+  )
+  useRegisterWorkspaceLeaveGuard(worldRulesDirty)
+  const worldRulesDirtyRef = React.useRef(false)
+  worldRulesDirtyRef.current = worldRulesDirty
 
   const loadAutoStatus = useCallback(async (applyDraft = false) => {
     const requestId = ++autoStatusRequestRef.current
@@ -221,13 +228,14 @@ export default function WorldRules({ novelId }: Props) {
     const latestStatus = await window.electron.worldRules.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
     if (autoStatusRequestRef.current !== requestId) return null
     setAutoStatus(latestStatus)
-    if (applyDraft && latestStatus.workingRules) {
+    if (applyDraft && latestStatus.workingRules && !worldRulesDirtyRef.current) {
       form.setFieldsValue(latestStatus.workingRules)
     }
     return latestTask
   }, [form, novelId])
 
   useEffect(() => {
+    if (worldRulesDirtyRef.current) return
     form.setFieldsValue(parsedRules)
   }, [form, parsedRules])
 
@@ -1072,7 +1080,7 @@ export default function WorldRules({ novelId }: Props) {
           }}
         />
         <Form form={form} layout="vertical" disabled={hasRunningAutoTask}>
-          <Tabs className="novel-editor-tabs" items={tabItems} activeKey={activeTab} onChange={(key) => setActiveTab(key as WorldRuleSectionKey)} />
+          <Tabs className="novel-editor-tabs" items={tabItems.map((item) => ({ ...item, forceRender: true }))} activeKey={activeTab} onChange={(key) => setActiveTab(key as WorldRuleSectionKey)} />
         </Form>
       </WorkspacePanel>
     </WorkspacePage>

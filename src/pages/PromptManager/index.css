@@ -11,10 +11,9 @@
 
 .app-layout .prompt-manager-page .prompt-manager-filter-group,
 .app-layout .prompt-manager-page .prompt-manager-lanes {
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow-x: hidden;
   padding-bottom: 2px;
-  scrollbar-width: thin;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-filter,
@@ -32,7 +31,7 @@
 
 .app-layout .prompt-manager-page .prompt-manager-toolbar {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -55,18 +54,17 @@
   display: flex;
   align-items: center;
   padding-block: 0;
-  line-height: 32px;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input {
   padding-top: 0;
   padding-bottom: 0;
-  line-height: 32px;
+  line-height: 1.5715;
   height: 32px;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-toolbar__search .ant-input::placeholder {
-  line-height: 32px;
+  line-height: 1.5715;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-card {
@@ -185,4 +183,31 @@
   .app-layout .prompt-manager-page .prompt-manager-card {
     grid-template-columns: 1fr;
   }
+}
+
+.app-layout .prompt-manager-page .novel-hero__title-row {
+  flex-wrap: wrap;
+  align-items: center;
+  overflow: visible;
+}
+
+.app-layout .prompt-manager-page .novel-hero__metrics,
+.app-layout .prompt-manager-page .novel-hero__metrics--compact {
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: visible;
+}
+
+.app-layout .prompt-manager-page .novel-hero__metrics .novel-metric,
+.app-layout .prompt-manager-page .novel-metric--compact {
+  min-height: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.app-layout .prompt-manager-page .novel-hero__metrics .novel-metric__value,
+.app-layout .prompt-manager-page .novel-metric--compact .novel-metric__value {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
 }

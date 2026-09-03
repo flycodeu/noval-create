@@ -36,7 +36,7 @@ import {
   parseDraftJson,
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -210,6 +210,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   const [editingEntry, setEditingEntry] = useState<ForeshadowLedgerEntry | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const refreshRequestRef = React.useRef(0)
   const segmentsRequestRef = React.useRef(0)
   const editorDirtyRef = React.useRef(false)

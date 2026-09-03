@@ -244,6 +244,7 @@ export default function BatchWorkbench({ novelId }: Props) {
       return
     }
     if (typeof inspectionChapterNum === 'number' && activeSnapshot.chapterNums.includes(inspectionChapterNum)) return
+    if (inspectionChapterNum === undefined) return
     setInspectionChapterNum(activeSnapshot.chapterNums[0])
   }, [activeSnapshot, inspectionChapterNum])
 

@@ -1029,7 +1029,6 @@
   gap: 12px;
 }
 
-/* Chapter Navigator Styles */
 .chapter-navigator-panel {
   display: flex;
   flex-direction: column;
@@ -1309,7 +1308,6 @@
   flex: 1;
 }
 
-/* Dark mode overrides for Chapter Navigator */
 [data-theme="dark"] .chapter-navigator__volume-group {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);

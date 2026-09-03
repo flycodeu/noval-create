@@ -33,7 +33,7 @@ import AiPatchEditor from '../components/AiPatchEditor'
 import { STRUCTURE_BATCH_CREATE_MAX, useStructureWorkspace } from './useStructureWorkspace'
 import { WorkspacePage } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 function summarizeSegments(items: Array<{ segmentOrder: number; title?: string | null; purpose?: string | null }>) {
@@ -749,11 +749,19 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     return true
   }, [clearDraft, finalizeDraft, saveSegment, segmentForm])
 
-  const hasUnsavedChanges = editorMode === 'chapter' ? chapterDirty : segmentDirty
-  const saveActiveEditor = React.useCallback(
-    () => editorMode === 'chapter' ? saveChapterEditor() : saveSegmentEditor(),
-    [editorMode, saveChapterEditor, saveSegmentEditor],
-  )
+  const hasUnsavedChanges = chapterDirty || segmentDirty
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
+  const saveActiveEditor = React.useCallback(async () => {
+    if (chapterDirty) {
+      const saved = await saveChapterEditor()
+      if (!saved) return false
+    }
+    if (segmentDirty) {
+      const saved = await saveSegmentEditor()
+      if (!saved) return false
+    }
+    return true
+  }, [chapterDirty, saveChapterEditor, saveSegmentEditor, segmentDirty])
 
   const runGuardedAction = React.useCallback((action: () => void | Promise<void>) => {
     if (!hasUnsavedChanges) {
@@ -977,7 +985,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           <strong>{linkageSummary?.totalGapCount ?? 0}</strong>
           <small>个待处理缺口</small>
         </div>
-        <Button size="small" loading={linkageSyncing} onClick={() => void handleSyncLinkage()}>
+        <Button size="small" loading={linkageSyncing} onClick={() => runGuardedAction(() => handleSyncLinkage())}>
           一键补齐
         </Button>
       </section>

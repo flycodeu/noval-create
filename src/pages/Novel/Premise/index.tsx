@@ -48,7 +48,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import './index.css'
 
@@ -345,6 +345,7 @@ export default function PremisePage({ novelId }: Props) {
     bannedTerms: normalizeText(currentFormValues.bannedTerms),
   })
   const hasUnsavedChanges = currentValuesSignature !== lastSavedSignature
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const assetReadiness = [
     isWorldFoundationReady(currentNovel),
     isMapStructureReady(stats),
@@ -377,7 +378,7 @@ export default function PremisePage({ novelId }: Props) {
   }
 
   const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
-    workspaceKey: 'premise',
+    workspaceKey: 'core-settings',
     getSnapshot: () => {
       const values = form.getFieldsValue(true)
       return {

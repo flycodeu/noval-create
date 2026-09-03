@@ -12,7 +12,7 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import './index.css'
 
@@ -135,6 +135,7 @@ export default function GlossaryPage({ novelId }: Props) {
     [items, selectedId],
   )
   const hasUnsavedChanges = Boolean(selectedItem || creating) && serializeFormValues(currentFormValues) !== persistedFormSignature
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const routeGlossaryId = useMemo(() => parseRouteId(searchParams.get('glossaryId')), [searchParams])
 
   const usageByGlossaryId = useMemo(() => {
@@ -181,7 +182,7 @@ export default function GlossaryPage({ novelId }: Props) {
     if (selectedItem) {
       setPersistedFormSignature(serializeFormValues(buildFormValues(selectedItem)))
     }
-  }, [form, selectedItem])
+  }, [form, selectedId, selectedItem?.id])
 
   const syncGlossaryRoute = useCallback((id: number | null) => {
     const nextParams = new URLSearchParams(searchParams)

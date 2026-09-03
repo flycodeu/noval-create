@@ -76,7 +76,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
     if (!snapshot?.latestCandidate || !snapshot.latestPreflight) return null
     return snapshot.latestCandidate.preflightRunId === snapshot.latestPreflight.runId ? snapshot.latestCandidate : null
   }, [snapshot])
-  const recordCandidate = matchingCandidate || snapshot?.latestCandidate || null
+  const recordCandidate = matchingCandidate
 
   const runPreflight = async () => {
     if (actionInFlightRef.current) return
@@ -262,7 +262,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
             </div>
           ) : <p className="recommendation-governance__empty">预检通过后可锁定候选版本，锁定不计入外部评估次数。</p>}
           <Space wrap>
-            <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={running !== null || !latestPreflight || latestPreflight.status !== 'ready' || !state.canRecordExternalEvaluation || Boolean(matchingCandidate)} onClick={() => void lockCandidate()}>
+            <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={running !== null || !latestPreflight || latestPreflight.status !== 'ready' || Boolean(matchingCandidate) || state.status === 'recommendation_locked' || state.status === 'passed' || state.status === 'attempts_exhausted'} onClick={() => void lockCandidate()}>
               锁定当前候选
             </Button>
             <Button type="primary" disabled={running !== null || !recordCandidate || !state.canRecordExternalEvaluation} onClick={() => {
@@ -277,7 +277,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
         </div>
       </div>
 
-      <Modal title="追加记录真实外部评估" open={recordOpen} onCancel={() => { if (running !== 'record') setRecordOpen(false) }} onOk={() => void recordEvaluation()} okText="原生确认后记录" confirmLoading={running === 'record'} cancelButtonProps={{ disabled: running === 'record' }} maskClosable={running !== 'record'}>
+      <Modal title="追加记录真实外部评估" open={recordOpen} destroyOnHidden onCancel={() => { if (running !== 'record') setRecordOpen(false) }} onOk={() => void recordEvaluation()} okText="原生确认后记录" confirmLoading={running === 'record'} cancelButtonProps={{ disabled: running === 'record' }} maskClosable={running !== 'record'}>
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="这会消耗一次真实评估额度" description="仅在作者主动评估或平台自动评估已经真实发生、结果已经人工核对后记录。内部模型审校、重试和预检不能填在这里。" />
         <Form form={form} layout="vertical">
           <Form.Item name="source" label="评估来源" rules={[{ required: true }]}><Select options={[{ value: 'author_requested', label: '作者主动发起' }, { value: 'platform_auto', label: '平台自动评估' }]} /></Form.Item>

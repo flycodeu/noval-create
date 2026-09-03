@@ -187,6 +187,11 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
     const previousActive = state.activeGeneration.chapterId === input.chapterId
       ? state.activeGeneration
       : idleGeneration
+    const alreadyFinished = previousActive.chapterId === input.chapterId
+      && previousActive.status !== 'idle'
+      && previousActive.status !== 'running'
+      && (input.taskId == null || previousActive.taskId == null || previousActive.taskId === input.taskId)
+    if (alreadyFinished) return {}
     const nextSnapshot = buildFinishedSnapshot(
       previousChapterSnapshot ?? previousActive,
       input,

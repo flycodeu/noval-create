@@ -3,7 +3,7 @@ import { Modal, message } from 'antd'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { Dispatch, SetStateAction } from 'react'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
-import type { Chapter, ChapterPublishCheck } from '../../../types'
+import type { Chapter, ChapterPublishCheck, ChapterVersion } from '../../../types'
 import type { WritingRouteKey } from './components/InsightPanel'
 import { resolvePublishFinalizationDecision } from './chapter-review-policy'
 
@@ -11,6 +11,7 @@ export interface UseChapterPublicationOptions {
   novelId: number
   currentChapter: Chapter | null
   selectedVersionId: number | null
+  selectedVersion?: ChapterVersion | null
   setCurrentChapter: Dispatch<SetStateAction<Chapter | null>>
   setPublishCheck: Dispatch<SetStateAction<ChapterPublishCheck | null>>
   navigate(path: string): void
@@ -43,6 +44,7 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
     refreshContextStatus,
     refreshMeta,
     refreshVersionHistory,
+    selectedVersion,
     selectedVersionId,
     setCurrentChapter,
     setPublishCheck,
@@ -77,6 +79,10 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
 
   const restoreVersion = useCallback(async () => {
     if (!selectedVersionId || !currentChapter) return
+    if (selectedVersion && selectedVersion.chapterId !== currentChapter.id) {
+      message.warning('所选版本已不属于当前章节，已取消恢复。')
+      return
+    }
     try {
       await window.electron.chapter.restoreVersion(selectedVersionId)
       await Promise.all([
@@ -90,7 +96,7 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
     } catch (error: unknown) {
       message.error(getErrorMessage(error, 'writing.restoreVersionFailed'))
     }
-  }, [currentChapter, loadChapters, notifyWorkspaceMutation, refreshContextStatus, refreshMeta, refreshVersionHistory, selectedVersionId])
+  }, [currentChapter, loadChapters, notifyWorkspaceMutation, refreshContextStatus, refreshMeta, refreshVersionHistory, selectedVersion, selectedVersionId])
 
   const changeStatusInternal = useCallback(async (status: Chapter['status']) => {
     if (!currentChapter) return

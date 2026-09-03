@@ -640,6 +640,8 @@ const FALLBACK_ADAPTERS: Partial<Record<WorkspaceQualityRouteKey, FallbackWorksp
     },
     async applySnapshot(_previous, next, context) {
       if (!context.currentChapter) return
+      const snapshotChapterId = typeof next.chapterId === 'number' ? next.chapterId : null
+      if (snapshotChapterId && snapshotChapterId !== context.currentChapter.id) return
       const fields = isRecord(next.fields) ? next.fields : {}
       await window.electron.chapter.update(context.currentChapter.id, {
         title: cleanText(fields.title) || context.currentChapter.title,

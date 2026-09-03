@@ -424,7 +424,8 @@ export function buildStructureJumpParams(event: TimelineEvent): URLSearchParams 
 
   if (event.volumeId) params.set('volumeId', String(event.volumeId))
   if (event.partId) params.set('partId', String(event.partId))
-  if (event.chapterStartId) params.set('chapterId', String(event.chapterStartId))
+  const chapterId = event.chapterStartId || event.chapterEndId
+  if (chapterId) params.set('chapterId', String(chapterId))
   if (event.segmentId) params.set('segmentId', String(event.segmentId))
 
   return params

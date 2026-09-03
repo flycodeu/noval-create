@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
@@ -137,6 +137,8 @@ export default function StagePlanner({ novelId }: Props) {
     const stored = Number(window.sessionStorage.getItem(`novelforge-stage-planner:${novelId}`))
     return Number.isSafeInteger(stored) && stored > 0 ? stored : null
   })
+  const loadRequestRef = useRef(0)
+  const assetsRequestRef = useRef(0)
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<CreativeStage | null>(null)
@@ -150,21 +152,25 @@ export default function StagePlanner({ novelId }: Props) {
     [selectedStageId, stages],
   )
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
       const nextStages = await window.electron.creativeStage.list(novelId)
+      if (loadRequestRef.current !== requestId) return
       setStages(nextStages)
       setSelectedStageId((current) => current && nextStages.some((stage) => stage.id === current)
         ? current
         : nextStages.find((stage) => stage.status === 'active')?.id || nextStages[0]?.id || null)
     } catch (error) {
+      if (loadRequestRef.current !== requestId) return
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (loadRequestRef.current === requestId) setLoading(false)
     }
   }, [novelId])
 
   const loadAssets = useCallback(async (stageId: number | null) => {
+    const requestId = ++assetsRequestRef.current
     if (!stageId) {
       setAssets([])
       setHandoffs([])
@@ -176,10 +182,12 @@ export default function StagePlanner({ novelId }: Props) {
         window.electron.creativeStage.getContext(novelId, stageId),
         window.electron.creativeStage.listHandoffs(novelId, stageId),
       ])
+      if (assetsRequestRef.current !== requestId) return
       setStageContext(context)
       setAssets(context.assets)
       setHandoffs(nextHandoffs)
     } catch (error) {
+      if (assetsRequestRef.current !== requestId) return
       message.error(getErrorMessage(error, 'common.loadFailed'))
     }
   }, [novelId])
@@ -237,6 +245,17 @@ export default function StagePlanner({ novelId }: Props) {
     }
   }, [novelId])
 
+  useEffect(() => {
+    setStages([])
+    setAssets([])
+    setHandoffs([])
+    setStageContext(null)
+    setSelectedStageId(() => {
+      if (typeof window === 'undefined') return null
+      const stored = Number(window.sessionStorage.getItem(`novelforge-stage-planner:${novelId}`))
+      return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+    })
+  }, [novelId])
   useEffect(() => { void load() }, [load])
   useEffect(() => {
     if (selectedStageId) window.sessionStorage.setItem(`novelforge-stage-planner:${novelId}`, String(selectedStageId))
@@ -624,7 +643,7 @@ export default function StagePlanner({ novelId }: Props) {
                                 type="button"
                                 key={report.artifactId}
                                 onClick={() => setStageQualityReport(report)}
-                                className={report.artifactId === stageQualityReports[0]?.artifactId ? 'is-current' : ''}
+                                className={report.artifactId === stageQualityReport?.artifactId ? 'is-current' : ''}
                               >
                                 {new Date(report.createdAt).toLocaleDateString('zh-CN')} · {report.score} 分 · {report.status === 'passed' ? '通过' : report.status === 'blocked' ? '阻断' : '需修订'}
                               </button>

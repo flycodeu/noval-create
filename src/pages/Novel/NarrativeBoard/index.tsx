@@ -1327,8 +1327,7 @@ function CharacterInspector({
       <div className="narrative-inspector narrative-inspector--empty">
         <div className="narrative-inspector__empty-mark"><TeamOutlined /></div>
         <h2>选择一个人物</h2>
-        <p>关系图会突出人物的一跳关系；阵营和地区演员表则帮助你快速定位当前场景的参与者。</p>
-        <Button type="link" icon={<LinkOutlined />} onClick={onOpenCharacterPage}>打开人物档案页</Button>
+<Button type="link" icon={<LinkOutlined />} onClick={onOpenCharacterPage}>打开人物档案页</Button>
       </div>
     )
   }

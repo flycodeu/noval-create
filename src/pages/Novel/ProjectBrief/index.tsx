@@ -27,7 +27,7 @@ import type { RegisteredWorkspaceQualityController } from '../workspace-quality-
 import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import './index.css'
@@ -166,6 +166,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
     : null
   const hasUnsavedChanges = JSON.stringify(normalizeFormValues(currentValues))
     !== JSON.stringify(normalizeFormValues(snapshot))
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const applyProjectBriefDraft = React.useCallback((draft: Partial<ProjectBriefFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
   }, [form, snapshot])

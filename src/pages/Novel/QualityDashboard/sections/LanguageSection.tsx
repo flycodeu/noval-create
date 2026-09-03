@@ -27,7 +27,6 @@ function recurrenceSeverityColor(severity: string): 'error' | 'warning' | 'defau
   return severity === 'medium' ? 'warning' : 'default'
 }
 
-/** 语言与对白 Tab：AI 味分解与角色对白辨识度。 */
 export default function LanguageSection({ data, filtered, hasScoreData }: LanguageSectionProps) {
   return (
     <>

@@ -28,7 +28,7 @@ import {
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -123,6 +123,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
     return Number.isSafeInteger(stored) && stored > 0 ? stored : null
   })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [auditing, setAuditing] = useState(false)
   const [syncingConstraints, setSyncingConstraints] = useState(false)
   const [createTasksOnAudit, setCreateTasksOnAudit] = useState(true)
@@ -184,8 +185,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
   )
 
   useEffect(() => {
+    if (draftDirtyRef.current) return
     form.setFieldsValue(buildFormValues(activeDesign))
-    draftDirtyRef.current = false
     setHasUnsavedChanges(false)
   }, [activeDesign, form])
 
@@ -241,7 +242,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
     }
     Modal.confirm({
       title: '切换当前卷？',
-      content: '当前卷还有未保存修改，切换后这些修改会留在表单中但不会写入数据库。',
+      content: '当前卷还有未保存修改，切换后这些修改会被丢弃。',
       okText: '切换卷',
       cancelText: '留下继续编辑',
       onOk: () => {
@@ -519,6 +520,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
                 endStateShift: typeof draft.endStateShift === 'string' ? draft.endStateShift : undefined,
                 readerExpectation: typeof draft.readerExpectation === 'string' ? draft.readerExpectation : undefined,
               })
+              markFormDirty()
             }}
           />
         )}
@@ -635,6 +637,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
               }
 
               form.setFieldsValue(nextValues)
+              markFormDirty()
             }}
           />
         )}

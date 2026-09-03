@@ -57,18 +57,18 @@ function useHistoryRouteEffects(
   clearVersionHistory: () => void,
 ) {
   useEffect(() => {
-    if (!isHistoryRoute || !currentChapter) return
+    if (!isHistoryRoute || !currentChapter) {
+      clearVersionHistory()
+      return
+    }
     const chapterId = currentChapter.id
+    clearVersionHistory()
     const isCurrent = () => currentChapterIdRef.current === chapterId && isHistoryRoute
     void refreshVersionHistory(chapterId, isCurrent).catch((error) => {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [currentChapter, currentChapterIdRef, isHistoryRoute, refreshVersionHistory])
-  useEffect(() => {
-    if (isHistoryRoute && currentChapter) return
-    clearVersionHistory()
-  }, [clearVersionHistory, currentChapter, isHistoryRoute])
+  }, [clearVersionHistory, currentChapter, currentChapterIdRef, isHistoryRoute, refreshVersionHistory])
 }
 
 function useWritingRouteEscape(input: UseWritingHistoryLifecycleInput) {

@@ -17,6 +17,7 @@ import type {
   StoryThread,
 } from '../../../types'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { getStatusLabel } from '../Writing/chapter-labels'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -32,6 +33,7 @@ import {
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -147,6 +149,13 @@ export default function ContractsPage({ novelId }: Props) {
   const [chapterKeyword, setChapterKeyword] = useState('')
   const [chapterDirty, setChapterDirty] = useState(false)
   const [sceneDirtyKeys, setSceneDirtyKeys] = useState<SceneKey[]>([])
+  const hasUnsavedChanges = chapterDirty || sceneDirtyKeys.length > 0
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
+  const chapterDirtyRef = useRef(chapterDirty)
+  const sceneDirtyKeysRef = useRef(sceneDirtyKeys)
+  const routeChapterGuardRef = useRef(false)
+  chapterDirtyRef.current = chapterDirty
+  sceneDirtyKeysRef.current = sceneDirtyKeys
   const [progressModalOpen, setProgressModalOpen] = useState(false)
   const [progressMode, setProgressMode] = useState<'character' | 'relationship' | 'resistance'>('character')
   const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
@@ -184,9 +193,9 @@ export default function ContractsPage({ novelId }: Props) {
     setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
     setForeshadows(foreshadowRows)
     setActiveChapterId((current) => {
+      if (current && chapterRows.some((item) => item.id === current)) return current
       const routeTarget = chapterRows.find((item) => item.id === routeChapterId)?.id
       if (routeTarget) return routeTarget
-      if (current && chapterRows.some((item) => item.id === current)) return current
       return chapterRows[0]?.id ?? null
     })
   }, [novelId, routeChapterId])
@@ -201,15 +210,13 @@ export default function ContractsPage({ novelId }: Props) {
     setChapterContract(contract)
     setSceneContracts(scenes)
     setActiveSceneKey((current) => {
-      const routeScene = routeSceneId ? scenes.find((scene) => scene.segmentId === routeSceneId) : undefined
-      if (routeScene) return getSceneKey(routeScene)
       if (current && scenes.some((scene) => getSceneKey(scene) === current)) return current
       return scenes[0] ? getSceneKey(scenes[0]) : null
     })
     setChapterDirty(false)
     setSceneDirtyKeys([])
     form.setFieldsValue(buildChapterFormValues(contract))
-  }, [form, routeSceneId])
+  }, [form])
 
   const refreshAll = useCallback(async (showLoading = false) => {
     const requestId = baseRequestRef.current + 1
@@ -240,9 +247,39 @@ export default function ContractsPage({ novelId }: Props) {
   useEffect(() => {
     if (!routeChapterId) return
     if (!chapters.some((item) => item.id === routeChapterId)) return
-    if (activeChapterId === routeChapterId) return
-    setActiveChapterId(routeChapterId)
-  }, [activeChapterId, chapters, routeChapterId])
+    if (activeChapterId === routeChapterId) {
+      routeChapterGuardRef.current = false
+      return
+    }
+    const isDirty = chapterDirtyRef.current || sceneDirtyKeysRef.current.length > 0
+    if (!isDirty) {
+      setActiveChapterId(routeChapterId)
+      return
+    }
+    if (routeChapterGuardRef.current) return
+    routeChapterGuardRef.current = true
+    const targetId = routeChapterId
+    const currentId = activeChapterId
+    Modal.confirm({
+      title: '切换章节并放弃未保存合同？',
+      content: '当前章节或场景还有未保存修改，切换后这些修改不会写入数据库。',
+      okText: '继续切换',
+      cancelText: '留在当前章',
+      okType: 'danger',
+      onOk: () => {
+        routeChapterGuardRef.current = false
+        setActiveChapterId(targetId)
+      },
+      onCancel: () => {
+        const nextParams = new URLSearchParams(searchParams)
+        if (currentId) nextParams.set('chapterId', String(currentId))
+        else nextParams.delete('chapterId')
+        nextParams.delete('sceneId')
+        setSearchParams(nextParams, { replace: true })
+        routeChapterGuardRef.current = false
+      },
+    })
+  }, [activeChapterId, chapters, routeChapterId, searchParams, setSearchParams])
 
   useEffect(() => {
     if (!activeChapterId) {
@@ -257,6 +294,12 @@ export default function ContractsPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
   }, [activeChapterId, form, loadChapterData])
+
+  useEffect(() => {
+    if (!routeSceneId) return
+    const routeScene = sceneContracts.find((scene) => scene.segmentId === routeSceneId)
+    if (routeScene) setActiveSceneKey(getSceneKey(routeScene))
+  }, [routeSceneId, sceneContracts])
 
   const activeChapter = useMemo(
     () => chapters.find((item) => item.id === activeChapterId) || null,
@@ -482,7 +525,7 @@ export default function ContractsPage({ novelId }: Props) {
   ) => {
     const sceneKey = sceneId ?? 'chapterless'
     setSceneContracts((current) => current.map((item) => (
-      item.segmentId === sceneId
+      getSceneKey(item) === sceneKey
         ? { ...item, ...patch }
         : item
     )))
@@ -507,8 +550,16 @@ export default function ContractsPage({ novelId }: Props) {
         requiredForeshadowIds: scene.requiredForeshadowIds,
         status: scene.status,
       })
-      setSceneContracts(result)
-      setSceneDirtyKeys((current) => current.filter((key) => key !== getSceneKey(scene)))
+      const savedKey = getSceneKey(scene)
+      setSceneContracts((current) => {
+        const remainingDirty = new Set(sceneDirtyKeys.filter((key) => key !== savedKey))
+        return result.map((serverItem) => {
+          const key = getSceneKey(serverItem)
+          if (!remainingDirty.has(key)) return serverItem
+          return current.find((item) => getSceneKey(item) === key) || serverItem
+        })
+      })
+      setSceneDirtyKeys((current) => current.filter((key) => key !== savedKey))
       message.success(getUserFacingMessage('contracts.sceneSaved', {
         segmentLabel: scene.segmentOrder ? ` · 场景 ${scene.segmentOrder}` : '',
       }))
@@ -628,7 +679,7 @@ export default function ContractsPage({ novelId }: Props) {
                     >
                       <span className="novel-contracts-page__chapter-number">{`第${chapter.chapterNum}章`}</span>
                       <span className="novel-contracts-page__chapter-title">{chapter.title || '未命名章节'}</span>
-                      <span className="novel-contracts-page__chapter-status">{chapter.status}</span>
+                      <span className="novel-contracts-page__chapter-status">{getStatusLabel(chapter.status)}</span>
                     </button>
                   )}
                 </VirtualList>
@@ -809,6 +860,7 @@ export default function ContractsPage({ novelId }: Props) {
               }
 
               form.setFieldsValue(nextValues)
+              setChapterDirty(true)
             }}
           />
         )}

@@ -9,7 +9,6 @@ interface ParallelGenerationModalProps {
   chapters: Chapter[]
 }
 
-/** 多视角并行生成分析 Modal：自带浮动入口按钮，开关 state 内聚在组件内。 */
 export default function ParallelGenerationModal({ novelId, chapters: chapterList }: ParallelGenerationModalProps) {
   const [open, setOpen] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
@@ -54,9 +53,7 @@ export default function ParallelGenerationModal({ novelId, chapters: chapterList
         width={640}
       >
         <div className="writing-layout-parallel-intro">
-          <p className="writing-layout-parallel-copy">
-            分析故事弧中哪些叙事线可以并行生成。独立叙事线（无共享角色和线索）可以同时生成以加速创作。
-          </p>
+
           <Button
             type="primary"
             icon={<BranchesOutlined />}

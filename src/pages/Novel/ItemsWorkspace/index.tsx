@@ -35,7 +35,7 @@ import {
   WorkspacePanel,
   WorkspaceTip,
 } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type WorkflowStats } from '../workflow'
 import { getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
@@ -413,6 +413,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     [currentItemKind, watchedItemValues],
   )
   const hasUnsavedChanges = Boolean(selectedItem || creating) && currentFormSignature !== persistedFormSignature
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
 
   const syncItemRoute = useCallback((itemId: number | null) => {
     const nextParams = new URLSearchParams(searchParams)
@@ -622,6 +623,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
   useEffect(() => {
     setPage(1)
   }, [categoryFilter, keyword, listMode, recordStatusFilter])
+
+  useEffect(() => {
+    setActiveEditorTab('overview')
+  }, [selectedId, creating])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1033,11 +1038,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
   )
 
   const detailsTabContent = (
-    <Form form={form} layout="vertical">
+    <>
       <section className="novel-form-section">
         <div className="novel-form-section__header">
           <div className="novel-form-section__title">基础标识</div>
-          <div className="novel-form-section__desc">先把类型、名称、分类和状态定准，这决定它会如何进入模板 / 实例链路。</div>
         </div>
         <div className="novel-grid novel-grid--3">
           <Form.Item name="itemKind" label="记录类型" rules={[{ required: true, message: '请选择记录类型' }]}>
@@ -1066,7 +1070,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
       <section className="novel-form-section">
         <div className="novel-form-section__header">
           <div className="novel-form-section__title">叙事概览</div>
-          <div className="novel-form-section__desc">把“它是什么、长什么样、为什么重要”讲清楚，否则实例无法形成完整闭环。</div>
         </div>
         <div className="novel-grid novel-grid--2">
           <Form.Item name="summary" label="一句话说明">
@@ -1084,7 +1087,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
       <section className="novel-form-section">
         <div className="novel-form-section__header">
           <div className="novel-form-section__title">流转与代价</div>
-          <div className="novel-form-section__desc">把得到方式、使用条件、代价和风险写全，才能避免物品只是“有名字没用法”。</div>
         </div>
         <div className="novel-grid novel-grid--2">
           <Form.Item name="acquisitionMethod" label="获取方式">
@@ -1107,7 +1109,6 @@ export default function ItemsWorkspace({ novelId }: Props) {
       <section className="novel-form-section">
         <div className="novel-form-section__header">
           <div className="novel-form-section__title">关系与锚点</div>
-          <div className="novel-form-section__desc">这里决定它和人物、地点、事件的闭环关系。实例应尽量填满，模板至少留下可派生的锚点。</div>
         </div>
         {currentItemKind === 'instance' ? (
           <div className="novel-grid novel-grid--3">
@@ -1202,7 +1203,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           </Form.Item>
         </div>
       </section>
-    </Form>
+    </>
   )
 
   const connectionsTabContent = (
@@ -1501,7 +1502,13 @@ export default function ItemsWorkspace({ novelId }: Props) {
                 <Select
                   value={listMode}
                   options={ITEM_KIND_OPTIONS as unknown as Array<{ value: StoryItem['itemKind']; label: string }>}
-                  onChange={(value) => setListMode(value)}
+                  onChange={(value) => requestItemNavigation(() => {
+                    setListMode(value)
+                    setCreating(false)
+                    setSelectedId(null)
+                    setSelectedItem(null)
+                    syncItemRoute(null)
+                  })}
                 />
               </div>
               <div className="novel-filter-bar__row">
@@ -1527,7 +1534,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           {loading ? (
             <div className="novel-empty"><Spin /></div>
           ) : pageData.total === 0 ? (
-            <div className="novel-empty">当前筛选下还没有记录。</div>
+            <div className="novel-empty">{keyword.trim() || categoryFilter !== 'all' || recordStatusFilter !== 'confirmed' ? '当前筛选下还没有记录。' : '当前没有物品记录。'}</div>
           ) : (
             <div className="workspace-stack-12">
               <VirtualList data={pageData.items} height={listHeight} itemHeight={116} itemKey="id">
@@ -1588,7 +1595,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           {!selectedItem && !creating && !loading ? (
             <div className="novel-empty novel-items__empty-inline">从列表选择记录，或新建模板 / 实例。</div>
           ) : (
-            <>
+            <Form form={form} layout="vertical">
               <div className="novel-items__editor-intro">
                 <div className="novel-items__editor-intro-copy">
                   <div className="novel-kicker">{buildKicker(selectedItem, creating)}</div>
@@ -1643,6 +1650,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
                   {
                     key: 'details',
                     label: '字段编辑',
+                    forceRender: true,
                     children: (
                       <React.Suspense fallback={<div className="novel-empty"><Spin /></div>}>
                         <DetailsTab content={detailsTabContent} />
@@ -1660,7 +1668,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
                   },
                 ]}
               />
-            </>
+            </Form>
           )}
         </WorkspacePanel>
       </div>

@@ -26,6 +26,7 @@ import {
   parseDraftJson,
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
+import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -136,6 +137,7 @@ export default function ResistancePage({ novelId }: Props) {
   const [keywordInput, setKeywordInput] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [saving, setSaving] = useState(false)
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)
@@ -153,6 +155,7 @@ export default function ResistancePage({ novelId }: Props) {
   })
   const refreshRequestRef = useRef(0)
   const draftDirtyRef = useRef(false)
+  const creatingRef = useRef(false)
 
   const setDraftDirty = useCallback((value: boolean) => {
     draftDirtyRef.current = value
@@ -284,7 +287,9 @@ export default function ResistancePage({ novelId }: Props) {
       return
     }
     const scopedTracks = tab === 'environment' ? dashboard.environmentTracks : dashboard.institutionTracks
+    if (selectedTrackId == null && creatingRef.current) return
     const track = scopedTracks.find((item) => item.id === selectedTrackId) || scopedTracks[0] || null
+    creatingRef.current = false
     setDraft(track ? buildTrackDraft(track) : buildEnvironmentDraft(novelId, tab))
     setSelectedTrackId(track?.id || null)
     setDraftDirty(false)
@@ -382,6 +387,7 @@ export default function ResistancePage({ novelId }: Props) {
   const selectTrack = useCallback((item: ResistanceTrack) => {
     if (!item.id) return
     confirmDraftNavigation(() => {
+      creatingRef.current = false
       setSelectedTrackId(item.id || null)
       setSearchParams((current) => {
         const next = new URLSearchParams(current)
@@ -407,6 +413,7 @@ export default function ResistancePage({ novelId }: Props) {
   const handleCreateStandalone = useCallback(() => {
     if (tab !== 'environment' && tab !== 'institution') return
     confirmDraftNavigation(() => {
+      creatingRef.current = true
       setSelectedTrackId(null)
       setDraft(buildEnvironmentDraft(novelId, tab))
       setDraftDirty(false)

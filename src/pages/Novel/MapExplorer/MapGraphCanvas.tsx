@@ -96,14 +96,20 @@ function buildLayeredTreePositions(nodes: MapGraphNode[], width: number, nodeHei
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const pathCache = new Map<number, string>()
 
-  const getPathKey = (node: MapGraphNode): string => {
+  const getPathKey = (node: MapGraphNode, visiting: Set<number> = new Set()): string => {
     const cached = pathCache.get(node.id)
     if (cached) return cached
     const selfKey = `${String(node.sortOrder || 0).padStart(5, '0')}-${String(node.id).padStart(6, '0')}`
+    if (visiting.has(node.id)) {
+      const fallback = `${String(node.level || 0).padStart(3, '0')}.${selfKey}`
+      pathCache.set(node.id, fallback)
+      return fallback
+    }
+    visiting.add(node.id)
     const parent = typeof node.parentId === 'number' && visibleIds.has(node.parentId)
       ? byId.get(node.parentId)
       : undefined
-    const resolved = parent ? `${getPathKey(parent)}.${selfKey}` : `${String(node.level || 0).padStart(3, '0')}.${selfKey}`
+    const resolved = parent ? `${getPathKey(parent, visiting)}.${selfKey}` : `${String(node.level || 0).padStart(3, '0')}.${selfKey}`
     pathCache.set(node.id, resolved)
     return resolved
   }
@@ -475,7 +481,7 @@ export default function MapGraphCanvas({
             nodeStrokeWidth={3}
             nodeColor={(node) => {
               const graphRole = (node.data as CanvasNodeData | undefined)?.item.graphRole || 'related'
-              return ROLE_COLORS[graphRole]
+              return ROLE_COLORS[graphRole] || ROLE_COLORS.related
             }}
           />
         ) : null}

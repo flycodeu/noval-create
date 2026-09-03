@@ -52,6 +52,10 @@
   gap: 12px;
 }
 
+.faction-workspace__focus > [hidden] {
+  display: none !important;
+}
+
 .faction-workspace__status {
   margin-bottom: 18px;
 }

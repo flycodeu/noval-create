@@ -12,13 +12,6 @@ interface StreamingOutputProps {
   title?: string
 }
 
-/**
- * 章节生成流式输出区：
- * - 通过 useTaskStreamContent 细粒度订阅，只随本任务的流内容重渲染
- * - 自动滚动到底；用户上滚超过 40px 暂停跟随并出现「回到底部」按钮
- * - 容器限高 40vh；超长文本只渲染尾部 60KB 并提示已省略字数
- * - 可折叠为单行状态条
- */
 export default function StreamingOutput({ streamTaskId, title = 'AI 正在生产本章' }: StreamingOutputProps) {
   const content = useTaskStreamContent(streamTaskId)
   const bodyRef = useRef<HTMLDivElement>(null)

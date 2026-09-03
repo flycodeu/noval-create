@@ -68,9 +68,14 @@ function ReviewSpotlight({ model }: { model: ReviewInspectorViewModel }) {
 
 function PublishCheckCard({ model, actions }: Pick<Props, 'model' | 'actions'>) {
   const check = model.publishCheck
-  if (!check) return <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft"><div className="novel-copy-block">先运行发布前检查，再决定是否可定稿。</div></InsightCard>
+  if (!check) return (
+    <InsightCard title="章节验收门" eyebrow="完成门槛" tone="soft">
+      <div className="novel-copy-block">先运行发布前检查，再决定是否可定稿。</div>
+      <Button size="small" onClick={actions.onOpenQualityDashboard}>去质量看板</Button>
+    </InsightCard>
+  )
   return (
-    <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
+    <InsightCard title="章节验收门" eyebrow="完成门槛" tone="soft">
       <div className="novel-gate-report">
         <div className="novel-gate-report__summary">
           <div className="novel-gate-report__summary-copy">

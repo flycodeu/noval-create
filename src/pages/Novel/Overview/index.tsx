@@ -16,14 +16,13 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { normalizeOptionalNumber, parseDraftJson, type DraftFieldDefinition } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
-  WorkspaceContextSummary,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import StepAIAssistant, { type StepAIAssistantPatch } from '../components/StepAIAssistant'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import { useRegisterWorkspaceQualityController } from '../workspace-quality-context-core'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props {
@@ -102,16 +101,6 @@ export default function Overview({ novelId }: Props) {
   const [packagingExpanded, setPackagingExpanded] = useState(false)
 
   useEffect(() => {
-    form.setFieldsValue({
-      title: currentNovel?.title || '',
-      synopsis: currentNovel?.synopsis || '',
-      userBackground: currentNovel?.userBackground || '',
-      expandedBackground: currentNovel?.expandedBackground || '',
-      targetWords: currentNovel?.targetWords ?? 200000,
-    })
-  }, [currentNovel, form])
-
-  useEffect(() => {
     setPackagingDraft(parseNovelBlurbDocument(currentNovel?.blurbJson))
   }, [currentNovel?.blurbJson])
 
@@ -152,6 +141,18 @@ export default function Overview({ novelId }: Props) {
     )
   }, [currentNovel, overviewFormValues])
   const hasUnsavedChanges = basicInfoDirty || packagingDirty
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
+
+  useEffect(() => {
+    if (basicInfoDirty) return
+    form.setFieldsValue({
+      title: currentNovel?.title || '',
+      synopsis: currentNovel?.synopsis || '',
+      userBackground: currentNovel?.userBackground || '',
+      expandedBackground: currentNovel?.expandedBackground || '',
+      targetWords: currentNovel?.targetWords ?? 200000,
+    })
+  }, [basicInfoDirty, currentNovel, form])
   const projectInfoFilledCount = [
     overviewFormValues?.title,
     overviewFormValues?.synopsis,
@@ -429,15 +430,7 @@ export default function Overview({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       chrome="shared"
-      eyebrow="项目资料"
       title="项目资料"
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-          ]}
-        />
-      )}
       actionContract={{
         primary: {
           key: 'save',

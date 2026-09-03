@@ -10,7 +10,6 @@ interface RewriteSelectionModalProps {
   onOk: () => void
 }
 
-/** 选区重写 Modal：只重写当前选中的文段，开关 state 由 Writing 页持有。 */
 export default function RewriteSelectionModal({
   open,
   selectedText,

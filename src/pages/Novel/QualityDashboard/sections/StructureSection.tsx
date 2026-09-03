@@ -40,11 +40,10 @@ interface StructureSectionProps {
   hasChapterGateData: boolean
   hasChapterFunctionData: boolean
   hasArcProgressData: boolean
-  onSelectChapter: (chapterNum: number) => void
-  onLocateChapter: (chapterNum?: number) => void
+  onSelectChapter: (chapterNum: number, volumeId?: number | null, chapterId?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }
 
-/** 结构与推进 Tab：章节验收门、主角节奏、章节功能与故事弧。 */
 export default function StructureSection({
   data,
   filtered,
@@ -126,8 +125,8 @@ function ChapterGatePanel({
   heatmap: QualityDashboardData['chapterGateHeatmap']
   alerts: QualityDashboardData['chapterGateDriftAlerts']
   selectedVolumeLabel?: string
-  onSelectChapter: (chapterNum: number) => void
-  onLocateChapter: (chapterNum?: number) => void
+  onSelectChapter: (chapterNum: number, volumeId?: number | null, chapterId?: number) => void
+  onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.coveredChapterCount === 0 || trend.length === 0) {
     return <Empty description="先跑一轮章节验收门，历史快照会从这里累计" />
@@ -135,7 +134,7 @@ function ChapterGatePanel({
 
   const { averageVisibleScore, bandCounts, levelCounts } = summarizeChapterGateTrend(trend)
   const visibleAlerts = getVisibleGateAlerts(alerts)
-  const { dimensions, chapterNums, valueMap: heatmapValueMap } = buildChapterGateHeatmapModel(heatmap, trend)
+  const { dimensions, chapters, valueMap: heatmapValueMap } = buildChapterGateHeatmapModel(heatmap, trend)
   const recentTrend = trend.slice(-8).reverse()
 
   return (
@@ -172,7 +171,7 @@ function ChapterGatePanel({
       <div className="quality-dashboard-page__dual-grid">
         <div className="quality-dashboard-page__panel-card">
           <div className="quality-dashboard-page__section-title">章节门趋势</div>
-          <MiniTrendRow label="总分" points={trend.map((entry) => ({ chapterNum: entry.chapterNum, value: entry.totalScore }))} />
+          <MiniTrendRow tone="score" label="总分" points={trend.map((entry) => ({ chapterNum: entry.chapterNum, value: entry.totalScore }))} />
           <MiniTrendRow
             label="门级压力"
             points={trend.map((entry) => ({
@@ -195,8 +194,8 @@ function ChapterGatePanel({
               key={`${alert.chapterId}-${alert.createdAt}`}
               role="button"
               tabIndex={0}
-              onClick={() => onSelectChapter(alert.chapterNum)}
-              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelectChapter(alert.chapterNum) }}
+              onClick={() => onSelectChapter(alert.chapterNum, undefined, alert.chapterId)}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelectChapter(alert.chapterNum, undefined, alert.chapterId) }}
               className="quality-dashboard-page__risk-button"
             >
               <div className="quality-dashboard-page__row quality-dashboard-page__row--wrap">
@@ -207,7 +206,7 @@ function ChapterGatePanel({
                   size="small"
                   onClick={(event) => {
                     event.stopPropagation()
-                    onLocateChapter(alert.chapterNum)
+                    onLocateChapter(alert.chapterNum, undefined, alert.chapterId)
                   }}
                 >
                   定位
@@ -222,22 +221,22 @@ function ChapterGatePanel({
       <div className="quality-dashboard-page__panel-card">
         <div className="quality-dashboard-page__section-title">维度热力图</div>
         <div className="quality-dashboard-page__heatmap-scroll">
-          <div className="quality-dashboard-page__heatmap-grid" style={{ minWidth: Math.max(640, chapterNums.length * 64) }}>
-            <div className="quality-dashboard-page__heatmap-row quality-dashboard-page__heatmap-header" style={{ gridTemplateColumns: `120px repeat(${chapterNums.length}, minmax(44px, 1fr))` }}>
+          <div className="quality-dashboard-page__heatmap-grid" style={{ minWidth: Math.max(640, chapters.length * 64) }}>
+            <div className="quality-dashboard-page__heatmap-row quality-dashboard-page__heatmap-header" style={{ gridTemplateColumns: `120px repeat(${chapters.length}, minmax(44px, 1fr))` }}>
               <div>维度 / 章节</div>
-              {chapterNums.map((chapterNum) => <div key={`head-${chapterNum}`} className="quality-dashboard-page__heatmap-head-cell">{chapterNum}</div>)}
+              {chapters.map((chapter) => <div key={`head-${chapter.chapterId}`} className="quality-dashboard-page__heatmap-head-cell">{chapter.chapterNum}</div>)}
             </div>
             {dimensions.map((dimension) => (
-              <div key={dimension} className="quality-dashboard-page__heatmap-row" style={{ gridTemplateColumns: `120px repeat(${chapterNums.length}, minmax(44px, 1fr))` }}>
+              <div key={dimension} className="quality-dashboard-page__heatmap-row" style={{ gridTemplateColumns: `120px repeat(${chapters.length}, minmax(44px, 1fr))` }}>
                 <div className="quality-dashboard-page__heatmap-dimension">{dimension}</div>
-                {chapterNums.map((chapterNum) => {
-                  const entry = heatmapValueMap.get(`${chapterNum}:${dimension}`)
+                {chapters.map((chapter) => {
+                  const entry = heatmapValueMap.get(`${chapter.chapterId}:${dimension}`)
                   const score = entry?.score || 0
                   return (
                     <button
-                      key={`${chapterNum}-${dimension}`}
+                      key={`${chapter.chapterId}-${dimension}`}
                       type="button"
-                      onClick={() => onSelectChapter(chapterNum)}
+                      onClick={() => onSelectChapter(chapter.chapterNum, undefined, chapter.chapterId)}
                       className="quality-dashboard-page__heatmap-button"
                       style={{ background: chapterGateHeatmapColor(score) }}
                     >
@@ -257,7 +256,7 @@ function ChapterGatePanel({
           <button
             key={`${entry.chapterId}-${entry.createdAt}`}
             type="button"
-            onClick={() => onSelectChapter(entry.chapterNum)}
+            onClick={() => onSelectChapter(entry.chapterNum, undefined, entry.chapterId)}
             className="quality-dashboard-page__chapter-snapshot-item"
           >
             <strong>{`第${entry.chapterNum}章`}</strong>

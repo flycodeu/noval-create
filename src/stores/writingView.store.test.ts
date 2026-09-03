@@ -83,4 +83,27 @@ describe('writingView.store generation isolation', () => {
       status: 'running',
     })
   })
+
+  it('ignores a duplicate terminal event for the same finished task', () => {
+    useWritingViewStore.getState().startGeneration({ chapterId: 1, taskId: 101 })
+    useWritingViewStore.getState().completeGeneration({
+      chapterId: 1,
+      taskId: 101,
+      status: 'success',
+      detail: '第一次完成',
+    })
+    useWritingViewStore.getState().completeGeneration({
+      chapterId: 1,
+      taskId: 101,
+      status: 'success',
+      detail: '重复完成',
+    })
+
+    expect(useWritingViewStore.getState().activeGeneration).toMatchObject({
+      chapterId: 1,
+      taskId: 101,
+      status: 'success',
+      detail: '第一次完成',
+    })
+  })
 })

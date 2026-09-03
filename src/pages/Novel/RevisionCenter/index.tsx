@@ -677,12 +677,13 @@ export default function RevisionCenterPage({ novelId }: Props) {
         </details>
       ) : null}
 
-      {/* 新建/编辑任务弹窗 */}
       <Modal
         title={editingTask ? '编辑人工修订任务' : '新建人工修订任务'}
         open={modalOpen}
-        forceRender
-        onCancel={() => setModalOpen(false)}
+        destroyOnHidden
+        onCancel={() => {
+          setModalOpen(false)
+        }}
         onOk={() => void handleSave()}
         confirmLoading={saving}
         okText={editingTask ? '保存修改' : '创建任务'}

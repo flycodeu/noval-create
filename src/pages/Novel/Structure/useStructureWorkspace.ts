@@ -75,6 +75,8 @@ export function useStructureWorkspace(novelId: number) {
   const checkpointsRequestRef = useRef(0)
   const chapterDetailRequestRef = useRef(0)
   const segmentDetailRequestRef = useRef(0)
+  const hydratedChapterIdRef = useRef<number | null>(null)
+  const hydratedSegmentIdRef = useRef<number | null>(null)
   const partsCache = useRef(new Map<string, PagedResult<StoryStructurePartSummary>>())
   const chapterCache = useRef(new Map<string, PagedResult<StoryStructureChapterSummary>>())
   const segmentCache = useRef(new Map<string, PagedResult<StoryStructureSegmentSummary>>())
@@ -345,38 +347,15 @@ export function useStructureWorkspace(novelId: number) {
   }, [resolveAndLoad, route, searchParams])
 
   useEffect(() => {
-    if (!selection.chapterId) {
-      setChapterDetail(null)
-      setSegmentDetail(null)
-      return
-    }
-
-    void loadChapterDetail(selection.chapterId).catch((error) => {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    })
-  }, [loadChapterDetail, selection.chapterId])
-
-  useEffect(() => {
-    if (!selection.chapterId) {
-      setSegmentDetail(null)
-      return
-    }
-
-    const activeSegmentId = selection.segmentId ?? segments.items[0]?.id ?? null
-    void loadSegmentDetail(activeSegmentId).catch((error) => {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    })
-  }, [loadSegmentDetail, segments.items, selection.chapterId, selection.segmentId])
-
-  useEffect(() => {
     if (loading) return
 
     if (!chapterDetail) {
+      hydratedChapterIdRef.current = null
       chapterForm.resetFields()
       return
     }
+    if (hydratedChapterIdRef.current === chapterDetail.id) return
+    hydratedChapterIdRef.current = chapterDetail.id
 
     chapterForm.setFieldsValue({
       title: chapterDetail.title || '',
@@ -390,9 +369,12 @@ export function useStructureWorkspace(novelId: number) {
     if (loading) return
 
     if (!segmentDetail) {
+      hydratedSegmentIdRef.current = null
       segmentForm.resetFields()
       return
     }
+    if (hydratedSegmentIdRef.current === segmentDetail.id) return
+    hydratedSegmentIdRef.current = segmentDetail.id
 
     segmentForm.setFieldsValue({
       title: segmentDetail.title || '',
@@ -849,8 +831,9 @@ export function useStructureWorkspace(novelId: number) {
   }, [navigate, novelId, selection])
 
   const openWritingPage = useCallback(() => {
-    navigate(buildWorkspaceRoute(novelId, 'writing'))
-  }, [navigate, novelId])
+    const chapterId = selection.chapterId || chapterDetail?.id
+    navigate(buildWorkspaceRoute(novelId, chapterId ? `writing?chapterId=${chapterId}` : 'writing'))
+  }, [chapterDetail?.id, navigate, novelId, selection.chapterId])
 
   const openLinkedEvent = useCallback((eventId: number) => {
     navigate(buildWorkspaceRoute(novelId, `timeline?eventId=${eventId}`))

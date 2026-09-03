@@ -346,7 +346,8 @@ export default function WritebackCenterPage({ novelId }: Props) {
 
   const applyConfirmedRun = useCallback(() => {
     if (!activeRun) return
-    const execute = () => void runAction(() => window.electron.writeback.applyRun(activeRun.id), '已执行统一回写。')
+    const runId = activeRun.id
+    const execute = () => void runAction(() => window.electron.writeback.applyRun(runId), '已执行统一回写。')
     if (pendingDiffCount <= 0) {
       execute()
       return
@@ -372,7 +373,8 @@ export default function WritebackCenterPage({ novelId }: Props) {
 
   const retryFailed = useCallback(() => {
     if (!activeRun) return
-    void runAction(() => window.electron.writeback.retryFailed(activeRun.id), '失败项已重试。')
+    const runId = activeRun.id
+    void runAction(() => window.electron.writeback.retryFailed(runId), '失败项已重试。')
   }, [activeRun, runAction])
 
   const selectAdjacentDiff = useCallback((offset: -1 | 1) => {
@@ -414,16 +416,16 @@ export default function WritebackCenterPage({ novelId }: Props) {
           key: 'bulk-accept',
           label: '批量接受当前筛选',
           icon: <CheckOutlined />,
-          disabled: !activeRun,
-          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'accepted', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量接受当前筛选结果。'),
+          disabled: !activeRun || filteredDiffs.length === 0,
+          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'accepted', assetType: assetFilter === 'all' ? undefined : assetFilter, diffIds: filteredDiffs.map((item) => item.id) }), '已批量接受当前筛选结果。'),
         },
         {
           key: 'bulk-reject',
           label: '批量拒绝当前筛选',
           icon: <StopOutlined />,
           danger: true,
-          disabled: !activeRun,
-          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'rejected', assetType: assetFilter === 'all' ? undefined : assetFilter }), '已批量拒绝当前筛选结果。'),
+          disabled: !activeRun || filteredDiffs.length === 0,
+          onClick: () => void runAction(() => window.electron.writeback.bulkUpdateDecisions(activeRun?.id || 0, { canonDecision: 'rejected', assetType: assetFilter === 'all' ? undefined : assetFilter, diffIds: filteredDiffs.map((item) => item.id) }), '已批量拒绝当前筛选结果。'),
         },
         {
           key: 'refresh',
@@ -433,7 +435,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
         },
       ],
     },
-  }), [actionLoading, activeRun, applyConfirmedRun, assetFilter, centerData?.chapter?.id, prepareRun, refresh, retryFailed, runAction])
+  }), [actionLoading, activeRun, applyConfirmedRun, assetFilter, centerData?.chapter?.id, filteredDiffs, prepareRun, refresh, retryFailed, runAction])
 
   if (loading && !centerData) {
     return (

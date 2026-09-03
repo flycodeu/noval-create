@@ -216,6 +216,10 @@
   align-self: start;
 }
 
+.map-graph-sidebar > [hidden] {
+  display: none !important;
+}
+
 .map-graph-stage-panel,
 .map-graph-inspector-panel {
   min-width: 0;

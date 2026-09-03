@@ -2,14 +2,11 @@ import { Alert, Button } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 
 export interface ActionErrorAlertProps {
-  /** 失败动作标题，例如「章节流水线启动失败」。 */
   title: string
-  /** 失败详情；为空时组件不渲染。 */
+  /** 为空时组件不渲染。 */
   message?: string | null
-  /** 提供后展示「重试」按钮。 */
   onRetry?: () => void
   retrying?: boolean
-  /** 提供后 Alert 可关闭。 */
   onDismiss?: () => void
   className?: string
 }

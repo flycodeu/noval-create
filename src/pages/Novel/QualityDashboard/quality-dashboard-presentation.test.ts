@@ -173,19 +173,20 @@ describe('getVisibleGateAlerts', () => {
 describe('buildChapterGateHeatmapModel', () => {
   it('维度去重、章号取自趋势、valueMap 可按键取值', () => {
     const heatmap = [
-      { chapterNum: 1, dimension: '连续性', score: 80 },
-      { chapterNum: 2, dimension: '连续性', score: 70 },
-      { chapterNum: 1, dimension: '结构连贯', score: 60 },
+      { chapterId: 11, chapterNum: 1, dimension: '连续性', score: 80 },
+      { chapterId: 12, chapterNum: 2, dimension: '连续性', score: 70 },
+      { chapterId: 11, chapterNum: 1, dimension: '结构连贯', score: 60 },
     ] as QualityDashboardData['chapterGateHeatmap']
     const trend = [
-      gateTrendEntry({ chapterNum: 1 }),
-      gateTrendEntry({ chapterNum: 2 }),
+      gateTrendEntry({ chapterId: 11, chapterNum: 1 }),
+      gateTrendEntry({ chapterId: 12, chapterNum: 2 }),
     ]
     const model = buildChapterGateHeatmapModel(heatmap, trend)
     expect(model.dimensions).toEqual(['连续性', '结构连贯'])
     expect(model.chapterNums).toEqual([1, 2])
-    expect(model.valueMap.get('2:连续性')?.score).toBe(70)
-    expect(model.valueMap.get('2:结构连贯')).toBeUndefined()
+    expect(model.chapters.map((entry) => entry.chapterId)).toEqual([11, 12])
+    expect(model.valueMap.get('12:连续性')?.score).toBe(70)
+    expect(model.valueMap.get('12:结构连贯')).toBeUndefined()
   })
 })
 
@@ -256,10 +257,6 @@ describe('buildWeakDimensionBars', () => {
     expect(buildWeakDimensionBars([]).maxCount).toBe(1)
   })
 })
-
-// ---------------------------------------------------------------------------
-// filterDashboardByVolume
-// ---------------------------------------------------------------------------
 
 function makeVolume(partial: Partial<VolumeQualityEntry>): VolumeQualityEntry {
   return {
@@ -429,12 +426,9 @@ describe('findChapterByNum', () => {
     const details = makeVolumeFilterSource().chapterDetails
     expect(findChapterByNum(details, 2)?.chapterId).toBe(12)
     expect(findChapterByNum(details, 99)).toBeNull()
+    expect(findChapterByNum(details, 99, null, 12)?.chapterId).toBe(12)
   })
 })
-
-// ---------------------------------------------------------------------------
-// 顶部筛选条
-// ---------------------------------------------------------------------------
 
 function makeFilters(partial: Partial<QualityDashboardFilters>): QualityDashboardFilters {
   return { ...DEFAULT_QUALITY_FILTERS, ...partial }

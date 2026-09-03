@@ -167,8 +167,7 @@ export function TimelineListPanel({
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{TIMELINE_TEXT.listTitle}</h2>
-          <div className="novel-panel__desc">按时间顺序定位事件；右侧只保留当前事件的完整因果详情。</div>
-        </div>
+            </div>
         <div className="novel-panel__extra">
           <div className="novel-filter-bar novel-timeline-page__filter-bar">
             <div className="novel-filter-bar__row">

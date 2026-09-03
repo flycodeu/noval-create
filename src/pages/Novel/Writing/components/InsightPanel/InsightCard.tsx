@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 
-/** 右侧辅助区通用卡片：支持 hero / soft 三种色调与可折叠模式。 */
 export function InsightCard({
   title,
   eyebrow,
@@ -50,7 +49,6 @@ export function InsightCard({
   )
 }
 
-/** 简单字符串清单：空态展示占位文案。 */
 export function StringList({ items, empty }: { items: string[]; empty: string }) {
   return items.length > 0 ? <div className="novel-insight-list">{items.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item">{item}</div>)}</div> : <div className="novel-copy-block">{empty}</div>
 }

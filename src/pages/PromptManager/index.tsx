@@ -483,8 +483,9 @@ export default function PromptManager() {
     return promptRows.filter(({ prompt, meta }) => {
       if (activeCategory !== '全部' && prompt.category !== activeCategory) return false
       if (activeLane !== '全部' && meta.lane !== activeLane) return false
-      if (!searchText) return true
-      return prompt.name.includes(searchText) || prompt.description.includes(searchText) || prompt.key.includes(searchText) || meta.stage.includes(searchText)
+      if (!searchText.trim()) return true
+      const query = searchText.trim().toLowerCase()
+      return [prompt.name, prompt.description, prompt.key, meta.stage].some((value) => value.toLowerCase().includes(query))
     })
   }, [activeCategory, activeLane, promptRows, searchText])
 
@@ -549,17 +550,27 @@ export default function PromptManager() {
     }
   }
 
-  const handleResetOverride = async (key: string) => {
-    setSaving(true)
-    try {
-      await window.electron.prompt.delete(key)
-      await loadPrompts()
-      message.success(getUserFacingMessage('prompt.resetDefault'))
-    } catch (error) {
-      message.error(getErrorMessage(error, 'common.saveFailed'))
-    } finally {
-      setSaving(false)
-    }
+  const handleResetOverride = (key: string, name: string) => {
+    Modal.confirm({
+      title: `恢复「${name}」为默认模板？`,
+      content: '会删除当前运行时覆盖，恢复为内置提示词。这个操作不可撤销。',
+      okText: '恢复默认',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setSaving(true)
+        try {
+          await window.electron.prompt.delete(key)
+          await loadPrompts()
+          message.success(getUserFacingMessage('prompt.resetDefault'))
+        } catch (error) {
+          message.error(getErrorMessage(error, 'common.saveFailed'))
+          throw error
+        } finally {
+          setSaving(false)
+        }
+      },
+    })
   }
 
   return (
@@ -692,7 +703,7 @@ export default function PromptManager() {
                   编辑
                 </Button>
                 {selectedPromptRow.hasOverride ? (
-                  <Button size="small" onClick={() => void handleResetOverride(selectedPromptRow.prompt.key)}>恢复默认</Button>
+                  <Button size="small" onClick={() => handleResetOverride(selectedPromptRow.prompt.key, selectedPromptRow.prompt.name)}>恢复默认</Button>
                 ) : null}
               </div>
             ) : null}

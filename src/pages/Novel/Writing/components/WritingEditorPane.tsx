@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode, RefObject } from 'react'
+import type { CompositionEvent, FormEvent, ReactNode, RefObject } from 'react'
 import { Alert, Button, Tag } from 'antd'
 import { ApartmentOutlined, BranchesOutlined } from '@ant-design/icons'
 import ActionErrorAlert from '../../../../components/common/ActionErrorAlert'
@@ -10,7 +10,6 @@ import StreamingOutput from './StreamingOutput'
 
 export interface WritingEditorPaneProps {
   title: string
-  subtitle: string
   currentChapter: Chapter | null
   content: string
   wordCount: number
@@ -22,6 +21,8 @@ export interface WritingEditorPaneProps {
   resumable: { visible: boolean; content: string; cancelled: boolean; onResume(): void; onRestart(): void }
   segments: ChapterSegment[]
   onInput(event: FormEvent<HTMLDivElement>): void
+  onCompositionStart?(event: CompositionEvent<HTMLDivElement>): void
+  onCompositionEnd?(event: CompositionEvent<HTMLDivElement>): void
   onSyncSelection(): void
   onDismissError(): void
   onOpenStructure(): void
@@ -77,7 +78,7 @@ function SegmentBoardPreview({ segments, onOpenStructure, onCompile }: {
 export default function WritingEditorPane(props: WritingEditorPaneProps) {
   const {
     actionError, advisory, commandBar, content, currentChapter, editorRef, generating, onCompile,
-    onDismissError, onInput, onOpenStructure, onSyncSelection, resumable, segments, streamTaskId,
+    onCompositionEnd, onCompositionStart, onDismissError, onInput, onOpenStructure, onSyncSelection, resumable, segments, streamTaskId,
     title, wordCount,
   } = props
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
@@ -105,7 +106,17 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
             <SegmentBoardPreview segments={segments} onOpenStructure={onOpenStructure} onCompile={onCompile} />
           </div>
         ) : (
-          <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={onInput} onMouseUp={onSyncSelection} onKeyUp={onSyncSelection} className="novel-writing-shell__editor-sheet">{content}</div>
+          <div
+            ref={editorRef}
+            contentEditable={!generating}
+            suppressContentEditableWarning
+            onInput={generating ? undefined : onInput}
+            onCompositionStart={generating ? undefined : onCompositionStart}
+            onCompositionEnd={generating ? undefined : onCompositionEnd}
+            onMouseUp={onSyncSelection}
+            onKeyUp={onSyncSelection}
+            className="novel-writing-shell__editor-sheet"
+          />
         )) : <div className="novel-empty novel-empty--writing">选择左侧章节开始写作，或点击新建章节。</div>}
       </div>
       {advisory.count > 0 ? (

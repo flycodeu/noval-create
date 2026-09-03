@@ -258,6 +258,7 @@ function useWorkspaceLoadLifecycle(
     setLivePipelineSnapshot(null)
   }, [clearChapterArtifacts, setLivePipelineSnapshot])
   const handleWorkspaceChapterLoaded = useCallback(async (chapter: Chapter, segments: ChapterSegment[], isCurrent: IsCurrent) => {
+    if (!isCurrent()) return
     setChapterSegments(segments)
     const record = chapter as unknown as Record<string, unknown>
     setAiResult(parseAiCheck(chapter.aiScoreJson ?? record.ai_score_json))
@@ -270,6 +271,7 @@ function useWorkspaceLoadLifecycle(
       refreshForeshadowLedger(),
       refreshLatestPipelineTask(chapter.id, isCurrent),
     ])
+    if (!isCurrent()) return
   }, [loadEditorContent, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck, setAiResult, setChapterSegments])
   const handleEmptyWorkspace = useCallback(() => {
     loadEditorContent('')

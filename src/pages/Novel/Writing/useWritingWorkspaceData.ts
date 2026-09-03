@@ -15,6 +15,7 @@ interface UseWritingWorkspaceDataOptions {
   onChapterLoaded(chapter: Chapter, segments: ChapterSegment[], isCurrent: () => boolean): Promise<void>
   onEmptyWorkspace(): void
   refreshWorkspaceMetadata(): Promise<void>
+  shouldPreserveEditorContent?(): boolean
 }
 
 export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions) {
@@ -27,6 +28,7 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
     onChapterLoaded,
     onEmptyWorkspace,
     refreshWorkspaceMetadata,
+    shouldPreserveEditorContent,
   } = options
   const chapters = useNovelStore((state) => state.chapters)
   const currentChapterId = useNovelStore((state) => state.currentChapterId)
@@ -52,12 +54,13 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
 
   const refreshChapter = useCallback(async (chapterId: number) => {
     const isCurrent = tracker.beginDetailRequest(chapterId)
-    beforeChapterLoad()
     const [full, segments] = await Promise.all([
       window.electron.chapter.get(chapterId),
       window.electron.structure.listSegments(chapterId),
     ])
     if (!full || !isCurrent()) return
+    beforeChapterLoad()
+    if (!isCurrent()) return
     setCurrentChapter(full)
     updateChapter(chapterId, full)
     await onChapterLoaded(full, segments, isCurrent)
@@ -86,10 +89,25 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
     await refreshChapter(target.id)
   }, [novelId, onEmptyWorkspace, refreshChapter, setChapters, setCurrentChapter, setCurrentChapterId, tracker])
 
-  const refreshBackgroundChapter = useCallback(async (chapterId: number) => {
+  const refreshBackgroundChapter = useCallback(async (
+    chapterId: number,
+    options: { replaceEditor?: boolean } = {},
+  ) => {
     await loadChapters(undefined, { selectChapter: false })
-    if (tracker.currentChapterIdRef.current === chapterId) await refreshChapter(chapterId)
-  }, [loadChapters, refreshChapter, tracker])
+    if (tracker.currentChapterIdRef.current !== chapterId) return
+    if (!options.replaceEditor && shouldPreserveEditorContent?.()) {
+      const isCurrent = tracker.beginDetailRequest(chapterId)
+      const full = await window.electron.chapter.get(chapterId)
+      if (!full || !isCurrent()) return
+      setCurrentChapter((current) => {
+        if (!current || current.id !== chapterId) return current
+        return { ...full, content: current.content, wordCount: current.wordCount }
+      })
+      updateChapter(chapterId, full)
+      return
+    }
+    await refreshChapter(chapterId)
+  }, [loadChapters, refreshChapter, setCurrentChapter, shouldPreserveEditorContent, tracker, updateChapter])
 
   const selectChapter = useCallback(async (chapterId: number) => {
     tracker.selectChapter(chapterId)

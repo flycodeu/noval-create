@@ -53,6 +53,12 @@ export function languageDriftRiskColor(value: number): string {
   return '#52c41a'
 }
 
+export function qualityScoreToneColor(value: number): string {
+  if (value >= 80) return '#52c41a'
+  if (value >= 60) return '#faad14'
+  return '#f5222d'
+}
+
 export function languageDriftStatusLabel(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']): string {
   if (status === 'worsening') return '恶化中'
   if (status === 'improving') return '改善中'
@@ -481,16 +487,11 @@ export function getTopLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit 
     .slice(0, limit)
 }
 
-// ---------------------------------------------------------------------------
-// 数据聚合 / 变换（纯函数）
-// ---------------------------------------------------------------------------
-
 export interface TrendPoint {
   chapterNum: number
   value: number
 }
 
-/** 卷筛选后各区块共用的数据切片。 */
 export interface VolumeFilteredDashboard {
   chapterDetails: QualityDashboardData['chapterDetails']
   heatmapData: QualityDashboardData['heatmapData']
@@ -535,7 +536,6 @@ type VolumeFilterSource = Pick<QualityDashboardData,
   | 'feedbackRecurrence'
 >
 
-/** 按选中的卷收窄各区块数据；不选卷时原样返回。 */
 export function filterDashboardByVolume(
   data: VolumeFilterSource,
   selectedVolume: VolumeQualityEntry | null,
@@ -616,7 +616,6 @@ export interface ChapterGateTrendSummary {
   levelCounts: Record<QualityDashboardData['chapterGateTrend'][number]['gateLevel'], number>
 }
 
-/** 章节验收门趋势的均值与分档统计。 */
 export function summarizeChapterGateTrend(trend: QualityDashboardData['chapterGateTrend']): ChapterGateTrendSummary {
   const averageVisibleScore = trend.length > 0
     ? Math.round((trend.reduce((sum, entry) => sum + entry.totalScore, 0) / trend.length) * 10) / 10
@@ -642,19 +641,21 @@ export function getVisibleGateAlerts(
 
 export interface ChapterGateHeatmapModel {
   dimensions: string[]
+  chapters: Array<{ chapterId: number; chapterNum: number }>
   chapterNums: number[]
   valueMap: Map<string, QualityDashboardData['chapterGateHeatmap'][number]>
 }
 
-/** 章节验收门维度热力图的行列与取值索引。 */
 export function buildChapterGateHeatmapModel(
   heatmap: QualityDashboardData['chapterGateHeatmap'],
   trend: QualityDashboardData['chapterGateTrend'],
 ): ChapterGateHeatmapModel {
+  const chapters = trend.map((entry) => ({ chapterId: entry.chapterId, chapterNum: entry.chapterNum }))
   return {
     dimensions: Array.from(new Set(heatmap.map((entry) => entry.dimension))),
-    chapterNums: trend.map((entry) => entry.chapterNum),
-    valueMap: new Map(heatmap.map((entry) => [`${entry.chapterNum}:${entry.dimension}`, entry] as const)),
+    chapters,
+    chapterNums: chapters.map((entry) => entry.chapterNum),
+    valueMap: new Map(heatmap.map((entry) => [`${entry.chapterId}:${entry.dimension}`, entry] as const)),
   }
 }
 
@@ -724,23 +725,30 @@ export interface WeakDimensionBarModel {
   maxCount: number
 }
 
-/** 薄弱维度条形图：过滤空项并求最大值。 */
 export function buildWeakDimensionBars(data: Array<{ dimension: string; count: number }>): WeakDimensionBarModel {
   const items = data.filter((d) => d.count > 0)
   return { items, maxCount: Math.max(...items.map((d) => d.count), 1) }
 }
 
-/** 按章号找到章节详情（用于风险定位与下钻）。 */
 export function findChapterByNum(
   chapterDetails: QualityDashboardData['chapterDetails'],
-  chapterNum: number,
+  chapterNum?: number,
+  volumeId?: number | null,
+  chapterId?: number | null,
 ): QualityChapterEntry | null {
+  if (typeof chapterId === 'number') {
+    const byId = chapterDetails.find((entry) => entry.chapterId === chapterId)
+    if (byId) return byId
+  }
+  if (typeof chapterNum !== 'number') return null
+  if (typeof volumeId === 'number') {
+    return chapterDetails.find((entry) => entry.chapterNum === chapterNum && entry.volumeId === volumeId)
+      || chapterDetails.find((entry) => entry.chapterNum === chapterNum)
+      || null
+  }
   return chapterDetails.find((entry) => entry.chapterNum === chapterNum) || null
 }
 
-// ---------------------------------------------------------------------------
-// 顶部筛选条：章节范围 / 严重度 / 指标类别
-// ---------------------------------------------------------------------------
 
 export type QualitySeverityFilter = 'all' | 'high' | 'medium' | 'low'
 export type QualityCategoryFilter = 'all' | 'overview' | 'language' | 'structure' | 'stability'
@@ -798,7 +806,6 @@ export function chapterNumsOverlapRange(chapterNums: number[] | undefined, filte
   return chapterNums.some((chapterNum) => isChapterInRange(chapterNum, filters))
 }
 
-/** 风险类型映射到 Tab 维度的指标类别。 */
 export function qualityRiskCategory(
   kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind'],
 ): Exclude<QualityCategoryFilter, 'all'> {
@@ -826,7 +833,6 @@ export function qualityRiskCategory(
   return 'overview'
 }
 
-/** 风险列表筛选：严重度 + 指标类别 + 章节范围（无绑定章节保守保留）。 */
 export function filterQualityRisks<T extends Pick<QualityRiskEntry, 'kind' | 'severity' | 'chapterNums'>>(
   risks: T[],
   filters: QualityDashboardFilters,
@@ -838,7 +844,6 @@ export function filterQualityRisks<T extends Pick<QualityRiskEntry, 'kind' | 'se
   ))
 }
 
-/** 只按严重度筛选带 severity 字段的告警列表。 */
 export function filterSeverityAlerts<T extends { severity?: string }>(
   alerts: T[],
   filters: QualityDashboardFilters,

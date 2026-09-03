@@ -46,6 +46,17 @@ const ROLE_COLORS: Record<Character['roleType'], string> = {
   minor: '#6f648e',
 }
 
+const FALLBACK_ROLE_LABEL = '其他'
+const FALLBACK_ROLE_COLOR = '#6f648e'
+
+function getRoleLabel(roleType: string) {
+  return ROLE_LABELS[roleType as Character['roleType']] || FALLBACK_ROLE_LABEL
+}
+
+function getRoleColor(roleType: string) {
+  return ROLE_COLORS[roleType as Character['roleType']] || FALLBACK_ROLE_COLOR
+}
+
 const LEGEND_ITEMS = [
   { label: '亲密 / 家人 / 恋人', color: '#b26a43', note: '暖色线代表高情感温度关系' },
   { label: '朋友 / 同盟 / 师徒', color: '#2f7b70', note: '青绿色线代表协作与信任' },
@@ -128,12 +139,15 @@ function buildGraphNodes(data: CharacterGraphPayload) {
     degreeMap.set(relation.charBId, (degreeMap.get(relation.charBId) || 0) + 1)
   })
 
-  const byRole = new Map<Character['roleType'], Character[]>()
+  const byRole = new Map<string, Character[]>()
   roleOrder.forEach((role) => byRole.set(role, []))
+  const extraRoles: string[] = []
   data.characters.forEach((character) => {
-    const bucket = byRole.get(character.roleType) || []
+    const role = character.roleType || 'unknown'
+    if (!byRole.has(role)) extraRoles.push(role)
+    const bucket = byRole.get(role) || []
     bucket.push(character)
-    byRole.set(character.roleType, bucket)
+    byRole.set(role, bucket)
   })
 
   const columnWidth = 290
@@ -141,8 +155,9 @@ function buildGraphNodes(data: CharacterGraphPayload) {
   const rowGap = 188
   const width = 236
   const nodes: Node<CanvasNodeData>[] = []
+  const columns = [...roleOrder, ...extraRoles]
 
-  roleOrder.forEach((role, columnIndex) => {
+  columns.forEach((role, columnIndex) => {
     const items = (byRole.get(role) || []).sort((left, right) => (
       (degreeMap.get(right.id) || 0) - (degreeMap.get(left.id) || 0)
       || left.sortOrder - right.sortOrder
@@ -235,7 +250,7 @@ function CharacterNode({ data }: NodeProps<CanvasNodeData>) {
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
 
       <div className="character-graph-node__eyebrow">
-        <span style={{ color: ROLE_COLORS[item.roleType] }}>{ROLE_LABELS[item.roleType]}</span>
+        <span style={{ color: getRoleColor(item.roleType) }}>{getRoleLabel(item.roleType)}</span>
         <span>{item.recordStatus === 'draft' ? '草稿' : '正式'}</span>
       </div>
       <div className="character-graph-node__title">{item.fullName}</div>
@@ -362,7 +377,7 @@ export default function CharacterGraphCanvas({
           pannable
           zoomable
           nodeStrokeWidth={3}
-          nodeColor={(node) => ROLE_COLORS[(node.data as CanvasNodeData).item.roleType]}
+          nodeColor={(node) => getRoleColor((node.data as CanvasNodeData).item.roleType)}
           maskColor="rgba(244, 236, 225, 0.72)"
         />
       </ReactFlow>

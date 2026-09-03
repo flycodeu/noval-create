@@ -22,7 +22,6 @@ const CATEGORY_OPTIONS: Array<{ value: QualityCategoryFilter; label: string }> =
   { value: 'stability', label: '召回与状态' },
 ]
 
-/** 顶部筛选条：章节范围 + 严重度 + 指标类别，状态由 index 持有并作用于各区块。 */
 export default function QualityFilterBar({
   filters,
   onChange,

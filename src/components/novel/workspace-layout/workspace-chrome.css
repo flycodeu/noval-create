@@ -85,8 +85,8 @@
 
 .workspace-contract-actions {
   max-width: 100%;
-  flex-wrap: nowrap;
-  overflow: hidden;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .workspace-contract-action.ant-btn,

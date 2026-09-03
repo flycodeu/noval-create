@@ -13,7 +13,6 @@ export default function WritingChapterHeader({ model }: Props) {
       <section className="chapter-console-page__panel chapter-console-page__hero-card">
         <SectionHeader
           title={model.title}
-          description={model.description}
           extra={model.selected ? <Tag color={model.statusColor}>{model.statusLabel}</Tag> : null}
         />
         <div className="chapter-console-page__hero-meta">
@@ -29,7 +28,6 @@ export default function WritingChapterHeader({ model }: Props) {
       <section className="chapter-console-page__panel chapter-console-page__writability-card">
         <SectionHeader
           title={model.writabilityTitle}
-          description={model.writability.summary}
           extra={model.writability.ready ? <Tag color="success">可直接开写</Tag> : <Tag color="gold">建议先补缺口</Tag>}
         />
         <div className="chapter-console-page__writability-checks">

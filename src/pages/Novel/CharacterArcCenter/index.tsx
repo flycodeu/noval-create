@@ -18,6 +18,7 @@ import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props { novelId: number }
@@ -105,6 +106,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [keywordInput, setKeywordInput] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [saving, setSaving] = useState(false)
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)

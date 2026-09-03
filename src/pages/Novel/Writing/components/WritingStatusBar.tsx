@@ -37,6 +37,7 @@ export default function WritingStatusBar({
   onOpenNavigator,
   onNavigate,
   onToggleInspector,
+  primaryStatusText,
   saveState,
   versionCount,
   wordCount,
@@ -68,6 +69,7 @@ export default function WritingStatusBar({
         </div>
       </div>
       <div className="chapter-console-page__editor-state">
+        {primaryStatusText ? <span className="chapter-console-page__primary-status">{primaryStatusText}</span> : null}
         <span className={`chapter-console-page__save-state ${saveMeta.tone}`} data-writing-save-state={saveState}>
           {saveMeta.label}
         </span>

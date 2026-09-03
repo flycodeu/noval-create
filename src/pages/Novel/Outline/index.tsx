@@ -16,7 +16,7 @@ import { usePlanningDraft } from '../shared/planning-draft'
 import { generateOutlineArcDraft } from '../shared/planning-ai-service'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { useChapterOutlineBatch } from './useChapterOutlineBatch'
 import CreativeStageScope from '../../../components/novel/CreativeStageScope'
 import './index.css'
@@ -184,6 +184,7 @@ export default function Outline({ novelId }: Props) {
   const arcSaveActionRef = React.useRef(false)
   const arcDirtyRef = React.useRef(false)
   const [arcHasUnsavedChanges, setArcHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(arcHasUnsavedChanges)
 
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -343,6 +344,10 @@ export default function Outline({ novelId }: Props) {
       onOk: async () => {
         try {
           await window.electron.outline.deleteArc(arc.id)
+          if (expandedArcId === arc.id) {
+            setExpandedArcId(null)
+            window.sessionStorage.removeItem(`novelforge-outline-arc:${novelId}`)
+          }
           await loadData()
           notifyWorkspaceMutation()
           message.success(getUserFacingMessage('outline.arcDeleted'))
@@ -370,7 +375,12 @@ export default function Outline({ novelId }: Props) {
     })
   }, [loadData, novelId, notifyWorkspaceMutation, setExpandedArcId])
 
-  const getArcChapters = useCallback((arc: StoryArc) => chapters.filter((chapter) => chapter.arcId === arc.id || (chapter.chapterNum >= (arc.chapterStart || 0) && chapter.chapterNum <= (arc.chapterEnd || 9999))).sort((a, b) => a.chapterNum - b.chapterNum), [chapters])
+  const getArcChapters = useCallback((arc: StoryArc) => chapters.filter((chapter) => {
+    if (chapter.arcId === arc.id) return true
+    if (chapter.arcId) return false
+    if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number') return false
+    return chapter.chapterNum >= arc.chapterStart && chapter.chapterNum <= arc.chapterEnd
+  }).sort((a, b) => a.chapterNum - b.chapterNum), [chapters])
 
   const handleChapterSelection = useCallback((event: React.MouseEvent, chapter: Chapter, orderedChapters: Chapter[]) => {
     const withMeta = event.metaKey || event.ctrlKey
@@ -520,7 +530,6 @@ export default function Outline({ novelId }: Props) {
       growthLedger: typeof draft.growthLedger === 'string' ? draft.growthLedger : currentValues.growthLedger,
       costLedger: typeof draft.costLedger === 'string' ? draft.costLedger : currentValues.costLedger,
     })
-    setEditingArc(null)
     setArcHasUnsavedChanges(true)
     arcDirtyRef.current = true
     setArcModalOpen(true)

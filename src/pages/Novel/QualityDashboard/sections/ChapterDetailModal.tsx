@@ -1,4 +1,4 @@
-import { Modal, Progress, Tag } from 'antd'
+import { Button, Modal, Progress, Tag } from 'antd'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../../types'
 import {
   LANGUAGE_DRIFT_LABELS,
@@ -26,20 +26,29 @@ import {
   type QualityChapterEntry,
 } from '../quality-dashboard-presentation'
 
-/** 章节评分详情弹窗：聚合章节门、AI 味、审校复现、召回与状态等分区详情。 */
 export default function ChapterDetailModal({
   chapter,
   onClose,
+  onLocateChapter,
 }: {
   chapter: QualityChapterEntry | null
   onClose: () => void
+  onLocateChapter?: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   return (
       <Modal
         title={chapter ? `第${chapter.chapterNum}章 · ${chapter.title}` : '章节评分'}
         open={!!chapter}
         onCancel={onClose}
-        footer={null}
+        destroyOnHidden
+        footer={chapter && onLocateChapter ? (
+          <Button
+            type="primary"
+            onClick={() => onLocateChapter(chapter.chapterNum, chapter.volumeId, chapter.chapterId)}
+          >
+            去正文
+          </Button>
+        ) : null}
         width={600}
       >
         {chapter ? (

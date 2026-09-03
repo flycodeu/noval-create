@@ -1,9 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { message } from 'antd'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { Dispatch, SetStateAction } from 'react'
 import type { AiExecutionMode } from '../../../shared/ai-execution'
-import type { Chapter, ChapterOptimizeResult, ChapterPublishCheck } from '../../../types'
+import type { Chapter, ChapterOptimizeResult, ChapterPublishCheck, ChapterVersion } from '../../../types'
 import type { WritingActionError } from './useChapterGeneration'
 import type { AiCheckPayload } from './parsers'
 import type { WritingRouteKey } from './components/InsightPanel'
@@ -23,6 +23,7 @@ interface UseChapterReviewOptions {
   optimizeRequirements: string
   optimizationResult: ChapterOptimizeResult | null
   selectedVersionId: number | null
+  selectedVersion?: ChapterVersion | null
   setCurrentChapter: Dispatch<SetStateAction<Chapter | null>>
   setAiResult: Dispatch<SetStateAction<AiCheckPayload | null>>
   setPublishCheck: Dispatch<SetStateAction<ChapterPublishCheck | null>>
@@ -39,6 +40,7 @@ interface UseChapterReviewOptions {
   applyChapterContent(text: string, versionSource?: 'manual-save' | 'ai-rewrite'): void
   commitContentState(text: string): string
   saveNow(chapterId: number, text: string, versionSource?: 'manual-save' | 'ai-rewrite'): Promise<void>
+  currentChapterIdRef: { current: number | null }
   loadChapters(preferredChapterId?: number): Promise<void>
   refreshMeta(): Promise<void>
   refreshContextStatus(): Promise<void>
@@ -53,6 +55,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     applyChapterContent,
     commitContentState,
     currentChapter,
+    currentChapterIdRef,
     editorText,
     effectiveAiExecutionMode,
     hasMultiSegments,
@@ -76,12 +79,16 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     setRewriteRequirements,
     setRewritingSelection,
   } = options
+  const optimizationChapterIdRef = useRef<number | null>(null)
 
   const runAiCheck = useCallback(async () => {
     if (!currentChapter) return
+    const chapterId = currentChapter.id
     setActionError(null)
     try {
-      setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload)
+      const result = await window.electron.chapter.aiCheck(chapterId) as AiCheckPayload
+      if (currentChapterIdRef.current !== chapterId) return
+      setAiResult(result)
       navigateToWritingRoute('review')
       await refreshQualityDashboard()
     } catch (error: unknown) {
@@ -93,7 +100,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
         retry: () => void runAiCheck(),
       })
     }
-  }, [currentChapter, navigateToWritingRoute, refreshQualityDashboard, setActionError, setAiResult])
+  }, [currentChapter, currentChapterIdRef, navigateToWritingRoute, refreshQualityDashboard, setActionError, setAiResult])
 
   const openRewriteModal = useCallback(() => {
     if (!currentChapter || !selectedSnippet?.text) {
@@ -106,6 +113,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
 
   const rewriteSelectedText = useCallback(async () => {
     if (!currentChapter || !selectedSnippet?.text) return
+    const chapterId = currentChapter.id
     const latestText = editorText()
     const before = latestText.slice(0, selectedSnippet.start)
     const after = latestText.slice(selectedSnippet.end)
@@ -119,6 +127,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
         novelId,
         executionMode: effectiveAiExecutionMode,
       }) as string)
+      if (currentChapterIdRef.current !== chapterId) return
       if (!rewritten.trim()) {
         message.warning(getUserFacingMessage('writing.rewriteNoResult'))
         return
@@ -137,6 +146,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
   }, [
     applyChapterContent,
     currentChapter,
+    currentChapterIdRef,
     editorText,
     effectiveAiExecutionMode,
     modelConfigId,
@@ -150,15 +160,18 @@ export function useChapterReview(options: UseChapterReviewOptions) {
 
   const optimizeChapter = useCallback(async () => {
     if (!currentChapter || hasMultiSegments) return
+    const chapterId = currentChapter.id
     const latestText = editorText()
     setOptimizingChapter(true)
     setActionError(null)
     try {
-      await saveNow(currentChapter.id, latestText)
-      const result = await window.electron.chapter.optimizeContent(currentChapter.id, {
+      await saveNow(chapterId, latestText)
+      const result = await window.electron.chapter.optimizeContent(chapterId, {
         executionMode: effectiveAiExecutionMode,
         extraRequirements: optimizeRequirements.trim(),
       })
+      if (currentChapterIdRef.current !== chapterId) return
+      optimizationChapterIdRef.current = chapterId
       setOptimizationResult(result)
       setOptimizeModalOpen(true)
       navigateToWritingRoute('review')
@@ -173,6 +186,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     }
   }, [
     currentChapter,
+    currentChapterIdRef,
     editorText,
     effectiveAiExecutionMode,
     hasMultiSegments,
@@ -187,16 +201,28 @@ export function useChapterReview(options: UseChapterReviewOptions) {
 
   const applyOptimizedChapter = useCallback(async () => {
     if (!currentChapter || !optimizationResult?.optimizedContent.trim()) return
+    if (optimizationChapterIdRef.current !== currentChapter.id) {
+      message.warning('优化结果已不属于当前章节，已取消套用。')
+      setOptimizeModalOpen(false)
+      setOptimizationResult(null)
+      return
+    }
     if (!canApplyChapterOptimization(optimizationResult)) {
       message.warning(getUserFacingMessage('writing.optimizeBlockedByQuality'))
       return
     }
     setApplyingOptimizedChapter(true)
+    const chapterId = currentChapter.id
     try {
       const normalized = normalizeEditorText(optimizationResult.optimizedContent)
-      await saveNow(currentChapter.id, normalized, 'ai-rewrite')
+      await saveNow(chapterId, normalized, 'ai-rewrite')
+      if (currentChapterIdRef.current !== chapterId) {
+        setOptimizeModalOpen(false)
+        setOptimizationResult(null)
+        return
+      }
       commitContentState(normalized)
-      await Promise.all([refreshQualityDashboard(), refreshVersionHistory(currentChapter.id)])
+      await Promise.all([refreshQualityDashboard(), refreshVersionHistory(chapterId)])
       setOptimizeModalOpen(false)
       setOptimizationResult(null)
       message.success(getUserFacingMessage('writing.optimizeApplied'))
@@ -208,6 +234,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
   }, [
     commitContentState,
     currentChapter,
+    currentChapterIdRef,
     optimizationResult,
     refreshQualityDashboard,
     refreshVersionHistory,

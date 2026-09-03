@@ -39,6 +39,14 @@ export function useWritingRouteState(novelId: number) {
     else next.delete('stageId')
     setSearchParams(next)
   }, [searchParams, setSearchParams])
+  const setRouteChapterId = useCallback((chapterId: number | null) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (chapterId) next.set('chapterId', String(chapterId))
+      else next.delete('chapterId')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
-  return { activeWritingRoute, creativeStageId, navigate, navigateToWritingRoute, routeChapterId, setCreativeStageId }
+  return { activeWritingRoute, creativeStageId, navigate, navigateToWritingRoute, routeChapterId, setCreativeStageId, setRouteChapterId }
 }

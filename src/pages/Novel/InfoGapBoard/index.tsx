@@ -29,7 +29,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import './index.css'
 
@@ -241,6 +241,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
   const [statusFilter, setStatusFilter] = useState<'all' | StoryFact['status']>('all')
   const [selectedFactId, setSelectedFactId] = useState<number | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const refreshRequestRef = React.useRef(0)
   const draftDirtyRef = React.useRef(false)
 
@@ -296,7 +297,8 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     if (selectedFact.status === 'explained') return { label: '已完成', color: 'success' as const }
     if (selectedFact.targetRevealChapterId) {
       const targetChapter = chapters.find((chapter) => chapter.id === selectedFact.targetRevealChapterId)
-      if (targetChapter && targetChapter.chapterNum <= currentChapterNum) return { label: '揭示计划已到期', color: 'error' as const }
+      if (targetChapter && targetChapter.chapterNum < currentChapterNum) return { label: '揭示计划已到期', color: 'error' as const }
+      if (targetChapter && targetChapter.chapterNum <= currentChapterNum + 2) return { label: '即将到期', color: 'warning' as const }
     }
     if (selectedFact.status === 'pending_payoff') return { label: '待回收', color: 'warning' as const }
     return { label: '按计划推进', color: 'processing' as const }

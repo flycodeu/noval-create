@@ -3,9 +3,7 @@ import { Collapse } from 'antd'
 import { ThunderboltOutlined } from '@ant-design/icons'
 
 interface DramaticEnginePanelProps {
-  /** 戏剧引擎文本：欲望/恐惧/矛盾如何驱动剧情的一段文字。 */
   text?: string | null
-  /** 折叠面板默认是否展开，默认展开。 */
   defaultOpen?: boolean
 }
 

@@ -1,5 +1,6 @@
 import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
@@ -89,6 +90,7 @@ export function useTimelineWorkspace(
   const chaptersRequestRef = useRef({ filter: 0, form: 0 })
   const segmentsRequestRef = useRef(0)
   const saveActionRef = useRef(false)
+  const dirtyRef = useRef(false)
 
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<TimelineFormValues>()
@@ -111,10 +113,11 @@ export function useTimelineWorkspace(
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [lastSelectedListId, setLastSelectedListId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   const [statusFilter, setStatusFilter] = useState<TimelineStatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [keyword, setKeyword] = useState('')
+  const [keywordInput, setKeyword, keyword] = useDebouncedSearch('')
   const [volumeFilter, setVolumeFilter] = useState<NumericFilter>('all')
   const [partFilter, setPartFilter] = useState<NumericFilter>('all')
   const [chapterFilter, setChapterFilter] = useState<NumericFilter>('all')
@@ -392,6 +395,7 @@ export function useTimelineWorkspace(
 
   const loadEventDetail = useCallback(async (id: number) => {
     const requestId = ++detailRequestRef.current
+    const keepDraft = dirtyRef.current && selectedIdRef.current === id
     selectedIdRef.current = id
     const isCurrent = () => detailRequestRef.current === requestId
     const row = await window.electron.timeline.get(id)
@@ -403,7 +407,9 @@ export function useTimelineWorkspace(
       selectedIdRef.current = row.id
       creatingRef.current = false
       setCreating(false)
-      form.setFieldsValue(toTimelineFormValues(row, defaultMode, defaultPrecision, defaultType))
+      if (!keepDraft) {
+        form.setFieldsValue(toTimelineFormValues(row, defaultMode, defaultPrecision, defaultType))
+      }
 
       if (row.volumeId) await loadPartsFor(row.volumeId, 'form', isCurrent)
       if (row.partId) await loadChaptersFor(row.partId, 'form', isCurrent)
@@ -606,6 +612,10 @@ export function useTimelineWorkspace(
   ])
 
   useEffect(() => {
+    setPage(1)
+  }, [keyword])
+
+  useEffect(() => {
     if (routeKeyRef.current === null) return
     if (suppressRefreshRef.current) {
       suppressRefreshRef.current = false
@@ -692,6 +702,7 @@ export function useTimelineWorkspace(
         const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex]
         const rangeIds = pageData.items.slice(from, to + 1).map((item) => item.id)
         setSelectedIds((current) => [...new Set([...current, ...rangeIds])])
+        setLastSelectedListId(event.id)
         return
       }
     }
@@ -704,39 +715,74 @@ export function useTimelineWorkspace(
       return
     }
 
+    if (dirtyRef.current && selectedIdRef.current && selectedIdRef.current !== event.id) {
+      Modal.confirm({
+        title: '当前事件还有未保存修改',
+        content: '切换后未保存内容会丢失。',
+        okText: '放弃并切换',
+        okButtonProps: { danger: true },
+        cancelText: '留下继续编辑',
+        onOk: async () => {
+          dirtyRef.current = false
+          setHasUnsavedChanges(false)
+          setSelectedIds([event.id])
+          setLastSelectedListId(event.id)
+          await loadEventDetail(event.id)
+        },
+      })
+      return
+    }
     setSelectedIds([event.id])
     setLastSelectedListId(event.id)
     await loadEventDetail(event.id)
   }, [lastSelectedListId, loadEventDetail, pageData.items])
 
   const handleNew = useCallback(() => {
-    detailRequestRef.current += 1
-    selectedIdRef.current = null
-    creatingRef.current = true
-    setCreating(true)
-    setSelectedId(null)
-    setSelectedEvent(null)
-    clearSelection()
-    form.setFieldsValue(buildDefaultTimelineValues(
-      defaultMode,
-      defaultPrecision,
-      defaultType,
-      {
-        volumeId: volumeFilter === 'all' ? undefined : volumeFilter,
-        partId: partFilter === 'all' ? undefined : partFilter,
-        chapterStartId: chapterFilter === 'all' ? undefined : chapterFilter,
-        chapterEndId: chapterFilter === 'all' ? undefined : chapterFilter,
-        segmentId: segmentFilter === 'all' ? undefined : segmentFilter,
-      },
-      pageData.total + 1,
-    ))
-    void hydrateOptions(null)
+    const startCreate = () => {
+      dirtyRef.current = false
+      setHasUnsavedChanges(false)
+      detailRequestRef.current += 1
+      selectedIdRef.current = null
+      creatingRef.current = true
+      setCreating(true)
+      setSelectedId(null)
+      setSelectedEvent(null)
+      clearSelection()
+      form.setFieldsValue(buildDefaultTimelineValues(
+        defaultMode,
+        defaultPrecision,
+        defaultType,
+        {
+          volumeId: volumeFilter === 'all' ? undefined : volumeFilter,
+          partId: partFilter === 'all' ? undefined : partFilter,
+          chapterStartId: chapterFilter === 'all' ? undefined : chapterFilter,
+          chapterEndId: chapterFilter === 'all' ? undefined : chapterFilter,
+          segmentId: segmentFilter === 'all' ? undefined : segmentFilter,
+        },
+        pageData.total + 1,
+      ))
+      void hydrateOptions(null)
+    }
+    if (dirtyRef.current) {
+      Modal.confirm({
+        title: '当前事件还有未保存修改',
+        content: '新建前未保存内容会丢失。',
+        okText: '放弃并新建',
+        okButtonProps: { danger: true },
+        cancelText: '留下继续编辑',
+        onOk: () => startCreate(),
+      })
+      return
+    }
+    startCreate()
   }, [chapterFilter, clearSelection, defaultMode, defaultPrecision, defaultType, form, hydrateOptions, pageData.total, partFilter, segmentFilter, volumeFilter])
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   useEffect(() => { creatingRef.current = creating }, [creating])
 
   const handleFormValuesChange = useCallback((changed: Partial<TimelineFormValues>, values: TimelineFormValues) => {
+    dirtyRef.current = true
+    setHasUnsavedChanges(true)
     if ('volumeId' in changed) {
       form.setFieldsValue({
         partId: undefined,
@@ -812,6 +858,8 @@ export function useTimelineWorkspace(
       }
 
       setCreating(false)
+      dirtyRef.current = false
+      setHasUnsavedChanges(false)
       message.success(getUserFacingMessage('timeline.saved'))
       return true
     } catch (error) {
@@ -953,6 +1001,7 @@ export function useTimelineWorkspace(
     generateOpen,
     generating,
     regenerating,
+    hasUnsavedChanges,
     getStructureTagsForEvent,
     handleClear,
     handleDelete,
@@ -964,6 +1013,7 @@ export function useTimelineWorkspace(
     handleSelect,
     itemOptions,
     keyword,
+    keywordInput,
     laneItems,
     loading,
     locationOptions,

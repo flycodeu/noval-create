@@ -67,7 +67,6 @@ interface VolumeGroup {
   sort: number
 }
 
-/** 写作页左栏：支持千章级快速过滤、卷折叠/展开、分页、超长标题截断与 Tooltip 完整预览。 */
 export default function ChapterNavigator({
   chapters,
   volumes,
@@ -145,7 +144,6 @@ export default function ChapterNavigator({
     [chapterVolumeGroups, currentVolumeGroupKey],
   )
 
-  // 滚动到激活章节
   useEffect(() => {
     if (activeChapterRef.current) {
       activeChapterRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -153,6 +151,10 @@ export default function ChapterNavigator({
   }, [currentChapterId])
 
   const normalizedKeyword = searchKeyword.trim().toLowerCase()
+
+  useEffect(() => {
+    setVolumePages({})
+  }, [normalizedKeyword, statusFilter])
 
   const filteredGroups = useMemo(() => {
     return chapterVolumeGroups
@@ -162,11 +164,17 @@ export default function ChapterNavigator({
           if (!normalizedKeyword) return true
           const numStr = String(chapter.chapterNum)
           const title = (chapter.title || '').toLowerCase()
+          const exactHash = `#${numStr}`
+          const exactOrdinal = `第${numStr}章`
+          if (normalizedKeyword.startsWith('#')) return exactHash === normalizedKeyword
           return (
-            numStr.includes(normalizedKeyword)
-            || `第${numStr}章`.includes(normalizedKeyword)
-            || `#${numStr}`.includes(normalizedKeyword)
+            numStr === normalizedKeyword
+            || exactOrdinal === normalizedKeyword
             || title.includes(normalizedKeyword)
+            || (!/^\d+$/.test(normalizedKeyword) && (
+              numStr.includes(normalizedKeyword)
+              || exactOrdinal.includes(normalizedKeyword)
+            ))
           )
         })
         return {
@@ -207,8 +215,8 @@ export default function ChapterNavigator({
 
   const isAllOpen = useMemo(() => {
     if (chapterVolumeGroups.length === 0) return true
-    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key] ?? g.key === currentVolumeGroupKey)
-  }, [chapterVolumeGroups, currentVolumeGroupKey, openVolumeKeys])
+    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key] === true)
+  }, [chapterVolumeGroups, openVolumeKeys])
 
   return (
     <section className="chapter-console-page__panel chapter-navigator-panel">
@@ -235,7 +243,6 @@ export default function ChapterNavigator({
         )}
       />
 
-      {/* 搜索与过滤工具栏 */}
       <div className="chapter-navigator__search-row">
         <Input
           size="small"
@@ -265,7 +272,6 @@ export default function ChapterNavigator({
         )}
       </div>
 
-      {/* 章节列表区 */}
       <div className="chapter-console-page__chapter-list chapter-navigator__list">
         {filteredGroups.length > 0 ? (
           filteredGroups.map((group) => {
@@ -275,9 +281,10 @@ export default function ChapterNavigator({
             const currentIndex = group.key === currentVolumeGroupKey && currentChapter
               ? group.chapters.findIndex((chapter) => chapter.id === currentChapter.id)
               : -1
-            const currentPage = volumePages[group.key]
-              || (currentIndex >= 0 ? Math.floor(currentIndex / CHAPTERS_PER_PAGE) + 1 : 1)
             const isPaginated = !normalizedKeyword && group.chapters.length > CHAPTERS_PER_PAGE
+            const maxPage = Math.max(1, Math.ceil(group.chapters.length / CHAPTERS_PER_PAGE))
+            const chapterPage = currentIndex >= 0 ? Math.floor(currentIndex / CHAPTERS_PER_PAGE) + 1 : 1
+            const currentPage = Math.min(maxPage, volumePages[group.key] || chapterPage)
             const paginatedChapters = isPaginated
               ? group.chapters.slice((currentPage - 1) * CHAPTERS_PER_PAGE, currentPage * CHAPTERS_PER_PAGE)
               : group.chapters

@@ -14,7 +14,6 @@ type RunGenerationInput = {
 }
 
 interface Props {
-  /** 调用时获取最新内容 */
   getContent: () => string
   contentType: string
   novelBackground?: string
@@ -24,7 +23,6 @@ interface Props {
   disabled?: boolean
   /** 重新生成后的回调，将新内容（已去除 Markdown）应用到字段 */
   onRegenerate?: (newContent: string) => void
-  /** 抽卡次数（传给重生成按钮） */
   drawCount?: number
   /**
    * 自定义重生成消息构建函数。
@@ -38,7 +36,6 @@ interface Props {
   ) => Message[]
   /** 使用自定义消息时是否输出 JSON（默认 false，即自动 strip markdown） */
   customIsJson?: boolean
-  /** 自定义生成执行器，优先于默认 ai.runPrompt */
   customRunGeneration?: (input: RunGenerationInput) => Promise<string[]>
 }
 
@@ -118,7 +115,6 @@ export default function AIScorePanel({
     }
   }
 
-  /** 构建「按评分优化」的提示词 */
   const buildRegenMessages = (): Message[] => {
     if (!result) return []
     const content = getContent()

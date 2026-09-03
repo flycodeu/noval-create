@@ -1,8 +1,10 @@
 import React from 'react'
-import { Button, Empty, Progress, Tag } from 'antd'
+import { Button, Empty, Progress, Tag, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage } from '@/utils/user-facing-message'
 import { useRunningTasks } from '../../stores/task.selectors'
 import { formatStageLabel } from '../../shared/task-labels'
+import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import type { TaskStream } from '../../stores/task.store'
 
 function taskTitle(stream: TaskStream): string {
@@ -18,7 +20,7 @@ function TaskRow({ stream, onNavigate }: { stream: TaskStream; onNavigate: () =>
 
   const handleOpen = () => {
     if (stream.meta.novelId && stream.meta.chapterId) {
-      navigate(`/novels/${stream.meta.novelId}/writing?chapterId=${stream.meta.chapterId}`)
+      navigate(`${buildWorkspaceRoute(stream.meta.novelId, 'writing/editor')}?chapterId=${stream.meta.chapterId}`)
     } else {
       navigate('/tasks')
     }
@@ -29,7 +31,7 @@ function TaskRow({ stream, onNavigate }: { stream: TaskStream; onNavigate: () =>
     try {
       await window.electron.task?.cancel?.(stream.taskId)
     } catch (error) {
-      console.warn('[TaskIndicator] cancel failed', error)
+      message.error(getErrorMessage(error, 'taskCenter.cancelFailed'))
     }
   }
 

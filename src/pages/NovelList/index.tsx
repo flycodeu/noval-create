@@ -65,18 +65,18 @@ interface ExpandBackgroundResult {
 }
 
 const GENRE_OPTIONS = [
-  { value: 1, label: '现代都市', description: '都市生活、职场、生存压力与现代关系。' },
-  { value: 2, label: '古代言情', description: '古典情感、宫廷关系与时代规训。' },
-  { value: 3, label: '玄幻修真', description: '修炼体系、宗门势力与超凡成长。' },
-  { value: 4, label: '悬疑推理', description: '谜案、线索追查与心理博弈。' },
-  { value: 5, label: '科幻未来', description: '未来科技、社会变迁与宏观设定。' },
-  { value: 6, label: '架空历史', description: '虚构历史路线下的家国与权力演化。' },
-  { value: 7, label: '赛博朋克', description: '高科技、低生活与秩序失衡。' },
-  { value: 8, label: '武侠', description: '江湖秩序、门派冲突与侠义选择。' },
-  { value: 9, label: '历史正剧', description: '历史叙事、人物命运与时代结构。' },
-  { value: 10, label: '末世求生', description: '灾变后的生存、重建与资源竞争。' },
-  { value: 11, label: '丧尸末日', description: '感染蔓延、逃亡协作与社会崩塌。' },
-  { value: 12, label: '盗墓探秘', description: '古墓机关、线索破解与冒险探索。' },
+  { value: 1, label: '现代都市' },
+  { value: 2, label: '古代言情' },
+  { value: 3, label: '玄幻修真' },
+  { value: 4, label: '悬疑推理' },
+  { value: 5, label: '科幻未来' },
+  { value: 6, label: '架空历史' },
+  { value: 7, label: '赛博朋克' },
+  { value: 8, label: '武侠' },
+  { value: 9, label: '历史正剧' },
+  { value: 10, label: '末世求生' },
+  { value: 11, label: '丧尸末日' },
+  { value: 12, label: '盗墓探秘' },
 ] as const
 
 const TARGET_WORDS_OPTIONS = [
@@ -123,6 +123,7 @@ export default function NovelList() {
   const novels = useNovelStore((state) => state.novels)
   const setNovels = useNovelStore((state) => state.setNovels)
   const loadVersionRef = React.useRef(0)
+  const wizardGenerationRef = React.useRef(0)
   const [loading, setLoading] = useState(true)
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<number, WorkspaceSnapshot>>({})
   const [search, setSearch] = useState('')
@@ -142,6 +143,7 @@ export default function NovelList() {
   const [launchIdeaNote, setLaunchIdeaNote] = useState('')
 
   const resetWizard = useCallback(() => {
+    wizardGenerationRef.current += 1
     setWizardOpen(false)
     setWizardStep(0)
     setWizardLoading(false)
@@ -170,6 +172,8 @@ export default function NovelList() {
           novel.id,
           getWorkspaceSnapshot(novel, {
             ...EMPTY_WORKFLOW_STATS,
+          }, {
+            viewMode: getWorkspaceViewModeForNovel(novel),
           }),
         ] as const
       }
@@ -286,6 +290,7 @@ export default function NovelList() {
   }
 
   const handleFastLaunchCreate = useCallback(async () => {
+    if (wizardLoading) return
     const values = await wizardForm.validateFields([
       'genreId',
       'protagonistStart',
@@ -319,6 +324,7 @@ export default function NovelList() {
       writingContractTags,
     })
 
+    const requestId = ++wizardGenerationRef.current
     setWizardLoading(true)
     let createdNovelId: number | null = null
     let bootstrapCompleted = false
@@ -586,6 +592,7 @@ export default function NovelList() {
 
       bootstrapCompleted = true
       await loadNovels()
+      if (requestId !== wizardGenerationRef.current) return
       resetWizard()
       navigate(buildWorkspaceRoute(createdNovelId, 'overview'))
       message.success(getUserFacingMessage('novel.fastLaunchCreated'))
@@ -603,7 +610,7 @@ export default function NovelList() {
     } finally {
       setWizardLoading(false)
     }
-  }, [loadNovels, navigate, resetWizard, wizardForm])
+  }, [loadNovels, navigate, resetWizard, wizardForm, wizardLoading])
 
   const handleExtractLaunchIdea = useCallback(async () => {
     const values = await wizardForm.validateFields(['genreId', 'launchIdea']).catch(() => null)
@@ -643,6 +650,7 @@ export default function NovelList() {
   }, [wizardForm])
 
   const handleWizardNext = async () => {
+    if (wizardLoading) return
     if (selectedLaunchMode === 'fast_launch') {
       if (wizardStep === 0) {
         const values = await wizardForm.validateFields(['genreId', 'writingContractTags']).catch(() => null)
@@ -665,6 +673,7 @@ export default function NovelList() {
     if (wizardStep === 1) {
       const values = await wizardForm.validateFields(['userBackground']).catch(() => null)
       if (!values) return
+      const requestId = ++wizardGenerationRef.current
       setWizardLoading(true)
       try {
         const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
@@ -675,6 +684,7 @@ export default function NovelList() {
           modelConfigId: allValues.modelConfigId,
         }) as ExpandBackgroundResult
 
+        if (requestId !== wizardGenerationRef.current) return
         setExpandedData(data)
         wizardForm.setFieldsValue({
           expandedBackground: data.expanded_background,
@@ -705,7 +715,7 @@ export default function NovelList() {
       message.error(writingContractError)
       return
     }
-    if (wizardLoading) return
+    const requestId = ++wizardGenerationRef.current
     setWizardLoading(true)
     try {
       const novelId = await window.electron.novel.create({
@@ -726,6 +736,7 @@ export default function NovelList() {
         })
       }
       await loadNovels()
+      if (requestId !== wizardGenerationRef.current) return
       resetWizard()
       navigate(buildWorkspaceRoute(novelId, 'overview'))
     } catch (error) {
@@ -820,13 +831,13 @@ export default function NovelList() {
           ) : filteredNovels.length === 0 ? (
             <Empty
               className="novel-list-page__empty"
-              description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
+              description={novels.length === 0 ? '还没有小说，点击“新建小说”开始创作。' : '没有找到匹配的小说。'}
             />
           ) : (
             <div className="novel-list-page__grid" data-p3-04-project-grid>
               {filteredNovels.map((novel) => {
                 const snapshot = workspaceSnapshots[novel.id] || getWorkspaceSnapshot(novel, EMPTY_WORKFLOW_STATS, {
-                  viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
+                  viewMode: getWorkspaceViewModeForNovel(novel),
                 })
                 return (
                   <ProjectCard
@@ -893,7 +904,6 @@ export default function NovelList() {
                             <strong className="novel-list-page__launch-card-title">{option.label}</strong>
                             <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
                         </div>
-                        <span className="novel-list-page__launch-card-copy">{option.description}</span>
                       </button>
                     )
                   })}
@@ -934,7 +944,6 @@ export default function NovelList() {
                         >
                           {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
                           <div className="novel-list-page__genre-title">{genre.label}</div>
-                          <div className="novel-list-page__genre-copy">{genre.description}</div>
                         </button>
                       )
                     })}

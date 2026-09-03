@@ -27,6 +27,7 @@ import {
   buildWorkspaceRoute,
   getWorkspaceSnapshot,
 } from '../../../shared/novel-workspace'
+import { getWorkspaceViewModeForNovel } from '../../../shared/operating-mode'
 import type { ProjectBlocker } from '../../../shared/workspace-types'
 import {
   WorkspacePage,
@@ -143,7 +144,7 @@ export default function StudioPage({ novelId }: Props) {
 
   const workspaceSnapshot = useMemo(
     () => getWorkspaceSnapshot(currentNovel, stats, {
-      viewMode: currentNovel?.launchMode === 'fast_launch' ? 'quick' : 'professional',
+      viewMode: getWorkspaceViewModeForNovel(currentNovel),
       qualitySummary: qualitySummary || undefined,
     }),
     [currentNovel, qualitySummary, stats],

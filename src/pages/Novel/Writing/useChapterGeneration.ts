@@ -48,21 +48,32 @@ interface UseChapterGenerationOptions {
   generationPreflight: ChapterGenerationPreflight
   setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
   setActionError: Dispatch<SetStateAction<WritingActionError | null>>
-  refreshBackgroundChapter(chapterId: number): Promise<void>
+  refreshBackgroundChapter(chapterId: number, options?: { replaceEditor?: boolean }): Promise<void>
   refreshMeta(): Promise<void>
   refreshQualityDashboard(): Promise<void>
   showPreflightWarning(messages: string[]): void
+  flushEditor?(chapterId: number, text: string): Promise<boolean>
+}
+
+function claimGenerationCompletion(completedTaskIds: MutableRefObject<Set<number>>, taskId?: number | null, chapterId?: number) {
+  const key = typeof taskId === 'number' && taskId > 0 ? taskId : typeof chapterId === 'number' ? -chapterId : 0
+  if (!key) return true
+  if (completedTaskIds.current.has(key)) return false
+  completedTaskIds.current.add(key)
+  return true
 }
 
 function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
   generationBaselineRef: MutableRefObject<string>
   generateRetryRef: MutableRefObject<() => void>
+  completedTaskIdsRef: MutableRefObject<Set<number>>
 }) {
   const {
     chapterIdsRef,
     currentChapterIdRef,
     generationBaselineRef,
     generateRetryRef,
+    completedTaskIdsRef,
     refreshBackgroundChapter,
     refreshMeta,
     refreshQualityDashboard,
@@ -91,32 +102,32 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
 
       if (payload.status === 'success' && payload.stage === 'completed') {
         if (payload.streamTaskId) clearStream(payload.streamTaskId)
+        const firstCompletion = claimGenerationCompletion(completedTaskIdsRef, payload.taskId, payload.chapterId)
+        completeGeneration({
+          taskId: payload.taskId,
+          chapterId: payload.chapterId,
+          status: 'success',
+          stage: 'completed',
+          label: payload.label || '章节流水线已完成',
+          detail: getUserFacingMessage('writing.pipelineCompleted'),
+        })
+        if (!firstCompletion) return
         void (async () => {
-          await Promise.all([refreshBackgroundChapter(payload.chapterId), refreshMeta(), refreshQualityDashboard()])
+          await Promise.all([refreshBackgroundChapter(payload.chapterId, { replaceEditor: true }), refreshMeta(), refreshQualityDashboard()])
           const latestChapter = await window.electron.chapter.get(payload.chapterId)
           const hasVisibleContentChange = normalizeEditorText(latestChapter?.content || '') !== generationBaselineRef.current
-          completeGeneration({
-            taskId: payload.taskId,
-            chapterId: payload.chapterId,
-            status: 'success',
-            stage: 'completed',
-            label: payload.label || '章节流水线已完成',
-            detail: hasVisibleContentChange
-              ? getUserFacingMessage('writing.pipelineCompleted')
-              : '章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与回写草案。',
-          })
+          if (!hasVisibleContentChange) {
+            message.info('章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与回写草案。')
+            return
+          }
           message.success(getUserFacingMessage('writing.pipelineCompleted'))
         })().catch((error) => {
           console.error('Failed to refresh completed chapter generation', error)
-          completeGeneration({
-            taskId: payload.taskId,
-            chapterId: payload.chapterId,
-            status: 'success',
-            stage: 'completed',
-            label: payload.label || '章节流水线已完成',
-            detail: getUserFacingMessage('writing.pipelineCompleted'),
+          setActionError({
+            title: '章节流水线已完成，正文刷新失败',
+            message: getErrorMessage(error, 'writing.generateFailed'),
+            retry: () => generateRetryRef.current(),
           })
-          message.success(getUserFacingMessage('writing.pipelineCompleted'))
         })
         return
       }
@@ -158,6 +169,7 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
     currentChapterIdRef,
     generationBaselineRef,
     generateRetryRef,
+    completedTaskIdsRef,
     refreshBackgroundChapter,
     refreshMeta,
     refreshQualityDashboard,
@@ -171,11 +183,13 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
 function useGenerationStreamStatus(options: UseChapterGenerationOptions & {
   generationBaselineRef: MutableRefObject<string>
   generateRetryRef: MutableRefObject<() => void>
+  completedTaskIdsRef: MutableRefObject<Set<number>>
 }) {
   const {
     currentChapterIdRef,
     generationBaselineRef,
     generateRetryRef,
+    completedTaskIdsRef,
     refreshBackgroundChapter,
     refreshMeta,
     refreshQualityDashboard,
@@ -193,33 +207,27 @@ function useGenerationStreamStatus(options: UseChapterGenerationOptions & {
     const taskId = activeGeneration.taskId
 
     if (activeStreamStatus === 'completed') {
+      const firstCompletion = claimGenerationCompletion(completedTaskIdsRef, taskId, chapterId)
       clearStream(taskId)
+      completeGeneration({
+        taskId,
+        chapterId,
+        status: 'success',
+        stage: 'completed',
+        label: '章节流水线已完成',
+        detail: getUserFacingMessage('writing.pipelineCompleted'),
+      })
+      if (!firstCompletion) return
       void (async () => {
-        await Promise.all([refreshBackgroundChapter(chapterId), refreshMeta(), refreshQualityDashboard()])
-        const latestChapter = await window.electron.chapter.get(chapterId)
-        const hasVisibleContentChange = normalizeEditorText(latestChapter?.content || '') !== generationBaselineRef.current
-        completeGeneration({
-          taskId,
-          chapterId,
-          status: 'success',
-          stage: 'completed',
-          label: '章节流水线已完成',
-          detail: hasVisibleContentChange
-            ? getUserFacingMessage('writing.pipelineCompleted')
-            : '章节流水线已完成，但正文未产生新增内容。请优先检查场景计划与审校建议。',
-        })
+        await Promise.all([refreshBackgroundChapter(chapterId, { replaceEditor: true }), refreshMeta(), refreshQualityDashboard()])
         message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })().catch((error) => {
         console.error('Failed to refresh completed chapter stream', error)
-        completeGeneration({
-          taskId,
-          chapterId,
-          status: 'success',
-          stage: 'completed',
-          label: '章节流水线已完成',
-          detail: getUserFacingMessage('writing.pipelineCompleted'),
+        setActionError({
+          title: '章节流水线已完成，正文刷新失败',
+          message: getErrorMessage(error, 'writing.generateFailed'),
+          retry: () => generateRetryRef.current(),
         })
-        message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })
       return
     }
@@ -267,6 +275,7 @@ function useGenerationStreamStatus(options: UseChapterGenerationOptions & {
     activeStreamStatus,
     clearStream,
     completeGeneration,
+    completedTaskIdsRef,
     currentChapterIdRef,
     generateRetryRef,
     generationBaselineRef,
@@ -289,6 +298,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     preserveConstraintLabels,
     setActionError,
     showPreflightWarning,
+    flushEditor,
   } = options
   const clearStream = useTaskStore((state) => state.clearStream)
   const {
@@ -303,11 +313,12 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
   const generationStartingRef = useRef(false)
   const generateRetryRef = useRef<() => void>(() => {})
   const resumeRetryRef = useRef<() => void>(() => {})
+  const completedTaskIdsRef = useRef(new Set<number>())
   const resumablePartialContent = getResumablePartialContent(currentPipelineSnapshot)
   const hasResumablePartialContent = Boolean(currentChapter && resumablePartialContent)
 
-  useGenerationProgressEvents({ ...options, generationBaselineRef, generateRetryRef })
-  useGenerationStreamStatus({ ...options, generationBaselineRef, generateRetryRef })
+  useGenerationProgressEvents({ ...options, generationBaselineRef, generateRetryRef, completedTaskIdsRef })
+  useGenerationStreamStatus({ ...options, generationBaselineRef, generateRetryRef, completedTaskIdsRef })
 
   const generate = useCallback(async () => {
     if (!currentChapter) {
@@ -320,8 +331,25 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
       return
     }
     generationStartingRef.current = true
-    generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
     setActionError(null)
+    try {
+      if (flushEditor && (currentChapter.segmentCount || 0) <= 1) {
+        const latestText = normalizeEditorText(content)
+        const saved = await flushEditor(currentChapter.id, latestText)
+        if (!saved) {
+          generationStartingRef.current = false
+          return
+        }
+        generationBaselineRef.current = latestText
+      } else {
+        generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
+      }
+    } catch (error: unknown) {
+      generationStartingRef.current = false
+      const errorMessage = getErrorMessage(error, 'writing.saveFailed')
+      setActionError({ title: '生成前保存失败', message: errorMessage, retry: () => generateRetryRef.current() })
+      return
+    }
     startGeneration({ chapterId: currentChapter.id })
     updateGenerationStage({
       chapterId: currentChapter.id,
@@ -350,6 +378,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     creativeStageId,
     currentChapter,
     effectiveAiExecutionMode,
+    flushEditor,
     generationPreflight,
     preserveConstraintLabels,
     setActionError,
@@ -367,8 +396,23 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     if (!currentChapter || !latestPipelineTask?.id || !hasResumablePartialContent) return
     if (generationStartingRef.current || activeGeneration.status === 'running') return
     generationStartingRef.current = true
-    generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
     setActionError(null)
+    try {
+      if (flushEditor && (currentChapter.segmentCount || 0) <= 1) {
+        const latestText = normalizeEditorText(content)
+        const saved = await flushEditor(currentChapter.id, latestText)
+        if (!saved) {
+          generationStartingRef.current = false
+          return
+        }
+      }
+    } catch (error: unknown) {
+      generationStartingRef.current = false
+      const errorMessage = getErrorMessage(error, 'writing.saveFailed')
+      setActionError({ title: '续写前保存失败', message: errorMessage, retry: () => resumeRetryRef.current() })
+      return
+    }
+    generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
     startGeneration({ chapterId: currentChapter.id, taskId: latestPipelineTask.id })
     updateGenerationStage({
       chapterId: currentChapter.id,
@@ -391,7 +435,9 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
   }, [
     activeGeneration.status,
     completeGeneration,
+    content,
     currentChapter,
+    flushEditor,
     hasResumablePartialContent,
     latestPipelineTask?.id,
     resumablePartialContent,
@@ -407,6 +453,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
 
   const cancel = useCallback(async () => {
     if (!activeGeneration.taskId || !activeGeneration.chapterId) return
+    claimGenerationCompletion(completedTaskIdsRef, activeGeneration.taskId, activeGeneration.chapterId)
     await window.electron.task.cancel(activeGeneration.taskId)
     if (activeGeneration.streamTaskId) clearStream(activeGeneration.streamTaskId)
     completeGeneration({
