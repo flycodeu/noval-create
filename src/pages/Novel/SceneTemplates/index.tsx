@@ -106,6 +106,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   const refreshRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const routeFocusRef = useRef<number | null>(null)
+  const formSelectionRef = useRef<string | null>(null)
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId) || null,
@@ -167,11 +168,14 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   }, [mutationToken, refresh])
 
   useEffect(() => {
-    form.setFieldsValue(buildFormValues(selectedItem))
-    if (selectedItem) {
-      setPersistedFormSignature(serializeFormValues(buildFormValues(selectedItem)))
-    }
-  }, [form, selectedId, selectedItem?.id])
+    const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
+    const selectionChanged = formSelectionRef.current !== selectionKey
+    if (!selectionChanged && hasUnsavedChanges) return
+    const values = buildFormValues(selectedItem)
+    form.setFieldsValue(values)
+    setPersistedFormSignature(serializeFormValues(values))
+    formSelectionRef.current = selectionKey
+  }, [form, hasUnsavedChanges, novelId, selectedItem])
 
   const syncTemplateRoute = useCallback((id: number | null) => {
     const nextParams = new URLSearchParams(searchParams)

@@ -117,7 +117,7 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
           const latestChapter = await window.electron.chapter.get(payload.chapterId)
           const hasVisibleContentChange = normalizeEditorText(latestChapter?.content || '') !== generationBaselineRef.current
           if (!hasVisibleContentChange) {
-            message.info('章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与回写草案。')
+            message.info(getUserFacingMessage('writing.pipelineNoContent'))
             return
           }
           message.success(getUserFacingMessage('writing.pipelineCompleted'))

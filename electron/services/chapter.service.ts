@@ -64,11 +64,13 @@ import {
   ensureStoryStructure,
   normalizeChapterNumbers,
   resolveDefaultStructure,
+  resolveVolumePartForChapter,
   syncChapterToSegments,
 } from './story-structure.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { prepareChapterWritebackRun } from './chapter-writeback.service'
+import { syncStoryPartRanges } from './story-structure-range.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 import { assertCreativeStageContextReadyForGeneration } from './creative-stage.service'
 import { captureChapterNumberReferenceSnapshot } from './chapter-number-remap.service'
@@ -1263,23 +1265,6 @@ function loadChapterBatch(ids: unknown): { ids: number[]; rows: Array<typeof cha
   return { ids: chapterIds, rows, novelId: rows[0].novelId }
 }
 
-function syncChapterPartRanges(novelId: number) {
-  const db = getDb()
-  db.select().from(storyParts).where(eq(storyParts.novelId, novelId)).all().forEach((part) => {
-    const nums = db.select({ chapterNum: chapters.chapterNum })
-      .from(chapters)
-      .where(eq(chapters.partId, part.id))
-      .all()
-      .map((row) => row.chapterNum)
-      .sort((left, right) => left - right)
-    db.update(storyParts).set({
-      startChapterNum: nums[0] ?? null,
-      endChapterNum: nums.at(-1) ?? null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyParts.id, part.id)).run()
-  })
-}
-
 function appendChapterStaleReason(raw: unknown, reason: string): string {
   const current = typeof raw === 'string' ? raw : ''
   let values: string[] = []
@@ -1353,25 +1338,23 @@ export function createChapter(novelId: number, data: Partial<{
   const volumeId = normalizeChapterRelationId(safeData.volumeId, 'volumeId')
   const partId = normalizeChapterRelationId(safeData.partId, 'partId')
   const arcId = normalizeChapterRelationId(safeData.arcId, 'arcId')
+  const chapterNum = normalizePositiveChapterNumber(safeData.chapterNum)
+    ?? ((db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+      .reduce((max, chapter) => Math.max(max, chapter.chapterNum || 0), 0)) + 1)
+  assertChapterNumberAvailable(novelId, chapterNum)
+  assertChapterRelationsBelongToNovel(novelId, { volumeId, partId, arcId })
   const defaults = resolveDefaultStructure(novelId)
   const explicitPart = partId != null
     ? db.select().from(storyParts).where(eq(storyParts.id, partId)).all()[0]
     : undefined
   const volumePart = partId == null && volumeId != null
-    ? db.select().from(storyParts)
+    ? resolveVolumePartForChapter(db.select().from(storyParts)
       .where(eq(storyParts.volumeId, volumeId))
       .orderBy(asc(storyParts.partNumber), asc(storyParts.id))
-      .all()[0]
+      .all(), chapterNum)
     : undefined
   let resolvedPartId = partId ?? volumePart?.id ?? (volumeId == null ? defaults.partId : null)
   const resolvedVolumeId = volumeId ?? explicitPart?.volumeId ?? defaults.volumeId
-  // 先验证显式结构 ID，再决定是否需要为目标卷补建分册，避免无效卷 ID
-  // 触发底层外键异常而不是返回可理解的用户错误。
-  assertChapterRelationsBelongToNovel(novelId, { volumeId, partId, arcId })
-  const chapterNum = normalizePositiveChapterNumber(safeData.chapterNum)
-    ?? ((db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
-      .reduce((max, chapter) => Math.max(max, chapter.chapterNum || 0), 0)) + 1)
-  assertChapterNumberAvailable(novelId, chapterNum)
   const status = normalizeChapterStatus(safeData.status) || 'outline'
   if (status === 'final') {
     throwUserFacingError('chapter.publishBlocked', { summary: '新章节必须先完成正文和发布前检查。' })
@@ -1846,7 +1829,7 @@ export function batchRenumberChapters(ids: number[], startChapterNum: number) {
       })
     })
     remapChapterNumberReferences(novelId, chapterNumberRemap)
-    syncChapterPartRanges(novelId)
+    syncStoryPartRanges(novelId)
     syncTimelineStructureAnchors(novelId)
   })()
 
@@ -1917,7 +1900,7 @@ export function reorderChapters(ids: number[], startChapterNum: number) {
       })
     })
     remapChapterNumberReferences(batch.novelId, chapterNumberRemap)
-    syncChapterPartRanges(batch.novelId)
+    syncStoryPartRanges(batch.novelId)
     syncTimelineStructureAnchors(batch.novelId)
   })()
 

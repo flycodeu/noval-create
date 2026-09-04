@@ -124,6 +124,7 @@ export default function GlossaryPage({ novelId }: Props) {
   const refreshRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const routeFocusRef = useRef<number | null>(null)
+  const formSelectionRef = useRef<string | null>(null)
   const watchedValues = Form.useWatch([], form) as Partial<GlossaryFormValues> | undefined
   const currentFormValues = useMemo<GlossaryFormValues>(() => ({
     ...EMPTY_VALUES,
@@ -178,11 +179,14 @@ export default function GlossaryPage({ novelId }: Props) {
   }, [mutationToken, refresh])
 
   useEffect(() => {
-    form.setFieldsValue(buildFormValues(selectedItem))
-    if (selectedItem) {
-      setPersistedFormSignature(serializeFormValues(buildFormValues(selectedItem)))
-    }
-  }, [form, selectedId, selectedItem?.id])
+    const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
+    const selectionChanged = formSelectionRef.current !== selectionKey
+    if (!selectionChanged && hasUnsavedChanges) return
+    const values = buildFormValues(selectedItem)
+    form.setFieldsValue(values)
+    setPersistedFormSignature(serializeFormValues(values))
+    formSelectionRef.current = selectionKey
+  }, [form, hasUnsavedChanges, novelId, selectedItem])
 
   const syncGlossaryRoute = useCallback((id: number | null) => {
     const nextParams = new URLSearchParams(searchParams)

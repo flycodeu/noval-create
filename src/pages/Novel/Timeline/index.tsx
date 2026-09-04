@@ -41,6 +41,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     creating,
     form,
     handleClear,
+    handleFormValuesChange,
     handleSave: saveTimelineEvent,
     selectedEvent,
   } = workspace
@@ -50,8 +51,8 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const applyTimelineDraft = React.useCallback((draft: Record<string, unknown>) => {
-    const currentValues = workspace.form.getFieldsValue(true)
-    workspace.form.setFieldsValue({
+    const currentValues = form.getFieldsValue(true)
+    form.setFieldsValue({
       ...currentValues,
       eventTitle: typeof draft.eventTitle === 'string' ? draft.eventTitle : currentValues.eventTitle,
       eventSummary: typeof draft.eventSummary === 'string' ? draft.eventSummary : currentValues.eventSummary,
@@ -66,8 +67,8 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       openThreads: normalizeStringArray(draft.openThreads ?? currentValues.openThreads),
       notes: typeof draft.notes === 'string' ? draft.notes : currentValues.notes,
     })
-    workspace.handleFormValuesChange({}, workspace.form.getFieldsValue(true))
-  }, [workspace.form, workspace.handleFormValuesChange])
+    handleFormValuesChange({}, form.getFieldsValue(true))
+  }, [form, handleFormValuesChange])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
     novelId,
     pageKey: 'timeline',

@@ -127,7 +127,7 @@ function DiagnosticCards({ model, actions }: Pick<Props, 'model' | 'actions'>) {
           <ChapterRevealConstraintCard chapter={model.chapter} facts={model.facts} volumes={model.volumes} characters={model.characters} allowedFactIds={model.allowedRevealFactIds} revealedFactIds={model.revealedFactIds} truthStats={model.truthStats} saving={model.revealConstraintsSaving} onUpdate={actions.onUpdateRevealConstraints} onOpenBoard={actions.onOpenInfoGapBoard} />
         </InsightCard>
         <InsightCard title="本章伏笔回写" eyebrow="新增埋设 / 已回收登记" tone="soft">
-          <ChapterForeshadowWritebackCard chapter={model.chapter} chapterSegments={model.chapterSegments} ledger={model.foreshadowLedger} saving={model.foreshadowWritebackSaving} onCreate={actions.onCreateForeshadow} onPatch={actions.onPatchForeshadow} onDelete={actions.onDeleteForeshadow} onOpenLedger={actions.onOpenForeshadowLedger} />
+          <ChapterForeshadowWritebackCard key={model.chapter?.id ?? 'empty'} chapter={model.chapter} chapterSegments={model.chapterSegments} ledger={model.foreshadowLedger} saving={model.foreshadowWritebackSaving} onCreate={actions.onCreateForeshadow} onPatch={actions.onPatchForeshadow} onDelete={actions.onDeleteForeshadow} onOpenLedger={actions.onOpenForeshadowLedger} />
         </InsightCard>
         <InsightCard title="本章应回收伏笔" eyebrow={model.dueForeshadowEyebrow} tone="soft"><StringList items={model.dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" /></InsightCard>
         <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={model.reviewInsightItems} empty="先运行审校或刷新摘要，再集中处理需要回看的修订点。" /></InsightCard>

@@ -19,6 +19,7 @@ import { markNovelContextChanged } from './context-impact.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { syncTimelineEventItemLinks } from './link-sync.service'
 import { resolveCreativeStageContextForChapter } from './creative-stage.service'
+import { syncStoryPartRanges } from './story-structure-range.service'
 import {
   applyStructureBatchEdit as applyStructureBatchEditTransactional,
   applyStructureBatchPlan as applyStructureBatchPlanTransactional,
@@ -140,6 +141,31 @@ function getDefaultVolumeTitle(volumeNumber: number): string {
 
 function getDefaultPartTitle(partNumber: number): string {
   return `第${partNumber}部`
+}
+
+function ensurePartForVolume(
+  volume: typeof storyVolumes.$inferSelect,
+  partsByVolume: Map<number, Array<typeof storyParts.$inferSelect>>,
+): Array<typeof storyParts.$inferSelect> {
+  const existing = partsByVolume.get(volume.id) || []
+  if (existing.length > 0) return existing
+
+  const db = getDb()
+  const result = db.insert(storyParts).values({
+    novelId: volume.novelId,
+    volumeId: volume.id,
+    partNumber: 1,
+    title: getDefaultPartTitle(1),
+    status: 'planning',
+  }).run()
+  const created = db.select().from(storyParts)
+    .where(eq(storyParts.id, Number(result.lastInsertRowid)))
+    .all()[0]
+  if (!created) return []
+
+  const parts = [created]
+  partsByVolume.set(volume.id, parts)
+  return parts
 }
 
 function getVolumeRows(novelId: number) {
@@ -364,7 +390,7 @@ function runStructureTransaction(
   sqlite.transaction(() => {
     mutate()
     syncChapterSegmentMetadata(novelId)
-    syncPartRanges(novelId)
+    syncStoryPartRanges(novelId)
     syncTimelineStructureAnchors(novelId)
     markNovelContextChangedInline(novelId, reason)
   })()
@@ -727,25 +753,6 @@ export function resolveDefaultStructure(novelId: number): { volumeId: number; pa
   return { volumeId: primaryVolume.id, partId: parts[0].id }
 }
 
-function syncPartRanges(novelId: number) {
-  const db = getDb()
-  const partRows = getPartRows(novelId)
-  const chapterRows = getChapterRows(novelId)
-
-  for (const part of partRows) {
-    const chapterNums = chapterRows
-      .filter((chapter) => chapter.partId === part.id)
-      .map((chapter) => chapter.chapterNum)
-      .sort((left, right) => left - right)
-
-    db.update(storyParts).set({
-      startChapterNum: chapterNums[0] ?? null,
-      endChapterNum: chapterNums.length > 0 ? chapterNums[chapterNums.length - 1] : null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyParts.id, part.id)).run()
-  }
-}
-
 function syncChapterSegmentMetadata(novelId: number) {
   const db = getDb()
   const chapterRows = getChapterRows(novelId)
@@ -795,56 +802,144 @@ function createDefaultSegment(
   return Number(result.lastInsertRowid)
 }
 
-export function ensureStoryStructure(novelId: number): { volumeId: number; partId: number } {
-  const db = getDb()
+function chapterDistanceToPart(part: typeof storyParts.$inferSelect, chapterNum: number): number {
+  const start = Number.isInteger(part.startChapterNum) ? Number(part.startChapterNum) : null
+  const end = Number.isInteger(part.endChapterNum) ? Number(part.endChapterNum) : null
+  if (start !== null && chapterNum < start) return start - chapterNum
+  if (end !== null && chapterNum > end) return chapterNum - end
+  return 0
+}
+
+export function resolveVolumePartForChapter(
+  parts: Array<typeof storyParts.$inferSelect>,
+  chapterNum: number,
+) {
+  const rangedParts = parts.filter((part) => Number.isInteger(part.startChapterNum) || Number.isInteger(part.endChapterNum))
+  if (rangedParts.length === 0) return parts.at(-1)
+
+  return rangedParts
+    .slice()
+    .sort((left, right) => (
+      chapterDistanceToPart(left, chapterNum) - chapterDistanceToPart(right, chapterNum)
+      || left.partNumber - right.partNumber
+      || left.id - right.id
+    ))[0]
+}
+
+type StoryStructureRepairContext = {
+  fallback: { volumeId: number; partId: number }
+  partById: Map<number, typeof storyParts.$inferSelect>
+  volumeById: Map<number, typeof storyVolumes.$inferSelect>
+  partsByVolume: Map<number, Array<typeof storyParts.$inferSelect>>
+  chapterRows: Array<typeof chapters.$inferSelect>
+  segmentCountByChapter: Map<number, number>
+  segmentsByChapter: Map<number, Array<typeof chapterSegments.$inferSelect>>
+}
+
+function buildStoryStructureRepairContext(novelId: number): StoryStructureRepairContext {
   const fallback = resolveDefaultStructure(novelId)
   const volumeRows = getVolumeRows(novelId)
   const partRows = getPartRows(novelId)
-  const partById = new Map(partRows.map((part) => [part.id, part]))
-  const volumeById = new Map(volumeRows.map((volume) => [volume.id, volume]))
-  const chapterRows = getChapterRows(novelId)
-  const segmentRows = getSegmentRowsByNovel(novelId)
+  const partsByVolume = new Map<number, Array<typeof storyParts.$inferSelect>>()
+  for (const part of partRows) {
+    const current = partsByVolume.get(part.volumeId) || []
+    current.push(part)
+    partsByVolume.set(part.volumeId, current)
+  }
+
   const segmentCountByChapter = new Map<number, number>()
-
-  for (const segment of segmentRows) {
+  const segmentsByChapter = new Map<number, Array<typeof chapterSegments.$inferSelect>>()
+  for (const segment of getSegmentRowsByNovel(novelId)) {
     segmentCountByChapter.set(segment.chapterId, (segmentCountByChapter.get(segment.chapterId) || 0) + 1)
+    const current = segmentsByChapter.get(segment.chapterId) || []
+    current.push(segment)
+    segmentsByChapter.set(segment.chapterId, current)
   }
 
-  for (const chapter of chapterRows) {
-    const linkedPart = chapter.partId ? partById.get(chapter.partId) : undefined
-    const linkedVolume = chapter.volumeId ? volumeById.get(chapter.volumeId) : undefined
-    const nextPartId = linkedPart?.id ?? fallback.partId
-    const nextVolumeId = linkedPart?.volumeId ?? linkedVolume?.id ?? fallback.volumeId
-    const shouldUpdate = chapter.partId !== nextPartId || chapter.volumeId !== nextVolumeId
+  return {
+    fallback,
+    partById: new Map(partRows.map((part) => [part.id, part])),
+    volumeById: new Map(volumeRows.map((volume) => [volume.id, volume])),
+    partsByVolume,
+    chapterRows: getChapterRows(novelId),
+    segmentCountByChapter,
+    segmentsByChapter,
+  }
+}
 
-    if (shouldUpdate) {
-      db.update(chapters).set({
-        volumeId: nextVolumeId,
-        partId: nextPartId,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(chapters.id, chapter.id)).run()
-    }
-
-    if ((segmentCountByChapter.get(chapter.id) || 0) === 0) {
-      createDefaultSegment({
-        ...chapter,
-        volumeId: nextVolumeId,
-        partId: nextPartId,
-      })
-    } else {
-      db.update(chapterSegments).set({
-        volumeId: nextVolumeId,
-        partId: nextPartId,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(chapterSegments.chapterId, chapter.id)).run()
+function resolveChapterStructureTarget(
+  chapter: typeof chapters.$inferSelect,
+  context: StoryStructureRepairContext,
+): { volumeId: number; partId: number | null } {
+  const linkedPart = chapter.partId ? context.partById.get(chapter.partId) : undefined
+  const linkedVolume = chapter.volumeId ? context.volumeById.get(chapter.volumeId) : undefined
+  const linkedPartVolume = linkedPart ? context.volumeById.get(linkedPart.volumeId) : undefined
+  if (linkedPart && linkedPartVolume) return { volumeId: linkedPartVolume.id, partId: linkedPart.id }
+  if (linkedVolume) {
+    const targetPart = resolveVolumePartForChapter(
+      ensurePartForVolume(linkedVolume, context.partsByVolume),
+      chapter.chapterNum,
+    )
+    return {
+      volumeId: targetPart?.volumeId ?? linkedVolume.id,
+      partId: targetPart?.id ?? null,
     }
   }
+  return context.fallback
+}
 
-  // 读取/补齐结构不应悄悄改写作者明确设置的章节编号；编号重排由结构批处理或
-  // chapter.reorder 显式完成，并在那里同步所有按章节号保存的引用。
-  syncChapterSegmentMetadata(novelId)
-  syncPartRanges(novelId)
-  return fallback
+function syncChapterStructureRelations(
+  chapter: typeof chapters.$inferSelect,
+  target: { volumeId: number; partId: number | null },
+  context: StoryStructureRepairContext,
+) {
+  const db = getDb()
+  const shouldUpdate = chapter.partId !== target.partId || chapter.volumeId !== target.volumeId
+  if (shouldUpdate) {
+    db.update(chapters).set({
+      volumeId: target.volumeId,
+      partId: target.partId,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.id, chapter.id)).run()
+  }
+
+  if ((context.segmentCountByChapter.get(chapter.id) || 0) === 0) {
+    createDefaultSegment({
+      ...chapter,
+      volumeId: target.volumeId,
+      partId: target.partId,
+    })
+    return
+  }
+
+  for (const segment of context.segmentsByChapter.get(chapter.id) || []) {
+    if (segment.volumeId === target.volumeId && segment.partId === target.partId) continue
+    db.update(chapterSegments).set({
+      volumeId: target.volumeId,
+      partId: target.partId,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapterSegments.id, segment.id)).run()
+  }
+}
+
+export function ensureStoryStructure(novelId: number): { volumeId: number; partId: number } {
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    const nextContext = buildStoryStructureRepairContext(novelId)
+    for (const chapter of nextContext.chapterRows) {
+      syncChapterStructureRelations(chapter, resolveChapterStructureTarget(chapter, nextContext), nextContext)
+    }
+
+    // 读取/补齐结构不应悄悄改写作者明确设置的章节编号；编号重排由结构批处理或
+    // chapter.reorder 显式完成，并在那里同步所有按章节号保存的引用。
+    syncChapterSegmentMetadata(novelId)
+    syncStoryPartRanges(novelId)
+    return nextContext
+  })
+  const context = sqlite.inTransaction || typeof transaction.immediate !== 'function'
+    ? transaction()
+    : transaction.immediate()
+  return context.fallback
 }
 
 export function listStoryStructure(novelId: number): StoryStructureTree {
@@ -1045,7 +1140,7 @@ export function updateStoryPart(
     status: data.status || current.status,
     updatedAt: new Date().toISOString(),
   }).where(eq(storyParts.id, id)).run()
-  syncPartRanges(current.novelId)
+  syncStoryPartRanges(current.novelId)
   markNovelContextChanged(current.novelId, 'Story structure changed')
 }
 

@@ -115,7 +115,9 @@ type CreativeStageHandoffForm = {
 type StageQualityReportView = Pick<
   AgentQualityReportContent,
   'status' | 'score' | 'confidenceLowerBound' | 'coverageRate' | 'summary' | 'blockers' | 'warnings' | 'findings'
->
+> & {
+  artifactId?: string
+}
 
 type StageQualityReportHistoryEntry = StageQualityReportView & {
   artifactId: string
@@ -420,9 +422,15 @@ export default function StagePlanner({ novelId }: Props) {
         },
       })
       if (!result.ok) throw new Error(result.error.message)
-      const data = result.data as { report?: StageQualityReportView }
+      const data = result.data as {
+        report?: StageQualityReportView
+        reportArtifact?: { id?: string }
+      }
       if (!data.report) throw new Error(getUserFacingMessage('creativeStage.qualityReportMissing'))
-      setStageQualityReport(data.report)
+      setStageQualityReport({
+        ...data.report,
+        artifactId: data.reportArtifact?.id,
+      })
       await loadStageQualityHistory(selectedStage.id)
       message.success(getUserFacingMessage('creativeStage.qualityReportGenerated'))
     } catch (error) {

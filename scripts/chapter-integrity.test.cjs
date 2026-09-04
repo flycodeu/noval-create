@@ -139,6 +139,29 @@ async function run() {
       INSERT INTO story_parts (novel_id, volume_id, part_number, title, status)
       VALUES (?, ?, 1, '第二部', 'planning')
     `).run(novelA, Number(secondVolume.lastInsertRowid))
+    const plannedVolume = getSqlite().prepare(`
+      INSERT INTO story_volumes (novel_id, volume_number, title, status)
+      VALUES (?, 4, '按范围分配卷', 'planning')
+    `).run(novelA)
+    const plannedVolumeId = Number(plannedVolume.lastInsertRowid)
+    getSqlite().prepare(`
+      INSERT INTO story_parts (novel_id, volume_id, part_number, title, start_chapter_num, end_chapter_num, status)
+      VALUES (?, ?, 1, '范围部一', 40, 49, 'planning')
+    `).run(novelA, plannedVolumeId)
+    const plannedPartTwo = getSqlite().prepare(`
+      INSERT INTO story_parts (novel_id, volume_id, part_number, title, start_chapter_num, end_chapter_num, status)
+      VALUES (?, ?, 2, '范围部二', 50, 59, 'planning')
+    `).run(novelA, plannedVolumeId)
+    const rangeAssignedChapter = chapterService.createChapter(novelA, {
+      volumeId: plannedVolumeId,
+      chapterNum: 50,
+      title: '按部范围分配章节',
+    })
+    assert.equal(
+      getSqlite().prepare('SELECT part_id FROM chapters WHERE id = ?').get(rangeAssignedChapter).part_id,
+      Number(plannedPartTwo.lastInsertRowid),
+      'volume-only chapter creation must honor the planned chapter range instead of always selecting the first part',
+    )
     const emptyVolume = getSqlite().prepare(`
       INSERT INTO story_volumes (novel_id, volume_number, title, status)
       VALUES (?, 3, '空卷', 'planning')
@@ -374,6 +397,39 @@ async function run() {
     const structureThread = getSqlite().prepare('SELECT start_chapter, target_payoff_chapter, planted_chapter, last_referenced_chapter FROM story_threads WHERE novel_id = ?').get(novelA)
     assert.deepEqual(structureArc, { chapter_start: 1, chapter_end: 2 })
     assert.deepEqual(structureThread, { start_chapter: 2, target_payoff_chapter: 1, planted_chapter: 2, last_referenced_chapter: 1 })
+    const sentinelUpdatedAt = '2000-01-01T00:00:00.000Z'
+    const defaultPartSegmentId = getSqlite().prepare('SELECT id FROM chapter_segments WHERE chapter_id = ? LIMIT 1').get(firstChapter).id
+    getSqlite().prepare('UPDATE story_parts SET updated_at = ? WHERE id = ?').run(sentinelUpdatedAt, defaultPartId)
+    getSqlite().prepare('UPDATE chapter_segments SET updated_at = ? WHERE id = ?').run(sentinelUpdatedAt, defaultPartSegmentId)
+    storyStructureService.ensureStoryStructure(novelA)
+    assert.equal(
+      getSqlite().prepare('SELECT updated_at FROM story_parts WHERE id = ?').get(defaultPartId).updated_at,
+      sentinelUpdatedAt,
+      'reading a stable structure must not rewrite the part updatedAt',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT updated_at FROM chapter_segments WHERE id = ?').get(defaultPartSegmentId).updated_at,
+      sentinelUpdatedAt,
+      'reading a stable structure must not rewrite segment updatedAt',
+    )
+    const repairedVolumeChapter = chapterService.createChapter(novelA, {
+      volumeId: Number(secondVolume.lastInsertRowid),
+      title: '修复失效部引用',
+    })
+    getSqlite().prepare('UPDATE chapters SET part_id = NULL WHERE id = ?').run(repairedVolumeChapter)
+    storyStructureService.ensureStoryStructure(novelA)
+    const repairedVolumeChapterRow = getSqlite().prepare('SELECT volume_id, part_id FROM chapters WHERE id = ?').get(repairedVolumeChapter)
+    assert.equal(repairedVolumeChapterRow.volume_id, Number(secondVolume.lastInsertRowid))
+    assert.equal(
+      getSqlite().prepare('SELECT volume_id FROM story_parts WHERE id = ?').get(repairedVolumeChapterRow.part_id).volume_id,
+      Number(secondVolume.lastInsertRowid),
+      'a chapter with a valid volume but missing part must be repaired inside that volume',
+    )
+    assert.equal(
+      getSqlite().prepare('SELECT part_id FROM chapter_segments WHERE chapter_id = ? LIMIT 1').get(repairedVolumeChapter).part_id,
+      repairedVolumeChapterRow.part_id,
+      'structure repair must keep chapter segments aligned with the repaired part',
+    )
     const volumeChapter = chapterService.createChapter(novelA, {
       volumeId: Number(secondVolume.lastInsertRowid),
       title: '指定卷新增章节',
@@ -391,6 +447,16 @@ async function run() {
     assert.equal(
       getSqlite().prepare('SELECT volume_id FROM story_parts WHERE id = ?').get(autoPartChapterRow.part_id).volume_id,
       emptyVolumeId,
+    )
+    getSqlite().prepare('DELETE FROM story_parts WHERE id = ?').run(autoPartChapterRow.part_id)
+    storyStructureService.ensureStoryStructure(novelA)
+    const repairedEmptyVolumeChapterRow = getSqlite().prepare('SELECT volume_id, part_id FROM chapters WHERE id = ?').get(autoPartChapter)
+    assert.equal(repairedEmptyVolumeChapterRow.volume_id, emptyVolumeId)
+    assert.ok(repairedEmptyVolumeChapterRow.part_id > 0)
+    assert.equal(
+      getSqlite().prepare('SELECT volume_id FROM story_parts WHERE id = ?').get(repairedEmptyVolumeChapterRow.part_id).volume_id,
+      emptyVolumeId,
+      'a legacy chapter in a part-less volume must receive a new part in that same volume',
     )
 
     const historyNovel = novelService.createNovel({ title: '章节撤销测试', targetWords: 5000, operatingMode: 'shortform' })

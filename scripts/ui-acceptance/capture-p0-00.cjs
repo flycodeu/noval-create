@@ -10,6 +10,10 @@ const SAMPLE_TITLE = '神账局：我给万神讨薪'
 const PREPARE_DENSITY = process.argv.includes('--prepare') || process.env.NOVELFORGE_UI_ACCEPTANCE_PREPARE === '1'
 const REQUESTED_NOVEL_ID = Number(process.env.NOVELFORGE_UI_ACCEPTANCE_NOVEL_ID || 0) || null
 const MINIMUM_DENSITY = { volumes: 5, chapters: 120, characters: 20, timelineEvents: 30, foreshadowRevisionItems: 50 }
+const SAMPLE_PART_RANGES = [
+  [1, 20], [21, 40], [41, 60], [61, 80], [81, 100], [101, 120],
+  [121, 145], [146, 170], [171, 195], [196, 220],
+]
 
 const VIEWPORTS = [
   { width: 1440, height: 900 },
@@ -175,15 +179,28 @@ async function prepareSampleDensity(page, project) {
       created.volumes += 1
     }
     volumes = await window.electron.structure.listVolumes(id)
+    const sampleVolumes = volumes
+      .slice()
+      .sort((left, right) => Number(left.volumeNumber || 0) - Number(right.volumeNumber || 0))
+      .slice(0, minimums.volumes)
+    const partsByVolume = await Promise.all(sampleVolumes.map(async (volume) => {
+      const page = await window.electron.structure.listPartsPage(volume.id, 1, 200)
+      return (page?.items || []).slice().sort((left, right) => Number(left.partNumber || 0) - Number(right.partNumber || 0))
+    }))
 
     let chapters = await window.electron.chapter.list(id)
     let nextChapterNum = Math.max(0, ...chapters.map((item) => Number(item.chapterNum) || 0)) + 1
     while (chapters.length + created.chapters < minimums.chapters) {
-      const offset = created.chapters
-      const volume = volumes[offset % volumes.length]
+      const partSlot = SAMPLE_PART_RANGES.findIndex(([start, end]) => nextChapterNum >= start && nextChapterNum <= end)
+      const volumeIndex = Math.floor(partSlot / 2)
+      const partIndex = partSlot % 2
+      const volume = sampleVolumes[volumeIndex]
+      const part = partsByVolume[volumeIndex]?.[partIndex]
+      if (!volume || !part) throw new Error(`P0-00 样例项目缺少第${nextChapterNum}章对应的卷/部结构。`)
       await window.electron.chapter.create(id, {
         chapterNum: nextChapterNum,
-        volumeId: volume?.id,
+        volumeId: volume.id,
+        partId: part.id,
         title: `P0验收章节${nextChapterNum}`,
         outline: '用于验证长篇项目列表、滚动和信息密度，不作为正式正文。',
         status: 'outline',

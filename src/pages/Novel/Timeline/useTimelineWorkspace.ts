@@ -902,14 +902,19 @@ export function useTimelineWorkspace(
     }
   }, [refreshPage, selectedEvent])
 
-  const handleGenerate = useCallback(async () => {
+  const ensureGenerationAllowed = useCallback(async () => {
     const nextWorkflowStats = await loadWorkflowStats(novelId)
     setWorkflowStats(nextWorkflowStats)
     const blockers = getWorkflowBlockers('timeline', currentNovel, nextWorkflowStats)
     if (blockers.length > 0) {
       message.warning(blockers.join('\n'))
-      return
+      return false
     }
+    return true
+  }, [currentNovel, novelId])
+
+  const handleGenerate = useCallback(async () => {
+    if (!await ensureGenerationAllowed()) return
 
     const values = generateForm.getFieldsValue()
     setGenerating(true)
@@ -929,19 +934,12 @@ export function useTimelineWorkspace(
     } finally {
       setGenerating(false)
     }
-  }, [currentNovel, generateForm, novelId, refreshPage, timelineGenerationPreset])
+  }, [ensureGenerationAllowed, generateForm, novelId, refreshPage, timelineGenerationPreset])
 
   const openGenerateModal = useCallback(async () => {
-    const nextWorkflowStats = await loadWorkflowStats(novelId)
-    setWorkflowStats(nextWorkflowStats)
-    const blockers = getWorkflowBlockers('timeline', currentNovel, nextWorkflowStats)
-    if (blockers.length > 0) {
-      message.warning(blockers.join('\n'))
-      return
-    }
-
+    if (!await ensureGenerationAllowed()) return
     setGenerateOpen(true)
-  }, [currentNovel, novelId])
+  }, [ensureGenerationAllowed])
 
   const handleClear = useCallback(() => {
     Modal.confirm({
@@ -951,7 +949,13 @@ export function useTimelineWorkspace(
       okText: TIMELINE_TEXT.clearConfirmOk,
       onOk: async () => {
         await window.electron.timeline.clear(novelId)
+        detailRequestRef.current += 1
+        selectedIdRef.current = null
+        creatingRef.current = false
+        dirtyRef.current = false
+        setHasUnsavedChanges(false)
         form.resetFields()
+        clearSelection()
         setSelectedId(null)
         setSelectedEvent(null)
         setCreating(false)
@@ -960,7 +964,7 @@ export function useTimelineWorkspace(
         message.success(getUserFacingMessage('timeline.cleared'))
       },
     })
-  }, [form, novelId, onCleared, refreshPage])
+  }, [clearSelection, form, novelId, onCleared, refreshPage])
 
   const openSelectedEventInStructure = useCallback(() => {
     if (!selectedEvent) return

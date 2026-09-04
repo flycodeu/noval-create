@@ -779,7 +779,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     if (!selectedNode) return
     const values = detailForm.getFieldsValue(true) as DetailFormValues
     if (!String(values.name || '').trim()) {
-      message.error('请输入名称')
+      message.error(getUserFacingMessage('map.nameRequired'))
       if (workspaceMode === 'graph') {
         setGraphInspectorOpen(true)
         setGraphInspectorTab('detail')

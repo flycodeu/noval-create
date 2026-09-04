@@ -158,18 +158,22 @@ const BASICS_AI_TOOLS = [
   {
     id: 'read_step_context',
     label: '读取当前步骤',
+    description: '读取当前步骤及已有设定，避免重复生成。',
   },
   {
     id: 'draft_basics_patch',
     label: '生成基础补丁',
+    description: '生成可回填到基础字段的候选内容。',
   },
   {
     id: 'targeted_field_update',
     label: '定向字段更新',
+    description: '只更新用户点名的字段，保留其他已有内容。',
   },
   {
     id: 'anti_ai_style_check',
     label: '反 AI 味自检',
+    description: '检查模板化表达、空泛描述和字段重复。',
   },
 ]
 

@@ -131,7 +131,6 @@ export default function Writing({ novelId }: Props) {
     setOptimizeModalOpen(false)
     setOptimizationResult(null)
     setRewriteModalOpen(false)
-    setAiResult(null)
   }, [currentChapter?.id, setOptimizeModalOpen, setOptimizationResult, setRewriteModalOpen])
   const storySettings = useMemo(() => parseStorySettingsSnapshot(currentNovel?.settingsJson), [currentNovel?.settingsJson])
   const defaultAiExecutionMode = storySettings.aiDefaultMode
@@ -139,6 +138,7 @@ export default function Writing({ novelId }: Props) {
   const isHistoryRoute = activeWritingRoute === 'history'
   const hasMultiSegments = hasMultipleChapterSegments(currentChapter)
   const preserveEditorContentRef = useRef(false)
+  const shouldPreserveEditorContent = useCallback(() => preserveEditorContentRef.current, [])
   const workspaceRefresh = useWritingWorkspaceRefreshController({
     novelId,
     creativeStageId,
@@ -191,7 +191,7 @@ export default function Writing({ novelId }: Props) {
     onChapterLoaded: handleWorkspaceChapterLoaded,
     onEmptyWorkspace: handleEmptyWorkspace,
     refreshWorkspaceMetadata,
-    shouldPreserveEditorContent: () => preserveEditorContentRef.current,
+    shouldPreserveEditorContent,
   })
   const {
     chapters,
@@ -233,7 +233,9 @@ export default function Writing({ novelId }: Props) {
     saveNow,
     syncSelectedSnippet,
   } = editorLifecycle
-  preserveEditorContentRef.current = hasUnsavedChanges
+  useEffect(() => {
+    preserveEditorContentRef.current = hasUnsavedChanges
+  }, [hasUnsavedChanges])
   const chapterCrud = useWritingChapterCrudController({
     novelId,
     chapters,

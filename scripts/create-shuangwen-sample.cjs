@@ -47,6 +47,26 @@ const SAMPLE_KEY = 'sample.shuangwen.shenzhangju.v1'
 const SAMPLE_TITLE = '神账局：我给万神讨薪'
 const GENRE_NAME = '都市民俗高武'
 const TARGET_WORDS = 1000000
+const TOTAL_PLANNED_CHAPTERS = 220
+const OPENING_CHAPTER_WORDS = 3200
+const BODY_CHAPTER_COUNT = TOTAL_PLANNED_CHAPTERS - 2
+const BODY_WORD_BUDGET = TARGET_WORDS - OPENING_CHAPTER_WORDS * 2
+const STANDARD_CHAPTER_WORDS = Math.floor(BODY_WORD_BUDGET / BODY_CHAPTER_COUNT)
+const EXTRA_STANDARD_CHAPTER_COUNT = BODY_WORD_BUDGET - STANDARD_CHAPTER_WORDS * BODY_CHAPTER_COUNT
+
+function getChapterTargetWords(chapterNum) {
+  if (chapterNum <= 2) return OPENING_CHAPTER_WORDS
+  if (chapterNum > TOTAL_PLANNED_CHAPTERS) return STANDARD_CHAPTER_WORDS
+  return STANDARD_CHAPTER_WORDS + (chapterNum - 3 < EXTRA_STANDARD_CHAPTER_COUNT ? 1 : 0)
+}
+
+function getChapterRangeTargetWords(startChapter, endChapter) {
+  let total = 0
+  for (let chapterNum = startChapter; chapterNum <= endChapter; chapterNum += 1) {
+    total += getChapterTargetWords(chapterNum)
+  }
+  return total
+}
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, '-')
@@ -142,7 +162,7 @@ const projectBrief = {
   millionWordPlan: {
     targetWords: TARGET_WORDS,
     volumeCount: 5,
-    plannedChapters: 220,
+    plannedChapters: TOTAL_PLANNED_CHAPTERS,
     cadence: '前30章每3章完成一个小清算，之后每卷完成一条城市级神债。',
   },
   trendPositioning: {
@@ -749,11 +769,11 @@ const chapterOutlines = [
 ]
 
 const volumes = [
-  ['第一卷：城隍欠薪', '陆沉入职神账局，从瑞恒广场旧账切入，清掉城隍和黑水河两笔城市旧债，确认新愿集团是幕后香火资本。', 200000, 0.18],
-  ['第二卷：河神断流', '黑水河旧案扩展到城市供水和河道改造，陆沉第一次面对“救人”和“清算彻底”的冲突。', 200000, 0.32],
-  ['第三卷：鬼市上市', '地下鬼市被新愿资本化，愿望、名字和福报变成可交易资产，主角从被动查案转为主动做局。', 200000, 0.52],
-  ['第四卷：万庙封神', '全国民俗节点陆续复苏，新愿制造算法神分身，主角需要联合旧神和普通人公开账目。', 200000, 0.74],
-  ['第五卷：天庭资产清算', '万神账本源头揭开，陆沉清算父亲失踪真相和算法神总账，完成去中心化结局。', 200000, 0.95],
+  ['第一卷：城隍欠薪', '陆沉入职神账局，从瑞恒广场旧账切入，清掉城隍和黑水河两笔城市旧债，确认新愿集团是幕后香火资本。', getChapterRangeTargetWords(1, 40), 0.18],
+  ['第二卷：河神断流', '黑水河旧案扩展到城市供水和河道改造，陆沉第一次面对“救人”和“清算彻底”的冲突。', getChapterRangeTargetWords(41, 80), 0.32],
+  ['第三卷：鬼市上市', '地下鬼市被新愿资本化，愿望、名字和福报变成可交易资产，主角从被动查案转为主动做局。', getChapterRangeTargetWords(81, 120), 0.52],
+  ['第四卷：万庙封神', '全国民俗节点陆续复苏，新愿制造算法神分身，主角需要联合旧神和普通人公开账目。', getChapterRangeTargetWords(121, 170), 0.74],
+  ['第五卷：天庭资产清算', '万神账本源头揭开，陆沉清算父亲失踪真相和算法神总账，完成去中心化结局。', getChapterRangeTargetWords(171, 220), 0.95],
 ]
 
 const characters = [
@@ -947,8 +967,20 @@ function createStructure(db, novelId, now) {
       main_conflict: ['城隍旧债对瑞恒和新愿法务反压', '黑水河命债对城市改造真相', '鬼市交易对算法愿力', '万庙复苏对平台造神', '账本公开对秩序代价'][index],
       climax_plan: ['旧城厢万人对账，黑水河副本入口打开', '河底名单公开，第一批河工回家', '鬼市上市失败，新愿露出算法神主体', '全国旧庙同步封门，算法神分身失控', '陆沉公开万神账本，清算父亲旧案'][index],
       end_state_shift: ['陆沉确认新愿是主敌', '陆沉从查案转向主动做局', '神账局内部旧账曝光', '全民对账不可逆', '神权去中心化'][index],
-      must_add_clues_json: toJson(['红章收据', '黑水河工号', '祈愿 App 标签', '父亲错账页']),
-      must_resolve_clues_json: toJson(index === 0 ? ['瑞恒三千万咨询费', '城隍 IP 代持'] : []),
+      must_add_clues_json: toJson([
+        ['红章收据', '黑水河工号'],
+        ['河工赔偿名单', '祈愿 App 标签'],
+        ['鬼市交易凭证', '愿望标签原始记录'],
+        ['算法神分身记录', '父亲错账页'],
+        ['公开账册规则', '父亲错账页'],
+      ][index]),
+      must_resolve_clues_json: toJson([
+        ['瑞恒三千万咨询费', '城隍 IP 代持'],
+        ['三十七名河工名单', '第一批河工家属赔偿'],
+        ['愿望资产挂牌合法性', '鬼市公共证据规则'],
+        ['算法神分身来源', '神账局内部封存旧档'],
+        ['父亲失踪真相', '万神账本公开规则'],
+      ][index]),
       reader_expectation: '每卷必须有至少三个当众清算名场面，并在卷尾兑现一笔城市级旧债。',
       audit_status: index === 0 ? 'ready' : 'draft',
       created_at: now,
@@ -976,7 +1008,7 @@ function createStructure(db, novelId, now) {
       part_number: partNumber,
       title,
       summary,
-      target_words: Math.round(TARGET_WORDS / 10),
+      target_words: getChapterRangeTargetWords(start, end),
       status: volumeNumber === 1 && partNumber === 1 ? 'active' : 'planning',
       start_chapter_num: start,
       end_chapter_num: end,
@@ -1005,7 +1037,7 @@ function createStructure(db, novelId, now) {
       growth_ledger: order === 1 ? '陆沉获得问账、问名，付出身份异常和失眠代价。' : '每卷新增一种清算能力，同时留下现实代价。',
       cost_ledger: order === 1 ? '第一次问名导致身份信息短暂空白；城隍残印消耗。' : '代价随神权扩大而转向社会关系和公共秩序。',
       phase_targets_json: toJson(['开局钩子', '证据链', '规则反转', '当众清算', '代价回收']),
-      target_words: order === 1 ? 90000 : 180000,
+      target_words: getChapterRangeTargetWords(start, end),
       progress_percent: order === 1 ? 10 : 0,
       stalled_chapter_count: 0,
       last_progress_chapter_num: order === 1 ? 2 : null,
@@ -1448,7 +1480,7 @@ function createChapters(db, novelId, structure, refs, now) {
       continuity_state_json: toJson({ activeThreads: ['城隍欠薪', '新愿集团', '万神账本'], latestState: chapter.outline }),
       status: chapter.content ? 'draft' : 'outline',
       arc_id: firstArcId,
-      target_words: chapter.chapterNum <= 2 ? 3200 : 2600,
+      target_words: getChapterTargetWords(chapter.chapterNum),
       emotion_tone: chapter.emotionTone,
       compiled_from_segments: 0,
       segment_count: (chapter.scenes || []).length || 1,
@@ -1606,12 +1638,13 @@ function createMemoryAndPayoffs(db, novelId, structure, refs, chapters, now) {
     commitmentIds.set(title, id)
   })
 
+  const foreshadowIds = new Map()
   ;[
     ['红章“已欠”', '第一章收据右下角的“已欠”红章，是万神账本判断旧债的外显符号。', chapters.chapterIds.get(1), '细节物件', 'medium', 18, '商户尾款兑现时红章变为“已偿”。', refs.threadIds.get('瑞恒广场城隍欠薪案'), commitmentIds.get('第一笔账必须讨回普通人的钱')],
     ['电梯井黑水', '第二章末电梯井涌出的黑水预告黑水河命债。', chapters.chapterIds.get(2), '场景异象', 'high', 35, '河底副本打开，三十七名河工名单浮出。', refs.threadIds.get('黑水河三十七名河工命债'), null],
     ['身份栏空白', '第二章问名后陆沉手机 App 的姓名栏短暂空白，预告父亲当年也被抵押过名字。', chapters.chapterIds.get(2), '现实系统异常', 'medium', 170, '陆怀章失踪真相回收。', refs.threadIds.get('万神账本到底从何而来'), commitmentIds.get('陆沉父亲为何失踪')],
   ].forEach(([title, detail, sourceChapter, plant, salience, payoff, method, threadId, commitmentId]) => {
-    insertRow(db, 'foreshadow_ledger', {
+    const id = insertRow(db, 'foreshadow_ledger', {
       novel_id: novelId,
       title,
       detail,
@@ -1632,6 +1665,27 @@ function createMemoryAndPayoffs(db, novelId, structure, refs, chapters, now) {
       created_at: now,
       updated_at: now,
     })
+    foreshadowIds.set(title, id)
+  })
+
+  const updateChapterContractLinks = db.prepare(`
+    UPDATE chapter_contracts
+    SET required_endgame_commitment_ids_json = ?, required_foreshadow_ids_json = ?, updated_at = ?
+    WHERE novel_id = ? AND chapter_id = ?
+  `)
+  ;[
+    [1, ['第一笔账必须讨回普通人的钱'], ['红章“已欠”']],
+    [2, ['陆沉父亲为何失踪'], ['电梯井黑水', '身份栏空白']],
+  ].forEach(([chapterNum, commitmentTitles, foreshadowTitles]) => {
+    const chapterId = chapters.chapterIds.get(chapterNum)
+    if (!chapterId) return
+    updateChapterContractLinks.run(
+      toJson(commitmentTitles.map((title) => commitmentIds.get(title)).filter(Boolean)),
+      toJson(foreshadowTitles.map((title) => foreshadowIds.get(title)).filter(Boolean)),
+      now,
+      novelId,
+      chapterId,
+    )
   })
 
   insertRow(db, 'story_memory_checkpoints', {

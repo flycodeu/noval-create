@@ -27,7 +27,9 @@ export function useNovelWorkspaceActions() {
 export function useRegisterWorkspaceLeaveGuard(isDirty: boolean) {
   const { registerLeaveGuard } = useNovelWorkspaceActions()
   const dirtyRef = useRef(isDirty)
-  dirtyRef.current = isDirty
+  useEffect(() => {
+    dirtyRef.current = isDirty
+  }, [isDirty])
   useEffect(() => {
     registerLeaveGuard(() => dirtyRef.current)
     return () => registerLeaveGuard(null)

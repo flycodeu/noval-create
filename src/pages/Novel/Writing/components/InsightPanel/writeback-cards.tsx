@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
@@ -44,16 +44,6 @@ export function ChapterForeshadowWritebackCard({
   const [plantMethod, setPlantMethod] = useState('')
   const [salienceLevel, setSalienceLevel] = useState('medium')
   const [impactScope, setImpactScope] = useState('global')
-
-  useEffect(() => {
-    setTitle('')
-    setDetail('')
-    setSourceSegmentId(undefined)
-    setTargetPayoffChapter(null)
-    setPlantMethod('')
-    setSalienceLevel('medium')
-    setImpactScope('global')
-  }, [chapter?.id])
 
   const chapterEntries = useMemo(
     () => ledger

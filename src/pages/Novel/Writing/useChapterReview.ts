@@ -202,7 +202,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
   const applyOptimizedChapter = useCallback(async () => {
     if (!currentChapter || !optimizationResult?.optimizedContent.trim()) return
     if (optimizationChapterIdRef.current !== currentChapter.id) {
-      message.warning('优化结果已不属于当前章节，已取消套用。')
+      message.warning(getUserFacingMessage('writing.optimizeWrongChapter'))
       setOptimizeModalOpen(false)
       setOptimizationResult(null)
       return

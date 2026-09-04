@@ -80,7 +80,7 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
   const restoreVersion = useCallback(async () => {
     if (!selectedVersionId || !currentChapter) return
     if (selectedVersion && selectedVersion.chapterId !== currentChapter.id) {
-      message.warning('所选版本已不属于当前章节，已取消恢复。')
+      message.warning(getUserFacingMessage('writing.versionWrongChapter'))
       return
     }
     try {

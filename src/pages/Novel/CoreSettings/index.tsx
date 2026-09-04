@@ -130,12 +130,6 @@ function emptySubplot(): SubPlot {
   }
 }
 
-function compactText(value?: string | null, max = 44): string {
-  const text = value?.trim() || ''
-  if (!text) return '未补背景'
-  return text.length > max ? `${text.slice(0, max)}...` : text
-}
-
 function normalizeText(value?: string | null): string {
   return value?.trim() || ''
 }

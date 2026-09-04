@@ -23,6 +23,7 @@ import type {
 import { markNovelContextChanged } from './context-impact.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
+import { syncStoryPartRanges } from './story-structure-range.service'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -99,25 +100,6 @@ function getDefaultVolumeTitle(volumeNumber: number): string {
 
 function getDefaultPartTitle(partNumber: number): string {
   return `第${partNumber}部`
-}
-
-function syncPartRanges(novelId: number) {
-  const db = getDb()
-  const partRows = getPartRows(novelId)
-  const chapterRows = getChapterRows(novelId)
-
-  for (const part of partRows) {
-    const chapterNums = chapterRows
-      .filter((chapter) => chapter.partId === part.id)
-      .map((chapter) => chapter.chapterNum)
-      .sort((left, right) => left - right)
-
-    db.update(storyParts).set({
-      startChapterNum: chapterNums[0] ?? null,
-      endChapterNum: chapterNums.length > 0 ? chapterNums[chapterNums.length - 1] : null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyParts.id, part.id)).run()
-  }
 }
 
 function syncChapterSegmentMetadata(novelId: number) {
@@ -236,7 +218,7 @@ function runStructureTransaction(novelId: number, mutate: () => void) {
     const beforeChapters = getChapterRows(novelId)
     mutate()
     syncChapterSegmentMetadata(novelId)
-    syncPartRanges(novelId)
+    syncStoryPartRanges(novelId)
 
     const afterChapters = getChapterRows(novelId)
     const afterById = new Map(afterChapters.map((chapter) => [chapter.id, chapter]))

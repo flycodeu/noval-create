@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import StatusTag from '../common/StatusTag'
@@ -34,14 +34,6 @@ export default function ProjectSidebar({
     [activeKey, navGroups],
   )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
-
-  useEffect(() => {
-    if (!activeGroup) return
-    setOpenGroups((current) => {
-      if (current[activeGroup] === false) return { ...current, [activeGroup]: true }
-      return current
-    })
-  }, [activeGroup])
 
   const handleNavigate = (route: string) => {
     onNavigate(route)
@@ -81,14 +73,14 @@ export default function ProjectSidebar({
 
       <div className="project-sidebar__groups">
         {navGroups.map((group, groupIndex) => {
-          const isOpen = openGroups[group.key] ?? group.key === activeGroup
+          const isOpen = group.key === activeGroup || (openGroups[group.key] ?? false)
           const canCollapse = group.items.length > 0
 
           return (
             <section key={group.key} className="project-sidebar__group">
               <button
                 type="button"
-                onClick={() => canCollapse && setOpenGroups((current) => ({ ...current, [group.key]: !isOpen }))}
+                onClick={() => canCollapse && group.key !== activeGroup && setOpenGroups((current) => ({ ...current, [group.key]: !isOpen }))}
                 className={`project-sidebar__group-toggle${canCollapse ? '' : ' is-static'}`}
               >
                 <div className="project-sidebar__group-toggle-main">
@@ -140,4 +132,3 @@ export default function ProjectSidebar({
     </div>
   )
 }
-

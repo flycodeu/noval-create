@@ -186,6 +186,7 @@ export default function FactionsPage({ novelId }: Props) {
   const creatingRef = useRef(false)
   const autoActionRef = useRef(false)
   const draftDirtyRef = useRef(false)
+  const formSelectionRef = useRef<string | null>(null)
 
   const setDraftDirty = useCallback((value: boolean) => {
     draftDirtyRef.current = value
@@ -286,10 +287,14 @@ export default function FactionsPage({ novelId }: Props) {
     if (queryView === 'detail' || queryView === 'graph') setViewMode(queryView)
   }, [items, searchParams])
   useEffect(() => {
+    const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
+    const selectionChanged = formSelectionRef.current !== selectionKey
+    if (!selectionChanged && draftDirtyRef.current) return
     form.setFieldsValue(buildFormValues(selectedItem))
     setDraftDirty(false)
     setDetailsOpen(false)
-  }, [form, selectedId, selectedItem?.id, setDraftDirty])
+    formSelectionRef.current = selectionKey
+  }, [form, novelId, selectedItem, setDraftDirty])
   useEffect(() => {
     if (!hasUnsavedChanges) return
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {

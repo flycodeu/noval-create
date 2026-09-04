@@ -14,7 +14,7 @@ interface NavigatorBindingInput extends Omit<
   novelId: number
   setExecutionMode: ChapterNavigatorProps['onExecutionModeChange']
   selectChapter(chapterId: number): Promise<void>
-  addChapter(volumeId?: number | null): Promise<void>
+  addChapter: ChapterNavigatorProps['onAddChapter']
   deleteChapter: ChapterNavigatorProps['onDeleteChapter']
   navigate(path: string): void
 }

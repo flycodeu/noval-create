@@ -152,10 +152,6 @@ export default function ChapterNavigator({
 
   const normalizedKeyword = searchKeyword.trim().toLowerCase()
 
-  useEffect(() => {
-    setVolumePages({})
-  }, [normalizedKeyword, statusFilter])
-
   const filteredGroups = useMemo(() => {
     return chapterVolumeGroups
       .map((group) => {
@@ -249,7 +245,10 @@ export default function ChapterNavigator({
           placeholder="按章号或关键词筛选..."
           prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
           value={searchKeyword}
-          onChange={(e) => setSearchKeyword(e.target.value)}
+          onChange={(e) => {
+            setSearchKeyword(e.target.value)
+            setVolumePages({})
+          }}
           allowClear
           className="chapter-navigator__search-input"
         />
@@ -259,7 +258,10 @@ export default function ChapterNavigator({
           className="chapter-navigator__status-filter"
           value={statusFilter}
           options={statusOptions}
-          onChange={setStatusFilter}
+          onChange={(value) => {
+            setStatusFilter(value)
+            setVolumePages({})
+          }}
         />
         {normalizedKeyword ? (
           <span className="chapter-navigator__search-badge">
