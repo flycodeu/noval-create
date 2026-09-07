@@ -193,6 +193,16 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('thread_cards_json'))
   assert.ok(getColumns(db, 'tasks').has('runner_type'))
   assert.ok(getColumns(db, 'tasks').has('progress_json'))
+  const attemptColumns = getColumns(db, 'model_request_attempts')
+  for (const column of [
+    'request_id', 'task_id', 'novel_id', 'kind', 'provider', 'model_id',
+    'attempt_index', 'status', 'started_at', 'finished_at', 'usage_json',
+    'completion_json', 'error_code', 'context_pack_id',
+  ]) assert.ok(attemptColumns.has(column))
+  const attemptIndexes = db.prepare('PRAGMA index_list(model_request_attempts)').all().map((row) => row.name)
+  assert.ok(attemptIndexes.includes('idx_model_request_attempts_task_index'))
+  assert.ok(attemptIndexes.includes('idx_model_request_attempts_status_started'))
+  assert.ok(attemptIndexes.includes('idx_model_request_attempts_novel'))
   assert.ok(getColumns(db, 'chapter_versions').has('version_source'))
   assert.ok(getColumns(db, 'chapter_versions').has('word_count'))
   assert.ok(getColumns(db, 'operation_logs').has('summary'))
@@ -514,6 +524,7 @@ function testFreshDbIsIdempotent() {
       '0062_map_travel_fields',
       '0063_narrative_board_layout_and_location_bindings',
       '0064_semantic_memory_source_range_repair',
+      '0065_model_request_attempts',
     ])
 
     runMigrations(db)
@@ -657,6 +668,7 @@ function testPartialSchemaCanResume() {
       '0062_map_travel_fields',
       '0063_narrative_board_layout_and_location_bindings',
       '0064_semantic_memory_source_range_repair',
+      '0065_model_request_attempts',
     ])
 
     const configs = db.prepare(`

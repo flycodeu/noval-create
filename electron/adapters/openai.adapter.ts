@@ -1,6 +1,7 @@
-import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { buildHttpError, executeManagedRequest } from './request-support'
+import { BaseAdapter, ChatOptions, type EmbeddingOptions, Message, normalizeContextWindowTokens } from './base.adapter'
+import { buildHttpError, buildIncompleteStreamError, executeManagedRequest, type ManagedRequestResult } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
+import { normalizeCallCompletion, normalizeOpenAIUsage } from '../../src/shared/model-call-telemetry'
 
 export class OpenAIAdapter extends BaseAdapter {
   id = 'openai'
@@ -31,30 +32,72 @@ export class OpenAIAdapter extends BaseAdapter {
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
     const body = this.buildBody(messages, opts, false)
-    const response = await this.requestChatCompletions(body, opts)
+    const request = await this.requestChatCompletions(body, opts, 'chat')
 
-    const data = await response.json() as Record<string, any>
-    return data.choices[0]?.message?.content || ''
+    try {
+      const data = await request.value.json() as Record<string, any>
+      const choice = data.choices?.[0]
+      const content = choice?.message?.content ?? choice?.delta?.content
+      const completion = normalizeCallCompletion(normalizeOpenAIUsage(data.usage), choice?.finish_reason)
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
+      return typeof content === 'string' ? content : ''
+    } catch (error) {
+      request.fail(error)
+      throw error
+    }
   }
 
   async stream(messages: Message[], opts?: ChatOptions): Promise<void> {
     const body = this.buildBody(messages, opts, true)
-    const response = await this.requestChatCompletions(body, opts)
-    await consumeSseStream(response, async ({ data, event }) => {
-      if (data === '[DONE]') return
+    const request = await this.requestChatCompletions(body, opts, 'stream')
+    let latestUsage: unknown
+    let hasUsage = false
+    let rawFinishReason: unknown
+    let sawDone = false
+    try {
+      await consumeSseStream(request.value, async ({ data, event }) => {
+        if (data === '[DONE]') {
+          sawDone = true
+          return
+        }
 
-      const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
-      const chunk = parsed?.choices?.[0]?.delta?.content
-      if (chunk && opts?.onStream) {
-        opts.onStream(chunk)
-      }
-    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+        const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+        if (!parsed) return
+        if (parsed.usage && typeof parsed.usage === 'object') {
+          latestUsage = parsed.usage
+          hasUsage = true
+        }
+        const choice = parsed.choices?.[0]
+        if (typeof choice?.finish_reason === 'string') rawFinishReason = choice.finish_reason
+        const chunk = choice?.delta?.content
+        if (typeof chunk === 'string' && chunk && opts?.onStream) {
+          opts.onStream(chunk)
+        }
+      }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+      const completion = normalizeCallCompletion(normalizeOpenAIUsage(latestUsage), rawFinishReason)
+      if (!sawDone) throw buildIncompleteStreamError(this.provider)
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
+    } catch (error) {
+      const partialCompletion = hasUsage || typeof rawFinishReason === 'string'
+        ? normalizeCallCompletion(normalizeOpenAIUsage(latestUsage), rawFinishReason)
+        : null
+      request.fail(error, partialCompletion)
+      throw error
+    }
   }
 
-  private async requestChatCompletions(body: Record<string, unknown>, opts?: ChatOptions): Promise<Response> {
+  private async requestChatCompletions(
+    body: Record<string, unknown>,
+    opts: ChatOptions | undefined,
+    kind: 'chat' | 'stream',
+  ): Promise<ManagedRequestResult<Response>> {
     return executeManagedRequest({
       provider: this.provider,
       modelId: this.modelId,
+      kind,
+      requestObserver: opts?.requestObserver,
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,
@@ -109,23 +152,39 @@ export class OpenAIAdapter extends BaseAdapter {
     return body
   }
 
-  async embed(texts: string[], opts?: { model?: string }): Promise<number[][]> {
+  async embed(texts: string[], opts?: EmbeddingOptions): Promise<number[][]> {
     const embeddingModel = opts?.model || 'text-embedding-3-small'
-    const response = await fetch(`${this.baseUrl}/embeddings`, {
-      method: 'POST',
-      headers: this.buildHeaders(),
-      body: JSON.stringify({
-        model: embeddingModel,
-        input: texts,
-      }),
+    const request = await executeManagedRequest({
+      provider: this.provider,
+      modelId: embeddingModel,
+      kind: 'embedding',
+      requestObserver: opts?.requestObserver,
+      signal: opts?.signal,
+      timeoutMs: opts?.timeoutMs,
+      requestRetryCount: opts?.requestRetryCount,
+      requestLabel: 'openai.embeddings',
+    }, async (signal) => {
+      const response = await fetch(`${this.baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: this.buildHeaders(),
+        body: JSON.stringify({ model: embeddingModel, input: texts }),
+        signal,
+      })
+      if (!response.ok) {
+        const err = await response.text()
+        throw buildHttpError(`OpenAI Embedding API 请求失败（${response.status}）：${err}`, response)
+      }
+      return response
     })
 
-    if (!response.ok) {
-      const err = await response.text()
-      throw buildHttpError(`OpenAI Embedding API 请求失败（${response.status}）：${err}`, response)
+    try {
+      const data = await request.value.json() as { data: Array<{ embedding: number[] }> }
+      const embeddings = data.data.map((item) => item.embedding)
+      request.succeed()
+      return embeddings
+    } catch (error) {
+      request.fail(error)
+      throw error
     }
-
-    const data = await response.json() as { data: Array<{ embedding: number[] }> }
-    return data.data.map((d) => d.embedding)
   }
 }

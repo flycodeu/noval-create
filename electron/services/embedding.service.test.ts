@@ -31,6 +31,7 @@ function createDbMock(rowsByTable: TableRows) {
     const query = {
       where: () => query,
       orderBy: () => query,
+      innerJoin: () => query,
       limit: (value: number) => {
         limitValue = value
         requestedLimits.push(value)
@@ -94,6 +95,16 @@ describe('embedding fallback retrieval', () => {
     expect(keywords).toContain('openai')
     expect(keywords).not.toContain('灯事')
     expect(keywords.length).toBeLessThanOrEqual(12)
+  })
+
+  it('rejects an explicitly invalid historical boundary', async () => {
+    expect(() => fallbackKeywordSearch(1, '历史', 5, { beforeChapterNum: 0 })).toThrow('beforeChapterNum 必须是正整数')
+    await expect(
+      searchSimilarFragments(1, '历史', 5, undefined, { beforeChapterNum: 1.5 }),
+    ).rejects.toThrow('beforeChapterNum 必须是正整数')
+    await expect(
+      searchSimilarFragments(1, '历史', 5, undefined, { beforeChapterNum: Number.NaN }),
+    ).rejects.toThrow('beforeChapterNum 必须是正整数')
   })
 
   it('rejects malformed or mixed-dimension embedding batches', () => {

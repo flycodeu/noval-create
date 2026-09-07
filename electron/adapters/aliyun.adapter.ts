@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { buildHttpError, executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest, type ManagedRequestResult } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class AliyunAdapter extends BaseAdapter {
@@ -27,41 +27,53 @@ export class AliyunAdapter extends BaseAdapter {
   }
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
-    const response = await this.requestGeneration(this.buildBody(messages, opts), opts, false)
+    const request = await this.requestGeneration(this.buildBody(messages, opts), opts, false)
 
-    const data = await response.json() as Record<string, any>
-    if (data.code) {
-      throw new Error(`通义错误: ${data.message}`)
+    try {
+      const data = await request.value.json() as Record<string, any>
+      if (data.code) throw new Error(`通义错误: ${data.message}`)
+      const result = data.output?.text || data.output?.choices?.[0]?.message?.content || ''
+      request.succeed()
+      return result
+    } catch (error) {
+      request.fail(error)
+      throw error
     }
-
-    return data.output?.text || data.output?.choices?.[0]?.message?.content || ''
   }
 
   async stream(messages: Message[], opts?: ChatOptions): Promise<void> {
-    const response = await this.requestGeneration(this.buildBody(messages, opts, true), opts, true)
+    const request = await this.requestGeneration(this.buildBody(messages, opts, true), opts, true)
     let previousContent = ''
 
-    await consumeSseStream(response, async ({ data, event }) => {
-      const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
-      const fullContent = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text || ''
-      const delta = extractAccumulatedDelta(previousContent, fullContent)
-      if (delta) {
-        previousContent = fullContent
-        opts?.onStream?.(delta)
-      } else if (fullContent.length > previousContent.length) {
-        previousContent = fullContent
-      }
-    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+    try {
+      await consumeSseStream(request.value, async ({ data, event }) => {
+        const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+        const fullContent = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text || ''
+        const delta = extractAccumulatedDelta(previousContent, fullContent)
+        if (delta) {
+          previousContent = fullContent
+          opts?.onStream?.(delta)
+        } else if (fullContent.length > previousContent.length) {
+          previousContent = fullContent
+        }
+      }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+      request.succeed()
+    } catch (error) {
+      request.fail(error)
+      throw error
+    }
   }
 
   private async requestGeneration(
     body: Record<string, unknown>,
     opts: ChatOptions | undefined,
     stream: boolean,
-  ): Promise<Response> {
+  ): Promise<ManagedRequestResult<Response>> {
     return executeManagedRequest({
       provider: this.provider,
       modelId: this.modelId,
+      kind: stream ? 'stream' : 'chat',
+      requestObserver: opts?.requestObserver,
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,

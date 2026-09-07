@@ -2085,7 +2085,7 @@ export function runMigrations(sqlite: Database.Database) {
       CREATE TABLE IF NOT EXISTS artifacts (
         id TEXT PRIMARY KEY,
         novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('chat', 'stream', 'embedding', 'auth', 'cli')),
         status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'reviewed', 'approved', 'committed', 'rejected', 'superseded')),
         version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
         parent_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
@@ -3012,6 +3012,35 @@ export function runMigrations(sqlite: Database.Database) {
       `).run()
     }
   })
+
+  runMigrationStep(sqlite, '0065_model_request_attempts', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS model_request_attempts (
+        request_id TEXT PRIMARY KEY,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+        novel_id INTEGER,
+        kind TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        attempt_index INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('started', 'success', 'failed', 'cancelled', 'interrupted')),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        usage_json TEXT NOT NULL DEFAULT '{"input":{"value":null,"source":"unknown"},"output":{"value":null,"source":"unknown"},"cacheRead":{"value":null,"source":"unknown"},"cacheWrite":{"value":null,"source":"unknown"},"reasoning":{"value":null,"source":"unknown"}}',
+        completion_json TEXT,
+        error_code TEXT,
+        context_pack_id TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_model_request_attempts_task_index
+        ON model_request_attempts(task_id, attempt_index);
+      CREATE INDEX IF NOT EXISTS idx_model_request_attempts_status_started
+        ON model_request_attempts(status, started_at, request_id);
+      CREATE INDEX IF NOT EXISTS idx_model_request_attempts_novel
+        ON model_request_attempts(novel_id, started_at, request_id);
+    `)
+    validateModelRequestAttemptSchema(sqlite)
+  })
 }
 
 function parseLegacyIdTokens(raw: unknown): Array<number | string> {
@@ -3374,6 +3403,27 @@ function validateRequiredSchema(
 
   if (missing.length > 0) {
     throw new Error(`数据库结构迁移未完成，缺少：${missing.join(', ')}`)
+  }
+}
+
+function validateModelRequestAttemptSchema(sqlite: Database.Database) {
+  const requiredColumns = [
+    'request_id', 'task_id', 'novel_id', 'kind', 'provider', 'model_id',
+    'attempt_index', 'status', 'started_at', 'finished_at', 'usage_json',
+    'completion_json', 'error_code', 'context_pack_id',
+  ]
+  const columns = getColumnNames(sqlite, 'model_request_attempts')
+  const missing = requiredColumns.filter((column) => !columns.has(column))
+  const indexes = new Set((sqlite.prepare('PRAGMA index_list(model_request_attempts)').all() as Array<{ name: string }>).map((row) => row.name))
+  for (const indexName of [
+    'idx_model_request_attempts_task_index',
+    'idx_model_request_attempts_status_started',
+    'idx_model_request_attempts_novel',
+  ]) {
+    if (!indexes.has(indexName)) missing.push(`index:${indexName}`)
+  }
+  if (missing.length > 0) {
+    throw new Error(`模型请求账本迁移未完成，缺少：${missing.join(', ')}`)
   }
 }
 

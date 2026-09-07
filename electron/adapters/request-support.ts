@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import type { CallCompletion, ModelRequestKind, ModelRequestObserver, ModelRequestStatus } from '../../src/shared/model-call-telemetry'
+import { createUnknownCallUsage } from '../../src/shared/model-call-telemetry'
 import { logError, logWarn } from '../utils/runtime-log'
 
 type ErrorLike = Error & {
@@ -17,10 +20,25 @@ interface ManagedRequestSignal {
 export interface ManagedRequestOptions {
   provider: string
   modelId: string
+  kind: ModelRequestKind
+  requestObserver?: ModelRequestObserver
   timeoutMs?: number
   requestRetryCount?: number
   signal?: AbortSignal
   requestLabel?: string
+}
+
+export interface ManagedRequestResult<T> {
+  requestId: string
+  value: T
+  succeed: (completion?: CallCompletion | null) => void
+  fail: (error: unknown, completion?: CallCompletion | null) => void
+}
+
+export interface ManagedRequestLifecycle {
+  requestId: string
+  succeed: (completion?: CallCompletion | null) => void
+  fail: (error: unknown, completion?: CallCompletion | null) => void
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 90_000
@@ -71,24 +89,54 @@ export function buildHttpError(
   return error
 }
 
+export function buildIncompleteStreamError(provider: string): Error {
+  return buildError(`${provider} 流式响应在协议结束标记前中断。`, 'MODEL_STREAM_INTERRUPTED')
+}
+
 export async function executeManagedRequest<T>(
   options: ManagedRequestOptions,
   operation: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
+): Promise<ManagedRequestResult<T>> {
   const retryLimit = resolveManagedRequestRetryCount(options.requestRetryCount)
   let lastError: unknown
 
   for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
     const timeoutMs = resolveManagedRequestTimeoutMs(options.timeoutMs)
     const managedSignal = createManagedSignal(options.signal, timeoutMs)
+    const lifecycle = createManagedRequestLifecycle(options)
 
     try {
-      return await operation(managedSignal.signal)
+      const value = await operation(managedSignal.signal)
+      return {
+        requestId: lifecycle.requestId,
+        value,
+        succeed: (completion) => {
+          try {
+            lifecycle.succeed(completion)
+          } finally {
+            managedSignal.cleanup()
+          }
+        },
+        fail: (error, completion) => {
+          try {
+            lifecycle.fail(error, completion)
+          } finally {
+            managedSignal.cleanup()
+          }
+        },
+      }
     } catch (error) {
-      if (managedSignal.didExternalAbort()) throw buildAbortError()
+      if (managedSignal.didExternalAbort()) {
+        const abortError = buildAbortError()
+        lifecycle.fail(abortError)
+        managedSignal.cleanup()
+        throw abortError
+      }
       const normalizedError = managedSignal.didTimeout()
         ? buildRequestTimeoutError(timeoutMs, error)
         : error
+      lifecycle.fail(normalizedError)
+      managedSignal.cleanup()
 
       if (!isRetryableNetworkError(normalizedError)) throw normalizedError
       lastError = normalizedError
@@ -108,8 +156,6 @@ export async function executeManagedRequest<T>(
         error: normalizedError,
       })
       await delay(getRetryDelayMs(attempt))
-    } finally {
-      managedSignal.cleanup()
     }
   }
 
@@ -125,6 +171,82 @@ export async function executeManagedRequest<T>(
     error: lastError,
   })
   throw buildRetryExhaustedError(lastError, retryLimit + 1)
+}
+
+export function createManagedRequestLifecycle(options: Pick<
+  ManagedRequestOptions,
+  'provider' | 'modelId' | 'kind' | 'requestObserver'
+>): ManagedRequestLifecycle {
+  const requestId = randomUUID()
+  let ended = false
+  notifyRequestObserver(options.requestObserver?.onRequestStart, {
+    requestId,
+    kind: options.kind,
+    provider: options.provider,
+    modelId: options.modelId,
+    status: 'started',
+    usage: createUnknownCallUsage(),
+    completion: null,
+    errorCode: null,
+  })
+
+  const end = (
+    status: Exclude<ModelRequestStatus, 'started' | 'interrupted'>,
+    error: unknown,
+    completion: CallCompletion | null = null,
+  ) => {
+    if (ended) return
+    ended = true
+    notifyRequestObserver(options.requestObserver?.onRequestEnd, {
+      requestId,
+      kind: options.kind,
+      provider: options.provider,
+      modelId: options.modelId,
+      status,
+      usage: completion?.usage || createUnknownCallUsage(),
+      completion,
+      errorCode: status === 'success' ? null : getRequestErrorCode(error, status),
+    })
+  }
+
+  return {
+    requestId,
+    succeed: (completion = null) => end('success', null, completion),
+    fail: (error, completion = null) => end(isAbortError(error) ? 'cancelled' : 'failed', error, completion),
+  }
+}
+
+function notifyRequestObserver(
+  callback: ModelRequestObserver['onRequestStart'] | ModelRequestObserver['onRequestEnd'],
+  event: Parameters<NonNullable<ModelRequestObserver['onRequestStart']>>[0],
+): void {
+  try {
+    callback?.(event)
+  } catch (error) {
+    logWarn('model', '模型请求计量回调失败，生成流程继续。', {
+      consoleSummary: `[model:warn] provider=${event.provider} request=${event.requestId} telemetry-callback-failed`,
+      context: {
+        requestId: event.requestId,
+        provider: event.provider,
+        modelId: event.modelId,
+        kind: event.kind,
+        status: event.status,
+      },
+      error,
+    })
+  }
+}
+
+function getRequestErrorCode(error: unknown, status: 'failed' | 'cancelled'): string {
+  if (status === 'cancelled') return 'REQUEST_CANCELLED'
+  if (error instanceof Error) {
+    const typed = error as ErrorLike
+    if (typeof typed.code === 'string' && typed.code.trim()) return typed.code.trim().slice(0, 120)
+    if (typeof typed.statusCode === 'number' && Number.isFinite(typed.statusCode)) {
+      return `HTTP_${Math.round(typed.statusCode)}`
+    }
+  }
+  return 'MODEL_REQUEST_FAILED'
 }
 
 function createManagedSignal(externalSignal: AbortSignal | undefined, timeoutMs: number): ManagedRequestSignal {

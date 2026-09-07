@@ -1042,6 +1042,23 @@ export const tasks = sqliteTable('tasks', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const modelRequestAttempts = sqliteTable('model_request_attempts', {
+  requestId: text('request_id').primaryKey(),
+  taskId: integer('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
+  novelId: integer('novel_id'),
+  kind: text('kind').notNull(),
+  provider: text('provider').notNull(),
+  modelId: text('model_id').notNull(),
+  attemptIndex: integer('attempt_index').notNull(),
+  status: text('status').notNull(),
+  startedAt: text('started_at').notNull(),
+  finishedAt: text('finished_at'),
+  usageJson: text('usage_json').notNull().default('{"input":{"value":null,"source":"unknown"},"output":{"value":null,"source":"unknown"},"cacheRead":{"value":null,"source":"unknown"},"cacheWrite":{"value":null,"source":"unknown"},"reasoning":{"value":null,"source":"unknown"}}'),
+  completionJson: text('completion_json'),
+  errorCode: text('error_code'),
+  contextPackId: text('context_pack_id'),
+})
+
 export const chapterBatchSnapshots = sqliteTable('chapter_batch_snapshots', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),

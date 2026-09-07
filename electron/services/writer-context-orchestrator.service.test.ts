@@ -217,6 +217,29 @@ describe('writer context orchestrator', () => {
     ]))
   })
 
+  it('passes the current chapter boundary to every writer recall entry', async () => {
+    const searchSimilarFragments = vi.fn(async () => ({ hits: [] }))
+
+    await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterGoal: '守住补给点并稳住副手',
+        relationSummary: '林策与沈砚互不信任。',
+        activeThreads: '副手可能临阵倒向对方。',
+        openLoops: '掉队者生死未明。',
+        dueForeshadows: '失灵通信器可能暴露位置。',
+        mentionedCharacters: ['林策'],
+        mentionedItems: ['药箱'],
+        mentionedLocations: ['东门补给点'],
+      },
+    }), { searchSimilarFragments })
+
+    expect(searchSimilarFragments).toHaveBeenCalled()
+    const calls = searchSimilarFragments.mock.calls as unknown[][]
+    expect(calls.every((call) => (
+      call[4] && (call[4] as { beforeChapterNum?: number }).beforeChapterNum === 13
+    ))).toBe(true)
+  })
+
   it('uses chapter bridge and step memory as recall signals even without entity mentions', async () => {
     const input = createInput({
       signals: {

@@ -17,6 +17,12 @@ import {
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { logWarn } from '../utils/runtime-log'
+import type { CallCompletion, ModelRequestObserver } from '../../src/shared/model-call-telemetry'
+import {
+  createModelAttemptLedgerSink,
+  interruptStartedModelAttempts,
+  type ModelAttemptLedgerSink,
+} from './model-attempt-ledger.service'
 
 export type TaskType =
   | 'init'
@@ -465,8 +471,56 @@ async function acquireModelSlot(
 type ErrorLike = Error & {
   code?: string
   cause?: unknown
+  outputText?: string
   statusCode?: number
   retryAfterMs?: number
+}
+
+function buildIncompleteModelOutputError(completion: CallCompletion, outputText: string): Error {
+  const error = new Error(`模型输出未完整结束（${completion.finish}），已保留候选内容。`) as ErrorLike
+  error.code = 'NF_MODEL_OUTPUT_INCOMPLETE'
+  error.outputText = outputText
+  return error
+}
+
+function throwIfModelOutputIncomplete(completion: CallCompletion | null, outputText: string): void {
+  if (completion && ['length', 'filtered', 'tool_call'].includes(completion.finish)) {
+    throw buildIncompleteModelOutputError(completion, outputText)
+  }
+}
+
+function combineRequestObservers(
+  ledger: ModelRequestObserver,
+  external?: ModelRequestObserver,
+): ModelRequestObserver {
+  const notifyBoth = (
+    first: ModelRequestObserver['onRequestStart'] | ModelRequestObserver['onRequestEnd'],
+    second: ModelRequestObserver['onRequestStart'] | ModelRequestObserver['onRequestEnd'],
+    event: Parameters<NonNullable<ModelRequestObserver['onRequestStart']>>[0],
+  ) => {
+    let firstError: unknown
+    try {
+      first?.(event)
+    } catch (error) {
+      firstError = error
+    }
+    second?.(event)
+    if (firstError) throw firstError
+  }
+  return {
+    onRequestStart: (event) => notifyBoth(ledger.onRequestStart, external?.onRequestStart, event),
+    onRequestEnd: (event) => notifyBoth(ledger.onRequestEnd, external?.onRequestEnd, event),
+  }
+}
+
+function reportLedgerFailures(taskId: number, sink: ModelAttemptLedgerSink): void {
+  const failures = sink.getPersistenceFailures()
+  if (failures.length === 0) return
+  logWarn('model', '模型请求已完成，但物理请求计量写入不完整。', {
+    consoleSummary: `[model:warn] task=${taskId} telemetry-persistence-incomplete count=${failures.length}`,
+    context: { taskId, failureCount: failures.length },
+    error: failures[0],
+  })
 }
 
 function parseJsonObject<T extends object>(raw?: string | null): T {
@@ -987,6 +1041,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
   let outputLimitExceeded = false
   let stopHeartbeat = () => {}
   let release = () => {}
+  let ledgerSink: ModelAttemptLedgerSink | null = null
 
   try {
     const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
@@ -995,6 +1050,8 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
+    ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
+    let completion: CallCompletion | null = null
 
     for (let attemptNumber = 0; ; attemptNumber += 1) {
       try {
@@ -1005,6 +1062,11 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
           providerOptions: {
             ...acquired.runtime.providerOptions,
             ...chatOpts.providerOptions,
+          },
+          requestObserver: combineRequestObservers(ledgerSink, chatOpts.requestObserver),
+          onCompletion: (value) => {
+            completion = value
+            chatOpts.onCompletion?.(value)
           },
           signal: controller.signal,
           onStream: (chunk) => {
@@ -1032,6 +1094,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     }
 
     throwIfTaskCancellationRequested(taskId)
+    throwIfModelOutputIncomplete(completion, fullOutput)
     const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
     throwIfTaskCancellationRequested(taskId)
     const durationMs = Date.now() - startTime
@@ -1084,6 +1147,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
 
     throw error
   } finally {
+    if (ledgerSink) reportLedgerFailures(taskId, ledgerSink)
     stopHeartbeat()
     release()
     abortControllers.delete(taskId)
@@ -1116,6 +1180,8 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
   const startTime = Date.now()
   let stopHeartbeat = () => {}
   let release = () => {}
+  let ledgerSink: ModelAttemptLedgerSink | null = null
+  let result = ''
 
   try {
     const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
@@ -1124,8 +1190,9 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
+    ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
+    let completion: CallCompletion | null = null
 
-    let result = ''
     for (let attemptNumber = 0; ; attemptNumber += 1) {
       try {
         result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
@@ -1135,6 +1202,11 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
           providerOptions: {
             ...acquired.runtime.providerOptions,
             ...chatOpts.providerOptions,
+          },
+          requestObserver: combineRequestObservers(ledgerSink, chatOpts.requestObserver),
+          onCompletion: (value) => {
+            completion = value
+            chatOpts.onCompletion?.(value)
           },
           signal: controller.signal,
         })
@@ -1151,6 +1223,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     }
 
     throwIfTaskCancellationRequested(taskId)
+    throwIfModelOutputIncomplete(completion, result)
     const finalResult = opts.onSuccess ? await opts.onSuccess(result, taskId) : undefined
     throwIfTaskCancellationRequested(taskId)
 
@@ -1179,6 +1252,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     updateTask(taskId, {
       status,
       errorMessage: aborted ? '用户已取消' : errorMessage,
+      outputText: result || null,
       durationMs: Date.now() - startTime,
       currentChildTaskId: null,
     })
@@ -1191,6 +1265,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
 
     throw error
   } finally {
+    if (ledgerSink) reportLedgerFailures(taskId, ledgerSink)
     stopHeartbeat()
     release()
     abortControllers.delete(taskId)
@@ -1311,6 +1386,15 @@ export function cancelTask(taskId: number, sender?: ProgressSink, visited = new 
 
 export function recoverOrphanedTasks(): number {
   const db = getDb()
+  try {
+    interruptStartedModelAttempts()
+  } catch (error) {
+    logWarn('model', '应用恢复任务时未能收尾物理请求账本。', {
+      consoleSummary: '[model:warn] attempt-ledger-recovery-failed',
+      context: {},
+      error,
+    })
+  }
   const recoveryTimestamp = new Date().toISOString()
   const orphanedTasks = db.select().from(tasks).all()
     .filter((task) => {

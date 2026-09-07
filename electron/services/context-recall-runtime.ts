@@ -69,6 +69,7 @@ export async function runRecallAugmentation(
           bucket.query,
           bucket.topK,
           input.modelConfigId || undefined,
+          { beforeChapterNum: input.chapterNum },
         ).catch(() => ({
           hits: [],
           fallbackReason: 'embedding_service_failed' as RecallFallbackReason,

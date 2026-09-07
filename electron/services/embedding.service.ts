@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, desc, eq, inArray, isNotNull, like, or } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, like, lt, or } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
@@ -52,6 +52,37 @@ export type SimilarFragmentFallbackReason =
 export interface SimilarFragmentSearchResult {
   hits: SimilarFragmentHit[]
   fallbackReason?: SimilarFragmentFallbackReason
+}
+
+export interface SimilarFragmentSearchOptions {
+  beforeChapterNum?: number
+}
+
+const embeddingCandidateSelection = {
+  id: chapterEmbeddings.id,
+  novelId: chapterEmbeddings.novelId,
+  chapterId: chapterEmbeddings.chapterId,
+  fragmentType: chapterEmbeddings.fragmentType,
+  fragmentText: chapterEmbeddings.fragmentText,
+  embeddingJson: chapterEmbeddings.embeddingJson,
+  modelId: chapterEmbeddings.modelId,
+  dimensions: chapterEmbeddings.dimensions,
+  embeddingProfile: chapterEmbeddings.embeddingProfile,
+  chapterNum: chapters.chapterNum,
+}
+
+function resolveBeforeChapterNum(options?: SimilarFragmentSearchOptions): number | undefined {
+  if (options === undefined) return undefined
+  if (options === null || typeof options !== 'object') {
+    throw new Error('beforeChapterNum 必须是正整数。')
+  }
+  if (!Object.prototype.hasOwnProperty.call(options, 'beforeChapterNum')) return undefined
+
+  const value = options.beforeChapterNum
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error('beforeChapterNum 必须是正整数。')
+  }
+  return value
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -462,19 +493,24 @@ export async function searchSimilarFragments(
   queryText: string,
   topK = 5,
   modelConfigId?: number,
+  options?: SimilarFragmentSearchOptions,
 ): Promise<SimilarFragmentSearchResult> {
+  const beforeChapterNum = resolveBeforeChapterNum(options)
   const db = getDb()
   const vectorRows = db.select({ id: chapterEmbeddings.id })
     .from(chapterEmbeddings)
+    .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
     .where(and(
       eq(chapterEmbeddings.novelId, novelId),
+      eq(chapters.novelId, novelId),
+      ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
       isNotNull(chapterEmbeddings.embeddingJson),
     ))
     .limit(1)
     .all()
 
   if (vectorRows.length === 0) {
-    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    const hits = fallbackKeywordSearch(novelId, queryText, topK, options)
     return {
       hits,
       fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
@@ -484,7 +520,7 @@ export async function searchSimilarFragments(
   const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
   const queryEmbedding = queryBatch.embeddings?.[0]
   if (!queryEmbedding || !queryBatch.profile) {
-    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    const hits = fallbackKeywordSearch(novelId, queryText, topK, options)
     return {
       hits,
       fallbackReason: 'embedding_service_failed',
@@ -500,17 +536,25 @@ export async function searchSimilarFragments(
   ] as const
   const lookupKeywords = extractEmbeddingKeywords(queryText, MAX_LOOKUP_KEYWORDS)
   const lexicalRows = lookupKeywords.length > 0
-    ? db.select().from(chapterEmbeddings)
+    ? db.select(embeddingCandidateSelection).from(chapterEmbeddings)
+      .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
       .where(and(
         ...compatibilityFilters,
+        eq(chapters.novelId, novelId),
+        ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
         buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
       ))
       .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
       .limit(MAX_VECTOR_CANDIDATES - RECENT_VECTOR_CANDIDATES)
       .all()
     : []
-  const recentRows = db.select().from(chapterEmbeddings)
-    .where(and(...compatibilityFilters))
+  const recentRows = db.select(embeddingCandidateSelection).from(chapterEmbeddings)
+    .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
+    .where(and(
+      ...compatibilityFilters,
+      eq(chapters.novelId, novelId),
+      ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
+    ))
     .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
     .limit(RECENT_VECTOR_CANDIDATES)
     .all()
@@ -521,26 +565,12 @@ export async function searchSimilarFragments(
   ).values()].slice(0, MAX_VECTOR_CANDIDATES)
 
   if (compatibleRows.length === 0) {
-    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    const hits = fallbackKeywordSearch(novelId, queryText, topK, options)
     return {
       hits,
       fallbackReason: hits.length > 0 ? 'embedding_profile_mismatch' : 'no_hits',
     }
   }
-
-  const compatibleChapterIds = [...new Set(compatibleRows.map((row) => row.chapterId))]
-  const chapterNumById = compatibleChapterIds.length > 0
-    ? new Map(db.select({
-      id: chapters.id,
-      chapterNum: chapters.chapterNum,
-    }).from(chapters)
-      .where(and(
-        eq(chapters.novelId, novelId),
-        inArray(chapters.id, compatibleChapterIds),
-      ))
-      .all()
-      .map((row) => [row.id, row.chapterNum] as const))
-    : new Map<number, number>()
 
   const scored = compatibleRows.flatMap((e) => {
       try {
@@ -548,7 +578,7 @@ export async function searchSimilarFragments(
         if (!isCompatibleEmbeddingRow(e, queryProfile, queryEmbedding.length)) return []
         return [{
           chapterId: e.chapterId,
-          chapterNum: chapterNumById.get(e.chapterId) || 0,
+          chapterNum: e.chapterNum ?? 0,
           fragmentType: e.fragmentType,
           fragmentText: e.fragmentText,
           similarity: cosineSimilarity(queryEmbedding, embedding),
@@ -572,48 +602,37 @@ export async function findSimilarFragments(
   queryText: string,
   topK = 5,
   modelConfigId?: number,
+  options?: SimilarFragmentSearchOptions,
 ): Promise<SimilarFragmentHit[]> {
-  return (await searchSimilarFragments(novelId, queryText, topK, modelConfigId)).hits
+  return (await searchSimilarFragments(novelId, queryText, topK, modelConfigId, options)).hits
 }
 
 export function fallbackKeywordSearch(
   novelId: number,
   queryText: string,
   topK = 5,
+  options?: SimilarFragmentSearchOptions,
 ): SimilarFragmentHit[] {
+  const beforeChapterNum = resolveBeforeChapterNum(options)
   const db = getDb()
   const keywords = extractEmbeddingKeywords(queryText)
   const lookupKeywords = keywords.slice(0, MAX_LOOKUP_KEYWORDS)
   const candidateLimit = getCandidateLimit(topK)
-  const embeddingFilter = lookupKeywords.length > 0
-    ? and(
+  const candidateEmbeddings = db.select(embeddingCandidateSelection).from(chapterEmbeddings)
+    .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
+    .where(and(
       eq(chapterEmbeddings.novelId, novelId),
-      buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
-    )
-    : eq(chapterEmbeddings.novelId, novelId)
-  const candidateEmbeddings = db.select().from(chapterEmbeddings)
-    .where(embeddingFilter)
+      eq(chapters.novelId, novelId),
+      ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
+      ...(lookupKeywords.length > 0 ? [buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords)] : []),
+    ))
     .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
     .limit(candidateLimit)
     .all()
 
-  const candidateChapterIds = [...new Set(candidateEmbeddings.map((row) => row.chapterId))]
-  const chapterNumById = candidateChapterIds.length > 0
-    ? new Map(db.select({
-      id: chapters.id,
-      chapterNum: chapters.chapterNum,
-    }).from(chapters)
-      .where(and(
-        eq(chapters.novelId, novelId),
-        inArray(chapters.id, candidateChapterIds),
-      ))
-      .all()
-      .map((row) => [row.id, row.chapterNum] as const))
-    : new Map<number, number>()
-
   const candidates: SimilarFragmentHit[] = candidateEmbeddings.map((e) => ({
       chapterId: e.chapterId,
-      chapterNum: chapterNumById.get(e.chapterId) || 0,
+      chapterNum: e.chapterNum ?? 0,
       fragmentType: e.fragmentType,
       fragmentText: e.fragmentText,
       similarity: keywordScoreRatio(e.fragmentText, keywords),
@@ -642,9 +661,11 @@ export function fallbackKeywordSearch(
     content: chapters.content,
   })
     .from(chapters)
-    .where(lookupKeywords.length > 0
-      ? and(eq(chapters.novelId, novelId), or(...chapterMatches))
-      : eq(chapters.novelId, novelId))
+    .where(and(
+      eq(chapters.novelId, novelId),
+      ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
+      ...(lookupKeywords.length > 0 ? [or(...chapterMatches)] : []),
+    ))
     .orderBy(desc(chapters.chapterNum), desc(chapters.id))
     .limit(candidateLimit)
     .all()

@@ -1,3 +1,5 @@
+import type { CallCompletion, ModelRequestObserver } from '../../src/shared/model-call-telemetry'
+
 export interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -9,12 +11,22 @@ export interface ChatOptions {
   systemPrompt?: string
   stopSequences?: string[]
   onStream?: (chunk: string) => void
+  onCompletion?: (result: CallCompletion) => void
+  requestObserver?: ModelRequestObserver
   signal?: AbortSignal
   timeoutMs?: number
   requestRetryCount?: number
   providerOptions?: {
     kimiThinking?: 'enabled' | 'disabled'
   }
+}
+
+export interface EmbeddingOptions {
+  model?: string
+  signal?: AbortSignal
+  timeoutMs?: number
+  requestRetryCount?: number
+  requestObserver?: ModelRequestObserver
 }
 
 export function normalizeContextWindowTokens(value: unknown, fallback: number): number {
@@ -34,7 +46,7 @@ export abstract class BaseAdapter {
   abstract chat(messages: Message[], opts?: ChatOptions): Promise<string>
   abstract stream(messages: Message[], opts?: ChatOptions): Promise<void>
 
-  async embed?(texts: string[], opts?: { model?: string }): Promise<number[][]>
+  async embed?(texts: string[], opts?: EmbeddingOptions): Promise<number[][]>
 
   countTokens(text: string): number {
     if (!text) return 0

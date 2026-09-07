@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { buildHttpError, executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest, type ManagedRequestResult } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class BaiduAdapter extends BaseAdapter {
@@ -32,7 +32,7 @@ export class BaiduAdapter extends BaseAdapter {
     this.defaultMaxTokens = defaultMaxTokens
   }
 
-  private async getAccessToken(opts?: Pick<ChatOptions, 'signal' | 'timeoutMs' | 'requestRetryCount'>): Promise<string> {
+  private async getAccessToken(opts?: Pick<ChatOptions, 'signal' | 'timeoutMs' | 'requestRetryCount' | 'requestObserver'>): Promise<string> {
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken
     }
@@ -49,10 +49,13 @@ export class BaiduAdapter extends BaseAdapter {
     }
   }
 
-  private async refreshAccessToken(opts?: Pick<ChatOptions, 'timeoutMs' | 'requestRetryCount'>): Promise<string> {
-    const response = await executeManagedRequest({
+  private async refreshAccessToken(opts?: Pick<ChatOptions, 'signal' | 'timeoutMs' | 'requestRetryCount' | 'requestObserver'>): Promise<string> {
+    const request = await executeManagedRequest({
       provider: this.provider,
       modelId: this.modelId,
+      kind: 'auth',
+      requestObserver: opts?.requestObserver,
+      signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,
       requestLabel: 'baidu.oauth.token',
@@ -70,13 +73,19 @@ export class BaiduAdapter extends BaseAdapter {
       return result
     })
 
-    const data = await response.json() as Record<string, any>
-    if (!data.access_token) {
-      throw new Error(`百度 Token 获取失败：${data.error_description || data.error || '未返回 access_token'}`)
+    try {
+      const data = await request.value.json() as Record<string, any>
+      if (!data.access_token) {
+        throw new Error(`百度 Token 获取失败：${data.error_description || data.error || '未返回 access_token'}`)
+      }
+      this.accessToken = data.access_token
+      this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
+      request.succeed()
+      return this.accessToken!
+    } catch (error) {
+      request.fail(error)
+      throw error
     }
-    this.accessToken = data.access_token
-    this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
-    return this.accessToken!
   }
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
@@ -93,14 +102,18 @@ export class BaiduAdapter extends BaseAdapter {
       body.system = opts.systemPrompt
     }
 
-    const response = await this.requestChat(endpoint, body, opts, false)
+    const request = await this.requestChat(endpoint, body, opts, false)
 
-    const data = await response.json() as Record<string, any>
-    if (data.error_code) {
-      throw new Error(`百度文心错误: ${data.error_msg}`)
+    try {
+      const data = await request.value.json() as Record<string, any>
+      if (data.error_code) throw new Error(`百度文心错误: ${data.error_msg}`)
+      const result = data.result || ''
+      request.succeed()
+      return result
+    } catch (error) {
+      request.fail(error)
+      throw error
     }
-
-    return data.result || ''
   }
 
   async stream(messages: Message[], opts?: ChatOptions): Promise<void> {
@@ -118,14 +131,18 @@ export class BaiduAdapter extends BaseAdapter {
       body.system = opts.systemPrompt
     }
 
-    const response = await this.requestChat(endpoint, body, opts, true)
+    const request = await this.requestChat(endpoint, body, opts, true)
 
-    await consumeSseStream(response, async ({ data, event }) => {
-      const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
-      if (parsed?.result) {
-        opts?.onStream?.(parsed.result)
-      }
-    }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+    try {
+      await consumeSseStream(request.value, async ({ data, event }) => {
+        const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+        if (parsed?.result) opts?.onStream?.(parsed.result)
+      }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
+      request.succeed()
+    } catch (error) {
+      request.fail(error)
+      throw error
+    }
   }
 
   private async requestChat(
@@ -133,10 +150,12 @@ export class BaiduAdapter extends BaseAdapter {
     body: Record<string, unknown>,
     opts: ChatOptions | undefined,
     stream: boolean,
-  ): Promise<Response> {
+  ): Promise<ManagedRequestResult<Response>> {
     return executeManagedRequest({
       provider: this.provider,
       modelId: this.modelId,
+      kind: stream ? 'stream' : 'chat',
+      requestObserver: opts?.requestObserver,
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,

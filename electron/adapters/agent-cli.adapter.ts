@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import os from 'node:os'
 import { BaseAdapter, type ChatOptions, type Message, normalizeContextWindowTokens } from './base.adapter'
+import { createManagedRequestLifecycle } from './request-support'
 
 export type NativeAgentProvider = 'codex' | 'claude_code'
 
@@ -182,19 +183,36 @@ function runAgentCli(
     return Promise.reject(error)
   }
   return new Promise((resolve, reject) => {
-    const child = spawnAgentProcess(invocation, {
-      cwd: os.tmpdir(),
-      env: buildNativeProcessEnv(),
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+    const lifecycle = createManagedRequestLifecycle({
+      provider: invocation.provider,
+      modelId: invocation.args[invocation.args.indexOf('--model') + 1] || 'unknown',
+      kind: 'cli',
+      requestObserver: opts?.requestObserver,
     })
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = spawnAgentProcess(invocation, {
+        cwd: os.tmpdir(),
+        env: buildNativeProcessEnv(),
+        shell: false,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch (error) {
+      lifecycle.fail(error)
+      reject(error)
+      return
+    }
     let output = ''
     let stderr = ''
     let settled = false
     const timer = setTimeout(() => {
       terminateProcess(child)
-      finish(() => reject(new Error(`原生模型请求超时（${Math.ceil(resolveNativeTimeout(opts?.timeoutMs) / 1000)} 秒）`)))
+      const error = new Error(`原生模型请求超时（${Math.ceil(resolveNativeTimeout(opts?.timeoutMs) / 1000)} 秒）`)
+      finish(() => {
+        lifecycle.fail(error)
+        reject(error)
+      })
     }, resolveNativeTimeout(opts?.timeoutMs))
 
     const cleanup = () => {
@@ -211,7 +229,10 @@ function runAgentCli(
       terminateProcess(child)
       const error = new Error('用户已取消')
       error.name = 'AbortError'
-      finish(() => reject(error))
+      finish(() => {
+        lifecycle.fail(error)
+        reject(error)
+      })
     }
 
     opts?.signal?.addEventListener('abort', onAbort, { once: true })
@@ -221,7 +242,11 @@ function runAgentCli(
       output += text
       if (output.length > MAX_NATIVE_OUTPUT_CHARS) {
         terminateProcess(child)
-        finish(() => reject(new Error('原生模型输出超过安全上限。')))
+        const error = new Error('原生模型输出超过安全上限。')
+        finish(() => {
+          lifecycle.fail(error)
+          reject(error)
+        })
         return
       }
       onChunk?.(text)
@@ -231,16 +256,23 @@ function runAgentCli(
       if (stderr.length > 32_000) stderr = stderr.slice(-32_000)
     })
     child.stdin.on('error', () => undefined)
-    child.once('error', (error) => finish(() => reject(new Error(`原生模型启动失败：${error.message}`))))
+    child.once('error', (error) => finish(() => {
+      const normalized = new Error(`原生模型启动失败：${error.message}`)
+      lifecycle.fail(normalized)
+      reject(normalized)
+    }))
     child.once('close', (code, signal) => {
       finish(() => {
         const result = output.trim()
         if (code === 0 && result) {
+          lifecycle.succeed()
           resolve(result)
           return
         }
         const detail = stderr.trim() || output.trim() || `exit=${String(code)} signal=${String(signal)}`
-        reject(new Error(`原生模型返回失败：${detail}`))
+        const error = new Error(`原生模型返回失败：${detail}`)
+        lifecycle.fail(error)
+        reject(error)
       })
     })
 

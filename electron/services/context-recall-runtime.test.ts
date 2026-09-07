@@ -88,6 +88,13 @@ describe('context recall runtime', () => {
     }))
 
     expect(searchSimilarFragments).toHaveBeenCalledTimes(1)
+    expect(searchSimilarFragments).toHaveBeenCalledWith(
+      7,
+      expect.stringContaining('找回药箱'),
+      expect.any(Number),
+      undefined,
+      { beforeChapterNum: 6 },
+    )
     expect(searchSemanticMemory).toHaveBeenCalledWith(
       7,
       expect.stringContaining('找回药箱'),

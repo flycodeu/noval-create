@@ -1516,6 +1516,8 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           context.input.novelId,
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
+          undefined,
+          { beforeChapterNum: context.input.chapterNum },
         )
         const filteredHits = filterValidatedRecallHits(
           'recall_character',
@@ -1551,6 +1553,8 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           context.input.novelId,
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
+          undefined,
+          { beforeChapterNum: context.input.chapterNum },
         )
         const filteredHits = filterValidatedRecallHits(
           'recall_rule',
@@ -1586,6 +1590,8 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           context.input.novelId,
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
+          undefined,
+          { beforeChapterNum: context.input.chapterNum },
         )
         const filteredHits = filterValidatedRecallHits(
           'recall_thread',
