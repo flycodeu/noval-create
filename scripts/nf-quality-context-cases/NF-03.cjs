@@ -75,7 +75,14 @@ function seedRecallFixture(db, profile) {
   })
   insert()
 
+  // Deliberately invert physical ids and chapter order. The recent candidate
+  // window must follow chapter_num, never chapter_id.
+  insertChapter.run(8_000, 101, 18, '顺序验证后章', '较新的历史章节。')
+  insertChapter.run(20_000, 101, 2, '顺序验证前章', '较旧但物理 ID 更大的章节。')
+
   insertEmbedding.run(101, 901, 'summary', '历史语义证据', '[0.7,0.7]', 'stub-embedding', 2, profile)
+  insertEmbedding.run(101, 8_000, 'summary', '章序候选甲', '[0.6,0.8]', 'stub-embedding', 2, profile)
+  insertEmbedding.run(101, 20_000, 'summary', '章序候选乙', '[0.6,0.8]', 'stub-embedding', 2, profile)
   insertEmbedding.run(101, 3001, 'summary', '关键词当前章', '[1,0]', 'stub-embedding', 2, profile)
   insertEmbedding.run(101, 15, 'summary', '关键词未来第80章', '[1,0]', 'stub-embedding', 2, profile)
   insertEmbedding.run(202, 902, 'summary', '关键词 N2 片段', '[1,0]', 'stub-embedding', 2, profile)
@@ -164,6 +171,17 @@ async function run({ tempRoot, Database, runMigrations, loadTypeScriptModule }) 
     )
     assert.deepEqual(boundedFacadeHits.map((hit) => hit.chapterNum), [3])
 
+    dependencies.setQueryVector([0.6, 0.8])
+    const chapterOrderProbe = await embeddingModule.searchSimilarFragments(
+      101,
+      '无词法命中的顺序探针',
+      1,
+      7,
+      { beforeChapterNum: 20 },
+    )
+    assert.equal(chapterOrderProbe.hits[0]?.chapterId, 8_000)
+    assert.equal(chapterOrderProbe.hits[0]?.chapterNum, 18)
+
     dependencies.setQueryVector([1, 0, 0])
     const profileMismatchFallback = await embeddingModule.searchSimilarFragments(
       101,
@@ -195,7 +213,11 @@ async function run({ tempRoot, Database, runMigrations, loadTypeScriptModule }) 
       dbPath,
       fixture,
       checks: {
-        '03-01': { status: 'PASS', hits: bounded.hits.map((hit) => ({ chapterId: hit.chapterId, chapterNum: hit.chapterNum })) },
+        '03-01': {
+          status: 'PASS',
+          hits: bounded.hits.map((hit) => ({ chapterId: hit.chapterId, chapterNum: hit.chapterNum })),
+          recentOrder: chapterOrderProbe.hits.map((hit) => ({ chapterId: hit.chapterId, chapterNum: hit.chapterNum })),
+        },
         '03-02': { status: 'PASS', excludedChapterId: 15 },
         '03-03': {
           status: 'PASS',

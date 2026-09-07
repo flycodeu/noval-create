@@ -756,8 +756,15 @@ export function buildAntiAiHardConstraintContext(options: {
   genre?: string
   settingsJson?: string | null
   promotedRules?: AntiAiPromotedRule[]
+  /**
+   * `all` preserves the legacy prompt. Context assembly uses `explicit` for
+   * author-authored rules in the hard layer and `automatic` for builtin /
+   * recurrence suggestions in the soft layer.
+   */
+  layer?: 'all' | 'explicit' | 'automatic'
 }): string {
   const settings = parseStorySettingsDocument(options.settingsJson)
+  const layer = options.layer || 'all'
   const promptRules = getBuiltinAntiAiPromptRules(options.genre)
   const promotedRules = options.promotedRules || []
   const promotedByBucket = promotedRules.reduce<Record<AntiAiPromptRuleBucket, string[]>>((result, rule) => {
@@ -800,6 +807,27 @@ export function buildAntiAiHardConstraintContext(options: {
     '优先写角色当下在做什么、承受什么、误判什么，而不是替角色总结感悟。',
     '优先用动作、感官、对话潜台词和现实后果承接情绪。',
   ], 8)
+
+  if (layer === 'explicit') {
+    return buildSection('【作者明确禁用-硬约束】', [
+      ...customBannedTerms.map((item) => `本书禁用：${item}`),
+      ...customAntiAiLines.map((item) => `本书自定义：${item}`),
+    ])
+  }
+
+  if (layer === 'automatic') {
+    return [
+      buildSection('【自动文风建议-软层】', [
+        ...promotedByBucket.expression,
+        ...builtinByBucket.expression,
+        ...promotedByBucket.sentence,
+        ...builtinByBucket.sentence,
+        ...promotedByBucket.structure,
+        ...builtinByBucket.structure,
+      ]),
+      buildSection('【自动正向替代表达-软层】', positiveLines),
+    ].filter(Boolean).join('\n\n')
+  }
 
   return [
     buildSection('【必须避免-禁用表达】', [

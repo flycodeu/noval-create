@@ -18,8 +18,8 @@ import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import {
   collectQualityGuardrailFindings,
   formatQualityGuardrailSummary,
-  shouldForceRepair,
 } from '../../src/shared/content-guardrails'
+import type { QualityIssueV1 } from '../../src/shared/quality-issue'
 import {
   isContractValidationBlockerVerdict,
   isHardContractValidationItem,
@@ -45,6 +45,13 @@ import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.servi
 import { analyzeNovelStyleCompliance } from './style-compliance.service'
 import type { NarrativeControlSceneSnapshot } from './narrative-control.service'
 import { analyzeWorkspaceAiFlavor } from './workspace-quality.service'
+import {
+  applyQualityIssuesToReviewNotes,
+  buildQualityIssuesFromDialogueReview,
+  buildQualityIssuesFromFindings,
+  buildQualityIssuesFromSemanticVerdicts,
+  normalizeStoredQualityIssues,
+} from './quality-issue-policy'
 import {
   analyzeChapterReadingExperience,
   type ChapterReadingExperienceScore,
@@ -75,6 +82,8 @@ export type ChapterFunctionTag = 'setup' | 'progression' | 'reversal' | 'payoff'
 export interface ChapterReviewNotes {
   summary: string
   critical_fixes: string[]
+  /** C-07 issues; optional at the boundary so legacy review JSON remains readable. */
+  issues?: QualityIssueV1[]
   continuity_risks: string[]
   arc_progress_risks: string[]
   context_drift_risks: string[]
@@ -483,6 +492,7 @@ export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotes
   const notes: ChapterReviewNotes = {
     summary: asText(record.summary),
     critical_fixes: toStringArray(record.critical_fixes),
+    issues: normalizeStoredQualityIssues(record.issues),
     continuity_risks: toStringArray(record.continuity_risks),
     arc_progress_risks: toStringArray(record.arc_progress_risks),
     context_drift_risks: toStringArray(record.context_drift_risks),
@@ -607,6 +617,7 @@ export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotes
 export function hasReviewNotes(notes: ChapterReviewNotes): boolean {
   return Boolean(
     notes.summary ||
+    (notes.issues?.length || 0) > 0 ||
     notes.critical_fixes.length > 0 ||
     notes.continuity_risks.length > 0 ||
     notes.arc_progress_risks.length > 0 ||
@@ -670,6 +681,7 @@ export function buildFallbackReviewNotes(consistencyNotes: string): ChapterRevie
   return {
     summary: '先按场景计划把事件链写顺，再统一修正承接、常识和语言问题。',
     critical_fixes: ['逐段核对场景计划里的 must_cover 是否全部落地。'],
+    issues: [],
     continuity_risks: consistencyLines,
     arc_progress_risks: [],
     context_drift_risks: [],
@@ -726,6 +738,9 @@ export function buildFallbackReviewNotes(consistencyNotes: string): ChapterRevie
 export function formatReviewNotes(notes: ChapterReviewNotes): string {
   return [
     notes.summary ? `整体判断：${notes.summary}` : '',
+    notes.issues && notes.issues.length > 0
+      ? `质量问题分级：\n- ${notes.issues.map((issue) => `[${issue.level}] ${issue.ruleId}：${issue.message}${issue.evidence[0] ? `（证据：${issue.evidence[0].quote}）` : '（缺少正文证据）'}`).join('\n- ')}`
+      : '',
     notes.critical_fixes.length > 0 ? `必须修改：\n- ${notes.critical_fixes.join('\n- ')}` : '',
     notes.continuity_risks.length > 0 ? `连续性风险：\n- ${notes.continuity_risks.join('\n- ')}` : '',
     notes.arc_progress_risks.length > 0 ? `故事弧推进风险：\n- ${notes.arc_progress_risks.join('\n- ')}` : '',
@@ -829,6 +844,7 @@ export function formatReviewNotes(notes: ChapterReviewNotes): string {
 export function applyContractValidationToReviewNotes(
   reviewNotes: ChapterReviewNotes,
   contractValidation: ChapterContractValidationResult,
+  chapterContent = '',
 ): ChapterReviewNotes {
   // enforce 模式下合同关键词验证降级为建议（advisoryOnly）：verdict 保留，
   // 但 blocker 汇总按 warning 处理——不强制 rewrite_required，也不把严重度顶到 high。
@@ -874,7 +890,7 @@ export function applyContractValidationToReviewNotes(
     .filter((item) => item.contractItemType === 'scene_result_state' || item.contractItemType === 'scene_conflict')
     .map((item) => `${item.segmentTitle || '场景'} 没有把场景计划里的冲突、结果或退出压力落到正文，Planner 到 Writer 的接力偏弱。`)
 
-  return {
+  const next = {
     ...reviewNotes,
     critical_fixes: dedupeTextList([...criticalFixes, ...reviewNotes.critical_fixes]),
     arc_progress_risks: dedupeTextList([...reviewNotes.arc_progress_risks, ...arcRisks]),
@@ -899,6 +915,15 @@ export function applyContractValidationToReviewNotes(
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, hardRewriteHints),
     contract_validation: contractValidation,
   }
+  const contractIssues = buildQualityIssuesFromFindings(chapterContent, failedItems.map((item) => ({
+    ruleId: item.contractItemType,
+    message: item.rewriteHint || item.expected,
+    excerpt: item.evidenceExcerpt,
+    source: 'contract-validator',
+    detector: 'deterministic' as const,
+    level: advisoryOnly ? 'advice' as const : 'blocker' as const,
+  })), 'contract-validator')
+  return applyQualityIssuesToReviewNotes(next, contractIssues)
 }
 
 /**
@@ -1036,6 +1061,7 @@ export function applyCriticSemanticGateOutcomeToReviewNotes(
   reviewNotes: ChapterReviewNotes,
   outcome: SemanticGateRunOutcome,
   policy: SemanticGatePolicy,
+  chapterContent = '',
 ): AppliedSemanticGateOutcome {
   let notes = reviewNotes
   if (!outcome.degraded) {
@@ -1082,14 +1108,28 @@ export function applyCriticSemanticGateOutcomeToReviewNotes(
   }
   const blockerVerdicts = outcome.review.verdicts.filter((verdict) => verdict.status === 'blocker')
   if (blockerVerdicts.length > 0) {
+    const semanticIssues = buildQualityIssuesFromSemanticVerdicts(
+      chapterContent,
+      blockerVerdicts,
+      'semantic-gate',
+    )
+    const evidenceBackedSemanticFixes = blockerVerdicts
+      .filter((verdict) => buildQualityIssuesFromSemanticVerdicts(chapterContent, [verdict], 'semantic-gate')
+        .some((issue) => issue.level === 'repair'))
+      .map(formatSemanticGateBlockerFix)
     notes = {
       ...notes,
-      critical_fixes: dedupeTextList([
-        ...blockerVerdicts.map(formatSemanticGateBlockerFix),
-        ...notes.critical_fixes,
-      ]),
-      severity: mergeSeverity(notes.severity, 'high'),
-      rewrite_required: true,
+      // 保留旧文本格式供历史 UI 阅读；是否进入 critical 由 C-07
+      // evidence/level 策略决定，缺少原文引用的模型判断不会自动阻断。
+      critical_fixes: dedupeTextList([...evidenceBackedSemanticFixes, ...notes.critical_fixes]),
+    }
+    notes = applyQualityIssuesToReviewNotes(notes, semanticIssues)
+    if (semanticIssues.some((issue) => issue.level === 'repair')) {
+      notes = {
+        ...notes,
+        severity: mergeSeverity(notes.severity, 'high'),
+        rewrite_required: true,
+      }
     }
   }
   return { reviewNotes: notes, effectiveMode: 'enforce', restoreHeuristicContractBlockers: false }
@@ -1133,7 +1173,7 @@ export function applyHistoricalGroundingToReviewNotes(
       : '保留奇幻元素，但把制度、器物和措辞收回到历史框架内。'
   const severity = assessment.mode === 'historical_realist' ? 'high' : assessment.mode === 'alternate_history' ? 'medium' : 'medium'
 
-  return {
+  const next = {
     ...reviewNotes,
     realism_risks: dedupeTextList([realismRisk, ...reviewNotes.realism_risks]),
     source_grounding_risks: dedupeTextList([realismRisk, ...reviewNotes.source_grounding_risks]),
@@ -1147,6 +1187,13 @@ export function applyHistoricalGroundingToReviewNotes(
     rewrite_required: true,
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [fixHint]),
   }
+  return applyQualityIssuesToReviewNotes(next, buildQualityIssuesFromFindings('', [{
+    ruleId: 'source_grounding_missing',
+    message: realismRisk,
+    source: 'historical-grounding',
+    detector: 'deterministic',
+    level: 'blocker',
+  }], 'historical-grounding'))
 }
 
 export function buildTypedRefRiskSummary(novelId: number): {
@@ -1275,7 +1322,7 @@ export function applyProvenanceAndOperatingModeToReviewNotes(
       : '',
   ].filter(Boolean)
 
-  return {
+  const next = {
     ...reviewNotes,
     typed_ref_risks: dedupeTextList([...reviewNotes.typed_ref_risks, ...typedRefSummary.risks]),
     source_grounding_risks: dedupeTextList([...reviewNotes.source_grounding_risks, ...sourceGroundingRisks]),
@@ -1306,6 +1353,12 @@ export function applyProvenanceAndOperatingModeToReviewNotes(
       operatingModeRisks[0] || '',
     ]),
   }
+  const qualityIssues = buildQualityIssuesFromFindings('', [
+    ...typedRefSummary.risks.map((message) => ({ ruleId: 'typed_ref_unresolved', message, source: 'provenance', detector: 'deterministic' as const, level: 'blocker' as const })),
+    ...sourceGroundingRisks.map((message) => ({ ruleId: 'source_grounding_missing', message, source: 'provenance', detector: 'deterministic' as const, level: 'blocker' as const })),
+    ...operatingModeRisks.map((message) => ({ ruleId: 'operating_mode_contract', message, source: 'operating-mode', detector: 'deterministic' as const, level: 'blocker' as const })),
+  ], 'provenance')
+  return applyQualityIssuesToReviewNotes(next, qualityIssues)
 }
 
 export function applyLongWindowQualitySignalsToReviewNotes(
@@ -1373,26 +1426,13 @@ export function applyLongWindowQualitySignalsToReviewNotes(
       : '',
   ].filter(Boolean)
 
-  return {
+  const next = {
     ...reviewNotes,
     genre_register_risks: dedupeTextList([...reviewNotes.genre_register_risks, ...genreRegisterRisks]),
     long_window_humanization_risks: dedupeTextList([...reviewNotes.long_window_humanization_risks, ...expositionRisks, ...longWindowHomogenizationRisks]),
     dialogue_separability_risks: dedupeTextList([...reviewNotes.dialogue_separability_risks, ...dialogueSeparabilityRisks]),
-    critical_fixes: dedupeTextList([
-      expositionRisks.length > 0 ? '删减解释腔和世界观说明文，把设定信息改写为场景动作、对白和结果状态。': '',
-      longWindowHomogenizationRisks.length > 0 ? '优先替换复现频率最高的模板连接、模板情绪和高频重复句式。': '',
-      dialogueSeparabilityRisks.length > 0 ? '为高相似/漂移角色补 voice lock，并重写关键对白段落。': '',
-      ...reviewNotes.critical_fixes,
-    ]),
-    severity: [
-      genreRegisterRisks.length > 0 ? 'medium' : undefined,
-      expositionRisks.length >= 2 ? 'high' : expositionRisks.length > 0 ? 'medium' : undefined,
-      longWindowHomogenizationRisks.length >= 2 ? 'medium' : undefined,
-      dialogueSeparabilityRisks.length >= 2 ? 'high' : dialogueSeparabilityRisks.length > 0 ? 'medium' : undefined,
-    ].filter(Boolean).reduce<ReviewSeverity>((current, next) => mergeSeverity(current, next as ReviewSeverity), reviewNotes.severity),
-    rewrite_required: reviewNotes.rewrite_required
-      || expositionRisks.length >= 2
-      || dialogueSeparabilityRisks.length >= 2,
+    severity: reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required,
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       genreRegisterRisks[0] || '',
       expositionRisks[0] || '',
@@ -1400,6 +1440,13 @@ export function applyLongWindowQualitySignalsToReviewNotes(
       dialogueSeparabilityRisks[0] || '',
     ]),
   }
+  const qualityIssues = buildQualityIssuesFromFindings(content, [
+    ...genreRegisterRisks.map((message) => ({ ruleId: 'genre_register_drift', message, source: 'long-window', level: 'advice' as const })),
+    ...expositionRisks.map((message) => ({ ruleId: 'exposition_density', message, source: 'long-window', level: 'advice' as const })),
+    ...longWindowHomogenizationRisks.map((message) => ({ ruleId: 'long_window_homogenization', message, source: 'long-window', level: 'advice' as const })),
+    ...dialogueSeparabilityRisks.map((message) => ({ ruleId: 'dialogue_similarity', message, source: 'long-window', level: 'advice' as const })),
+  ], 'long-window')
+  return applyQualityIssuesToReviewNotes(next, qualityIssues)
 }
 
 export function findingSeverityToReviewSeverity(severity: 'low' | 'medium' | 'high'): ReviewSeverity {
@@ -1503,9 +1550,13 @@ export function applyHumanizationAnalysisToReviewNotes(
   }
 
   const signalDetails = signals.map((item) => `${item.title}：${item.detail}`)
-  const criticalSignals = signals
-    .filter((item) => item.severity === 'high')
-    .map((item) => `${item.title}：${item.prefer || item.avoid}`)
+  const qualityIssues = buildQualityIssuesFromFindings(content, signals.map((item) => ({
+    ruleId: item.issueType,
+    message: `${item.title}：${item.detail}`,
+    source: 'humanization',
+    detector: 'heuristic' as const,
+    level: 'advice' as const,
+  })), 'humanization')
   const languageRisks = signals
     .filter((item) => item.issueType === 'template_connector' || item.issueType === 'explanatory_narration' || item.issueType === 'ornament_overload' || item.issueType === 'world_exposition_dump')
     .map((item) => item.detail)
@@ -1526,26 +1577,23 @@ export function applyHumanizationAnalysisToReviewNotes(
     }
   })
 
-  return {
+  const next = {
     ...reviewNotes,
-    critical_fixes: dedupeTextList([...reviewNotes.critical_fixes, ...criticalSignals]),
     language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageRisks]),
     coherence_risks: dedupeTextList([...reviewNotes.coherence_risks, ...coherenceRisks]),
     reader_hook_risks: dedupeTextList([...reviewNotes.reader_hook_risks, ...readerHookRisks]),
     genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowingRisks]),
     human_language_repairs: dedupeTextList([...reviewNotes.human_language_repairs, ...aiFlavor.humanizationDirections]),
     summary: reviewNotes.summary || aiFlavor.summary,
-    severity: signals.reduce(
-      (current, item) => mergeSeverity(current, item.severity === 'high' ? 'high' : item.severity === 'medium' ? 'medium' : 'low'),
-      reviewNotes.severity,
-    ),
-    rewrite_required: reviewNotes.rewrite_required || signals.some((item) => item.severity === 'high'),
+    severity: reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required,
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       ...signalDetails,
       ...aiFlavor.humanizationDirections.slice(0, 3),
     ]),
     humanization_signals: [...reviewSignalMap.values()],
   }
+  return applyQualityIssuesToReviewNotes(next, qualityIssues)
 }
 
 export function applyDialogueAnalysisToReviewNotes(
@@ -1572,7 +1620,7 @@ export function applyDialogueAnalysisToReviewNotes(
     return reviewNotes
   }
 
-  return {
+  const next = {
     ...reviewNotes,
     dialogue_homogenization_risks: replaceExistingSignals
       ? dedupeTextList(analysis.risks)
@@ -1619,6 +1667,7 @@ export function applyDialogueAnalysisToReviewNotes(
       analysis.infoDensityRisks.length > 0 ? '让关键对白明确交代地点、目标、证据、筹码或下一步动作。' : '',
     ]),
   }
+  return applyQualityIssuesToReviewNotes(next, buildQualityIssuesFromDialogueReview(content, analysis, 'mini-review'))
 }
 
 export function normalizeStyleComplianceMetrics(raw: unknown): StyleComplianceMetricSnapshot {
@@ -1765,25 +1814,25 @@ export function applyStyleComplianceToReviewNotes(
   const prefixedDeviations = compliance.status === 'pass' ? [] : compliance.deviations
   const prefixedHints = compliance.status === 'pass' ? [] : compliance.rewriteHints
 
-  return {
+  const next = {
     ...reviewNotes,
     style_compliance: compliance,
     language_risks: replacePrefixedNotes(reviewNotes.language_risks, STYLE_COMPLIANCE_RISK_PREFIX, prefixedDeviations),
     human_language_repairs: replacePrefixedNotes(reviewNotes.human_language_repairs, STYLE_COMPLIANCE_FIX_PREFIX, prefixedHints),
-    critical_fixes: replacePrefixedNotes(
-      reviewNotes.critical_fixes,
-      STYLE_COMPLIANCE_FIX_PREFIX,
-      compliance.status === 'rewrite' ? compliance.rewriteHints : [],
-    ),
     summary: reviewNotes.summary || (compliance.status !== 'pass' ? compliance.summary : ''),
-    severity: compliance.status === 'rewrite'
-      ? mergeSeverity(reviewNotes.severity, 'high')
-      : compliance.status === 'warning'
-        ? mergeSeverity(reviewNotes.severity, 'medium')
-        : reviewNotes.severity,
-    rewrite_required: reviewNotes.rewrite_required || compliance.status === 'rewrite',
+    severity: reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required,
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, compliance.rewriteHints),
   }
+  const styleIssues = buildQualityIssuesFromFindings(content, compliance.matchedForbiddenPatterns.map((pattern) => ({
+    ruleId: 'style_forbidden_pattern',
+    message: `正文命中风格指纹禁用模式「${pattern}」，建议替换为更具体的动作、感官或后果。`,
+    excerpt: pattern,
+    source: 'style-compliance',
+    detector: 'heuristic' as const,
+    level: 'advice' as const,
+  })), 'style-compliance')
+  return applyQualityIssuesToReviewNotes(next, styleIssues)
 }
 
 export function applyReadingExperienceToReviewNotes(
@@ -1798,7 +1847,7 @@ export function applyReadingExperienceToReviewNotes(
     }
   }
 
-  return {
+  const next = {
     ...reviewNotes,
     reading_experience: readingExperience,
     reader_hook_risks: dedupeTextList([
@@ -1825,22 +1874,21 @@ export function applyReadingExperienceToReviewNotes(
       ...reviewNotes.human_language_repairs,
       ...readingExperience.recommendations,
     ]),
-    critical_fixes: dedupeTextList([
-      readingExperience.status === 'rewrite'
-        ? '章节读感未达长篇连载门槛：必须同时修句长、段落密度、动作锚点和剧情结果，不允许只做词句润色。'
-        : '',
-      ...reviewNotes.critical_fixes,
-    ]),
     summary: reviewNotes.summary || readingExperience.summary,
-    severity: readingExperience.status === 'rewrite'
-      ? mergeSeverity(reviewNotes.severity, 'high')
-      : mergeSeverity(reviewNotes.severity, 'medium'),
-    rewrite_required: reviewNotes.rewrite_required || readingExperience.status === 'rewrite',
+    severity: reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required,
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       readingExperience.summary,
       ...readingExperience.recommendations.slice(0, 3),
     ]),
   }
+  return applyQualityIssuesToReviewNotes(next, buildQualityIssuesFromFindings(content, readingExperience.risks.map((risk) => ({
+    ruleId: 'reading_experience',
+    message: risk,
+    source: 'reading-experience',
+    detector: 'heuristic' as const,
+    level: 'advice' as const,
+  })), 'reading-experience'))
 }
 
 export function countNarrativeWords(text: string): number {
@@ -2029,7 +2077,8 @@ export function enhanceReviewNotesWithGuardrails(
 
   const next: ChapterReviewNotes = {
     ...reviewNotes,
-    critical_fixes: dedupeTextList([...buildGuardrailCriticalFixes(findings), ...reviewNotes.critical_fixes]),
+    // 新命中先进入统一 issue 分级；历史 critical_fixes 保留，不在这里清空。
+    critical_fixes: dedupeTextList(reviewNotes.critical_fixes),
     continuity_risks: dedupeTextList(reviewNotes.continuity_risks),
     arc_progress_risks: dedupeTextList(reviewNotes.arc_progress_risks),
     context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
@@ -2046,11 +2095,8 @@ export function enhanceReviewNotesWithGuardrails(
     genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowFindings]),
     missing_payoffs: dedupeTextList(reviewNotes.missing_payoffs),
     strengths: dedupeTextList(reviewNotes.strengths),
-    severity: findings.reduce(
-      (current, finding) => mergeSeverity(current, findingSeverityToReviewSeverity(finding.severity)),
-      reviewNotes.severity,
-    ),
-    rewrite_required: reviewNotes.rewrite_required || shouldForceRepair(findings),
+    severity: reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required,
     summary: reviewNotes.summary || '当前稿件仍有需要落地修正的体裁、常识或语言问题。',
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       realismFindings.length > 0 ? '把伤害、资源、秩序、移动成本和世界规则的代价写实写满。' : '',
@@ -2066,7 +2112,12 @@ export function enhanceReviewNotesWithGuardrails(
       : reviewNotes.cost_resolution_state,
   }
 
-  return next
+  return applyQualityIssuesToReviewNotes(next, buildQualityIssuesFromFindings(content, findings.map((finding) => ({
+    ruleId: finding.code,
+    message: finding.message,
+    excerpt: finding.excerpt,
+    source: 'guardrail',
+  })), 'guardrail'))
 }
 
 export function parseStoredReviewNotes(raw?: string | null): ChapterReviewNotes {

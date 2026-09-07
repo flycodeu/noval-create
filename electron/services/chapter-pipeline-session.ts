@@ -24,6 +24,14 @@ import {
   type RuntimeProgress,
 } from './chapter-pipeline-runtime'
 import type { TaskRecoveryHint } from '../../src/types'
+import {
+  createRevisionBudget,
+  deriveRevisionBudgetFromLegacySnapshot,
+  deriveRevisionBudgetFromLegacyAttempts,
+  RevisionBudgetController,
+  type RevisionBudgetState,
+  type RevisionReservation,
+} from './revision-budget'
 import type {
   ChapterComplexity,
   ChapterPipelinePromptGuidanceBundle,
@@ -121,9 +129,11 @@ export interface CreateChapterPipelineSessionInput {
   executionMode: AiExecutionMode
   modelConfigId?: number
   initialContextVersion: number
+  revisionBudget?: RevisionBudgetState
   previousStatus: string
   onWorkflowTaskCreated?(taskId: number): void
   loadRetrySnapshot?(taskId: number): string | null | undefined
+  loadLegacyRevisionAttempts?(taskId: number): Array<{ taskId: number }>
   buildRecoveryHint(role: ChapterPipelineRole, failureCode?: ChapterPipelineFailureCode): TaskRecoveryHint
   getOutputRefs(state: ChapterPipelineDraftState): {
     chapterId: number
@@ -146,6 +156,10 @@ export interface ChapterPipelineSession {
   bindings: ChapterPipelineRuntimeBindings
   state: ChapterPipelineDraftState
   retrySnapshot: Partial<ChapterPipelineSnapshot> | null
+  revisionBudget: RevisionBudgetController
+  canAutomaticallyRevise: boolean
+  reserveRevisionAttempt(attemptKey: string): RevisionReservation | null
+  releaseUnstartedRevisionAttempt(attemptKey: string): void
 }
 
 export async function createChapterPipelineSession(
@@ -153,6 +167,38 @@ export async function createChapterPipelineSession(
 ): Promise<ChapterPipelineSession> {
   const { chapter } = input
   const stateRef: { current?: ChapterPipelineDraftState } = {}
+  const retrySnapshotJson = input.resumeSourceTaskId && input.loadRetrySnapshot
+    ? input.loadRetrySnapshot(input.resumeSourceTaskId)
+    : undefined
+  const retrySnapshot = parseChapterPipelineSnapshot(retrySnapshotJson)
+  const legacyRevisionAttempts = input.resumeSourceTaskId && input.loadLegacyRevisionAttempts
+    ? input.loadLegacyRevisionAttempts(input.resumeSourceTaskId)
+    : []
+  const hasLegacyRewriterEvidence = Boolean(
+    retrySnapshot
+    && (
+      input.retryNodeRole === 'rewriter'
+      || retrySnapshot.lastFailureRole === 'rewriter'
+      || retrySnapshot.roles?.rewriter?.taskId
+      || retrySnapshot.roles?.rewriter?.status === 'success'
+    ),
+  )
+  const revisionBudgetDerivation = input.revisionBudget
+    ? { budget: input.revisionBudget, reliable: true }
+    : legacyRevisionAttempts.length > 0
+      ? deriveRevisionBudgetFromLegacyAttempts(
+        `chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`,
+        legacyRevisionAttempts,
+      )
+    : retrySnapshot?.revisionBudget || hasLegacyRewriterEvidence
+      ? deriveRevisionBudgetFromLegacySnapshot(
+        `chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`,
+        retrySnapshot,
+      )
+      : {
+          budget: createRevisionBudget(`chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`),
+          reliable: true,
+        }
   const runtime = await ChapterPipelineRuntime.create({
     chapterId: chapter.id,
     novelId: chapter.novelId,
@@ -166,6 +212,7 @@ export async function createChapterPipelineSession(
     initialContent: chapter.content || '',
     initialContextVersion: input.initialContextVersion,
     initialContractVersion: '',
+    revisionBudget: revisionBudgetDerivation.budget,
     retry: {
       retryNodeRole: input.retryNodeRole,
       retrySourceNodeRunId: input.retrySourceNodeRunId,
@@ -188,6 +235,16 @@ export async function createChapterPipelineSession(
     expectedContextVersion: input.initialContextVersion,
   })
   stateRef.current = state
+  const revisionBudget = new RevisionBudgetController(revisionBudgetDerivation.budget, {
+    allowAutomatic: revisionBudgetDerivation.reliable,
+    onChange: (nextBudget) => {
+      state.snapshot = { ...state.snapshot, revisionBudget: nextBudget }
+      runtime.adoptSnapshot(state.snapshot)
+      // Persist the reservation before a model request is started. This is the
+      // crash boundary that prevents a resumed run from reusing the key.
+      runtime.sync()
+    },
+  })
   const bindings = createChapterPipelineRuntimeBindings({
     runtime,
     chapter,
@@ -209,14 +266,15 @@ export async function createChapterPipelineSession(
     updateFailureStatus: input.updateFailureStatus,
     buildRecoveryHint: input.buildRecoveryHint,
   })
-  const retrySnapshotJson = input.resumeSourceTaskId && input.loadRetrySnapshot
-    ? input.loadRetrySnapshot(input.resumeSourceTaskId)
-    : undefined
   return {
     runtime,
     bindings,
     state,
-    retrySnapshot: parseChapterPipelineSnapshot(retrySnapshotJson),
+    retrySnapshot,
+    revisionBudget,
+    canAutomaticallyRevise: revisionBudgetDerivation.reliable,
+    reserveRevisionAttempt: (attemptKey) => revisionBudget.tryReserve(attemptKey),
+    releaseUnstartedRevisionAttempt: (attemptKey) => revisionBudget.releaseUnstarted(attemptKey),
   }
 }
 
@@ -232,7 +290,7 @@ export function adoptReusedRoleSnapshot(input: {
   outputText?: string
   extraSnapshot?: Partial<Pick<
     ChapterPipelineSnapshot,
-    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId'
+    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget'
   >>
 }): void {
   const { state, shared } = input

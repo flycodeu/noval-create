@@ -14,6 +14,7 @@ import {
   buildStructuralRepairDirective,
   buildRewriteMiniReviewVerdict,
 } from './chapter-pipeline-policy.service'
+import type { QualityIssueV1 } from '../../src/shared/quality-issue'
 
 function createReviewNotes(overrides: Partial<Parameters<typeof buildReviewPrioritySummary>[0]> = {}) {
   return {
@@ -67,6 +68,72 @@ describe('chapter pipeline policy', () => {
     expect(summary.topIssues[0]?.source).toBe('critical_fixes')
     expect(summary.topIssues.some((issue) => issue.source === 'continuity_risks')).toBe(true)
     expect(fillerIndex).toBeGreaterThan(continuityIndex)
+  })
+
+  it('does not route advice issues into rewrite priority, while retaining repair issues', () => {
+    const issues: QualityIssueV1[] = [
+      {
+        id: 'quality:artifact:ai_opener:1:3',
+        ruleId: 'ai_opener',
+        category: 'style',
+        level: 'advice',
+        detector: 'heuristic',
+        confidence: null,
+        evidence: [{ artifactHash: 'artifact', start: 1, end: 3, quote: '突然' }],
+        scope: 'span',
+        message: '单次套语命中。',
+      },
+      {
+        id: 'quality:artifact:zero_cost_resolution:4:8',
+        ruleId: 'zero_cost_resolution',
+        category: 'narrative',
+        level: 'repair',
+        detector: 'heuristic',
+        confidence: 0.8,
+        evidence: [{ artifactHash: 'artifact', start: 4, end: 8, quote: '无代价解决' }],
+        scope: 'span',
+        message: '关键冲突缺少可见代价。',
+      },
+    ]
+
+    const summary = buildReviewPrioritySummary(createReviewNotes({ issues }))
+
+    expect(summary.topIssues).toHaveLength(1)
+    expect(summary.topIssues[0]).toMatchObject({ source: 'quality_issues', priority: 'medium' })
+    expect(summary.forceMaxCoverage).toBe(false)
+    expect(summary.requiresFullRewrite).toBe(false)
+  })
+
+  it('selects a local patch only when actionable quality evidence has a span', () => {
+    const summary = buildReviewPrioritySummary(createReviewNotes({
+      issues: [{
+        id: 'quality:artifact:zero_cost_resolution:4:8',
+        ruleId: 'zero_cost_resolution',
+        category: 'narrative',
+        level: 'repair',
+        detector: 'heuristic',
+        confidence: 0.9,
+        evidence: [{ artifactHash: 'artifact', start: 4, end: 8, quote: '无代价解决' }],
+        scope: 'span',
+        message: '关键冲突缺少可见代价。',
+      }],
+    }))
+    expect(summary.rewriteScope).toBe('paragraph_patch')
+
+    const chapterScoped = buildReviewPrioritySummary(createReviewNotes({
+      issues: [{
+        id: 'quality:artifact:continuity_break:none',
+        ruleId: 'continuity_break',
+        category: 'narrative',
+        level: 'repair',
+        detector: 'model',
+        confidence: 0.8,
+        evidence: [],
+        scope: 'chapter',
+        message: '跨章连续性断裂。',
+      }],
+    }))
+    expect(chapterScoped.rewriteScope).toBe('chapter_rewrite')
   })
 
   it('forces full rewrite and max coverage for dense high-risk review results', () => {
@@ -201,6 +268,10 @@ describe('chapter pipeline policy', () => {
     expect(policy.contextStrategy).toBe('max_coverage')
   })
 
+})
+
+describe('chapter pipeline policy ordering', () => {
+
   it('keeps batch 7 provenance and mode findings ahead of generic polish without rewrite_required', () => {
     const summary = buildReviewPrioritySummary(createReviewNotes({
       typed_ref_risks: ['线程引用仍有 unresolved typed ref。'],
@@ -261,6 +332,10 @@ describe('chapter pipeline policy', () => {
     expect(orderedSources.indexOf('dialogue_separability_risks')).toBeLessThan(orderedSources.indexOf('language_risks'))
     expect(orderedSources.indexOf('long_window_humanization_risks')).toBeLessThan(orderedSources.indexOf('language_risks'))
   })
+
+})
+
+describe('chapter pipeline policy quality gates', () => {
 
   it('marks highly similar full rewrites for human review', () => {
     vi.mocked(computeCandidateSimilarity).mockReturnValue(1)
@@ -430,6 +505,10 @@ describe('chapter pipeline policy', () => {
     expect(report.goalChain.status).toBe('pass')
     expect(report.findings.join('\n')).not.toContain('链证据密度仅')
   })
+
+})
+
+describe('chapter pipeline policy narrative delta', () => {
 
   it('does not require mechanical chain density growth when rewritten draft keeps an already solid plot chain', () => {
     vi.mocked(computeCandidateSimilarity).mockReturnValue(0.58)

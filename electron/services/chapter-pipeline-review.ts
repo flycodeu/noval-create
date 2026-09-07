@@ -13,6 +13,7 @@ import type { ChapterContext } from './context.service'
 import { pickProtagonistDramaticEngine } from './context-cards'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import type { ChapterComplexity } from './chapter-pipeline-context'
+import type { RunTaskOptions } from './task.service'
 import type {
   ChapterPromptGuidance,
   ChapterPromptNarrativeFields,
@@ -40,6 +41,11 @@ import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.ser
 import { buildChapterReviewPrompt } from './story-prompts'
 import { executeChatTask, updateTaskStatus } from './task.service'
 import { assertContractDrivenStageInputs } from './chapter-pipeline-writer'
+import {
+  applyQualityIssuesToReviewNotes,
+  buildQualityIssuesFromAntiAiHits,
+  buildQualityIssuesFromDialogueReview,
+} from './quality-issue-policy'
 
 export interface ChapterReviewPromptInput {
   novelTitle: string
@@ -299,7 +305,7 @@ export function enrichCriticReviewNotes(input: EnrichCriticReviewInput): Chapter
     chapterId: input.chapterId,
     content: input.content,
     reviewNotes: notes,
-  }, { advisoryOnly: input.semanticGateMode === 'enforce' }))
+  }, { advisoryOnly: input.semanticGateMode === 'enforce' }), input.content)
   notes = applyGroundingAndLongWindowReviewNotes({
     reviewNotes: notes,
     content: input.content,
@@ -373,14 +379,14 @@ export async function applyCriticSemanticReview(
   const outcome = applyCriticSemanticGateOutcomeToReviewNotes(input.reviewNotes, {
     review: gateRun.review,
     degraded: gateRun.degraded,
-  }, input.policy)
+  }, input.policy, input.chapterContent)
   let reviewNotes = outcome.reviewNotes
   if (outcome.restoreHeuristicContractBlockers) {
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
       chapterId: input.chapterId,
       content: input.chapterContent,
       reviewNotes,
-    }))
+    }), input.chapterContent)
     console.warn(`[semantic-gate] critic 语义评审失败，本章回退启发式门 chapter=${input.chapterId}`)
   }
   return {
@@ -399,7 +405,11 @@ export function applyReviewEnforcer(input: {
   genre: string
   knownTerms: string[]
 }): ChapterReviewNotes {
-  const notes = { ...input.reviewNotes, critical_fixes: [...input.reviewNotes.critical_fixes] }
+  let notes: ChapterReviewNotes = {
+    ...input.reviewNotes,
+    critical_fixes: [...input.reviewNotes.critical_fixes],
+    issues: [...(input.reviewNotes.issues || [])],
+  }
   const antiAiResult = persistAntiAiRuleHits({
     novelId: input.novelId,
     chapterId: input.chapterId,
@@ -408,13 +418,15 @@ export function applyReviewEnforcer(input: {
     genre: input.genre,
     knownTerms: input.knownTerms,
   })
-  if (antiAiResult.hits.length > 0) {
-    notes.critical_fixes.push(`【反 AI 味护栏拦截】存在典型 AI 常见违规表达：${antiAiResult.hits.map((hit) => hit.ruleCode).join('、')}，必须在改写环节清理！`)
-  }
+  notes = applyQualityIssuesToReviewNotes(
+    notes,
+    buildQualityIssuesFromAntiAiHits(input.content, antiAiResult.hits, 'enforcer'),
+  )
   const dialogueReview = analyzeChapterDialogueAgainstNovel(input.novelId, input.chapterNum, input.content)
-  if (dialogueReview.risks.length > 0 || dialogueReview.drifts.length > 0 || dialogueReview.similarities.length > 0) {
-    notes.critical_fixes.push('【对话指纹护栏拦截】角色对白存在口吻漂移、角色同质化或对白风险，必须基于角色性格重写！')
-  }
+  notes = applyQualityIssuesToReviewNotes(
+    notes,
+    buildQualityIssuesFromDialogueReview(input.content, dialogueReview, 'enforcer'),
+  )
   return notes
 }
 
@@ -466,6 +478,7 @@ export async function runChapterCriticStage(input: {
   sender?: ProgressSink
   promptInput: ChapterReviewPromptInput
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   contractVersion: string
   initialReviewNotes: ChapterReviewNotes
   priorTaskId?: number
@@ -517,6 +530,7 @@ export async function runChapterCriticStage(input: {
     messages,
     modelConfigId: input.modelConfigId,
     chatOpts: input.chatOptions,
+    prepareInput: input.prepareInput,
     retryable: true,
     sender: input.sender,
   })

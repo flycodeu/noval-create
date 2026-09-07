@@ -14,7 +14,7 @@ import {
 import type { ChapterComplexity } from './chapter-pipeline-context'
 import { reconcileScenePlanForContracts } from './scene-plan-reconciliation'
 import { buildScenePlanPrompt } from './story-prompts'
-import { executeChatTask } from './task.service'
+import { executeChatTask, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 
 export interface ChapterPromptNarrativeFields {
@@ -193,6 +193,7 @@ export async function runChapterPlannerStage(input: {
   sender?: ProgressSink
   messages: Message[]
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
   priorTaskId?: number
@@ -239,6 +240,7 @@ export async function runChapterPlannerStage(input: {
     messages: input.messages,
     modelConfigId: input.modelConfigId,
     chatOpts: input.chatOptions,
+    prepareInput: input.prepareInput,
     retryable: true,
     sender: input.sender,
   })
@@ -268,6 +270,7 @@ export async function executeChapterPlannerPhase(input: {
   modelConfigId?: number
   sender?: ProgressSink
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
   priorTaskId?: number
@@ -287,6 +290,7 @@ export async function executeChapterPlannerPhase(input: {
     sender: input.sender,
     messages,
     chatOptions: input.chatOptions,
+    prepareInput: input.prepareInput,
     fallbackScenePlan: input.fallbackScenePlan,
     storedScenePlanJson: input.storedScenePlanJson,
     priorTaskId: input.priorTaskId,

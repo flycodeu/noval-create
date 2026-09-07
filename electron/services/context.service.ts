@@ -99,6 +99,10 @@ import {
 } from './context-recall-core'
 import { runRecallAugmentation } from './context-recall-runtime'
 import { estimateTokens, truncateToTokens } from './context-token-budget'
+import {
+  allocateRequiredContextAtoms,
+  createRequiredContextAtom,
+} from './context-required-atoms'
 
 export { resolveMentionedEntityLimits } from './context-entity-mentions'
 export { buildRecallSnapshot } from './context-recall-core'
@@ -203,6 +207,8 @@ export interface ContextBudgetWarningSummary {
 
 export interface ContextBudgetReport {
   modelContextLimit: number
+  modelWindowStatus?: 'verified' | 'unverified'
+  tokenEstimateSource?: 'estimated'
   safeModelContextLimit?: number
   modelProvider?: string
   tokenSafetyMarginPct?: number
@@ -222,6 +228,9 @@ export interface ContextBudgetReport {
   droppedByPriority: ContextBudgetWarningSummary[]
   preservedConstraintLabels: HardConstraintSourceLabel[]
   droppedConstraintLabels: HardConstraintSourceLabel[]
+  requiredHardConstraintTokens?: number
+  hardConstraintDeficitTokens?: number
+  droppedConstraintIds?: string[]
 }
 
 export interface StorySubPlot {
@@ -331,6 +340,11 @@ export interface ChapterContextParts {
   rewriteDeltaSummary: string
   publishGateRiskSummary: string
   stepMemorySummary: string
+  /** NF-08: these compatibility fields expose soft suggestions; hard entries use explicit sources only. */
+  antiAiRules?: string
+  styleHardGuard?: string
+  antiAiRulesSoft?: string
+  styleHardGuardSoft?: string
 }
 
 export interface HardConstraintEntry {
@@ -455,10 +469,42 @@ export class ContextOverflowError extends Error {
   }
 }
 
+export class InvalidContextBudgetError extends Error {
+  readonly code = 'NF_CONTEXT_BUDGET_INVALID' as const
+
+  constructor(value: unknown) {
+    super(`NF_CONTEXT_BUDGET_INVALID: totalBudget must be a positive finite number (received ${String(value)})`)
+    this.name = 'InvalidContextBudgetError'
+  }
+}
+
+export interface HardConstraintOverflowDiagnostics {
+  requiredTokens: number
+  availableTokens: number
+  deficitTokens: number
+  missingConstraintIds: string[]
+  missingConstraintLabels: HardConstraintSourceLabel[]
+}
+
 export class HardConstraintOverflowError extends ContextOverflowError {
-  constructor(message: string, context: ChapterContext, contextBudgetReport: ContextBudgetReport) {
+  readonly code = 'NF_CONTEXT_REQUIRED_OVERFLOW' as const
+  readonly diagnostics: HardConstraintOverflowDiagnostics
+
+  constructor(
+    message: string,
+    context: ChapterContext,
+    contextBudgetReport: ContextBudgetReport,
+    diagnostics?: HardConstraintOverflowDiagnostics,
+  ) {
     super(message, context, contextBudgetReport)
     this.name = 'HardConstraintOverflowError'
+    this.diagnostics = diagnostics || {
+      requiredTokens: 0,
+      availableTokens: 0,
+      deficitTokens: 0,
+      missingConstraintIds: [],
+      missingConstraintLabels: [],
+    }
   }
 }
 
@@ -632,8 +678,23 @@ function dedupe(values: string[], limit?: number): string[] {
   return result
 }
 
-function buildConstraintSection(title: string, lines: string[]): string {
-  const normalizedLines = dedupe(lines.map((line) => compactRecallLine(line, 92)).filter(Boolean), 6)
+function dedupePreservedLines(values: string[], limit?: number): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values.filter((item) => item.trim())) {
+    const key = value.trim()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(value)
+    if (limit && result.length >= limit) break
+  }
+  return result
+}
+
+function buildConstraintSection(title: string, lines: string[], preserveText = false): string {
+  const normalizedLines = preserveText
+    ? dedupePreservedLines(lines, 6)
+    : dedupe(lines.map((line) => compactRecallLine(line, 92)).filter(Boolean), 6)
   if (normalizedLines.length === 0) return ''
   return [`${title}:`, ...normalizedLines.map((line) => `- ${line}`)].join('\n')
 }
@@ -684,8 +745,6 @@ const DEFAULT_PRESERVED_CONSTRAINT_LABELS: HardConstraintSourceLabel[] = [
   'openLoops',
   'continuityNotes',
 ]
-const MIN_HARD_CONSTRAINT_TOKENS = 28
-const MIN_PINNED_HARD_CONSTRAINT_TOKENS = 18
 
 function selectConstraintLines(
   text: string,
@@ -694,9 +753,12 @@ function selectConstraintLines(
     fallbackLines?: number
     maxLines?: number
     maxLength?: number
+    preserveText?: boolean
   } = {},
 ): string[] {
-  const lines = splitRecallLines(text, options.maxLines || 4, options.maxLength || 92)
+  const lines = options.preserveText
+    ? dedupePreservedLines(text.split(/\r?\n/), options.maxLines || 4)
+    : splitRecallLines(text, options.maxLines || 4, options.maxLength || 92)
   if (lines.length === 0) return []
   const matched = options.keywords?.length
     ? lines.filter((line) => containsAny(line, options.keywords || []))
@@ -764,7 +826,7 @@ function computeHardConstraintRelevance(
 function resolveHardConstraintBudget(
   promptProfile: ChapterContextPromptProfile,
   chapterComplexity: ChapterContextComplexity,
-  targetWords: number,
+  _targetWords: number,
 ): number {
   const baseByProfile: Record<ChapterContextPromptProfile, number> = {
     scenePlan: 1200,
@@ -777,8 +839,7 @@ function resolveHardConstraintBudget(
     standard: 0,
     key: 280,
   }
-  const largeNovelOffset = targetWords >= 800000 ? 240 : targetWords >= 350000 ? 120 : 0
-  return Math.max(800, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+  return Math.max(800, baseByProfile[promptProfile] + complexityOffset[chapterComplexity])
 }
 
 function buildHardConstraintDrafts(
@@ -790,25 +851,30 @@ function buildHardConstraintDrafts(
     keywords: RELATION_CONSTRAINT_KEYWORDS,
     fallbackLines: 1,
     maxLines: 2,
+    preserveText: true,
   })
   const itemLines = selectConstraintLines(parts.itemSummary, {
     keywords: ITEM_CONSTRAINT_KEYWORDS,
     fallbackLines: 1,
     maxLines: 2,
+    preserveText: true,
   })
   const writingContractLines = selectConstraintLines(parts.writingContractSummary, {
     keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
     fallbackLines: 3,
     maxLines: 5,
+    preserveText: true,
   })
   const openLoopLines = selectConstraintLines(parts.openLoops, {
     keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
     maxLines: 3,
+    preserveText: true,
   })
   const continuityLines = selectConstraintLines(parts.continuityNotes, {
     keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
     fallbackLines: 1,
     maxLines: 3,
+    preserveText: true,
   })
   const antiAiConstraintText = buildAntiAiHardConstraintContext({
     genre: rawData.profile.genre,
@@ -816,54 +882,55 @@ function buildHardConstraintDrafts(
     promotedRules: rawData.currentChapter?.chapterNum
       ? getPromotedAntiAiRulesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
       : [],
+    layer: 'explicit',
   })
   const feedbackConstraintText = buildFeedbackRecurrenceHardConstraintContext({
     promotedIssues: rawData.currentChapter?.chapterNum
       ? getPromotedFeedbackIssuesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
       : [],
   })
-  const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id, rawData.novel.themeVoiceJson)
+  const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id, rawData.novel.themeVoiceJson, 'explicit')
 
   const draftSpecs: Array<Pick<HardConstraintDraft, 'label' | 'title' | 'content'>> = [
     {
       label: 'chapterGoal',
       title: '章节目标',
-      content: buildConstraintSection('章节目标', [parts.chapterGoal]),
+      content: buildConstraintSection('章节目标', [parts.chapterGoal], true),
     },
     {
       label: 'characterStates',
       title: '人物当前状态',
-      content: buildConstraintSection('人物当前状态', selectConstraintLines(parts.characterStates, { fallbackLines: 4, maxLines: 4 })),
+      content: buildConstraintSection('人物当前状态', selectConstraintLines(parts.characterStates, { fallbackLines: 4, maxLines: 4, preserveText: true }), true),
     },
     {
       label: 'worldStates',
       title: '当前世界状态',
-      content: buildConstraintSection('当前世界状态', selectConstraintLines(parts.worldStates, { fallbackLines: 4, maxLines: 4 })),
+      content: buildConstraintSection('当前世界状态', selectConstraintLines(parts.worldStates, { fallbackLines: 4, maxLines: 4, preserveText: true }), true),
     },
     {
       label: 'writingContractSummary',
       title: '写作合同/章节合同',
-      content: buildConstraintSection('写作合同/章节合同', writingContractLines),
+      content: buildConstraintSection('写作合同/章节合同', writingContractLines, true),
     },
     {
       label: 'relationSummary',
       title: '关键人物关系',
-      content: buildConstraintSection('关键人物关系', relationLines),
+      content: buildConstraintSection('关键人物关系', relationLines, true),
     },
     {
       label: 'itemSummary',
       title: '关键物品去向',
-      content: buildConstraintSection('关键物品去向', itemLines),
+      content: buildConstraintSection('关键物品去向', itemLines, true),
     },
     {
       label: 'openLoops',
       title: '必须回收事项',
-      content: buildConstraintSection('必须回收事项', openLoopLines),
+      content: buildConstraintSection('必须回收事项', openLoopLines, true),
     },
     {
       label: 'continuityNotes',
       title: '必须承接',
-      content: buildConstraintSection('必须承接', continuityLines),
+      content: buildConstraintSection('必须承接', continuityLines, true),
     },
     {
       label: 'feedbackRecurrence',
@@ -908,82 +975,44 @@ function allocateHardConstraintEntries(
   text: string
   used: number
   dropped: HardConstraintDraft[]
+  requiredTokens: number
+  deficitTokens: number
+  missingAtomIds: string[]
 } {
-  if (drafts.length === 0 || budget <= 0) {
-    return { entries: [], text: '', used: 0, dropped: [...drafts] }
-  }
-
-  const originals = new Map(drafts.map((draft) => [draft.label, estimateTokens(draft.content)] as const))
+  const atoms = drafts.map((draft) => createRequiredContextAtom({
+    sourceKey: `context:${draft.label}`,
+    label: draft.label,
+    text: draft.content,
+    priority: draft.pinned ? 0 : 1,
+    tokenEstimate: estimateTokens(draft.content),
+  }))
+  const allocation = allocateRequiredContextAtoms(atoms, budget)
+  const draftsByAtomId = new Map(atoms.map((atom, index) => [atom.id, drafts[index]] as const))
   const entries: HardConstraintEntry[] = []
-  const dropped: HardConstraintDraft[] = []
-  let remainingBudget = budget
-
-  for (let index = 0; index < drafts.length; index += 1) {
-    const draft = drafts[index]
-    const originalTokens = originals.get(draft.label) || estimateTokens(draft.content)
-    if (remainingBudget <= 0) {
-      dropped.push(draft)
-      continue
-    }
-
-    const remainingPinnedReserve = drafts
-      .slice(index + 1)
-      .filter((candidate) => candidate.pinned)
-      .reduce((sum, candidate) => {
-        const candidateTokens = originals.get(candidate.label) || estimateTokens(candidate.content)
-        return sum + Math.min(candidateTokens, MIN_PINNED_HARD_CONSTRAINT_TOKENS)
-      }, 0)
-    const maxAllocatable = Math.max(draft.pinned ? 1 : 0, remainingBudget - remainingPinnedReserve)
-    if (maxAllocatable <= 0) {
-      dropped.push(draft)
-      continue
-    }
-
-    if (originalTokens <= maxAllocatable) {
-      entries.push({
-        label: draft.label,
-        title: draft.title,
-        content: draft.content,
-        originalTokens,
-        allocatedTokens: originalTokens,
-        truncated: false,
-      })
-      remainingBudget -= originalTokens
-      continue
-    }
-
-    const minimumUsefulTokens = draft.pinned ? MIN_PINNED_HARD_CONSTRAINT_TOKENS : MIN_HARD_CONSTRAINT_TOKENS
-    if (!draft.pinned && maxAllocatable < minimumUsefulTokens) {
-      dropped.push(draft)
-      continue
-    }
-
-    const targetTokens = draft.pinned
-      ? maxAllocatable
-      : Math.max(minimumUsefulTokens, Math.min(maxAllocatable, Math.floor(originalTokens * 0.72)))
-    const content = truncateToTokens(draft.content, targetTokens)
-    const allocatedTokens = estimateTokens(content)
-    if (!content.trim() || allocatedTokens <= 0) {
-      dropped.push(draft)
-      continue
-    }
-
+  allocation.included.forEach((atom) => {
+    const draft = draftsByAtomId.get(atom.id)
+    if (!draft) return
     entries.push({
       label: draft.label,
       title: draft.title,
-      content,
-      originalTokens,
-      allocatedTokens,
-      truncated: allocatedTokens < originalTokens,
+      content: draft.content,
+      originalTokens: atom.tokenEstimate,
+      allocatedTokens: atom.tokenEstimate,
+      truncated: false,
     })
-    remainingBudget -= allocatedTokens
-  }
+  })
+  const dropped = allocation.dropped
+    .map((atom) => draftsByAtomId.get(atom.id))
+    .filter((draft): draft is HardConstraintDraft => Boolean(draft))
 
   return {
     entries,
     text: entries.map((entry) => entry.content).filter(Boolean).join('\n\n'),
-    used: entries.reduce((sum, entry) => sum + entry.allocatedTokens, 0),
+    used: allocation.usedTokens,
     dropped,
+    requiredTokens: allocation.requiredTokens,
+    deficitTokens: allocation.deficitTokens,
+    missingAtomIds: allocation.missingAtomIds,
   }
 }
 
@@ -1256,6 +1285,10 @@ function resolveContextLabelTitle(label: ChapterContextLabel): string {
     reviewProofSummary: '审校证据摘要',
     rewriteDeltaSummary: '重写差量摘要',
     publishGateRiskSummary: '发布门风险',
+    antiAiRules: '作者明确反 AI 味禁令（硬层）',
+    styleHardGuard: '作者手工文风样本（硬层）',
+    antiAiRulesSoft: '自动反 AI 味建议（软层）',
+    styleHardGuardSoft: '自动风格指纹建议（软层）',
   }
   return titleMap[label]
 }
@@ -1489,17 +1522,10 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
   return { allocated: result, warnings, decisions: [...decisions.values()], totalUsed: totalBudget - budget, totalBudget }
 }
 
-function resolveChapterBudgetFloor(targetWords: number, requestedBudget: number): number {
-  if (targetWords >= 1500000) return Math.max(requestedBudget, 22000)
-  if (targetWords >= 800000) return Math.max(requestedBudget, 18000)
-  if (targetWords >= 350000) return Math.max(requestedBudget, 14000)
-  return requestedBudget
-}
-
 function resolvePromptFixedOverhead(
   promptProfile: ChapterContextPromptProfile,
   chapterComplexity: ChapterContextComplexity,
-  targetWords: number,
+  _targetWords: number,
 ): number {
   const baseByProfile: Record<ChapterContextPromptProfile, number> = {
     scenePlan: 950,
@@ -1512,14 +1538,13 @@ function resolvePromptFixedOverhead(
     standard: 0,
     key: 320,
   }
-  const largeNovelOffset = targetWords >= 800000 ? 180 : targetWords >= 350000 ? 80 : 0
-  return Math.max(500, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+  return Math.max(500, baseByProfile[promptProfile] + complexityOffset[chapterComplexity])
 }
 
 function resolvePromptOutputReserve(
   promptProfile: ChapterContextPromptProfile,
   chapterComplexity: ChapterContextComplexity,
-  targetWords: number,
+  _targetWords: number,
 ): number {
   const baseByProfile: Record<ChapterContextPromptProfile, number> = {
     scenePlan: 1600,
@@ -1532,12 +1557,7 @@ function resolvePromptOutputReserve(
     standard: 0,
     key: 280,
   }
-  const largeNovelOffset = targetWords >= 800000 && (promptProfile === 'draft' || promptProfile === 'rewrite')
-    ? 260
-    : targetWords >= 350000 && promptProfile === 'rewrite'
-      ? 160
-      : 0
-  return Math.max(1200, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+  return Math.max(1200, baseByProfile[promptProfile] + complexityOffset[chapterComplexity])
 }
 
 function createStagePriorityMap(
@@ -1583,6 +1603,8 @@ function createStagePriorityMap(
           reviewProofSummary: null,
           rewriteDeltaSummary: null,
           publishGateRiskSummary: null,
+          antiAiRulesSoft: 3,
+          styleHardGuardSoft: 3,
         }
       case 'draft':
         return {
@@ -1619,6 +1641,8 @@ function createStagePriorityMap(
           reviewProofSummary: null,
           rewriteDeltaSummary: null,
           publishGateRiskSummary: null,
+          antiAiRulesSoft: 2,
+          styleHardGuardSoft: 2,
         }
       case 'review':
         return {
@@ -1655,6 +1679,8 @@ function createStagePriorityMap(
           reviewProofSummary: 1,
           rewriteDeltaSummary: null,
           publishGateRiskSummary: 0,
+          antiAiRulesSoft: 2,
+          styleHardGuardSoft: 2,
         }
       case 'rewrite':
       default:
@@ -1692,6 +1718,8 @@ function createStagePriorityMap(
           reviewProofSummary: 0,
           rewriteDeltaSummary: 0,
           publishGateRiskSummary: 1,
+          antiAiRulesSoft: 2,
+          styleHardGuardSoft: 2,
         }
     }
   })()
@@ -1895,17 +1923,23 @@ function buildManualStyleSampleConstraint(themeVoiceJson?: string | null): strin
   ].join('\n')
 }
 
-function buildStyleHardConstraintForNovel(novelId: number, themeVoiceJson?: string | null): string {
+function buildStyleHardConstraintForNovel(
+  novelId: number,
+  themeVoiceJson?: string | null,
+  layer: 'all' | 'explicit' | 'automatic' = 'all',
+): string {
   const manualConstraint = buildManualStyleSampleConstraint(themeVoiceJson)
   try {
     const resolved = resolveActiveStyleFingerprint(novelId)
-    if (!resolved) return manualConstraint
+    if (!resolved) return layer === 'automatic' ? '' : manualConstraint
+    if (layer === 'explicit') return manualConstraint
+    if (layer === 'automatic') return buildStyleHardGuardPromptSection(resolved.record.id)
     return [
       buildStyleHardGuardPromptSection(resolved.record.id),
       manualConstraint,
     ].filter(Boolean).join('\n\n')
   } catch {
-    return manualConstraint
+    return layer === 'automatic' ? '' : manualConstraint
   }
 }
 
@@ -3832,6 +3866,15 @@ export async function collectChapterContextRawData(
       rewriteDeltaSummary: '',
       publishGateRiskSummary: '',
       stepMemorySummary: '',
+      antiAiRulesSoft: buildAntiAiHardConstraintContext({
+        genre: profile.genre,
+        settingsJson: novel.settingsJson,
+        promotedRules: currentChapter?.chapterNum
+          ? getPromotedAntiAiRulesForChapter(novelId, currentChapter.chapterNum)
+          : [],
+        layer: 'automatic',
+      }),
+      styleHardGuardSoft: buildStyleHardConstraintForNovel(novelId, novel.themeVoiceJson, 'automatic'),
     },
     previousChapterSampleReport: previousChapterFeed.previousChapterSampleReport,
   })
@@ -3914,6 +3957,14 @@ export function allocateChapterContext(
   const normalizedOptions: BuildChapterContextOptions = typeof options === 'number'
     ? { totalBudget: options }
     : options || {}
+  if (
+    normalizedOptions.totalBudget !== undefined
+    && (typeof normalizedOptions.totalBudget !== 'number'
+      || !Number.isFinite(normalizedOptions.totalBudget)
+      || normalizedOptions.totalBudget <= 0)
+  ) {
+    throw new InvalidContextBudgetError(normalizedOptions.totalBudget)
+  }
   const requestedBudget = normalizedOptions.totalBudget ?? 10000
   const promptProfile = normalizedOptions.promptProfile || 'draft'
   const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
@@ -3922,13 +3973,20 @@ export function allocateChapterContext(
   const rawModelContextLimit = modelRuntimeBudget.maxContextTokens && modelRuntimeBudget.maxContextTokens > 0
     ? modelRuntimeBudget.maxContextTokens
     : 32000
+  const normalizedModelProvider = (modelRuntimeBudget.provider || '').trim().toLowerCase()
+  const modelWindowStatus: ContextBudgetReport['modelWindowStatus'] = (
+    normalizedModelProvider === 'custom'
+    || normalizedModelProvider === 'codex'
+    || normalizedModelProvider === 'claude_code'
+    || !normalizedModelProvider
+  ) ? 'unverified' : 'verified'
   const tokenSafetyMarginPct = modelRuntimeBudget.tokenSafetyMarginPct || 0
   const safeModelContextLimit = Math.max(
     2048,
     Math.floor(rawModelContextLimit * (1 - tokenSafetyMarginPct / 100)),
   )
   const modelContextLimit = rawModelContextLimit
-  const desiredBudget = resolveChapterBudgetFloor(targetWords, requestedBudget)
+  const desiredBudget = requestedBudget
   const effectiveBudget = Math.min(safeModelContextLimit, desiredBudget)
   const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
   const requestedOutputReserve = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
@@ -3938,10 +3996,7 @@ export function allocateChapterContext(
   // Adapter 的 maxTokens 是本次请求真实可能占用的输出上限。即使调用方
   // 请求的上下文预算尚未碰到模型窗口，也必须预留两者较大值；否则长篇
   // 模式抬高 effectiveBudget 后可能出现 prompt + output 超过模型窗口。
-  const reservedForOutput = Math.max(0, Math.min(
-    Math.max(requestedOutputReserve, configuredOutputLimit),
-    Math.max(0, effectiveBudget - promptFixedOverhead),
-  ))
+  const reservedForOutput = Math.max(requestedOutputReserve, configuredOutputLimit)
   const remainingContextBudget = effectiveBudget - promptFixedOverhead - reservedForOutput
   const contextBudget = Math.max(0, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterCount || rawData.chapterRows.length)
@@ -3958,17 +4013,36 @@ export function allocateChapterContext(
     : contextBudget
   const hardConstraintAllocation = allocateHardConstraintEntries(hardConstraintDrafts, hardConstraintBudget)
   const softContextBudget = Math.max(0, contextBudget - hardConstraintAllocation.used)
-  const contextPartLabels = new Set<string>(Object.keys(rawData.contextParts))
+  // Unit callers may construct rawData directly (without the full builder).
+  // Resolve the same automatic soft sources here so they cannot accidentally
+  // disappear merely because an optional context part was omitted.
+  const effectiveContextParts: ChapterContextParts = {
+    ...rawData.contextParts,
+    antiAiRulesSoft: rawData.contextParts.antiAiRulesSoft || buildAntiAiHardConstraintContext({
+      genre: rawData.profile.genre,
+      settingsJson: rawData.novel.settingsJson,
+      promotedRules: rawData.currentChapter?.chapterNum
+        ? getPromotedAntiAiRulesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
+        : [],
+      layer: 'automatic',
+    }),
+    styleHardGuardSoft: rawData.contextParts.styleHardGuardSoft || buildStyleHardConstraintForNovel(
+      rawData.novel.id,
+      rawData.novel.themeVoiceJson,
+      'automatic',
+    ),
+  }
+  const contextPartLabels = new Set<string>(Object.keys(effectiveContextParts))
   const hardCoveredSoftLabels = new Set<ChapterContextLabel>(
-    hardConstraintAllocation.entries
-      .map((entry) => entry.label)
+    hardConstraintDrafts
+      .map((draft) => draft.label)
       .filter((label) => contextPartLabels.has(label))
       .map((label) => label as ChapterContextLabel),
   )
 
-  const partDefinitions = (Object.keys(rawData.contextParts) as ChapterContextLabel[]).map((label) => ({
+  const partDefinitions = (Object.keys(effectiveContextParts) as ChapterContextLabel[]).map((label) => ({
     label,
-    content: rawData.contextParts[label],
+    content: effectiveContextParts[label],
   }))
 
   const parts = partDefinitions.reduce<ContextPart[]>((result, part) => {
@@ -4035,12 +4109,32 @@ export function allocateChapterContext(
       reason: 'covered_by_hard_constraint',
       sourceKind: resolveContextSourceKind(entry.label),
     }))
-  const softContextDecisions = [...hardCoveredDecisions, ...softAllocation.decisions]
-  const hardConstraintSummary = buildHardConstraintSummary(
+  const droppedHardConstraintDecisions: ContextDecisionEntry[] = hardConstraintAllocation.dropped.map((draft) => ({
+    label: draft.label,
+    title: draft.title,
+    priority: 'hard',
+    originalTokens: estimateTokens(draft.content),
+    allocatedTokens: 0,
+    status: 'dropped',
+    reason: 'budget_insufficient',
+    sourceKind: resolveContextSourceKind(draft.label),
+  }))
+  const softContextDecisions = [
+    ...hardCoveredDecisions,
+    ...droppedHardConstraintDecisions,
+    ...softAllocation.decisions,
+  ]
+  const hardConstraintSummaryBase = buildHardConstraintSummary(
     hardConstraintAllocation.entries,
     hardConstraintAllocation.dropped,
     preservedConstraintSet,
   )
+  const hardConstraintSummary = hardConstraintAllocation.dropped.length > 0
+    ? [
+      hardConstraintSummaryBase,
+      `缺口 ${hardConstraintAllocation.deficitTokens} tokens；未注入原子 ID：${hardConstraintAllocation.missingAtomIds.join('、')}`,
+    ].join('；')
+    : hardConstraintSummaryBase
   const droppedLabels = [...new Set([
     ...hardOverflowLabels,
     ...softContextBudgetUsage.droppedLabels,
@@ -4056,6 +4150,8 @@ export function allocateChapterContext(
       : 'none'
   const contextBudgetReport: ContextBudgetReport = {
     modelContextLimit,
+    modelWindowStatus,
+    tokenEstimateSource: 'estimated',
     safeModelContextLimit,
     modelProvider: modelRuntimeBudget.provider,
     tokenSafetyMarginPct,
@@ -4075,6 +4171,9 @@ export function allocateChapterContext(
     droppedByPriority: summarizeBudgetWarnings(softAllocation.warnings),
     preservedConstraintLabels,
     droppedConstraintLabels: hardOverflowLabels,
+    requiredHardConstraintTokens: hardConstraintAllocation.requiredTokens,
+    hardConstraintDeficitTokens: hardConstraintAllocation.deficitTokens,
+    droppedConstraintIds: hardConstraintAllocation.missingAtomIds,
   }
 
   if (droppedConstraintCount > 0) {
@@ -4127,6 +4226,10 @@ export function allocateChapterContext(
     rewriteDeltaSummary: softAllocation.allocated.rewriteDeltaSummary || '',
     publishGateRiskSummary: softAllocation.allocated.publishGateRiskSummary || '',
     stepMemorySummary: softAllocation.allocated.stepMemorySummary || '',
+    antiAiRules: softAllocation.allocated.antiAiRulesSoft || '',
+    styleHardGuard: softAllocation.allocated.styleHardGuardSoft || '',
+    antiAiRulesSoft: softAllocation.allocated.antiAiRulesSoft || '',
+    styleHardGuardSoft: softAllocation.allocated.styleHardGuardSoft || '',
     hardConstraintContext: hardConstraintAllocation.text,
     hardConstraintSummary,
     hardConstraintEntries: hardConstraintAllocation.entries,
@@ -4142,10 +4245,21 @@ export function allocateChapterContext(
   }
 
   if (hardConstraintFailed) {
+    const hardOverflowDiagnostics = {
+      requiredTokens: hardConstraintAllocation.requiredTokens,
+      availableTokens: hardConstraintBudget,
+      deficitTokens: hardConstraintAllocation.deficitTokens,
+      missingConstraintIds: hardConstraintAllocation.missingAtomIds,
+      missingConstraintLabels: hardOverflowLabels,
+    }
+    const overflowMessage = hardConstraintAllocation.dropped.length > 0
+      ? `NF_CONTEXT_REQUIRED_OVERFLOW：当前章节上下文超出预算，${hardConstraintAllocation.dropped.length} 项关键约束无法完整注入（缺口 ${hardConstraintAllocation.deficitTokens} tokens；原子 ID：${hardConstraintAllocation.missingAtomIds.join('、')}）。请缩小本章范围、减少必须承接项，或先拆分章节后再生成。`
+      : '当前章节上下文超出预算，关键约束无法完整注入。请缩小本章范围、减少必须承接项，或先拆分章节后再生成。'
     throw new HardConstraintOverflowError(
-      '当前章节上下文超出预算，关键约束无法完整注入。请缩小本章范围、减少必须承接项，或先拆分章节后再生成。',
+      overflowMessage,
       result,
       contextBudgetReport,
+      hardOverflowDiagnostics,
     )
   }
 

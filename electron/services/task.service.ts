@@ -12,6 +12,7 @@ import {
   getDefaultModelConfigRecord,
   getModelConfigRecord,
   getModelProviderOptions,
+  getProviderTokenSafetyMarginPct,
   getProviderRuntimeDefaults,
 } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
@@ -23,6 +24,12 @@ import {
   interruptStartedModelAttempts,
   type ModelAttemptLedgerSink,
 } from './model-attempt-ledger.service'
+import {
+  estimateRequestBudget,
+  RequestBudgetExceededError,
+  type RequestBudgetReport,
+  type RequestBudgetInput,
+} from './request-budget'
 
 export type TaskType =
   | 'init'
@@ -192,9 +199,24 @@ interface CreateTaskOptions {
   status?: TaskStatus
 }
 
-interface RunTaskOptions extends CreateTaskOptions {
+export interface TaskPrepareInputRequest {
+  readonly messages: readonly Message[]
+  readonly systemPrompt?: string
+  readonly maxTokens: number
+  readonly modelContextTokens: number | null
+  readonly budgetReport: RequestBudgetReport
+}
+
+export interface TaskPrepareInputResult {
+  messages: Message[]
+  diagnostics?: Record<string, unknown>
+}
+
+export interface RunTaskOptions extends CreateTaskOptions {
   messages: Message[]
   chatOpts?: Partial<ChatOptions>
+  requestBudget?: Pick<RequestBudgetInput, 'stageBudget' | 'tokenSafetyMarginPct'>
+  prepareInput?: (request: TaskPrepareInputRequest) => Promise<TaskPrepareInputResult> | TaskPrepareInputResult
   sender?: ProgressSink
   onChunk?: (chunk: string, fullOutput: string, taskId: number) => void | Promise<void>
   onSuccess?: (outputText: string, taskId: number) => Promise<unknown> | unknown
@@ -206,6 +228,8 @@ interface TaskModelRuntime {
   maxConcurrency: number
   temperature: number
   maxTokens: number
+  modelContextTokens: number | null
+  tokenSafetyMarginPct: number
   providerOptions?: ChatOptions['providerOptions']
   adapter: BaseAdapter
 }
@@ -350,16 +374,28 @@ function resolveTaskModelConfig(modelConfigId?: number | null): typeof modelConf
 
 function buildTaskModelRuntime(modelConfigId?: number | null): TaskModelRuntime {
   const config = resolveTaskModelConfig(modelConfigId)
+  const adapter = createAdapter(config)
+  const provider = config.provider
+  const normalizedProvider = provider.trim().toLowerCase()
+  const explicitContextWindow = typeof config.maxContextTokens === 'number'
+    && Number.isFinite(config.maxContextTokens)
+    && config.maxContextTokens > 0
+  const modelContextTokens = explicitContextWindow
+    || (normalizedProvider !== 'custom' && normalizedProvider !== 'codex' && normalizedProvider !== 'claude_code')
+    ? adapter.maxContextTokens
+    : null
   return {
     configId: config.id,
-    provider: config.provider,
+    provider,
     maxConcurrency: Math.max(1, config.maxConcurrency || 2),
     temperature: typeof config.temperature === 'number' ? config.temperature : 0.85,
     maxTokens: typeof config.maxTokens === 'number' && config.maxTokens > 0
       ? Math.round(config.maxTokens)
       : getProviderRuntimeDefaults(config.provider).maxTokens,
+    modelContextTokens,
+    tokenSafetyMarginPct: getProviderTokenSafetyMarginPct(config.provider),
     providerOptions: getModelProviderOptions(config),
-    adapter: createAdapter(config),
+    adapter,
   }
 }
 
@@ -466,6 +502,80 @@ async function acquireModelSlot(
       },
     })
   })
+}
+
+interface PreparedTaskRequest {
+  messages: Message[]
+  report: RequestBudgetReport
+}
+
+function resolveActualMaxTokens(runtime: TaskModelRuntime, chatOpts: Partial<ChatOptions>): number {
+  const mergedMaxTokens = {
+    maxTokens: runtime.maxTokens,
+    ...chatOpts,
+  }.maxTokens
+  return typeof mergedMaxTokens === 'number'
+    ? mergedMaxTokens
+    : runtime.adapter.defaultMaxTokens
+}
+
+function buildRequestBudgetReport(
+  runtime: TaskModelRuntime,
+  messages: readonly Message[],
+  chatOpts: Partial<ChatOptions>,
+  requestBudget?: RunTaskOptions['requestBudget'] | ChatOptions['requestBudget'],
+): RequestBudgetReport {
+  return estimateRequestBudget({
+    messages,
+    systemPrompt: typeof chatOpts.systemPrompt === 'string' ? chatOpts.systemPrompt : undefined,
+    maxTokens: resolveActualMaxTokens(runtime, chatOpts),
+    modelContextTokens: runtime.modelContextTokens,
+    tokenSafetyMarginPct: requestBudget?.tokenSafetyMarginPct ?? runtime.tokenSafetyMarginPct,
+    stageBudget: requestBudget?.stageBudget,
+  })
+}
+
+async function prepareTaskRequest(
+  runtime: TaskModelRuntime,
+  opts: RunTaskOptions,
+  chatOpts: Partial<ChatOptions>,
+): Promise<PreparedTaskRequest> {
+  const initialMessages = opts.messages.map((message) => ({ ...message }))
+  const requestBudget = opts.requestBudget || chatOpts.requestBudget
+  const initialReport = buildRequestBudgetReport(runtime, initialMessages, chatOpts, requestBudget)
+  let messages = initialMessages
+  let diagnostics: Record<string, unknown> | undefined
+
+  if (opts.prepareInput) {
+    const prepared = await opts.prepareInput({
+      messages: initialMessages,
+      systemPrompt: typeof chatOpts.systemPrompt === 'string' ? chatOpts.systemPrompt : undefined,
+      maxTokens: resolveActualMaxTokens(runtime, chatOpts),
+      modelContextTokens: runtime.modelContextTokens,
+      budgetReport: initialReport,
+    })
+    if (!prepared || !Array.isArray(prepared.messages)) {
+      throw new Error('prepareInput must return a messages array')
+    }
+    messages = prepared.messages.map((message) => ({ ...message }))
+    diagnostics = prepared.diagnostics
+  }
+
+  const report = buildRequestBudgetReport(runtime, messages, chatOpts, requestBudget)
+  if (diagnostics) report.diagnostics = diagnostics
+  if (!report.allowed) throw new RequestBudgetExceededError(report)
+  return { messages, report }
+}
+
+function assertTaskRequestBudget(
+  runtime: TaskModelRuntime,
+  messages: readonly Message[],
+  chatOpts: Partial<ChatOptions>,
+  requestBudget?: RunTaskOptions['requestBudget'] | ChatOptions['requestBudget'],
+): RequestBudgetReport {
+  const report = buildRequestBudgetReport(runtime, messages, chatOpts, requestBudget)
+  if (!report.allowed) throw new RequestBudgetExceededError(report)
+  return report
 }
 
 type ErrorLike = Error & {
@@ -729,11 +839,13 @@ async function executeChatWithRateLimitRetries(
   adapter: BaseAdapter,
   messages: Message[],
   opts: Partial<ChatOptions> & { signal: AbortSignal },
+  beforeAdapterCall?: () => void,
 ): Promise<string> {
   let lastError: unknown
 
   for (let attempt = 0; attempt < RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
     try {
+      beforeAdapterCall?.()
       return await adapter.chat(messages, opts)
     } catch (error) {
       if (opts.signal.aborted || !isRateLimitError(error) || attempt >= RATE_LIMIT_RETRY_LIMIT - 1) {
@@ -751,11 +863,13 @@ async function executeStreamWithRateLimitRetries(
   adapter: BaseAdapter,
   messages: Message[],
   opts: Partial<ChatOptions> & { signal: AbortSignal; onStream?: (chunk: string) => void },
+  beforeAdapterCall?: () => void,
 ): Promise<void> {
   for (let attempt = 0; attempt < RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
     let receivedChunk = false
 
     try {
+      beforeAdapterCall?.()
       await adapter.stream(messages, {
         ...opts,
         onStream: (chunk) => {
@@ -1050,23 +1164,25 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
+    const effectiveChatOpts = { ...chatOpts }
+    const preparedRequest = await prepareTaskRequest(acquired.runtime, opts, effectiveChatOpts)
     ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
     let completion: CallCompletion | null = null
 
     for (let attemptNumber = 0; ; attemptNumber += 1) {
       try {
-        await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+        await executeStreamWithRateLimitRetries(acquired.runtime.adapter, preparedRequest.messages, {
           temperature: acquired.runtime.temperature,
           maxTokens: acquired.runtime.maxTokens,
-          ...chatOpts,
+          ...effectiveChatOpts,
           providerOptions: {
             ...acquired.runtime.providerOptions,
-            ...chatOpts.providerOptions,
+            ...effectiveChatOpts.providerOptions,
           },
-          requestObserver: combineRequestObservers(ledgerSink, chatOpts.requestObserver),
+          requestObserver: combineRequestObservers(ledgerSink, effectiveChatOpts.requestObserver),
           onCompletion: (value) => {
             completion = value
-            chatOpts.onCompletion?.(value)
+            effectiveChatOpts.onCompletion?.(value)
           },
           signal: controller.signal,
           onStream: (chunk) => {
@@ -1079,6 +1195,8 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
             void opts.onChunk?.(chunk, fullOutput, taskId)
             safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
           },
+        }, () => {
+          assertTaskRequestBudget(acquired.runtime, preparedRequest.messages, effectiveChatOpts, opts.requestBudget || effectiveChatOpts.requestBudget)
         })
         break
       } catch (error) {
@@ -1190,25 +1308,29 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
+    const effectiveChatOpts = { ...chatOpts }
+    const preparedRequest = await prepareTaskRequest(acquired.runtime, opts, effectiveChatOpts)
     ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
     let completion: CallCompletion | null = null
 
     for (let attemptNumber = 0; ; attemptNumber += 1) {
       try {
-        result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+        result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, preparedRequest.messages, {
           temperature: acquired.runtime.temperature,
           maxTokens: acquired.runtime.maxTokens,
-          ...chatOpts,
+          ...effectiveChatOpts,
           providerOptions: {
             ...acquired.runtime.providerOptions,
-            ...chatOpts.providerOptions,
+            ...effectiveChatOpts.providerOptions,
           },
-          requestObserver: combineRequestObservers(ledgerSink, chatOpts.requestObserver),
+          requestObserver: combineRequestObservers(ledgerSink, effectiveChatOpts.requestObserver),
           onCompletion: (value) => {
             completion = value
-            chatOpts.onCompletion?.(value)
+            effectiveChatOpts.onCompletion?.(value)
           },
           signal: controller.signal,
+        }, () => {
+          assertTaskRequestBudget(acquired.runtime, preparedRequest.messages, effectiveChatOpts, opts.requestBudget || effectiveChatOpts.requestBudget)
         })
         break
       } catch (error) {

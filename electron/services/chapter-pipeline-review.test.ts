@@ -189,9 +189,12 @@ describe('chapter pipeline review', () => {
 
     expect(output).not.toBe(reviewNotes)
     expect(reviewNotes.critical_fixes).toEqual(originalFixes)
-    expect(output.critical_fixes).toHaveLength(originalFixes.length + 2)
-    expect(output.critical_fixes.at(-2)).toContain('AI-001')
-    expect(output.critical_fixes.at(-1)).toContain('对话指纹护栏拦截')
+    expect(output.critical_fixes).toEqual(originalFixes)
+    expect(output.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'AI-001', level: 'advice' }),
+      expect.objectContaining({ ruleId: 'dialogue_homogenization', level: 'advice' }),
+    ]))
+    expect(output.rewrite_required).toBe(true)
   })
 
   it('runs and persists the chapter 1 Enforcer stage before marking the role complete', async () => {
@@ -220,7 +223,9 @@ describe('chapter pipeline review', () => {
     })
 
     expect(output).toMatchObject({ reused: false, taskId: 71 })
-    expect(persisted.at(-1)).toContain('AI-001')
+    expect(output.reviewNotes.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'AI-001', level: 'advice' }),
+    ]))
     expect(events).toEqual(['start', 'persist', 'finish'])
   })
 

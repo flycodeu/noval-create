@@ -11,6 +11,7 @@ import type {
   TaskRecoveryHint,
   WriterContextOrchestratorResolution,
 } from '../../src/types'
+import type { RevisionBudgetState } from './revision-budget'
 
 export const CHAPTER_PIPELINE_ROLES = [
   'planner',
@@ -94,6 +95,8 @@ export interface ChapterPipelineSnapshot {
   baseContextVersion?: number
   resumeReason?: 'failed' | 'cancelled' | 'timeout' | 'network' | 'unknown'
   resumeSourceTaskId?: number
+  /** Shared logical content-revision quota; recovery must preserve this object. */
+  revisionBudget?: RevisionBudgetState
   roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
 }
 
@@ -268,7 +271,7 @@ export function createInitialChapterPipelineSnapshot(
   chapterId: number,
   workflowTaskId: number,
   contractVersion?: string,
-  base?: { content: string; contextVersion: number },
+  base?: { content: string; contextVersion: number; revisionBudget?: RevisionBudgetState },
 ): ChapterPipelineSnapshot {
   return {
     kind: 'chapter_pipeline',
@@ -282,6 +285,7 @@ export function createInitialChapterPipelineSnapshot(
       ? {
           baseContentHash: buildChapterContentHash(base.content),
           baseContextVersion: base.contextVersion,
+          ...(base.revisionBudget ? { revisionBudget: base.revisionBudget } : {}),
         }
       : {}),
     totalTokensUsed: 0,

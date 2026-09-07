@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
@@ -23,6 +24,10 @@ import {
 } from './embedding.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
+
+function queryHash(query: string): string {
+  return `sha256:${createHash('sha256').update(query.trim(), 'utf8').digest('hex')}`
+}
 
 function createDbMock(rowsByTable: TableRows) {
   const requestedLimits: number[] = []
@@ -105,6 +110,72 @@ describe('embedding fallback retrieval', () => {
     await expect(
       searchSimilarFragments(1, '历史', 5, undefined, { beforeChapterNum: Number.NaN }),
     ).rejects.toThrow('beforeChapterNum 必须是正整数')
+  })
+
+  it('consumes a compatible prepared query without embedding again', async () => {
+    const db = createDbMock(new Map<unknown, Array<Record<string, unknown>>>([
+      [chapterEmbeddings, [{
+        id: 1,
+        novelId: 1,
+        chapterId: 101,
+        chapterNum: 3,
+        fragmentType: 'summary',
+        fragmentText: '历史线索',
+        embeddingJson: '[1,0]',
+        dimensions: 2,
+        embeddingProfile: 'stub-model:2',
+      }]],
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 3 }]],
+    ]))
+    vi.mocked(getDb).mockReturnValue(db as never)
+
+    const result = await searchSimilarFragments(1, '  历史  ', 1, 7, {
+      beforeChapterNum: 4,
+      preparedQuery: {
+        queryHash: queryHash('历史'),
+        profile: 'stub-model:2',
+        dimensions: 2,
+        embedding: [1, 0],
+      },
+    })
+
+    expect(getAdapterById).not.toHaveBeenCalled()
+    expect(result.hits[0]).toMatchObject({ chapterId: 101, chapterNum: 3, searchMode: 'vector' })
+  })
+
+  it('uses keyword fallback for null or incompatible prepared queries', async () => {
+    const db = createDbMock(new Map<unknown, Array<Record<string, unknown>>>([
+      [chapterEmbeddings, [{
+        id: 1,
+        novelId: 1,
+        chapterId: 101,
+        chapterNum: 3,
+        fragmentType: 'summary',
+        fragmentText: '历史线索',
+        embeddingJson: '[1,0]',
+        dimensions: 2,
+        embeddingProfile: 'stub-model:2',
+      }]],
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 3 }]],
+    ]))
+    vi.mocked(getDb).mockReturnValue(db as never)
+
+    const nullPrepared = await searchSimilarFragments(1, '历史', 1, 7, { preparedQuery: null })
+    expect(nullPrepared.fallbackReason).toBe('query_embedding_failed')
+    expect(nullPrepared.hits[0].searchMode).toBe('keyword')
+    expect(getAdapterById).not.toHaveBeenCalled()
+
+    const invalidPrepared = await searchSimilarFragments(1, '历史', 1, 7, {
+      preparedQuery: {
+        queryHash: 'sha256:not-this-query',
+        profile: 'stub-model:2',
+        dimensions: 2,
+        embedding: [1, 0],
+      },
+    })
+    expect(invalidPrepared.fallbackReason).toBe('query_embedding_failed')
+    expect(invalidPrepared.hits[0].searchMode).toBe('keyword')
+    expect(getAdapterById).not.toHaveBeenCalled()
   })
 
   it('rejects malformed or mixed-dimension embedding batches', () => {

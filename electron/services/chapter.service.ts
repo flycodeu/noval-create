@@ -156,6 +156,7 @@ import {
   buildStageContextMap,
   buildStepMemorySummary,
   classifyChapterComplexity,
+  createChapterStagePrepareInput,
   createChapterPipelinePromptGuidance,
   getActiveChapterPromptOverrideKeys,
   logConstraintInjectionStatus,
@@ -190,9 +191,11 @@ import {
   createChapterRewriterMessageBuilder,
   createRewriterStreamAttemptRunner,
   processChapterRewriteOutcome,
+  selectCompatibleRevisionPatchEvidence,
   RepairSemanticEvaluator,
   runRewriterQualityPipeline,
   runRewriteRiskRecheck,
+  type RevisionAttemptHooks,
 } from './chapter-pipeline-rewriter'
 import {
   executeChapterFinalizePhase,
@@ -1165,6 +1168,7 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
   executionMode?: AiExecutionMode
   preserveConstraintLabels?: HardConstraintSourceLabel[]
   stageId?: number
+  totalBudget?: number
 } {
   if (value === undefined || value === null) return {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -1174,6 +1178,14 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
   const stageId = source.stageId
   if (stageId !== undefined && !(typeof stageId === 'number' && Number.isSafeInteger(stageId) && stageId > 0)) {
     throwUserFacingError('ipc.invalidObject', { name: 'options.stageId' })
+  }
+  const totalBudget = source.totalBudget
+  if (totalBudget !== undefined && (
+    typeof totalBudget !== 'number'
+    || !Number.isFinite(totalBudget)
+    || totalBudget <= 0
+  )) {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.totalBudget' })
   }
   const executionMode = source.executionMode
   const normalizedMode = normalizeAiExecutionMode(executionMode)
@@ -1186,6 +1198,7 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
     return {
       ...(normalizedMode ? { executionMode: normalizedMode } : {}),
       ...(stageId !== undefined ? { stageId } : {}),
+      ...(totalBudget !== undefined ? { totalBudget } : {}),
     }
   }
   if (!Array.isArray(labels)) {
@@ -1198,6 +1211,7 @@ export function sanitizeChapterGenerationOptions(value: unknown): {
   return {
     ...(normalizedMode ? { executionMode: normalizedMode } : {}),
     ...(stageId !== undefined ? { stageId } : {}),
+    ...(totalBudget !== undefined ? { totalBudget } : {}),
     preserveConstraintLabels: Array.from(new Set(labels)) as HardConstraintSourceLabel[],
   }
 }
@@ -1997,7 +2011,14 @@ async function prepareChapterContinuation(
     executionModeResolution.source,
     novel.modelConfigId || undefined,
   )
-  const writerChatOpts = buildChatOptionsFromRoute(stageReports[1].route)
+  const writerChatOpts = withChapterStageRequestBudget(
+    buildChatOptionsFromRoute(stageReports[1].route),
+    stageReports[1].route,
+    'draft',
+    complexity,
+    chapter,
+    novel,
+  )
   const continuationStepMemory = buildStepMemorySummary({
     chapterBridgePlan: draftContext.chapterBridgePlan,
     draftText: normalizedPartial,
@@ -2128,6 +2149,7 @@ async function runChapterContinuationSuccess(input: {
     messages,
     modelConfigId: novel.modelConfigId || undefined,
     chatOpts: writerChatOpts,
+    prepareInput: createChapterStagePrepareInput(prepared.draftContext, 'draft'),
     sender,
     onChunk: async (_chunk, fullOutput) => {
       runtime.setSnapshot({
@@ -2440,6 +2462,8 @@ function publishChapterGenerationTaskId(chapterId: number, taskId: number) {
 interface ChapterGenerationOptions {
   executionMode?: AiExecutionMode
   preserveConstraintLabels?: HardConstraintSourceLabel[]
+  /** Optional explicit stage request budget, shared by context and task gate. */
+  totalBudget?: number
   stageId?: number
   /** Internal-only recovery input. IPC/Web sanitizers never expose this field. */
   resumeDraft?: string
@@ -2451,6 +2475,32 @@ interface ChapterGenerationOptions {
   retrySourceNodeRunId?: number
   retryUpstreamSnapshotId?: string | null
   retryReason?: string
+}
+
+function withChapterStageRequestBudget(
+  chatOptions: ReturnType<typeof buildChatOptionsFromRoute>,
+  route: Parameters<typeof buildChatOptionsFromRoute>[0],
+  stage: ChapterContextStage,
+  complexity: ChapterComplexity,
+  chapter: typeof chapters.$inferSelect,
+  novel: typeof novels.$inferSelect,
+  explicitBudget?: number,
+): ReturnType<typeof buildChatOptionsFromRoute> {
+  const stageBudget = typeof explicitBudget === 'number'
+    ? explicitBudget
+    : resolveContextBudgetForStage(
+      stage,
+      complexity,
+      resolveChapterReferenceWords(chapter.targetWords, novel),
+      novel.targetWords || 0,
+    )
+  return {
+    ...chatOptions,
+    requestBudget: {
+      stageBudget,
+      tokenSafetyMarginPct: route.tokenSafetyMarginPct,
+    },
+  }
 }
 
 interface GeneratedChapterReviewPhaseInput {
@@ -2531,6 +2581,7 @@ async function executeGeneratedChapterReviewPhase(input: GeneratedChapterReviewP
       promptTier: complexity,
     },
     chatOptions: criticChatOpts,
+    prepareInput: createChapterStagePrepareInput(reviewContext, 'review'),
     contractVersion: state.contractVersion,
     initialReviewNotes: reviewNotes,
     priorTaskId: retrySourceWorkflowSnapshot?.roles?.critic?.taskId,
@@ -2668,6 +2719,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
     modelConfigId: novel.modelConfigId || undefined,
     sender,
     chatOptions: plannerChatOpts,
+    prepareInput: createChapterStagePrepareInput(scenePlanContext, 'scenePlan'),
     fallbackScenePlan,
     storedScenePlanJson: chapter.scenePlanJson,
     priorTaskId: retrySourceWorkflowSnapshot?.roles?.planner?.taskId,
@@ -2705,7 +2757,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
     chapter,
     complexity,
     'draft',
-    undefined,
+    options.totalBudget,
     options.preserveConstraintLabels,
   )
   commitPlannerStageOutput({
@@ -2746,6 +2798,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       promptTier: complexity,
     },
     chatOptions: writerChatOpts,
+    prepareInput: createChapterStagePrepareInput(draftContext, 'draft'),
     contractVersion: state.contractVersion,
     scenePlanText,
     initialContent: chapter.content || '',
@@ -2796,6 +2849,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion: state.contractVersion,
       activePromptOverrideKeys,
+      totalBudget: options.totalBudget,
       upstreamArtifacts: reviewUpstreamArtifacts,
     },
   )).context
@@ -2840,11 +2894,84 @@ interface GeneratedChapterRewritePhaseInput {
   structuralAlertsSummary: string
 }
 
+async function resolveGeneratedChapterRewriteContext(input: GeneratedChapterRewritePhaseInput) {
+  const {
+    chapter, novel, session, options, draftResolution, complexity,
+    executionModeResolution, activePromptOverrideKeys, chapterBridgePlanText, scenePlanText,
+    draftContent, lockedParagraphContext, reviewNotes, structuralAlertsSummary,
+  } = input
+  const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
+  const revisionPatchEvidence = selectCompatibleRevisionPatchEvidence(reviewPrioritySummary, draftContent)
+  const patchIssueCount = reviewPrioritySummary.topIssues.filter((issue) => issue.source === 'quality_issues').length
+  const canUsePatch = reviewPrioritySummary.rewriteScope === 'paragraph_patch'
+    && patchIssueCount > 0
+    && revisionPatchEvidence.length === patchIssueCount
+  const revisionMode = canUsePatch
+    ? 'patch' as const
+    : reviewPrioritySummary.rewriteScope === 'chapter_rewrite'
+      ? 'chapter' as const
+      : 'scene' as const
+  const rewritePolicy = {
+    ...buildAdaptiveRewritePolicy(reviewPrioritySummary),
+    ...(canUsePatch ? {} : reviewPrioritySummary.rewriteScope === 'paragraph_patch'
+      ? { rewriteScope: 'scene_rewrite' as const }
+      : {}),
+  }
+  const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)
+  const rewriterStepMemory = buildStepMemorySummary({
+    chapterBridgePlan: chapterBridgePlanText,
+    scenePlanText,
+    draftText: lockedParagraphContext.promptDraftContent,
+    reviewNotes,
+    previousSummary: 'Critic 已完成审校，Rewriter 必须按优先级修复，不得绕开上游计划。',
+  })
+  session.state.snapshot = { ...session.state.snapshot, stepMemory: rewriterStepMemory }
+  const rewriteUpstreamArtifacts: UpstreamRuntimeArtifacts = {
+    scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+    draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
+    contractVersionSummary: buildContractVersionArtifactSummary(session.state.contractVersion),
+    stepMemorySummary: rewriterStepMemory.summary,
+    runtimeAssertions: rewriterStepMemory.runtimeAssertions,
+    reviewRiskSummary: buildReviewRiskArtifactSummary(reviewNotes),
+    reviewProofSummary: buildReviewProofArtifactSummary(reviewNotes),
+    rewriteDeltaSummary: buildRewriteDeltaArtifactSummary(reviewNotes, rewritePolicy.rewriteScope, reviewPriorityPrompt),
+    publishGateRiskSummary: summarizeStageArtifactLines([
+      structuralAlertsSummary,
+      ...reviewPrioritySummary.reasons,
+    ], 5, 640),
+  }
+  const rewriteContext = (await resolveStageContextForPipeline(
+    'rewrite', chapter, draftResolution.effectiveRawContext, complexity, {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion: session.state.contractVersion,
+      activePromptOverrideKeys,
+      totalBudget: typeof options.totalBudget === 'number'
+        ? options.totalBudget
+        : rewritePolicy.contextBudgetMultiplier > 1
+          ? Math.round(resolveContextBudgetForStage(
+            'rewrite', complexity, resolveChapterReferenceWords(chapter.targetWords, novel), novel.targetWords || 0,
+          ) * rewritePolicy.contextBudgetMultiplier)
+          : undefined,
+      upstreamArtifacts: rewriteUpstreamArtifacts,
+    },
+  )).context
+  return {
+    reviewPrioritySummary,
+    revisionPatchEvidence,
+    revisionMode,
+    rewritePolicy,
+    reviewPriorityPrompt,
+    rewriteUpstreamArtifacts,
+    rewriteContext,
+  }
+}
+
 async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewritePhaseInput) {
   const {
-    chapter, novel, profile, session, options, sender, promptGuidance, themeVoice, draftResolution,
+    chapter, novel, profile, session, sender, promptGuidance, themeVoice,
     complexity, executionModeResolution, usageSnapshot, contextAssemblyReport, authorStyleLock,
-    activePromptOverrideKeys, chapterBridgePlanText, scenePlanText, draftContent,
+    activePromptOverrideKeys, scenePlanText, draftContent,
     lockedParagraphContext, reviewNotes, criticSemanticReview, semanticGatePolicy, effectiveSemanticGateMode,
     glossaryTerms, guardrailKnownTerms, chapterTitleForCheck, chapterWordTarget, storyCore,
     structuralAlertsSummary,
@@ -2857,60 +2984,15 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
     failRole: failRoleTask,
   } = session.bindings
   const chapterId = chapter.id
+  const revisionBudget: RevisionAttemptHooks = {
+    reserveRevisionAttempt: (attemptKey) => Boolean(session.reserveRevisionAttempt(attemptKey)),
+    releaseUnstartedRevisionAttempt: session.releaseUnstartedRevisionAttempt,
+  }
 
-  const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
-  const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
-  const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)
-  const rewriterStepMemory = buildStepMemorySummary({
-    chapterBridgePlan: chapterBridgePlanText,
-    scenePlanText,
-    draftText: lockedParagraphContext.promptDraftContent,
-    reviewNotes,
-    previousSummary: 'Critic 已完成审校，Rewriter 必须按优先级修复，不得绕开上游计划。',
-  })
-  state.snapshot = {
-    ...state.snapshot,
-    stepMemory: rewriterStepMemory,
-  }
-  const rewriteUpstreamArtifacts: UpstreamRuntimeArtifacts = {
-    scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
-    draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
-    contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
-    stepMemorySummary: rewriterStepMemory.summary,
-    runtimeAssertions: rewriterStepMemory.runtimeAssertions,
-    reviewRiskSummary: buildReviewRiskArtifactSummary(reviewNotes),
-    reviewProofSummary: buildReviewProofArtifactSummary(reviewNotes),
-    rewriteDeltaSummary: buildRewriteDeltaArtifactSummary(
-      reviewNotes,
-      rewritePolicy.rewriteScope,
-      reviewPriorityPrompt,
-    ),
-    publishGateRiskSummary: summarizeStageArtifactLines([
-      structuralAlertsSummary,
-      ...reviewPrioritySummary.reasons,
-    ], 5, 640),
-  }
-  const rewriteContext = (await resolveStageContextForPipeline(
-    'rewrite',
-    chapter,
-    draftResolution.effectiveRawContext,
-    complexity,
-    {
-      executionMode: executionModeResolution.mode,
-      preserveConstraintLabels: options.preserveConstraintLabels,
-      contractVersion: state.contractVersion,
-      activePromptOverrideKeys,
-      totalBudget: rewritePolicy.contextBudgetMultiplier > 1
-        ? Math.round(resolveContextBudgetForStage(
-          'rewrite',
-          complexity,
-          resolveChapterReferenceWords(chapter.targetWords, novel),
-          novel.targetWords || 0,
-        ) * rewritePolicy.contextBudgetMultiplier)
-        : undefined,
-      upstreamArtifacts: rewriteUpstreamArtifacts,
-    },
-  )).context
+  const {
+    reviewPrioritySummary, revisionPatchEvidence, revisionMode, rewritePolicy,
+    reviewPriorityPrompt, rewriteUpstreamArtifacts, rewriteContext,
+  } = await resolveGeneratedChapterRewriteContext(input)
   const rewriteWritingGuidance = promptGuidance.buildWritingGuidance(rewriteContext.styleTemplate)
   logConstraintInjectionStatus('rewrite', rewriteContext)
   const { stageReports, generationExplainability } = buildChapterPipelineStageObservability({
@@ -2941,10 +3023,18 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
   )
   const rewriteNarrativeFields = promptGuidance.buildNarrativeFields(
     rewriteContext.chapterGoal,
-    lockedParagraphContext.promptDraftContent,
+    draftContent,
     reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
   )
-  const rewriterChatOpts = buildChatOptionsFromRoute(stageReports[3].route)
+  const rewriterChatOpts = withChapterStageRequestBudget(
+    buildChatOptionsFromRoute(stageReports[3].route),
+    stageReports[3].route,
+    'rewrite',
+    complexity,
+    chapter,
+    novel,
+    rewriteContext.contextBudgetReport.requestedBudget,
+  )
   const initialDialogueRepairDirective = buildDialogueRepairDirective({
     similarities: reviewNotes.cross_character_similarity,
     drifts: reviewNotes.dialogue_drift_alerts,
@@ -2982,6 +3072,8 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
     promptTier: complexity,
+    revisionMode,
+    revisionPatchEvidence,
   })
   const runRewriterStreamAttempt = createRewriterStreamAttemptRunner({
     novelId: chapter.novelId,
@@ -2989,10 +3081,15 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
     modelConfigId: novel.modelConfigId || undefined,
     sender,
     defaultChatOptions: rewriterChatOpts,
+    prepareInput: createChapterStagePrepareInput(rewriteContext, 'rewrite'),
+    revisionBudget,
+    resolveAttemptKey: (attemptNumber) => attemptNumber === 5
+      ? 'rewriter:publish-gate:1'
+      : `rewriter:candidate:${attemptNumber}`,
     buildMessages: (attemptNumber, rejectedDigests, draftContentOverride) => rewriterMessageBuilder(
       attemptNumber,
       rejectedDigests,
-      draftContentOverride || lockedParagraphContext.promptDraftContent,
+      draftContentOverride || (revisionMode === 'patch' ? draftContent : lockedParagraphContext.promptDraftContent),
       structuralRepairDirective,
     ),
     startRole: (messages, detail) => startRoleTask('rewriter', 'chapter_rewriter', detail, {
@@ -3045,8 +3142,16 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
       targetWords: chapterWordTarget,
       attemptNumber,
       rejectedDigests,
+      revisionBudget,
+      factGuard: (originalContent, candidateContent) => buildChapterOptimizationFactGuard(
+        chapter.novelId,
+        originalContent,
+        candidateContent,
+        { structuralRepair: true },
+      ),
     },
     reviewNotes,
+    revisionMode,
   })
 
   const semanticEvaluator = new RepairSemanticEvaluator({
@@ -3087,6 +3192,8 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
     semanticEvaluator,
     evaluateRepairCandidateSemantics,
     recheckRewriteRisks,
+    revisionBudget,
+    revisionMode,
     setStructuralRepairDirective: (directive: string) => { structuralRepairDirective = directive },
   }
 }
@@ -3099,7 +3206,7 @@ async function executeGeneratedChapterRewriteQualityPhase(input: {
   const {
     chapter, novel, profile, session, sender, draftContent, criticSemanticReview, executionModeResolution,
     semanticGatePolicy, effectiveSemanticGateMode, guardrailKnownTerms, chapterTitleForCheck,
-    scenePlanText,
+    scenePlanText, complexity,
   } = base
   const { state, runtime } = session
   const { failRole: failRoleTask } = session.bindings
@@ -3140,12 +3247,21 @@ async function executeGeneratedChapterRewriteQualityPhase(input: {
             rewriteReasons: [...prepared.rewritePolicy.reasons, '差异门重试：升级 premium 路由执行结构性重写。'],
           })
           console.warn(`[chapter:pipeline] 差异门重试升级 premium 路由 chapter=${chapterId}（原模式 ${executionModeResolution.mode}）`)
-          return buildChatOptionsFromRoute(escalated[3].route)
+          return withChapterStageRequestBudget(
+            buildChatOptionsFromRoute(escalated[3].route),
+            escalated[3].route,
+            'rewrite',
+            complexity,
+            chapter,
+            novel,
+            prepared.rewriteContext.contextBudgetReport.requestedBudget,
+          )
         } catch (error) {
           console.warn(`[chapter:pipeline] premium 路由升级失败，沿用原路由重试 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
           return undefined
         }
       },
+      revisionBudget: prepared.revisionBudget,
     },
     postProcess: {
       genre: profile.genre,
@@ -3159,6 +3275,7 @@ async function executeGeneratedChapterRewriteQualityPhase(input: {
       modelConfigId: novel.modelConfigId || undefined,
       criticSemanticReview,
       evaluateSemantics: prepared.evaluateRepairCandidateSemantics,
+      revisionBudget: prepared.revisionBudget,
       onRiskRechecked: (riskReviewNotes, content) => {
         state.latestUsableDraft = content.trim()
         state.latestReviewNotesJson = JSON.stringify(riskReviewNotes)
@@ -3199,6 +3316,7 @@ async function executeGeneratedChapterRewriteQualityPhase(input: {
         state.snapshot = runtime.checkpointContent({ persistedContent: outcome.content, resumableContent: outcome.content, resumeSourceTaskId: taskId })
         return runChapterPublishCheck(chapterId, { phase: 'pipeline', semanticGateMode: effectiveSemanticGateMode })
       },
+      revisionBudget: prepared.revisionBudget,
     },
     goldenReview: {
       policy: { ...semanticGatePolicy, mode: effectiveSemanticGateMode },
@@ -3257,11 +3375,19 @@ async function executeGeneratedChapterRewritePhase(
 ): Promise<{ repairedContent: string; publishCheck: ChapterPublishCheck }> {
   const { chapter, session, options, draftContent, reviewNotes, effectiveSemanticGateMode } = input
   const { state, retrySnapshot: retrySourceWorkflowSnapshot } = session
-  const { shouldRun: shouldRunPipelineRole } = session.bindings
+  const { shouldRun: shouldRunPipelineRole, failRole: failRoleTask } = session.bindings
   const chapterId = chapter.id
   const priorTaskId = retrySourceWorkflowSnapshot?.roles?.rewriter?.taskId || 0
 
   if (shouldRunPipelineRole('rewriter')) {
+    if (!session.canAutomaticallyRevise) {
+      const message = '旧版流水线快照无法可靠推导修订额度，已保留候选并转人工复核。'
+      failRoleTask('rewriter', priorTaskId || undefined, new ChapterPipelineStageError('human_review_required', message, {
+        blocked: true,
+        rewriteScope: 'chapter_rewrite',
+        outputText: buildPipelineFailureOutput('human_review_required', message, { rewriteScope: 'chapter_rewrite' }),
+      }), { blocked: true })
+    }
     const prepared = await prepareGeneratedChapterRewriteRuntime(input)
     const qualityOutput = await executeGeneratedChapterRewriteQualityPhase({
       base: input,
@@ -3518,6 +3644,16 @@ async function generateChapterContentInternal(
     }),
     onProgress: (currentSnapshot, progress) => sendPipelineProgress(sender, currentSnapshot, progress),
     loadRetrySnapshot: (taskId) => getTaskRecord(taskId)?.progressJson,
+    loadLegacyRevisionAttempts: (taskId) => {
+      const sourceTask = getTaskRecord(taskId)
+      const workflowTaskId = sourceTask?.runnerType === 'workflow'
+        ? taskId
+        : sourceTask?.parentTaskId
+      if (!workflowTaskId) return sourceTask?.pipelineRole === 'rewriter' ? [{ taskId }] : []
+      return db.select({ taskId: tasks.id }).from(tasks)
+        .where(and(eq(tasks.parentTaskId, workflowTaskId), eq(tasks.pipelineRole, 'rewriter')))
+        .all()
+    },
     persistUsableDraft: ({ expectedContent, expectedContextVersion, content, reviewNotesJson }) => (
       updatePipelineChapterContent(chapterId, expectedContent, expectedContextVersion, {
         content,
@@ -3545,6 +3681,7 @@ async function generateChapterContentInternal(
       executionMode: executionModeResolution.mode,
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion: state.contractVersion,
+      totalBudget: options.totalBudget,
     })
     const {
       activePromptOverrideKeys,
@@ -3570,9 +3707,33 @@ async function generateChapterContentInternal(
     })
     const { usageSnapshot, contextAssemblyReport, authorStyleLock } = observability
     const { stageReports, generationExplainability } = observability
-    const plannerChatOpts = buildChatOptionsFromRoute(stageReports[0].route)
-    const writerChatOpts = buildChatOptionsFromRoute(stageReports[1].route)
-    const criticChatOpts = buildChatOptionsFromRoute(stageReports[2].route)
+    const plannerChatOpts = withChapterStageRequestBudget(
+      buildChatOptionsFromRoute(stageReports[0].route),
+      stageReports[0].route,
+      'scenePlan',
+      complexity,
+      chapter,
+      novel,
+      options.totalBudget,
+    )
+    const writerChatOpts = withChapterStageRequestBudget(
+      buildChatOptionsFromRoute(stageReports[1].route),
+      stageReports[1].route,
+      'draft',
+      complexity,
+      chapter,
+      novel,
+      options.totalBudget,
+    )
+    const criticChatOpts = withChapterStageRequestBudget(
+      buildChatOptionsFromRoute(stageReports[2].route),
+      stageReports[2].route,
+      'review',
+      complexity,
+      chapter,
+      novel,
+      options.totalBudget,
+    )
     logConstraintInjectionStatus('scenePlan', scenePlanContext)
     logConstraintInjectionStatus('draft', draftContext)
     const storyCore = buildStoryCore(profile, draftContext.storyCore || scenePlanContext.storyCore)
@@ -3600,7 +3761,7 @@ async function generateChapterContentInternal(
       chapter,
       complexity,
       'scenePlan',
-      undefined,
+      options.totalBudget,
       options.preserveConstraintLabels,
     )
     state.snapshot = {

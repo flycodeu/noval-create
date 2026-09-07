@@ -1,4 +1,5 @@
 import type { CallCompletion, ModelRequestObserver } from '../../src/shared/model-call-telemetry'
+import { estimateTokens } from '../../src/shared/token-budget'
 
 export interface Message {
   role: 'system' | 'user' | 'assistant'
@@ -16,6 +17,11 @@ export interface ChatOptions {
   signal?: AbortSignal
   timeoutMs?: number
   requestRetryCount?: number
+  /** Runtime-only budget metadata consumed by task.service; adapters ignore it. */
+  requestBudget?: {
+    stageBudget?: number | null
+    tokenSafetyMarginPct?: number | null
+  }
   providerOptions?: {
     kimiThinking?: 'enabled' | 'disabled'
   }
@@ -49,12 +55,7 @@ export abstract class BaseAdapter {
   async embed?(texts: string[], opts?: EmbeddingOptions): Promise<number[][]>
 
   countTokens(text: string): number {
-    if (!text) return 0
-    const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length
-    const punctuation = (text.match(/[\u3000-\u303f\uff00-\uffef，。！？；：、""''（）【】《》…—\s]/g) || []).length
-    const asciiChars = text.length - chineseChars - punctuation
-    const rawEstimate = chineseChars * 1.0 + asciiChars * 0.25 + punctuation * 0.5
-    return Math.ceil(rawEstimate * 1.1)
+    return estimateTokens(text)
   }
 
   protected buildSystemMessage(systemPrompt: string): Message {

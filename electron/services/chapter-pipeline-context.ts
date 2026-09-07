@@ -10,6 +10,9 @@ import type {
   WriterContextOrchestratorRuntimeOptions,
 } from '../../src/types'
 import type { ThemeVoiceDocument } from '../../src/shared/theme-voice'
+import type { Message } from '../adapters/base.adapter'
+import type { RequestBudgetReport } from './request-budget'
+import { estimateTokens } from '../../src/shared/token-budget'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, glossary, novels, storyArcs } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -71,6 +74,67 @@ export interface StageContextResolverPayload {
   upstreamArtifacts: UpstreamRuntimeArtifacts
   renderSchema: StageRenderSchema
   writerContextResolution?: WriterContextOrchestratorResolution
+}
+
+export type ChapterStagePrepareInput = (request: {
+  readonly messages: readonly Message[]
+  readonly budgetReport: RequestBudgetReport
+}) => { messages: Message[]; diagnostics?: Record<string, unknown> }
+
+/**
+ * The allocator has already classified context fields. If final prompt framing
+ * pushes a request over its window, remove only those classified optional
+ * fields once and let task.service perform the authoritative second estimate.
+ */
+export function createChapterStagePrepareInput(
+  context: ChapterContext,
+  stage: ChapterContextStage,
+): ChapterStagePrepareInput {
+  const renderSchema = buildStageRenderSchema(stage)
+  const protectedText = [
+    context.hardConstraintContext,
+    ...renderSchema.requiredAllocatorFields.map((field) => context[field] || ''),
+  ].filter(Boolean).join('\n')
+  const optionalSegments = [...renderSchema.optionalAllocatorFields]
+    .reverse()
+    .map((field) => ({ field, content: context[field]?.trim() || '' }))
+    .filter((entry) => entry.content.length > 0 && !protectedText.includes(entry.content))
+
+  return (request) => {
+    const messages = request.messages.map((message) => ({ ...message }))
+    if (request.budgetReport.allowed) return { messages }
+    const effectiveBudget = request.budgetReport.effectiveBudget
+    const deficit = effectiveBudget === null
+      ? 0
+      : Math.max(0, request.budgetReport.estimatedTotalTokens - effectiveBudget)
+    let reclaimedTokens = 0
+    const droppedFields: string[] = []
+    for (const segment of optionalSegments) {
+      let removed = false
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const offset = messages[index].content.lastIndexOf(segment.content)
+        if (offset < 0) continue
+        messages[index] = {
+          ...messages[index],
+          content: `${messages[index].content.slice(0, offset)}${messages[index].content.slice(offset + segment.content.length)}`,
+        }
+        removed = true
+        break
+      }
+      if (!removed) continue
+      droppedFields.push(segment.field)
+      reclaimedTokens += estimateTokens(segment.content)
+      if (reclaimedTokens >= deficit + 32) break
+    }
+    return {
+      messages,
+      diagnostics: {
+        optionalContextRecompiled: droppedFields.length > 0,
+        optionalContextDroppedFields: droppedFields,
+        optionalContextEstimatedReclaimedTokens: reclaimedTokens,
+      },
+    }
+  }
 }
 
 const CHAPTER_PIPELINE_PROMPT_KEYS = new Set([
@@ -167,7 +231,7 @@ export function resolveContextBudgetForStage(
   stage: ChapterContextStage,
   complexity: ChapterComplexity,
   targetWords: number,
-  novelTargetWords = 0,
+  _novelTargetWords = 0,
 ): number {
   const baseByStage: Record<ChapterContextStage, number> = {
     scenePlan: 10000,
@@ -181,16 +245,7 @@ export function resolveContextBudgetForStage(
     key: 1800,
   }
   const largeChapterOffset = targetWords >= 5000 ? 1200 : targetWords >= 3500 ? 400 : 0
-  const novelScaleOffset = novelTargetWords >= 1500000
-    ? 4000
-    : novelTargetWords >= 800000
-      ? 2800
-      : novelTargetWords >= 500000
-        ? 1600
-        : novelTargetWords >= 300000
-          ? 800
-          : 0
-  return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset + novelScaleOffset)
+  return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset)
 }
 
 export function logConstraintInjectionStatus(stage: ChapterContextStage, context: ChapterContext): void {
@@ -367,7 +422,7 @@ export function allocateStageContextForPipeline(
     return allocateChapterContext(rawContext, {
       promptProfile,
       chapterComplexity: complexity,
-      totalBudget: totalBudget || resolveContextBudgetForStage(
+      totalBudget: typeof totalBudget === 'number' ? totalBudget : resolveContextBudgetForStage(
         promptProfile,
         complexity,
         resolveChapterReferenceWords(chapter.targetWords, rawContext.novel),
@@ -502,6 +557,7 @@ export function allocateDraftContextWithWriterFallback(
   complexity: ChapterComplexity,
   writerContextResolution: WriterContextOrchestratorResolution,
   preserveConstraintLabels?: HardConstraintSourceLabel[],
+  totalBudget?: number,
 ): {
   effectiveRawContext: ChapterRawContext
   draftContext: ChapterContext
@@ -510,14 +566,14 @@ export function allocateDraftContextWithWriterFallback(
   try {
     return {
       effectiveRawContext: writerRawContext,
-      draftContext: allocateStageContextForPipeline(writerRawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      draftContext: allocateStageContextForPipeline(writerRawContext, chapter, complexity, 'draft', totalBudget, preserveConstraintLabels),
       writerContextResolution,
     }
   } catch (error) {
     const detail = `writer draft allocator fallback: ${error instanceof Error ? error.message : 'unknown error'}`
     return {
       effectiveRawContext: baseRawContext,
-      draftContext: allocateStageContextForPipeline(baseRawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      draftContext: allocateStageContextForPipeline(baseRawContext, chapter, complexity, 'draft', totalBudget, preserveConstraintLabels),
       writerContextResolution: appendWriterContextFallback(writerContextResolution, detail),
     }
   }
@@ -795,6 +851,7 @@ export async function resolveStageContextForPipeline(
       complexity,
       writerPayload.writerContextResolution,
       options.preserveConstraintLabels,
+      options.totalBudget,
     )
     return {
       stage,
@@ -985,6 +1042,7 @@ export async function prepareChapterPipelineStageContexts(
     executionMode: AiExecutionMode
     preserveConstraintLabels?: HardConstraintSourceLabel[]
     contractVersion?: string
+    totalBudget?: number
   },
 ): Promise<PreparedChapterPipelineStageContexts> {
   const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
@@ -999,6 +1057,7 @@ export async function prepareChapterPipelineStageContexts(
     executionMode: options.executionMode,
     preserveConstraintLabels: options.preserveConstraintLabels,
     contractVersion: options.contractVersion,
+    totalBudget: options.totalBudget,
     activePromptOverrideKeys,
   }
   const scenePlanResolution = await resolveStageContextForPipeline(

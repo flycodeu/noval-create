@@ -20,6 +20,7 @@ import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 import { analyzeNarrativeControls } from './narrative-control.service'
 import { getSceneSnapshotLabel } from './chapter-publish-contract-gate'
+import { readQualityIssuesFromReviewNotesJson } from './quality-issue-policy'
 import {
   parseNumberArray,
   type ChapterContractAudit,
@@ -135,6 +136,10 @@ function makeAvailabilityPublishCheckItem(input: {
 function buildPublishCoreReadinessChecklist(input: PublishReadinessChecklistInput): ChapterPublishCheckItem[] {
   const { chapter, novel, staleReasons, semanticGateStatus, semanticGateDetail } = input
   const { highIssues, aiScore } = input
+  const qualityIssues = readQualityIssuesFromReviewNotesJson(chapter.reviewNotesJson)
+  const blockerIssues = qualityIssues.filter((issue) => issue.level === 'blocker')
+  const repairIssues = qualityIssues.filter((issue) => issue.level === 'repair')
+  const adviceIssues = qualityIssues.filter((issue) => issue.level === 'advice')
   return [
     makeAvailabilityPublishCheckItem({
       key: 'content', label: '正文已完成', available: Boolean(chapter.content?.trim()),
@@ -168,6 +173,18 @@ function buildPublishCoreReadinessChecklist(input: PublishReadinessChecklistInpu
       key: 'consistency', label: '无高优先级结构风险', status: highIssues.length === 0 ? 'pass' : 'blocker',
       detail: highIssues.length === 0 ? '没有命中当前章节的高优先级结构问题。' : highIssues.slice(0, 3).map((issue) => issue.title).join('；'),
       relatedPage: 'revision', fixHint: '先处理高优先级结构风险，再尝试标记完成。',
+    }),
+    makePublishCheckItem({
+      key: 'quality_issues', label: '质量问题分级',
+      status: blockerIssues.length > 0 ? 'blocker' : repairIssues.length > 0 ? 'rewrite' : adviceIssues.length > 0 ? 'warning' : 'pass',
+      detail: blockerIssues.length > 0
+        ? `确定性问题仍需阻断：${blockerIssues.slice(0, 3).map((issue) => `${issue.ruleId}：${issue.message}`).join('；')}`
+        : repairIssues.length > 0
+          ? `存在带证据的可修复问题：${repairIssues.slice(0, 3).map((issue) => `${issue.ruleId}：${issue.message}`).join('；')}`
+          : adviceIssues.length > 0
+            ? `文风/统计建议（可由作者忽略）：${adviceIssues.slice(0, 3).map((issue) => issue.message).join('；')}`
+            : '当前没有结构化质量问题。',
+      source: 'review', relatedPage: 'revision', fixHint: '只处理 blocker/repair；advice 仅作为可追溯的作者提示。',
     }),
     makePublishCheckItem({
       key: 'ai_score', label: 'AI 体检已完成',
@@ -289,7 +306,8 @@ export function buildPublishLanguageAndDynamicsChecklist(input: {
     }),
     makePublishCheckItem({
       key: 'exposition_density', label: '解释密度 / 说明文',
-      status: expositionRisks.length >= 2 ? 'blocker' : expositionRisks.length > 0 ? 'warning' : 'pass',
+      // 长窗/说明密度是自动文风观察，不得绕过 C-07 直接成为 blocker。
+      status: expositionRisks.length > 0 ? 'warning' : 'pass',
       detail: expositionRisks.slice(0, 3).join('；') || '当前没有识别到明显的解释密度问题。',
       source: 'review', relatedPage: 'writing',
       fixHint: '删掉替作者总结的说明句，把世界观与过渡信息改为角色行动、结果状态和场景细节。',
@@ -303,7 +321,8 @@ export function buildPublishLanguageAndDynamicsChecklist(input: {
     }),
     makePublishCheckItem({
       key: 'dialogue_separability', label: '角色对白可分离度',
-      status: reviewState.dialogueSeparabilityRisks.length >= 2 ? 'blocker' : reviewState.dialogueSeparabilityRisks.length > 0 ? 'warning' : 'pass',
+      // 相似度/漂移统计没有正文事实证据时只是 advice，允许作者忽略。
+      status: reviewState.dialogueSeparabilityRisks.length > 0 ? 'warning' : 'pass',
       detail: reviewState.dialogueSeparabilityRisks.length > 0
         ? reviewState.dialogueSeparabilityRisks.slice(0, 3).join('；')
         : '当前没有识别到明显的长窗对白可分离度风险。',

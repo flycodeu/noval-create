@@ -12,6 +12,8 @@ const cases = new Map([
   ['NF-00', require('./nf-quality-context-cases/NF-00.cjs')],
   ['NF-02', require('./nf-quality-context-cases/NF-02.cjs')],
   ['NF-03', require('./nf-quality-context-cases/NF-03.cjs')],
+  ['NF-04', require('./nf-quality-context-cases/NF-04.cjs')],
+  ['NF-05', require('./nf-quality-context-cases/NF-05.cjs')],
 ])
 
 function parseCase(argv) {
@@ -130,7 +132,15 @@ function loadTypeScriptModule(relativePath) {
 function loadBaselineMigrationRunner() {
   return withTypeScriptRequireHook(() => {
     const filename = path.join(workspaceRoot, 'electron', 'database', 'db.ts')
-    const source = execFileSync('git', ['show', `${getHead()}:electron/database/db.ts`], {
+    const migrationIntroduction = execFileSync('git', [
+      'log', '--format=%H', '-S', '0065_model_request_attempts', '--', 'electron/database/db.ts',
+    ], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim().split(/\r?\n/u).filter(Boolean).at(-1)
+    const baselineRevision = migrationIntroduction ? `${migrationIntroduction}^` : getHead()
+    const source = execFileSync('git', ['show', `${baselineRevision}:electron/database/db.ts`], {
       cwd: workspaceRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],

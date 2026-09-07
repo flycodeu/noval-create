@@ -9,11 +9,27 @@ vi.mock('./semantic-memory.service', () => ({
   searchSemanticMemory: vi.fn(),
 }))
 
+vi.mock('./query-embedding', () => ({
+  hashQueryText: (query: string) => query.trim(),
+  prepareQueryEmbeddings: vi.fn(async (queries: string[]) => new Map(
+    queries.map((query, index) => {
+      const normalized = query.trim()
+      return [normalized, {
+        queryHash: normalized,
+        profile: 'stub:2',
+        dimensions: 2,
+        embedding: [1, index],
+      }]
+    }),
+  )),
+}))
+
 import { searchSimilarFragments } from './embedding.service'
 import {
   processSemanticMemoryOutbox,
   searchSemanticMemory,
 } from './semantic-memory.service'
+import { prepareQueryEmbeddings } from './query-embedding'
 import {
   runRecallAugmentation,
   type RunRecallAugmentationInput,
@@ -65,6 +81,17 @@ describe('context recall runtime', () => {
     })
     vi.mocked(searchSimilarFragments).mockResolvedValue({ hits: [] })
     vi.mocked(searchSemanticMemory).mockResolvedValue([])
+    vi.mocked(prepareQueryEmbeddings).mockImplementation(async (queries) => new Map(
+      queries.map((query, index) => {
+        const normalized = query.trim()
+        return [normalized, {
+          queryHash: normalized,
+          profile: 'stub:2',
+          dimensions: 2,
+          embedding: [1, index],
+        }]
+      }),
+    ))
   })
 
   it('skips projection refresh and search when planning produces no buckets', async () => {
@@ -93,17 +120,47 @@ describe('context recall runtime', () => {
       expect.stringContaining('找回药箱'),
       expect.any(Number),
       undefined,
-      { beforeChapterNum: 6 },
+      expect.objectContaining({
+        beforeChapterNum: 6,
+        preparedQuery: expect.objectContaining({ profile: 'stub:2' }),
+      }),
     )
     expect(searchSemanticMemory).toHaveBeenCalledWith(
       7,
       expect.stringContaining('找回药箱'),
       expect.objectContaining({
+        preparedQuery: expect.objectContaining({ profile: 'stub:2' }),
         sourceTypes: ['story_thread', 'timeline_event'],
         visibility: 'canon',
         refreshOutbox: false,
       }),
     )
+  })
+
+  it('prepares one batch and shares each prepared query with both channels', async () => {
+    await runRecallAugmentation(buildInput({
+      chapterGoal: '守住补给线',
+      outline: '角色前往旧仓库确认药箱。',
+      activeThreads: '找回药箱',
+      openLoops: '药箱去向未明',
+      mentionValidationItems: ['药箱'],
+    }))
+
+    expect(prepareQueryEmbeddings).toHaveBeenCalledTimes(1)
+    expect(prepareQueryEmbeddings).toHaveBeenCalledWith(expect.any(Array), undefined)
+    const chapterCalls = vi.mocked(searchSimilarFragments).mock.calls
+    const semanticCalls = vi.mocked(searchSemanticMemory).mock.calls
+    expect(chapterCalls).toHaveLength(3)
+    expect(semanticCalls).toHaveLength(3)
+
+    for (const [novelId, queryText, , , chapterOptions] of chapterCalls) {
+      const semanticCall = semanticCalls.find((call) => call[0] === novelId && call[1] === queryText)
+      expect(semanticCall).toBeDefined()
+      if (!semanticCall) {
+        throw new Error(`missing semantic recall call for ${queryText}`)
+      }
+      expect(chapterOptions?.preparedQuery).toBe(semanticCall[2]?.preparedQuery)
+    }
   })
 
   it('filters future chapter fragments before snapshot selection', async () => {
@@ -148,6 +205,7 @@ describe('context recall runtime', () => {
 
     expect(searchSimilarFragments).toHaveBeenCalledTimes(3)
     expect(searchSemanticMemory).toHaveBeenCalledTimes(3)
+    expect(prepareQueryEmbeddings).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({
       assemblyStage: 'recall',
       recalledMemory: '',

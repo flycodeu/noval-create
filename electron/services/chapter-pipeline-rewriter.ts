@@ -21,6 +21,7 @@ import { validateChapterContractDelivery } from './chapter-contract-validator.se
 import type { ChapterContext } from './context.service'
 import type { ChapterPublishCheck } from './context-impact.service'
 import type { ChapterComplexity } from './chapter-pipeline-context'
+import type { RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import type {
   ChapterPromptGuidance,
@@ -53,6 +54,7 @@ import {
   buildReviewPrioritySummary,
   buildStructuralRepairDirective,
   buildRewriteMiniReviewVerdict,
+  type ReviewPriorityIssue,
   type ReviewPrioritySummary,
   type RewriteMiniReviewVerdict,
 } from './chapter-pipeline-policy.service'
@@ -83,6 +85,25 @@ import {
 } from './chapter-pipeline-writer'
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import type { ChapterRewriteScope } from '../../src/types'
+import {
+  applyRevisionPatch,
+  buildRevisionPatchArtifactHash,
+  RevisionPatchValidationError,
+  type RevisionPatch,
+} from '../../src/shared/revision-patch'
+
+/** A logical revision reservation shared by every automatic repair entry. */
+export interface RevisionAttemptHooks {
+  reserveRevisionAttempt?: (attemptKey: string) => boolean
+  releaseUnstartedRevisionAttempt?: (attemptKey: string) => void
+}
+
+function reserveRevisionAttempt(
+  hooks: RevisionAttemptHooks | undefined,
+  attemptKey: string,
+): boolean {
+  return hooks?.reserveRevisionAttempt ? hooks.reserveRevisionAttempt(attemptKey) : true
+}
 
 export const STYLE_REPAIRABLE_GUARDRAIL_CODES = new Set([
   'low_value_body_detail',
@@ -134,6 +155,11 @@ export interface ChapterRepairInput {
   targetWords: number
   attemptNumber?: number
   rejectedDigests?: string[]
+  revisionBudget?: RevisionAttemptHooks
+  factGuard?: (originalContent: string, candidateContent: string) => {
+    safeToApply: boolean
+    warnings: string[]
+  }
 }
 
 export interface ChapterRewriterPromptInput {
@@ -161,6 +187,23 @@ export interface ChapterRewriterPromptInput {
   promptTier: ChapterComplexity
   attemptNumber: number
   rejectedDigests: string[]
+  /** Local evidence-backed revisions must return C-07 JSON instead of a full rewrite. */
+  revisionMode?: 'patch' | 'scene' | 'chapter'
+  revisionPatchEvidence?: NonNullable<ReviewPriorityIssue['patchEvidence']>[]
+}
+
+export function selectCompatibleRevisionPatchEvidence(
+  summary: ReviewPrioritySummary,
+  draftContent: string,
+): NonNullable<ReviewPriorityIssue['patchEvidence']>[] {
+  const artifactHash = buildRevisionPatchArtifactHash(draftContent)
+  return summary.topIssues.flatMap((issue) => {
+    const evidence = issue.patchEvidence
+    if (!evidence || evidence.artifactHash !== artifactHash) return []
+    if (evidence.start < 0 || evidence.end < evidence.start || evidence.end > draftContent.length) return []
+    if (draftContent.slice(evidence.start, evidence.end) !== evidence.quote) return []
+    return [{ ...evidence }]
+  })
 }
 
 export interface RewriteOutcome {
@@ -168,6 +211,7 @@ export interface RewriteOutcome {
   reviewNotes: ChapterReviewNotes
   miniReview: RewriteMiniReviewVerdict
   dialogueAnalysis: ReturnType<typeof analyzeChapterDialogueAgainstNovel>
+  revisionRejected?: boolean
 }
 
 export interface RepairSemanticEvaluatorInput {
@@ -277,6 +321,9 @@ export function createRewriterStreamAttemptRunner(input: {
   modelConfigId?: number
   sender?: ProgressSink
   defaultChatOptions: RewriterChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
+  revisionBudget?: RevisionAttemptHooks
+  resolveAttemptKey?: (attemptNumber: number) => string
   buildMessages: (attemptNumber: number, rejectedDigests: string[], draftContent?: string) => Message[]
   startRole: (messages: Message[], detail: string) => Promise<number>
   validateInputs: () => void
@@ -290,11 +337,12 @@ export function createRewriterStreamAttemptRunner(input: {
   chatOptions?: RewriterChatOptions,
   draftContent?: string,
 ) => Promise<RewriterStreamAttemptResult> {
-  const startTask = async (messages: Message[], detail: string) => {
+  const startTask = async (messages: Message[], detail: string, attemptKey?: string) => {
     const taskId = await input.startRole(messages, detail)
     try {
       input.validateInputs()
     } catch (error) {
+      if (attemptKey) input.revisionBudget?.releaseUnstartedRevisionAttempt?.(attemptKey)
       updateTaskStatus(taskId, 'failed', input.sender, {
         pipelineStage: 'blocked',
         errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
@@ -306,7 +354,8 @@ export function createRewriterStreamAttemptRunner(input: {
   }
   return async (attemptNumber, rejectedDigests, detail, chatOptions, draftContent) => {
     const messages = input.buildMessages(attemptNumber, rejectedDigests, draftContent)
-    let taskId = await startTask(messages, detail)
+    const attemptKey = input.resolveAttemptKey?.(attemptNumber)
+    let taskId = await startTask(messages, detail, attemptKey)
     let networkRetryCount = 0
     while (true) {
       let receivedOutput = ''
@@ -320,6 +369,7 @@ export function createRewriterStreamAttemptRunner(input: {
           messages,
           modelConfigId: input.modelConfigId,
           chatOpts: chatOptions || input.defaultChatOptions,
+          prepareInput: input.prepareInput,
           sender: input.sender,
           onChunk: async (_chunk, fullOutput) => {
             receivedOutput = fullOutput
@@ -335,6 +385,8 @@ export function createRewriterStreamAttemptRunner(input: {
               ? '流式连接中断，未提交不完整输出；已自动新建 Rewriter 任务重试一次。'
               : '流式连接在返回正文前中断，已自动新建 Rewriter 任务重试一次。',
           })
+          // The logical reservation has already reached the network; a
+          // physical retry must never release or reserve it again.
           taskId = await startTask(messages, `${detail}（网络中断自动重试 ${networkRetryCount}/1）`)
           continue
         }
@@ -416,21 +468,33 @@ export async function runRewriterCandidateLoop(input: {
   evaluateSemantics: (content: string) => Promise<SemanticGateReview | null>
   markAttemptComplete: (taskId: number, message: string, includeStatusUpdate: boolean) => void
   resolvePremiumChatOptions: () => RewriterChatOptions | undefined
+  revisionBudget?: RevisionAttemptHooks
 }): Promise<RewriterCandidateLoopOutput> {
   let attemptNumber = 1
   let rejectedDigests: string[] = []
+  if (!reserveRevisionAttempt(input.revisionBudget, `rewriter:candidate:${attemptNumber}`)) {
+    throw new ChapterPipelineStageError(
+      'human_review_required',
+      '自动修订额度已用尽或恢复状态不确定，保留现有候选并转人工复核。',
+      { blocked: true, rewriteScope: 'chapter_rewrite' },
+    )
+  }
   let run = await input.runAttempt(attemptNumber, rejectedDigests, 'Rewriter 正在按 Critic 结论修正文稿。')
 
   if (isCandidateTooSimilar(run.result.output, [input.draftContent])
     && (input.requiresFullRewrite || input.reviewPrioritySummary.counts.high > 0)) {
     rejectedDigests = [buildVariationDigest(run.result.output)]
-    input.markAttemptComplete(run.taskId, '首轮重写与初稿过近，已切换变体重试。', true)
-    attemptNumber = 2
-    run = await input.runAttempt(
-      attemptNumber,
-      rejectedDigests,
-      'Rewriter 首轮改写幅度不足，正在切到变体重试。',
-    )
+    if (reserveRevisionAttempt(input.revisionBudget, 'rewriter:candidate:2')) {
+      input.markAttemptComplete(run.taskId, '首轮重写与初稿过近，已切换变体重试。', true)
+      attemptNumber = 2
+      run = await input.runAttempt(
+        attemptNumber,
+        rejectedDigests,
+        'Rewriter 首轮改写幅度不足，正在切到变体重试。',
+      )
+    } else {
+      console.warn('[chapter:pipeline] Rewriter 首轮差异不足但修订额度已用尽，保留首轮候选。')
+    }
   }
 
   let outcome = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
@@ -441,7 +505,7 @@ export async function runRewriterCandidateLoop(input: {
     infoDensityRisks: outcome.dialogueAnalysis.infoDensityRisks,
   })
   const retryDialogue = dialogueDirective.length > 0
-  if ((outcome.miniReview.needsHumanReview || retryDialogue) && outcome.content.trim() && attemptNumber < 3) {
+  if ((outcome.miniReview.needsHumanReview || retryDialogue) && outcome.content.trim()) {
     let structuralDirective = [
       buildStructuralRepairDirective(outcome.miniReview.narrativeDelta, [
         ...outcome.reviewNotes.critical_fixes,
@@ -455,42 +519,47 @@ export async function runRewriterCandidateLoop(input: {
       '本轮必须在保持事实连续性的前提下拉开与初稿的差异：重排至少一个场景的切入点，改变冲突交锋的走向或结果，补入可见代价或新增风险。',
       '不允许仅替换措辞、调整语序或润色修辞。',
     ].join('\n')
-    rejectedDigests = [...rejectedDigests, buildVariationDigest(run.result.output)]
-    input.markAttemptComplete(
-      run.taskId,
-      retryDialogue
-        ? '对白质量复检仍有风险，已带具体证据自动发起定向重写。'
-        : '重写差异门未通过，已带差异门结论自动发起结构性重写。',
-      true,
-    )
-    attemptNumber = 3
-    const premiumOptions = retryDialogue ? undefined : input.resolvePremiumChatOptions()
-    run = await input.runAttempt(
-      attemptNumber,
-      rejectedDigests,
-      retryDialogue
-        ? 'Rewriter 正在按对白质量证据进行定向重写。'
-        : premiumOptions
-          ? 'Rewriter 正在按差异门结论以 premium 路由进行结构性重写。'
-          : 'Rewriter 正在按差异门结论进行结构性重写。',
-      premiumOptions,
-      structuralDirective,
-    )
-    const retried = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
-    const originalLength = countNarrativeWords(input.draftContent)
-    const semantic = await input.evaluateSemantics(retried.content)
-    if (isCandidateBetter({
-      current: outcome,
-      candidate: retried,
-      candidateSemantic: semantic,
-      criticSemanticReview: input.criticSemanticReview,
-      originalLength,
-      genre: input.genre,
-      knownTerms: input.knownTerms,
-      compareDialogueOnTie: true,
-    })) outcome = retried
+    const canRunStructuralRetry = reserveRevisionAttempt(input.revisionBudget, 'rewriter:candidate:3')
+    if (canRunStructuralRetry) {
+      rejectedDigests = [...rejectedDigests, buildVariationDigest(run.result.output)]
+      input.markAttemptComplete(
+        run.taskId,
+        retryDialogue
+          ? '对白质量复检仍有风险，已带具体证据自动发起定向重写。'
+          : '重写差异门未通过，已带差异门结论自动发起结构性重写。',
+        true,
+      )
+      attemptNumber = 3
+      const premiumOptions = retryDialogue ? undefined : input.resolvePremiumChatOptions()
+      run = await input.runAttempt(
+        attemptNumber,
+        rejectedDigests,
+        retryDialogue
+          ? 'Rewriter 正在按对白质量证据进行定向重写。'
+          : premiumOptions
+            ? 'Rewriter 正在按差异门结论以 premium 路由进行结构性重写。'
+            : 'Rewriter 正在按差异门结论进行结构性重写。',
+        premiumOptions,
+        structuralDirective,
+      )
+      const retried = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
+      const originalLength = countNarrativeWords(input.draftContent)
+      const semantic = await input.evaluateSemantics(retried.content)
+      if (isCandidateBetter({
+        current: outcome,
+        candidate: retried,
+        candidateSemantic: semantic,
+        criticSemanticReview: input.criticSemanticReview,
+        originalLength,
+        genre: input.genre,
+        knownTerms: input.knownTerms,
+        compareDialogueOnTie: true,
+      })) outcome = retried
+    } else {
+      console.warn('[chapter:pipeline] Rewriter 结构修复额度已用尽，保留候选并转人工复核。')
+    }
 
-    if (outcome.miniReview.needsHumanReview && outcome.content.trim()) {
+    if (canRunStructuralRetry && outcome.miniReview.needsHumanReview && outcome.content.trim()) {
       structuralDirective = [
         buildStructuralRepairDirective(outcome.miniReview.narrativeDelta, [
           ...outcome.reviewNotes.critical_fixes,
@@ -500,31 +569,37 @@ export async function runRewriterCandidateLoop(input: {
         ]),
         dialogueDirective,
       ].filter(Boolean).join('\n\n')
-      rejectedDigests = [...rejectedDigests, buildVariationDigest(run.result.output)]
-      input.markAttemptComplete(
-        run.taskId,
-        '上一轮结构修复仍未达标，已带最新差异证据发起最后一次有界重写。',
-        false,
-      )
-      attemptNumber = 4
-      run = await input.runAttempt(
-        attemptNumber,
-        rejectedDigests,
-        'Rewriter 正在按最新结构差异证据执行最后一次有界重写。',
-        premiumOptions,
-        structuralDirective,
-      )
-      const finalRetry = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
-      const finalSemantic = await input.evaluateSemantics(finalRetry.content)
-      if (isCandidateBetter({
-        current: outcome,
-        candidate: finalRetry,
-        candidateSemantic: finalSemantic,
-        criticSemanticReview: input.criticSemanticReview,
-        originalLength,
-        genre: input.genre,
-        knownTerms: input.knownTerms,
-      })) outcome = finalRetry
+      const canRunFinalRetry = reserveRevisionAttempt(input.revisionBudget, 'rewriter:candidate:4')
+      if (canRunFinalRetry) {
+        rejectedDigests = [...rejectedDigests, buildVariationDigest(run.result.output)]
+        input.markAttemptComplete(
+          run.taskId,
+          '上一轮结构修复仍未达标，已带最新差异证据发起最后一次有界重写。',
+          false,
+        )
+        attemptNumber = 4
+        run = await input.runAttempt(
+          attemptNumber,
+          rejectedDigests,
+          'Rewriter 正在按最新结构差异证据执行最后一次有界重写。',
+          undefined,
+          structuralDirective,
+        )
+        const finalRetry = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
+        const originalLength = countNarrativeWords(input.draftContent)
+        const finalSemantic = await input.evaluateSemantics(finalRetry.content)
+        if (isCandidateBetter({
+          current: outcome,
+          candidate: finalRetry,
+          candidateSemantic: finalSemantic,
+          criticSemanticReview: input.criticSemanticReview,
+          originalLength,
+          genre: input.genre,
+          knownTerms: input.knownTerms,
+        })) outcome = finalRetry
+      } else {
+        console.warn('[chapter:pipeline] Rewriter 最后一次结构修复额度已用尽，保留候选。')
+      }
     }
   }
 
@@ -596,12 +671,17 @@ export async function runPublishGateRepair(input: {
   ) => Promise<RewriteOutcome>
   recheckRisks: (reviewNotes: ChapterReviewNotes, content: string) => Promise<ChapterReviewNotes>
   persistAccepted: (outcome: RewriteOutcome, taskId: number) => Promise<ChapterPublishCheck>
+  revisionBudget?: RevisionAttemptHooks
 }): Promise<PublishGateRepairOutput> {
   const directive = buildPublishGateRepairDirective(input.publishCheck, input.reviewNotes)
   const current = { ...input }
   if (!directive || !input.content.trim() || input.attemptNumber >= 5) return current
 
   const rejectedDigests = [...input.rejectedDigests, buildVariationDigest(input.content)]
+  if (!reserveRevisionAttempt(input.revisionBudget, 'rewriter:publish-gate:1')) {
+    console.warn(`[chapter:pipeline] 章节验收门修订额度已用尽，保留候选 chapter=${input.chapterId}`)
+    return current
+  }
   try {
     input.markCurrentAttempt(input.taskId, '章节验收门发现硬缺口，已回灌具体证据执行最后一次定向重写。')
     const attemptNumber = 5
@@ -706,6 +786,7 @@ export async function runRewriterQualityPipeline(input: {
   syncRevisionState: () => void
   failRole: (taskId: number, error: unknown, blocked?: boolean) => never
   rewriteScope: ChapterRewriteScope
+  revisionBudget?: RevisionAttemptHooks
 }): Promise<{
   content: string
   reviewNotes: ChapterReviewNotes
@@ -713,13 +794,25 @@ export async function runRewriterQualityPipeline(input: {
   publishCheck: ChapterPublishCheck
   taskId: number
 }> {
-  const candidate = await runRewriterCandidateLoop(input.candidateLoop)
+  const candidate = await runRewriterCandidateLoop({
+    ...input.candidateLoop,
+    revisionBudget: input.revisionBudget || input.candidateLoop.revisionBudget,
+  })
+  if (candidate.outcome.revisionRejected) {
+    const message = '局部补丁未通过校验或事实差异门，候选未写回，需人工处理。'
+    input.failRole(candidate.taskId, new ChapterPipelineStageError('human_review_required', message, {
+      blocked: true,
+      rewriteScope: input.rewriteScope,
+      outputText: buildPipelineFailureOutput('human_review_required', message, { rewriteScope: input.rewriteScope }),
+    }), true)
+  }
   let content = candidate.outcome.content
   let reviewNotes = candidate.outcome.reviewNotes
   let miniReview = candidate.outcome.miniReview
   let taskId = candidate.taskId
   const prepared = await prepareRewriterCandidateForPublish({
     ...input.postProcess,
+    revisionBudget: input.revisionBudget || input.postProcess.revisionBudget,
     content,
     reviewNotes,
   })
@@ -735,6 +828,7 @@ export async function runRewriterQualityPipeline(input: {
   })
   const gateRepair = await runPublishGateRepair({
     ...input.gateRepair,
+    revisionBudget: input.revisionBudget || input.gateRepair.revisionBudget,
     content,
     reviewNotes,
     miniReview,
@@ -774,59 +868,74 @@ export async function runRewriterQualityPipeline(input: {
 
 export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput): Message[] {
   const { context } = input
+  const patchArtifactHash = buildRevisionPatchArtifactHash(input.draftContent)
+  const targetedPatchDirective = input.revisionMode === 'patch'
+    ? [
+        '【C-07 局部补丁模式】',
+        '当前问题有明确正文 span 证据，只能返回 JSON 对象，不得返回整章正文，也不得修改证据范围之外的文字。',
+        '{"baseArtifactHash":"...","patches":[{"start":0,"end":0,"expectedText":"","replacement":"","issueIds":["..."]}]}',
+        `baseArtifactHash 必须精确使用：${patchArtifactHash}`,
+        'start/end 使用 JavaScript UTF-16 偏移；expectedText 必须逐字等于当前正文对应片段；所有补丁必须针对同一 baseArtifactHash。',
+        ...(input.revisionPatchEvidence || []).map((evidence) => `证据 JSON：${JSON.stringify(evidence)}`),
+      ].join('\n')
+    : ''
+  const prompt = buildChapterRewritePrompt({
+    novelTitle: input.novelTitle,
+    genre: input.genre,
+    chapterNum: input.chapterNum,
+    chapterTitle: input.chapterTitle,
+    chapterGoal: context.chapterGoal,
+    hardConstraintContext: context.hardConstraintContext,
+    dialogueVoiceLocks: context.dialogueVoiceLocks,
+    emotionTone: input.emotionTone,
+    targetWords: input.targetWords,
+    storyCore: input.storyCore,
+    writingContractSummary: context.writingContractSummary,
+    themeChapterTest: input.themeChapterTest,
+    relationSummary: context.relationSummary,
+    currentArc: context.currentArc,
+    worldRules: context.worldRules,
+    characterStates: context.characterStates,
+    worldStates: context.worldStates,
+    mapSummary: context.mapSummary,
+    itemSummary: context.itemSummary,
+    previousSummaries: context.previousSummaries,
+    previousChapterContext: context.previousChapterContext,
+    lastChapterEnding: context.lastChapterEnding,
+    chapterBridgePlan: context.chapterBridgePlan,
+    stepMemorySummary: context.stepMemorySummary,
+    runtimeAssertions: input.runtimeAssertions,
+    continuitySummary: context.continuitySummary,
+    openLoops: context.openLoops,
+    dueForeshadows: context.dueForeshadows,
+    continuityNotes: context.continuityNotes,
+    timelineSummary: context.timelineSummary,
+    timelineOpenThreads: context.timelineOpenThreads,
+    longTermMemory: context.longTermMemory,
+    recalledMemory: context.recalledMemory,
+    consistencyNotes: input.consistencyNotes,
+    structuralAlertsSummary: input.structuralAlertsSummary,
+    scenePlan: input.scenePlanText,
+    draftContent: input.draftContent,
+    reviewNotes: [targetedPatchDirective, input.prioritizedReviewNotesText, input.structuralRepairDirective]
+      .filter(Boolean)
+      .join('\n\n'),
+    lockedParagraphs: input.lockedParagraphs,
+    activeThreads: context.activeThreads,
+    ...input.narrativeFields,
+    ...input.guidance,
+    protagonistReference: input.protagonistReference,
+    protagonistRule: input.protagonistRule,
+    promptTier: input.promptTier,
+    attemptNumber: input.attemptNumber,
+    rejectedDigests: input.rejectedDigests,
+  })
+  const finalPrompt = input.revisionMode === 'patch'
+    ? `${prompt}\n\n【局部补丁最终输出格式（覆盖前文整章正文输出要求）】\n只输出 C-07 JSON 对象，不要输出整章正文、Markdown 或解释；校验失败时不要猜测，返回可被拒绝的 JSON。`
+    : prompt
   return [{
     role: 'user',
-    content: buildChapterRewritePrompt({
-      novelTitle: input.novelTitle,
-      genre: input.genre,
-      chapterNum: input.chapterNum,
-      chapterTitle: input.chapterTitle,
-      chapterGoal: context.chapterGoal,
-      hardConstraintContext: context.hardConstraintContext,
-      dialogueVoiceLocks: context.dialogueVoiceLocks,
-      emotionTone: input.emotionTone,
-      targetWords: input.targetWords,
-      storyCore: input.storyCore,
-      writingContractSummary: context.writingContractSummary,
-      themeChapterTest: input.themeChapterTest,
-      relationSummary: context.relationSummary,
-      currentArc: context.currentArc,
-      worldRules: context.worldRules,
-      characterStates: context.characterStates,
-      worldStates: context.worldStates,
-      mapSummary: context.mapSummary,
-      itemSummary: context.itemSummary,
-      previousSummaries: context.previousSummaries,
-      previousChapterContext: context.previousChapterContext,
-      lastChapterEnding: context.lastChapterEnding,
-      chapterBridgePlan: context.chapterBridgePlan,
-      stepMemorySummary: context.stepMemorySummary,
-      runtimeAssertions: input.runtimeAssertions,
-      continuitySummary: context.continuitySummary,
-      openLoops: context.openLoops,
-      dueForeshadows: context.dueForeshadows,
-      continuityNotes: context.continuityNotes,
-      timelineSummary: context.timelineSummary,
-      timelineOpenThreads: context.timelineOpenThreads,
-      longTermMemory: context.longTermMemory,
-      recalledMemory: context.recalledMemory,
-      consistencyNotes: input.consistencyNotes,
-      structuralAlertsSummary: input.structuralAlertsSummary,
-      scenePlan: input.scenePlanText,
-      draftContent: input.draftContent,
-      reviewNotes: [input.prioritizedReviewNotesText, input.structuralRepairDirective]
-        .filter(Boolean)
-        .join('\n\n'),
-      lockedParagraphs: input.lockedParagraphs,
-      activeThreads: context.activeThreads,
-      ...input.narrativeFields,
-      ...input.guidance,
-      protagonistReference: input.protagonistReference,
-      protagonistRule: input.protagonistRule,
-      promptTier: input.promptTier,
-      attemptNumber: input.attemptNumber,
-      rejectedDigests: input.rejectedDigests,
-    }),
+    content: finalPrompt,
   }]
 }
 
@@ -909,6 +1018,33 @@ async function runGuardrailRepairAttempt(
   })).trim()
 }
 
+function parseRevisionPatchCandidate(output: string): RevisionPatch | null {
+  const parsed = parseAiJsonResult<RevisionPatch>(output, 'object', {
+    channel: 'chapter-revision-patch',
+    message: '局部修订补丁解析失败。',
+    consoleSummary: '[chapter:revision-patch] invalid patch candidate',
+  })
+  if (!parsed.success || !parsed.data) return null
+  const candidate = parsed.data
+  if (typeof candidate.baseArtifactHash !== 'string' || !Array.isArray(candidate.patches)) return null
+  return candidate
+}
+
+function findLockedPatchRanges(content: string, lockedParagraphs: readonly string[]): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = []
+  for (const paragraph of lockedParagraphs) {
+    if (!paragraph) continue
+    let from = 0
+    while (from <= content.length) {
+      const start = content.indexOf(paragraph, from)
+      if (start < 0) break
+      ranges.push({ start, end: start + paragraph.length })
+      from = start + Math.max(1, paragraph.length)
+    }
+  }
+  return ranges
+}
+
 function applyGuardrailReview(
   input: ChapterRepairInput,
   reviewNotes: ChapterReviewNotes,
@@ -936,6 +1072,11 @@ export async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Pr
     return { content: originalContent, reviewNotes: input.reviewNotes }
   }
   const repairNotes = applyGuardrailReview(input, input.reviewNotes, originalContent, findings)
+  const firstAttemptKey = `rewriter:guardrail:${input.chapter.id}:${input.attemptNumber || 1}`
+  if (!reserveRevisionAttempt(input.revisionBudget, firstAttemptKey)) {
+    console.warn(`[chapter:pipeline] 护栏修订额度已用尽，保留候选 chapter=${input.chapter.id}`)
+    return { content: originalContent, reviewNotes: repairNotes }
+  }
   try {
     const repairedContent = await runGuardrailRepairAttempt(
       input,
@@ -984,6 +1125,11 @@ export async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Pr
       protectedRepaired.content,
       finalFindings,
     )
+    const secondAttemptKey = `rewriter:guardrail:${input.chapter.id}:${(input.attemptNumber || 1) + 1}`
+    if (!reserveRevisionAttempt(input.revisionBudget, secondAttemptKey)) {
+      console.warn(`[chapter:pipeline] 第二次护栏修订额度已用尽，保留首个候选 chapter=${input.chapter.id}`)
+      return { content: protectedRepaired.content, reviewNotes: secondRepairNotes }
+    }
     try {
       const secondContent = await runGuardrailRepairAttempt(
         input,
@@ -1025,20 +1171,99 @@ export async function processChapterRewriteOutcome(input: {
   glossaryTerms: string[]
   repairInput: Omit<ChapterRepairInput, 'content' | 'reviewNotes'>
   reviewNotes: ChapterReviewNotes
+  revisionMode?: 'patch' | 'scene' | 'chapter'
 }): Promise<RewriteOutcome> {
   const { repairInput } = input
-  const protectedOutput = enforceLockedParagraphProtection(
-    input.rewriteOutput,
-    repairInput.lockedParagraphs,
-    input.lockedFallbackContent,
-    input.reviewNotes,
-  )
-  const repaired = await repairChapterOutputIfNeeded({
-    ...repairInput,
-    reviewNotes: protectedOutput.reviewNotes,
-    content: protectedOutput.content,
-  })
-  const repairedContent = stripChapterHeadingNoise(
+  const previousFactIssueIds = new Set((input.reviewNotes.issues || [])
+    .filter((issue) => issue.category === 'fact')
+    .map((issue) => issue.id))
+  let revisionRejected = false
+  let safePatchBase = input.originalDraft
+  let protectedOutput: { content: string; reviewNotes: ChapterReviewNotes }
+  if (input.revisionMode === 'patch') {
+    const patchBase = input.originalDraft
+    const lockedFallbackContent = input.lockedFallbackContent || patchBase
+    safePatchBase = enforceLockedParagraphProtection(
+      patchBase,
+      repairInput.lockedParagraphs,
+      lockedFallbackContent,
+      input.reviewNotes,
+    ).content
+    const candidatePatch = parseRevisionPatchCandidate(input.rewriteOutput)
+    if (!candidatePatch) {
+      revisionRejected = true
+      protectedOutput = {
+        content: safePatchBase,
+        reviewNotes: {
+          ...input.reviewNotes,
+          critical_fixes: [...input.reviewNotes.critical_fixes, '局部补丁输出格式无效，未退化为整章重写，需人工处理。'],
+          rewrite_required: true,
+          severity: 'high',
+        },
+      }
+    } else {
+      try {
+        protectedOutput = enforceLockedParagraphProtection(
+          applyRevisionPatch(
+            patchBase,
+            candidatePatch,
+            findLockedPatchRanges(patchBase, repairInput.lockedParagraphs),
+          ),
+          repairInput.lockedParagraphs,
+          lockedFallbackContent,
+          input.reviewNotes,
+        )
+      } catch (error) {
+        revisionRejected = true
+        const detail = error instanceof RevisionPatchValidationError
+          ? `${error.code}：${error.message}`
+          : '局部补丁校验失败。'
+        console.warn(`[chapter:pipeline] 局部补丁未采纳 chapter=${repairInput.chapter.id}：${detail}`)
+        protectedOutput = {
+          content: safePatchBase,
+          reviewNotes: {
+            ...input.reviewNotes,
+            critical_fixes: [...input.reviewNotes.critical_fixes, `局部补丁未采纳：${detail}`],
+            rewrite_required: true,
+            severity: 'high',
+          },
+        }
+      }
+    }
+    if (!revisionRejected && repairInput.factGuard && protectedOutput.content.trim() !== patchBase.trim()) {
+      const factGuard = repairInput.factGuard(patchBase, protectedOutput.content)
+      if (!factGuard.safeToApply) {
+        revisionRejected = true
+        protectedOutput = {
+          content: safePatchBase,
+          reviewNotes: {
+            ...protectedOutput.reviewNotes,
+            critical_fixes: [
+              ...protectedOutput.reviewNotes.critical_fixes,
+              `局部补丁事实差异门未通过：${factGuard.warnings.join('；')}`,
+            ],
+            rewrite_required: true,
+            severity: 'high',
+          },
+        }
+      }
+    }
+  } else {
+    protectedOutput = enforceLockedParagraphProtection(
+      input.rewriteOutput,
+      repairInput.lockedParagraphs,
+      input.lockedFallbackContent,
+      input.reviewNotes,
+    )
+  }
+  const repaired = input.revisionMode === 'patch'
+    ? protectedOutput
+    : await repairChapterOutputIfNeeded({
+        ...repairInput,
+        reviewNotes: protectedOutput.reviewNotes,
+        content: protectedOutput.content,
+      })
+  let repairedContent = stripChapterHeadingNoise(
     repaired.content,
     repairInput.chapter.chapterNum,
     input.chapterTitle,
@@ -1082,6 +1307,23 @@ export async function processChapterRewriteOutcome(input: {
     scenePlanJson: repairInput.chapter.scenePlanJson,
     novel: repairInput.novel,
   })
+  if (input.revisionMode === 'patch') {
+    const factDrift = (reviewNotes.issues || []).find((issue) => (
+      issue.category === 'fact'
+      && issue.level === 'blocker'
+      && !previousFactIssueIds.has(issue.id)
+    ))
+    if (factDrift) {
+      revisionRejected = true
+      repairedContent = safePatchBase
+      reviewNotes = {
+        ...reviewNotes,
+        critical_fixes: [...reviewNotes.critical_fixes, `局部补丁引入事实校验失败：${factDrift.message}`],
+        rewrite_required: true,
+        severity: 'high',
+      }
+    }
+  }
   const miniReview = buildRewriteMiniReviewVerdict({
     originalContent: input.originalDraft,
     rewrittenContent: repairedContent,
@@ -1093,6 +1335,7 @@ export async function processChapterRewriteOutcome(input: {
     reviewNotes: applyRewriteDeltaToReviewNotes(reviewNotes, miniReview.narrativeDelta),
     miniReview,
     dialogueAnalysis,
+    revisionRejected,
   }
 }
 
@@ -1107,6 +1350,7 @@ export async function applyPostRewriteStyleRepair(input: {
   modelConfigId?: number
   criticSemanticReview: SemanticGateReview | null
   evaluateSemantics: (content: string) => Promise<SemanticGateReview | null>
+  revisionBudget?: RevisionAttemptHooks
 }): Promise<{
   content: string
   findings: ReturnType<typeof collectQualityGuardrailFindings>
@@ -1116,6 +1360,10 @@ export async function applyPostRewriteStyleRepair(input: {
   const styleOnly = findings.length > 0
     && findings.every((finding) => STYLE_REPAIRABLE_GUARDRAIL_CODES.has(finding.code))
   if (!hasBlockingGuardrailFindings(findings) || !styleOnly || !content.trim()) {
+    return { content, findings }
+  }
+  if (!reserveRevisionAttempt(input.revisionBudget, `rewriter:style:${input.chapterId}`)) {
+    console.warn(`[chapter:pipeline] 后验风格修订额度已用尽，保留候选 chapter=${input.chapterId}`)
     return { content, findings }
   }
   try {
@@ -1185,6 +1433,7 @@ export async function prepareRewriterCandidateForPublish(input: {
   modelConfigId?: number
   criticSemanticReview: SemanticGateReview | null
   evaluateSemantics: (content: string) => Promise<SemanticGateReview | null>
+  revisionBudget?: RevisionAttemptHooks
   /** 风险复检完成后回调，用于把最近一份完整稿登记为可恢复的保稿基线。 */
   onRiskRechecked?: (reviewNotes: ChapterReviewNotes, content: string) => void
 }): Promise<{

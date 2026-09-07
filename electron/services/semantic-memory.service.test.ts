@@ -17,13 +17,21 @@ vi.mock('./embedding.service', () => ({
 import { getDb, getSqlite } from '../database/db'
 import { characters, novels, semanticMemoryEntries } from '../database/schema'
 import { buildCharacterSemanticDocuments } from '../../src/shared/semantic-memory'
-import { embedSemanticTexts, isUsableEmbedding } from './embedding.service'
+import {
+  cosineSimilarity,
+  embedSemanticTexts,
+  extractEmbeddingKeywords,
+  isCompatibleEmbeddingRow,
+  isUsableEmbedding,
+} from './embedding.service'
+import { hashQueryText } from './query-embedding'
 import {
   buildSemanticMemoryFtsQuery,
   getSemanticMemoryOutboxStatus,
   hashSemanticDocument,
   querySemanticMemoryFtsCandidateIds,
   reindexSemanticMemorySource,
+  searchSemanticMemory,
 } from './semantic-memory.service'
 
 describe('semantic memory FTS candidate retrieval', () => {
@@ -195,5 +203,55 @@ describe('semantic memory FTS candidate retrieval', () => {
     expect(embedSemanticTexts).not.toHaveBeenCalled()
     expect(result.vectorizedCount).toBe(documents.length)
     expect(insertedRows).toHaveLength(documents.length)
+  })
+
+  it('consumes a compatible prepared query without embedding again', async () => {
+    const row = {
+      id: 17,
+      novelId: 8,
+      sourceType: 'character',
+      sourceId: 11,
+      fragmentKey: 'identity',
+      contentText: '历史线索',
+      embeddingJson: '[1,0]',
+      embeddingProfile: 'stub-model:2',
+      dimensions: 2,
+      entityRefsJson: '[]',
+      visibility: 'canon',
+      validFromChapter: null,
+      validToChapter: null,
+    }
+    const query = {
+      where: () => query,
+      orderBy: () => query,
+      limit: () => query,
+      all: () => [row],
+    }
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({ from: () => query }),
+    } as never)
+    vi.mocked(extractEmbeddingKeywords).mockReturnValue(['历史'])
+    vi.mocked(isCompatibleEmbeddingRow).mockReturnValue(true)
+    vi.mocked(cosineSimilarity).mockReturnValue(1)
+    vi.mocked(getSqlite).mockReturnValue({
+      prepare: vi.fn(() => ({ all: () => [] })),
+    } as never)
+
+    const hits = await searchSemanticMemory(8, '  历史  ', {
+      topK: 1,
+      modelConfigId: 7,
+      preparedQuery: {
+        queryHash: hashQueryText('历史'),
+        profile: 'stub-model:2',
+        dimensions: 2,
+        embedding: [1, 0],
+      },
+      sourceTypes: ['character'],
+      visibility: 'canon',
+      refreshOutbox: false,
+    })
+
+    expect(embedSemanticTexts).not.toHaveBeenCalled()
+    expect(hits[0]).toMatchObject({ sourceType: 'character', sourceId: 11, searchMode: 'vector' })
   })
 })

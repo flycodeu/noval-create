@@ -20,6 +20,7 @@ import {
   resolveSemanticSourceTypesForBucket,
   type RecallQueryBuildInput,
 } from './context-recall-planner'
+import { hashQueryText, prepareQueryEmbeddings } from './query-embedding'
 
 export interface RecallAugmentationResult {
   assemblyStage: 'recall'
@@ -55,6 +56,11 @@ export async function runRecallAugmentation(
   }
 
   try {
+    const preparedQueries = await prepareQueryEmbeddings(
+      recallBuckets.map((bucket) => bucket.query),
+      input.modelConfigId || undefined,
+    )
+
     try {
       await processSemanticMemoryOutbox({ novelId: input.novelId, limit: 24 })
     } catch {
@@ -63,13 +69,14 @@ export async function runRecallAugmentation(
 
     const combinedResults = await Promise.all(recallBuckets.map(async (bucket) => {
       const validationTerms = resolveRecallValidationTerms(bucket.bucket, input)
+      const preparedQuery = preparedQueries.get(hashQueryText(bucket.query)) || null
       const [searchResult, semanticHits] = await Promise.all([
         searchSimilarFragments(
           input.novelId,
           bucket.query,
           bucket.topK,
           input.modelConfigId || undefined,
-          { beforeChapterNum: input.chapterNum },
+          { beforeChapterNum: input.chapterNum, preparedQuery },
         ).catch(() => ({
           hits: [],
           fallbackReason: 'embedding_service_failed' as RecallFallbackReason,
@@ -78,6 +85,7 @@ export async function runRecallAugmentation(
           topK: bucket.topK,
           modelConfigId: input.modelConfigId || undefined,
           chapterNum: input.chapterNum,
+          preparedQuery,
           sourceTypes: resolveSemanticSourceTypesForBucket(bucket.bucket),
           visibility: 'canon',
           refreshOutbox: false,

@@ -1003,11 +1003,11 @@ describe('runChapterPublishCheck', () => {
 
     const result = runChapterPublishCheck(10)
 
-    expect(result.gateLevel).toBe('blocker')
+    expect(result.gateLevel).toBe('warning')
     expect(result.checklist.find((item) => item.key === 'genre_register_drift')?.status).toBe('warning')
-    expect(result.checklist.find((item) => item.key === 'exposition_density')?.status).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'exposition_density')?.status).toBe('warning')
     expect(result.checklist.find((item) => item.key === 'long_window_homogenization')?.status).toBe('warning')
-    expect(result.checklist.find((item) => item.key === 'dialogue_separability')?.status).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'dialogue_separability')?.status).toBe('warning')
   })
 
   it('marks style compliance as rewrite when review notes persist severe style drift', () => {

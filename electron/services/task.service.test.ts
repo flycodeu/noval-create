@@ -12,6 +12,7 @@ vi.mock('./model.service', () => ({
   getDefaultModelConfigRecord: vi.fn(),
   getModelConfigRecord: vi.fn(),
   getModelProviderOptions: vi.fn(),
+  getProviderTokenSafetyMarginPct: vi.fn(() => 5),
   getProviderRuntimeDefaults: vi.fn(() => ({ temperature: 0.85, maxTokens: 4096 })),
 }))
 
@@ -83,9 +84,10 @@ function buildLedgerSqlite() {
   }
 }
 
-function configureTaskRuntime(adapter: OpenAIAdapter) {
+function configureTaskRuntime(adapter: OpenAIAdapter, overrides: Record<string, unknown> = {}) {
   vi.mocked(getModelConfigRecord).mockReturnValue({
     id: 2, provider: 'openai', modelId: 'test-model', maxConcurrency: 1, temperature: 0.8, maxTokens: 100,
+    ...overrides,
   } as never)
   vi.mocked(getModelProviderOptions).mockReturnValue(undefined)
   vi.mocked(createAdapter).mockReturnValue(adapter)
@@ -149,6 +151,82 @@ describe('task service transient retry policy', () => {
       retryable: true,
       attemptNumber: 0,
     })).toBe(false)
+  })
+
+  it('rejects an oversized final request before the adapter is called', async () => {
+    const task = { id: 46, novelId: 5, runnerType: 'chat', status: 'running', currentChildTaskId: null, controlJson: '{}' }
+    const fakeTaskDb = buildFakeDb([], [[task], [task]])
+    vi.mocked(getDb).mockReturnValue(fakeTaskDb.db as never)
+    const adapter = new OpenAIAdapter('key', 'test-model', 'http://127.0.0.1:1/v1', 8_000, 0.8, 100)
+    const chat = vi.spyOn(adapter, 'chat').mockResolvedValue('should-not-run')
+    configureTaskRuntime(adapter, { maxContextTokens: 8_000 })
+
+    await expect(executeChatTask(task.id, {
+      type: 'chapter_writer',
+      novelId: task.novelId,
+      modelConfigId: 2,
+      messages: [{ role: 'user', content: 'x'.repeat(30_000) }],
+      chatOpts: { maxTokens: 2_000 },
+    })).rejects.toMatchObject({ code: 'NF_REQUEST_BUDGET_EXCEEDED' })
+
+    expect(chat).not.toHaveBeenCalled()
+    expect(fakeTaskDb.updates.at(-1)).toMatchObject({ status: 'failed' })
+  })
+
+  it('runs prepareInput once, then rechecks the final messages', async () => {
+    const task = { id: 47, novelId: 5, runnerType: 'chat', status: 'running', currentChildTaskId: null, controlJson: '{}' }
+    const fakeTaskDb = buildFakeDb([], [[task], [task]])
+    vi.mocked(getDb).mockReturnValue(fakeTaskDb.db as never)
+    const adapter = new OpenAIAdapter('key', 'test-model', 'http://127.0.0.1:1/v1', 20_000, 0.8, 100)
+    const chat = vi.spyOn(adapter, 'chat').mockResolvedValue('should-not-run')
+    configureTaskRuntime(adapter, { maxContextTokens: 20_000 })
+    const prepareInput = vi.fn(async () => ({
+      messages: [{ role: 'user' as const, content: 'x'.repeat(100_000) }],
+      diagnostics: { removedOptional: 1 },
+    }))
+
+    await expect(executeChatTask(task.id, {
+      type: 'chapter_writer',
+      novelId: task.novelId,
+      modelConfigId: 2,
+      messages: [{ role: 'user', content: 'short' }],
+      chatOpts: { maxTokens: 2_000 },
+      prepareInput,
+    })).rejects.toMatchObject({ code: 'NF_REQUEST_BUDGET_EXCEEDED' })
+
+    expect(prepareInput).toHaveBeenCalledOnce()
+    expect(chat).not.toHaveBeenCalled()
+  })
+
+  it('allows prepareInput to trim once while preserving the actual maxTokens override', async () => {
+    const task = { id: 48, novelId: 5, runnerType: 'chat', status: 'running', currentChildTaskId: null, controlJson: '{}' }
+    const fakeTaskDb = buildFakeDb([], [[task], [task]])
+    vi.mocked(getDb).mockReturnValue(fakeTaskDb.db as never)
+    const adapter = new OpenAIAdapter('key', 'test-model', 'http://127.0.0.1:1/v1', 8_000, 0.8, 100)
+    const chat = vi.spyOn(adapter, 'chat').mockImplementation(async (_messages, opts) => {
+      expect(opts?.maxTokens).toBe(2_000)
+      return 'ok'
+    })
+    configureTaskRuntime(adapter, { maxContextTokens: 8_000 })
+    const prepareInput = vi.fn(async (request: { budgetReport: { allowed: boolean } }) => {
+      expect(request.budgetReport.allowed).toBe(false)
+      return {
+        messages: [{ role: 'user' as const, content: 'trimmed' }],
+        diagnostics: { removedOptional: 1 },
+      }
+    })
+
+    await expect(executeChatTask(task.id, {
+      type: 'chapter_writer',
+      novelId: task.novelId,
+      modelConfigId: 2,
+      messages: [{ role: 'user', content: 'x'.repeat(30_000) }],
+      chatOpts: { maxTokens: 2_000 },
+      prepareInput,
+    })).resolves.toBe('ok')
+
+    expect(prepareInput).toHaveBeenCalledOnce()
+    expect(chat).toHaveBeenCalledOnce()
   })
 })
 
@@ -387,6 +465,25 @@ describe('task service completion gate', () => {
     expect(onSuccess).not.toHaveBeenCalled()
     expect(fakeTaskDb.updates.at(-1)).toMatchObject({ status: 'failed', outputText: '半段正文' })
     expect(ledger.rows).toMatchObject([{ attempt_index: 1, status: 'failed', error_code: 'MODEL_STREAM_INTERRUPTED' }])
+  })
+
+  it('rejects a large system prompt after chat options are merged', async () => {
+    const task = { id: 49, novelId: 5, runnerType: 'chat', status: 'running', currentChildTaskId: null, controlJson: '{}' }
+    const fakeTaskDb = buildFakeDb([], [[task], [task]])
+    vi.mocked(getDb).mockReturnValue(fakeTaskDb.db as never)
+    const adapter = new OpenAIAdapter('key', 'test-model', 'http://127.0.0.1:1/v1', 8_000, 0.8, 100)
+    const chat = vi.spyOn(adapter, 'chat').mockResolvedValue('should-not-run')
+    configureTaskRuntime(adapter, { maxContextTokens: 8_000 })
+
+    await expect(executeChatTask(task.id, {
+      type: 'chapter_writer',
+      novelId: task.novelId,
+      modelConfigId: 2,
+      messages: [{ role: 'user', content: 'short' }],
+      chatOpts: { maxTokens: 2_000, systemPrompt: 'system '.repeat(20_000) },
+    })).rejects.toMatchObject({ code: 'NF_REQUEST_BUDGET_EXCEEDED' })
+
+    expect(chat).not.toHaveBeenCalled()
   })
 
   it('does not regenerate when the task ledger sink cannot persist', async () => {

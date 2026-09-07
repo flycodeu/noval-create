@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, like, lt, or } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
+import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
 
 const LOCAL_EMBEDDING_MODEL_ID = 'local:Xenova/bge-small-zh-v1.5:q8'
 const REMOTE_EMBEDDING_MODEL_ID = 'text-embedding-3-small'
@@ -56,6 +57,7 @@ export interface SimilarFragmentSearchResult {
 
 export interface SimilarFragmentSearchOptions {
   beforeChapterNum?: number
+  preparedQuery?: PreparedQueryEmbedding | null
 }
 
 const embeddingCandidateSelection = {
@@ -517,21 +519,38 @@ export async function searchSimilarFragments(
     }
   }
 
-  const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
-  const queryEmbedding = queryBatch.embeddings?.[0]
-  if (!queryEmbedding || !queryBatch.profile) {
+  const preparedQuery = options?.preparedQuery
+  const usePreparedQuery = preparedQuery !== undefined
+    && preparedQuery !== null
+    && isCompatiblePreparedQuery(queryText, preparedQuery)
+  const preparedQueryRejected = preparedQuery !== undefined && !usePreparedQuery
+  let queryEmbedding: number[] | undefined
+  let queryProfile: string | undefined
+  let queryDimensions: number | undefined
+
+  if (usePreparedQuery) {
+    queryEmbedding = preparedQuery!.embedding
+    queryProfile = preparedQuery!.profile
+    queryDimensions = preparedQuery!.dimensions
+  } else if (!preparedQueryRejected) {
+    const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
+    queryEmbedding = queryBatch.embeddings?.[0]
+    queryProfile = queryBatch.profile
+    queryDimensions = queryBatch.dimensions
+  }
+
+  if (!queryEmbedding || !queryProfile || !queryDimensions) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK, options)
     return {
       hits,
-      fallbackReason: 'embedding_service_failed',
+      fallbackReason: preparedQueryRejected ? 'query_embedding_failed' : 'embedding_service_failed',
     }
   }
 
-  const queryProfile = queryBatch.profile
   const compatibilityFilters = [
     eq(chapterEmbeddings.novelId, novelId),
     eq(chapterEmbeddings.embeddingProfile, queryProfile),
-    eq(chapterEmbeddings.dimensions, queryEmbedding.length),
+    eq(chapterEmbeddings.dimensions, queryDimensions),
     isNotNull(chapterEmbeddings.embeddingJson),
   ] as const
   const lookupKeywords = extractEmbeddingKeywords(queryText, MAX_LOOKUP_KEYWORDS)
@@ -544,7 +563,7 @@ export async function searchSimilarFragments(
         ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
         buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
       ))
-      .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+      .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
       .limit(MAX_VECTOR_CANDIDATES - RECENT_VECTOR_CANDIDATES)
       .all()
     : []
@@ -555,12 +574,12 @@ export async function searchSimilarFragments(
       eq(chapters.novelId, novelId),
       ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
     ))
-    .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+    .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
     .limit(RECENT_VECTOR_CANDIDATES)
     .all()
   const compatibleRows = [...new Map(
     [...lexicalRows, ...recentRows]
-      .filter((row) => isCompatibleEmbeddingRow(row, queryProfile, queryEmbedding.length))
+      .filter((row) => isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!))
       .map((row) => [row.id, row] as const),
   ).values()].slice(0, MAX_VECTOR_CANDIDATES)
 
@@ -575,7 +594,7 @@ export async function searchSimilarFragments(
   const scored = compatibleRows.flatMap((e) => {
       try {
         const embedding = JSON.parse(e.embeddingJson!) as number[]
-        if (!isCompatibleEmbeddingRow(e, queryProfile, queryEmbedding.length)) return []
+        if (!isCompatibleEmbeddingRow(e, queryProfile!, queryDimensions!)) return []
         return [{
           chapterId: e.chapterId,
           chapterNum: e.chapterNum ?? 0,
@@ -626,7 +645,7 @@ export function fallbackKeywordSearch(
       ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
       ...(lookupKeywords.length > 0 ? [buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords)] : []),
     ))
-    .orderBy(desc(chapterEmbeddings.chapterId), desc(chapterEmbeddings.id))
+    .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
     .limit(candidateLimit)
     .all()
 

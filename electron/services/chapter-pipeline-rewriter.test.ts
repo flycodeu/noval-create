@@ -12,6 +12,27 @@ const mocks = vi.hoisted(() => ({
   persistAntiAiRuleHits: vi.fn(),
 }))
 
+vi.mock('../database/db', () => {
+  const query = {
+    from: () => query,
+    where: () => query,
+    innerJoin: () => query,
+    leftJoin: () => query,
+    orderBy: () => query,
+    groupBy: () => query,
+    limit: () => query,
+    offset: () => query,
+    all: () => [],
+    get: () => undefined,
+  }
+  return {
+    getDb: () => ({ select: () => query }),
+    getSqlite: () => ({
+      prepare: () => ({ all: () => [], get: () => undefined, run: () => ({ changes: 0 }) }),
+    }),
+  }
+})
+
 vi.mock('./prompt-override.service', () => ({
   applyPromptOverride: (_key: string, fallback: string) => fallback,
 }))
@@ -28,17 +49,35 @@ vi.mock('./anti-ai-rule.service', () => ({
   persistAntiAiRuleHits: mocks.persistAntiAiRuleHits,
 }))
 
+vi.mock('./chapter-contract-validator.service', () => ({
+  validateChapterContractDelivery: () => ({ status: 'pass', summary: '通过', itemResults: [], rewriteHints: [] }),
+}))
+
+vi.mock('./chapter-pipeline-review', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./chapter-pipeline-review')>()
+  return {
+    ...actual,
+    applyGroundingAndLongWindowReviewNotes: (input: { reviewNotes: unknown }) => input.reviewNotes,
+  }
+})
+
 import {
   buildChapterRewriterMessages,
   buildRewriterReleaseError,
   createRewriterStreamAttemptRunner,
+  processChapterRewriteOutcome,
   repairChapterOutputIfNeeded,
   runPublishGateRepair,
   runRewriterCandidateLoop,
   runRewriterQualityPipeline,
   runRewriteRiskRecheck,
+  selectCompatibleRevisionPatchEvidence,
   type RewriteOutcome,
 } from './chapter-pipeline-rewriter'
+import { createRevisionBudget, RevisionBudgetController } from './revision-budget'
+import { buildReviewPrioritySummary } from './chapter-pipeline-policy.service'
+import { createQualityIssue } from '../../src/shared/quality-issue'
+import { buildRevisionPatchArtifactHash } from '../../src/shared/revision-patch'
 
 function contextFixture(chapterNum: number): ChapterContext {
   const prefix = `chapter-${chapterNum}`
@@ -145,6 +184,73 @@ beforeEach(() => {
 })
 
 describe('chapter pipeline rewriter', () => {
+  it('09-03: accepts patch evidence only when hash, UTF-16 range, and quote match the current draft', () => {
+    const content = '😀他咬牙把门推开。'
+    const issue = createQualityIssue({
+      ruleId: 'motivation_irrational',
+      message: '动作缺少现场动机。',
+      detector: 'model',
+      level: 'repair',
+      content,
+      excerpt: '咬牙把门推开',
+      source: 'semantic-gate',
+    })!
+    const reviewNotes = { ...buildFallbackReviewNotes(''), issues: [issue] }
+    const summary = buildReviewPrioritySummary(reviewNotes)
+
+    expect(selectCompatibleRevisionPatchEvidence(summary, content)).toEqual([{
+      issueId: issue.id,
+      ...issue.evidence[0],
+    }])
+    expect(selectCompatibleRevisionPatchEvidence(summary, `${content}改`)).toEqual([])
+  })
+
+  it('09-08: processes a verified patch against the same unmarked draft used by the prompt', async () => {
+    const originalDraft = '锁定句。\n坏句。'
+    const expectedText = '坏句。'
+    const start = originalDraft.indexOf(expectedText)
+    const factGuard = vi.fn(() => ({ safeToApply: true, warnings: [] }))
+    const output = await processChapterRewriteOutcome({
+      rewriteOutput: JSON.stringify({
+        baseArtifactHash: buildRevisionPatchArtifactHash(originalDraft),
+        patches: [{
+          start,
+          end: start + expectedText.length,
+          expectedText,
+          replacement: '好句。',
+          issueIds: ['quality:test:bad-sentence'],
+        }],
+      }),
+      originalDraft,
+      lockedFallbackContent: '锁定句。\n旧句。',
+      chapterTitle: '夜账',
+      chapterWordTarget: 20,
+      semanticGateMode: 'off',
+      glossaryTerms: [],
+      repairInput: {
+        chapter: { id: 101, novelId: 7, chapterNum: 1, title: '夜账' },
+        novel: { title: '雾城旧账' },
+        context: contextFixture(1),
+        storyCore: '追查矿难真相',
+        profile: { genre: '悬疑', protagonistReference: '沈砚青', protagonistRule: '不得全知' },
+        scenePlanText: '1. 追出后门',
+        consistencyNotes: '',
+        structuralAlertsSummary: '',
+        lockedParagraphs: ['锁定句。'],
+        promptTier: 'standard',
+        knownTerms: ['沈砚青'],
+        targetWords: 20,
+        factGuard,
+      },
+      reviewNotes: buildFallbackReviewNotes(''),
+      revisionMode: 'patch',
+    })
+
+    expect(output.content).toContain('锁定句。\n好句。')
+    expect(output.revisionRejected).toBe(false)
+    expect(factGuard).toHaveBeenCalledWith(originalDraft, '锁定句。\n好句。')
+  })
+
   it('restarts a chapter 1 stream once when the provider fails before usable output', async () => {
     const transientError = new Error('connection reset')
     mocks.executeStreamTask
@@ -169,6 +275,7 @@ describe('chapter pipeline rewriter', () => {
 
     expect(result).toEqual({ taskId: 72, result: { output: '第二个任务返回可用正文。' } })
     expect(startRole).toHaveBeenCalledTimes(2)
+    expect(mocks.executeStreamTask).toHaveBeenCalledTimes(2)
     expect(mocks.updateTask).toHaveBeenCalledWith(71, expect.objectContaining({
       outputText: expect.stringContaining('自动新建 Rewriter 任务'),
     }))
@@ -207,6 +314,27 @@ describe('chapter pipeline rewriter', () => {
     }))
   })
 
+  it('09-07: releases a logical reservation when preflight fails before the adapter call', async () => {
+    const releaseUnstartedRevisionAttempt = vi.fn()
+    const preflightError = new Error('contract input missing')
+    const runner = createRewriterStreamAttemptRunner({
+      novelId: 7,
+      chapterId: 101,
+      defaultChatOptions: {},
+      revisionBudget: { releaseUnstartedRevisionAttempt },
+      resolveAttemptKey: (attemptNumber) => `rewriter:candidate:${attemptNumber}`,
+      buildMessages: () => [{ role: 'user', content: '重写第一章' }],
+      startRole: vi.fn().mockResolvedValue(91),
+      validateInputs: () => { throw preflightError },
+      failRole: vi.fn((_taskId, error) => { throw error }),
+      onChunk: vi.fn(),
+    })
+
+    await expect(runner(1, [], '执行重写')).rejects.toBe(preflightError)
+    expect(releaseUnstartedRevisionAttempt).toHaveBeenCalledWith('rewriter:candidate:1')
+    expect(mocks.executeStreamTask).not.toHaveBeenCalled()
+  })
+
   it('accepts a distinct chapter 1 candidate without spending a retry', async () => {
     const runAttempt = vi.fn().mockResolvedValue({ taskId: 11, result: { output: '他撞开侧门，警铃随即响起。' } })
     const processOutcome = vi.fn(async (content: string) => rewriteOutcome(content))
@@ -232,6 +360,10 @@ describe('chapter pipeline rewriter', () => {
     expect(processOutcome).toHaveBeenCalledOnce()
     expect(markAttemptComplete).not.toHaveBeenCalled()
   })
+
+})
+
+describe('chapter pipeline rewriter orchestration', () => {
 
   it('composes the chapter 1 candidate, publish gate, and release check in order', async () => {
     const content = '他撞开侧门，警铃随即响起。'
@@ -334,6 +466,65 @@ describe('chapter pipeline rewriter', () => {
     expect(markAttemptComplete).toHaveBeenCalledWith(21, '首轮重写与初稿过近，已切换变体重试。', true)
     expect(result.rejectedDigests).toHaveLength(1)
   })
+
+  it('does not start a third logical rewriter call after two reservations', async () => {
+    const controller = new RevisionBudgetController(createRevisionBudget('chapter:budget'))
+    const runAttempt = vi.fn()
+      .mockResolvedValueOnce({ taskId: 41, result: { output: '初轮改写。' } })
+      .mockResolvedValueOnce({ taskId: 42, result: { output: '第二轮改写。' } })
+    const outcome = rewriteOutcome('初轮改写。')
+    const result = await runRewriterCandidateLoop({
+      draftContent: '原稿。',
+      reviewPrioritySummary: { ...noPriorityIssues, counts: { high: 1, medium: 0, low: 0 } },
+      requiresFullRewrite: false,
+      genre: '悬疑',
+      knownTerms: [],
+      criticSemanticReview: null,
+      runAttempt,
+      processOutcome: vi.fn().mockResolvedValue({
+        ...outcome,
+        miniReview: { ...outcome.miniReview, needsHumanReview: true },
+      }),
+      evaluateSemantics: vi.fn().mockResolvedValue(null),
+      markAttemptComplete: vi.fn(),
+      resolvePremiumChatOptions: vi.fn(),
+      revisionBudget: { reserveRevisionAttempt: (key) => Boolean(controller.tryReserve(key)) },
+    })
+
+    expect(result.taskId).toBe(42)
+    expect(runAttempt).toHaveBeenCalledTimes(2)
+    expect(controller.snapshot.used).toBe(2)
+  })
+
+  it('skips publish-gate content repair when the shared budget is exhausted', async () => {
+    const controller = new RevisionBudgetController(createRevisionBudget('chapter:gate'))
+    controller.tryReserve('rewriter:candidate:1')
+    controller.tryReserve('rewriter:candidate:2')
+    const runAttempt = vi.fn()
+    const current = rewriteOutcome('保留候选。')
+    const result = await runPublishGateRepair({
+      chapterId: 103,
+      content: current.content,
+      reviewNotes: buildFallbackReviewNotes('待修复'),
+      miniReview: current.miniReview,
+      publishCheck: publishCheckFixture(),
+      taskId: 33,
+      attemptNumber: 2,
+      rejectedDigests: [],
+      genre: '悬疑',
+      knownTerms: [],
+      markCurrentAttempt: vi.fn(),
+      runAttempt,
+      processOutcome: vi.fn(),
+      recheckRisks: vi.fn(),
+      persistAccepted: vi.fn(),
+      revisionBudget: { reserveRevisionAttempt: (key) => Boolean(controller.tryReserve(key)) },
+    })
+
+    expect(result.content).toBe('保留候选。')
+    expect(runAttempt).not.toHaveBeenCalled()
+    expect(controller.snapshot.used).toBe(2)
+  })
 })
 
 describe('chapter pipeline rewriter safeguards', () => {
@@ -420,6 +611,14 @@ describe('chapter pipeline rewriter safeguards', () => {
       promptTier: 'key',
       attemptNumber: 2,
       rejectedDigests: ['digest-1'],
+      revisionMode: 'patch',
+      revisionPatchEvidence: [{
+        issueId: 'quality:artifact:repeat:12:16',
+        artifactHash: 'sha256:artifact',
+        start: 12,
+        end: 16,
+        quote: '第二个重复句',
+      }],
     })
 
     expect(messages[0].content).toContain('chapter-1-hard-contract')
@@ -427,6 +626,10 @@ describe('chapter pipeline rewriter safeguards', () => {
     expect(messages[0].content).toContain('重排冲突切入点')
     expect(messages[0].content).toContain('作者原句。')
     expect(messages[0].content).toContain('不得新增无来源设定')
+    expect(messages[0].content).toContain('【C-07 局部补丁模式】')
+    expect(messages[0].content).toContain('quality:artifact:repeat:12:16')
+    expect(messages[0].content).toContain('"start":12')
+    expect(messages[0].content).toContain('"quote":"第二个重复句"')
   })
 
   it('keeps a clean chapter 1 candidate without spending a repair model call', async () => {

@@ -1,5 +1,6 @@
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
+import type { RunTaskOptions } from './task.service'
 import type { ScenePlanStep } from './chapter-scene-plan'
 import {
   executeChapterPlannerPhase,
@@ -34,6 +35,7 @@ export async function executeChapterPlannerRuntimePhase(input: {
   modelConfigId?: number
   sender?: ProgressSink
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
   priorTaskId?: number
@@ -52,6 +54,7 @@ export async function executeChapterPlannerRuntimePhase(input: {
     modelConfigId: input.modelConfigId,
     sender: input.sender,
     chatOptions: input.chatOptions,
+    prepareInput: input.prepareInput,
     fallbackScenePlan: input.fallbackScenePlan,
     storedScenePlanJson: input.storedScenePlanJson,
     priorTaskId: input.priorTaskId,

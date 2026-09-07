@@ -41,6 +41,7 @@ import {
   isUsableEmbedding,
   resolveEmbeddingConfigCacheKey,
 } from './embedding.service'
+import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
 
 const EMBEDDING_BATCH_SIZE = 24
 const MAX_SEARCH_CANDIDATES = 3072
@@ -126,6 +127,7 @@ export interface SemanticMemorySearchOptions {
   topK?: number
   modelConfigId?: number
   chapterNum?: number
+  preparedQuery?: PreparedQueryEmbedding | null
   sourceTypes?: SemanticMemorySourceType[]
   visibility?: 'canon' | 'draft' | 'private'
   refreshOutbox?: boolean
@@ -133,6 +135,27 @@ export interface SemanticMemorySearchOptions {
 
 function isIndexedSourceType(value: string): value is SemanticMemorySourceType {
   return INDEXED_SOURCE_TYPES.includes(value as SemanticMemorySourceType)
+}
+
+async function resolveSemanticSearchQuery(
+  queryText: string,
+  options: Pick<SemanticMemorySearchOptions, 'preparedQuery' | 'modelConfigId'>,
+): Promise<{ embedding?: number[]; profile?: string; dimensions?: number }> {
+  if (options.preparedQuery !== undefined) {
+    if (options.preparedQuery === null
+      || !isCompatiblePreparedQuery(queryText, options.preparedQuery)) return {}
+    return {
+      embedding: options.preparedQuery.embedding,
+      profile: options.preparedQuery.profile,
+      dimensions: options.preparedQuery.dimensions,
+    }
+  }
+  const batch = await embedSemanticTexts([queryText], options.modelConfigId)
+  return {
+    embedding: batch.embeddings?.[0],
+    profile: batch.profile,
+    dimensions: batch.dimensions,
+  }
 }
 
 export function hashSemanticDocument(
@@ -965,16 +988,19 @@ export async function searchSemanticMemory(
   const lookupKeywords = keywords.slice(0, MAX_LOOKUP_KEYWORDS)
   const validityFilters = buildValidityFilters(options.chapterNum)
   const cleanProjectionFilter = buildCleanProjectionFilter()
-  const queryBatch = await embedSemanticTexts([queryText], options.modelConfigId)
-  const queryEmbedding = queryBatch.embeddings?.[0]
+  const {
+    embedding: queryEmbedding,
+    profile: queryProfile,
+    dimensions: queryDimensions,
+  } = await resolveSemanticSearchQuery(queryText, options)
 
-  if (queryEmbedding && queryBatch.profile && queryBatch.dimensions) {
+  if (queryEmbedding && queryProfile && queryDimensions) {
     const compatibilityFilters = [
       eq(semanticMemoryEntries.novelId, novelId),
       inArray(semanticMemoryEntries.sourceType, sourceTypes),
       eq(semanticMemoryEntries.visibility, visibility),
-      eq(semanticMemoryEntries.embeddingProfile, queryBatch.profile),
-      eq(semanticMemoryEntries.dimensions, queryBatch.dimensions),
+      eq(semanticMemoryEntries.embeddingProfile, queryProfile),
+      eq(semanticMemoryEntries.dimensions, queryDimensions),
       isNotNull(semanticMemoryEntries.embeddingJson),
       cleanProjectionFilter,
       ...validityFilters,
@@ -986,8 +1012,8 @@ export async function searchSemanticMemory(
       sourceTypes,
       visibility,
       chapterNum: options.chapterNum,
-      embeddingProfile: queryBatch.profile,
-      dimensions: queryBatch.dimensions,
+      embeddingProfile: queryProfile,
+      dimensions: queryDimensions,
       limit: lexicalCandidateLimit,
     })
     const ftsRows = ftsCandidateIds?.length
@@ -1018,7 +1044,7 @@ export async function searchSemanticMemory(
       [...likeRows, ...ftsRows, ...recentRows].map((row) => [row.id, row] as const),
     ).values()].slice(0, MAX_SEARCH_CANDIDATES)
     const vectorHits = candidates.flatMap((row) => {
-      if (!isCompatibleEmbeddingRow(row, queryBatch.profile!, queryBatch.dimensions!)) return []
+      if (!isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!)) return []
       try {
         const embedding = JSON.parse(row.embeddingJson || '')
         if (!Array.isArray(embedding)) return []

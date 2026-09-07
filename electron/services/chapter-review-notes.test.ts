@@ -283,6 +283,7 @@ describe('applyCriticSemanticGateOutcomeToReviewNotes（enforce 降级链）', (
       normalizeReviewNotes({}),
       { review, degraded: false },
       ENFORCE_POLICY,
+      '逐字证据句',
     )
     expect(outcome.effectiveMode).toBe('enforce')
     expect(outcome.reviewNotes.critical_fixes.some((item) => (

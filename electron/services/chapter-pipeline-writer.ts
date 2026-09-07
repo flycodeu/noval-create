@@ -20,7 +20,7 @@ import {
   type ChapterPipelineRole,
 } from './chapter-pipeline-state'
 import { buildChapterDraftPrompt } from './story-prompts'
-import { executeChatTask, updateTaskStatus } from './task.service'
+import { executeChatTask, updateTaskStatus, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 
 export interface ChapterWriterPromptInput {
@@ -253,6 +253,7 @@ export async function runChapterWriterStage(input: {
   sender?: ProgressSink
   promptInput: ChapterWriterPromptInput
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   contractVersion: string
   scenePlanText: string
   initialContent: string
@@ -300,6 +301,7 @@ export async function runChapterWriterStage(input: {
     messages,
     modelConfigId: input.modelConfigId,
     chatOpts: input.chatOptions,
+    prepareInput: input.prepareInput,
     retryable: true,
     sender: input.sender,
   })
@@ -332,6 +334,7 @@ export async function executeChapterWriterPhase(input: {
   modelConfigId?: number
   sender?: ProgressSink
   chatOptions: ChatOptions
+  prepareInput?: RunTaskOptions['prepareInput']
   contractVersion: string
   scenePlanText: string
   initialContent: string

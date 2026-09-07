@@ -152,6 +152,7 @@ import {
   collectChapterContextRawData,
   ContextOverflowError,
   HardConstraintOverflowError,
+  InvalidContextBudgetError,
   resolveMentionedEntityLimits,
   selectRecentContextRows,
 } from './context.service'
@@ -389,6 +390,13 @@ function createTableAwareDbMock(
 }
 
 describe('allocateChapterContext', () => {
+  it('rejects non-positive explicit budgets instead of applying a hidden floor', () => {
+    expect(() => allocateChapterContext(createRawData(), { totalBudget: 0 }))
+      .toThrowError(expect.objectContaining({ code: 'NF_CONTEXT_BUDGET_INVALID' }))
+    expect(() => allocateChapterContext(createRawData(), { totalBudget: -1 }))
+      .toThrowError(InvalidContextBudgetError)
+  })
+
   beforeEach(() => {
     clearChapterEntityMentionCatalogCache()
     vi.mocked(getDb).mockReset()
@@ -508,15 +516,16 @@ describe('allocateChapterContext', () => {
         }),
       },
     }), {
-      totalBudget: 10000,
+      totalBudget: 20000,
       promptProfile: 'draft',
       chapterComplexity: 'standard',
     })
 
-    expect(context.hardConstraintContext).toContain('【必须避免-禁用表达】')
+    expect(context.hardConstraintContext).not.toContain('【必须避免-禁用表达】')
+    expect(context.hardConstraintContext).toContain('【作者明确禁用-硬约束】')
     expect(context.hardConstraintContext).toContain('本书禁用：命运的齿轮')
     expect(context.hardConstraintContext).toContain('本书自定义：不要在段尾替角色总结意义。')
-    expect(context.hardConstraintContext).toContain('本书近章复现')
+    expect(context.softContextDecisions.some((entry) => entry.label === 'antiAiRulesSoft')).toBe(true)
     expect(context.constraintInjectionStatus.injectedLabels).toContain('antiAiRules')
   })
 
@@ -540,13 +549,14 @@ describe('allocateChapterContext', () => {
     )
 
     const context = allocateChapterContext(createRawData(), {
-      totalBudget: 10000,
+      totalBudget: 20000,
       promptProfile: 'draft',
       chapterComplexity: 'standard',
     })
 
-    expect(context.hardConstraintContext).toContain('【风格硬约束 · 冷硬短句】')
-    expect(context.constraintInjectionStatus.injectedLabels).toContain('styleHardGuard')
+    expect(context.hardConstraintContext).not.toContain('【风格硬约束 · 冷硬短句】')
+    expect(context.styleHardGuard || '').toContain('【风格硬约束 · 冷硬短句】')
+    expect(context.constraintInjectionStatus.injectedLabels).not.toContain('styleHardGuard')
   })
 
   it('injects generic feedback recurrence hard constraints from recent review loops', () => {
@@ -665,13 +675,31 @@ describe('allocateChapterContext', () => {
       chapterComplexity: 'standard',
     })
 
-    expect(context.contextBudgetReport.effectiveBudget).toBe(16000)
+    expect(context.contextBudgetReport.effectiveBudget).toBe(10000)
     expect(context.contextBudgetReport.reservedForOutput).toBe(6000)
     expect(
       context.contextBudgetReport.availableContextBudget
       + context.contextBudgetReport.promptFixedOverhead
       + context.contextBudgetReport.reservedForOutput,
     ).toBeLessThanOrEqual(context.contextBudgetReport.safeModelContextLimit!)
+  })
+
+  it('keeps an explicit budget unchanged for a larger whole-book target', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 32000,
+      maxTokens: 1200,
+    } as ReturnType<typeof resolveModelRuntimeBudget>)
+
+    const context = allocateChapterContext(createRawData({
+      novel: { targetWords: 1500000 },
+    }), {
+      totalBudget: 8000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.contextBudgetReport.requestedBudget).toBe(8000)
+    expect(context.contextBudgetReport.effectiveBudget).toBe(8000)
   })
 
   it('applies provider-level token safety margin before allocating context budget', () => {
@@ -798,6 +826,65 @@ describe('allocateChapterContext', () => {
       expect(overflow.contextBudgetReport.overflowLevel).toBe('hard_failed')
       expect(overflow.contextBudgetReport.modelContextLimit).toBe(2500)
       expect(overflow.context.constraintInjectionStatus.droppedConstraintCount).toBeGreaterThan(0)
+      expect(overflow.code).toBe('NF_CONTEXT_REQUIRED_OVERFLOW')
+      expect(overflow.diagnostics.requiredTokens).toBeGreaterThan(overflow.diagnostics.availableTokens)
+      expect(overflow.diagnostics.deficitTokens).toBeGreaterThan(0)
+      expect(overflow.diagnostics.missingConstraintIds.length).toBeGreaterThan(0)
+      expect(overflow.diagnostics.missingConstraintLabels.length).toBe(overflow.diagnostics.missingConstraintIds.length)
+      expect(overflow.contextBudgetReport.requiredHardConstraintTokens).toBe(overflow.diagnostics.requiredTokens)
+      expect(overflow.contextBudgetReport.hardConstraintDeficitTokens).toBe(overflow.diagnostics.deficitTokens)
+      expect(overflow.contextBudgetReport.droppedConstraintIds).toEqual(overflow.diagnostics.missingConstraintIds)
+      expect(overflow.context.hardConstraintEntries.every((entry) => entry.truncated === false)).toBe(true)
+      expect(overflow.context.hardConstraintSummary).toContain(overflow.diagnostics.missingConstraintIds[0])
+    }
+  })
+
+  it('keeps a selected hard condition complete across CRLF and emoji boundaries', () => {
+    const condition = '除非收到回执，否则之前的伤势不允许被忽略。\r\n必须保留现场🙂'
+    const context = allocateChapterContext(createRawData({
+      contextParts: {
+        chapterGoal: condition,
+      },
+    }), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    const entry = context.hardConstraintEntries.find((item) => item.label === 'chapterGoal')
+    expect(entry).toBeDefined()
+    expect(entry?.content).toContain(condition)
+    expect(entry?.allocatedTokens).toBe(entry?.originalTokens)
+    expect(entry?.truncated).toBe(false)
+  })
+
+  it('keeps required hard atoms exact while optional soft context is dropped', () => {
+    const chapterGoal = '除非收到回执，否则之前的伤势不允许被忽略。'
+    const rawData = createRawData({
+      contextParts: {
+        chapterGoal,
+        continuitySummary: '软上下文'.repeat(2400),
+        timelineSummary: '时间线'.repeat(2200),
+        previousSummaries: '摘要'.repeat(2000),
+      },
+    })
+
+    try {
+      allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'draft',
+        chapterComplexity: 'standard',
+      })
+      throw new Error('expected ContextOverflowError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      expect(error).not.toBeInstanceOf(HardConstraintOverflowError)
+      const overflow = error as ContextOverflowError
+      const entry = overflow.context.hardConstraintEntries.find((item) => item.label === 'chapterGoal')
+      expect(entry?.content).toContain(chapterGoal)
+      expect(entry?.allocatedTokens).toBe(entry?.originalTokens)
+      expect(entry?.truncated).toBe(false)
+      expect(overflow.context.softContextDecisions.some((item) => item.status === 'dropped')).toBe(true)
     }
   })
 

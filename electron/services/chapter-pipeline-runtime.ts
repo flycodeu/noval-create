@@ -2,6 +2,7 @@ import type { ProgressSink } from '../utils/progress-sink'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import type { AiExecutionMode, ChapterRewriteScope, TaskRecoveryHint } from '../../src/types'
+import type { RevisionBudgetState } from './revision-budget'
 import {
   createTask,
   getTaskRecord,
@@ -92,6 +93,7 @@ export interface CreateChapterPipelineRuntimeInput {
   initialContent: string
   initialContextVersion: number
   initialContractVersion?: string
+  revisionBudget?: RevisionBudgetState
   retry?: RuntimeRetryInput
   onWorkflowTaskCreated?(taskId: number): void
   buildRecoveryHint(role: ChapterPipelineRole, failureCode?: ChapterPipelineFailureCode): TaskRecoveryHint
@@ -128,7 +130,7 @@ export interface ReusePipelineRoleInput {
   outputText?: string
   snapshot?: Partial<Pick<
     ChapterPipelineSnapshot,
-    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId'
+    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget'
   >>
   extra?: Partial<ChapterPipelineRoleState>
 }
@@ -191,7 +193,11 @@ export class ChapterPipelineRuntime {
       input.chapterId,
       workflowTaskId,
       input.initialContractVersion,
-      { content: input.initialContent, contextVersion: input.initialContextVersion },
+      {
+        content: input.initialContent,
+        contextVersion: input.initialContextVersion,
+        revisionBudget: input.revisionBudget,
+      },
     )
     const snapshot: ChapterPipelineSnapshot = {
       ...initialSnapshot,

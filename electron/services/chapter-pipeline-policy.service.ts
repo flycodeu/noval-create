@@ -3,6 +3,7 @@ import type {
   DialogueDriftWarning,
   DialogueSimilarityWarning,
 } from '../../src/types'
+import { qualityIssueHasActionableLevel, type QualityIssueV1 } from '../../src/shared/quality-issue'
 import { computeCandidateSimilarity } from './variation-control.service'
 
 export type ReviewPriorityLevel = 'high' | 'medium' | 'low'
@@ -34,12 +35,23 @@ export type ReviewPrioritySource =
   | 'reading_experience'
   | 'rewrite_delta'
   | 'contract_validation'
+  | 'quality_issues'
 
 export interface ReviewPriorityIssue {
   source: ReviewPrioritySource
   label: string
   detail: string
   priority: ReviewPriorityLevel
+  /** Only populated for C-07 quality issues; used to select local mode safely. */
+  evidenceBacked?: boolean
+  issueScope?: QualityIssueV1['scope']
+  patchEvidence?: {
+    issueId: string
+    artifactHash: string
+    start: number
+    end: number
+    quote: string
+  }
 }
 
 export interface ReviewPrioritySummary {
@@ -151,6 +163,7 @@ export interface ChapterReviewNotesLike {
   reading_experience?: ChapterReadingExperienceScore
   rewrite_delta?: RewriteNarrativeDeltaReport
   contract_validation?: ContractValidationLike
+  issues?: QualityIssueV1[]
 }
 
 const STRUCTURAL_REWRITE_SOURCES = new Set<ReviewPrioritySource>([
@@ -170,6 +183,7 @@ const STRUCTURAL_REWRITE_SOURCES = new Set<ReviewPrioritySource>([
   'operating_mode_risks',
   'missing_payoffs',
   'contract_validation',
+  'quality_issues',
 ])
 
 const ACTION_TOKENS = [
@@ -265,6 +279,19 @@ function calculateSentenceTokenRate(sentences: string[], tokens: string[]): numb
   return roundMetric((countSentencesWithTokens(sentences, tokens) / sentences.length) * 100)
 }
 
+function lacksVisibleRewriteChain(
+  structuralPressure: boolean,
+  signalAvailable: boolean,
+  rate: number,
+  minimumRate: number,
+): boolean {
+  return structuralPressure && signalAvailable && rate < minimumRate
+}
+
+function hasSparseSentenceParsing(sentenceCount: number, contentLength: number): boolean {
+  return sentenceCount < 8 && contentLength >= 600
+}
+
 function buildRewriteDeltaChainScore(
   originalSentences: string[],
   rewrittenSentences: string[],
@@ -292,7 +319,7 @@ function buildRewriteDeltaChainScore(
   const strongSurfaceRewrite = !surfaceRewriteSuspected
   const minimumVisibleRate = strongSurfaceRewrite ? 8 : 14
 
-  if (structuralPressure && chainSignalAvailable && rewrittenHitRate < minimumVisibleRate) {
+  if (lacksVisibleRewriteChain(structuralPressure, chainSignalAvailable, rewrittenHitRate, minimumVisibleRate)) {
     findings.push(`${label}证据密度仅 ${rewrittenHitRate}%，重写后仍缺少可见链条。`)
   }
   if (structuralPressure && chainSignalAvailable && surfaceRewriteSuspected && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
@@ -384,7 +411,7 @@ export function analyzeChapterReadingExperience(content: string): ChapterReading
   const recommendations: string[] = []
   let penalty = 0
 
-  if (sentences.length < 8 && content.trim().length >= 600) {
+  if (hasSparseSentenceParsing(sentences.length, content.trim().length)) {
     penalty += 18
     risks.push('句子切分过少，正文可能存在长句堆叠或标点异常。')
     recommendations.push('拆开长句，把动作、判断和结果分成更清楚的句群。')
@@ -605,12 +632,33 @@ function getSourceWeight(source: ReviewPrioritySource): number {
     dialogue_filler_risks: 1,
     reading_experience: 6,
     rewrite_delta: 12,
+    quality_issues: 16,
   }
   return weights[source]
 }
 
 function normalizePriorityIssues(reviewNotes: ChapterReviewNotesLike): ReviewPriorityIssue[] {
   const issues: ReviewPriorityIssue[] = []
+  ;(reviewNotes.issues || []).filter(qualityIssueHasActionableLevel).forEach((issue) => {
+    const evidence = issue.evidence[0]
+    issues.push({
+      source: 'quality_issues',
+      label: `质量问题/${issue.level}/${issue.ruleId}`,
+      detail: `${issue.message}${issue.evidence[0] ? `（证据：${issue.evidence[0].quote}）` : '（缺少正文证据）'}`,
+      priority: issue.level === 'blocker' ? 'high' : 'medium',
+      evidenceBacked: issue.evidence.length > 0,
+      issueScope: issue.scope,
+      ...(evidence ? {
+        patchEvidence: {
+          issueId: issue.id,
+          artifactHash: evidence.artifactHash,
+          start: evidence.start,
+          end: evidence.end,
+          quote: evidence.quote,
+        },
+      } : {}),
+    })
+  })
   pushIssues(issues, reviewNotes.critical_fixes, 'critical_fixes', '关键修订', 'high')
   pushIssues(issues, reviewNotes.continuity_risks, 'continuity_risks', '连续性风险', 'high')
   pushIssues(issues, reviewNotes.arc_progress_risks, 'arc_progress_risks', '故事弧推进风险', 'high')
@@ -676,14 +724,17 @@ function resolveRewriteScope(
   requiresFullRewrite: boolean,
 ): ChapterRewriteScope {
   if (requiresFullRewrite) return 'chapter_rewrite'
-  const onlyLanguageFixes = topIssues.length > 0 && topIssues.every((issue) => (
-    issue.source === 'language_risks'
-    || issue.source === 'human_language_repairs'
-    || issue.source === 'dialogue_homogenization_risks'
-    || issue.source === 'dialogue_filler_risks'
-    || issue.source === 'dialogue_info_density_risks'
+  const evidenceBackedLocal = topIssues.length > 0 && topIssues.every((issue) => (
+    (issue.source === 'quality_issues'
+      && issue.evidenceBacked
+      && (issue.issueScope === 'span' || issue.issueScope === 'scene'))
   ))
-  if (onlyLanguageFixes) return 'paragraph_patch'
+  if (evidenceBackedLocal) {
+    return topIssues.some((issue) => issue.issueScope === 'scene') ? 'scene_rewrite' : 'paragraph_patch'
+  }
+  // A chapter-scoped quality issue has no safe local span; retain the existing
+  // chapter mode rather than silently turning an unbounded repair into a patch.
+  if (topIssues.some((issue) => issue.issueScope === 'chapter')) return 'chapter_rewrite'
   return topIssues.length <= 2 ? 'scene_rewrite' : 'chapter_rewrite'
 }
 
