@@ -16,6 +16,7 @@ import { reconcileScenePlanForContracts } from './scene-plan-reconciliation'
 import { buildScenePlanPrompt } from './story-prompts'
 import { executeChatTask, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
+import { buildSceneWritingBrief, formatSceneWritingBrief } from '../../src/shared/scene-writing-brief'
 
 export interface ChapterPromptNarrativeFields {
   povGuidance: string
@@ -77,6 +78,11 @@ export interface ResolvePlannerModelOutputInput {
 
 export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): Message[] {
   const { context } = input
+  const sceneWritingBrief = formatSceneWritingBrief(buildSceneWritingBrief(
+    null,
+    context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' },
+    { knownFacts: [context.chapterGoal, context.currentArc].filter(Boolean) },
+  ))
   return [{
     role: 'user',
     content: buildScenePlanPrompt({
@@ -89,6 +95,7 @@ export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): M
       dialogueVoiceLocks: context.dialogueVoiceLocks,
       designGateDirective: input.designGateDirective,
       rhythmSection: input.rhythmSection,
+      sceneWritingBrief,
       plotPoints: input.plotPoints,
       emotionTone: input.emotionTone,
       targetWords: input.targetWords,

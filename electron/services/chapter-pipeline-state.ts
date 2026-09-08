@@ -12,6 +12,9 @@ import type {
   WriterContextOrchestratorResolution,
 } from '../../src/types'
 import type { RevisionBudgetState } from './revision-budget'
+import type { ContextPackStage, ContextPackV1 } from '../../src/shared/context-pack'
+
+export type ChapterPipelineContextPackStage = Exclude<ContextPackStage, 'planning'>
 
 export const CHAPTER_PIPELINE_ROLES = [
   'planner',
@@ -97,6 +100,7 @@ export interface ChapterPipelineSnapshot {
   resumeSourceTaskId?: number
   /** Shared logical content-revision quota; recovery must preserve this object. */
   revisionBudget?: RevisionBudgetState
+  contextPacks?: Partial<Record<ChapterPipelineContextPackStage, ContextPackV1>>
   roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
 }
 
@@ -236,6 +240,17 @@ export function checkpointChapterPipelineContext(
   return {
     ...snapshot,
     baseContextVersion: contextVersion,
+  }
+}
+
+export function checkpointChapterPipelineContextPacks(
+  snapshot: ChapterPipelineSnapshot,
+  contextPacks: Partial<Record<ChapterPipelineContextPackStage, ContextPackV1>>,
+): ChapterPipelineSnapshot {
+  if (!contextPacks || Object.keys(contextPacks).length === 0) return snapshot
+  return {
+    ...snapshot,
+    contextPacks: { ...snapshot.contextPacks, ...contextPacks },
   }
 }
 

@@ -99,6 +99,13 @@ import {
 } from './context-recall-core'
 import { runRecallAugmentation } from './context-recall-runtime'
 import { estimateTokens, truncateToTokens } from './context-token-budget'
+import type { ContextPackV1 } from '../../src/shared/context-pack'
+import {
+  applyContextVisibility,
+  loadContextVisibilityPolicyInput,
+  type ContextVisibilityPolicyInput,
+  type ContextVisibilityReport,
+} from './context-visibility'
 import {
   allocateRequiredContextAtoms,
   createRequiredContextAtom,
@@ -455,6 +462,12 @@ export interface ChapterContext extends ChapterContextParts {
   recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
+  authorStyleMaterials?: {
+    targetWorkSampleGuide: string
+    humanStyleSampleLock: string
+  }
+  contextPack?: ContextPackV1
+  visibilityReport?: ContextVisibilityReport
 }
 
 export class ContextOverflowError extends Error {
@@ -529,6 +542,12 @@ export interface ChapterContextRawData {
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
   creativeStageContext?: CreativeStageContext
+  /** NF-10: explicit author materials kept separate from generated style summaries. */
+  authorStyleMaterials?: {
+    targetWorkSampleGuide: string
+    humanStyleSampleLock: string
+  }
+  contextVisibilityInput?: ContextVisibilityPolicyInput
 }
 
 const BOUNDED_CONTEXT_CHAPTER_THRESHOLD = 2000
@@ -3946,6 +3965,17 @@ export async function collectChapterContextRawData(
     recallSnapshot: recallAugmentation.recallSnapshot,
     recallDiagnostics: recallAugmentation.recallDiagnostics,
     recalledMemorySources: recallAugmentation.recalledMemorySources,
+    authorStyleMaterials: {
+      targetWorkSampleGuide: parseThemeVoiceDocument(novel.themeVoiceJson).targetWorkSampleGuide,
+      humanStyleSampleLock: parseThemeVoiceDocument(novel.themeVoiceJson).humanStyleSampleLock,
+    },
+    contextVisibilityInput: currentChapter
+      ? loadContextVisibilityPolicyInput(novel.id, currentChapter.id, currentChapter.chapterNum, 'writer', {
+          chapterRows,
+          characters: entityCatalogs.characters,
+          scenes: contractContext?.sceneContracts || [],
+        })
+      : undefined,
     creativeStageContext: creativeStageContext || undefined,
   }
 }
@@ -4183,7 +4213,7 @@ export function allocateChapterContext(
         .filter((label) => !constraintInjectionStatus.injectedLabels.includes(label))
         .join(', '))
   }
-  const result: ChapterContext = {
+  let result: ChapterContext = {
     storyCore: softAllocation.allocated.storyCore || '',
     currentArc: softAllocation.allocated.currentArc || '',
     worldRules: softAllocation.allocated.worldRules || '',
@@ -4196,6 +4226,7 @@ export function allocateChapterContext(
     lastChapterEnding: softAllocation.allocated.lastChapterEnding || '',
     chapterBridgePlan: softAllocation.allocated.chapterBridgePlan || '',
     styleTemplate: softAllocation.allocated.styleTemplate || '',
+    authorStyleMaterials: rawData.authorStyleMaterials,
     chapterGoal: softAllocation.allocated.chapterGoal
       || hardConstraintAllocation.entries.find((entry) => entry.label === 'chapterGoal')?.content
       || '',
@@ -4260,6 +4291,25 @@ export function allocateChapterContext(
       result,
       contextBudgetReport,
       hardOverflowDiagnostics,
+    )
+  }
+
+  result = applyContextVisibility(rawData, result, promptProfile)
+  const visibilityMissing = result.visibilityReport
+  if (visibilityMissing && visibilityMissing.requiredMissingSourceKeys.length > 0) {
+    const missingConstraintLabels = visibilityMissing.requiredMissingSourceKeys
+      .flatMap((key) => key.startsWith('hard:') ? [key.slice(5) as HardConstraintSourceLabel] : [])
+    throw new HardConstraintOverflowError(
+      `NF_CONTEXT_REQUIRED_OVERFLOW：${visibilityMissing.requiredMissingSourceKeys.length} 项必需资料因视角或来源不明被隔离；来源 ID：${visibilityMissing.requiredMissingSourceKeys.join('、')}。请补充人物知情记录或明确场景揭示合同。`,
+      result,
+      contextBudgetReport,
+      {
+        requiredTokens: contextBudgetReport.requiredHardConstraintTokens || 0,
+        availableTokens: contextBudgetReport.availableContextBudget,
+        deficitTokens: 0,
+        missingConstraintIds: visibilityMissing.requiredMissingSourceKeys,
+        missingConstraintLabels,
+      },
     )
   }
 

@@ -23,6 +23,7 @@ import {
   buildChapterPipelineRetryPlan,
   checkpointChapterPipelineContent,
   checkpointChapterPipelineContext,
+  checkpointChapterPipelineContextPacks,
   completeChapterPipelineRole,
   createInitialChapterPipelineSnapshot,
   failChapterPipelineRole,
@@ -37,6 +38,7 @@ import {
   type ChapterPipelineRoleState,
   type ChapterPipelineSnapshot,
 } from './chapter-pipeline-state'
+import type { ContextPackStage, ContextPackV1 } from '../../src/shared/context-pack'
 import {
   appendRevisionBrief,
   dedupeTextList,
@@ -94,6 +96,7 @@ export interface CreateChapterPipelineRuntimeInput {
   initialContextVersion: number
   initialContractVersion?: string
   revisionBudget?: RevisionBudgetState
+  initialContextPacks?: ChapterPipelineSnapshot['contextPacks']
   retry?: RuntimeRetryInput
   onWorkflowTaskCreated?(taskId: number): void
   buildRecoveryHint(role: ChapterPipelineRole, failureCode?: ChapterPipelineFailureCode): TaskRecoveryHint
@@ -130,7 +133,7 @@ export interface ReusePipelineRoleInput {
   outputText?: string
   snapshot?: Partial<Pick<
     ChapterPipelineSnapshot,
-    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget'
+    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget' | 'contextPacks'
   >>
   extra?: Partial<ChapterPipelineRoleState>
 }
@@ -202,6 +205,7 @@ export class ChapterPipelineRuntime {
     const snapshot: ChapterPipelineSnapshot = {
       ...initialSnapshot,
       executionMode: input.executionMode,
+      ...(input.initialContextPacks ? { contextPacks: input.initialContextPacks } : {}),
       ...(input.resumeDraft?.trim()
         ? {
             partialContent: input.resumeDraft.trim(),
@@ -240,6 +244,13 @@ export class ChapterPipelineRuntime {
 
   checkpointContext(contextVersion: number): ChapterPipelineSnapshot {
     this.currentSnapshot = checkpointChapterPipelineContext(this.currentSnapshot, contextVersion)
+    return this.currentSnapshot
+  }
+
+  checkpointContextPacks(
+    contextPacks: Partial<Record<Exclude<ContextPackStage, 'planning'>, ContextPackV1>>,
+  ): ChapterPipelineSnapshot {
+    this.currentSnapshot = checkpointChapterPipelineContextPacks(this.currentSnapshot, contextPacks)
     return this.currentSnapshot
   }
 

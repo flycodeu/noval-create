@@ -41,6 +41,10 @@ function contextFixture(chapterNum: number): ChapterContext {
     longTermMemory: `${prefix}-long-memory`,
     recalledMemory: `${prefix}-recalled-memory`,
     activeThreads: `${prefix}-active-threads`,
+    authorStyleMaterials: {
+      targetWorkSampleGuide: '作者说明：句子克制。',
+      humanStyleSampleLock: '雨水顺着账册边缘滴下来。',
+    },
   } as ChapterContext
 }
 
@@ -106,6 +110,7 @@ describe('chapter pipeline planner', () => {
     expect(messages[0].content).toContain('必须承接后巷追兵')
     expect(messages[0].content).toContain('必须推进原创工册制度')
     expect(messages[0].content).toContain('第一拍：追逃')
+    expect(messages[0].content).toContain('作者样稿正文1')
   })
 
   it('normalizes and reconciles chapter 1 output before persistence and writeback', () => {

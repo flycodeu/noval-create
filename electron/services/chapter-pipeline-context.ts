@@ -39,6 +39,8 @@ import {
   getStoryArcStatusContext,
 } from './story-arc-progress.service'
 import { resolveWriterOrchestratedContext } from './writer-context-orchestrator.service'
+import { compileChapterContextPack, resolveContextCompilerMode } from './context-compiler'
+import type { ContextPackV1 } from '../../src/shared/context-pack'
 import {
   buildChapterBridgePlan,
   buildHookContinuitySnapshot,
@@ -74,6 +76,28 @@ export interface StageContextResolverPayload {
   upstreamArtifacts: UpstreamRuntimeArtifacts
   renderSchema: StageRenderSchema
   writerContextResolution?: WriterContextOrchestratorResolution
+}
+
+async function attachContextPack(
+  rawContext: ChapterRawContext,
+  context: ChapterContext,
+  stage: ChapterContextStage,
+  upstreamArtifacts: UpstreamRuntimeArtifacts,
+  modelProfile?: string,
+  restoredPack?: ContextPackV1,
+): Promise<ChapterContext> {
+  const result = await compileChapterContextPack({
+    rawContext,
+    context,
+    stage,
+    modelProfile,
+    contractVersion: context.contractVersionSummary,
+    templateVersion: getActiveChapterPromptOverrideFingerprint(),
+    upstreamArtifacts,
+    mode: resolveContextCompilerMode(),
+    restoredPack,
+  })
+  return { ...context, contextPack: result.pack }
 }
 
 export type ChapterStagePrepareInput = (request: {
@@ -830,6 +854,7 @@ export async function resolveStageContextForPipeline(
     activePromptOverrideKeys?: string[]
     totalBudget?: number
     upstreamArtifacts?: UpstreamRuntimeArtifacts
+    restoredContextPack?: ContextPackV1
   } = {},
 ): Promise<StageContextResolverPayload> {
   const renderSchema = buildStageRenderSchema(stage)
@@ -853,25 +878,42 @@ export async function resolveStageContextForPipeline(
       options.preserveConstraintLabels,
       options.totalBudget,
     )
+    const packedDraftContext = await attachContextPack(
+      draftResolution.effectiveRawContext,
+      draftResolution.draftContext,
+      stage,
+      upstreamArtifacts,
+      options.executionMode || stage,
+      options.restoredContextPack,
+    )
     return {
       stage,
-      context: draftResolution.draftContext,
+      context: packedDraftContext,
       effectiveRawContext: draftResolution.effectiveRawContext,
       upstreamArtifacts,
       renderSchema,
       writerContextResolution: draftResolution.writerContextResolution,
     }
   }
+  const allocatedContext = allocateStageContextForPipeline(
+    effectiveRawContext,
+    chapter,
+    complexity,
+    stage,
+    options.totalBudget,
+    options.preserveConstraintLabels,
+  )
+  const packedContext = await attachContextPack(
+    effectiveRawContext,
+    allocatedContext,
+    stage,
+    upstreamArtifacts,
+    options.executionMode || stage,
+    options.restoredContextPack,
+  )
   return {
     stage,
-    context: allocateStageContextForPipeline(
-      effectiveRawContext,
-      chapter,
-      complexity,
-      stage,
-      options.totalBudget,
-      options.preserveConstraintLabels,
-    ),
+    context: packedContext,
     effectiveRawContext,
     upstreamArtifacts,
     renderSchema,
@@ -1043,6 +1085,7 @@ export async function prepareChapterPipelineStageContexts(
     preserveConstraintLabels?: HardConstraintSourceLabel[]
     contractVersion?: string
     totalBudget?: number
+    contextPacks?: Partial<Record<ChapterContextStage, ContextPackV1>>
   },
 ): Promise<PreparedChapterPipelineStageContexts> {
   const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
@@ -1070,6 +1113,7 @@ export async function prepareChapterPipelineStageContexts(
       upstreamArtifacts: {
         contractVersionSummary: buildContractVersionArtifactSummary(options.contractVersion),
       },
+      restoredContextPack: options.contextPacks?.scenePlan,
     },
   )
   const draftResolution = await resolveStageContextForPipeline(
@@ -1077,7 +1121,7 @@ export async function prepareChapterPipelineStageContexts(
     chapter,
     rawContext,
     complexity,
-    sharedOptions,
+    { ...sharedOptions, restoredContextPack: options.contextPacks?.draft },
   )
   // Review and rewrite depend on the actual Writer/Critic artifacts. Resolve
   // them at their stage boundary instead of pre-building stale copies here;

@@ -5,6 +5,7 @@ import {
   buildChapterPipelineResumeRetryMetadata,
   checkpointChapterPipelineContent,
   checkpointChapterPipelineContext,
+  checkpointChapterPipelineContextPacks,
   completeChapterPipelineRole,
   createInitialChapterPipelineSnapshot,
   failChapterPipelineRole,
@@ -246,6 +247,22 @@ describe('chapter pipeline state', () => {
     })).toBe('ready')
     expect(checkpointChapterPipelineContext(advanced, 0)).toBe(advanced)
     expect(initial.baseContextVersion).toBe(3)
+  })
+
+  it('11-06: preserves immutable stage packs in the persisted pipeline snapshot', () => {
+    const initial = createInitialChapterPipelineSnapshot(1, 2, 'c1', { content: 'draft', contextVersion: 3 })
+    const draftPack = {
+      schemaVersion: 1 as const,
+      id: 'pack:draft', novelId: 7, chapterId: 1, chapterNum: 1, stage: 'draft' as const,
+      contextVersion: 3, inputHash: 'input:1', contractVersion: 'c1', modelProfile: 'balanced',
+      sources: [], estimatedInputTokens: 0, outputReserve: 100,
+    }
+    const withDraft = checkpointChapterPipelineContextPacks(initial, { draft: draftPack })
+    const parsed = parseChapterPipelineSnapshot(JSON.stringify(withDraft))
+
+    expect(parsed?.contextPacks?.draft).toEqual(draftPack)
+    expect(initial.contextPacks).toBeUndefined()
+    expect(checkpointChapterPipelineContextPacks(withDraft, {})).toBe(withDraft)
   })
 
   it('records blocked and cancelled failures without losing the reusable task lineage', () => {

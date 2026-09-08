@@ -213,6 +213,7 @@ export async function createChapterPipelineSession(
     initialContextVersion: input.initialContextVersion,
     initialContractVersion: '',
     revisionBudget: revisionBudgetDerivation.budget,
+    initialContextPacks: retrySnapshot?.contextPacks,
     retry: {
       retryNodeRole: input.retryNodeRole,
       retrySourceNodeRunId: input.retrySourceNodeRunId,
@@ -290,7 +291,7 @@ export function adoptReusedRoleSnapshot(input: {
   outputText?: string
   extraSnapshot?: Partial<Pick<
     ChapterPipelineSnapshot,
-    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget'
+    'contractVersion' | 'stepMemory' | 'partialContent' | 'resumeSourceTaskId' | 'canonRunId' | 'revisionBudget' | 'contextPacks'
   >>
 }): void {
   const { state, shared } = input

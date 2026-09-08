@@ -44,6 +44,10 @@ function contextFixture(chapterNum: number): ChapterContext {
     longTermMemory: `${prefix}-long-memory`,
     recalledMemory: `${prefix}-recalled-memory`,
     activeThreads: `${prefix}-active-threads`,
+    authorStyleMaterials: {
+      targetWorkSampleGuide: '作者说明：短句，现场细节优先。',
+      humanStyleSampleLock: '他把账册压在膝上，没有先解释。',
+    },
   } as ChapterContext
 }
 
@@ -88,6 +92,9 @@ describe('chapter pipeline writer', () => {
     expect(messages[0].content).toContain('逐场执行 Planner 计划')
     expect(messages[0].content).toContain('必须交代=带走账册')
     expect(messages[0].content).toContain('近期主角推进过顺')
+    expect(messages[0].content).toContain('作者样稿正文1')
+    expect(messages[0].content).toContain('ThemeVoice.humanStyleSampleLock#1')
+    expect(messages[0].content).toContain('场景材料来源')
   })
 
   it('strips a model-authored chapter 1 heading and reports title mismatch', () => {

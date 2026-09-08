@@ -20,6 +20,7 @@ import {
 } from '../../../shared/theme-voice'
 import type { DraftContextSection } from './ai-draft'
 import { estimateTokens, truncateToTokens } from '../../../shared/token-budget'
+import { compileContextPack, type ContextPackCompileResult } from '../../../shared/context-pack'
 
 export interface PlanningContextOptions {
   includeSubplots?: boolean
@@ -165,4 +166,33 @@ export function buildPlanningContextSections(
   appendContextSection(sections, storySettings.endgameReadyCount > 0, '终局设计', compactText(buildEndgameDesignSummary(storySettings.endgameDesign), 900))
 
   return normalizeContextSections(sections.concat(options.extraSections || []), options.tokenBudget)
+}
+
+/** Pure planning projection sharing the ContextPack schema used by chapter stages. */
+export async function buildPlanningContextPack(
+  novel: Novel | null | undefined,
+  options: PlanningContextOptions = {},
+): Promise<ContextPackCompileResult> {
+  const sections = buildPlanningContextSections(novel, options)
+  const contextVersion = Number.isInteger(novel?.contextVersion) && (novel?.contextVersion || 0) > 0
+    ? novel?.contextVersion || 1
+    : 1
+  return compileContextPack({
+    novelId: novel?.id || 0,
+    chapterId: null,
+    chapterNum: null,
+    stage: 'planning',
+    contextVersion,
+    modelProfile: 'planning',
+    sources: sections.map((section) => ({
+      key: `planning:${section.label}`,
+      sourceKind: 'planning_section',
+      sourceId: section.label,
+      sourceVersion: String(contextVersion),
+      visibility: 'plan' as const,
+      text: `${section.label}：${compactContextValue(section.value)}`,
+      required: ['书名', '题材', '一句话简介'].includes(section.label),
+    })),
+    budget: resolvePlanningTokenBudget(options.tokenBudget),
+  })
 }

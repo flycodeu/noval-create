@@ -2748,18 +2748,32 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       ? '复用已持久化 Planner 快照，直接从指定节点继续。'
       : 'Planner 已固化场景计划，下一步 Writer 必须逐场落正文。',
   })
-  const draftContext = allocateStageContextForPipeline(
-    applyUpstreamArtifactsToRawContext(draftResolution.effectiveRawContext, {
-      scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
-      contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
-      stepMemorySummary: writerStepMemory.summary,
-    }),
-    chapter,
-    complexity,
+  const finalDraftResolution = await resolveStageContextForPipeline(
     'draft',
-    options.totalBudget,
-    options.preserveConstraintLabels,
+    chapter,
+    draftResolution.effectiveRawContext,
+    complexity,
+    {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion: state.contractVersion,
+      activePromptOverrideKeys,
+      totalBudget: options.totalBudget,
+      upstreamArtifacts: {
+        scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+        contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
+        stepMemorySummary: writerStepMemory.summary,
+      },
+      restoredContextPack: retrySourceWorkflowSnapshot?.contextPacks?.draft,
+    },
   )
+  const draftContext = finalDraftResolution.context
+  state.snapshot = {
+    ...state.snapshot,
+    ...(draftContext.contextPack
+      ? { contextPacks: { ...state.snapshot.contextPacks, draft: draftContext.contextPack } }
+      : {}),
+  }
   commitPlannerStageOutput({
     state,
     bindings: session.bindings,
@@ -2850,9 +2864,16 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       contractVersion: state.contractVersion,
       activePromptOverrideKeys,
       totalBudget: options.totalBudget,
+      restoredContextPack: session.retrySnapshot?.contextPacks?.review,
       upstreamArtifacts: reviewUpstreamArtifacts,
     },
   )).context
+  state.snapshot = {
+    ...state.snapshot,
+    ...(reviewContext.contextPack
+      ? { contextPacks: { ...state.snapshot.contextPacks, review: reviewContext.contextPack } }
+      : {}),
+  }
   logConstraintInjectionStatus('review', reviewContext)
   const reviewNarrativeFields = promptGuidance.buildNarrativeFields(reviewContext.chapterGoal, draftContent)
   return {
@@ -2954,8 +2975,15 @@ async function resolveGeneratedChapterRewriteContext(input: GeneratedChapterRewr
           ) * rewritePolicy.contextBudgetMultiplier)
           : undefined,
       upstreamArtifacts: rewriteUpstreamArtifacts,
+      restoredContextPack: session.retrySnapshot?.contextPacks?.rewrite,
     },
   )).context
+  session.state.snapshot = {
+    ...session.state.snapshot,
+    ...(rewriteContext.contextPack
+      ? { contextPacks: { ...session.state.snapshot.contextPacks, rewrite: rewriteContext.contextPack } }
+      : {}),
+  }
   return {
     reviewPrioritySummary,
     revisionPatchEvidence,
@@ -3682,6 +3710,7 @@ async function generateChapterContentInternal(
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion: state.contractVersion,
       totalBudget: options.totalBudget,
+      contextPacks: session.retrySnapshot?.contextPacks,
     })
     const {
       activePromptOverrideKeys,
@@ -3754,20 +3783,33 @@ async function generateChapterContentInternal(
       contractVersion: state.contractVersion,
     })
     const { chapterBridgePlan, chapterBridgePlanText, initialStepMemory } = promptGuidance
-    scenePlanContext = allocateStageContextForPipeline(
-      applyUpstreamArtifactsToRawContext(scenePlanResolution.effectiveRawContext, {
-        stepMemorySummary: initialStepMemory.summary,
-      }),
-      chapter,
-      complexity,
+    scenePlanContext = (await resolveStageContextForPipeline(
       'scenePlan',
-      options.totalBudget,
-      options.preserveConstraintLabels,
-    )
+      chapter,
+      scenePlanResolution.effectiveRawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion: state.contractVersion,
+        activePromptOverrideKeys,
+        totalBudget: options.totalBudget,
+        upstreamArtifacts: {
+          contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
+          stepMemorySummary: initialStepMemory.summary,
+        },
+        restoredContextPack: session.retrySnapshot?.contextPacks?.scenePlan,
+      },
+    )).context
     state.snapshot = {
       ...state.snapshot,
       recallSnapshot: draftContext.recallSnapshot,
       recallDiagnostics: draftContext.recallDiagnostics,
+      contextPacks: {
+        ...state.snapshot.contextPacks,
+        ...(scenePlanContext.contextPack ? { scenePlan: scenePlanContext.contextPack } : {}),
+        ...(draftContext.contextPack ? { draft: draftContext.contextPack } : {}),
+      },
       contextAssemblyReport,
       authorStyleLock,
       generationExplainability,
@@ -4198,6 +4240,7 @@ export async function getChapterContextPreview(
         contextBudgetReport: context.contextBudgetReport,
         softContextDecisions: context.softContextDecisions,
         droppedConstraintCount: context.droppedConstraintCount,
+        contextPack: context.contextPack,
         upstreamArtifacts: resolution.upstreamArtifacts,
         renderSchema: resolution.renderSchema,
       }

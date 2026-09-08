@@ -184,6 +184,7 @@ export interface ChapterWritingPromptInput {
   previousChapterContext: string
   lastChapterEnding: string
   styleTemplate: string
+  sceneWritingBrief?: string
   continuitySummary: string
   openLoops: string
   dueForeshadows?: string
@@ -252,6 +253,7 @@ export interface ScenePlanPromptInput {
   recalledMemory?: string
   chapterBridgePlan?: string
   stepMemorySummary?: string
+  sceneWritingBrief?: string
   runtimeAssertions?: string[]
   povGuidance?: string
   povRotationGuidance?: string
@@ -360,6 +362,7 @@ export interface ChapterRewritePromptInput {
   longTermMemory: string
   consistencyNotes: string
   scenePlan: string
+  sceneWritingBrief?: string
   draftContent: string
   reviewNotes: string
   scenePlanSummary?: string
@@ -1109,7 +1112,7 @@ export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文�
 
 阻塞坏习惯（检测到会被强制修改）：
 - “突然””不由得””这一刻””顷刻之间”这类万能起手——改为直接写动作
-- 深吸一口气、攥紧拳头、瞪大眼睛、僵在原地——换成这个角色独有的应激反应
+- 深吸一口气、攥紧拳头、瞪大眼睛、僵在原地——优先删掉冗余反应，或改成与当前冲突有关的选择和动作；正常停顿、比喻不必一律禁用
 - “命运的齿轮””冥冥之中””也许这就是”——删掉，用事件本身说话
 - 给普通概念乱加引号——去掉引号，只有专有名词保留
 - 用破折号偷懒解释或做假揭示——改成正常叙述
@@ -1683,6 +1686,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('设计对齐矫正（本章被弧级设计校验标记，必须执行）', params.designGateDirective),
     section('本章节奏节拍（弧级节奏模板换算）', params.rhythmSection),
     section('角色 Voice Lock', params.dialogueVoiceLocks),
+    section('场景写作材料', params.sceneWritingBrief),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
@@ -1833,6 +1837,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('摘要健康', params.summaryHealthGuidance),
     section('角色声音进化', params.voiceEvolutionGuidance),
     section('文风参考', params.styleTemplate),
+    section('场景写作材料', params.sceneWritingBrief),
     section('写作要求', [
       '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
       '人物说话要像这个人当下会说的话，别让所有角色一个语气。',
@@ -1876,6 +1881,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       extraRealityLines: ['人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。'],
     }),
     section('场景计划', params.scenePlan),
+    section('场景写作材料', params.sceneWritingBrief),
     sectionUnlessCovered('本章目标', params.chapterGoal, params.hardConstraintContext, ['章节目标']),
     section('硬约束', params.hardConstraintContext),
     section('角色 Voice Lock', params.dialogueVoiceLocks),
