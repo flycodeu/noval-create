@@ -1,5 +1,6 @@
 import type {
   ChapterBatchAutoGenerateStatus,
+  ChapterContractValidationResult,
   ChapterDialogueReviewData,
   ExpressionDedupHit,
   ExpressionDedupMode,
@@ -45,7 +46,7 @@ import {
   buildChapterGateDriftSummary,
   safeParseStringArray,
 } from './chapter-gate-utils'
-import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
+import { getDialogueAnalyticsSnapshot } from './dialogue-fingerprint.service'
 import { buildVoiceEvolutionProfiles } from './generation-integrity.service'
 import { getEndgameDebtSnapshot } from './endgame-asset.service'
 import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
@@ -55,7 +56,6 @@ import { getWorldStateLedgerSnapshot } from './world-state.service'
 import { buildStoryMemoryPromptPackage } from './story-memory.service'
 import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
-import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
 import {
   loadQualityDashboardBatchSnapshot,
   loadQualityDashboardCatalogSnapshot,
@@ -64,6 +64,7 @@ import {
 import { deriveChapterGateMetrics } from './quality-dashboard-gate-metrics'
 import { deriveChapterScoreMetrics } from './quality-dashboard-chapter-metrics'
 import { assembleQualityDashboardData } from './quality-dashboard-assembler'
+import type { QualityDashboardAssemblyContext } from './quality-dashboard-contracts'
 import { buildRuntimeObservability } from './quality-dashboard-runtime-metrics'
 import { buildVolumeTopRisks } from './quality-dashboard-volume-metrics'
 import {
@@ -118,6 +119,10 @@ import {
   type StoryDynamicsChapterRecord,
 } from './quality-dashboard-story-dynamics'
 import { buildStoryDynamicsReadModel } from './story-dynamics-read-model'
+import {
+  createQualityAnalysisMemo,
+  type QualityAnalysisSnapshot,
+} from './quality-analysis-snapshot'
 
 export { buildHeuristicRecallDiagnostics } from './quality-dashboard-recall-diagnostics'
 
@@ -732,7 +737,10 @@ function buildForeshadowCountsByVolume(
   return countsByVolume
 }
 
-function collectContractProgressMetrics(rows: Array<{ reviewNotesJson?: string | null }>) {
+function collectContractProgressMetrics(
+  rows: Array<{ id: number }>,
+  qualityAnalysisByChapterId: ReadonlyMap<number, QualityAnalysisSnapshot>,
+) {
   let threadItemCount = 0
   let threadAdvanceCount = 0
   let threadMentionOnlyCount = 0
@@ -740,7 +748,7 @@ function collectContractProgressMetrics(rows: Array<{ reviewNotesJson?: string |
   let foreshadowStaleCount = 0
 
   rows.forEach((row) => {
-    const validation = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    const validation = qualityAnalysisByChapterId.get(row.id)?.metrics.contractValidation
     if (!validation) return
 
     validation.itemResults.forEach((item) => {
@@ -768,7 +776,7 @@ function collectContractProgressMetrics(rows: Array<{ reviewNotesJson?: string |
   }
 }
 
-type ParsedChapterContractValidation = NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>
+type ParsedChapterContractValidation = ChapterContractValidationResult
 
 function getDashboardContractHardStatus(
   validation: ParsedChapterContractValidation,
@@ -1545,9 +1553,6 @@ function loadQualityDashboardCatalogContext(novelId: number, options: QualityDas
     recentDialogueAlerts: [],
     requiredDialogueVoiceLocks: [],
   }
-  if (includeDialogueInsights) {
-    scheduleDialogueFingerprintRefresh(novelId)
-  }
   const storyArcProgressSnapshot = getStoryArcProgressSnapshot(novelId)
   const chapterArcProgressMap = storyArcProgressSnapshot.chapterPoints.reduce<Map<number, QualityDashboardData['chapterDetails'][number]['storyArcProgress']>>((result, point) => {
     const current = result.get(point.chapterId) || []
@@ -1559,6 +1564,16 @@ function loadQualityDashboardCatalogContext(novelId: number, options: QualityDas
   const volumeById = new Map(volumeRows.map((row) => [row.id, row] as const))
   const derivedDatabaseSnapshot = loadQualityDashboardDerivedDatabaseSnapshot(novelId)
   const batchSnapshot = loadQualityDashboardBatchSnapshot(novelId, rows)
+  const qualityAnalysisMemo = createQualityAnalysisMemo()
+  const contextVersion = novelMeta?.contextVersion || 1
+  const qualityAnalysisByChapterId = new Map(rows.map((row) => [
+    row.id,
+    qualityAnalysisMemo.get({
+      content: row.content || '',
+      reviewNotesJson: row.reviewNotesJson,
+      contextVersion,
+    }),
+  ] as const))
   return {
     novelId,
     options,
@@ -1572,6 +1587,7 @@ function loadQualityDashboardCatalogContext(novelId: number, options: QualityDas
     rows,
     derivedDatabaseSnapshot,
     batchSnapshot,
+    qualityAnalysisByChapterId,
     ...derivedDatabaseSnapshot,
   }
 }
@@ -1614,7 +1630,7 @@ function deriveQualityDashboardPolicyInputContext(
   })
   const structuredMemoryObservability = buildStoryMemoryPromptPackage(novelId, {
     chapterId: rows.at(-1)?.id,
-    refreshMode: currentRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
+    readOnly: true,
   }).observability
   const storyMemoryPrecomputeStatus = getStoryMemoryCheckpointRefreshStatus(novelId)
   const typedRefObservability = buildTypedRefObservability(context.typedRefRows)
@@ -1720,9 +1736,9 @@ function deriveQualityDashboardContinuityContext(
     chapterGateSummary,
   } = gateMetrics
   const volumeChapterRanges = buildVolumeChapterRanges(volumeRows, rows)
-  const foreshadowSnapshot = getForeshadowSnapshot(novelId)
+  const foreshadowSnapshot = getForeshadowSnapshot(novelId, undefined, { readOnly: true })
   const foreshadowCountsByVolume = buildForeshadowCountsByVolume(foreshadowSnapshot, volumeChapterRanges)
-  const endgameDebtSnapshot = getEndgameDebtSnapshot(novelId)
+  const endgameDebtSnapshot = getEndgameDebtSnapshot(novelId, { readOnly: true })
   const endgameCountsByVolume = new Map(
     [...endgameDebtSnapshot.countsByVolume.entries()].map(([volumeId, counts]) => [volumeId, counts] as const),
   )
@@ -1990,6 +2006,7 @@ function deriveQualityDashboardEditorialContext(
   const { rows, chapterDetails, weakDimFreq, languageMetricsList, languageDriftTrends } = context
   const { volumeAccumulators, trackedStoryChapters, volumeStoryAccumulators } = context
   const { chapterFunctionChapters, volumeChapterFunctionAccumulators } = context
+  const { qualityAnalysisByChapterId } = context
   const reviewFindingEntries = rows.map((row) => ({
     chapterNum: row.chapterNum,
     findings: parseReviewFindingArrays(row.reviewNotesJson),
@@ -2022,8 +2039,8 @@ function deriveQualityDashboardEditorialContext(
     averageScore: roundMetric(averageNumbers(styleComplianceEntries.map((entry) => entry.styleCompliance.score))),
     recentAlerts: styleComplianceAlerts.slice(0, 6),
   }
-  const contractValidationStatuses = rows.reduce<NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>[]>((result, row) => {
-    const parsed = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+  const contractValidationStatuses = rows.reduce<ChapterContractValidationResult[]>((result, row) => {
+    const parsed = qualityAnalysisByChapterId.get(row.id)?.metrics.contractValidation
     if (parsed) result.push(parsed)
     return result
   }, [])
@@ -2032,14 +2049,14 @@ function deriveQualityDashboardEditorialContext(
   const contractReadyRate = contractValidationStatuses.length > 0
     ? Math.round((contractValidationStatuses.filter((item) => getDashboardContractHardStatus(item) === 'pass').length / contractValidationStatuses.length) * 100)
     : 0
-  const contractProgressMetrics = collectContractProgressMetrics(rows)
+  const contractProgressMetrics = collectContractProgressMetrics(rows, qualityAnalysisByChapterId)
   const contractStatusEntries = rows.reduce<Array<{
     chapterId: number
     chapterNum: number
     volumeId: number | null
-    validation: NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>
+    validation: ChapterContractValidationResult
   }>>((result, row) => {
-    const validation = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    const validation = qualityAnalysisByChapterId.get(row.id)?.metrics.contractValidation
     if (!validation) return result
     result.push({
       chapterId: row.id,
@@ -3843,7 +3860,7 @@ function deriveQualityDashboardLanguageArtifactsContext(
   }
 }
 
-export type QualityDashboardAssemblyContext = ReturnType<typeof deriveQualityDashboardLanguageArtifactsContext>
+export type { QualityDashboardAssemblyContext } from './quality-dashboard-contracts'
 
 export function getQualityDashboardData(
   novelId: number,
@@ -3872,5 +3889,5 @@ export function getQualityDashboardData(
   const batchRuntime = deriveQualityDashboardBatchRuntimeContext(riskOverview)
   const runtime = deriveQualityDashboardRuntimeContext(batchRuntime)
   const languageArtifacts = deriveQualityDashboardLanguageArtifactsContext(runtime)
-  return assembleQualityDashboardData(languageArtifacts)
+  return assembleQualityDashboardData(languageArtifacts satisfies QualityDashboardAssemblyContext)
 }

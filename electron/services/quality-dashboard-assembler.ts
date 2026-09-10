@@ -1,6 +1,6 @@
 import type { QualityDashboardData } from '../../src/types'
 import { estimateChapterCountFromOperatingMode } from '../../src/shared/operating-mode'
-import type { QualityDashboardAssemblyContext } from './quality-dashboard.service'
+import type { QualityDashboardAssemblyContext } from './quality-dashboard-contracts'
 
 function roundMetric(value: number): number {
   return Math.round(value * 100) / 100

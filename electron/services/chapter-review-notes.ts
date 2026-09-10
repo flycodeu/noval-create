@@ -64,6 +64,10 @@ import type {
   StyleComplianceMetricSnapshot,
   StyleComplianceResult,
 } from '../../src/types'
+import {
+  getQualityAnalysisSnapshot,
+  type QualityAnalysisOptions,
+} from './quality-analysis-snapshot'
 
 export type ReviewSeverity = 'low' | 'medium' | 'high'
 
@@ -2120,11 +2124,29 @@ export function enhanceReviewNotesWithGuardrails(
   })), 'guardrail'))
 }
 
-export function parseStoredReviewNotes(raw?: string | null): ChapterReviewNotes {
+export function parseStoredReviewNotes(
+  raw?: string | null,
+  analysisOptions?: QualityAnalysisOptions & { content: string },
+): ChapterReviewNotes {
   if (!raw?.trim()) return normalizeReviewNotes({})
 
   try {
-    return normalizeReviewNotes(JSON.parse(raw) as unknown)
+    const notes = normalizeReviewNotes(JSON.parse(raw) as unknown)
+    if (!analysisOptions) return notes
+    const input = {
+      content: analysisOptions.content,
+      reviewNotesJson: raw,
+      contextVersion: analysisOptions.contextVersion,
+      rulesVersion: analysisOptions.rulesVersion,
+    }
+    const analysis = analysisOptions.memo
+      ? analysisOptions.memo.get(input, analysisOptions.snapshot)
+      : getQualityAnalysisSnapshot(input, analysisOptions.snapshot)
+    return {
+      ...notes,
+      issues: analysis.issues,
+      contract_validation: analysis.metrics.contractValidation || undefined,
+    }
   } catch {
     return normalizeReviewNotes({})
   }

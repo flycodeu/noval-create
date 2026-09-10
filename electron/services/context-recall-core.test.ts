@@ -81,4 +81,53 @@ describe('context recall core', () => {
     expect(result.recallDiagnostics.selectedHitCount).toBe(1)
     expect(result.recalledMemorySources).toHaveLength(1)
   })
+
+  it('13-05: prefers a deterministic SQL asset over the same semantic asset', () => {
+    const semantic = {
+      sourceType: 'item' as const,
+      sourceId: 20,
+      fragmentKey: 'summary',
+      content: '旧怀表仍在A手中',
+      entityRefs: ['A', '旧怀表'],
+      similarity: 0.92,
+      searchMode: 'vector' as const,
+      bucket: 'character' as const,
+      stale: false,
+      staleReasons: [],
+      overriddenByConstraint: false,
+      entityMatches: ['A'],
+      entityValidated: true,
+    }
+    const deterministic = {
+      deterministic: true as const,
+      sourceKey: 'asset:item:20',
+      sourceVersion: 'v1:abc',
+      required: false,
+      reason: 'owner_relation' as const,
+      optionalKind: 'item' as const,
+      dueChapter: null,
+      sourceKind: 'semantic_asset' as const,
+      semanticSourceType: 'item' as const,
+      semanticSourceId: 20,
+      bucket: 'character' as const,
+      fragmentType: 'owner_relation',
+      similarity: 1,
+      searchMode: 'keyword' as const,
+      sourceLabel: '物品#20',
+      summary: '持有物品：旧怀表',
+      stale: false,
+      staleReasons: [],
+      overriddenByConstraint: false,
+      entityMatches: [],
+      entityValidated: true,
+    }
+    const result = buildRecallSnapshot([], [{ bucket: 'character', hits: [semantic] }], [deterministic])
+
+    expect(result.recalledMemorySources).toHaveLength(1)
+    expect(result.recalledMemorySources[0]).toMatchObject({
+      deterministic: true,
+      sourceKey: 'asset:item:20',
+    })
+    expect(result.recalledMemory.match(/旧怀表/gu)).toHaveLength(1)
+  })
 })

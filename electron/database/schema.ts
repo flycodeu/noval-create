@@ -800,6 +800,8 @@ export const storyMemoryCheckpoints = sqliteTable('story_memory_checkpoints', {
   sourceRangeStart: integer('source_range_start'),
   sourceRangeEnd: integer('source_range_end'),
   version: integer('version').default(1),
+  sourceContextVersion: integer('source_context_version'),
+  sourceManifestJson: text('source_manifest_json'),
   stale: integer('stale').default(0),
   lastRefreshedChapterNum: integer('last_refreshed_chapter_num').default(0),
   locked: integer('locked').default(0),

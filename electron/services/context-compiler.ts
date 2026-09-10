@@ -6,6 +6,11 @@ import {
   type ContextPackSource,
 } from '../../src/shared/context-pack'
 import type { ChapterContext, ChapterContextRawData } from './context.service'
+import {
+  getRecallSourceKey,
+  isAcceptedRecallSource,
+  isDeterministicRecallSource,
+} from './context-recall-core'
 
 export type ContextCompilerMode = 'legacy' | 'shadow' | 'active'
 
@@ -68,6 +73,17 @@ export function buildChapterContextSources(input: {
   const sourceVersion = `${rawContext.novel.contextVersion || 1}:${context.contractVersionSummary || ''}`
   const visibility = STAGE_VISIBILITY[stage]
   const sources: ContextPackSource[] = []
+  const recallVisibilityDenied = context.visibilityReport?.decisions.some((decision) => (
+    decision.sourceKey === 'part:recalledMemory' && !decision.included
+  )) === true
+  const selectedRecallSources = recallVisibilityDenied
+    ? []
+    : (rawContext.recalledMemorySources || [])
+        .filter((source) => isAcceptedRecallSource(source))
+        .filter((source) => (
+          isDeterministicRecallSource(source) && source.required
+        ) || Boolean(context.recalledMemory && context.recalledMemory.includes(source.summary)))
+  const useGranularRecallSources = selectedRecallSources.some(isDeterministicRecallSource)
   context.hardConstraintEntries.forEach((entry) => addSource(sources, {
     key: `hard:${entry.label}`,
     sourceKind: 'hard_constraint',
@@ -83,6 +99,7 @@ export function buildChapterContextSources(input: {
     const field = STRUCTURED_FIELDS.find((candidate) => candidate === decision.label)
     const text = field ? context[field] : ''
     if (!text) return
+    if (decision.label === 'recalledMemory' && useGranularRecallSources) return
     addSource(sources, {
       key: `part:${decision.label}`,
       sourceKind: decision.sourceKind || 'legacy',
@@ -95,6 +112,22 @@ export function buildChapterContextSources(input: {
       estimatedTokens: decision.allocatedTokens || decision.originalTokens,
     })
   })
+  if (useGranularRecallSources) {
+    selectedRecallSources.forEach((source) => addSource(sources, {
+      key: getRecallSourceKey(source),
+      sourceKind: isDeterministicRecallSource(source) ? 'relation_recall' : 'recall_memory',
+      sourceId: source.sourceKind === 'chapter'
+        ? String(source.chapterId || source.sourceLabel)
+        : `${source.semanticSourceType || 'semantic'}:${source.semanticSourceId || source.sourceLabel}`,
+      sourceVersion: isDeterministicRecallSource(source)
+        ? source.sourceVersion
+        : `${sourceVersion}:${source.sourceKind === 'chapter' ? source.chapterNum || 0 : 'semantic'}`,
+      visibility,
+      text: source.summary,
+      required: isDeterministicRecallSource(source) && source.required,
+      reason: isDeterministicRecallSource(source) ? source.reason : 'recall_selected',
+    }))
+  }
   for (const [key, value] of Object.entries(upstreamArtifacts)) {
     if (typeof value !== 'string' || !value.trim()) continue
     addSource(sources, {

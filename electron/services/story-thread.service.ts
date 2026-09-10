@@ -794,7 +794,11 @@ function buildLedgerForeshadowCard(
   }
 }
 
-export function getForeshadowSnapshot(novelId: number, chapterNum?: number) {
+export function getForeshadowSnapshot(
+  novelId: number,
+  chapterNum?: number,
+  options: { readOnly?: boolean } = {},
+) {
   const currentChapterNum = typeof chapterNum === 'number' && chapterNum > 0
     ? Math.round(chapterNum)
     : getLatestChapterNum(novelId)
@@ -809,7 +813,7 @@ export function getForeshadowSnapshot(novelId: number, chapterNum?: number) {
   const threadById = new Map(threadRows.map((thread) => [thread.id, thread] as const))
   const coveredThreadIds = new Set<number>()
 
-  listForeshadowLedger(novelId).forEach((entry) => {
+  listForeshadowLedger(novelId, options).forEach((entry) => {
     const linkedThread = typeof entry.linkedThreadId === 'number'
       ? threadById.get(entry.linkedThreadId) || null
       : null

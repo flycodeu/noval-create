@@ -191,6 +191,8 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('item_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('timeline_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('thread_cards_json'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_context_version'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_manifest_json'))
   assert.ok(getColumns(db, 'tasks').has('runner_type'))
   assert.ok(getColumns(db, 'tasks').has('progress_json'))
   const attemptColumns = getColumns(db, 'model_request_attempts')
@@ -525,6 +527,7 @@ function testFreshDbIsIdempotent() {
       '0063_narrative_board_layout_and_location_bindings',
       '0064_semantic_memory_source_range_repair',
       '0065_model_request_attempts',
+      '0066_checkpoint_source_manifest',
     ])
 
     runMigrations(db)
@@ -669,6 +672,7 @@ function testPartialSchemaCanResume() {
       '0063_narrative_board_layout_and_location_bindings',
       '0064_semantic_memory_source_range_repair',
       '0065_model_request_attempts',
+      '0066_checkpoint_source_manifest',
     ])
 
     const configs = db.prepare(`
@@ -911,6 +915,60 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
   }
 }
 
+function testCheckpointSourceManifestMigrationRollbackAndRecovery() {
+  const control = openDb('checkpoint-manifest-control.db')
+  let priorMigrationIds
+  try {
+    runMigrations(control)
+    priorMigrationIds = getMigrationIds(control).filter((id) => id !== '0066_checkpoint_source_manifest')
+  } finally {
+    control.close()
+  }
+
+  const db = openDb('checkpoint-manifest-rollback.db')
+  try {
+    db.exec(`
+      CREATE TABLE _schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE story_memory_checkpoints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        summary TEXT
+      );
+      INSERT INTO story_memory_checkpoints (summary) VALUES ('legacy summary kept');
+    `)
+    const insertMigration = db.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)')
+    const appliedAt = new Date().toISOString()
+    priorMigrationIds.forEach((id) => insertMigration.run(id, appliedAt))
+    db.exec(`
+      CREATE TRIGGER fail_checkpoint_manifest_migration
+      BEFORE INSERT ON _schema_migrations
+      WHEN NEW.id = '0066_checkpoint_source_manifest'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced checkpoint manifest migration failure');
+      END;
+    `)
+
+    assert.throws(() => runMigrations(db), /forced checkpoint manifest migration failure/)
+    assert.equal(getColumns(db, 'story_memory_checkpoints').has('source_context_version'), false)
+    assert.equal(getColumns(db, 'story_memory_checkpoints').has('source_manifest_json'), false)
+    assert.equal(db.prepare('SELECT summary FROM story_memory_checkpoints').get().summary, 'legacy summary kept')
+    assert.equal(getMigrationIds(db).includes('0066_checkpoint_source_manifest'), false)
+
+    db.exec('DROP TRIGGER fail_checkpoint_manifest_migration')
+    runMigrations(db)
+    assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_context_version'))
+    assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_manifest_json'))
+    assert.equal(db.prepare('SELECT summary FROM story_memory_checkpoints').get().summary, 'legacy summary kept')
+    assert.ok(getMigrationIds(db).includes('0066_checkpoint_source_manifest'))
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM _schema_migrations WHERE id = ?').get('0066_checkpoint_source_manifest').count, 1)
+  } finally {
+    db.close()
+  }
+}
+
 function testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns() {
   const db = openDb('legacy-semantic-memory-range-repair.db')
   try {
@@ -1030,6 +1088,7 @@ function runAllTests() {
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
   testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()
   testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns()
+  testCheckpointSourceManifestMigrationRollbackAndRecovery()
   testRecommendationGovernanceTriggers()
   console.log('migration-safety tests passed')
 }

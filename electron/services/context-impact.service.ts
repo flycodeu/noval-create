@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, ne, or, sql } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 import type { ChapterContractValidationResult } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
@@ -275,7 +275,7 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
   const staleCheckpointCount = db.select().from(storyMemoryCheckpoints)
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .all()
-    .filter((checkpoint) => checkpoint.stale === 1 || (checkpoint.version || 1) < (novel.contextVersion || 1))
+    .filter((checkpoint) => checkpoint.stale === 1 || checkpoint.sourceContextVersion !== (novel.contextVersion || 1))
     .length
   const novelUpdatedAt = parseIsoTime(novel.updatedAt)
   const assetRows = {
@@ -348,13 +348,7 @@ export function markStoryMemoryCheckpointsDirty(novelId: number, updatedAt = new
   db.update(storyMemoryCheckpoints).set({
     stale: 1,
     updatedAt,
-  }).where(and(
-    eq(storyMemoryCheckpoints.novelId, novelId),
-    or(
-      isNull(storyMemoryCheckpoints.locked),
-      ne(storyMemoryCheckpoints.locked, 1),
-    ),
-  )).run()
+  }).where(eq(storyMemoryCheckpoints.novelId, novelId)).run()
 }
 
 export function markSubsequentChaptersStale(

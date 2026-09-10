@@ -61,4 +61,78 @@ describe('context compiler source mapping', () => {
       restoredPack: first.pack,
     })).rejects.toMatchObject({ code: 'NF_CONTEXT_STALE' })
   })
+
+  it('13-05: maps selected deterministic recall as one versioned ContextPack source', () => {
+    const { rawContext, context } = compilerFixture()
+    rawContext.recalledMemorySources = [{
+      deterministic: true,
+      sourceKey: 'asset:item:20',
+      sourceVersion: 'v1:abc',
+      required: true,
+      reason: 'explicit_contract',
+      optionalKind: 'item',
+      dueChapter: null,
+      sourceKind: 'semantic_asset',
+      semanticSourceType: 'item',
+      semanticSourceId: 20,
+      bucket: 'character',
+      fragmentType: 'contract_item',
+      similarity: 1,
+      searchMode: 'keyword',
+      sourceLabel: '物品#20',
+      summary: '合同物品：旧怀表',
+      stale: false,
+      staleReasons: [],
+      overriddenByConstraint: false,
+      entityMatches: [],
+      entityValidated: true,
+    }] as never
+    context.recalledMemory = '以下内容仅作背景补充，不定义当前事实。\n[角色/关系召回·确定性·物品#20·contract_item] 合同物品：旧怀表'
+    context.softContextDecisions.push({
+      label: 'recalledMemory', sourceKind: 'recall', priority: 2, reason: 'budget_fit', allocatedTokens: 20, originalTokens: 20,
+    } as never)
+
+    const sources = buildChapterContextSources({ rawContext, context, stage: 'draft' })
+    expect(sources.filter((source) => source.key === 'asset:item:20')).toEqual([expect.objectContaining({
+      sourceVersion: 'v1:abc',
+      required: true,
+      sourceKind: 'relation_recall',
+    })])
+    expect(sources.some((source) => source.key === 'part:recalledMemory')).toBe(false)
+  })
+
+  it('13-06: does not restore a raw required recall source rejected by NF-12 visibility', () => {
+    const { rawContext, context } = compilerFixture()
+    rawContext.recalledMemorySources = [{
+      deterministic: true,
+      sourceKey: 'contract:foreshadow:91',
+      sourceVersion: 'v1:secret',
+      required: true,
+      reason: 'explicit_contract',
+      optionalKind: 'contract',
+      dueChapter: 20,
+      sourceKind: 'semantic_asset',
+      semanticSourceType: 'story_thread',
+      semanticSourceId: 91,
+      bucket: 'thread',
+      fragmentType: 'contract_foreshadow',
+      similarity: 1,
+      searchMode: 'keyword',
+      sourceLabel: '伏笔#91',
+      summary: '未公开谜底',
+      stale: false,
+      staleReasons: [],
+      overriddenByConstraint: false,
+      entityMatches: [],
+      entityValidated: true,
+    }] as never
+    context.recalledMemory = ''
+    context.visibilityReport = {
+      decisions: [{ sourceKey: 'part:recalledMemory', included: false }],
+      sources: [],
+    } as never
+
+    const sources = buildChapterContextSources({ rawContext, context, stage: 'draft' })
+    expect(sources.some((source) => source.key === 'contract:foreshadow:91')).toBe(false)
+  })
 })

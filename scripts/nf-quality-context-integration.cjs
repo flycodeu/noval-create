@@ -17,6 +17,9 @@ const cases = new Map([
   ['NF-10', require('./nf-quality-context-cases/NF-10.cjs')],
   ['NF-11', require('./nf-quality-context-cases/NF-11.cjs')],
   ['NF-12', require('./nf-quality-context-cases/NF-12.cjs')],
+  ['NF-13', require('./nf-quality-context-cases/NF-13.cjs')],
+  ['NF-14', require('./nf-quality-context-cases/NF-14.cjs')],
+  ['NF-16', require('./nf-quality-context-cases/NF-16.cjs')],
 ])
 
 function parseCase(argv) {

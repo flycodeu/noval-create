@@ -77,11 +77,12 @@ interface SemanticMemoryOutboxClaim {
   operation: 'upsert' | 'delete'
   revision: number
   attempts: number
+  contextVersion: number
 }
 
 interface IncrementalProjectionOptions {
   modelConfigId?: number
-  outboxClaim?: Pick<SemanticMemoryOutboxClaim, 'id' | 'revision'>
+  outboxClaim?: Pick<SemanticMemoryOutboxClaim, 'id' | 'revision' | 'contextVersion'>
 }
 
 export interface SemanticMemoryReindexResult {
@@ -111,6 +112,15 @@ export interface SemanticMemoryOutboxStatus {
   processingCount: number
   deadLetterCount: number
   oldestQueuedAt?: string
+}
+
+export function isSemanticProjectionCommitCurrent(input: {
+  claimContextVersion: number
+  outboxContextVersion: number
+  novelContextVersion: number
+}): boolean {
+  return input.claimContextVersion === input.outboxContextVersion
+    && input.claimContextVersion === input.novelContextVersion
 }
 
 export interface SemanticMemorySearchHit {
@@ -517,21 +527,51 @@ export async function reindexSemanticMemorySource(
     options.modelConfigId || novel.modelConfigId || undefined,
     existingRows,
   )
-  const contextVersion = Math.max(1, novel.contextVersion || 1)
+  const contextVersion = options.outboxClaim?.contextVersion || Math.max(1, novel.contextVersion || 1)
   let applied = false
 
   db.transaction((tx) => {
+    const currentContextVersion = tx.select({ contextVersion: novels.contextVersion })
+      .from(novels)
+      .where(eq(novels.id, novelId))
+      .all()[0]?.contextVersion || 1
     if (options.outboxClaim) {
       const claimed = tx.select({
         id: semanticMemoryOutbox.id,
         revision: semanticMemoryOutbox.revision,
         status: semanticMemoryOutbox.status,
+        contextVersion: semanticMemoryOutbox.contextVersion,
       }).from(semanticMemoryOutbox).where(and(
         eq(semanticMemoryOutbox.id, options.outboxClaim.id),
         eq(semanticMemoryOutbox.revision, options.outboxClaim.revision),
         eq(semanticMemoryOutbox.status, 'processing'),
       )).all()[0]
       if (!claimed) return
+      if (!isSemanticProjectionCommitCurrent({
+        claimContextVersion: options.outboxClaim.contextVersion,
+        outboxContextVersion: claimed.contextVersion,
+        novelContextVersion: currentContextVersion,
+      })) {
+        tx.update(semanticMemoryOutbox).set({
+          status: 'pending',
+          revision: sql`${semanticMemoryOutbox.revision} + 1`,
+          attempts: 0,
+          contextVersion: currentContextVersion,
+          availableAt: new Date().toISOString(),
+          lockedAt: null,
+          processedAt: null,
+          lastError: null,
+          updatedAt: new Date().toISOString(),
+        }).where(and(
+          eq(semanticMemoryOutbox.id, options.outboxClaim.id),
+          eq(semanticMemoryOutbox.revision, options.outboxClaim.revision),
+          eq(semanticMemoryOutbox.status, 'processing'),
+          eq(semanticMemoryOutbox.contextVersion, options.outboxClaim.contextVersion),
+        )).run()
+        return
+      }
+    } else if (currentContextVersion !== contextVersion) {
+      return
     }
 
     tx.delete(semanticMemoryEntries).where(and(
@@ -721,7 +761,8 @@ function claimSemanticMemoryOutbox(options: {
         source_id AS sourceId,
         operation,
         revision,
-        attempts
+        attempts,
+        context_version AS contextVersion
       FROM semantic_memory_outbox
       WHERE status IN ('pending', 'failed')
         AND attempts < ${MAX_OUTBOX_ATTEMPTS}
@@ -737,6 +778,7 @@ function claimSemanticMemoryOutbox(options: {
       operation: string
       revision: number
       attempts: number
+      contextVersion: number
     }>
 
     const claim = sqlite.prepare(`
@@ -768,6 +810,7 @@ function claimSemanticMemoryOutbox(options: {
         operation: row.operation === 'delete' ? 'delete' as const : 'upsert' as const,
         revision: row.revision,
         attempts: row.attempts + 1,
+        contextVersion: Math.max(1, row.contextVersion || 1),
       }]
     })
   })
@@ -856,13 +899,13 @@ async function processOutboxClaimGroup(
     return { claim: entry.claim, prepared }
   })
 
-  const contextVersion = Math.max(1, novel.contextVersion || 1)
   let processedCount = 0
   let supersededCount = 0
   db.transaction((tx) => {
     projections.forEach(({ claim, prepared }) => {
       const currentClaim = tx.select({
         id: semanticMemoryOutbox.id,
+        contextVersion: semanticMemoryOutbox.contextVersion,
       }).from(semanticMemoryOutbox).where(and(
         eq(semanticMemoryOutbox.id, claim.id),
         eq(semanticMemoryOutbox.revision, claim.revision),
@@ -872,13 +915,41 @@ async function processOutboxClaimGroup(
         supersededCount += 1
         return
       }
+      const currentContextVersion = tx.select({ contextVersion: novels.contextVersion })
+        .from(novels)
+        .where(eq(novels.id, claim.novelId))
+        .all()[0]?.contextVersion || 1
+      if (!isSemanticProjectionCommitCurrent({
+        claimContextVersion: claim.contextVersion,
+        outboxContextVersion: currentClaim.contextVersion,
+        novelContextVersion: currentContextVersion,
+      })) {
+        tx.update(semanticMemoryOutbox).set({
+          status: 'pending',
+          revision: sql`${semanticMemoryOutbox.revision} + 1`,
+          attempts: 0,
+          contextVersion: currentContextVersion,
+          availableAt: new Date().toISOString(),
+          lockedAt: null,
+          processedAt: null,
+          lastError: null,
+          updatedAt: new Date().toISOString(),
+        }).where(and(
+          eq(semanticMemoryOutbox.id, claim.id),
+          eq(semanticMemoryOutbox.revision, claim.revision),
+          eq(semanticMemoryOutbox.status, 'processing'),
+          eq(semanticMemoryOutbox.contextVersion, claim.contextVersion),
+        )).run()
+        supersededCount += 1
+        return
+      }
 
       tx.delete(semanticMemoryEntries).where(and(
         eq(semanticMemoryEntries.novelId, claim.novelId),
         eq(semanticMemoryEntries.sourceType, claim.sourceType),
         eq(semanticMemoryEntries.sourceId, claim.sourceId),
       )).run()
-      insertPreparedDocuments(tx, claim.novelId, contextVersion, prepared)
+      insertPreparedDocuments(tx, claim.novelId, claim.contextVersion, prepared)
       tx.delete(semanticMemoryOutbox).where(and(
         eq(semanticMemoryOutbox.id, claim.id),
         eq(semanticMemoryOutbox.revision, claim.revision),

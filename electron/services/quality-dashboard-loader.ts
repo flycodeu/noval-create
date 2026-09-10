@@ -27,6 +27,7 @@ export function loadQualityDashboardCatalogSnapshot(novelId: number) {
   const db = getDb()
   const novelMeta = db.select({
     launchMode: novels.launchMode,
+    contextVersion: novels.contextVersion,
     targetWords: novels.targetWords,
     settingsJson: novels.settingsJson,
     worldRulesJson: novels.worldRulesJson,

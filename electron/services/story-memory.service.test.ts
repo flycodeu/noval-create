@@ -204,6 +204,36 @@ describe('buildStoryMemorySnapshot query scope', () => {
     }
   })
 
+  it('keeps read-only prompt projection from scheduling or writing checkpoints', () => {
+    const tableReads: unknown[] = []
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({
+        from: (table: unknown) => {
+          tableReads.push(table)
+          const query = {
+            where: () => query,
+            orderBy: () => query,
+            limit: () => query,
+            all: () => {
+              if (table === novels) return [{ id: 16, title: '只读看板', targetWords: 120000, contextVersion: 5 }]
+              if (table === storyMemoryCheckpoints || table === chapters || table === timelineEvents || table === storyItems) return []
+              return []
+            },
+          }
+          return query
+        },
+      }),
+    } as never)
+
+    const promptPackage = buildStoryMemoryPromptPackage(16, { readOnly: true })
+
+    expect(promptPackage.observability.fallbackScopeCount).toBeGreaterThan(0)
+    expect(getStoryMemoryCheckpointRefreshStatus(16).status).toBe('idle')
+    expect(ensureStoryStructure).not.toHaveBeenCalled()
+    expect(tableReads).not.toContain(storyVolumes)
+    expect(tableReads).not.toContain(storyParts)
+  })
+
   it('reuses event and checkpoint catalogs while preserving locked scopes', () => {
     const tableReads: unknown[] = []
     const updatePayloads: Array<Record<string, unknown>> = []
@@ -391,7 +421,15 @@ describe('buildStoryMemorySnapshot query scope', () => {
                     novelId: 4,
                     scopeType: 'novel',
                     scopeId: null,
-                    version: 7,
+                    version: 99,
+                    sourceContextVersion: 7,
+                    sourceManifestJson: JSON.stringify({
+                      schemaVersion: 1,
+                      contextVersion: 7,
+                      sources: [],
+                      range: { startChapterNum: 1, endChapterNum: 100 },
+                      unresolvedRefs: [],
+                    }),
                     stale: 0,
                     locked: 0,
                     lastRefreshedChapterNum: 100,

@@ -28,6 +28,7 @@ import { hashQueryText } from './query-embedding'
 import {
   buildSemanticMemoryFtsQuery,
   getSemanticMemoryOutboxStatus,
+  isSemanticProjectionCommitCurrent,
   hashSemanticDocument,
   querySemanticMemoryFtsCandidateIds,
   reindexSemanticMemorySource,
@@ -37,6 +38,24 @@ import {
 describe('semantic memory FTS candidate retrieval', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('rejects an old projection commit when either version has advanced', () => {
+    expect(isSemanticProjectionCommitCurrent({
+      claimContextVersion: 10,
+      outboxContextVersion: 10,
+      novelContextVersion: 10,
+    })).toBe(true)
+    expect(isSemanticProjectionCommitCurrent({
+      claimContextVersion: 10,
+      outboxContextVersion: 11,
+      novelContextVersion: 11,
+    })).toBe(false)
+    expect(isSemanticProjectionCommitCurrent({
+      claimContextVersion: 10,
+      outboxContextVersion: 10,
+      novelContextVersion: 11,
+    })).toBe(false)
   })
 
   it('uses trigram only for terms with at least three characters', () => {
@@ -189,6 +208,15 @@ describe('semantic memory FTS candidate retrieval', () => {
         },
       }),
       transaction: (callback: (tx: unknown) => unknown) => callback({
+        select: () => ({
+          from: () => {
+            const query = {
+              where: () => query,
+              all: () => [{ contextVersion: 3 }],
+            }
+            return query
+          },
+        }),
         delete: () => ({ where: () => ({ run: () => undefined }) }),
         insert: () => ({
           values: (row: Record<string, unknown>) => ({

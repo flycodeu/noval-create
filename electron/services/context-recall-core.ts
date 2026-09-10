@@ -10,6 +10,7 @@ import type {
 import type { SemanticMemorySourceType } from '../../src/shared/semantic-memory'
 import type { SimilarFragmentHit } from './embedding.service'
 import type { SemanticMemorySearchHit } from './semantic-memory.service'
+import type { DeterministicRecallSource } from './relation-recall'
 
 export type {
   RecallBucketKey,
@@ -93,14 +94,18 @@ function formatRecalledMemory(sources: RecallMemorySource[]): string {
     rule: '规则/主题召回',
     thread: '线程/伏笔召回',
   }
-  const selectedSources = sources
-    .filter((source) => isAcceptedRecallSource(source))
-    .slice(0, 6)
+  const acceptedSources = sources.filter((source) => isAcceptedRecallSource(source))
+  const selectedSources = [
+    ...acceptedSources.filter(isDeterministicRecallSource).filter((source) => source.required),
+    ...acceptedSources.filter((source) => !isDeterministicRecallSource(source) || !source.required).slice(0, 6),
+  ]
   if (selectedSources.length === 0) return ''
 
   const lines = ['以下内容仅作背景补充，不定义当前事实。']
   selectedSources.forEach((source) => {
-    const origin = source.sourceKind === 'chapter'
+    const origin = isDeterministicRecallSource(source)
+      ? `确定性·${source.sourceLabel}`
+      : source.sourceKind === 'chapter'
       ? `第${source.chapterNum}章`
       : source.sourceLabel
     lines.push(`[${labels[source.bucket]}·${origin}·${source.fragmentType}] ${source.summary}`)
@@ -161,10 +166,16 @@ function buildSemanticRecallMemorySource(hit: SemanticRecallHit): RecallMemorySo
   }
 }
 
-function getRecallSourceKey(source: RecallMemorySource): string {
+export function isDeterministicRecallSource(source: RecallMemorySource): source is DeterministicRecallSource {
+  return (source as Partial<DeterministicRecallSource>).deterministic === true
+    && typeof (source as Partial<DeterministicRecallSource>).sourceKey === 'string'
+}
+
+export function getRecallSourceKey(source: RecallMemorySource): string {
+  if (isDeterministicRecallSource(source)) return source.sourceKey
   return source.sourceKind === 'chapter'
     ? `chapter:${source.bucket}:${source.chapterId}:${source.fragmentType}:${source.summary}`
-    : `semantic:${source.bucket}:${source.semanticSourceType}:${source.semanticSourceId}:${source.fragmentType}:${source.summary}`
+    : `asset:${source.semanticSourceType}:${source.semanticSourceId}`
 }
 
 export function compactRecallLine(text: string, maxLength = 96): string {
@@ -272,6 +283,7 @@ export function pickRecallFallbackReason(
 export function buildRecallSnapshot(
   bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[]; fallbackReason?: RecallFallbackReason }>,
   semanticBucketResults: Array<{ bucket: RecallBucketKey; hits: SemanticRecallHit[] }> = [],
+  deterministicSources: DeterministicRecallSource[] = [],
 ): {
   recalledMemory: string
   recalledMemorySources: RecallMemorySource[]
@@ -297,15 +309,29 @@ export function buildRecallSnapshot(
       if (source.summary) sources.push(source)
     })
   })
+  sources.push(...deterministicSources)
 
-  const dedupedSources = [...new Map(sources.map((source) => [getRecallSourceKey(source), source] as const)).values()]
+  const dedupedByKey = new Map<string, RecallMemorySource>()
+  sources.forEach((source) => {
+    const key = getRecallSourceKey(source)
+    const existing = dedupedByKey.get(key)
+    if (!existing || (!isDeterministicRecallSource(existing) && isDeterministicRecallSource(source))) {
+      dedupedByKey.set(key, source)
+    }
+  })
+  const dedupedSources = [...dedupedByKey.values()]
   sources.splice(0, sources.length, ...dedupedSources)
 
   ;(['character', 'rule', 'thread'] as RecallBucketKey[]).forEach((bucket) => {
     const bucketSources = sources
       .filter((source) => source.bucket === bucket)
-      .sort((left, right) => right.similarity - left.similarity)
-    const eligible = bucketSources.filter((source) => {
+      .sort((left, right) => {
+        const leftRequired = isDeterministicRecallSource(left) && left.required ? 1 : 0
+        const rightRequired = isDeterministicRecallSource(right) && right.required ? 1 : 0
+        return rightRequired - leftRequired || right.similarity - left.similarity
+      })
+    const deterministic = bucketSources.filter(isDeterministicRecallSource)
+    const eligible = bucketSources.filter((source) => !isDeterministicRecallSource(source)).filter((source) => {
       if (source.stale || source.overriddenByConstraint) return false
       if (source.similarity < resolveRecallMinimumSimilarity(source.searchMode)) {
         lowSimilarityRejectedCount += 1
@@ -321,7 +347,8 @@ export function buildRecallSnapshot(
       source.similarity >= resolveRecallPreferredSimilarity(source.searchMode))
     const fallback = eligible.filter((source) =>
       source.similarity >= resolveRecallMinimumSimilarity(source.searchMode))
-    const selected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
+    const similaritySelected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
+    const selected = [...deterministic, ...similaritySelected]
     const chapterResult = bucketResults.find((result) => result.bucket === bucket)
     bucketStats[bucket] = {
       hitCount: bucketSources.length,

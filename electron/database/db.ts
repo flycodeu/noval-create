@@ -555,6 +555,8 @@ export function runMigrations(sqlite: Database.Database) {
       source_range_start INTEGER,
       source_range_end INTEGER,
       version INTEGER DEFAULT 1,
+      source_context_version INTEGER,
+      source_manifest_json TEXT,
       stale INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -3041,6 +3043,13 @@ export function runMigrations(sqlite: Database.Database) {
     `)
     validateModelRequestAttemptSchema(sqlite)
   })
+
+  runMigrationStep(sqlite, '0066_checkpoint_source_manifest', () => {
+    if (hasTable(sqlite, 'story_memory_checkpoints')) {
+      ensureColumn(sqlite, 'story_memory_checkpoints', 'source_context_version', 'INTEGER')
+      ensureColumn(sqlite, 'story_memory_checkpoints', 'source_manifest_json', 'TEXT')
+    }
+  })
 }
 
 function parseLegacyIdTokens(raw: unknown): Array<number | string> {
@@ -3369,7 +3378,15 @@ function validateRequiredSchema(
     },
     {
       tableName: 'story_memory_checkpoints',
-      columns: ['character_cards_json', 'relation_cards_json', 'item_cards_json', 'timeline_cards_json', 'thread_cards_json'],
+      columns: [
+        'character_cards_json',
+        'relation_cards_json',
+        'item_cards_json',
+        'timeline_cards_json',
+        'thread_cards_json',
+        'source_context_version',
+        'source_manifest_json',
+      ],
     },
     {
       tableName: 'factions',

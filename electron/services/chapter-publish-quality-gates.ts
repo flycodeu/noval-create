@@ -20,7 +20,10 @@ import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 import { analyzeNarrativeControls } from './narrative-control.service'
 import { getSceneSnapshotLabel } from './chapter-publish-contract-gate'
-import { readQualityIssuesFromReviewNotesJson } from './quality-issue-policy'
+import {
+  getQualityAnalysisSnapshot,
+  type QualityAnalysisSnapshot,
+} from './quality-analysis-snapshot'
 import {
   parseNumberArray,
   type ChapterContractAudit,
@@ -113,6 +116,7 @@ export interface PublishReadinessChecklistInput {
   reviewState: ReviewStateSnapshot
   openingHookIssues: string[]
   titleAlignmentIssues: string[]
+  qualityAnalysisSnapshot?: QualityAnalysisSnapshot
 }
 
 function makeAvailabilityPublishCheckItem(input: {
@@ -133,10 +137,32 @@ function makeAvailabilityPublishCheckItem(input: {
   })
 }
 
+export function resolvePublishQualityIssues(input: {
+  content: string
+  reviewNotesJson?: string | null
+  contextVersion: number
+  snapshot?: QualityAnalysisSnapshot
+}) {
+  return getQualityAnalysisSnapshot({
+    content: input.content,
+    reviewNotesJson: input.reviewNotesJson,
+    contextVersion: input.contextVersion,
+  }, input.snapshot).issues
+}
+
+function resolveChecklistQualityIssues(input: PublishReadinessChecklistInput) {
+  return resolvePublishQualityIssues({
+    content: input.chapter.content || '',
+    reviewNotesJson: input.chapter.reviewNotesJson,
+    contextVersion: input.novel.contextVersion || 1,
+    snapshot: input.qualityAnalysisSnapshot,
+  })
+}
+
 function buildPublishCoreReadinessChecklist(input: PublishReadinessChecklistInput): ChapterPublishCheckItem[] {
   const { chapter, novel, staleReasons, semanticGateStatus, semanticGateDetail } = input
   const { highIssues, aiScore } = input
-  const qualityIssues = readQualityIssuesFromReviewNotesJson(chapter.reviewNotesJson)
+  const qualityIssues = resolveChecklistQualityIssues(input)
   const blockerIssues = qualityIssues.filter((issue) => issue.level === 'blocker')
   const repairIssues = qualityIssues.filter((issue) => issue.level === 'repair')
   const adviceIssues = qualityIssues.filter((issue) => issue.level === 'advice')

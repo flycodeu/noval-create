@@ -55,10 +55,18 @@ import {
   type WorldStateSummary,
   getWorldStateLedgerSnapshot,
 } from './world-state.service'
+import {
+  createMemorySourceManifest,
+  createMemorySourceRef,
+  parseMemorySourceManifest,
+  type MemorySourceManifestSource,
+  type MemorySourceManifestState,
+} from './memory-source-manifest'
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
 const storyMemoryRefreshRuns = new Map<number, Promise<void>>()
+const storyMemoryRefreshQueued = new Map<number, { reason: string; trigger: string }>()
 const storyMemoryRefreshStatus = new Map<number, {
   status: 'idle' | 'queued' | 'running' | 'failed'
   queuedAt?: string
@@ -124,6 +132,12 @@ export interface StoryMemoryPromptScopeObservability {
   missingFamilyCount: number
   cardCoverageRate: number
   usesTextFallback: boolean
+  manifestState: MemorySourceManifestState
+  verifiedSource: boolean
+  usableAsFactPack: boolean
+  locked: boolean
+  stale: boolean
+  requiredGaps: string[]
 }
 
 export interface StoryMemoryPromptObservability {
@@ -141,6 +155,11 @@ export interface StoryMemoryPromptPackage {
   summary: string
   observability: StoryMemoryPromptObservability
 }
+
+type StoryMemoryCheckpointSourceObservability = Pick<
+  StoryMemoryPromptScopeObservability,
+  'manifestState' | 'verifiedSource' | 'usableAsFactPack' | 'locked' | 'stale' | 'requiredGaps'
+>
 
 export interface StoryMemoryCheckpointRefreshStatus {
   status: 'idle' | 'queued' | 'running' | 'failed'
@@ -491,6 +510,7 @@ interface StoryMemoryCheckpointCatalogEntry {
   scopeType: string
   scopeId: number | null
   locked: number
+  version: number
 }
 
 interface StoryMemoryCheckpointCatalog {
@@ -512,6 +532,7 @@ function createStoryMemoryCheckpointCatalog(
         scopeType: row.scopeType,
         scopeId: row.scopeId ?? null,
         locked: row.locked || 0,
+        version: row.version || 1,
       },
     ])),
   }
@@ -533,6 +554,7 @@ function upsertCheckpoint(
       ...payload,
       updatedAt: new Date().toISOString(),
     }).where(eq(storyMemoryCheckpoints.id, existing.id)).run()
+    if (typeof payload.version === 'number') existing.version = payload.version
     return existing.id
   }
 
@@ -548,6 +570,7 @@ function upsertCheckpoint(
     scopeType,
     scopeId,
     locked: 0,
+    version: typeof payload.version === 'number' ? payload.version : 1,
   })
   return id
 }
@@ -562,7 +585,9 @@ function checkpointsNeedRefresh(novelId: number): boolean {
   if (checkpoints.length === 0) return true
   const refreshableCheckpoints = checkpoints.filter((checkpoint) => checkpoint.locked !== 1)
   if (refreshableCheckpoints.some((checkpoint) =>
-    (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)) {
+    checkpoint.sourceContextVersion !== (novel.contextVersion || 1)
+    || checkpoint.stale === 1
+    || parseMemorySourceManifest(checkpoint.sourceManifestJson, novel.contextVersion || 1).state !== 'verified')) {
     return true
   }
   if (refreshableCheckpoints.some((checkpoint) =>
@@ -605,7 +630,32 @@ function checkpointsNeedRefresh(novelId: number): boolean {
   return false
 }
 
-function rebuildStoryMemoryCheckpoints(novelId: number) {
+function buildCheckpointSourceObservability(
+  checkpoint: StoryMemoryCheckpointRow,
+  currentContextVersion: number,
+  activeCompiler: boolean,
+): StoryMemoryCheckpointSourceObservability {
+  const manifest = parseMemorySourceManifest(checkpoint.sourceManifestJson, currentContextVersion)
+  const verifiedSource = manifest.state === 'verified'
+    && checkpoint.sourceContextVersion === currentContextVersion
+    && checkpoint.stale !== 1
+  const manifestState = checkpoint.stale === 1 && manifest.state === 'verified'
+    ? 'stale'
+    : manifest.state
+  const requiredGaps = verifiedSource
+    ? []
+    : manifest.requiredGaps.length > 0 ? manifest.requiredGaps : ['checkpoint_source_not_current']
+  return {
+    manifestState,
+    verifiedSource,
+    usableAsFactPack: !activeCompiler || verifiedSource,
+    locked: checkpoint.locked === 1,
+    stale: checkpoint.stale === 1,
+    requiredGaps,
+  }
+}
+
+function rebuildStoryMemoryCheckpoints(novelId: number, expectedSourceContextVersion?: number) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
@@ -649,7 +699,10 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
     .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
     .all()
 
-  const baseVersion = novel.contextVersion || 1
+  const sourceContextVersion = novel.contextVersion || 1
+  if (typeof expectedSourceContextVersion === 'number' && sourceContextVersion !== expectedSourceContextVersion) {
+    throw new Error(`STORY_MEMORY_REFRESH_SUPERSEDED: expected=${expectedSourceContextVersion} current=${sourceContextVersion}`)
+  }
   const forbiddenDirectionsJson = stringifyStringArray(buildForbiddenDirections())
   const styleGuard = buildStyleGuard()
   const characterNameMap = new Map(characterRows.map((character) => [character.id, character.fullName]))
@@ -752,6 +805,34 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
       extraThreadNames: activeThreads,
       limit: 12,
     })
+    const manifestSources: MemorySourceManifestSource[] = [
+      createMemorySourceRef('novel', novel.id, { title: novel.title }, novel.updatedAt || sourceContextVersion),
+      ...rows.map((row) => createMemorySourceRef('chapter', row.id, {
+        chapterNum: row.chapterNum,
+        title: row.title,
+        status: row.status,
+        summary: row.summary,
+        continuityStateJson: row.continuityStateJson,
+      })),
+      ...characterRows.map((row) => createMemorySourceRef('character', row.id, row, row.updatedAt)),
+      ...relationRows.map((row) => createMemorySourceRef('character_relation', row.id, row)),
+      ...itemRows.map((row) => createMemorySourceRef('story_item', row.id, row, row.updatedAt)),
+      ...threadRows.map((row) => createMemorySourceRef('story_thread', row.id, row, row.updatedAt)),
+      ...events.map((row) => createMemorySourceRef('timeline_event', row.id, row, row.updatedAt)),
+      ...arcRows.map((row) => createMemorySourceRef('story_arc', row.id, row)),
+      ...mapRows.map((row) => createMemorySourceRef('world_map', row.id, row)),
+    ]
+    const scopeRecord = scopeType === 'volume'
+      ? volumeRows.find((row) => row.id === scopeId)
+      : scopeType === 'part' ? partRows.find((row) => row.id === scopeId) : null
+    if (scopeRecord) {
+      manifestSources.push(createMemorySourceRef(scopeType, scopeRecord.id, scopeRecord, scopeRecord.updatedAt))
+    }
+    const sourceManifest = createMemorySourceManifest({
+      contextVersion: sourceContextVersion,
+      sources: manifestSources,
+      range: { startChapterNum: start, endChapterNum: end },
+    })
 
     return upsertCheckpoint(novelId, scopeType, scopeId, {
       label,
@@ -772,7 +853,9 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
       sourceRangeStart: start || null,
       sourceRangeEnd: end || null,
       lastRefreshedChapterNum: end || 0,
-      version: baseVersion,
+      version: (existing?.version || 0) + 1,
+      sourceContextVersion,
+      sourceManifestJson: JSON.stringify(sourceManifest),
       stale: 0,
     }, checkpointCatalog)
   }
@@ -809,6 +892,14 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
     upsertScope('part', part.id, part.title?.trim() || `第${part.partNumber}部`, rows, { partId: part.id })
   }
 
+  const currentContextVersion = db.select({ contextVersion: novels.contextVersion })
+    .from(novels)
+    .where(eq(novels.id, novelId))
+    .all()[0]?.contextVersion || 1
+  if (currentContextVersion !== sourceContextVersion) {
+    throw new Error(`STORY_MEMORY_REFRESH_SUPERSEDED: expected=${sourceContextVersion} current=${currentContextVersion}`)
+  }
+
   return db.select().from(storyMemoryCheckpoints)
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .orderBy(asc(storyMemoryCheckpoints.scopeType), asc(storyMemoryCheckpoints.scopeId), asc(storyMemoryCheckpoints.id))
@@ -817,8 +908,12 @@ function rebuildStoryMemoryCheckpoints(novelId: number) {
 
 export function refreshStoryMemoryCheckpoints(novelId: number) {
   ensureStoryStructure(novelId)
+  const expectedSourceContextVersion = getDb().select({ contextVersion: novels.contextVersion })
+    .from(novels)
+    .where(eq(novels.id, novelId))
+    .all()[0]?.contextVersion || 1
   const sqlite = getSqlite()
-  const transaction = sqlite.transaction(() => rebuildStoryMemoryCheckpoints(novelId))
+  const transaction = sqlite.transaction(() => rebuildStoryMemoryCheckpoints(novelId, expectedSourceContextVersion))
   return sqlite.inTransaction || typeof transaction.immediate !== 'function'
     ? transaction()
     : transaction.immediate()
@@ -842,6 +937,7 @@ function setStoryMemoryRefreshStatus(
 export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = 'checkpoint stale', trigger = 'background_precompute') {
   const now = new Date().toISOString()
   if (storyMemoryRefreshRuns.has(novelId)) {
+    storyMemoryRefreshQueued.set(novelId, { reason, trigger })
     setStoryMemoryRefreshStatus(novelId, {
       status: 'queued',
       queuedAt: now,
@@ -887,13 +983,20 @@ export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = '
       console.warn('[story-memory] failed to refresh checkpoints in background', error)
     } finally {
       storyMemoryRefreshRuns.delete(novelId)
+      const queued = storyMemoryRefreshQueued.get(novelId)
+      if (queued) {
+        storyMemoryRefreshQueued.delete(novelId)
+        scheduleStoryMemoryCheckpointRefresh(novelId, queued.reason, queued.trigger)
+      }
     }
   })()
   storyMemoryRefreshRuns.set(novelId, run)
 }
 
 export async function waitForScheduledStoryMemoryRefreshes(): Promise<void> {
-  await Promise.allSettled([...storyMemoryRefreshRuns.values()])
+  while (storyMemoryRefreshRuns.size > 0) {
+    await Promise.allSettled([...storyMemoryRefreshRuns.values()])
+  }
 }
 
 export function refreshStoryMemoryCheckpointsIfNeeded(
@@ -1036,22 +1139,29 @@ export function buildStoryMemorySnapshot(
 
 export function buildStoryMemoryPromptSummary(
   novelId: number,
-  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only' } = {},
+  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only'; readOnly?: boolean } = {},
 ): string {
   return buildStoryMemoryPromptPackage(novelId, options).summary
 }
 
 export function buildStoryMemoryPromptPackage(
   novelId: number,
-  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only' } = {},
+  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only'; readOnly?: boolean } = {},
 ): StoryMemoryPromptPackage {
   const refreshMode = options.refreshMode || 'sync'
-  refreshStoryMemoryCheckpointsIfNeeded(novelId, {
-    refreshMode,
-    reason: 'checkpoint stale during story memory prompt build',
-    trigger: 'story_memory_prompt',
-  })
+  if (!options.readOnly) {
+    refreshStoryMemoryCheckpointsIfNeeded(novelId, {
+      refreshMode,
+      reason: 'checkpoint stale during story memory prompt build',
+      trigger: 'story_memory_prompt',
+    })
+  }
   const db = getDb()
+  const currentContextVersion = db.select({ contextVersion: novels.contextVersion })
+    .from(novels)
+    .where(eq(novels.id, novelId))
+    .all()[0]?.contextVersion || 1
+  const activeCompiler = process.env.NOVELFORGE_CONTEXT_COMPILER_MODE?.trim().toLowerCase() === 'active'
   const chapter = options.chapterId
     ? db.select().from(chapters).where(eq(chapters.id, options.chapterId)).all()[0]
     : null
@@ -1070,6 +1180,11 @@ export function buildStoryMemoryPromptPackage(
   const sections = [partCheckpoint, volumeCheckpoint, novelCheckpoint]
     .filter((checkpoint): checkpoint is StoryMemoryCheckpointRow => Boolean(checkpoint))
     .map((checkpoint) => {
+      const sourceObservability = buildCheckpointSourceObservability(
+        checkpoint,
+        currentContextVersion,
+        activeCompiler,
+      )
       const activeThreads = parseCardStringArray(checkpoint.activeThreadsJson)
       const resolvedThreads = parseCardStringArray(checkpoint.resolvedThreadsJson)
       const characterCardsText = renderCharacterCards(parseCharacterCards(checkpoint.characterCardsJson))
@@ -1105,7 +1220,9 @@ export function buildStoryMemoryPromptPackage(
         missingFamilyCount,
         cardCoverageRate: toPercent(structuredFamilyCount, 5),
         usesTextFallback: fallbackFamilyCount > 0,
+        ...sourceObservability,
       })
+      if (!sourceObservability.usableAsFactPack) return ''
       return [
         checkpoint.label ? `[${checkpoint.label}]` : '',
         checkpoint.summary ? `摘要：${checkpoint.summary}` : '',
@@ -1134,19 +1251,25 @@ export function buildStoryMemoryPromptPackage(
       missingFamilyCount: 5,
       cardCoverageRate: 0,
       usesTextFallback: false,
+      manifestState: 'legacy',
+      verifiedSource: false,
+      usableAsFactPack: false,
+      locked: false,
+      stale: true,
+      requiredGaps: ['checkpoint_scope_missing'],
     })
   }
   const structuredFamilyTotal = scopeObservability.reduce((sum, item) => sum + item.structuredFamilyCount, 0)
   const observability: StoryMemoryPromptObservability = {
     promptSummaryMode: 'structured_first',
-    activeScopeLabels: scopeObservability.filter((item) => item.hasCheckpoint).map((item) => item.label),
-    scopeCoverageRate: toPercent(scopeObservability.filter((item) => item.hasCheckpoint).length, scopeObservability.length || 1),
+    activeScopeLabels: scopeObservability.filter((item) => item.usableAsFactPack).map((item) => item.label),
+    scopeCoverageRate: toPercent(scopeObservability.filter((item) => item.usableAsFactPack).length, scopeObservability.length || 1),
     cardCoverageRate: toPercent(structuredFamilyTotal, Math.max(scopeObservability.length * 5, 1)),
     structuredScopeCount: scopeObservability.filter((item) => item.structuredFamilyCount > 0).length,
     fallbackScopeCount: scopeObservability.filter((item) => item.usesTextFallback).length,
     buckets: scopeObservability,
     summary: scopeObservability.length > 0
-      ? `结构化 checkpoint 命中 ${scopeObservability.filter((item) => item.hasCheckpoint).length}/${scopeObservability.length} 个 scope，卡片覆盖 ${toPercent(structuredFamilyTotal, Math.max(scopeObservability.length * 5, 1))}%，文本 fallback ${scopeObservability.filter((item) => item.usesTextFallback).length} 个 scope。`
+      ? `可验证 checkpoint 命中 ${scopeObservability.filter((item) => item.usableAsFactPack).length}/${scopeObservability.length} 个 scope，卡片覆盖 ${toPercent(structuredFamilyTotal, Math.max(scopeObservability.length * 5, 1))}%，文本 fallback ${scopeObservability.filter((item) => item.usesTextFallback).length} 个 scope。`
       : '当前还没有可用的结构化 checkpoint 观测数据。',
   }
 

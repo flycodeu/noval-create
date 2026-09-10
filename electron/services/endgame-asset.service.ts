@@ -214,9 +214,12 @@ function resolveVolumeIdByChapter(chapterNum: number | undefined, ranges: Volume
   return ranges.find((range) => chapterNum >= range.chapterStart && chapterNum <= range.chapterEnd)?.volumeId
 }
 
-function buildCommitmentReferenceSummary(novelId: number): Map<number, CommitmentReferenceSummary> {
+function buildCommitmentReferenceSummary(
+  novelId: number,
+  options: { readOnly?: boolean } = {},
+): Map<number, CommitmentReferenceSummary> {
   const db = getDb()
-  ensureStoryStructure(novelId)
+  if (!options.readOnly) ensureStoryStructure(novelId)
 
   const chapterRows = db.select({
     id: chapters.id,
@@ -395,9 +398,11 @@ function refreshCommitmentDerivedState(novelId: number) {
   })
 }
 
-export function listEndgameCommitments(novelId: number) {
-  ensureStoryStructure(novelId)
-  refreshCommitmentDerivedState(novelId)
+export function listEndgameCommitments(novelId: number, options: { readOnly?: boolean } = {}) {
+  if (!options.readOnly) {
+    ensureStoryStructure(novelId)
+    refreshCommitmentDerivedState(novelId)
+  }
   const db = getDb()
   const novel = findNovelById(novelId)
   const rows = db.select().from(endgameCommitments)
@@ -408,7 +413,7 @@ export function listEndgameCommitments(novelId: number) {
   const progressPercent = novel.targetWords && novel.targetWords > 0
     ? Math.round(((novel.totalWords || 0) / novel.targetWords) * 100)
     : 0
-  const referenceSummary = buildCommitmentReferenceSummary(novelId)
+  const referenceSummary = buildCommitmentReferenceSummary(novelId, options)
   return rows.map((row) => buildEndgameCommitmentView(row, referenceSummary.get(row.id), currentChapterNum, progressPercent))
 }
 
@@ -623,8 +628,8 @@ function enrichForeshadowLedgerRows(
   }))
 }
 
-export function listForeshadowLedger(novelId: number) {
-  ensureStoryStructure(novelId)
+export function listForeshadowLedger(novelId: number, options: { readOnly?: boolean } = {}) {
+  if (!options.readOnly) ensureStoryStructure(novelId)
   const rows = getDb().select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, novelId))
     .orderBy(asc(foreshadowLedger.targetPayoffChapter), asc(foreshadowLedger.id))
@@ -1603,13 +1608,13 @@ export function getChapterContractContext(chapterId: number) {
   }
 }
 
-export function getEndgameDebtSnapshot(novelId: number) {
+export function getEndgameDebtSnapshot(novelId: number, options: { readOnly?: boolean } = {}) {
   const novel = findNovelById(novelId)
   const currentChapterNum = getCurrentChapterNum(novelId)
   const progressPercent = novel.targetWords && novel.targetWords > 0
     ? Math.round(((novel.totalWords || 0) / novel.targetWords) * 100)
     : 0
-  const commitments = listEndgameCommitments(novelId)
+  const commitments = listEndgameCommitments(novelId, options)
   const volumeRanges = getVolumeRanges(novelId)
   const countsByVolume = new Map<number, {
     pending: number
