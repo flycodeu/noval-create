@@ -61,13 +61,13 @@ function buildThresholds(options) {
 }
 
 function buildDryRunReport(options) {
-  const chapterService = readText('electron/services/chapter.service.ts')
+  const chapterGeneration = readText('electron/services/chapter-generation.usecase.ts')
   const chapterPipelineFinalize = readText('electron/services/chapter-pipeline-finalize.ts')
   const chapterPipelineState = readText('electron/services/chapter-pipeline-state.ts')
   const batchWorkflow = readText('electron/services/batch-workflow.service.ts')
   const contextService = readText('electron/services/context.service.ts')
   const contextEntityMentions = readText('electron/services/context-entity-mentions.ts')
-  const promptLibrary = readText('src/shared/prompt-library.ts')
+  const reviewPrompts = readText('src/shared/prompts/review-prompts.ts')
   const thresholds = buildThresholds(options)
   const checks = []
 
@@ -85,17 +85,17 @@ function buildDryRunReport(options) {
       )
     })
     assertIncludes(chapterPipelineState, 'createInitialChapterPipelineSnapshot', 'chapter pipeline state')
-    assertIncludes(chapterService, 'createInitialChapterPipelineSnapshot', 'chapter pipeline integration')
+    assertIncludes(chapterGeneration, 'createInitialChapterPipelineSnapshot', 'chapter pipeline integration')
   })
 
   check('chapter pipeline persists draft, gate, canon and finalize stages', () => {
     assertMatches(
-      chapterService,
+      chapterGeneration,
       /runChapterPublishCheck\(chapterId(?:,|\))/u,
       'chapter pipeline publish gate',
     )
     assertIncludes(chapterPipelineFinalize, 'prepareChapterWritebackRunWithRetry', 'canonizer')
-    assertIncludes(chapterService, 'finalizeGeneratedChapterContent', 'finalize')
+    assertIncludes(chapterGeneration, 'finalizeGeneratedChapterContent', 'finalize')
     assertIncludes(chapterPipelineFinalize, 'generateChapterEmbeddings', 'embedding refresh')
   })
 
@@ -119,9 +119,9 @@ function buildDryRunReport(options) {
   })
 
   check('longform prompts carry review and continuity schemas', () => {
-    assertIncludes(promptLibrary, 'context_drift_risks', 'review schema')
-    assertIncludes(promptLibrary, 'realism_risks', 'review schema')
-    assertIncludes(promptLibrary, 'continuity', 'continuity prompt')
+    assertIncludes(reviewPrompts, 'context_drift_risks', 'review schema')
+    assertIncludes(reviewPrompts, 'realism_risks', 'review schema')
+    assertIncludes(reviewPrompts, 'continuity', 'continuity prompt')
   })
 
   return {

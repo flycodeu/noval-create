@@ -283,7 +283,7 @@
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-panel + .novel-panel {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-panel--scrollable {
@@ -491,21 +491,7 @@
 .novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__head-copy {
   display: flex;
   align-items: center;
-  gap: 9px;
   min-width: 0;
-}
-
-.novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__eyebrow {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 3px 7px;
-  border: 1px solid var(--workspace-rule-soft);
-  border-radius: 999px;
-  color: var(--workspace-accent);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  line-height: 1.2;
-  white-space: nowrap;
 }
 
 .novel-workspace[data-workspace-surface="quiet"] .novel-step-guide__head-copy strong {

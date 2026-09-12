@@ -35,4 +35,24 @@ describe('persistWritingChapter', () => {
     expect(refreshPublishCheck).not.toHaveBeenCalled()
     expect(updateStore).toHaveBeenCalledWith(8, 'background', 1)
   })
+
+  it('canonicalizes contenteditable blank lines before remote persistence', async () => {
+    const updateRemote = vi.fn(async () => undefined)
+    const updateStore = vi.fn()
+    const expected = '第一段\n\n第二段'
+
+    await persistWritingChapter({
+      chapterId: 9,
+      text: '第一段\n\n\n第二段',
+      versionSource: 'manual-save',
+      isCurrentChapter: () => true,
+      updateRemote,
+      refreshContextStatus: vi.fn(async () => undefined),
+      refreshPublishCheck: vi.fn(async () => undefined),
+      updateStore,
+    })
+
+    expect(updateRemote).toHaveBeenCalledWith(9, expected, 6, 'manual-save')
+    expect(updateStore).toHaveBeenCalledWith(9, expected, 6)
+  })
 })

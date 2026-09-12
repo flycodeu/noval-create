@@ -1,5 +1,5 @@
 import { Button, Dropdown, Tag } from 'antd'
-import { ArrowLeftOutlined, BookOutlined, DownOutlined } from '@ant-design/icons'
+import { BookOutlined, DownOutlined } from '@ant-design/icons'
 import type { Chapter } from '../../../../types'
 import { formatChapterNumber } from '../chapter-labels'
 import type { WritingSaveState } from '../useWritingEditorLifecycle'
@@ -8,14 +8,12 @@ import type { WritingRouteKey } from './InsightPanel'
 export interface WritingStatusBarProps {
   currentChapter: Chapter | null
   editorTitle: string
-  primaryStatusText: string
   wordCount: number
   writability: { score: number; label: string }
   versionCount: number
   currentStatusLabel: string
   saveState: WritingSaveState
   insightPanelOpen: boolean
-  onExitWriting(): void
   onOpenNavigator?(): void
   onToggleInspector(): void
   onNavigate(route: WritingRouteKey): void
@@ -33,11 +31,9 @@ export default function WritingStatusBar({
   currentStatusLabel,
   editorTitle,
   insightPanelOpen,
-  onExitWriting,
   onOpenNavigator,
   onNavigate,
   onToggleInspector,
-  primaryStatusText,
   saveState,
   versionCount,
   wordCount,
@@ -51,13 +47,6 @@ export default function WritingStatusBar({
   return (
     <section className="chapter-console-page__editor-hero" data-writing-status-bar="compact">
       <div className="chapter-console-page__editor-identity">
-        <Button
-          className="chapter-console-page__exit-writing"
-          icon={<ArrowLeftOutlined />}
-          onClick={onExitWriting}
-        >
-          返回控制台
-        </Button>
         {onOpenNavigator ? (
           <Button className="chapter-console-page__navigator-trigger" icon={<BookOutlined />} onClick={onOpenNavigator}>
             章节
@@ -69,7 +58,6 @@ export default function WritingStatusBar({
         </div>
       </div>
       <div className="chapter-console-page__editor-state">
-        {primaryStatusText ? <span className="chapter-console-page__primary-status">{primaryStatusText}</span> : null}
         <span className={`chapter-console-page__save-state ${saveMeta.tone}`} data-writing-save-state={saveState}>
           {saveMeta.label}
         </span>

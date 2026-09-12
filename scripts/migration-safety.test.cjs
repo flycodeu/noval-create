@@ -529,6 +529,7 @@ function testFreshDbIsIdempotent() {
       '0064_semantic_memory_source_range_repair',
       '0065_model_request_attempts',
       '0066_checkpoint_source_manifest',
+      '0067_agent_artifact_kind_contract',
     ])
 
     runMigrations(db)
@@ -674,6 +675,7 @@ function testPartialSchemaCanResume() {
       '0064_semantic_memory_source_range_repair',
       '0065_model_request_attempts',
       '0066_checkpoint_source_manifest',
+      '0067_agent_artifact_kind_contract',
     ])
 
     const configs = db.prepare(`
@@ -970,6 +972,101 @@ function testCheckpointSourceManifestMigrationRollbackAndRecovery() {
   }
 }
 
+function testLegacyArtifactKindConstraintMigration() {
+  const control = openDb('legacy-artifact-kind-control.db')
+  let priorMigrationIds
+  try {
+    runMigrations(control)
+    priorMigrationIds = getMigrationIds(control).filter((id) => id !== '0067_agent_artifact_kind_contract')
+  } finally {
+    control.close()
+  }
+
+  const db = openDb('legacy-artifact-kind.db')
+  try {
+    db.exec(`
+      CREATE TABLE _schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE novels (id INTEGER PRIMARY KEY, title TEXT NOT NULL);
+      CREATE TABLE model_configs (id INTEGER PRIMARY KEY);
+      CREATE TABLE tasks (id INTEGER PRIMARY KEY);
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('chat', 'stream', 'embedding', 'auth', 'cli')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'reviewed', 'approved', 'committed', 'rejected', 'superseded')),
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+        parent_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        content_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        context_version INTEGER NOT NULL,
+        producer_type TEXT NOT NULL,
+        producer_id TEXT NOT NULL,
+        producer_client TEXT NOT NULL,
+        model_config_id INTEGER REFERENCES model_configs(id) ON DELETE SET NULL,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        review_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        committed_entity_ids_json TEXT NOT NULL DEFAULT '[]',
+        idempotency_key TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE canon_commits (
+        id INTEGER PRIMARY KEY,
+        source_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_artifacts_novel_kind_created
+        ON artifacts(novel_id, kind, created_at DESC, id DESC);
+      CREATE INDEX idx_artifacts_parent
+        ON artifacts(parent_artifact_id, version DESC);
+      CREATE UNIQUE INDEX idx_artifacts_idempotency
+        ON artifacts(novel_id, kind, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE TRIGGER trg_artifact_content_immutable
+      BEFORE UPDATE OF novel_id, kind, version, parent_artifact_id, content_json, content_hash, context_version,
+        producer_type, producer_id, producer_client, model_config_id, task_id, idempotency_key
+      ON artifacts
+      BEGIN
+        SELECT RAISE(ABORT, 'ARTIFACT_CONTENT_IMMUTABLE');
+      END;
+      INSERT INTO novels (id, title) VALUES (1, 'legacy artifact kind')
+    `)
+    db.prepare(`
+      INSERT INTO artifacts (
+        id, novel_id, kind, status, version, content_json, content_hash,
+        context_version, producer_type, producer_id, producer_client,
+        committed_entity_ids_json, idempotency_key
+      ) VALUES ('art-1', 1, 'chat', 'draft', 1, '{}', 'sha256:legacy', 1, 'system', 'legacy', 'test', '[]', 'legacy-1')
+    `).run()
+    db.prepare('INSERT INTO canon_commits (id, source_artifact_id) VALUES (1, \'art-1\')').run()
+    const insertMigration = db.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)')
+    priorMigrationIds.forEach((id) => insertMigration.run(id, new Date().toISOString()))
+
+    runMigrations(db)
+
+    assert.equal(db.prepare('SELECT kind FROM artifacts WHERE id = \'art-1\'').get().kind, 'chat')
+    assert.equal(db.prepare('SELECT source_artifact_id FROM canon_commits WHERE id = 1').get().source_artifact_id, 'art-1')
+    db.prepare(`
+      INSERT INTO artifacts (
+        id, novel_id, kind, status, version, content_json, content_hash,
+        context_version, producer_type, producer_id, producer_client,
+        committed_entity_ids_json, idempotency_key
+      ) VALUES ('art-2', 1, 'character_draft', 'draft', 1, '{}', 'sha256:agent', 1, 'system', 'agent', 'test', '[]', 'agent-1')
+    `).run()
+    assert.ok(db.prepare('PRAGMA index_list(artifacts)').all().some((row) => row.name === 'idx_artifacts_idempotency'))
+    assert.ok(db.prepare(`
+      SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_artifact_content_immutable'
+    `).get())
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM _schema_migrations WHERE id = ?').get('0067_agent_artifact_kind_contract').count, 1)
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM _schema_migrations WHERE id = ?').get('0067_agent_artifact_kind_contract').count, 1)
+  } finally {
+    db.close()
+  }
+}
+
 function testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns() {
   const db = openDb('legacy-semantic-memory-range-repair.db')
   try {
@@ -1090,6 +1187,7 @@ function runAllTests() {
   testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()
   testAppliedSemanticMemoryMigrationRepairsMissingSourceRangeColumns()
   testCheckpointSourceManifestMigrationRollbackAndRecovery()
+  testLegacyArtifactKindConstraintMigration()
   testRecommendationGovernanceTriggers()
   console.log('migration-safety tests passed')
 }

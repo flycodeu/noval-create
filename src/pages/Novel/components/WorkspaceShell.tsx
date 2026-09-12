@@ -259,7 +259,6 @@ export function WorkspaceStepGuide({
     <details className="novel-step-guide">
       <summary className="novel-step-guide__head">
         <div className="novel-step-guide__head-copy">
-          <span className="novel-step-guide__eyebrow">流程提示</span>
           <strong>{title}</strong>
         </div>
         <span className="novel-step-guide__progress">{`${completedCount}/${steps.length}`}</span>

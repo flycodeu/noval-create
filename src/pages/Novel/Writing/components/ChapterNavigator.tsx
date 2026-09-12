@@ -462,12 +462,13 @@ export default function ChapterNavigator({
         <Select
           size="small"
           className="writing-layout-select-generation"
+          aria-label="本章生成模式"
           value={executionModeOverride}
           options={[
-            { value: 'follow_default', label: `跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）` },
+            { value: 'follow_default', label: `本章：跟随全局（${getAiExecutionModeLabel(defaultAiExecutionMode)}）` },
             ...AI_EXECUTION_MODE_OPTIONS.map((item) => ({
               value: item.value,
-              label: `覆盖·${item.label}`,
+              label: `本章：${item.label}`,
             })),
           ]}
           onChange={(value) => onExecutionModeChange(value)}

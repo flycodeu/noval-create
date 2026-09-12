@@ -11,6 +11,11 @@ describe('chapter editor controller', () => {
     expect(countChapterWords('第一章 hello world')).toBe(5)
   })
 
+  it('normalizes the extra blank-block separator emitted by contenteditable', () => {
+    expect(normalizeEditorText('第一段\n\n\n第二段')).toBe('第一段\n\n第二段')
+    expect(normalizeEditorText('第一段\r\n\r\n\r\n第二段')).toBe('第一段\n\n第二段')
+  })
+
   it('keeps undo and redo transitions isolated after a chapter reset', () => {
     const history = createChapterEditorHistory()
     history.reset('chapter one', 100)

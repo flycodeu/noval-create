@@ -1,4 +1,4 @@
-import { countChapterWords } from './useChapterEditor'
+import { countChapterWords, normalizeEditorText } from './useChapterEditor'
 
 export type WritingChapterVersionSource = 'manual-save' | 'ai-rewrite'
 
@@ -15,9 +15,10 @@ interface PersistWritingChapterInput {
 
 export async function persistWritingChapter(input: PersistWritingChapterInput): Promise<void> {
   const { chapterId, isCurrentChapter, refreshContextStatus, refreshPublishCheck, text, updateRemote, updateStore, versionSource } = input
-  const wordCount = countChapterWords(text)
-  await updateRemote(chapterId, text, wordCount, versionSource)
+  const normalizedText = normalizeEditorText(text)
+  const wordCount = countChapterWords(normalizedText)
+  await updateRemote(chapterId, normalizedText, wordCount, versionSource)
   await refreshContextStatus()
   if (isCurrentChapter(chapterId)) await refreshPublishCheck(chapterId)
-  updateStore(chapterId, text, wordCount)
+  updateStore(chapterId, normalizedText, wordCount)
 }

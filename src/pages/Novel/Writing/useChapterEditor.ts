@@ -12,7 +12,11 @@ export const countChapterWords = (text: string) => (
 )
 
 export function normalizeEditorText(value?: string | null): string {
-  return (value || '').replace(/\r\n/g, '\n')
+  // Chromium exposes one extra line separator for a blank contenteditable block.
+  // Keep the editor's plain-text contract at one blank line between paragraphs.
+  return (value || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
 }
 
 function writePlainEditorText(element: HTMLElement | null, value?: string | null) {

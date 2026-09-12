@@ -104,6 +104,14 @@ function buildBatchModule(task, overrides = {}) {
       },
     },
     './character.service': { generateCharacterBatchChunk: async () => ({ ids: [], warning: '', batchDigest: '', majorGenerated: 0, minorGenerated: 0, antagonistGenerated: 0, supportingGenerated: 0 }) },
+    './chapter.service': {
+      aiCheckChapter: async () => null,
+      generateChapterContent: async () => null,
+      getChapter: () => null,
+    },
+    './context-impact.service': {
+      runChapterPublishCheck: async () => null,
+    },
     './faction.service': { generateFactionBatchChunk: async () => ({ ids: [], warning: '', batchDigest: '' }) },
     './item.service': { generateStoryItemsBatchChunk: async () => ({ ids: [], warning: '', batchDigest: '' }) },
     './story-thread.service': { generateStoryThreadBatchChunk: async () => ({ ids: [], warnings: [], batchDigest: '' }) },

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChapterWritabilitySummary } from '../../../shared/novel-workspace'
 import {
-  buildChapterHeaderViewModel,
   buildEditorHeaderViewModel,
   buildGenerationPreflight,
 } from './writing-chapter-presentation'
@@ -17,35 +16,20 @@ const writability: ChapterWritabilitySummary = {
 }
 
 describe('writing chapter presentation', () => {
-  it('builds chapter hero and editor copy from one status source', () => {
+  it('builds the editor title and status from the selected chapter', () => {
     const chapter = {
       id: 7,
       chapterNum: 3,
       title: '',
       status: 'draft',
       segmentCount: 2,
-    } as Parameters<typeof buildChapterHeaderViewModel>[0]['chapter']
+    } as Parameters<typeof buildEditorHeaderViewModel>[0]['chapter']
 
-    expect(buildChapterHeaderViewModel({
-      chapter,
-      volumeName: '第一卷',
-      wordCount: 1800,
-      versionCount: 2,
-      writability,
-    })).toMatchObject({
-      title: '第3章 · 未命名章节',
-      description: '当前卷：第一卷 · 状态：草稿 · 1800 字',
-      statusLabel: '草稿',
-    })
     expect(buildEditorHeaderViewModel({
       chapter,
-      generating: false,
-      refreshing: false,
-      hasMultiSegments: true,
-    })).toMatchObject({
-      title: '第3章',
-      subtitle: expect.stringContaining('已拆成 2 个场景'),
-      primaryStatusText: '自动保存开启 · 草稿',
+    })).toEqual({
+      title: '未命名章节',
+      statusLabel: '草稿',
     })
   })
 

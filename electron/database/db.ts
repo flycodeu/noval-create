@@ -2087,7 +2087,7 @@ export function runMigrations(sqlite: Database.Database) {
       CREATE TABLE IF NOT EXISTS artifacts (
         id TEXT PRIMARY KEY,
         novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL CHECK (kind IN ('chat', 'stream', 'embedding', 'auth', 'cli')),
+        kind TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'reviewed', 'approved', 'committed', 'rejected', 'superseded')),
         version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
         parent_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
@@ -3050,6 +3050,120 @@ export function runMigrations(sqlite: Database.Database) {
       ensureColumn(sqlite, 'story_memory_checkpoints', 'source_manifest_json', 'TEXT')
     }
   })
+
+  runMigrationStep(sqlite, '0067_agent_artifact_kind_contract', () => {
+    repairLegacyArtifactKindConstraint(sqlite)
+  })
+}
+
+function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {
+  const table = sqlite.prepare(`
+    SELECT sql
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'artifacts'
+  `).get() as { sql?: string } | undefined
+  if (!table?.sql || !/kind\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*kind\s+IN\s*\(\s*'chat'/u.test(table.sql)) return
+
+  const externalReferences = sqlite.prepare(`
+    SELECT name, sql
+    FROM sqlite_master
+    WHERE type = 'table' AND sql IS NOT NULL
+  `).all() as Array<{ name: string; sql: string }>
+  const unsupportedReferences = externalReferences
+    .filter((entry) => entry.name !== 'artifacts')
+    .filter((entry) => /references\s+["']?artifacts["']?\s*\(/iu.test(entry.sql))
+    .filter((entry) => entry.name !== 'canon_commits')
+  if (unsupportedReferences.length > 0) {
+    throw new Error(`无法安全修复 artifacts.kind 约束，存在未覆盖的外部引用：${unsupportedReferences.map((entry) => entry.name).join(', ')}`)
+  }
+
+  sqlite.pragma('defer_foreign_keys = ON')
+  if (hasTable(sqlite, 'canon_commits')) {
+    sqlite.exec(`
+      CREATE TEMP TABLE artifact_source_refs_backup (
+        id INTEGER PRIMARY KEY,
+        source_artifact_id TEXT
+      );
+      INSERT INTO artifact_source_refs_backup (id, source_artifact_id)
+      SELECT id, source_artifact_id FROM canon_commits;
+    `)
+  }
+
+  sqlite.exec(`
+    DROP TRIGGER IF EXISTS trg_artifact_content_immutable;
+    DROP INDEX IF EXISTS idx_artifacts_novel_kind_created;
+    DROP INDEX IF EXISTS idx_artifacts_parent;
+    DROP INDEX IF EXISTS idx_artifacts_idempotency;
+
+    CREATE TABLE artifacts_new (
+      id TEXT PRIMARY KEY,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'reviewed', 'approved', 'committed', 'rejected', 'superseded')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+      parent_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+      content_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      context_version INTEGER NOT NULL,
+      producer_type TEXT NOT NULL,
+      producer_id TEXT NOT NULL,
+      producer_client TEXT NOT NULL,
+      model_config_id INTEGER REFERENCES model_configs(id) ON DELETE SET NULL,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+      review_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+      committed_entity_ids_json TEXT NOT NULL DEFAULT '[]',
+      idempotency_key TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO artifacts_new (
+      id, novel_id, kind, status, version, parent_artifact_id,
+      content_json, content_hash, context_version,
+      producer_type, producer_id, producer_client,
+      model_config_id, task_id, review_artifact_id,
+      committed_entity_ids_json, idempotency_key, created_at, updated_at
+    )
+    SELECT
+      id, novel_id, kind, status, version, parent_artifact_id,
+      content_json, content_hash, context_version,
+      producer_type, producer_id, producer_client,
+      model_config_id, task_id, review_artifact_id,
+      committed_entity_ids_json, idempotency_key, created_at, updated_at
+    FROM artifacts;
+
+    DROP TABLE artifacts;
+    ALTER TABLE artifacts_new RENAME TO artifacts;
+
+    CREATE INDEX idx_artifacts_novel_kind_created
+      ON artifacts(novel_id, kind, created_at DESC, id DESC);
+    CREATE INDEX idx_artifacts_parent
+      ON artifacts(parent_artifact_id, version DESC);
+    CREATE UNIQUE INDEX idx_artifacts_idempotency
+      ON artifacts(novel_id, kind, idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
+
+    CREATE TRIGGER trg_artifact_content_immutable
+    BEFORE UPDATE OF novel_id, kind, version, parent_artifact_id, content_json, content_hash, context_version,
+      producer_type, producer_id, producer_client, model_config_id, task_id, idempotency_key
+    ON artifacts
+    BEGIN
+      SELECT RAISE(ABORT, 'ARTIFACT_CONTENT_IMMUTABLE');
+    END;
+  `)
+
+  if (hasTable(sqlite, 'canon_commits')) {
+    sqlite.exec(`
+      UPDATE canon_commits
+      SET source_artifact_id = (
+        SELECT source_artifact_id
+        FROM artifact_source_refs_backup
+        WHERE artifact_source_refs_backup.id = canon_commits.id
+      )
+      WHERE id IN (SELECT id FROM artifact_source_refs_backup);
+      DROP TABLE artifact_source_refs_backup;
+    `)
+  }
 }
 
 function parseLegacyIdTokens(raw: unknown): Array<number | string> {

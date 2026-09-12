@@ -60,7 +60,8 @@ export default function WritingCommandBar({
           className="writing-layout-select-default"
           value={defaultAiExecutionMode}
           loading={savingAiMode}
-          options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({ value: item.value, label: `默认·${item.label}` }))}
+          aria-label="全局生成模式"
+          options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({ value: item.value, label: `全局：${item.label}` }))}
           onChange={onDefaultAiModeChange}
         />
         {selectedSnippetLength > 0 ? <span>{`已选 ${selectedSnippetLength} 字`}</span> : null}

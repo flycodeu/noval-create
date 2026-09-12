@@ -513,14 +513,6 @@
   gap: 8px;
 }
 
-.novel-writing-console-page .chapter-console-page__exit-writing {
-  flex: 0 0 auto;
-  min-height: 30px;
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-default));
-  color: var(--text-main);
-  white-space: nowrap;
-}
-
 .novel-writing-console-page .chapter-console-page__editor-title {
   display: grid;
   flex: 1 1 220px;
@@ -1369,6 +1361,7 @@
   gap: 8px;
   min-width: 0;
   min-height: 32px;
+  flex-wrap: wrap;
 }
 
 .novel-writing-console-page .chapter-console-page__editor-actions {
@@ -1387,4 +1380,72 @@
 .novel-writing-console-page .chapter-console-page__editor-status .ant-select,
 .novel-writing-console-page .chapter-console-page__editor-status .creative-stage-scope {
   min-width: 0;
+}
+
+.novel-writing-console-page .creative-stage-scope {
+  flex: 1 1 300px;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.novel-writing-console-page .creative-stage-scope__label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.novel-writing-console-page .creative-stage-scope__select {
+  flex-basis: 180px;
+}
+
+@media (max-width: 960px) {
+  .novel-writing-console-page .creative-stage-scope {
+    display: flex;
+    width: auto;
+    min-height: 32px;
+    padding: 0;
+  }
+
+  .novel-writing-console-page .creative-stage-scope__label {
+    flex: 0 0 auto;
+  }
+
+  .novel-writing-console-page .creative-stage-scope__select {
+    flex: 1 1 180px;
+    width: auto;
+  }
+
+  .novel-writing-console-page .creative-stage-scope .ant-tag {
+    max-width: min(180px, 30vw);
+  }
+}
+
+@media (max-width: 520px) {
+  .novel-writing-console-page .creative-stage-scope {
+    flex-wrap: wrap;
+  }
+
+  .novel-writing-console-page .creative-stage-scope__select {
+    flex-basis: 160px;
+  }
+
+  .novel-writing-console-page .creative-stage-scope .ant-tag {
+    max-width: calc(100% - 32px);
+  }
+}
+
+.novel-writing-console-page .chapter-console-page__editor-sheet-wrap.is-empty,
+.app-layout .novel-writing-console-page .chapter-console-page__editor-sheet-wrap.is-empty {
+  min-height: 0;
+}
+
+.novel-writing-console-page .novel-writing-shell__editor-sheet--empty,
+.app-layout .novel-writing-console-page .novel-writing-shell__editor-sheet--empty {
+  min-height: clamp(220px, 32dvh, 340px);
+}
+
+.novel-writing-console-page .novel-empty--writing {
+  min-height: clamp(220px, 32dvh, 340px);
 }

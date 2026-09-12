@@ -4,7 +4,6 @@ import { getErrorMessage } from '@/utils/user-facing-message'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
 import { type AiExecutionMode } from '../../../shared/ai-execution'
 import { parseStorySettingsSnapshot } from '../../../shared/story-settings'
-import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type {
   HardConstraintSourceLabel,
   ChapterPublishCheck,
@@ -21,7 +20,6 @@ import WritingModals from './components/WritingModals'
 import WritingWorkspaceLayout from './components/WritingWorkspaceLayout'
 import { useWritingInspectorComposition } from './useWritingInspectorComposition'
 import { useWritingPipelineItems } from './useWritingPipelineItems'
-import { useWritingChapterController } from './useWritingChapterController'
 import { useWritingChapterCrudController } from './useWritingChapterCrudController'
 import { useWritingCommandBindings } from './useWritingCommandBindings'
 import { useWritingContractSections } from './useWritingContractSections'
@@ -34,7 +32,7 @@ import {
 } from './useWritingRuntimePresentation'
 import { hasMultipleChapterSegments } from './writing-runtime-presentation'
 import { useWritingWorkspaceActionController } from './useWritingWorkspaceActionController'
-import { getWritebackPhaseLabel } from './writing-chapter-presentation'
+import { buildEditorHeaderViewModel, getWritebackPhaseLabel } from './writing-chapter-presentation'
 import { useWritingChapterReadiness } from './useWritingChapterReadiness'
 import { useWritingReviewState } from './useWritingReviewState'
 import { buildWritingViewComposition } from './writing-view-composition'
@@ -229,7 +227,6 @@ export default function Writing({ novelId }: Props) {
     aiResult,
   })
   const {
-    issues: chapterIssues,
     contractAudit: currentContractAudit,
     events: relatedEvents,
     productionBriefItems,
@@ -244,7 +241,6 @@ export default function Writing({ novelId }: Props) {
     chapterContextPreview,
   })
   const {
-    activePromptOverrideKeys,
     dueForeshadow: {
       items: dueForeshadowItems,
     },
@@ -477,25 +473,7 @@ export default function Writing({ novelId }: Props) {
     },
   })
 
-  const chapterController = useWritingChapterController({
-    chapter: currentChapter,
-    volumeName: currentVolumeTruthStats.volumeName,
-    wordCount,
-    versionCount: chapterVersions.length,
-    generating: currentChapterGenerating,
-    refreshing,
-    hasMultiSegments,
-    writability: chapterWritability,
-    publishCheck,
-    writebackStatus: currentWritebackStatus,
-    pipelineSnapshot: currentPipelineSnapshot,
-    activePromptOverrideKeys,
-    contractAudit: currentContractAudit,
-    aiResult,
-    reviewNotes,
-    chapterIssues,
-  })
-  const { editor: editorHeader } = chapterController
+  const editorHeader = buildEditorHeaderViewModel({ chapter: currentChapter })
 
   const contractSections = useWritingContractSections({
     chapter: currentChapter,
@@ -557,14 +535,12 @@ export default function Writing({ novelId }: Props) {
     statusBar: {
       currentChapter,
       editorTitle: editorHeader.title,
-      primaryStatusText: editorHeader.primaryStatusText,
       wordCount,
       writability: chapterWritability,
       versionCount: chapterVersions.length,
       currentStatusLabel: editorHeader.statusLabel,
       saveState,
       insightPanelOpen,
-      onExitWriting: () => navigate(buildWorkspaceRoute(novelId, 'studio')),
       setInsightPanelOpen,
       onNavigate: navigateToWritingRoute,
     },
@@ -600,16 +576,13 @@ export default function Writing({ novelId }: Props) {
       insightPanelOpen,
       activeRoute: activeWritingRoute,
       onNavigate: navigateToWritingRoute,
-      onExitWriting: () => navigate(buildWorkspaceRoute(novelId, 'studio')),
     },
-    chapter: chapterController,
     generation: chapterGeneration,
     runtime: editorRuntime,
     commandBindings,
     editor: {
       currentChapter,
       content,
-      wordCount,
       editorRef,
       actionError,
       segments: chapterSegments,

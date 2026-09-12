@@ -16,7 +16,6 @@ export interface WritingWorkspaceLayoutProps {
   currentChapter: Chapter | null
   pipelineItems: PipelineBarItem[]
   insightPanelOpen: boolean
-  onExitWriting(): void
   commandBindings: WritingCommandBindings
   editor: Omit<WritingEditorPaneProps, 'commandBar'>
   inspector: WritingInspectorProps
@@ -39,7 +38,6 @@ export default function WritingWorkspaceLayout({
   currentChapter,
   editor,
   insightPanelOpen,
-  onExitWriting,
   inspector,
   loading,
   pipelineItems,
@@ -80,7 +78,6 @@ export default function WritingWorkspaceLayout({
             <section className="chapter-console-page__column chapter-console-page__column--center">
               <WritingStatusBar
                 {...commandBindings.statusBar}
-                onExitWriting={onExitWriting}
                 onOpenNavigator={narrow ? () => setNavigatorOpen(true) : undefined}
               />
               <WritingEditorPane

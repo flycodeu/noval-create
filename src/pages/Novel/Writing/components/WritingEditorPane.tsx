@@ -2,17 +2,14 @@ import type { CompositionEvent, FormEvent, ReactNode, RefObject } from 'react'
 import { Alert, Button, Tag } from 'antd'
 import { ApartmentOutlined, BranchesOutlined } from '@ant-design/icons'
 import ActionErrorAlert from '../../../../components/common/ActionErrorAlert'
-import SectionHeader from '../../../../components/novel/common/SectionHeader'
 import type { Chapter, ChapterPublishCheck, ChapterSegment, WritebackSyncStatus } from '../../../../types'
 import type { WritingActionError } from '../useChapterGeneration'
 import { countChapterWords } from '../useChapterEditor'
 import StreamingOutput from './StreamingOutput'
 
 export interface WritingEditorPaneProps {
-  title: string
   currentChapter: Chapter | null
   content: string
-  wordCount: number
   editorRef: RefObject<HTMLDivElement>
   commandBar: ReactNode
   actionError: WritingActionError | null
@@ -79,12 +76,11 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
   const {
     actionError, advisory, commandBar, content, currentChapter, editorRef, generating, onCompile,
     onCompositionEnd, onCompositionStart, onDismissError, onInput, onOpenStructure, onSyncSelection, resumable, segments, streamTaskId,
-    title, wordCount,
   } = props
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
+  const hasChapterContent = content.trim().length > 0
   return (
     <section className="chapter-console-page__panel chapter-console-page__editor-card">
-      <SectionHeader title={title} extra={currentChapter ? <Tag color="default">{`字数 ${wordCount}`}</Tag> : null} />
       {commandBar}
       {actionError ? <ActionErrorAlert title={actionError.title} message={actionError.message} onRetry={actionError.retry} onDismiss={onDismissError} /> : null}
       {generating ? <StreamingOutput streamTaskId={streamTaskId} /> : null}
@@ -99,7 +95,7 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
           </div>
         )} />
       ) : null}
-      <div className="chapter-console-page__editor-sheet-wrap">
+      <div className={`chapter-console-page__editor-sheet-wrap${currentChapter && (hasChapterContent || hasMultiSegments) ? '' : ' is-empty'}`}>
         {currentChapter ? (hasMultiSegments ? (
           <div className="novel-writing-shell__segment-preview">
             <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly">{content}</div>
@@ -115,7 +111,7 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
             onCompositionEnd={generating ? undefined : onCompositionEnd}
             onMouseUp={onSyncSelection}
             onKeyUp={onSyncSelection}
-            className="novel-writing-shell__editor-sheet"
+            className={`novel-writing-shell__editor-sheet${hasChapterContent ? '' : ' novel-writing-shell__editor-sheet--empty'}`}
           />
         )) : <div className="novel-empty novel-empty--writing">选择左侧章节开始写作，或点击新建章节。</div>}
       </div>

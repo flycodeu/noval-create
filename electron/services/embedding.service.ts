@@ -4,6 +4,7 @@ import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
 import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const LOCAL_EMBEDDING_MODEL_ID = 'local:Xenova/bge-small-zh-v1.5:q8'
 const REMOTE_EMBEDDING_MODEL_ID = 'text-embedding-3-small'
@@ -76,13 +77,13 @@ const embeddingCandidateSelection = {
 function resolveBeforeChapterNum(options?: SimilarFragmentSearchOptions): number | undefined {
   if (options === undefined) return undefined
   if (options === null || typeof options !== 'object') {
-    throw new Error('beforeChapterNum 必须是正整数。')
+    throwUserFacingError('common.invalidParameter', { parameter: 'beforeChapterNum 必须是正整数' })
   }
   if (!Object.prototype.hasOwnProperty.call(options, 'beforeChapterNum')) return undefined
 
   const value = options.beforeChapterNum
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throw new Error('beforeChapterNum 必须是正整数。')
+    throwUserFacingError('common.invalidParameter', { parameter: 'beforeChapterNum 必须是正整数' })
   }
   return value
 }

@@ -4,7 +4,6 @@ import type { WritingModalsProps } from './components/WritingModals'
 import type { WritingWorkspaceLayoutProps } from './components/WritingWorkspaceLayout'
 import type { useChapterGeneration } from './useChapterGeneration'
 import type { useChapterReview } from './useChapterReview'
-import type { useWritingChapterController } from './useWritingChapterController'
 import type { useWritingContractSections } from './useWritingContractSections'
 import type { WritingCommandBindings } from './useWritingCommandBindings'
 import type { useWritingHistoryLifecycle } from './useWritingHistoryLifecycle'
@@ -19,13 +18,11 @@ interface WritingViewCompositionInput {
   > & {
     activeRoute: WritingRouteKey
     onNavigate: WritingWorkspaceLayoutProps['inspector']['onNavigate']
-    onExitWriting: WritingWorkspaceLayoutProps['onExitWriting']
   }
-  chapter: ReturnType<typeof useWritingChapterController>
   generation: ReturnType<typeof useChapterGeneration>
   runtime: ReturnType<typeof useWritingEditorRuntimePresentation>
   commandBindings: WritingCommandBindings
-  editor: Omit<WritingEditorPaneProps, 'commandBar' | keyof WritingCommandBindings['editorActions'] | 'title' | 'generating' | 'streamTaskId'>
+  editor: Omit<WritingEditorPaneProps, 'commandBar' | keyof WritingCommandBindings['editorActions'] | 'generating' | 'streamTaskId'>
   inspector: ReturnType<typeof useWritingInspectorComposition>
   contracts: ReturnType<typeof useWritingContractSections>
   history: ReturnType<typeof useWritingHistoryLifecycle>
@@ -42,7 +39,7 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
   layout: WritingWorkspaceLayoutProps
   modals: WritingModalsProps
 } {
-  const { chapter, commandBindings, contracts, generation, inspector, runtime, workspace } = input
+  const { commandBindings, contracts, generation, inspector, runtime, workspace } = input
   return {
     layout: {
       loading: workspace.loading,
@@ -50,11 +47,9 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
       currentChapter: workspace.currentChapter,
       pipelineItems: workspace.pipelineItems,
       insightPanelOpen: workspace.insightPanelOpen,
-      onExitWriting: workspace.onExitWriting,
       commandBindings,
       editor: {
         ...input.editor,
-        title: chapter.editor.title,
         generating: runtime.generating,
         streamTaskId: generation.activeGeneration.streamTaskId,
         ...commandBindings.editorActions,
