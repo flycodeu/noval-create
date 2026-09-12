@@ -130,3 +130,22 @@ export function normalizeCallCompletion(usage: CallUsage, rawFinishReason: unkno
 
   return { finish, rawFinishReason: raw, usage }
 }
+
+export function normalizeAliyunCompletion(value: unknown): CallCompletion {
+  const data = isRecord(value) ? value : null
+  const usage = nestedRecord(data, 'usage')
+  const output = nestedRecord(data, 'output')
+  const choices = output?.choices
+  const choice = Array.isArray(choices) && isRecord(choices[0]) ? choices[0] : null
+  return normalizeCallCompletion({
+    ...createUnknownCallUsage(),
+    input: reportedToken(usage?.input_tokens),
+    output: reportedToken(usage?.output_tokens),
+  }, choice?.finish_reason ?? output?.finish_reason)
+}
+
+export function normalizeBaiduCompletion(value: unknown): CallCompletion {
+  const data = isRecord(value) ? value : null
+  const reason = data?.is_truncated === true ? 'length' : data?.is_end === true ? 'stop' : null
+  return normalizeCallCompletion(normalizeOpenAIUsage(data?.usage), reason)
+}

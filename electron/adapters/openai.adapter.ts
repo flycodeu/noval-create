@@ -97,7 +97,7 @@ export class OpenAIAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: this.modelId,
       kind,
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,
@@ -158,7 +158,7 @@ export class OpenAIAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: embeddingModel,
       kind: 'embedding',
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,
@@ -178,9 +178,9 @@ export class OpenAIAdapter extends BaseAdapter {
     })
 
     try {
-      const data = await request.value.json() as { data: Array<{ embedding: number[] }> }
+      const data = await request.value.json() as { data: Array<{ embedding: number[] }>; usage?: unknown }
       const embeddings = data.data.map((item) => item.embedding)
-      request.succeed()
+      request.succeed(normalizeCallCompletion(normalizeOpenAIUsage(data.usage), null))
       return embeddings
     } catch (error) {
       request.fail(error)

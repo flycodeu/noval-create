@@ -148,6 +148,36 @@ async function run({ Database, loadTypeScriptModule }) {
     assert.equal(packSources.filter((source) => source.key === 'asset:item:20').length, 1)
     assert.equal(packSources.find((source) => source.key === 'asset:item:20').sourceVersion, ownerItem.sourceVersion)
 
+    const mixedVisibilitySources = compiler.buildChapterContextSources({
+      rawContext: {
+        ...rawContext,
+        recalledMemorySources: [ownerItem, foreshadow],
+      },
+      context: {
+        ...context,
+        recalledMemory: '',
+        recalledMemorySources: [ownerItem],
+        visibilityReport: {
+          purpose: 'writer',
+          povCharacterIds: [1],
+          unresolvedPovLabels: [],
+          decisions: [{
+            sourceKey: 'part:recalledMemory',
+            channel: 'semantic_memory',
+            included: false,
+            reason: 'pov_forbidden_fact',
+            factIds: [91],
+          }],
+          requiredMissingSourceKeys: ['contract:foreshadow:91'],
+          requiredMissingFactIds: [91],
+          sources: [],
+        },
+      },
+      stage: 'draft',
+    })
+    assert.equal(mixedVisibilitySources.filter((source) => source.key === 'asset:item:20').length, 1)
+    assert.equal(mixedVisibilitySources.some((source) => source.key === 'contract:foreshadow:91'), false)
+
     const rejected = relation.loadRelationRecallSources(db, {
       novelId: 1,
       chapterNum: 200,
@@ -169,6 +199,7 @@ async function run({ Database, loadTypeScriptModule }) {
         'owner item and one-hop relations are selected without recursive expansion',
         'required sources survive stable optional limits',
         'SQL and semantic hits share one canonical ContextPack source',
+        'mixed recalledMemory rejection keeps allowed per-source required recall and drops denied sources',
         'foreign and future entities are rejected with ID-only diagnostics',
       ],
       sqlite: {

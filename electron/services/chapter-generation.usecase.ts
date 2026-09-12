@@ -8,6 +8,7 @@ import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
 import { resolveChapterPipelineResumeMode } from '../../src/shared/chapter-resume-policy'
+import { restoreRevisionBudget } from './revision-budget'
 import {
   ChapterContext,
   buildStoryProfile,
@@ -124,6 +125,7 @@ import {
   createInitialChapterPipelineSnapshot,
   getCompletedChapterPipelineRoleCount,
   inferChapterPipelineResumeReason,
+  inheritChapterPipelineRecoveryState,
   isChapterPipelineRole,
   parseChapterPipelineSnapshot,
   validateChapterPipelineResumeBase,
@@ -1953,6 +1955,16 @@ function buildPersistedScenePlanText(scenePlanJson?: string | null): string {
   }
 }
 
+function getContinuationRevisionBudget(chapterId: number, sourceTaskId?: number) {
+  const source = sourceTaskId ? getTaskRecord(sourceTaskId) : null
+  if (!source || source.type !== 'chapter_write' || source.relatedEntityType !== 'chapter' || source.relatedEntityId !== chapterId) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
+  const attempts = getDb().select({ taskId: tasks.id }).from(tasks)
+    .where(and(eq(tasks.parentTaskId, source.id), eq(tasks.pipelineRole, 'rewriter'))).all()
+  return restoreRevisionBudget(`chapter:${chapterId}:revision:pipeline`, parseChapterPipelineSnapshot(source.progressJson), attempts).budget
+}
+
 interface ChapterContinuationPreparation {
   chapter: typeof chapters.$inferSelect
   novel: Awaited<ReturnType<typeof collectChapterContextRawData>>['novel']
@@ -1976,6 +1988,7 @@ async function prepareChapterContinuation(
 ): Promise<ChapterContinuationPreparation> {
   const chapter = getRequiredChapterGenerationInput(chapterId)
   validateChapterContractsForGeneration(chapterId)
+  const revisionBudget = getContinuationRevisionBudget(chapterId, options.sourceTaskId)
   const normalizedPartial = partialContent.trim()
   if (!normalizedPartial) throwUserFacingError('workflow.resumeUnsupported')
 
@@ -2049,7 +2062,7 @@ async function prepareChapterContinuation(
     chapterId,
     workflowTaskId,
     buildChapterContractVersion(chapterId),
-    { content: chapter.content || '', contextVersion: novel.contextVersion || 1 },
+    { content: chapter.content || '', contextVersion: novel.contextVersion || 1, revisionBudget },
   )
   snapshot = {
     ...snapshot,
@@ -2208,13 +2221,17 @@ async function runChapterContinuationSuccess(input: {
       if (resumeTask && parseTaskControl(resumeTask).cancelRequested) cancelTask(taskId, sender)
     },
   })
+  const completedSnapshot = inheritChapterPipelineRecoveryState(
+    runtime.getSnapshot(),
+    parseChapterPipelineSnapshot(getTaskRecord(resumedWorkflowTaskId)?.progressJson),
+  )
   runtime.setSnapshot({
-    ...runtime.getSnapshot(),
+    ...completedSnapshot,
     status: 'success',
     currentRole: 'writer',
     currentStage: 'completed',
     message: '断点续写稿已交回完整章节流水线并通过后续门禁。',
-    partialContent: combinedContent,
+    partialContent: completedSnapshot.partialContent || combinedContent,
     streamTaskId: undefined,
     roles: {
       ...runtime.getSnapshot().roles,
@@ -2241,7 +2258,7 @@ async function runChapterContinuationSuccess(input: {
   return resumedWorkflowTaskId
 }
 
-function buildChapterContinuationFailureSnapshot(input: {
+interface ChapterContinuationFailureInput {
   chapter: typeof chapters.$inferSelect
   chapterId: number
   workflowTaskId: number
@@ -2251,7 +2268,30 @@ function buildChapterContinuationFailureSnapshot(input: {
   currentSnapshot: ChapterPipelineSnapshot
   normalizedPartial: string
   error: unknown
-}): { snapshot: ChapterPipelineSnapshot; downstreamRole?: ChapterPipelineRole } {
+}
+
+function buildContinuationFailureRoles(
+  input: ChapterContinuationFailureInput,
+  downstream: Partial<ChapterPipelineSnapshot> | null,
+  detail: string,
+): ChapterPipelineSnapshot['roles'] {
+  if (downstream?.roles) return { ...input.currentSnapshot.roles, ...downstream.roles }
+  if (input.writerContinuationCompleted) return input.currentSnapshot.roles
+  return {
+    ...input.currentSnapshot.roles,
+    writer: {
+      ...input.currentSnapshot.roles.writer,
+      status: 'failed',
+      detail,
+      finishedAt: new Date().toISOString(),
+      recoveryHint: buildChapterPipelineRecoveryHint(input.chapter.novelId, input.chapterId, 'writer'),
+    },
+  }
+}
+
+function buildChapterContinuationFailureSnapshot(input: ChapterContinuationFailureInput): {
+  snapshot: ChapterPipelineSnapshot; downstreamRole?: ChapterPipelineRole
+} {
   const downstreamTask = input.downstreamWorkflowTaskId
     ? getTaskRecord(input.downstreamWorkflowTaskId)
     : null
@@ -2261,24 +2301,12 @@ function buildChapterContinuationFailureSnapshot(input: {
     || (input.downstreamWorkflowTaskId ? isChapterPipelineAbortError(input.downstreamWorkflowTaskId, input.error) : false)
   const fallbackRecoveryRole = downstreamRole || 'writer'
   const detail = input.error instanceof Error ? input.error.message : '断点续写失败'
-  const roles = downstreamSnapshot?.roles
-    ? { ...input.currentSnapshot.roles, ...downstreamSnapshot.roles }
-    : input.writerContinuationCompleted
-      ? input.currentSnapshot.roles
-      : {
-          ...input.currentSnapshot.roles,
-          writer: {
-            ...input.currentSnapshot.roles.writer,
-            status: 'failed' as const,
-            detail,
-            finishedAt: new Date().toISOString(),
-            recoveryHint: buildChapterPipelineRecoveryHint(input.chapter.novelId, input.chapterId, 'writer'),
-          },
-        }
+  const roles = buildContinuationFailureRoles(input, downstreamSnapshot, detail)
+  const recoveryState = inheritChapterPipelineRecoveryState(input.currentSnapshot, downstreamSnapshot)
   return {
     downstreamRole,
     snapshot: {
-      ...input.currentSnapshot,
+      ...recoveryState,
       status: aborted ? 'cancelled' : 'failed',
       currentRole: downstreamRole || 'writer',
       currentStage: downstreamSnapshot?.currentStage || (input.writerContinuationCompleted ? 'reviewing' : 'drafting'),
@@ -2288,9 +2316,7 @@ function buildChapterContinuationFailureSnapshot(input: {
       recoveryHint: downstreamSnapshot?.recoveryHint
         || buildChapterPipelineRecoveryHint(input.chapter.novelId, input.chapterId, fallbackRecoveryRole),
       lastFailureRole: downstreamSnapshot?.lastFailureRole || (input.writerContinuationCompleted ? undefined : 'writer'),
-      partialContent: downstreamSnapshot?.partialContent?.trim()
-        || input.currentSnapshot.partialContent
-        || input.normalizedPartial,
+      partialContent: recoveryState.partialContent || input.normalizedPartial,
       roles,
     },
   }
@@ -2662,6 +2688,19 @@ interface GeneratedChapterPlannerWriterPhaseInput {
   structuralAlertsSummary: string
 }
 
+function getChapterDesignGateDirective(
+  chapterId: number,
+  flag: ReturnType<typeof getUnresolvedDesignGateFlags>,
+): string {
+  if (!flag) return ''
+  console.warn(`[chapter:plan] 本章处于未消解的设计校验 flagged 记录中 chapter=${chapterId}，已注入设计对齐矫正指令。`)
+  return [
+    '本章在弧级设计校验中被标记为“史实复述/零弧推进”。场景计划必须显式推进以下原创设计元素，不要按历史事件时间线铺陈：',
+    `本弧原创设计词元：${flag.designTerms.slice(0, 12).join('、')}`,
+    flag.correctiveDirective,
+  ].filter(Boolean).join('\n')
+}
+
 async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapterPlannerWriterPhaseInput) {
   const {
     chapter, novel, profile, session, options, sender, fallbackScenePlan, storyCore, scenePlanContext,
@@ -2677,16 +2716,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
   const chapterId = chapter.id
 
   const unresolvedDesignGateFlag = getUnresolvedDesignGateFlags(chapter.novelId, chapter.chapterNum)
-  const designGateDirective = unresolvedDesignGateFlag
-    ? [
-        '本章在弧级设计校验中被标记为“史实复述/零弧推进”。场景计划必须显式推进以下原创设计元素，不要按历史事件时间线铺陈：',
-        `本弧原创设计词元：${unresolvedDesignGateFlag.designTerms.slice(0, 12).join('、')}`,
-        unresolvedDesignGateFlag.correctiveDirective,
-      ].filter(Boolean).join('\n')
-    : ''
-  if (unresolvedDesignGateFlag) {
-    console.warn(`[chapter:plan] 本章处于未消解的设计校验 flagged 记录中 chapter=${chapterId}，已注入设计对齐矫正指令。`)
-  }
+  const designGateDirective = getChapterDesignGateDirective(chapterId, unresolvedDesignGateFlag)
   // 弧级节奏模板传导：本章所属弧挂了节奏模板时，把单章节拍段注入 planner prompt（失败静默降级）。
   const chapterRhythmSection = getChapterRhythmSection(chapter.novelId, chapter.chapterNum, chapter.arcId)
   let scenePlan: ScenePlanStep[] = fallbackScenePlan

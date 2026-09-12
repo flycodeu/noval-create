@@ -26,8 +26,7 @@ import {
 import type { TaskRecoveryHint } from '../../src/types'
 import {
   createRevisionBudget,
-  deriveRevisionBudgetFromLegacySnapshot,
-  deriveRevisionBudgetFromLegacyAttempts,
+  restoreRevisionBudget,
   RevisionBudgetController,
   type RevisionBudgetState,
   type RevisionReservation,
@@ -174,26 +173,13 @@ export async function createChapterPipelineSession(
   const legacyRevisionAttempts = input.resumeSourceTaskId && input.loadLegacyRevisionAttempts
     ? input.loadLegacyRevisionAttempts(input.resumeSourceTaskId)
     : []
-  const hasLegacyRewriterEvidence = Boolean(
-    retrySnapshot
-    && (
-      input.retryNodeRole === 'rewriter'
-      || retrySnapshot.lastFailureRole === 'rewriter'
-      || retrySnapshot.roles?.rewriter?.taskId
-      || retrySnapshot.roles?.rewriter?.status === 'success'
-    ),
-  )
   const revisionBudgetDerivation = input.revisionBudget
     ? { budget: input.revisionBudget, reliable: true }
-    : legacyRevisionAttempts.length > 0
-      ? deriveRevisionBudgetFromLegacyAttempts(
-        `chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`,
-        legacyRevisionAttempts,
-      )
-    : retrySnapshot?.revisionBudget || hasLegacyRewriterEvidence
-      ? deriveRevisionBudgetFromLegacySnapshot(
+    : input.resumeSourceTaskId
+      ? restoreRevisionBudget(
         `chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`,
         retrySnapshot,
+        legacyRevisionAttempts,
       )
       : {
           budget: createRevisionBudget(`chapter:${chapter.id}:revision:${input.stageId || 'pipeline'}`),

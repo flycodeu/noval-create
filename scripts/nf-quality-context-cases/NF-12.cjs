@@ -37,6 +37,7 @@ function context(overrides = {}) {
 
 async function run({ loadTypeScriptModule }) {
   const visibility = loadTypeScriptModule('electron/services/context-visibility.ts')
+  const compiler = loadTypeScriptModule('electron/services/context-compiler.ts')
   const packs = loadTypeScriptModule('src/shared/context-pack.ts')
   const empty = { readerKnownChapterNum: null, protagonistKnownChapterNum: null, characterKnowledge: [] }
   const readerOnly = fact(4001, '账册藏在药箱', { ...empty, readerKnownChapterNum: 3 })
@@ -58,6 +59,35 @@ async function run({ loadTypeScriptModule }) {
   assert.equal(JSON.stringify(writerContext).includes('账册藏在药箱'), false)
   assert.ok(writerContext.visibilityReport.decisions.some((item) => item.channel === 'previous_excerpt' && !item.included))
   assert.ok(writerContext.visibilityReport.decisions.some((item) => item.channel === 'semantic_memory' && !item.included))
+
+  const recallBypassSource = {
+    deterministic: true, sourceKey: 'contract:thread:4001', sourceVersion: 'v1:secret', required: true,
+    reason: 'explicit_contract', optionalKind: 'thread', dueChapter: null,
+    sourceKind: 'semantic_asset', semanticSourceType: 'story_thread', semanticSourceId: 4001,
+    bucket: 'thread', fragmentType: 'contract_thread', similarity: 1, searchMode: 'keyword',
+    sourceLabel: '线程#4001', summary: '账册藏在药箱', stale: false, staleReasons: [],
+    overriddenByConstraint: false, entityMatches: [], entityValidated: true,
+  }
+  const sourceFilteredContext = visibility.filterChapterContextByVisibility(context({
+    scenePlanSummary: '原始计划：账册藏在药箱',
+    recalledMemorySources: [recallBypassSource],
+    authorStyleMaterials: { targetWorkSampleGuide: '模仿样例：账册藏在药箱', humanStyleSampleLock: '' },
+  }), writerPolicy)
+  const sourcePack = await compiler.compileChapterContextPack({
+    rawContext: {
+      novel: { id: 101, contextVersion: 1 }, currentChapter: { id: 3001, chapterNum: 20 },
+      recalledMemorySources: [recallBypassSource],
+      authorStyleMaterials: { targetWorkSampleGuide: '模仿样例：账册藏在药箱', humanStyleSampleLock: '' },
+    },
+    context: sourceFilteredContext,
+    stage: 'draft',
+    mode: 'active',
+    upstreamArtifacts: { scenePlanSummary: '原始计划：账册藏在药箱' },
+  })
+  assert.equal(JSON.stringify(sourcePack.pack).includes('账册藏在药箱'), false)
+  assert.equal(sourceFilteredContext.recalledMemorySources.length, 0)
+  assert.equal(sourceFilteredContext.authorStyleMaterials.targetWorkSampleGuide, '')
+  assert.ok(sourceFilteredContext.visibilityReport.requiredMissingSourceKeys.includes('contract:thread:4001'))
 
   const revealFact = fact(4004, '幕后人是赵队长', empty)
   const revealPolicy = visibility.buildContextVisibilityPolicy({
@@ -128,6 +158,7 @@ async function run({ loadTypeScriptModule }) {
     },
     assertions: [
       'writer context omits reader-only secret across duplicated channels',
+      'raw recall, upstream artifact, and author-style metadata cannot restore forbidden text',
       'confirmed scene reveal is isolated from chapter-start knowledge',
       'same-chapter and planned-only facts stay unknown',
       'review and writer packs are isolated',

@@ -4,6 +4,7 @@ import {
   resolveCurrentPipelineSnapshot,
 } from './chapter-generation-snapshot'
 import type { WritingPipelineSnapshot } from './parsers'
+import { buildWritingPipelineRuntimePresentation } from './writing-runtime-presentation'
 
 function createSnapshot(
   chapterId: number,
@@ -25,6 +26,14 @@ function createSnapshot(
 }
 
 describe('chapter generation snapshot selection', () => {
+  it('keeps A live progress available after visiting B and uses B persisted data while selected', () => {
+    const live = createSnapshot(901, 'running')
+    const persisted = createSnapshot(15, 'cancelled', 'B 保留草稿')
+    const task = { id: 150, progressJson: JSON.stringify(persisted) } as Parameters<typeof buildWritingPipelineRuntimePresentation>[0]['latestTask']
+    expect(buildWritingPipelineRuntimePresentation({ chapterId: 15, liveSnapshot: live, latestTask: task }).snapshot).toEqual(persisted)
+    expect(buildWritingPipelineRuntimePresentation({ chapterId: 901, liveSnapshot: live, latestTask: null }).snapshot).toBe(live)
+    expect(buildWritingPipelineRuntimePresentation({ chapterId: null, liveSnapshot: live, latestTask: task }).snapshot).toBeNull()
+  })
   it('prefers the live snapshot for the current chapter', () => {
     const live = createSnapshot(2, 'running')
     const persisted = createSnapshot(2, 'failed', '旧草稿')

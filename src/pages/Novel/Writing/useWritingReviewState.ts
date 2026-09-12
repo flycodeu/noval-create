@@ -7,6 +7,7 @@ interface ReviewGateState {
 }
 
 type ReviewGateAction =
+  | { type: 'reset' }
   | { type: 'set-publish-check'; update: SetStateAction<ChapterPublishCheck | null> }
   | { type: 'set-gate-expanded'; update: SetStateAction<boolean> }
 
@@ -20,6 +21,7 @@ export function reduceWritingReviewGateState(
   state: ReviewGateState,
   action: ReviewGateAction,
 ): ReviewGateState {
+  if (action.type === 'reset') return { publishCheck: null, gateReportExpanded: false }
   if (action.type === 'set-gate-expanded') {
     return {
       ...state,
@@ -57,7 +59,15 @@ export function useWritingReviewState() {
     dispatchGateState({ type: 'set-gate-expanded', update })
   }, [])
 
+  const resetChapterReview = useCallback(() => {
+    dispatchGateState({ type: 'reset' })
+    setOptimizeModalOpen(false)
+    setOptimizationResult(null)
+    setRewriteModalOpen(false)
+  }, [])
+
   return {
+    resetChapterReview,
     ...gateState,
     applyingOptimizedChapter,
     optimizationResult,

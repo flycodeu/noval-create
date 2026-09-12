@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
@@ -9,6 +9,8 @@ import { useWritingViewStore, type WritingGenerationStage } from '../../../store
 import { normalizeEditorText } from './useChapterEditor'
 import type { WritingPipelineRole, WritingPipelineSnapshot } from './parsers'
 import { getResumablePartialContent } from './chapter-generation-snapshot'
+import { useWritingPipelineRuntimePresentation } from './useWritingRuntimePresentation'
+import { canResumeWritingPipeline, isWritingPipelineResumeHandoff } from './writing-state-ownership'
 
 export interface WritingActionError {
   title: string
@@ -44,9 +46,7 @@ interface UseChapterGenerationOptions {
   effectiveAiExecutionMode: AiExecutionMode
   preserveConstraintLabels: HardConstraintSourceLabel[]
   latestPipelineTask: Task | null
-  currentPipelineSnapshot: WritingPipelineSnapshot | null
   generationPreflight: ChapterGenerationPreflight
-  setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
   setActionError: Dispatch<SetStateAction<WritingActionError | null>>
   refreshBackgroundChapter(chapterId: number, options?: { replaceEditor?: boolean }): Promise<void>
   refreshMeta(): Promise<void>
@@ -63,10 +63,38 @@ function claimGenerationCompletion(completedTaskIds: MutableRefObject<Set<number
   return true
 }
 
+type WritingGenerationStore = ReturnType<typeof useWritingViewStore.getState>
+
+function commitGenerationProgressIdentity(input: {
+  payload: ChapterGenerationProgressEvent
+  resumeSourceTaskRef: MutableRefObject<{ chapterId: number; taskId: number } | null>
+  setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
+  startGeneration: WritingGenerationStore['startGeneration']
+  updateGenerationTask: WritingGenerationStore['updateGenerationTask']
+}): void {
+  const { payload, resumeSourceTaskRef, setLivePipelineSnapshot, startGeneration, updateGenerationTask } = input
+  if (payload.pipeline?.chapterId === payload.chapterId) setLivePipelineSnapshot(payload.pipeline)
+  const resumeSource = resumeSourceTaskRef.current
+  if (isWritingPipelineResumeHandoff({
+    sourceChapterId: resumeSource?.chapterId ?? null,
+    sourceTaskId: resumeSource?.taskId ?? null,
+    eventChapterId: payload.chapterId,
+    eventTaskId: payload.taskId,
+    snapshot: payload.pipeline,
+  })) {
+    startGeneration({ chapterId: payload.chapterId, taskId: payload.taskId })
+    resumeSourceTaskRef.current = null
+    return
+  }
+  if (payload.taskId) updateGenerationTask({ chapterId: payload.chapterId, taskId: payload.taskId })
+}
+
 function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
+  setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
   generationBaselineRef: MutableRefObject<string>
   generateRetryRef: MutableRefObject<() => void>
   completedTaskIdsRef: MutableRefObject<Set<number>>
+  resumeSourceTaskRef: MutableRefObject<{ chapterId: number; taskId: number } | null>
 }) {
   const {
     chapterIdsRef,
@@ -74,6 +102,7 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
     generationBaselineRef,
     generateRetryRef,
     completedTaskIdsRef,
+    resumeSourceTaskRef,
     refreshBackgroundChapter,
     refreshMeta,
     refreshQualityDashboard,
@@ -81,15 +110,20 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
     setLivePipelineSnapshot,
   } = options
   const clearStream = useTaskStore((state) => state.clearStream)
-  const { completeGeneration, updateGenerationStage, updateGenerationTask } = useWritingViewStore()
+  const { completeGeneration, startGeneration, updateGenerationStage, updateGenerationTask } = useWritingViewStore()
 
   useEffect(() => {
     const unsubscribe = window.electron.on('chapter:generation-progress', (data: unknown) => {
       const payload = data as ChapterGenerationProgressEvent
       if (!Number.isSafeInteger(payload?.chapterId) || !chapterIdsRef.current.has(payload.chapterId)) return
       if (!['running', 'success', 'failed', 'cancelled'].includes(payload.status)) return
-      if (payload.pipeline && currentChapterIdRef.current === payload.chapterId) setLivePipelineSnapshot(payload.pipeline)
-      if (payload.taskId) updateGenerationTask({ chapterId: payload.chapterId, taskId: payload.taskId })
+      commitGenerationProgressIdentity({
+        payload,
+        resumeSourceTaskRef,
+        setLivePipelineSnapshot,
+        startGeneration,
+        updateGenerationTask,
+      })
       updateGenerationStage({
         chapterId: payload.chapterId,
         taskId: payload.taskId,
@@ -123,6 +157,7 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
           message.success(getUserFacingMessage('writing.pipelineCompleted'))
         })().catch((error) => {
           console.error('Failed to refresh completed chapter generation', error)
+          if (currentChapterIdRef.current !== payload.chapterId) return
           setActionError({
             title: '章节流水线已完成，正文刷新失败',
             message: getErrorMessage(error, 'writing.generateFailed'),
@@ -173,14 +208,17 @@ function useGenerationProgressEvents(options: UseChapterGenerationOptions & {
     refreshBackgroundChapter,
     refreshMeta,
     refreshQualityDashboard,
+    resumeSourceTaskRef,
     setActionError,
     setLivePipelineSnapshot,
+    startGeneration,
     updateGenerationStage,
     updateGenerationTask,
   ])
 }
 
 function useGenerationStreamStatus(options: UseChapterGenerationOptions & {
+  setLivePipelineSnapshot: Dispatch<SetStateAction<WritingPipelineSnapshot | null>>
   generationBaselineRef: MutableRefObject<string>
   generateRetryRef: MutableRefObject<() => void>
   completedTaskIdsRef: MutableRefObject<Set<number>>
@@ -223,6 +261,7 @@ function useGenerationStreamStatus(options: UseChapterGenerationOptions & {
         message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })().catch((error) => {
         console.error('Failed to refresh completed chapter stream', error)
+        if (currentChapterIdRef.current !== chapterId) return
         setActionError({
           title: '章节流水线已完成，正文刷新失败',
           message: getErrorMessage(error, 'writing.generateFailed'),
@@ -291,7 +330,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     content,
     creativeStageId,
     currentChapter,
-    currentPipelineSnapshot,
+    currentChapterIdRef,
     effectiveAiExecutionMode,
     generationPreflight,
     latestPipelineTask,
@@ -300,6 +339,9 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     showPreflightWarning,
     flushEditor,
   } = options
+  const [livePipelineSnapshot, setLivePipelineSnapshot] = useState<WritingPipelineSnapshot | null>(null)
+  const pipelineRuntime = useWritingPipelineRuntimePresentation({ currentChapter, latestPipelineTask, livePipelineSnapshot })
+  const currentPipelineSnapshot = pipelineRuntime.snapshot
   const clearStream = useTaskStore((state) => state.clearStream)
   const {
     activeGeneration,
@@ -314,11 +356,12 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
   const generateRetryRef = useRef<() => void>(() => {})
   const resumeRetryRef = useRef<() => void>(() => {})
   const completedTaskIdsRef = useRef(new Set<number>())
+  const resumeSourceTaskRef = useRef<{ chapterId: number; taskId: number } | null>(null)
   const resumablePartialContent = getResumablePartialContent(currentPipelineSnapshot)
-  const hasResumablePartialContent = Boolean(currentChapter && resumablePartialContent)
+  const hasResumablePartialContent = Boolean(resumablePartialContent && canResumeWritingPipeline(currentChapter?.id ?? null, latestPipelineTask, currentPipelineSnapshot))
 
-  useGenerationProgressEvents({ ...options, generationBaselineRef, generateRetryRef, completedTaskIdsRef })
-  useGenerationStreamStatus({ ...options, generationBaselineRef, generateRetryRef, completedTaskIdsRef })
+  useGenerationProgressEvents({ ...options, setLivePipelineSnapshot, generationBaselineRef, generateRetryRef, completedTaskIdsRef, resumeSourceTaskRef })
+  useGenerationStreamStatus({ ...options, setLivePipelineSnapshot, generationBaselineRef, generateRetryRef, completedTaskIdsRef })
 
   const generate = useCallback(async () => {
     if (!currentChapter) {
@@ -347,7 +390,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     } catch (error: unknown) {
       generationStartingRef.current = false
       const errorMessage = getErrorMessage(error, 'writing.saveFailed')
-      setActionError({ title: '生成前保存失败', message: errorMessage, retry: () => generateRetryRef.current() })
+      if (currentChapterIdRef.current === currentChapter.id) setActionError({ title: '生成前保存失败', message: errorMessage, retry: () => generateRetryRef.current() })
       return
     }
     startGeneration({ chapterId: currentChapter.id })
@@ -367,7 +410,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error, 'writing.configureModelFirst')
       completeGeneration({ chapterId: currentChapter.id, status: 'failed', stage: 'planning', label: '章节流水线启动失败', detail: errorMessage, error: errorMessage })
-      setActionError({ title: '章节流水线启动失败', message: errorMessage, retry: () => generateRetryRef.current() })
+      if (currentChapterIdRef.current === currentChapter.id) setActionError({ title: '章节流水线启动失败', message: errorMessage, retry: () => generateRetryRef.current() })
     } finally {
       generationStartingRef.current = false
     }
@@ -377,6 +420,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     content,
     creativeStageId,
     currentChapter,
+    currentChapterIdRef,
     effectiveAiExecutionMode,
     flushEditor,
     generationPreflight,
@@ -409,10 +453,11 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     } catch (error: unknown) {
       generationStartingRef.current = false
       const errorMessage = getErrorMessage(error, 'writing.saveFailed')
-      setActionError({ title: '续写前保存失败', message: errorMessage, retry: () => resumeRetryRef.current() })
+      if (currentChapterIdRef.current === currentChapter.id) setActionError({ title: '续写前保存失败', message: errorMessage, retry: () => resumeRetryRef.current() })
       return
     }
     generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
+    resumeSourceTaskRef.current = { chapterId: currentChapter.id, taskId: latestPipelineTask.id }
     startGeneration({ chapterId: currentChapter.id, taskId: latestPipelineTask.id })
     updateGenerationStage({
       chapterId: currentChapter.id,
@@ -426,9 +471,10 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
       updateGenerationTask({ chapterId: currentChapter.id, taskId })
       message.success(getUserFacingMessage('writing.resumedFromDraft'))
     } catch (error: unknown) {
+      if (resumeSourceTaskRef.current?.taskId === latestPipelineTask.id) resumeSourceTaskRef.current = null
       const errorMessage = getErrorMessage(error, 'writing.generateFailed')
       completeGeneration({ chapterId: currentChapter.id, status: 'failed', stage: 'drafting', label: '断点续写启动失败', detail: errorMessage, error: errorMessage })
-      setActionError({ title: '断点续写启动失败', message: errorMessage, retry: () => resumeRetryRef.current() })
+      if (currentChapterIdRef.current === currentChapter.id) setActionError({ title: '断点续写启动失败', message: errorMessage, retry: () => resumeRetryRef.current() })
     } finally {
       generationStartingRef.current = false
     }
@@ -437,6 +483,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     completeGeneration,
     content,
     currentChapter,
+    currentChapterIdRef,
     flushEditor,
     hasResumablePartialContent,
     latestPipelineTask?.id,
@@ -467,6 +514,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
   }, [activeGeneration, clearStream, completeGeneration])
 
   return {
+    pipelineRuntime,
     activeGeneration,
     lastGenerationByChapter,
     generate,

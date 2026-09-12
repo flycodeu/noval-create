@@ -74,4 +74,12 @@ describe('buildScenePlanPrompt 设计层约束', () => {
     expect(prompt).not.toContain('重复关系不应再次出现')
     expect(prompt).toContain('【硬约束】')
   })
+
+  it('barrel 文件正常导出 PROMPT_CATALOG 与 PROMPT_CATEGORIES', async () => {
+    const { PROMPT_CATALOG, PROMPT_CATEGORIES } = await import('./prompt-library')
+    expect(Array.isArray(PROMPT_CATALOG)).toBe(true)
+    expect(PROMPT_CATALOG.length).toBeGreaterThanOrEqual(10)
+    expect(PROMPT_CATEGORIES).toContain('人物系统')
+    expect(PROMPT_CATEGORIES).toContain('正文编写')
+  })
 })

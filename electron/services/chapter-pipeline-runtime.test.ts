@@ -303,6 +303,55 @@ describe('chapter pipeline runtime', () => {
   })
 })
 
+describe('failed Writer recovery candidates', () => {
+  beforeEach(resetRuntimeMocks)
+
+  it.each([
+    { name: 'incomplete output', role: 'writer' as const, code: 'NF_MODEL_OUTPUT_INCOMPLETE', draft: '', output: '  截断😀\r\n候选  ', expected: '  截断😀\r\n候选  ' },
+    { name: 'content conflict', role: 'writer' as const, code: 'chapter.pipelineContentConflict', draft: 'CAS拒绝的候选', output: '', expected: 'CAS拒绝的候选' },
+    { name: 'context conflict', role: 'writer' as const, code: 'chapter.pipelineContextConflict', draft: '合同变更前候选', output: '', expected: '合同变更前候选' },
+    { name: 'unrelated error output', role: 'writer' as const, code: 'OTHER', draft: '', output: '诊断而非正文', expected: undefined },
+    { name: 'non-Writer output', role: 'critic' as const, code: 'NF_MODEL_OUTPUT_INCOMPLETE', draft: '', output: '审校JSON', expected: undefined },
+    { name: 'empty output', role: 'writer' as const, code: 'NF_MODEL_OUTPUT_INCOMPLETE', draft: '', output: ' \r\n', expected: undefined },
+  ])('preserves recovery boundaries for $name', async ({ role, code, draft, output, expected }) => {
+    const budget = { id: 'shared-budget', limit: 2 as const, used: 1, attemptKeys: ['rewriter:candidate:1'] }
+    const runtime = await ChapterPipelineRuntime.create(createRuntimeInput(2, { revisionBudget: budget }))
+    let snapshot = runtime.snapshot
+    const baseHash = snapshot.baseContentHash
+    const baseVersion = snapshot.baseContextVersion
+    const persistUsableDraft = vi.fn((content: string) => content)
+    const setExpectedContent = vi.fn()
+    const bindings = createChapterPipelineRuntimeBindings({
+      runtime,
+      chapter: { novelId: 7, reviewNotesJson: '' },
+      chapterId: 2,
+      previousStatus: 'draft',
+      getSnapshot: () => snapshot,
+      setSnapshot: (next) => { snapshot = next },
+      getLatestUsableDraft: () => draft,
+      getLatestReviewNotesJson: () => '',
+      getHasCommittedContent: () => false,
+      setHasCommittedContent: vi.fn(),
+      persistUsableDraft,
+      setExpectedContent,
+      updateFailureStatus: vi.fn(),
+      buildRecoveryHint: () => ({ kind: 'open_page', label: '恢复', description: '保留候选后处理失败' }),
+    })
+    const taskId = await bindings.startRole(role, role === 'writer' ? 'chapter_writer' : 'chapter_critic', '执行')
+    const failure = Object.assign(new Error('模型或提交失败'), { code, outputText: output })
+    expect(() => bindings.failRole(role, taskId, failure)).toThrow(failure)
+    expect(snapshot.partialContent).toBe(expected)
+    if (expected !== undefined) expect(snapshot.resumeSourceTaskId).toBe(taskId)
+    expect(snapshot.baseContentHash).toBe(baseHash)
+    expect(snapshot.baseContextVersion).toBe(baseVersion)
+    expect(snapshot.revisionBudget).toEqual(budget)
+    expect(persistUsableDraft).not.toHaveBeenCalled()
+    expect(setExpectedContent).not.toHaveBeenCalled()
+    expect(mocks.updateTaskStatus).toHaveBeenLastCalledWith(runtime.workflowTaskId, 'failed', undefined,
+      expect.objectContaining({ progressJson: JSON.stringify(snapshot) }))
+  })
+})
+
 describe('chapter pipeline reused roles', () => {
   beforeEach(resetRuntimeMocks)
 

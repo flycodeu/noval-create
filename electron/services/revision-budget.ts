@@ -89,12 +89,10 @@ export function normalizeRevisionBudget(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   if (typeof record.id !== 'string' || !record.id.trim()) return null
+  if (typeof record.used !== 'number' || !Number.isInteger(record.used) || record.used < 0) return null
+  if (typeof record.limit !== 'number' || !Number.isInteger(record.limit) || record.limit < 1) return null
   const keys = normalizeAttemptKeys(record.attemptKeys)
-  const used = typeof record.used === 'number' && Number.isFinite(record.used)
-    ? Math.floor(record.used)
-    : keys.length
-  if (used < 0 || !Number.isFinite(used)) return null
-  return createRevisionBudget(record.id || fallbackId, record.limit as number | undefined, used, keys)
+  return createRevisionBudget(record.id || fallbackId, record.limit, record.used, keys)
 }
 
 export function hasRevisionBudget(state: RevisionBudgetState): boolean {
@@ -285,4 +283,18 @@ export function deriveRevisionBudgetFromLegacySnapshot(
     }
   }
   return { budget: createRevisionBudget(id, limit), reliable: false, reason: 'unknown' }
+}
+
+/** A persisted logical budget outranks child-task counts, which cannot reconstruct shared attempt keys. */
+export function restoreRevisionBudget(
+  id: string,
+  snapshot: unknown,
+  attempts: readonly LegacyRevisionAttempt[] = [],
+): LegacyRevisionBudgetDerivation {
+  const saved = deriveRevisionBudgetFromLegacySnapshot(id, snapshot)
+  if (saved.reliable) return saved
+  const legacy = deriveRevisionBudgetFromLegacyAttempts(id, attempts)
+  if (legacy.reliable) return legacy
+  // Persist exhausted quota for unknown old state so a second recovery cannot reinterpret it as a fresh run.
+  return { budget: createRevisionBudget(id, DEFAULT_REVISION_BUDGET_LIMIT, DEFAULT_REVISION_BUDGET_LIMIT), reliable: false, reason: 'unknown' }
 }

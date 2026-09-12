@@ -62,7 +62,9 @@ function loadBetterSqlite3() {
 const Database = loadBetterSqlite3()
 
 const workspaceRoot = path.resolve(__dirname, '..')
-const tempRoot = path.join(workspaceRoot, '.tmp-tests')
+const testParent = path.join(workspaceRoot, '.tmp-tests')
+fs.mkdirSync(testParent, { recursive: true })
+const tempRoot = fs.mkdtempSync(path.join(testParent, 'migration-safety-'))
 
 const originalResolveFilename = Module._resolveFilename
 Module._resolveFilename = function patchedResolve(request, parent, isMain, options) {
@@ -103,7 +105,6 @@ require.extensions['.tsx'] = compileTs
 const { runMigrations } = require(path.join(workspaceRoot, 'electron/database/db.ts'))
 
 function prepareTempDir() {
-  fs.rmSync(tempRoot, { recursive: true, force: true })
   fs.mkdirSync(tempRoot, { recursive: true })
 }
 

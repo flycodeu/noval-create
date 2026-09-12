@@ -48,6 +48,16 @@ export abstract class BaseAdapter {
   abstract maxContextTokens: number
   defaultTemperature = 0.85
   defaultMaxTokens = 4096
+  private defaultRequestObserver?: ModelRequestObserver
+
+  setDefaultRequestObserver(observer: ModelRequestObserver): this {
+    this.defaultRequestObserver = observer
+    return this
+  }
+
+  protected resolveRequestObserver(observer?: ModelRequestObserver): ModelRequestObserver | undefined {
+    return observer ?? this.defaultRequestObserver
+  }
 
   abstract chat(messages: Message[], opts?: ChatOptions): Promise<string>
   abstract stream(messages: Message[], opts?: ChatOptions): Promise<void>

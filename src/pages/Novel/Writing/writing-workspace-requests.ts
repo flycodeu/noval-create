@@ -7,6 +7,7 @@ export interface WritingWorkspaceRequestTracker {
   isLatestListRequest(requestId: number): boolean
   isLatestSelectionRequest(requestId: number | null): boolean
   selectChapter(chapterId: number): void
+  captureChapterSelection(chapterId: number | null): () => boolean
   beginDetailRequest(chapterId: number): () => boolean
   invalidateDetailRequest(): void
 }
@@ -44,6 +45,10 @@ export function createWritingWorkspaceRequestTracker(): WritingWorkspaceRequestT
     selectChapter(chapterId) {
       selectionRequestId += 1
       currentChapterIdRef.current = chapterId
+    },
+    captureChapterSelection(chapterId) {
+      const epoch = selectionRequestId
+      return () => selectionRequestId === epoch && currentChapterIdRef.current === chapterId
     },
     beginDetailRequest(chapterId) {
       detailRequestId += 1

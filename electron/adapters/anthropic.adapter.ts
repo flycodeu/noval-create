@@ -119,7 +119,7 @@ export class AnthropicAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: this.modelId,
       kind,
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,

@@ -1,0 +1,266 @@
+import type {
+  ChapterReviewPromptInput,
+  ContentScoringPromptInput,
+  ContinuityPromptInput,
+} from './prompt-types'
+import {
+  buildAvoidanceSection,
+  buildContextAlignmentRules,
+  buildGenreCoreExecutionGuidance,
+  buildGenreRealityRules,
+  buildGoldenThreeChapterGuidance,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+  buildPromptGuardrailSections,
+  buildRuntimeAssertionSection,
+  buildStepMemoryContinuityGuidance,
+  buildVariationHint,
+  renderPrompt,
+  section,
+  sectionLines,
+  sectionUnlessCovered,
+} from './prompt-common'
+
+export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): string {
+  return renderPrompt([
+    '你是本书的连续性审校编辑。只指出会真正影响后续章节的问题：连续性断裂、上下文漂移、常识或规则违反、因果薄弱、铺垫落空、以及明显的 AI 腔。',
+    sectionLines('章节信息', [
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
+    ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '只找出真正砸掉上下文、真实度、连续性或人话感的问题。',
+      extraQualityLines: ['优先给出具体修法，不要给空泛评论。'],
+    }),
+    sectionUnlessCovered('本章目标', params.chapterGoal, params.hardConstraintContext, ['章节目标']),
+    section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
+    section('场景计划', params.scenePlan),
+    section('场景计划摘要', params.scenePlanSummary),
+    section('小说核心', params.storyCore),
+    sectionUnlessCovered('写作类型', params.writingContractSummary, params.hardConstraintContext, ['写作合同/章节合同']),
+    section('章节级主题验证', params.themeChapterTest),
+    section('合同版本摘要', params.contractVersionSummary),
+    sectionUnlessCovered('关键人物关系', params.relationSummary, params.hardConstraintContext),
+    section('当前故事弧', params.currentArc),
+    section('本弧推进记录', params.arcProgress),
+    section('本弧进度状态', params.arcProgressStatus),
+    section('弧检查点提醒', params.arcProgressCheckpoint),
+    section('世界规则', params.worldRules),
+    sectionUnlessCovered('人物当前状态', params.characterStates, params.hardConstraintContext),
+    sectionUnlessCovered('当前世界状态', params.worldStates, params.hardConstraintContext),
+    section('地图地点上下文', params.mapSummary),
+    sectionUnlessCovered('关键物品与去向', params.itemSummary, params.hardConstraintContext, ['关键物品去向']),
+    section('上一章关键先验', params.previousChapterContext),
+    section('连续性记忆', params.continuitySummary),
+    sectionUnlessCovered('未回收事项', params.openLoops, params.hardConstraintContext, ['必须回收事项']),
+    section('本章应回收伏笔', params.dueForeshadows),
+    section('时间轴锚点', params.timelineSummary),
+    section('长期记忆', params.longTermMemory),
+    section('向量召回记忆', params.recalledMemory),
+    section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
+    section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'review'),
+    buildStepMemoryContinuityGuidance('review'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'review',
+    }),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
+    section('结构体检提醒', params.consistencyNotes),
+    section('近期结构告警', params.structuralAlertsSummary),
+    section('当前稿件摘要', params.draftTextSummary),
+    section('审校风险摘要', params.reviewRiskSummary),
+    section('审校证据摘要', params.reviewProofSummary),
+    section('发布门风险', params.publishGateRiskSummary),
+    section('待审初稿', params.draftContent),
+    section('输出规则', [
+      '只保留真正值得修的问题。',
+      'critical_fixes 最多 5 条，且必须是可直接执行的修改动作。',
+      'continuity_risks 只写连续性、伏笔、状态跟踪、物品跟踪或时间顺序问题。',
+      'arc_progress_risks 只写本章没有推进、反向推进、在关键检查点空转，或与当前故事弧目标脱节的问题。',
+      'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
+      'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
+      'coherence_risks 只写叙事链条会让读者读乱的地方，例如视角滑移、过渡断层、因果跳跃、信息顺序失衡。',
+      'reader_hook_risks 只写会削弱追读欲的问题，例如冲突太轻、结果没代价、反转不成立、主角一路顺推。',
+      'step_memory_risks 只写 Planner 场景计划、章节衔接桥、运行时接力断言、Writer 初稿之间没有对上的地方。',
+      'opening_hook_risks 只写开篇吸引力问题：前 300 字无现场/动作/压力/追问点，前 800 字还在解释设定，或章尾没有递进。',
+      'title_alignment_risks 只写标题与本章核心事件、场景物件、选择压力或反转点不匹配的问题。',
+      'hallucination_risks 只写无来源新增设定、人物、能力、地点、物品、背景真相，或把推断升级成事实的问题。',
+      'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
+      'human_language_repairs 只列最值得优先替换的 1 到 3 处生硬表达，格式尽量写成“原说法 -> 更自然说法”。',
+      '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
+      'dialogue_filler_risks 只写对白空转、打哈哈、重复问答却没有立场和动作承载的问题。',
+      'dialogue_info_density_risks 只写对白信息推进不足的问题，要明确指出该补地点、目标、证据、筹码或下一步动作。',
+      'dialogue_voice_lock_summary 用一句话概括本章生成前要锁哪些角色的声音。',
+      'required_voice_lock_character_ids 只保留本章生成前必须启用 voice lock 的角色 id。',
+      '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
+      '如果提供了章节级主题验证，必须逐项判断正文是否出现主题问题、角色选择、即时代价和后果证据；缺少任一环节就写入 critical_fixes 或 reader_hook_risks，并引用正文短证据。',
+      'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
+      '志怪治妖如果没有“妖病-人事-诊疗选择-病后余味”的闭环，历史正剧如果没有“劳动/制度-组织反馈-受挫-重塑”的链条，都必须写进 genre_hollowing_risks 或 critical_fixes。',
+      '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
+      '主角受挫判断 protagonist_setback 只能是 none / minor / major，并给出 setback_summary 概括本章主角到底输了什么、失去了什么或被压制了什么。',
+      'cost_present 表示本章是否出现明确代价；cost_present=true 时必须同时给出 cost_summary 和 cost_resolution_state。cost_resolution_state 只能是 new / ongoing / resolved / evaporated。',
+      '如果本章把重大损失、风险或冲突一两段就抹平，cost_resolution_state 应判为 evaporated，而不是 resolved。',
+      'reversal_marker 表示本章是否发生明确反转；为 true 时必须同时给出 reversal_summary 和 reversal_support_state。reversal_support_state 只能是 supported / weak / forced。',
+      'pace_marker 只能选 setup / conflict / reversal / climax / payoff / breather 其中一个主标签。',
+      'reward_state 只能是 none / partial / major，用来区分持续压抑、部分回报和阶段性大回报。',
+      'protagonist_pressure 用 0-100 评估主角本章承受的结构压力；纯顺推爽章不要虚报高分。',
+      'chapter_function_primary 只能选 setup / progression / reversal / payoff / breather / climax / exposition / closure 其中一个主功能。',
+      'chapter_function_tags 只保留 1 到 3 个真正承担的叙事功能标签，并且必须包含 chapter_function_primary。',
+      '如果关键章的主功能仍然只是 setup / exposition / breather，也要明确写进 critical_fixes 或 reader_hook_risks。',
+      '如果“本章应回收伏笔”里存在到期或超期线索，而正文没有推进、暗示或交代延期原因，要优先写进 missing_payoffs 或 critical_fixes。',
+      'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
+      'strengths 只写已经成立且应该保留的具体优点。',
+      'severity 只能是 low / medium / high。',
+      '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
+      'revision_brief 用 60 到 120 字中文写清修改方向。',
+    ].join('\n')),
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
+    buildAvoidanceSection(params.rejectedDigests || []),
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
+  ])
+}
+
+export function buildContinuityStatePrompt(params: ContinuityPromptInput): string {
+  return renderPrompt([
+    '从这一章里提炼后续写作必须记住的事实。不要写评价，不要写赏析，不要复述空话。',
+    sectionLines('章节信息', [
+      `小说：${params.novelTitle}`,
+      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
+      params.arcName ? `所属故事弧：${params.arcName}` : '',
+      params.chapterGoal ? `本章目标：${params.chapterGoal}` : '',
+      params.summary ? `本章摘要：${params.summary}` : '',
+    ]),
+    ...buildPromptGuardrailSections({
+      background: params.summary,
+      taskFocus: '只保留清楚、可验证的事实，不写情绪化判断和抽象口号。',
+      extraQualityLines: ['每条尽量写成短句，具体、可复用。'],
+    }),
+    section('入站义务', [
+      params.chapterBridgePlan ? `章节衔接桥：\n${params.chapterBridgePlan}` : '',
+      params.inboundContinuityNotes ? `本章必须承接：\n${params.inboundContinuityNotes}` : '',
+      params.inboundOpenLoops ? `入站未回收事项：\n${params.inboundOpenLoops}` : '',
+      params.inboundDueForeshadows ? `入站应回收伏笔：\n${params.inboundDueForeshadows}` : '',
+    ].filter(Boolean).join('\n\n')),
+    section('本章正文', params.chapterContent),
+    section('提炼规则', [
+      'plot_progress 只写真正推动了主线或支线的事实。',
+      'character_state_changes 只写后续章节不能忘的人物状态变化。',
+      'world_state_changes 只写局势、地点、势力、规则变化。',
+      'open_loops 只保留还没回收、后面必须回应的事。',
+      'continuity_notes 只写下章或后文不能漏掉的承接事项。',
+      '如果入站未回收事项或入站应回收伏笔在正文里没有明确解决、回收或说明延期原因，必须继续写入 open_loops 或 continuity_notes，不得因为正文没提到就删除。',
+      '如果章节衔接桥里的时间、地点、情绪、POV 或上章压力在正文里没有完全消化，也要保留为 continuity_notes 供后续修复。',
+      '每条尽量写成短句，具体、可复用。',
+    ].join('\n')),
+    section('语言要求', buildHumanLanguageRules([
+      '只保留清楚、可验证的事实，不写情绪化判断和抽象口号。',
+    ])),
+    '只输出 JSON。示例值只表示字段结构，实际输出必须写入当前章节的具体事实：{"plot_progress":[],"character_state_changes":[],"world_state_changes":[],"open_loops":[],"continuity_notes":[],"arc_progress":""}',
+  ])
+}
+
+export function chapterSummaryPrompt(chapterContent: string): string {
+  return renderPrompt([
+    '为这一章生成后续写作要用的结构化摘要。只写事实，不渲染气氛。',
+    section('章节内容', chapterContent),
+    section('上下文护栏', buildContextAlignmentRules({
+      taskFocus: '只总结具体事实、状态变化和下一章最自然的承接点。',
+    })),
+    section('输出质量底线', buildOutputQualityRules([
+      '不要把不确定的解读升级成硬事实。',
+    ])),
+    section('要求', [
+      'summary 控制在 150 到 200 字，写清楚发生了什么、涉及谁、造成了什么变化。',
+      '记录重要人物状态变化、关系变化、获得或失去的关键物件、局势变化。',
+      'next_chapter_seed 用 50 字以内写清下章最自然的承接点。',
+    ].join('\n')),
+    section('语言要求', buildHumanLanguageRules([
+      '摘要只写清楚事实和后果，不写悬浮的主题感悟。',
+    ])),
+    '只输出 JSON：{"summary":"...","next_chapter_seed":"..."}',
+  ])
+}
+
+export function aiCheckPrompt(text: string, truncated = false): string {
+  return renderPrompt([
+    '检查这段小说文字里的 AI 指纹，以及会让读者出戏的真实度或上下文问题。',
+    truncated
+      ? '【注意】以下文本因篇幅过长已做首尾采样，中间省略部分用“……”表示。请基于可见内容进行评估，不要对省略部分下结论。'
+      : '',
+    section('待检查文本', text),
+    section('真实度护栏', buildGenreRealityRules({
+      extraLines: ['同时标出上下文漂移、不合理恢复、不合理移动、不可能的资源结果，以及缺乏规则支撑的能力使用。'],
+    })),
+    section('检查重点', [
+      '1. 用破折号偷懒解释或做假揭示',
+      '2. 用引号抬高普通概念',
+      '3. 抽象口号压过具体场景材料',
+      '4. 硬造伪文艺句或模板抒情',
+      '5. 万能引子和套路肌体反应',
+      '6. 主谓宾逻辑断裂或对象类别错配',
+      '7. 伤病、断缺、秩序、距离或能力上限被零代价解决',
+    ].join('\n')),
+    section('输出规则', [
+      'score 和 ai_like_rate 都使用 0-100 数值；score 越高表示文本整体质量越好，ai_like_rate 越高表示 AI 味风险越高。',
+      'issues.location 最多引用原文 15 个字。',
+      'suggestion 必须是可直接执行的修改方向。',
+      'overall_feedback 用一句话概括最主要的问题。',
+      '如果发现“电网死亡”这类对象类别错配，要明确建议改成“电网瘫痪”“电力中断”“系统崩溃”这类精确说法。',
+    ].join('\n')),
+    '只输出 JSON：{"score":0,"issues":[{"type":"问题类型","location":"原文位置","suggestion":"具体修改方向","severity":"high/medium/low"}],"repetitions":["重复 1","重复 2"],"quote_abuse_count":0,"overall_feedback":"一句结论","ai_like_rate":0}',
+  ])
+}
+
+export function contentScoringPrompt(params: ContentScoringPromptInput): string {
+  return renderPrompt([
+    `从编辑和普通读者两种视角，评估下面这段【${params.contentType}】。`,
+    sectionLines('背景信息', [
+      `题材：${params.genreContext}`,
+      `故事背景：${params.novelBackground}`,
+    ]),
+    section('上下文护栏', buildContextAlignmentRules({
+      background: params.novelBackground,
+      taskFocus: '从当前背景和题材出发给文本打分，不要拿它去和一个虚构的“更好版本”比较。',
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: params.genreContext,
+      extraLines: ['把上下文贴合度、真实度贴合度和常识贴合度也纳入逻辑质量评价。'],
+    })),
+    section('待评价内容', params.content),
+    section('评分维度（每项1-10分）', [
+      '文笔质量：语言是否自然流畅，有无模板腔、翻译腔、对象类别错配。',
+      '逻辑连贯：因果链、人物动机、事件顺序是否自洽，有无前后矛盾。',
+      '节奏控制：叙事松紧是否有变化，是否存在匀速推进或拖沓。',
+      '情感深度：情绪是否落在具体行为和细节上，还是停在抽象标签。',
+      '人物塑造：角色行为是否贴合性格，对话是否有辨识度，成长是否可信。',
+      '世界一致：设定、规则、物品、能力是否前后一致，有无违规。',
+      '创新性：有没有明显套路感，是否有独特内容。',
+      '追读欲：读者是否愿意继续看下去，结尾是否有有效钩子。',
+    ].join('\n')),
+    section('补充分析', [
+      '给出 ai_like_rate（0-100，越低越好），重点看抽象大词、模板句、动作套路、概念包装、引号强调、伪哲学总结和对象类别错配。',
+      '所有建议必须基于当前文本本身，不得发明额外设定、专业指标、概率判断或跨领域概念。',
+      'top_fixes 只列最值得先改的 3 处，要具体、可操作，最好直接给出更自然的替换说法。',
+      'weak_dimensions 列出得分最低的 2 个维度名称，用于后续章节生成时作为重点改进方向。',
+    ].join('\n')),
+    '只输出 JSON：{"dimensions":[{"name":"文笔质量","score":0,"feedback":"","suggestion":""},{"name":"逻辑连贯","score":0,"feedback":"","suggestion":""},{"name":"节奏控制","score":0,"feedback":"","suggestion":""},{"name":"情感深度","score":0,"feedback":"","suggestion":""},{"name":"人物塑造","score":0,"feedback":"","suggestion":""},{"name":"世界一致","score":0,"feedback":"","suggestion":""},{"name":"创新性","score":0,"feedback":"","suggestion":""},{"name":"追读欲","score":0,"feedback":"","suggestion":""}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"","top_fixes":[],"weak_dimensions":[]}',
+  ])
+}

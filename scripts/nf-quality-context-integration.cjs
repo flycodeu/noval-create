@@ -20,15 +20,24 @@ const cases = new Map([
   ['NF-13', require('./nf-quality-context-cases/NF-13.cjs')],
   ['NF-14', require('./nf-quality-context-cases/NF-14.cjs')],
   ['NF-16', require('./nf-quality-context-cases/NF-16.cjs')],
+  ['NF-20', require('./nf-quality-context-cases/NF-20.cjs')],
 ])
 
-function parseCase(argv) {
+function parseOptions(argv) {
+  const options = { caseName: null, databaseMode: 'fresh' }
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
-    if (argument === '--case') return argv[index + 1] || null
-    if (argument.startsWith('--case=')) return argument.slice('--case='.length) || null
+    if (argument === '--case') options.caseName = argv[++index] || null
+    else if (argument.startsWith('--case=')) options.caseName = argument.slice('--case='.length) || null
+    else if (argument === '--database-mode') options.databaseMode = argv[++index] || ''
+    else if (argument.startsWith('--database-mode=')) options.databaseMode = argument.slice('--database-mode='.length)
   }
-  return null
+  if (!['fresh', 'upgrade'].includes(options.databaseMode)) {
+    const error = new Error(`NF_INVALID_DATABASE_MODE: ${options.databaseMode || '(missing)'}`)
+    error.exitCode = 2
+    throw error
+  }
+  return options
 }
 
 function describeRuntime() {
@@ -174,7 +183,7 @@ function printSummary(summary) {
   console.log(JSON.stringify(summary, null, 2))
 }
 
-async function runCase(caseName) {
+async function runCase(caseName, options = {}) {
   const selected = cases.get(caseName)
   if (!selected) {
     const error = new Error(`NF_UNKNOWN_CASE: ${caseName || '(missing)'}`)
@@ -195,20 +204,23 @@ async function runCase(caseName) {
     runMigrations,
     baselineRunMigrations,
     loadTypeScriptModule,
+    databaseMode: options.databaseMode,
   })
 }
 
 async function main() {
-  const caseName = parseCase(process.argv.slice(2))
   const { app } = require('electron')
   await app.whenReady()
 
   let exitCode = 0
+  let options = { caseName: null, databaseMode: 'fresh' }
   try {
-    const result = await runCase(caseName)
+    options = parseOptions(process.argv.slice(2))
+    const result = await runCase(options.caseName, options)
     printSummary({
       harness: 'nf-quality-context-integration',
-      case: caseName,
+      case: options.caseName,
+      databaseMode: options.databaseMode,
       status: 'PASS',
       runtime: describeRuntime(),
       head: getHead(),
@@ -222,7 +234,8 @@ async function main() {
     if (error instanceof Error && error.stack) console.error(error.stack)
     printSummary({
       harness: 'nf-quality-context-integration',
-      case: caseName,
+      case: options.caseName,
+      databaseMode: options.databaseMode,
       status: 'FAIL',
       runtime: describeRuntime(),
       head: getHead(),

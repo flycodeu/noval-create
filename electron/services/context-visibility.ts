@@ -8,6 +8,7 @@ import {
   type StoryFactKnowledgeProjection,
   type StoryFactKnowledgeRow,
 } from './knowledge-boundary.service'
+import { isDeterministicRecallSource } from './context-recall-core'
 
 export type ContextReadPurpose = 'writer' | 'planner' | 'review'
 export type ContextVisibilityChannel =
@@ -312,6 +313,17 @@ function findMentionedFacts(text: string, facts: ContextVisibilityFact[]): Conte
   return facts.filter((fact) => factNeedles(fact).some((needle) => text.includes(needle)))
 }
 
+function buildRecallVisibilitySourceKey(
+  source: ChapterContext['recalledMemorySources'][number],
+  index: number,
+): string {
+  if (isDeterministicRecallSource(source)) return source.sourceKey
+  if (source.sourceKind === 'chapter') {
+    return `recall:chapter:${source.chapterId || 0}:${source.fragmentType || 'unknown'}:${index}`
+  }
+  return `recall:asset:${source.semanticSourceType || 'unknown'}:${source.semanticSourceId || 0}:${index}`
+}
+
 function toPackSource(
   fact: ContextVisibilityFact,
   included: boolean,
@@ -364,7 +376,11 @@ export function filterChapterContextByVisibility(
     if (typeof text !== 'string' || !text.trim()) return
     const channel = FIELD_CHANNELS[field] || 'writer_override'
     const deniedMentions = findMentionedFacts(text, policy.deniedFacts)
-    const unclassified = UNCLASSIFIED_TEXT_FIELDS.has(field) && policy.deniedFacts.length > 0 && deniedMentions.length === 0
+    const allowedMentions = findMentionedFacts(text, policy.allowedFacts)
+    const unclassified = UNCLASSIFIED_TEXT_FIELDS.has(field)
+      && policy.deniedFacts.length > 0
+      && deniedMentions.length === 0
+      && allowedMentions.length === 0
     if (deniedMentions.length === 0 && !unclassified) {
       decisions.push({ sourceKey: `part:${field}`, channel, included: true, reason: 'visibility_allowed', factIds: [] })
       return
@@ -385,6 +401,52 @@ export function filterChapterContextByVisibility(
       factIds: deniedIds,
     })
   })
+
+  next.recalledMemorySources = context.recalledMemorySources.filter((source, index) => {
+    const deniedMentions = findMentionedFacts(source.summary, policy.deniedFacts)
+    const allowedMentions = findMentionedFacts(source.summary, policy.allowedFacts)
+    const unclassified = policy.deniedFacts.length > 0
+      && deniedMentions.length === 0
+      && allowedMentions.length === 0
+    if (deniedMentions.length === 0 && !unclassified) return true
+    const deniedIds = deniedMentions.map((fact) => fact.fact.id)
+    const unauthorizedIds = deniedIds.filter((id) => !authorizedRevealIds.has(id))
+    const sourceKey = buildRecallVisibilitySourceKey(source, index)
+    if (isDeterministicRecallSource(source) && source.required && (unauthorizedIds.length > 0 || unclassified)) {
+      requiredMissingSourceKeys.push(sourceKey)
+      unauthorizedIds.forEach((id) => requiredMissingFactIds.add(id))
+    }
+    decisions.push({
+      sourceKey,
+      channel: 'semantic_memory',
+      included: false,
+      reason: unclassified ? 'unclassified_visibility' : unauthorizedIds.length > 0 ? 'pov_forbidden_fact' : 'moved_to_reveal_instruction',
+      factIds: deniedIds,
+    })
+    return false
+  })
+
+  if (context.authorStyleMaterials) {
+    const authorStyleMaterials = { ...context.authorStyleMaterials }
+    ;([
+      ['targetWorkSampleGuide', 'authorStyle:guide'],
+      ['humanStyleSampleLock', 'authorStyle:sampleLock'],
+    ] as const).forEach(([field, sourceKey]) => {
+      const text = authorStyleMaterials[field]
+      const deniedMentions = findMentionedFacts(text, policy.deniedFacts)
+      if (deniedMentions.length === 0) return
+      authorStyleMaterials[field] = ''
+      const deniedIds = deniedMentions.map((fact) => fact.fact.id)
+      decisions.push({
+        sourceKey,
+        channel: 'writer_override',
+        included: false,
+        reason: deniedIds.some((id) => !authorizedRevealIds.has(id)) ? 'pov_forbidden_fact' : 'moved_to_reveal_instruction',
+        factIds: deniedIds,
+      })
+    })
+    next.authorStyleMaterials = authorStyleMaterials
+  }
 
   const keptHardEntries = context.hardConstraintEntries.filter((entry) => {
     const deniedMentions = findMentionedFacts(entry.content, policy.deniedFacts)

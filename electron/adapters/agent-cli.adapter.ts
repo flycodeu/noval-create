@@ -308,7 +308,7 @@ export class AgentCliAdapter extends BaseAdapter {
     return runAgentCli(
       buildAgentCliInvocation(this.provider, this.modelId),
       composeAgentPrompt(messages, opts?.systemPrompt),
-      opts,
+      { ...opts, requestObserver: this.resolveRequestObserver(opts?.requestObserver) },
     )
   }
 
@@ -316,7 +316,7 @@ export class AgentCliAdapter extends BaseAdapter {
     await runAgentCli(
       buildAgentCliInvocation(this.provider, this.modelId),
       composeAgentPrompt(messages, opts?.systemPrompt),
-      opts,
+      { ...opts, requestObserver: this.resolveRequestObserver(opts?.requestObserver) },
       opts?.onStream,
     )
   }

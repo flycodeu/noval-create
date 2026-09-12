@@ -2,7 +2,6 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
-  ChapterContextPreview,
   ChapterPublishCheck,
   ChapterSegment,
   Character,
@@ -20,9 +19,10 @@ import type {
   TimelineEvent,
 } from '../../../types'
 import type { AiExecutionMode } from '../../../shared/ai-execution'
-import { parseAiCheck, parseNumberArray, type AiCheckPayload, type WritingPipelineSnapshot } from './parsers'
+import { parseAiCheck, parseNumberArray, type AiCheckPayload } from './parsers'
 import type { TextSelectionSnapshot } from './useChapterEditor'
 import type { WritingActionError } from './useChapterGeneration'
+import { reduceWritingContextPreview, type WritingContextPreviewState } from './writing-state-ownership'
 
 type Setter<T> = Dispatch<SetStateAction<T>>
 type IsCurrent = () => boolean
@@ -44,23 +44,25 @@ interface ChapterRefreshState {
   setChapterSegments: Setter<ChapterSegment[]>
   setAiResult: Setter<AiCheckPayload | null>
   setForeshadowSnapshot: Setter<ForeshadowSnapshot | null>
-  setChapterContextPreview: Setter<ChapterContextPreview | null>
-  setChapterContextPreviewError: Setter<string | null>
-  setPublishCheck: Setter<ChapterPublishCheck | null>
+  setContextPreview: Setter<WritingContextPreviewState>
   setLatestPipelineTask: Setter<Task | null>
-  setLivePipelineSnapshot: Setter<WritingPipelineSnapshot | null>
-  setGateReportExpanded: Setter<boolean>
-  setSelectedSnippet: Setter<TextSelectionSnapshot | null>
-  setActionError: Setter<WritingActionError | null>
   setCurrentChapter: Setter<Chapter | null>
 }
 
-interface UseWritingWorkspaceRefreshControllerInput extends WorkspaceRefreshState, ChapterRefreshState {
+export interface WritingWorkspaceRefreshOperations {
+  setPublishCheck: Setter<ChapterPublishCheck | null>
+  setSelectedSnippet: Setter<TextSelectionSnapshot | null>
+  setActionError: Setter<WritingActionError | null>
+  resetChapterReview(): void
   novelId: number
   creativeStageId: number | null
   effectiveAiExecutionMode: AiExecutionMode
   preserveConstraintLabels: HardConstraintSourceLabel[]
   loadEditorContent(text: string): void
+}
+
+interface UseWritingWorkspaceRefreshControllerInput extends WorkspaceRefreshState, ChapterRefreshState, WritingWorkspaceRefreshOperations {
+  captureChapterSelection(chapterId: number | null): IsCurrent
 }
 
 function useWorkspaceMetadataRefreshes(input: UseWritingWorkspaceRefreshControllerInput) {
@@ -120,12 +122,12 @@ function useWorkspaceMetadataRefreshes(input: UseWritingWorkspaceRefreshControll
 
 function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControllerInput) {
   const {
+    captureChapterSelection,
     creativeStageId,
     effectiveAiExecutionMode,
     novelId,
     preserveConstraintLabels,
-    setChapterContextPreview,
-    setChapterContextPreviewError,
+    setContextPreview,
     setCurrentChapter,
     setForeshadowSnapshot,
     setLatestPipelineTask,
@@ -133,7 +135,7 @@ function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControl
     setStoryItems,
     setTimelineEvents,
   } = input
-  const refreshForeshadowSnapshot = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = () => true) => {
+  const refreshForeshadowSnapshot = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = captureChapterSelection(chapter?.id ?? null)) => {
     if (!chapter) {
       if (isCurrent()) setForeshadowSnapshot(null)
       return
@@ -145,8 +147,8 @@ function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControl
       console.error('Failed to load foreshadow snapshot', error)
       if (isCurrent()) setForeshadowSnapshot(null)
     }
-  }, [novelId, setForeshadowSnapshot])
-  const refreshChapterLinks = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = () => true) => {
+  }, [captureChapterSelection, novelId, setForeshadowSnapshot])
+  const refreshChapterLinks = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = captureChapterSelection(chapter?.id ?? null)) => {
     if (!chapter) {
       if (isCurrent()) {
         setTimelineEvents([])
@@ -167,16 +169,15 @@ function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControl
     if (!isCurrent()) return
     setTimelineEvents(events.items)
     setStoryItems(items.filter((item): item is StoryItem => Boolean(item)))
-  }, [novelId, setStoryItems, setTimelineEvents])
-  const refreshChapterContextPreview = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = () => true) => {
+  }, [captureChapterSelection, novelId, setStoryItems, setTimelineEvents])
+  const refreshChapterContextPreview = useCallback(async (chapter?: Chapter | null, isCurrent: IsCurrent = captureChapterSelection(chapter?.id ?? null)) => {
     if (!chapter) {
       if (isCurrent()) {
-        setChapterContextPreview(null)
-        setChapterContextPreviewError(null)
+        setContextPreview((state) => reduceWritingContextPreview(state, { type: 'clear' }))
       }
       return
     }
-    if (isCurrent()) setChapterContextPreviewError(null)
+    if (isCurrent()) setContextPreview((state) => reduceWritingContextPreview(state, { type: 'start' }))
     try {
       const preview = await window.electron.chapter.getContextPreview(chapter.id, {
         executionMode: effectiveAiExecutionMode,
@@ -184,25 +185,23 @@ function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControl
         stageId: creativeStageId || undefined,
       })
       if (isCurrent()) {
-        setChapterContextPreview(preview)
-        setChapterContextPreviewError(null)
+        setContextPreview((state) => reduceWritingContextPreview(state, { type: 'success', preview }))
       }
     } catch (error) {
       if (isCurrent()) {
-        setChapterContextPreview(null)
-        setChapterContextPreviewError(getErrorMessage(error, 'common.loadFailed'))
+        setContextPreview((state) => reduceWritingContextPreview(state, { type: 'failure', error: getErrorMessage(error, 'common.loadFailed') }))
       }
     }
-  }, [creativeStageId, effectiveAiExecutionMode, preserveConstraintLabels, setChapterContextPreview, setChapterContextPreviewError])
-  const refreshPublishCheck = useCallback(async (chapterId: number, isCurrent: IsCurrent = () => true) => {
+  }, [captureChapterSelection, creativeStageId, effectiveAiExecutionMode, preserveConstraintLabels, setContextPreview])
+  const refreshPublishCheck = useCallback(async (chapterId: number, isCurrent: IsCurrent = captureChapterSelection(chapterId)) => {
     const nextCheck = await window.electron.chapter.runPublishCheck(chapterId)
     if (!isCurrent()) return
     setPublishCheck(nextCheck)
     setCurrentChapter((current) => current?.id === chapterId
       ? { ...current, contractAuditJson: JSON.stringify(nextCheck.contractAudit) }
       : current)
-  }, [setCurrentChapter, setPublishCheck])
-  const refreshLatestPipelineTask = useCallback(async (chapterId?: number, isCurrent: IsCurrent = () => true) => {
+  }, [captureChapterSelection, setCurrentChapter, setPublishCheck])
+  const refreshLatestPipelineTask = useCallback(async (chapterId?: number, isCurrent: IsCurrent = captureChapterSelection(chapterId ?? null)) => {
     if (!chapterId) {
       if (isCurrent()) setLatestPipelineTask(null)
       return
@@ -213,7 +212,7 @@ function useChapterLinkedAssetRefreshes(input: UseWritingWorkspaceRefreshControl
     } catch {
       if (isCurrent()) setLatestPipelineTask(null)
     }
-  }, [setLatestPipelineTask])
+  }, [captureChapterSelection, setLatestPipelineTask])
   return { refreshChapterContextPreview, refreshChapterLinks, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck }
 }
 
@@ -226,14 +225,11 @@ function useWorkspaceLoadLifecycle(
     loadEditorContent,
     setActionError,
     setAiResult,
-    setChapterContextPreview,
-    setChapterContextPreviewError,
+    setContextPreview,
     setChapterSegments,
     setForeshadowSnapshot,
-    setGateReportExpanded,
+    resetChapterReview,
     setLatestPipelineTask,
-    setLivePipelineSnapshot,
-    setPublishCheck,
     setSelectedSnippet,
     setStoryItems,
     setTimelineEvents,
@@ -246,17 +242,13 @@ function useWorkspaceLoadLifecycle(
     setChapterSegments([])
     setAiResult(null)
     setForeshadowSnapshot(null)
-    setChapterContextPreview(null)
-    setChapterContextPreviewError(null)
-    setPublishCheck(null)
-    setGateReportExpanded(false)
+    setContextPreview((state) => reduceWritingContextPreview(state, { type: 'clear' }))
+    resetChapterReview()
+    setLatestPipelineTask(null)
     setSelectedSnippet(null)
     setActionError(null)
-  }, [setActionError, setAiResult, setChapterContextPreview, setChapterContextPreviewError, setChapterSegments, setForeshadowSnapshot, setGateReportExpanded, setPublishCheck, setSelectedSnippet, setStoryItems, setTimelineEvents])
-  const beforeWorkspaceChapterLoad = useCallback(() => {
-    clearChapterArtifacts()
-    setLivePipelineSnapshot(null)
-  }, [clearChapterArtifacts, setLivePipelineSnapshot])
+  }, [setActionError, setAiResult, setContextPreview, setChapterSegments, setForeshadowSnapshot, resetChapterReview, setLatestPipelineTask, setSelectedSnippet, setStoryItems, setTimelineEvents])
+  const beforeWorkspaceChapterLoad = clearChapterArtifacts
   const handleWorkspaceChapterLoaded = useCallback(async (chapter: Chapter, segments: ChapterSegment[], isCurrent: IsCurrent) => {
     if (!isCurrent()) return
     setChapterSegments(segments)
@@ -274,16 +266,10 @@ function useWorkspaceLoadLifecycle(
     if (!isCurrent()) return
   }, [loadEditorContent, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck, setAiResult, setChapterSegments])
   const handleEmptyWorkspace = useCallback(() => {
+    clearChapterArtifacts()
     loadEditorContent('')
-    setPublishCheck(null)
-    setLatestPipelineTask(null)
-    setLivePipelineSnapshot(null)
-    setChapterSegments([])
-    setTimelineEvents([])
-    setStoryItems([])
-    setForeshadowSnapshot(null)
     void refreshContextStatus().catch(console.error)
-  }, [loadEditorContent, refreshContextStatus, setChapterSegments, setForeshadowSnapshot, setLatestPipelineTask, setLivePipelineSnapshot, setPublishCheck, setStoryItems, setTimelineEvents])
+  }, [clearChapterArtifacts, loadEditorContent, refreshContextStatus])
   const refreshWorkspaceMetadata = useCallback(async () => {
     const results = await Promise.allSettled([
       refreshMeta(),

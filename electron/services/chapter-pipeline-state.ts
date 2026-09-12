@@ -110,6 +110,23 @@ export interface ChapterPipelineRetryPlan {
   shouldRun: Record<ChapterPipelineRole, boolean>
 }
 
+/** Carry the downstream checkpoint back to its continuation wrapper without changing task identity. */
+export function inheritChapterPipelineRecoveryState(
+  current: ChapterPipelineSnapshot,
+  downstream: Partial<ChapterPipelineSnapshot> | null,
+): ChapterPipelineSnapshot {
+  if (!downstream || downstream.chapterId !== current.chapterId) return current
+  return {
+    ...current,
+    revisionBudget: downstream.revisionBudget ?? current.revisionBudget,
+    baseContentHash: downstream.baseContentHash ?? current.baseContentHash,
+    baseContextVersion: downstream.baseContextVersion ?? current.baseContextVersion,
+    contractVersion: downstream.contractVersion ?? current.contractVersion,
+    contextPacks: downstream.contextPacks ?? current.contextPacks,
+    partialContent: downstream.partialContent?.trim() || current.partialContent,
+  }
+}
+
 export interface ChapterPipelineResumeRetryMetadata {
   retryNodeRole: ChapterPipelineRole
   retrySourceNodeRunId?: number

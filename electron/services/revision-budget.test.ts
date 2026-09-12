@@ -7,9 +7,33 @@ import {
   RevisionBudgetError,
   releaseUnstartedRevisionAttempt,
   reserveRevisionAttempt,
+  restoreRevisionBudget,
 } from './revision-budget'
 
 describe('revision budget', () => {
+  it.each([
+    { id: 'old' },
+    { id: 'old', used: '2', limit: 2 },
+    { id: 'old', used: 0, limit: 0 },
+  ])('does not grant quota from malformed saved usage: %j', (revisionBudget) => {
+    const restored = restoreRevisionBudget('resume', { revisionBudget })
+    expect(restored.reliable).toBe(false)
+    expect(restored.budget.used).toBe(restored.budget.limit)
+  })
+
+  it('keeps logical quota and attempt keys ahead of legacy task counts', () => {
+    const saved = createRevisionBudget('original-run', 2, 2, ['repair:1', 'repair:2'])
+    expect(restoreRevisionBudget('new-run', { revisionBudget: saved }, [{ taskId: 9 }]).budget).toEqual(saved)
+  })
+
+  it('recovers old task evidence but never grants fresh quota for unknown history', () => {
+    expect(restoreRevisionBudget('old-run', {}, [{ taskId: 8 }])).toMatchObject({ reliable: true, budget: { used: 1 } })
+    const unknown = restoreRevisionBudget('old-run', {})
+    expect(unknown).toMatchObject({ reliable: false, budget: { used: 2, limit: 2 } })
+    const restoredAgain = restoreRevisionBudget('another-run', { revisionBudget: unknown.budget })
+    expect(new RevisionBudgetController(restoredAgain.budget).tryReserve('repair:1')).toBeNull()
+  })
+
   it('atomically reserves at most two logical content attempts', () => {
     let budget = createRevisionBudget('chapter:1')
     budget = reserveRevisionAttempt(budget, 'rewriter:1').budget

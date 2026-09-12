@@ -24,6 +24,7 @@ export class ContextCompilerStaleError extends Error {
 }
 
 export function resolveContextCompilerMode(value = process.env.NOVELFORGE_CONTEXT_COMPILER_MODE): ContextCompilerMode {
+  if (value === undefined) return 'legacy'
   return value === 'shadow' || value === 'active' ? value : 'legacy'
 }
 
@@ -73,16 +74,13 @@ export function buildChapterContextSources(input: {
   const sourceVersion = `${rawContext.novel.contextVersion || 1}:${context.contractVersionSummary || ''}`
   const visibility = STAGE_VISIBILITY[stage]
   const sources: ContextPackSource[] = []
-  const recallVisibilityDenied = context.visibilityReport?.decisions.some((decision) => (
-    decision.sourceKey === 'part:recalledMemory' && !decision.included
-  )) === true
-  const selectedRecallSources = recallVisibilityDenied
-    ? []
-    : (rawContext.recalledMemorySources || [])
-        .filter((source) => isAcceptedRecallSource(source))
-        .filter((source) => (
-          isDeterministicRecallSource(source) && source.required
-        ) || Boolean(context.recalledMemory && context.recalledMemory.includes(source.summary)))
+  const selectedRecallSources = (context.visibilityReport
+    ? context.recalledMemorySources || []
+    : rawContext.recalledMemorySources || [])
+    .filter((source) => isAcceptedRecallSource(source))
+    .filter((source) => (
+      isDeterministicRecallSource(source) && source.required
+    ) || Boolean(context.recalledMemory && context.recalledMemory.includes(source.summary)))
   const useGranularRecallSources = selectedRecallSources.some(isDeterministicRecallSource)
   context.hardConstraintEntries.forEach((entry) => addSource(sources, {
     key: `hard:${entry.label}`,
@@ -130,18 +128,20 @@ export function buildChapterContextSources(input: {
   }
   for (const [key, value] of Object.entries(upstreamArtifacts)) {
     if (typeof value !== 'string' || !value.trim()) continue
+    const filteredValue = context.visibilityReport ? context[key as keyof ChapterContext] : value
+    if (typeof filteredValue !== 'string' || !filteredValue.trim()) continue
     addSource(sources, {
       key: `artifact:${key}`,
       sourceKind: 'artifact',
       sourceId: key,
       sourceVersion,
       visibility,
-      text: value,
+      text: filteredValue,
       required: false,
       reason: 'upstream_artifact',
     })
   }
-  const authorStyle = rawContext.authorStyleMaterials
+  const authorStyle = context.visibilityReport ? context.authorStyleMaterials : rawContext.authorStyleMaterials
   if (authorStyle?.targetWorkSampleGuide?.trim()) addSource(sources, {
     key: 'authorStyle:guide',
     sourceKind: 'author_style_material',

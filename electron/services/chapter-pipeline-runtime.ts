@@ -567,6 +567,18 @@ export interface ChapterPipelineRuntimeBindings {
   failRole(role: ChapterPipelineRole, taskId: number | undefined, error: unknown, options?: { blocked?: boolean }): never
 }
 
+function resolveFailedWriterCandidate(role: ChapterPipelineRole, latestDraft: string, error: unknown): string | undefined {
+  if (role !== 'writer') return undefined
+  if (latestDraft.trim()) return latestDraft
+  if (error && typeof error === 'object' && 'code' in error
+    && error.code === 'NF_MODEL_OUTPUT_INCOMPLETE'
+    && 'outputText' in error && typeof error.outputText === 'string'
+    && error.outputText.trim()) {
+    return error.outputText
+  }
+  return undefined
+}
+
 export function createChapterPipelineRuntimeBindings(input: {
   runtime: ChapterPipelineRuntime
   chapter: { novelId: number; reviewNotesJson?: string | null }
@@ -631,6 +643,16 @@ export function createChapterPipelineRuntimeBindings(input: {
     input.setSnapshot(input.runtime.checkpointContent({ persistedContent: usableDraft, resumableContent }))
     return true
   }
+  const preserveWriterCandidateSnapshot = (role: ChapterPipelineRole, taskId: number | undefined, error: unknown) => {
+    const candidate = resolveFailedWriterCandidate(role, input.getLatestUsableDraft(), error)
+    if (candidate === undefined) return
+    // Retain the candidate independently of chapter writes; recovery must still check the original CAS base.
+    input.setSnapshot({
+      ...input.getSnapshot(),
+      partialContent: candidate,
+      resumeSourceTaskId: taskId,
+    })
+  }
 
   return {
     shouldRun: (role) => input.runtime.shouldRun(role),
@@ -653,6 +675,7 @@ export function createChapterPipelineRuntimeBindings(input: {
       input.setSnapshot(input.runtime.snapshot)
     },
     failRole: (role, taskId, error, options = {}): never => {
+      preserveWriterCandidateSnapshot(role, taskId, error)
       input.runtime.adoptSnapshot(input.getSnapshot())
       const aborted = input.runtime.isAbort(error, taskId)
       const detail = error instanceof Error ? error.message : `${getChapterPipelineRoleLabel(role)} 执行失败`

@@ -1,6 +1,7 @@
 import { safeStorage } from 'electron'
 import CryptoJS from 'crypto-js'
 import { getDb } from '../database/db'
+import { createModelAttemptLedgerSink } from './model-attempt-ledger.service'
 import { modelConfigs } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { BaseAdapter, type ChatOptions } from '../adapters/base.adapter'
@@ -189,7 +190,11 @@ export function decryptApiKey(encrypted: string): string {
   return result
 }
 
-export function createAdapter(config: {
+export function createAdapter(config: Parameters<typeof createProviderAdapter>[0]): BaseAdapter {
+  return createProviderAdapter(config).setDefaultRequestObserver(createModelAttemptLedgerSink({}))
+}
+
+function createProviderAdapter(config: {
   provider: string
   modelId: string
   apiKey?: string | null

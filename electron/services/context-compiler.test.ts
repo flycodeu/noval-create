@@ -32,16 +32,21 @@ describe('context compiler source mapping', () => {
     expect(sources.every((source) => Number.isFinite(source.estimatedTokens))).toBe(true)
   })
 
-  it('11-05/11-06: defaults to legacy and restores a saved pack without rebuilding changed source text', async () => {
+  it('11-05/11-06/NF-20: defaults to legacy while explicit active remains opt-in and legacy restores a saved pack', async () => {
     const { rawContext, context } = compilerFixture()
     expect(resolveContextCompilerMode(undefined)).toBe('legacy')
-    const first = await compileChapterContextPack({ rawContext, context, stage: 'draft', modelProfile: 'balanced' })
+    expect(resolveContextCompilerMode('active')).toBe('active')
+    expect(resolveContextCompilerMode('shadow')).toBe('shadow')
+    expect(resolveContextCompilerMode('legacy')).toBe('legacy')
+    expect(resolveContextCompilerMode('invalid')).toBe('legacy')
+    const first = await compileChapterContextPack({ rawContext, context, stage: 'draft', modelProfile: 'balanced', mode: 'active' })
     const changedContext = { ...context, characterStates: '当前数据库已变化' }
     const restored = await compileChapterContextPack({
       rawContext,
       context: changedContext,
       stage: 'draft',
       modelProfile: 'balanced',
+      mode: 'legacy',
       restoredPack: first.pack,
     })
     expect(restored.pack).toEqual(first.pack)
@@ -101,9 +106,9 @@ describe('context compiler source mapping', () => {
     expect(sources.some((source) => source.key === 'part:recalledMemory')).toBe(false)
   })
 
-  it('13-06: does not restore a raw required recall source rejected by NF-12 visibility', () => {
+  it('13-06: keeps only per-source allowed recalls when the mixed recalledMemory text is rejected', () => {
     const { rawContext, context } = compilerFixture()
-    rawContext.recalledMemorySources = [{
+    const rejectedSource = {
       deterministic: true,
       sourceKey: 'contract:foreshadow:91',
       sourceVersion: 'v1:secret',
@@ -125,8 +130,21 @@ describe('context compiler source mapping', () => {
       overriddenByConstraint: false,
       entityMatches: [],
       entityValidated: true,
-    }] as never
+    } as const
+    const allowedSource = {
+      ...rejectedSource,
+      sourceKey: 'asset:item:20',
+      sourceVersion: 'v1:allowed',
+      optionalKind: 'item',
+      semanticSourceType: 'item',
+      semanticSourceId: 20,
+      fragmentType: 'contract_item',
+      sourceLabel: '物品#20',
+      summary: '合同物品：旧怀表',
+    } as const
+    rawContext.recalledMemorySources = [rejectedSource, allowedSource] as never
     context.recalledMemory = ''
+    context.recalledMemorySources = [allowedSource] as never
     context.visibilityReport = {
       decisions: [{ sourceKey: 'part:recalledMemory', included: false }],
       sources: [],
@@ -134,5 +152,8 @@ describe('context compiler source mapping', () => {
 
     const sources = buildChapterContextSources({ rawContext, context, stage: 'draft' })
     expect(sources.some((source) => source.key === 'contract:foreshadow:91')).toBe(false)
+    expect(sources.filter((source) => source.key === 'asset:item:20')).toEqual([
+      expect.objectContaining({ required: true, sourceVersion: 'v1:allowed' }),
+    ])
   })
 })

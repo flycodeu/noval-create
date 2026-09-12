@@ -1,48 +1,63 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { getErrorMessage } from '@/utils/user-facing-message'
-import type { Dispatch, SetStateAction } from 'react'
-import type { Chapter, ChapterSegment } from '../../../types'
+import type { Chapter, ChapterSegment, Task, Character, ForeshadowLedgerEntry, ForeshadowSnapshot, NovelConsistencyReport, NovelContextStatus, QualityDashboardData, StoryFact, StoryItem, StoryMemorySnapshot, StoryVolume, TimelineEvent } from '../../../types'
+import type { AiCheckPayload } from './parsers'
+import { useWritingWorkspaceRefreshController, type WritingWorkspaceRefreshOperations } from './useWritingWorkspaceRefreshController'
+import type { WritingContextPreviewState } from './writing-state-ownership'
 import { useNovelStore } from '../../../stores/novel.store'
 import { createWritingWorkspaceRequestTracker } from './writing-workspace-requests'
 
-interface UseWritingWorkspaceDataOptions {
-  novelId: number
+interface UseWritingWorkspaceDataOptions extends WritingWorkspaceRefreshOperations {
   routeChapterId: number | null
-  currentChapter: Chapter | null
-  setCurrentChapter: Dispatch<SetStateAction<Chapter | null>>
-  beforeChapterLoad(): void
-  onChapterLoaded(chapter: Chapter, segments: ChapterSegment[], isCurrent: () => boolean): Promise<void>
-  onEmptyWorkspace(): void
-  refreshWorkspaceMetadata(): Promise<void>
   shouldPreserveEditorContent?(): boolean
 }
 
 export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions) {
+  const { novelId, routeChapterId, shouldPreserveEditorContent } = options
+  const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
+  const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
+  const [storyMemory, setStoryMemory] = useState<StoryMemorySnapshot | null>(null)
+  const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot | null>(null)
+  const [foreshadowLedger, setForeshadowLedger] = useState<ForeshadowLedgerEntry[]>([])
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
+  const [storyItems, setStoryItems] = useState<StoryItem[]>([])
+  const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
+  const [storyFacts, setStoryFacts] = useState<StoryFact[]>([])
+  const [storyVolumes, setStoryVolumes] = useState<StoryVolume[]>([])
+  const [chapterCharacters, setChapterCharacters] = useState<Character[]>([])
+  const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
+  const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
+  const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
+  const [contextPreview, setContextPreview] = useState<WritingContextPreviewState>({ preview: null, error: null })
+  const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
+  const trackerRef = useRef(createWritingWorkspaceRequestTracker())
+  const tracker = trackerRef.current
+  const workspaceRefresh = useWritingWorkspaceRefreshController({
+    ...options,
+    captureChapterSelection: tracker.captureChapterSelection,
+    setCurrentChapter, setConsistencyReport, setStoryMemory, setQualityDashboard,
+    setStoryFacts, setStoryVolumes, setChapterCharacters, setForeshadowLedger, setContextStatus,
+    setTimelineEvents, setStoryItems, setChapterSegments, setAiResult, setForeshadowSnapshot,
+    setContextPreview, setLatestPipelineTask,
+  })
   const {
-    novelId,
-    routeChapterId,
-    currentChapter,
-    setCurrentChapter,
-    beforeChapterLoad,
-    onChapterLoaded,
-    onEmptyWorkspace,
+    beforeWorkspaceChapterLoad: beforeChapterLoad,
+    handleWorkspaceChapterLoaded: onChapterLoaded,
+    handleEmptyWorkspace: onEmptyWorkspace,
     refreshWorkspaceMetadata,
-    shouldPreserveEditorContent,
-  } = options
+  } = workspaceRefresh
   const chapters = useNovelStore((state) => state.chapters)
   const currentChapterId = useNovelStore((state) => state.currentChapterId)
   const setChapters = useNovelStore((state) => state.setChapters)
   const setCurrentChapterId = useNovelStore((state) => state.setCurrentChapterId)
   const updateChapter = useNovelStore((state) => state.updateChapter)
-  const trackerRef = useRef(createWritingWorkspaceRequestTracker())
   const routeChapterFocusRef = useRef<number | null>(null)
   const routeChapterRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const initializedRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const tracker = trackerRef.current
 
   useEffect(() => {
     tracker.syncCurrentChapterId(currentChapterId)
@@ -175,6 +190,13 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
   }, [loadChapters, routeChapterId])
 
   return {
+    ...workspaceRefresh,
+    setCurrentChapter, consistencyReport, storyMemory, qualityDashboard, contextStatus,
+    storyFacts, storyVolumes, chapterCharacters, foreshadowLedger, setForeshadowLedger,
+    timelineEvents, storyItems, chapterSegments, aiResult, setAiResult, foreshadowSnapshot,
+    chapterContextPreview: contextPreview.preview,
+    chapterContextPreviewError: contextPreview.error,
+    latestPipelineTask,
     chapters,
     currentChapter,
     currentChapterId,

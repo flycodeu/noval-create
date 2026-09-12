@@ -1,6 +1,7 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { buildHttpError, executeManagedRequest, type ManagedRequestResult } from './request-support'
+import { buildHttpError, buildIncompleteStreamError, executeManagedRequest, type ManagedRequestResult } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
+import { normalizeAliyunCompletion } from '../../src/shared/model-call-telemetry'
 
 export class AliyunAdapter extends BaseAdapter {
   id = 'aliyun'
@@ -33,7 +34,9 @@ export class AliyunAdapter extends BaseAdapter {
       const data = await request.value.json() as Record<string, any>
       if (data.code) throw new Error(`通义错误: ${data.message}`)
       const result = data.output?.text || data.output?.choices?.[0]?.message?.content || ''
-      request.succeed()
+      const completion = normalizeAliyunCompletion(data)
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
       return result
     } catch (error) {
       request.fail(error)
@@ -44,10 +47,15 @@ export class AliyunAdapter extends BaseAdapter {
   async stream(messages: Message[], opts?: ChatOptions): Promise<void> {
     const request = await this.requestGeneration(this.buildBody(messages, opts, true), opts, true)
     let previousContent = ''
+    let latestUsage: unknown
+    let latestOutput: unknown
 
     try {
       await consumeSseStream(request.value, async ({ data, event }) => {
         const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+        if (parsed?.code) throw new Error(`通义错误: ${parsed.message}`)
+        if (parsed?.usage) latestUsage = parsed.usage
+        if (parsed?.output) latestOutput = parsed.output
         const fullContent = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text || ''
         const delta = extractAccumulatedDelta(previousContent, fullContent)
         if (delta) {
@@ -57,9 +65,12 @@ export class AliyunAdapter extends BaseAdapter {
           previousContent = fullContent
         }
       }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
-      request.succeed()
+      const completion = normalizeAliyunCompletion({ usage: latestUsage, output: latestOutput })
+      if (!completion.rawFinishReason || completion.rawFinishReason === 'null') throw buildIncompleteStreamError(this.provider)
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
     } catch (error) {
-      request.fail(error)
+      request.fail(error, normalizeAliyunCompletion({ usage: latestUsage, output: latestOutput }))
       throw error
     }
   }
@@ -73,7 +84,7 @@ export class AliyunAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: this.modelId,
       kind: stream ? 'stream' : 'chat',
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,

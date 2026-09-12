@@ -5,7 +5,8 @@ vi.mock('./prompt-override.service', () => ({
 }))
 import { compileContextPack } from '../../src/shared/context-pack'
 import { buildChapterWriterMessages } from './chapter-pipeline-writer'
-import type { ChapterContext } from './context.service'
+import { buildChapterContextSources } from './context-compiler'
+import type { ChapterContext, ChapterContextRawData } from './context.service'
 import {
   buildContextVisibilityPolicy,
   filterChapterContextByVisibility,
@@ -89,6 +90,67 @@ describe('context visibility', () => {
     expect(filtered.visibilityReport?.decisions.filter((item) => !item.included).map((item) => item.channel)).toEqual(
       expect.arrayContaining(['entity_world', 'checkpoint', 'previous_excerpt', 'semantic_memory', 'writer_override']),
     )
+  })
+
+  it('12-02: cannot restore forbidden text through raw recall, upstream artifact, or author-style source metadata', () => {
+    const secretText = '账册藏在药箱'
+    const secret = fact(2, secretText, { ...emptyProjection, readerKnownChapterNum: 3 })
+    const recalledMemorySources = [{
+      deterministic: true,
+      sourceKey: 'contract:thread:91',
+      sourceVersion: 'v1:secret',
+      required: true,
+      reason: 'explicit_contract',
+      optionalKind: 'thread',
+      dueChapter: null,
+      sourceKind: 'semantic_asset',
+      semanticSourceType: 'story_thread',
+      semanticSourceId: 91,
+      bucket: 'thread',
+      fragmentType: 'contract_thread',
+      similarity: 1,
+      searchMode: 'keyword',
+      sourceLabel: '线程#91',
+      summary: secretText,
+      stale: false,
+      staleReasons: [],
+      overriddenByConstraint: false,
+      entityMatches: [],
+      entityValidated: true,
+    }] as unknown as ChapterContext['recalledMemorySources']
+    const filtered = filterChapterContextByVisibility(context({
+      scenePlanSummary: `原始计划：${secretText}`,
+      recalledMemorySources,
+      authorStyleMaterials: {
+        targetWorkSampleGuide: `模仿样例：${secretText}`,
+        humanStyleSampleLock: '',
+      },
+    }), buildContextVisibilityPolicy(input({ facts: [secret] })))
+    const rawContext = {
+      novel: { id: 1, contextVersion: 1 },
+      currentChapter: { id: 20, chapterNum: 20 },
+      recalledMemorySources,
+      authorStyleMaterials: {
+        targetWorkSampleGuide: `模仿样例：${secretText}`,
+        humanStyleSampleLock: '',
+      },
+    } as unknown as ChapterContextRawData
+    const sources = buildChapterContextSources({
+      rawContext,
+      context: filtered,
+      stage: 'draft',
+      upstreamArtifacts: { scenePlanSummary: `原始计划：${secretText}` },
+    })
+
+    expect(filtered.recalledMemorySources).toEqual([])
+    expect(filtered.authorStyleMaterials?.targetWorkSampleGuide).toBe('')
+    expect(writerMessage(filtered)).not.toContain(secretText)
+    expect(JSON.stringify(sources)).not.toContain(secretText)
+    expect(filtered.visibilityReport?.requiredMissingSourceKeys).toContain('contract:thread:91')
+    expect(filtered.visibilityReport?.decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceKey: 'contract:thread:91', included: false }),
+      expect.objectContaining({ sourceKey: 'authorStyle:guide', included: false }),
+    ]))
   })
 
   it('12-03/12-04: emits only a confirmed scene-bound reveal and ignores planned chapter metadata alone', () => {

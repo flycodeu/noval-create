@@ -430,12 +430,9 @@ export function derivePublishQualityGateStatuses(input: {
     + reviewState.dialogueFillerRisks.length
     + reviewState.dialogueInfoDensityRisks.length
     + (reviewState.dialogueVoiceLockSummary ? 1 : 0)
-  const dialogueVoiceStatus = degrade('dialogue_voice', dialogueSignalCount >= 3
-    || (reviewState.dialogueDriftAlerts.length > 0
-      && reviewState.crossCharacterSimilarity.length > 0
-      && reviewState.severity === 'high')
-    ? 'blocker'
-    : dialogueSignalCount > 0 ? 'warning' : 'pass')
+  // Aggregate style statistics are advice. Evidence-backed issues and explicit
+  // contracts are evaluated separately and retain their repair/blocker level.
+  const dialogueVoiceStatus: ChapterGateLevel = dialogueSignalCount > 0 ? 'warning' : 'pass'
   const povPurityStatus: ChapterGateLevel = fixedNovelPov && uniqueScenePovs.length > 1
     ? 'rewrite'
     : missingScenePovs.length > 0
@@ -449,12 +446,16 @@ export function derivePublishQualityGateStatuses(input: {
     dialogueVoiceStatus,
     povPurityStatus,
     povBoundaryStatus,
-    sensoryCoverageStatus: degrade('sensory_coverage', narrativeControlReport.sensory.status),
-    narrativeRatioStatus: degrade('narrative_ratio', narrativeControlReport.narrativeRatio.status),
-    transitionDensityStatus: degrade('transition_density', narrativeControlReport.transitionDensity.status),
-    emotionFocusStatus: degrade('emotion_focus', narrativeControlReport.emotionFocus.status),
-    expositionStatus: degrade('world_exposition', narrativeControlReport.exposition.status),
+    sensoryCoverageStatus: advisoryGateStatus(narrativeControlReport.sensory.status),
+    narrativeRatioStatus: advisoryGateStatus(narrativeControlReport.narrativeRatio.status),
+    transitionDensityStatus: advisoryGateStatus(narrativeControlReport.transitionDensity.status),
+    emotionFocusStatus: advisoryGateStatus(narrativeControlReport.emotionFocus.status),
+    expositionStatus: advisoryGateStatus(narrativeControlReport.exposition.status),
   }
+}
+
+function advisoryGateStatus(status: ChapterGateLevel): ChapterGateLevel {
+  return status === 'pass' ? 'pass' : 'warning'
 }
 
 export function derivePublishStoryGateStatuses(input: {

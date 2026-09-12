@@ -505,7 +505,7 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.find((item) => item.key === 'pov_boundary')?.status).toBe('rewrite')
   })
 
-  it('returns rewrite when chapter falls into all-dialogue ratio drift', () => {
+  it('keeps dialogue ratio as advice while preserving the missing contract blocker', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {
       content: '“你来了？”“我来了。”“现在怎么办？”“先等。”\n“别说话。”“那你倒是给个主意。”“没有主意。”“那就继续等。”',
@@ -516,11 +516,11 @@ describe('runChapterPublishCheck', () => {
 
     const result = runChapterPublishCheck(10)
 
-    expect(result.gateLevel).toBe('rewrite')
-    expect(result.checklist.find((item) => item.key === 'narrative_ratio')?.status).toBe('rewrite')
-    expect(result.rewritePlan?.scope).toBe('paragraph_patch')
-    expect(result.rewritePlan?.recheckItems).toContain('narrative_ratio')
-    expect(result.scoreBreakdown.narrativeRatioScore).toBeLessThanOrEqual(49)
+    expect(result.gateLevel).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'narrative_ratio')?.status).toBe('warning')
+    expect(result.rewritePlan?.recheckItems || []).not.toContain('narrative_ratio')
+    expect(result.scoreBreakdown.narrativeRatioScore).toBeLessThan(100)
+    expect((rows.get(revisionTasks) || []).some((row) => row.issueKey === 'chapter_gate:10:check:narrative_ratio')).toBe(false)
   })
 
   it('does not create duplicate gate revision tasks for the same unresolved blocker', () => {
@@ -1055,7 +1055,7 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.some((item) => item.key === 'style_compliance' && item.status === 'rewrite')).toBe(true)
   })
 
-  it('enforce 模式把纯对白比例失衡的关键词判定降级为 warning 并标注语义门接管', () => {
+  it('enforce 模式下比例统计仍是独立文风建议', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {
       content: '“你来了？”“我来了。”“现在怎么办？”“先等。”\n“别说话。”“那你倒是给个主意。”“没有主意。”“那就继续等。”',
@@ -1068,11 +1068,11 @@ describe('runChapterPublishCheck', () => {
     const ratioItem = result.checklist.find((item) => item.key === 'narrative_ratio')
 
     expect(ratioItem?.status).toBe('warning')
-    expect(ratioItem?.detail).toContain('已由语义门接管')
+    expect(ratioItem?.detail).not.toContain('已由语义门接管')
     expect(result.gateLevel).not.toBe('rewrite')
   })
 
-  it('shadow 模式下关键词门保持原始 rewrite 行为', () => {
+  it('shadow 模式下比例建议不升级为强制修订，合同错误仍阻断', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {
       content: '“你来了？”“我来了。”“现在怎么办？”“先等。”\n“别说话。”“那你倒是给个主意。”“没有主意。”“那就继续等。”',
@@ -1083,8 +1083,8 @@ describe('runChapterPublishCheck', () => {
 
     const result = runChapterPublishCheck(10, { semanticGateMode: 'shadow' })
 
-    expect(result.gateLevel).toBe('rewrite')
-    expect(result.checklist.find((item) => item.key === 'narrative_ratio')?.status).toBe('rewrite')
+    expect(result.gateLevel).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'narrative_ratio')?.status).toBe('warning')
   })
 
   it('enforce 模式保留 POV 越界（direct mind reading）的精确 rewrite 判定', () => {
@@ -1108,7 +1108,7 @@ describe('runChapterPublishCheck', () => {
     expect(povItem?.detail).not.toContain('已由语义门接管')
   })
 
-  it('enforce 模式把对白计数 blocker 降级为 warning', () => {
+  it('对白统计在默认和 enforce 模式下均不因条数升级 blocker', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {
       content: '夜晚的北门外，林远假意盘问守卫，继续追查失窃药箱。DIALOGUE_RISK 线索也随之升级。',
@@ -1118,13 +1118,13 @@ describe('runChapterPublishCheck', () => {
     vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
 
     const blockerResult = runChapterPublishCheck(10)
-    expect(blockerResult.checklist.find((item) => item.key === 'dialogue_voice')?.status).toBe('blocker')
+    expect(blockerResult.checklist.find((item) => item.key === 'dialogue_voice')?.status).toBe('warning')
 
     const enforceResult = runChapterPublishCheck(10, { semanticGateMode: 'enforce' })
     const dialogueItem = enforceResult.checklist.find((item) => item.key === 'dialogue_voice')
 
     expect(dialogueItem?.status).toBe('warning')
-    expect(dialogueItem?.detail).toContain('已由语义门接管')
+    expect(dialogueItem?.detail).not.toContain('已由语义门接管')
   })
 
   it('enforce 模式不影响线程推进等非接管门项的 blocker 判定', () => {

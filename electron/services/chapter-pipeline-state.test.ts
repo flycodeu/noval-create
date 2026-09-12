@@ -11,6 +11,7 @@ import {
   failChapterPipelineRole,
   getChapterPipelineTaskStage,
   inferChapterPipelineResumeReason,
+  inheritChapterPipelineRecoveryState,
   isChapterPipelineRole,
   parseChapterPipelineSnapshot,
   startChapterPipelineRole,
@@ -18,6 +19,21 @@ import {
 } from './chapter-pipeline-state'
 
 describe('chapter pipeline state', () => {
+  it('inherits downstream revision consumption and CAS checkpoints without replacing the continuation identity', () => {
+    const parent = createInitialChapterPipelineSnapshot(12, 34, 'old', { content: '续写稿', contextVersion: 7 })
+    const downstream = createInitialChapterPipelineSnapshot(12, 35, 'new', { content: '修订后稿', contextVersion: 8 })
+    downstream.revisionBudget = { id: 'original', used: 2, limit: 2, attemptKeys: ['first', 'second'] }
+    downstream.partialContent = '修订后稿'
+    const inherited = inheritChapterPipelineRecoveryState(parent, downstream)
+    expect(inherited.workflowTaskId).toBe(34)
+    expect(inherited.revisionBudget).toEqual(downstream.revisionBudget)
+    expect(inherited.contractVersion).toBe('new')
+    expect(inherited.partialContent).toBe('修订后稿')
+    expect(validateChapterPipelineResumeBase(inherited, { content: '修订后稿', contextVersion: 8 })).toBe('ready')
+    expect(inheritChapterPipelineRecoveryState(parent, { ...downstream, chapterId: 99 })).toBe(parent)
+    expect(inheritChapterPipelineRecoveryState(parent, null)).toBe(parent)
+  })
+
   it('creates a stable initial snapshot with independent pending role states', () => {
     const snapshot = createInitialChapterPipelineSnapshot(
       12,

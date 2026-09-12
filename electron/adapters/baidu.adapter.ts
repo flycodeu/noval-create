@@ -1,6 +1,7 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { buildHttpError, executeManagedRequest, type ManagedRequestResult } from './request-support'
+import { buildHttpError, buildIncompleteStreamError, executeManagedRequest, type ManagedRequestResult } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
+import { normalizeBaiduCompletion } from '../../src/shared/model-call-telemetry'
 
 export class BaiduAdapter extends BaseAdapter {
   id = 'baidu'
@@ -54,7 +55,7 @@ export class BaiduAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: this.modelId,
       kind: 'auth',
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,
@@ -108,7 +109,9 @@ export class BaiduAdapter extends BaseAdapter {
       const data = await request.value.json() as Record<string, any>
       if (data.error_code) throw new Error(`百度文心错误: ${data.error_msg}`)
       const result = data.result || ''
-      request.succeed()
+      const completion = normalizeBaiduCompletion(data)
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
       return result
     } catch (error) {
       request.fail(error)
@@ -132,15 +135,23 @@ export class BaiduAdapter extends BaseAdapter {
     }
 
     const request = await this.requestChat(endpoint, body, opts, true)
+    let latestUsage: unknown
+    let finalData: Record<string, unknown> = {}
 
     try {
       await consumeSseStream(request.value, async ({ data, event }) => {
         const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+        if (parsed?.error_code) throw new Error(`百度文心错误: ${parsed.error_msg}`)
+        if (parsed?.usage) latestUsage = parsed.usage
+        if (parsed?.is_end === true || parsed?.is_truncated === true) finalData = parsed
         if (parsed?.result) opts?.onStream?.(parsed.result)
       }, { signal: opts?.signal, timeoutMs: opts?.timeoutMs })
-      request.succeed()
+      if (finalData.is_end !== true) throw buildIncompleteStreamError(this.provider)
+      const completion = normalizeBaiduCompletion({ ...finalData, usage: latestUsage })
+      request.succeed(completion)
+      opts?.onCompletion?.(completion)
     } catch (error) {
-      request.fail(error)
+      request.fail(error, normalizeBaiduCompletion({ ...finalData, usage: latestUsage }))
       throw error
     }
   }
@@ -155,7 +166,7 @@ export class BaiduAdapter extends BaseAdapter {
       provider: this.provider,
       modelId: this.modelId,
       kind: stream ? 'stream' : 'chat',
-      requestObserver: opts?.requestObserver,
+      requestObserver: this.resolveRequestObserver(opts?.requestObserver),
       signal: opts?.signal,
       timeoutMs: opts?.timeoutMs,
       requestRetryCount: opts?.requestRetryCount,

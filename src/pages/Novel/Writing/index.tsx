@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal, message } from 'antd'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
@@ -6,23 +6,8 @@ import { type AiExecutionMode } from '../../../shared/ai-execution'
 import { parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type {
-  Chapter,
-  ChapterContextPreview,
   HardConstraintSourceLabel,
   ChapterPublishCheck,
-  ChapterSegment,
-  Task,
-  Character,
-  ForeshadowLedgerEntry,
-  ForeshadowSnapshot,
-  NovelConsistencyReport,
-  NovelContextStatus,
-  QualityDashboardData,
-  StoryFact,
-  StoryItem,
-  StoryMemorySnapshot,
-  StoryVolume,
-  TimelineEvent,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
@@ -45,14 +30,11 @@ import { useWritingHistoryLifecycle } from './useWritingHistoryLifecycle'
 import { useWritingPresentationModel } from './useWritingPresentationModel'
 import {
   useWritingEditorRuntimePresentation,
-  useWritingPipelineRuntimePresentation,
   useWritingPreGenerationPresentation,
 } from './useWritingRuntimePresentation'
 import { hasMultipleChapterSegments } from './writing-runtime-presentation'
 import { useWritingWorkspaceActionController } from './useWritingWorkspaceActionController'
-import { useWritingWorkspaceRefreshController } from './useWritingWorkspaceRefreshController'
 import { getWritebackPhaseLabel } from './writing-chapter-presentation'
-import { type AiCheckPayload, type WritingPipelineSnapshot } from './parsers'
 import { useWritingChapterReadiness } from './useWritingChapterReadiness'
 import { useWritingReviewState } from './useWritingReviewState'
 import { buildWritingViewComposition } from './writing-view-composition'
@@ -88,26 +70,8 @@ export default function Writing({ novelId }: Props) {
     undo: undoEditor,
     redo: redoEditor,
   } = chapterEditor
-  const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
-  const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
-  const [storyMemory, setStoryMemory] = useState<StoryMemorySnapshot | null>(null)
-  const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot | null>(null)
-  const [foreshadowLedger, setForeshadowLedger] = useState<ForeshadowLedgerEntry[]>([])
-  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
-  const [storyItems, setStoryItems] = useState<StoryItem[]>([])
   const [preserveConstraintLabels, setPreserveConstraintLabels] = useState<HardConstraintSourceLabel[]>([])
-  const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
-  const [storyFacts, setStoryFacts] = useState<StoryFact[]>([])
-  const [storyVolumes, setStoryVolumes] = useState<StoryVolume[]>([])
-  const [chapterCharacters, setChapterCharacters] = useState<Character[]>([])
-  const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
-  const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
-  const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
-  const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
-  const [chapterContextPreviewError, setChapterContextPreviewError] = useState<string | null>(null)
   const [generationExecutionModeOverride, setGenerationExecutionModeOverride] = useState<AiExecutionMode | 'follow_default'>('follow_default')
-  const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
-  const [livePipelineSnapshot, setLivePipelineSnapshot] = useState<WritingPipelineSnapshot | null>(null)
   const [insightPanelOpen, setInsightPanelOpen] = useState(false)
   // 正文优先：修订建议/验收提示默认折叠在编辑器下方，避免把正文挤出首屏。
   const [advisoryPanelOpen, setAdvisoryPanelOpen] = useState(false)
@@ -125,85 +89,47 @@ export default function Writing({ novelId }: Props) {
     setOptimizeModalOpen,
     setPublishCheck,
     setRewriteModalOpen,
-    setOptimizationResult,
   } = reviewState
-  useEffect(() => {
-    setOptimizeModalOpen(false)
-    setOptimizationResult(null)
-    setRewriteModalOpen(false)
-  }, [currentChapter?.id, setOptimizeModalOpen, setOptimizationResult, setRewriteModalOpen])
   const storySettings = useMemo(() => parseStorySettingsSnapshot(currentNovel?.settingsJson), [currentNovel?.settingsJson])
   const defaultAiExecutionMode = storySettings.aiDefaultMode
   const effectiveAiExecutionMode = generationExecutionModeOverride === 'follow_default' ? defaultAiExecutionMode : generationExecutionModeOverride
   const isHistoryRoute = activeWritingRoute === 'history'
-  const hasMultiSegments = hasMultipleChapterSegments(currentChapter)
   const preserveEditorContentRef = useRef(false)
   const shouldPreserveEditorContent = useCallback(() => preserveEditorContentRef.current, [])
-  const workspaceRefresh = useWritingWorkspaceRefreshController({
+  const workspaceData = useWritingWorkspaceData({
     novelId,
+    routeChapterId,
     creativeStageId,
     effectiveAiExecutionMode,
     preserveConstraintLabels,
     loadEditorContent,
-    setConsistencyReport,
-    setStoryMemory,
-    setQualityDashboard,
-    setStoryFacts,
-    setStoryVolumes,
-    setChapterCharacters,
-    setForeshadowLedger,
-    setContextStatus,
-    setTimelineEvents,
-    setStoryItems,
-    setChapterSegments,
-    setAiResult,
-    setForeshadowSnapshot,
-    setChapterContextPreview,
-    setChapterContextPreviewError,
-    setPublishCheck,
-    setLatestPipelineTask,
-    setLivePipelineSnapshot,
-    setGateReportExpanded,
     setSelectedSnippet,
     setActionError,
-    setCurrentChapter,
-  })
-  const {
-    beforeWorkspaceChapterLoad,
-    clearChapterArtifacts,
-    handleEmptyWorkspace,
-    handleWorkspaceChapterLoaded,
-    refreshChapterContextPreview,
-    refreshContextStatus,
-    refreshForeshadowSnapshot,
-    refreshMeta,
-    refreshPublishCheck,
-    refreshQualityDashboard,
-    refreshWorkspaceMetadata,
-  } = workspaceRefresh
-
-  const workspaceData = useWritingWorkspaceData({
-    novelId,
-    routeChapterId,
-    currentChapter,
-    setCurrentChapter,
-    beforeChapterLoad: beforeWorkspaceChapterLoad,
-    onChapterLoaded: handleWorkspaceChapterLoaded,
-    onEmptyWorkspace: handleEmptyWorkspace,
-    refreshWorkspaceMetadata,
+    setPublishCheck,
+    resetChapterReview: reviewState.resetChapterReview,
     shouldPreserveEditorContent,
   })
   const {
-    chapters,
-    currentChapterId,
-    currentChapterIdRef,
-    chapterIdsRef,
-    loading,
-    refreshing,
-    loadChapters,
-    refreshBackgroundChapter,
+    currentChapter, setCurrentChapter,
+    consistencyReport, storyMemory, qualityDashboard, contextStatus,
+    storyFacts, storyVolumes, chapterCharacters, foreshadowLedger, setForeshadowLedger,
+    timelineEvents, storyItems, chapterSegments, aiResult, setAiResult,
+    foreshadowSnapshot, chapterContextPreview, chapterContextPreviewError, latestPipelineTask,
+    clearChapterArtifacts, refreshChapterContextPreview, refreshContextStatus,
+    refreshForeshadowSnapshot, refreshMeta, refreshPublishCheck, refreshQualityDashboard,
+    chapters, currentChapterId, currentChapterIdRef, chapterIdsRef,
+    loading, refreshing, loadChapters, refreshBackgroundChapter,
     selectChapter: selectWorkspaceChapter,
   } = workspaceData
+  const hasMultiSegments = hasMultipleChapterSegments(currentChapter)
+  const mountedEditorRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    if (mountedEditorRef.current === editorRef.current) return
+    mountedEditorRef.current = editorRef.current
+    // The initial query can finish before the editor mounts. Reattach its
+    // owner's text only for a new DOM node; metadata refresh keeps selection/undo.
+    if (editorRef.current) commitContentState(content)
+  }, [commitContentState, content, currentChapter?.id, editorRef, hasMultiSegments])
   const editorLifecycle = useWritingEditorLifecycle({
     currentChapter,
     content,
@@ -339,14 +265,6 @@ export default function Writing({ novelId }: Props) {
   })
   const { generationPreflight, writability: chapterWritability } = chapterReadiness
 
-  const pipelineRuntime = useWritingPipelineRuntimePresentation({
-    currentChapter,
-    livePipelineSnapshot,
-    latestPipelineTask,
-  })
-  const {
-    snapshot: currentPipelineSnapshot,
-  } = pipelineRuntime
   const generationPreflightWarning = useCallback((messages: string[]) => {
     Modal.warning({
       title: '当前章节暂不适合生成',
@@ -371,9 +289,7 @@ export default function Writing({ novelId }: Props) {
     effectiveAiExecutionMode,
     preserveConstraintLabels,
     latestPipelineTask,
-    currentPipelineSnapshot,
     generationPreflight,
-    setLivePipelineSnapshot,
     setActionError,
     refreshBackgroundChapter,
     refreshMeta,
@@ -391,6 +307,7 @@ export default function Writing({ novelId }: Props) {
     },
   })
   const {
+    pipelineRuntime,
     activeGeneration,
     lastGenerationByChapter,
     generate: handleGenerateContent,
@@ -400,6 +317,7 @@ export default function Writing({ novelId }: Props) {
     resumablePartialContent,
     hasResumablePartialContent,
   } = chapterGeneration
+  const currentPipelineSnapshot = pipelineRuntime.snapshot
   const historyLifecycle = useWritingHistoryLifecycle({
     currentChapter,
     currentChapterIdRef,
@@ -671,6 +589,8 @@ export default function Writing({ novelId }: Props) {
       setAdvisoryPanelOpen,
     },
   })
+  // The pure composition builder forwards editorRef; it never reads ref.current.
+  // eslint-disable-next-line react-hooks/refs
   const viewComposition = buildWritingViewComposition({
     workspace: {
       loading,
