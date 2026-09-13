@@ -111,6 +111,8 @@ describe('chapter pipeline planner', () => {
     expect(messages[0].content).toContain('必须推进原创工册制度')
     expect(messages[0].content).toContain('第一拍：追逃')
     expect(messages[0].content).toContain('作者样稿正文1')
+    expect(messages[0].content).toContain('【读者自然度校准】')
+    expect(messages[0].content).toContain('作者样章或人工风格锁')
   })
 
   it('normalizes and reconciles chapter 1 output before persistence and writeback', () => {

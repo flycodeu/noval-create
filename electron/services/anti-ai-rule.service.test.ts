@@ -61,14 +61,15 @@ describe('anti-ai-rule.service', () => {
     expect(codes).toContain('ai_process_leak')
   })
 
-  it('detects atmospheric imagery overload and uniform paragraph rhythm', () => {
+  it('uses generic repetition and rhythm checks instead of one novel imagery vocabulary', () => {
     const paragraph = '雨声压在廊外，雾从江面推到阶前，船板潮得发黑。赵构看完粮册，把暂缓二字刮去，令吏重新誊写，旁边的内侍只把灯芯挑低了一寸。'
     const text = Array.from({ length: 30 }, () => paragraph).join('\n')
     const hits = collectAntiAiRuntimeHits(text, '历史正剧')
     const codes = hits.map((item) => item.ruleCode)
 
-    expect(codes).toContain('atmospheric_imagery_overuse')
+    expect(codes).toContain('high_frequency_repetition')
     expect(codes).toContain('uniform_paragraph_rhythm')
+    expect(codes).not.toContain('atmospheric_imagery_overuse')
   })
 
   it('does not flag ordinary negation or useful body action as strong AI flavor', () => {
@@ -175,10 +176,26 @@ describe('anti-ai-rule.service', () => {
     expect(summary.topRepeatedRules[0]?.scope).toBe('style')
   })
 
-  it('injects system-settlement and chapter-end replacements into hard constraints', () => {
+  it('injects genre-neutral system-settlement and chapter-end replacements into hard constraints', () => {
     const context = buildAntiAiHardConstraintContext({ genre: '都市异能' })
     expect(context).toContain('【击杀】')
-    expect(context).toContain('三秒')
-    expect(context).toMatch(/未完成动作|下一步选择/)
+    expect(context).toContain('金手指不要写成游戏结算墙')
+    expect(context).not.toContain('三秒')
+    expect(context).not.toContain('寿命补回')
+    expect(context).toContain('总结式段尾')
+  })
+
+  it('keeps reader-facing rhythm and explanation rules inside the automatic prompt budget', () => {
+    const context = buildAntiAiHardConstraintContext({
+      genre: '都市情感',
+      layer: 'automatic',
+    })
+
+    expect(context).toContain('旁白反复说明')
+    expect(context).toContain('对白句句高效')
+    expect(context).toContain('每个段落都收在')
+    expect(context).toContain('长度相近')
+    expect(context).not.toContain('船板')
+    expect(context).not.toContain('证件')
   })
 })

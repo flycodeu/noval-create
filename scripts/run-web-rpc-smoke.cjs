@@ -1,10 +1,13 @@
 const http = require('node:http')
 const net = require('node:net')
+const fs = require('node:fs')
 const path = require('node:path')
+const { randomUUID } = require('node:crypto')
 const { spawn, spawnSync } = require('node:child_process')
 const { LOCAL_WEB_BACKEND_VERSION } = require('./local-web-contract.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
+const testDataRoot = path.join(workspaceRoot, '.tmp-tests', `web-rpc-user-data-${process.pid}-${randomUUID()}`)
 const electronCommand = process.platform === 'win32' ? 'electron.cmd' : 'electron'
 const requestedPort = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 0)
 
@@ -108,11 +111,14 @@ async function runSmoke(port) {
 }
 
 async function main() {
+  fs.mkdirSync(testDataRoot, { recursive: true })
   const port = await findFreePort(requestedPort)
   const backendEnv = {
     ...process.env,
     NOVELFORGE_WEB_BACKEND_HOST: '127.0.0.1',
     NOVELFORGE_WEB_BACKEND_PORT: String(port),
+    NOVELFORGE_USER_DATA_DIR: testDataRoot,
+    NOVELFORGE_DISABLE_LEGACY_DB_COPY: '1',
   }
   const backend = spawnElectron(['scripts/local-web-backend.cjs'], backendEnv)
   let smokeCode = 1
@@ -123,6 +129,7 @@ async function main() {
   } finally {
     stopProcessTree(backend)
     await waitForExit(backend)
+    fs.rmSync(testDataRoot, { recursive: true, force: true })
   }
   if (smokeCode !== 0) process.exitCode = smokeCode
 }

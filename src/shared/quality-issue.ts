@@ -150,6 +150,7 @@ export const QUALITY_ISSUE_RULE_SPECS: Readonly<Record<string, QualityIssueRuleS
   clean_paragraph_beat: { category: 'style', defaultLevel: 'advice' },
   dialogue_too_efficient: { category: 'style', defaultLevel: 'advice' },
   no_verbal_impurity: { category: 'style', defaultLevel: 'advice' },
+  narrative_explanation_overuse: { category: 'style', defaultLevel: 'advice' },
 }
 
 const LEVEL_RANK: Record<QualityIssueLevel, number> = { advice: 1, repair: 2, blocker: 3 }

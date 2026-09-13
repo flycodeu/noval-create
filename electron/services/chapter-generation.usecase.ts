@@ -8,6 +8,7 @@ import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
 import { resolveChapterPipelineResumeMode } from '../../src/shared/chapter-resume-policy'
+import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 import { restoreRevisionBudget } from './revision-budget'
 import {
   ChapterContext,
@@ -2074,7 +2075,7 @@ async function prepareChapterContinuation(
     resumeSourceTaskId: options.sourceTaskId,
   }
 
-  const continuationPrompt = buildContinuationPrompt(buildChapterWritingPrompt({
+  const continuationBasePrompt = appendNarrativeNaturalnessPrompt(buildChapterWritingPrompt({
     novelTitle: novel.title,
     genre: profile.genre,
     chapterNum: chapter.chapterNum,
@@ -2113,7 +2114,12 @@ async function prepareChapterContinuation(
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
     promptTier: complexity,
-  }), normalizedPartial)
+  }), {
+    genre: profile.genre,
+    hasAuthorStyleReference: Boolean(draftContext.styleTemplate?.trim()),
+    mode: 'write',
+  })
+  const continuationPrompt = buildContinuationPrompt(continuationBasePrompt, normalizedPartial)
 
   return {
     chapter,
@@ -4454,6 +4460,9 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
   if (!chapter || !chapter.content) throwUserFacingError('chapter.contentEmpty')
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+  const genreName = novel?.genreId
+    ? db.select({ name: genres.name }).from(genres).where(eq(genres.id, novel.genreId)).all()[0]?.name
+    : undefined
   const content = chapter.content
   const isTruncated = content.length > 6000
   const textToCheck = isTruncated
@@ -4465,7 +4474,13 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     novelId: chapter.novelId,
     relatedEntityType: 'chapter',
     relatedEntityId: chapterId,
-    messages: [{ role: 'user', content: aiCheckPrompt(textToCheck, isTruncated) }],
+    messages: [{
+      role: 'user',
+      content: appendNarrativeNaturalnessPrompt(aiCheckPrompt(textToCheck, isTruncated), {
+        genre: genreName,
+        mode: 'review',
+      }),
+    }],
     modelConfigId: novel?.modelConfigId || undefined,
   })
 

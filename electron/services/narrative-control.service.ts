@@ -459,13 +459,13 @@ function buildPromptGuidance(input: AnalyzeNarrativeControlsInput): NarrativePro
       ? '惊悚章额外注意声音、触觉压迫和空气变化。'
       : ''
   const transitionGuide = chapterFunction === 'breather'
-    ? '过渡/喘息章优先做出“2-3 段实质推进 + 1 段短释压”的疏密变化，不要整章平均铺陈。'
+    ? '过渡/喘息章用关系、认识或处境变化承接前后章节，释压长度由人物和现场决定，不要平均铺陈。'
     : ''
   const emotionGuide = asText(input.emotionFocus)
     ? `情绪主基调锁定为：${asText(input.emotionFocus)}。允许局部温差，但不要把整章写成单一情绪颜色。`
     : '没有显式情绪主基调时，也要避免整章只剩一种情绪腔调。'
   const expositionGuide = asText(input.expositionMode)
-    ? `设定/说明方式：${asText(input.expositionMode)}。禁止连续三句以上脱离人物动作与互动的纯说明。`
+    ? `设定/说明方式：${asText(input.expositionMode)}。避免连续写脱离人物动作与互动的纯说明。`
     : '世界观说明尽量绑到角色经历、动作和互动里，不要连写纯解释段。'
 
   return {
@@ -488,13 +488,13 @@ function buildPromptGuidance(input: AnalyzeNarrativeControlsInput): NarrativePro
         : '',
     ].filter(Boolean).join('\n'),
     sensoryGuidance: [
-      '每章至少覆盖 3 类感官，不要只有视觉和对白。',
+      '只选择当前视角真实会注意到、并能改变判断或情绪位置的感官信息，不按感官种类凑数。',
       sensoryFocus,
       genreFocus,
       '优先把感官细节绑到动作、风险和结果上，不要机械凑词。',
     ].filter(Boolean).join('\n'),
     narrativeRatioGuidance: [
-      `${functionRule.label}推荐比例：动作 ${functionRule.actionRange[0]}-${functionRule.actionRange[1]}%，对白 ${functionRule.dialogueRange[0]}-${functionRule.dialogueRange[1]}%，内心 <=${functionRule.interiorMax}%，环境 <=${functionRule.environmentMax}%，解释 <=${functionRule.expositionMax}%，环境+解释 <=${functionRule.ambientMax}%。`,
+      `${functionRule.label}的动作、对白、内心、环境与解释比例只用于完成后的失衡诊断，生成时按场景需要组织，不按百分比配写。`,
       '对白过满时要补动作和环境反应；内心过满时要把判断改回外部事件；解释过满时要删掉作者代说。',
       transitionGuide,
       emotionGuide,

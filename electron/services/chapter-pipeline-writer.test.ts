@@ -95,6 +95,8 @@ describe('chapter pipeline writer', () => {
     expect(messages[0].content).toContain('作者样稿正文1')
     expect(messages[0].content).toContain('ThemeVoice.humanStyleSampleLock#1')
     expect(messages[0].content).toContain('场景材料来源')
+    expect(messages[0].content).toContain('【读者自然度校准】')
+    expect(messages[0].content).toContain('作者样章或人工风格锁')
   })
 
   it('strips a model-authored chapter 1 heading and reports title mismatch', () => {

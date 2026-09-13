@@ -116,6 +116,8 @@ describe('chapter pipeline review', () => {
     expect(messages[0].content).toContain('chapter-1-proof-summary')
     expect(messages[0].content).toContain('逐场核对 Planner 计划')
     expect(messages[0].content).toContain('他翻过院墙')
+    expect(messages[0].content).toContain('【读者自然度校准】')
+    expect(messages[0].content).toContain('不代表作者身份')
   })
 
   it('normalizes chapter 1 structured review output and blocks malformed chapter 2 output', () => {

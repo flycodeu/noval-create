@@ -40,6 +40,7 @@ import { hasSceneDesignDeclarations, type ScenePlanStep } from './chapter-scene-
 import { runChapterSemanticGate } from './semantic-gate/semantic-gate-runner.service'
 import { buildChapterReviewPrompt } from './story-prompts'
 import { executeChatTask, updateTaskStatus } from './task.service'
+import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 import { assertContractDrivenStageInputs } from './chapter-pipeline-writer'
 import {
   applyQualityIssuesToReviewNotes,
@@ -147,7 +148,7 @@ export function buildChapterCriticMessages(input: ChapterReviewPromptInput): Mes
   const { context } = input
   return [{
     role: 'user',
-    content: buildChapterReviewPrompt({
+    content: appendNarrativeNaturalnessPrompt(buildChapterReviewPrompt({
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -193,6 +194,13 @@ export function buildChapterCriticMessages(input: ChapterReviewPromptInput): Mes
       protagonistReference: input.protagonistReference,
       protagonistRule: input.protagonistRule,
       promptTier: input.promptTier,
+    }), {
+      genre: input.genre,
+      hasAuthorStyleReference: Boolean(
+        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
+        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
+      ),
+      mode: 'review',
     }),
   }]
 }

@@ -20,6 +20,7 @@ import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-gene
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type { AiExecutionMode } from '../src/shared/ai-execution'
+import { appendNarrativeNaturalnessPrompt } from '../src/shared/narrative-naturalness'
 import type {
   AgentToolCallRequest,
   AgentToolApprovalRequest,
@@ -1545,7 +1546,10 @@ function registerAiIpcHandlers(handle: IpcHandle) {
       retryable: true,
       messages: [{
         role: 'user',
-        content: contentScoringPrompt(data),
+        content: appendNarrativeNaturalnessPrompt(contentScoringPrompt(data), {
+          genre: data.genreContext,
+          mode: 'review',
+        }),
       }],
       modelConfigId: data.modelConfigId,
     })

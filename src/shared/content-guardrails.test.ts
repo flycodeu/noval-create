@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { collectQualityGuardrailFindings, hasBlockingGuardrailFindings, shouldForceRepair } from './content-guardrails'
+import {
+  buildGenrePacingGuidance,
+  collectQualityGuardrailFindings,
+  hasBlockingGuardrailFindings,
+  shouldForceRepair,
+} from './content-guardrails'
 
 describe('content guardrail repair threshold', () => {
   it('repairs a single high-confidence AI cliche instead of letting it pass silently', () => {
@@ -116,5 +121,46 @@ describe('content guardrail repair threshold', () => {
     expect(findings.some((finding) => finding.code === 'appearance_ad')).toBe(true)
     expect(findings.some((finding) => finding.code === 'ai_ending_summary')).toBe(true)
     expect(shouldForceRepair(findings)).toBe(true)
+  })
+
+  it('flags repeated narrator explanations without treating one necessary conclusion as AI authorship', () => {
+    const content = [
+      '门锁没有新划痕，这只能说明钥匙曾被使用。',
+      '鞋印停在窗边，现有证据不足以确认来人从哪里离开。',
+      '杯底仍是温的，这意味着对方刚走。',
+      '值班表缺了一页，尚不能证明是谁撕掉的。',
+      '监控在同一分钟断开，也就是说有人提前算过时间。',
+      '她收起照片，没有马上追问。',
+      '走廊尽头传来推车声。',
+      '保安把钥匙攥回掌心。',
+    ].join('\n')
+
+    expect(collectQualityGuardrailFindings(content).some((finding) => finding.code === 'narrative_explanation_overuse')).toBe(true)
+    expect(collectQualityGuardrailFindings('杯底还是温的。她抓起外套追了出去。').some((finding) => finding.code === 'narrative_explanation_overuse')).toBe(false)
+  })
+
+  it('detects mechanically uniform sentence lengths while allowing varied scene rhythm', () => {
+    const uniform = Array.from({ length: 24 }, (_, index) => `第${index + 1}盏灯熄灭以后，他把门边的纸条收进衣袋里`).join('。') + '。'
+    const varied = [
+      '门响了。',
+      '她没动。',
+      '楼道里有人拖着箱子往上走，轮子每撞一级台阶，桌上的水就跟着晃一下。',
+      '到了门口，声音停住。',
+      '半晌，那人隔着门问：“三楼？”',
+      '她这才发现自己一直捏着没挂断的电话。',
+    ].join('\n')
+
+    expect(collectQualityGuardrailFindings(uniform).some((finding) => finding.code === 'uniform_sentence_rhythm')).toBe(true)
+    expect(collectQualityGuardrailFindings(varied).some((finding) => finding.code === 'uniform_sentence_rhythm')).toBe(false)
+  })
+
+  it('builds pacing from genre profiles without fixed quotas or a universal realist label', () => {
+    const xianxia = buildGenrePacingGuidance('修仙')
+    const romance = buildGenrePacingGuidance('都市情感')
+
+    expect(xianxia).toContain('题材画像')
+    expect(romance).toContain('题材画像')
+    expect(romance).not.toContain('写实叙事类型')
+    expect(`${xianxia}\n${romance}`).not.toMatch(/每章至少|每千字不超过|单段不超过/)
   })
 })

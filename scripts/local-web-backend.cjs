@@ -16,6 +16,10 @@ const ts = require('typescript')
 const { app } = require('electron')
 
 const workspaceRoot = path.resolve(__dirname, '..')
+const requestedUserDataDir = String(process.env.NOVELFORGE_USER_DATA_DIR || '').trim()
+if (requestedUserDataDir) {
+  app.setPath('userData', path.resolve(requestedUserDataDir))
+}
 const host = process.env.NOVELFORGE_WEB_BACKEND_HOST || '127.0.0.1'
 const port = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787)
 const MASKED_KEY = '已设置'

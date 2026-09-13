@@ -17,6 +17,7 @@ import { buildScenePlanPrompt } from './story-prompts'
 import { executeChatTask, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import { buildSceneWritingBrief, formatSceneWritingBrief } from '../../src/shared/scene-writing-brief'
+import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 
 export interface ChapterPromptNarrativeFields {
   povGuidance: string
@@ -85,7 +86,7 @@ export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): M
   ))
   return [{
     role: 'user',
-    content: buildScenePlanPrompt({
+    content: appendNarrativeNaturalnessPrompt(buildScenePlanPrompt({
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -129,6 +130,13 @@ export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): M
       protagonistReference: input.protagonistReference,
       protagonistRule: input.protagonistRule,
       promptTier: input.promptTier,
+    }), {
+      genre: input.genre,
+      hasAuthorStyleReference: Boolean(
+        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
+        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
+      ),
+      mode: 'write',
     }),
   }]
 }

@@ -67,6 +67,7 @@ import {
 } from './chapter-repair-loop'
 import { getDefaultChapterTitle } from './chapter-scene-plan'
 import { buildChapterRewritePrompt } from './story-prompts'
+import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 import {
   executeStreamTask,
   isTransientModelNetworkError,
@@ -113,8 +114,9 @@ export const STYLE_REPAIRABLE_GUARDRAIL_CODES = new Set([
   'soft_voice_cliche',
   'paragraph_simile_stacking',
   'eye_open_close_standalone_paragraph',
-  'atmospheric_imagery_overuse',
   'uniform_paragraph_rhythm',
+  'uniform_sentence_rhythm',
+  'narrative_explanation_overuse',
 ])
 
 export interface RewriterChapterInput {
@@ -879,7 +881,7 @@ export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput):
         ...(input.revisionPatchEvidence || []).map((evidence) => `证据 JSON：${JSON.stringify(evidence)}`),
       ].join('\n')
     : ''
-  const prompt = buildChapterRewritePrompt({
+  const prompt = appendNarrativeNaturalnessPrompt(buildChapterRewritePrompt({
     novelTitle: input.novelTitle,
     genre: input.genre,
     chapterNum: input.chapterNum,
@@ -929,6 +931,13 @@ export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput):
     promptTier: input.promptTier,
     attemptNumber: input.attemptNumber,
     rejectedDigests: input.rejectedDigests,
+  }), {
+    genre: input.genre,
+    hasAuthorStyleReference: Boolean(
+      context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
+      || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
+    ),
+    mode: 'rewrite',
   })
   const finalPrompt = input.revisionMode === 'patch'
     ? `${prompt}\n\n【局部补丁最终输出格式（覆盖前文整章正文输出要求）】\n只输出 C-07 JSON 对象，不要输出整章正文、Markdown 或解释；校验失败时不要猜测，返回可被拒绝的 JSON。`
@@ -949,7 +958,7 @@ function buildGuardrailRepairMessages(
   const { chapter, context, novel, profile } = input
   return [{
     role: 'user',
-    content: buildChapterRewritePrompt({
+    content: appendNarrativeNaturalnessPrompt(buildChapterRewritePrompt({
       novelTitle: novel.title,
       genre: profile.genre,
       chapterNum: chapter.chapterNum,
@@ -991,6 +1000,13 @@ function buildGuardrailRepairMessages(
       promptTier: input.promptTier,
       attemptNumber,
       rejectedDigests,
+    }), {
+      genre: profile.genre,
+      hasAuthorStyleReference: Boolean(
+        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
+        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
+      ),
+      mode: 'rewrite',
     }),
   }]
 }
@@ -1381,6 +1397,8 @@ export async function applyPostRewriteStyleRepair(input: {
           '高频姓名/称谓：在不造成指代歧义时，用动作主语、代词、职业或关系称呼替换部分机械重复；不要把主角姓名连续放进相邻句。',
           '低价值身体/声音细节：删除不改变行动、判断、阻力或后果的手指、眼睛、喉咙、嗓音微动作；只保留能改变现场的信息。',
           '破折号和括号：删除解释型、假停顿型用法，只有真实抢话、打断或语气断裂才保留。',
+          '解释性旁白：动作、对白或物件已经呈现的结论不要再解释；专业流程只保留真正改变选择的环节。',
+          '不要为了降低命中率机械换词、强行切分长短句或插入口头词。',
           '保持原文至少 75% 的篇幅，保留全部事件顺序、冲突结果、伏笔和代价。',
           '',
           '正文：',

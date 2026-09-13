@@ -160,6 +160,11 @@ const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   uniform_paragraph_rhythm: 'structure',
   system_settlement_wall: 'structure',
   appearance_ad: 'expression',
+  uniform_sentence_rhythm: 'sentence',
+  clean_paragraph_beat: 'structure',
+  dialogue_too_efficient: 'sentence',
+  no_verbal_impurity: 'expression',
+  narrative_explanation_overuse: 'structure',
 }
 
 const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
@@ -257,13 +262,13 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
     title: '系统结算墙',
     scope: 'structure',
     avoid: '不要连续输出【击杀】【吞噬】【获得】【警告】这类成就面板。',
-    prefer: '把金手指写成三秒画面和寿命代价，收获写成实物感觉。',
+    prefer: '按本书已有能力规则呈现状态变化、限制和代价，只保留会影响当前选择的反馈。',
   },
   appearance_ad: {
     title: '外貌广告',
     scope: 'expression',
     avoid: '不要用“绝美、万载玄冰、清冷如寒星、冰山队长”给人物做广告。',
-    prefer: '用证件、断口、拍照、下令这些办事动作区分人物。',
+    prefer: '用角色特有的行动顺序、物品痕迹、关系反应和冲突选择区分人物。',
   },
   ai_repetitive_structure: {
     title: '句式重复',
@@ -442,14 +447,44 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
   atmospheric_imagery_overuse: {
     title: '气氛意象重复',
     scope: 'expression',
-    avoid: '不要反复堆雨、雾、江风、铁声、船板、旧木、烛火等同类气氛意象。',
-    prefer: '只保留能改变行动或判断的意象，其余改成账册、路线、官职程序、物件去向或人物站位。',
+    avoid: '不要让同类气氛意象在短距离内反复承担相同作用。',
+    prefer: '只保留能改变当前视角、行动或判断的意象，其余删去或换成与本书题材有关的有效细节。',
   },
   uniform_paragraph_rhythm: {
     title: '段落节奏过整齐',
     scope: 'structure',
     avoid: '不要让段落长度和收束方式过于一致，像被模板统一清洗。',
-    prefer: '用长短段、未完成动作、答非所问、具体数字和持续代价打破过度工整。',
+    prefer: '让段长与收束位置跟随人物注意力和场景压力变化，不按固定技巧制造参差。',
+  },
+  uniform_sentence_rhythm: {
+    title: '句子节奏过整齐',
+    scope: 'sentence',
+    avoid: '不要让整章句长与停顿分布过于接近，像沿用同一句模。',
+    prefer: '句长随动作压力、观察距离和人物思路变化，节奏差异必须来自场景。',
+  },
+  clean_paragraph_beat: {
+    title: '段段完整收束',
+    scope: 'structure',
+    avoid: '不要让每段都以动作点或总结短句完整收束。',
+    prefer: '根据现场允许打断、转移和未完成，但不要为了反整齐而故意切碎。',
+  },
+  dialogue_too_efficient: {
+    title: '对白过度高效',
+    scope: 'sentence',
+    avoid: '不要让人物问一句答一句，轮流播报信息和结论。',
+    prefer: '让回答受到目标、关系与现场干扰，信息可以错位出现。',
+  },
+  no_verbal_impurity: {
+    title: '语言过度洁净',
+    scope: 'expression',
+    avoid: '不要把所有犹豫、改口和人物习惯都清洗成标准书面语。',
+    prefer: '只保留有角色依据的口吻差异，不机械插入口头词。',
+  },
+  narrative_explanation_overuse: {
+    title: '解释性旁白过量',
+    scope: 'structure',
+    avoid: '不要在动作、对白或物件已经呈现信息后，再由旁白重复解释结论。',
+    prefer: '删掉重复判断，让人物依据有限信息行动；必要结论只说一次。',
   },
 }
 
@@ -787,18 +822,21 @@ export function buildAntiAiHardConstraintContext(options: {
   // positive section before the compact prompt budget is applied; otherwise a
   // rule can be present as a prohibition while its actionable repair guidance
   // is silently truncated.
-  const priorityPositiveRuleCodes = new Set([
+  const priorityPositiveRuleCodes = [
+    'narrative_explanation_overuse',
+    'dialogue_too_efficient',
+    'clean_paragraph_beat',
+    'uniform_sentence_rhythm',
+    'no_verbal_impurity',
     'not_but_definition_pattern',
     'dash_abuse',
     'double_metaphor_or_simile_stack',
     'ai_transition_cliche',
     'ai_ending_summary',
-    'system_settlement_wall',
-    'appearance_ad',
-  ])
-  const priorityPositiveLines = promptRules
-    .filter((rule) => priorityPositiveRuleCodes.has(rule.code))
-    .map((rule) => rule.prefer || '')
+  ]
+  const promptRuleByCode = new Map(promptRules.map((rule) => [rule.code, rule]))
+  const priorityPositiveLines = priorityPositiveRuleCodes
+    .map((code) => promptRuleByCode.get(code)?.prefer || '')
     .filter(Boolean)
   const positiveLines = limitUnique([
     ...promotedRules.map((rule) => rule.prefer || '').filter(Boolean),
@@ -816,15 +854,24 @@ export function buildAntiAiHardConstraintContext(options: {
   }
 
   if (layer === 'automatic') {
+    const automaticPriorityCodes = [
+      'narrative_explanation_overuse',
+      'dialogue_too_efficient',
+      'clean_paragraph_beat',
+      'uniform_sentence_rhythm',
+      'no_verbal_impurity',
+      'ai_slogan',
+      'ai_pseudo_philosophy',
+      'genre_hollowing',
+    ]
+    const automaticPrioritySet = new Set(automaticPriorityCodes)
+    const automaticAvoidanceLines = [
+      ...promotedRules.map((rule) => `本书近章复现：${rule.avoid}（已在第${rule.chapterNums.join('、')}章连续出现）`),
+      ...automaticPriorityCodes.map((code) => promptRuleByCode.get(code)?.avoid || '').filter(Boolean),
+      ...promptRules.filter((rule) => !automaticPrioritySet.has(rule.code)).map((rule) => rule.avoid),
+    ]
     return [
-      buildSection('【自动文风建议-软层】', [
-        ...promotedByBucket.expression,
-        ...builtinByBucket.expression,
-        ...promotedByBucket.sentence,
-        ...builtinByBucket.sentence,
-        ...promotedByBucket.structure,
-        ...builtinByBucket.structure,
-      ]),
+      buildSection('【自动文风建议-软层】', automaticAvoidanceLines),
       buildSection('【自动正向替代表达-软层】', positiveLines),
     ].filter(Boolean).join('\n\n')
   }

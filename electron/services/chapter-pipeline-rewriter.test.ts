@@ -630,6 +630,8 @@ describe('chapter pipeline rewriter safeguards', () => {
     expect(messages[0].content).toContain('quality:artifact:repeat:12:16')
     expect(messages[0].content).toContain('"start":12')
     expect(messages[0].content).toContain('"quote":"第二个重复句"')
+    expect(messages[0].content).toContain('【读者自然度校准】')
+    expect(messages[0].content).toContain('没有作者样章时')
   })
 
   it('keeps a clean chapter 1 candidate without spending a repair model call', async () => {

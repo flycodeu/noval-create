@@ -410,7 +410,7 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     code: 'uniform_sentence_rhythm',
     bucket: 'sentence',
     avoid: '不要整章用长度相近的短句连排，节奏像节拍器一样均匀。',
-    prefer: '长短句交错：偶尔用一个四五十字的长句一口气写完一串动作或一段心绪，紧跟一两个极短句；允许句子随人物思路走偏。',
+    prefer: '让句长跟随人物的注意力、动作压力和思路变化；节奏变化必须来自场景，不按长短句配额拼接。',
   },
   {
     code: 'clean_paragraph_beat',
@@ -428,19 +428,25 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     code: 'no_verbal_impurity',
     bucket: 'expression',
     avoid: '不要把叙述打磨得毫无冗余，完全无赘字的洁净文本反而暴露机器痕迹。',
-    prefer: '按人物口吻保留少量顿挫和偏口语的小词（倒是、竟、偏偏、横竖之类），一章三五处即可，不堆砌。',
+    prefer: '保留人物本来就会有的停顿、改口、方言或职业用语；没有人物和语境依据时，不要为了显得自然而硬插口头词。',
+  },
+  {
+    code: 'narrative_explanation_overuse',
+    bucket: 'structure',
+    avoid: '不要在动作、对白或物件已经呈现信息后，再让旁白反复说明“这意味着什么、仍不能证明什么”。',
+    prefer: '删除重复结论，让人物根据有限信息采取行动；只有结论会改变选择时才明确说出。',
   },
   {
     code: 'system_settlement_wall',
     bucket: 'structure',
     avoid: '不要连续输出【击杀】【吞噬】【获得】【警告】这类成就面板。广播可以保留机械口吻，金手指不要写成游戏结算墙。',
-    prefer: '能力写成三秒内能看见的具体画面，并立刻写出代价（寿命、神智、伤口）。收获写成烫/凉的实物、补回一截的身体感觉，不要弹成就。',
+    prefer: '只保留会改变当前选择的状态变化，并通过本书已经建立的能力规则、身体反应、资源变化或现实后果呈现代价。',
   },
   {
     code: 'appearance_ad',
     bucket: 'expression',
     avoid: '不要用“绝美、万载玄冰、清冷如寒星、冰山队长”给人物做广告。',
-    prefer: '用办事方式区分人物：先看断口还是先问证件，先拍照还是先下令。',
+    prefer: '用角色特有的行动顺序、物品使用痕迹、关系反应和冲突中的选择区分人物。',
   },
 
 ]
@@ -505,7 +511,7 @@ const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = 
       code: 'system_settlement_wall',
       bucket: 'structure',
       avoid: '规则怪谈/都市异能不要把能力结算写成【击杀】【获得】连发。',
-      prefer: '预支写成三秒画面和太阳穴一沉；收获写成晶体烫凉、寿命补回、现场多标出的证据线。',
+      prefer: '能力反馈遵守本书已有设定，只呈现会影响眼前决定的变化、限制和代价。',
     },
   ],
   'western-fantasy': [
@@ -709,47 +715,6 @@ function collectEndingLonelyImagery(text: string): TextGuardrailFinding | null {
   }
 }
 
-const ATMOSPHERIC_IMAGERY_TOKENS = [
-  '雨',
-  '雾',
-  '江风',
-  '风声',
-  '水声',
-  '湿',
-  '潮',
-  '铁声',
-  '船板',
-  '旧木',
-  '刀',
-  '烛火',
-  '阴影',
-]
-
-function collectAtmosphericImageryOveruse(text: string): TextGuardrailFinding | null {
-  if (text.length < 1200) return null
-
-  const hits = ATMOSPHERIC_IMAGERY_TOKENS
-    .map((token) => {
-      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const count = (text.match(new RegExp(escaped, 'gu')) || []).length
-      return { token, count }
-    })
-    .filter((item) => item.count >= 4)
-    .sort((left, right) => right.count - left.count)
-
-  if (hits.length === 0) return null
-
-  const total = hits.reduce((sum, item) => sum + item.count, 0)
-  if (total < 10) return null
-
-  return {
-    code: 'atmospheric_imagery_overuse',
-    severity: total >= 18 || hits.some((item) => item.count >= 8) ? 'medium' : 'low',
-    message: '同类气氛意象重复偏高，容易形成漂亮但可删的生成腔。',
-    excerpt: hits.slice(0, 4).map((item) => `${item.token}×${item.count}`).join('、'),
-  }
-}
-
 function collectUniformParagraphRhythm(text: string): TextGuardrailFinding | null {
   const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter((item) => item.length >= 24)
   if (paragraphs.length < 10) return null
@@ -768,6 +733,49 @@ function collectUniformParagraphRhythm(text: string): TextGuardrailFinding | nul
     severity: coefficient < 0.38 && midBandRate > 0.82 ? 'medium' : 'low',
     message: '段落长度和收束节奏过于整齐，文本容易显得被统一模板清洗过。',
     excerpt: `平均段长${Math.round(avg)}字，均匀度${coefficient.toFixed(2)}`,
+  }
+}
+
+function collectUniformSentenceRhythm(text: string): TextGuardrailFinding | null {
+  const sentences = text
+    .split(/[。！？!?；;\n]/u)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 4)
+  if (sentences.length < 18) return null
+
+  const lengths = sentences.map((item) => item.length)
+  const average = lengths.reduce((sum, length) => sum + length, 0) / lengths.length
+  const variance = lengths.reduce((sum, length) => sum + Math.pow(length - average, 2), 0) / lengths.length
+  const coefficient = Math.sqrt(variance) / Math.max(average, 1)
+  const narrowBandRate = lengths.filter((length) => Math.abs(length - average) <= Math.max(4, average * 0.24)).length / lengths.length
+
+  if (coefficient > 0.32 || narrowBandRate < 0.72) return null
+  return {
+    code: 'uniform_sentence_rhythm',
+    severity: coefficient < 0.2 && narrowBandRate >= 0.84 ? 'medium' : 'low',
+    message: '句长和停顿分布过于整齐，阅读节奏像由同一个句模连续生成。',
+    excerpt: `平均句长${Math.round(average)}字，变异系数${coefficient.toFixed(2)}`,
+  }
+}
+
+const NARRATIVE_EXPLANATION_PATTERNS = [
+  /这(?:只能|足以|说明|意味着)/gu,
+  /(?:只能|仍需|尚不能|无法)(?:证明|确认|认定|说明|判断)/gu,
+  /现有(?:记录|证据|信息|线索)[^。！？!?；;\n]{0,12}(?:不足|不能|无法|不支持)/gu,
+  /(?:换句话说|也就是说|由此可见)/gu,
+]
+
+function collectNarrativeExplanationOveruse(text: string): TextGuardrailFinding | null {
+  const sentences = text.split(/[。！？!?；;\n]/u).map((item) => item.trim()).filter(Boolean)
+  if (sentences.length < 8) return null
+  const hits = NARRATIVE_EXPLANATION_PATTERNS.flatMap((pattern) => text.match(pattern) || [])
+  if (hits.length < 5 || hits.length / sentences.length < 0.12) return null
+
+  return {
+    code: 'narrative_explanation_overuse',
+    severity: hits.length >= 8 && hits.length / sentences.length >= 0.2 ? 'medium' : 'low',
+    message: '旁白反复替读者解释证据或结论，削弱了场景推进和阅读参与感。',
+    excerpt: [...new Set(hits)].slice(0, 4).join('、'),
   }
 }
 
@@ -836,7 +844,7 @@ export function getBuiltinAntiAiPromptRules(genre?: string): AntiAiPromptRule[] 
   return [...deduped.values()]
 }
 
-// 爽文系题材：读者以节拍兑现为核心预期，文风必须与写实系拉开
+// 强情节题材强调承诺兑现，但不设置跨题材通用的次数和段长配额。
 const PACING_ESCALATION_GENRE_KEYS = new Set(['fantasy', 'xianxia', 'urban-ability', 'western-fantasy', 'wuxia'])
 
 /**
@@ -844,25 +852,28 @@ const PACING_ESCALATION_GENRE_KEYS = new Set(['fantasy', 'xianxia', 'urban-abili
  * 注入 Writer/Rewriter 硬约束区。
  */
 export function buildGenrePacingGuidance(genre?: string): string {
-  const genreKey = getBuiltinGenreRules(genre).genreProfile.key
+  const genreProfile = getBuiltinGenreRules(genre).genreProfile
+  const genreKey = genreProfile.key
+  const focus = genreProfile.narrativeFocus.slice(0, 4).join('、') || '当前章节的核心阅读体验'
   const shared = [
-    '微动作细节预算：手/手指/掌心/眼/瞳孔/喉咙/声音很轻这类身体细节，每千字不超过 6 处；同一细节（如握拳、松手、抬头）一章内最多出现 2 次，重复时改写成动作阻力、关系压力或后果。',
-    '每个场景必须有信息增量：新事实、新阻力、关系变化或状态变化至少一项；一段只有气氛和微表情就删掉或合并。',
+    '身体与环境细节只在影响判断、关系、行动或后果时保留，不按字数配额机械增删。',
+    '场景需要改变读者对人物、局势或问题的理解；允许停顿和余味，但不能用可互换的气氛段填充篇幅。',
+    '节奏服从本章功能与人物视角，作者样章和已稳定的正文节奏优先于通用建议。',
   ]
   if (PACING_ESCALATION_GENRE_KEYS.has(genreKey)) {
     return [
-      '本书属于强节拍类型（升级流/爽文谱系），节奏优先于氛围：',
-      '- 事件密度：每章至少 2 个可见事件节点（冲突交锋、进展兑现、危机升级或信息揭露），不许整章只写一次内心波动。',
-      '- 爽点兑现节拍：每章至少一次读者可感的进展或反击兑现（实力、资源、信息、地位、关系任一），兑现要有在场者的即时反应，不许只写主角自我确认。',
-      '- 兑现必有代价或新钩子：每次进展同场景写出付出的代价或引来的新压力，结尾钩子必须指向下一个具体冲突。',
-      '- 叙事速度：白描和心理段单段不超过 120 字就要回到动作或对白；对峙场面用短兵相接的交锋句推进，不用长段静态观察。',
+      `本书题材画像：${genreProfile.name}；重点体验可从“${focus}”中按本章需要选择：`,
+      '- 本章只确立一个主导承诺或转折，让进展、反击、损失或发现被读者清楚感知；不要把多种爽点平均分配。',
+      '- 兑现后的反应、代价和新压力应来自既有规则与人物关系，不能套用固定的升级结算节拍。',
+      '- 动作、对白、心理和停顿的占比随冲突变化，必要的后果与关系场可以放慢。',
       ...shared.map((line) => '- ' + line),
     ].join('\n')
   }
   return [
-    '本书属于写实叙事类型，允许克制白描，但每章仍要有可感推进：',
-    '- 每章至少 1 处冲突交锋或不可逆的状态变化，不许整章停在情绪和环境里。',
-    '- 静态描写必须携带信息：环境、器物、身体细节要能反映人物处境或时代质感，纯氛围段落合并或删除。',
+    `本书题材画像：${genreProfile.name}；重点体验可从“${focus}”中按本章需要选择：`,
+    '- 根据本章承担的铺垫、关系、调查、喜剧、成长或转折功能确定速度，不把所有非升级题材统一写成“克制写实”。',
+    '- 让章节产生可感变化；变化可以是认识、关系、选择、风险或情绪位置，不强制安排打斗和不可逆事件。',
+    '- 静态描写必须属于当前视角的观察，并影响读者对人物、处境或题材体验的理解。',
     ...shared.map((line) => '- ' + line),
   ].join('\n')
 }
@@ -907,8 +918,9 @@ export function collectQualityGuardrailFindings(
   const densityFindings = collectDensityGuardrailFindings(content)
   const simileStackingFinding = collectParagraphSimileStacking(content)
   const endingImageryFinding = collectEndingLonelyImagery(content)
-  const atmosphericImageryFinding = collectAtmosphericImageryOveruse(content)
   const uniformParagraphFinding = collectUniformParagraphRhythm(content)
+  const uniformSentenceFinding = collectUniformSentenceRhythm(content)
+  const narrativeExplanationFinding = collectNarrativeExplanationOveruse(content)
   const systemSettlementFinding = collectSystemSettlementWall(content)
   const allFindings = [
     ...patternFindings,
@@ -917,8 +929,9 @@ export function collectQualityGuardrailFindings(
     ...densityFindings,
     ...(simileStackingFinding ? [simileStackingFinding] : []),
     ...(endingImageryFinding ? [endingImageryFinding] : []),
-    ...(atmosphericImageryFinding ? [atmosphericImageryFinding] : []),
     ...(uniformParagraphFinding ? [uniformParagraphFinding] : []),
+    ...(uniformSentenceFinding ? [uniformSentenceFinding] : []),
+    ...(narrativeExplanationFinding ? [narrativeExplanationFinding] : []),
     ...(systemSettlementFinding ? [systemSettlementFinding] : []),
   ]
 
@@ -956,8 +969,9 @@ const STYLE_DENSITY_FINDING_CODES = new Set([
   'soft_voice_cliche',
   'paragraph_simile_stacking',
   'eye_open_close_standalone_paragraph',
-  'atmospheric_imagery_overuse',
   'uniform_paragraph_rhythm',
+  'uniform_sentence_rhythm',
+  'narrative_explanation_overuse',
 ])
 
 /**

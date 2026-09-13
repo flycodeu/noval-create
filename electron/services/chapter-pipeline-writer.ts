@@ -23,6 +23,7 @@ import { buildChapterDraftPrompt } from './story-prompts'
 import { executeChatTask, updateTaskStatus, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import { buildSceneWritingBrief, formatSceneWritingBrief } from '../../src/shared/scene-writing-brief'
+import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 
 export interface ChapterWriterPromptInput {
   novelTitle: string
@@ -64,6 +65,10 @@ export interface LockedParagraphContext {
 
 export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Message[] {
   const { context } = input
+  const hasAuthorStyleReference = Boolean(
+    context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
+    || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
+  )
   const sceneWritingBrief = formatSceneWritingBrief(buildSceneWritingBrief(
     { sourceText: input.scenePlanText },
     context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' },
@@ -71,7 +76,7 @@ export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Mes
   ))
   return [{
     role: 'user',
-    content: buildChapterDraftPrompt({
+    content: appendNarrativeNaturalnessPrompt(buildChapterDraftPrompt({
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -117,6 +122,10 @@ export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Mes
       protagonistRule: input.protagonistRule,
       promptTier: input.promptTier,
       sceneWritingBrief,
+    }), {
+      genre: input.genre,
+      hasAuthorStyleReference,
+      mode: 'write',
     }),
   }]
 }
