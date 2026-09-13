@@ -48,6 +48,8 @@ export interface CharacterNeedRoleSlot {
   function: string
   coverage: CharacterRoleCoverage
   coveredByCharacterIds: number[]
+  /** Stable key for a not-yet-created character candidate. */
+  proposedCharacterKey?: string
   mustBeIndependent: boolean
   independenceReason: string
   evidenceRefs: string[]
@@ -117,4 +119,3 @@ export interface CharacterNeedsAnalysisResult {
   assumptions: string[]
   contextVersion: number
 }
-

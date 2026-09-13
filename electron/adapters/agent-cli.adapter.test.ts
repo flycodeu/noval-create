@@ -22,7 +22,7 @@ describe('native agent CLI adapter', () => {
     const invocation = buildAgentCliInvocation('codex', 'gpt-5')
 
     expect(invocation.args).toEqual(expect.arrayContaining([
-      'exec', '--model', 'gpt-5', '--sandbox', 'read-only', '--ask-for-approval', 'never',
+      'exec', '--model', 'gpt-5', '--sandbox', 'read-only',
       '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
     ]))
     expect(invocation.args).not.toContain('--dangerously-bypass-approvals-and-sandbox')

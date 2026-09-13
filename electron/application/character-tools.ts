@@ -189,6 +189,7 @@ export const characterNeedsOutputSchema: AgentToolJsonSchema = {
           function: { type: 'string' },
           coverage: { type: 'string', enum: ['covered', 'partial', 'missing', 'overloaded', 'redundant'] },
           coveredByCharacterIds: { type: 'array', items: { type: 'integer', minimum: 1 } },
+          proposedCharacterKey: { type: 'string' },
           mustBeIndependent: { type: 'boolean' },
           independenceReason: { type: 'string' },
           evidenceRefs: stringArraySchema,
@@ -266,4 +267,3 @@ export function registerCharacterPlanningTools(
     },
   })
 }
-

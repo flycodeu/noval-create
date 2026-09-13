@@ -99,7 +99,10 @@ function toMcpInfrastructureError(error) {
 }
 
 function startElectronRuntime() {
-  const child = spawn(electronExecutable, [runtimeEntry], {
+  // The MCP runtime is headless and never renders a BrowserWindow. Explicitly
+  // disable Chromium GPU startup so model-backed tool calls do not fail when
+  // Windows cannot initialize the sandboxed GPU process.
+  const child = spawn(electronExecutable, ['--disable-gpu', runtimeEntry], {
     cwd: workspaceRoot,
     env: process.env,
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],

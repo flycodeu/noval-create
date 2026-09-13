@@ -64,7 +64,6 @@ export function buildAgentCliInvocation(provider: NativeAgentProvider, modelId: 
       provider,
       command,
       args: [
-        '--ask-for-approval', 'never',
         'exec',
         '--model', normalizedModelId,
         '--sandbox', 'read-only',

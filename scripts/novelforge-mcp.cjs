@@ -11,6 +11,7 @@ console.warn = (...args) => console.error(...args)
 const workspaceRoot = path.resolve(__dirname, '..')
 registerProjectTsRuntime(workspaceRoot)
 app.setName('NovelForge')
+app.disableHardwareAcceleration()
 if (process.env.NOVELFORGE_USER_DATA_DIR) {
   app.setPath('userData', path.resolve(process.env.NOVELFORGE_USER_DATA_DIR))
 }

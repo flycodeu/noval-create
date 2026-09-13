@@ -288,6 +288,7 @@ function buildPlanningPrompt(input: NormalizedPlannerInput, context: CharacterCa
   return [
     '你是 NovelForge 的人物生态规划器。你的任务不是按固定配额凑人数，而是逐个验证叙事功能位。',
     '先判断功能能否由现有人物承担；只有不可兼任且有上下文证据时才建议新增人物。',
+    '当现有人物为 0 且需要创建新人物时，使用 proposedCharacterKey 表示尚未落库的候选人物；同一个候选键可以承担多个核心功能，但必须为十个核心功能各输出一条独立 roleSlot。',
     '',
     '【上下文快照】',
     JSON.stringify(promptContext, null, 2),
@@ -313,6 +314,7 @@ function buildPlanningPrompt(input: NormalizedPlannerInput, context: CharacterCa
     '  "roleSlots": [{',
     '    "slotId": "稳定短标识", "functionKey": "功能键", "function": "具体叙事职责",',
     '    "coverage": "covered|partial|missing|overloaded|redundant", "coveredByCharacterIds": [1],',
+    '    "proposedCharacterKey": "仅用于尚未落库的新人物，例如 lin-cen；现有人物功能不要填写",',
     '    "mustBeIndependent": false, "independenceReason": "字符串", "evidenceRefs": ["thread:3"],',
     '    "proposedAction": "keep|update|merge|create|archive", "proposedRoleType": "protagonist|major|antagonist|supporting|minor",',
     '    "firstAppearanceWindow": "字符串", "priority": 1',
@@ -416,6 +418,16 @@ function normalizeRoleSlots(
 
     const coverage = normalizeCoverage(record.coverage)
     const coveredByCharacterIds = uniquePositiveIds(record.coveredByCharacterIds, existingIds)
+    const proposedCharacterKey = asString(
+      record.proposedCharacterKey
+        ?? record.proposed_character_key
+        ?? record.candidateCharacterKey
+        ?? record.candidate_character_key
+        ?? record.candidateKey,
+    )
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/gu, '-')
+      .replace(/^-+|-+$/gu, '')
     let proposedAction = normalizeAction(record.proposedAction, coverage === 'missing' ? 'create' : 'keep')
     if (proposedAction === 'archive' && !constraints.allowArchiveExisting) proposedAction = 'keep'
     if (proposedAction === 'merge' && !constraints.allowMergeExisting) proposedAction = 'update'
@@ -427,6 +439,7 @@ function normalizeRoleSlots(
       function: asString(record.function, functionKey),
       coverage,
       coveredByCharacterIds,
+      ...(proposedCharacterKey ? { proposedCharacterKey } : {}),
       mustBeIndependent: asBoolean(record.mustBeIndependent, proposedAction === 'create'),
       independenceReason: asString(record.independenceReason),
       evidenceRefs: evidenceRefs.length > 0 ? evidenceRefs : [fallbackEvidence],
@@ -612,6 +625,31 @@ function runDeterministicChecks(
       : `这些新增功能位只有项目级证据：${weakEvidence.map((slot) => slot.slotId).join('、')}。`,
   )
 
+  if (context.existingCount === 0 && plan.recommended.create > 0) {
+    const coreSlots = plan.roleSlots.filter((slot) => CORE_FUNCTION_KEYS.includes(slot.functionKey as typeof CORE_FUNCTION_KEYS[number]))
+    const unmappedCore = coreSlots.filter((slot) => (
+      slot.coveredByCharacterIds.length === 0 && !slot.proposedCharacterKey
+    ))
+    const createSlotsWithoutKey = plan.roleSlots.filter((slot) => (
+      slot.proposedAction === 'create' && !slot.proposedCharacterKey
+    ))
+    const candidateKeys = new Set(
+      plan.roleSlots
+        .filter((slot) => slot.proposedAction === 'create' && slot.proposedCharacterKey)
+        .map((slot) => slot.proposedCharacterKey),
+    )
+    const mappingValid = unmappedCore.length === 0
+      && createSlotsWithoutKey.length === 0
+      && candidateKeys.size === plan.recommended.create
+    push(
+      'prospective_function_mapping',
+      mappingValid ? 'pass' : 'fail',
+      mappingValid
+        ? `十类核心功能均已映射到 ${candidateKeys.size} 个待创建人物候选键。`
+        : '新项目的人物计划必须为每个核心功能提供 proposedCharacterKey，并让每个 create 候选键对应一个新人物。',
+    )
+  }
+
   return checks
 }
 
@@ -666,6 +704,9 @@ function buildReviewPrompt(
     '【量表】',
     '分别从 necessity、causality、worldFit、tension、differentiation、writability、growthSpace、entranceFeasibility 八项按 0-100 评分。',
     '删除后没有不可替代损失、动机链断裂、违反世界规则、关系只有标签、与现有人物同构、无法落到场景、弧线与终局冲突、没有合理出场窗口，均可构成硬阻塞。',
+    '当 existingCount=0 时，proposedCharacterKey 是待创建人物的稳定候选键；请检查十个核心 functionKey 是否各自独立出现、是否映射到不超过 maxNewCharacters 个候选键，并检查每个候选键是否有具体行动与可追踪后果。',
+    '若案件要求区分直接操作、失实核验和流程管理责任，必须把直接操作责任明确映射到某个候选人物，或把已有证据支持的待证嫌疑明确写入该候选人的行动链；不能留下悬空的核心因果。',
+    '项目级 novel 证据不能单独证明新人物独立性；优先核对 thread、item、chapter 等细粒度 evidenceRefs 是否逐人对应行动与后果。',
     '任何确定性 fail 必须保留为 hardBlocker；不能用主观高分覆盖规则硬门。',
     '',
     '【输出 JSON】',
@@ -784,4 +825,3 @@ export async function analyzeCharacterNeeds(
     contextVersion: context.contextVersion,
   }
 }
-
