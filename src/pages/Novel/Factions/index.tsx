@@ -692,7 +692,8 @@ export default function FactionsPage({ novelId }: Props) {
             <span className="faction-workspace__view-note">一次只处理一个焦点</span>
           </div>
 
-          <div hidden={viewMode !== 'graph'}>
+          {viewMode === 'graph' ? (
+          <div>
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title="势力关系图谱"
@@ -713,7 +714,9 @@ export default function FactionsPage({ novelId }: Props) {
               </div>
             </WorkspacePanel>
           </div>
-          <div hidden={viewMode !== 'detail'}>
+          ) : null}
+          {viewMode === 'detail' ? (
+          <div>
             <WorkspacePanel
               className="faction-workspace__view-panel"
               title={selectedItem ? `当前详情：${selectedItem.name}` : '新建势力'}
@@ -828,6 +831,7 @@ export default function FactionsPage({ novelId }: Props) {
               </div>
             </WorkspacePanel>
           </div>
+          ) : null}
         </div>
       </div>
 

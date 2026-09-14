@@ -392,7 +392,7 @@ export default function StyleLabPage({ novelId }: Props) {
           />
         ) : null}
         {fingerprints.length === 0 ? (
-          <Empty description="还没有风格指纹。可以在下方粘贴范文或勾选章节生成第一条指纹。" />
+          <Empty description="还没有风格指纹。点击页面顶部的“新建风格指纹”，可粘贴范文或选择已有章节生成。" />
         ) : (
           <div className="style-lab__fingerprint-list">
             {fingerprints.map((fingerprint) => {

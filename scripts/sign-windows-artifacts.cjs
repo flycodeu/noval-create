@@ -1,5 +1,6 @@
 const fs = require('node:fs')
 const { spawnSync } = require('node:child_process')
+const { resolveSignTool } = require('./tool-paths.cjs')
 
 const files = process.argv.slice(2)
 const timestampUrl = process.env.NOVELFORGE_WINDOWS_TIMESTAMP_URL || 'http://timestamp.digicert.com'
@@ -11,18 +12,6 @@ function log(message) {
 function fail(message) {
   process.stderr.write(`[sign:windows] ${message}\n`)
   process.exit(1)
-}
-
-function resolveSigntool() {
-  const candidates = [
-    process.env.NOVELFORGE_SIGNTOOL_PATH,
-    'D:\\Windows Kits\\10\\bin\\10.0.22621.0\\x64\\signtool.exe',
-    'D:\\Windows Kits\\10\\bin\\10.0.22000.0\\x64\\signtool.exe',
-    'C:\\Program Files (x86)\\Microsoft SDKs\\ClickOnce\\SignTool\\signtool.exe',
-    'D:\\Software\\Microsoft Visual Studio\\Shared\\NuGetPackages\\microsoft.windows.sdk.buildtools\\10.0.22621.756\\bin\\10.0.22621.0\\x64\\signtool.exe',
-  ].filter(Boolean)
-
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null
 }
 
 function signFile(signtoolPath, filePath) {
@@ -78,7 +67,7 @@ if (files.length === 0) {
   fail('Provide at least one file path to sign.')
 }
 
-const signtoolPath = resolveSigntool()
+const signtoolPath = resolveSignTool()
 if (!signtoolPath) {
   fail('Unable to locate signtool.exe. Set NOVELFORGE_SIGNTOOL_PATH to continue.')
 }

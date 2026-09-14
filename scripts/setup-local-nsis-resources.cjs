@@ -3,6 +3,7 @@ const path = require('node:path')
 const http = require('node:http')
 const https = require('node:https')
 const { spawnSync } = require('node:child_process')
+const { resolveSevenZip } = require('./tool-paths.cjs')
 
 const projectRoot = path.resolve(__dirname, '..')
 const toolsRoot = path.resolve(projectRoot, '.local-tools')
@@ -20,19 +21,6 @@ function log(message) {
 
 function hasResourceBundle(targetDir) {
   return fs.existsSync(path.join(targetDir, 'plugins', 'x86-unicode'))
-}
-
-function resolveSevenZip() {
-  const candidates = [
-    process.env.NOVELFORGE_7Z_PATH,
-    'C:\\Program Files\\Nutstore\\bin-7.2.10\\7ZipStandalone\\7za.exe',
-    'C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\7z.exe',
-    'D:\\Program Files\\ShadowBot\\shadowbot-5.30.37\\7za.exe',
-    'D:\\Software\\vmware\\7za.exe',
-    'D:\\Program Files\\SmartPSSPlus\\7z.exe',
-  ].filter(Boolean)
-
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null
 }
 
 function download(url, destination, redirectCount = 0) {
@@ -121,7 +109,7 @@ async function main() {
     return
   }
 
-  const sevenZipPath = resolveSevenZip()
+  const sevenZipPath = resolveSevenZip(projectRoot)
   if (!sevenZipPath) {
     throw new Error('Unable to find a local 7-Zip executable. Set NOVELFORGE_7Z_PATH to continue.')
   }

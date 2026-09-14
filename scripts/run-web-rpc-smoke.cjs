@@ -129,7 +129,12 @@ async function main() {
   } finally {
     stopProcessTree(backend)
     await waitForExit(backend)
-    fs.rmSync(testDataRoot, { recursive: true, force: true })
+    fs.rmSync(testDataRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    })
   }
   if (smokeCode !== 0) process.exitCode = smokeCode
 }

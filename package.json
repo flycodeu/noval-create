@@ -1,6 +1,7 @@
 {
   "name": "novelforge",
   "version": "1.0.0",
+  "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
     "nativeScripts": "Migration safety should be run via `npm run test:migrations` (Electron runtime). Direct `node scripts/migration-safety.test.cjs` execution is diagnostic-only and may hit better-sqlite3 ABI mismatch."
@@ -65,19 +66,6 @@
     "test:thread-context-projection": "electron scripts/thread-context-projection.test.cjs",
     "test:semantic-memory-soak": "electron scripts/semantic-memory-soak.cjs",
     "soak:export-chapter-report": "electron scripts/export-chapter-soak-report.cjs",
-    "eval:novel": "electron scripts/run-novel-ai-eval.cjs",
-    "eval:novel:pipeline": "electron scripts/run-novel-ai-eval-pipeline.cjs",
-    "acceptance:real-model:preflight": "node scripts/real-model-acceptance.cjs --preflight",
-    "acceptance:real-model": "node scripts/real-model-acceptance.cjs --run",
-    "eval:novel:flow": "electron scripts/run-novel-flow-audit.cjs",
-    "eval:humanization": "node scripts/run-humanization-eval.cjs",
-    "eval:humanization:repair": "node scripts/run-humanization-repair-eval.cjs",
-    "eval:platform-samples": "node todo/platform-evaluation-2026/scripts/evaluate-samples.cjs",
-    "eval:novel:verify": "electron scripts/verify-novel-ai-eval.cjs",
-    "backfill:huaishang": "electron scripts/backfill-huaishang-xinjing.cjs",
-    "sample:create-shuangwen": "electron scripts/create-shuangwen-sample.cjs",
-    "sample:create-character-continuity": "electron scripts/create-character-continuity-sample.cjs",
-    "eval:character-continuity": "electron scripts/evaluate-character-continuity-sample.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck": "npm run typecheck:web && npm run typecheck:node",
@@ -86,25 +74,12 @@
     "audit:interfaces": "node scripts/interface-inventory.cjs --check",
     "audit:complexity": "node scripts/complexity-audit.cjs",
     "audit:complexity:strict": "node scripts/complexity-audit.cjs --strict",
-    "acceptance:p0-00": "node scripts/ui-acceptance/capture-p0-00.cjs",
-    "acceptance:p0-00:prepare": "node scripts/ui-acceptance/capture-p0-00.cjs --prepare",
-    "acceptance:p0-01": "node scripts/ui-acceptance/capture-p0-01.cjs",
-    "acceptance:p0-02": "node scripts/ui-acceptance/capture-p0-02.cjs",
-    "acceptance:p1-01": "node scripts/ui-acceptance/capture-p1-01.cjs",
-    "acceptance:local-text-write": "node scripts/ui-acceptance/verify-local-text-write.cjs",
-    "acceptance:p1-02": "node scripts/ui-acceptance/capture-p1-02.cjs",
-    "acceptance:p3-02": "node scripts/ui-acceptance/capture-p3-02.cjs",
-    "acceptance:p3-03": "node scripts/ui-acceptance/capture-p3-03.cjs",
-    "acceptance:p3-04": "node scripts/ui-acceptance/capture-p3-04.cjs",
-    "acceptance:p3-05": "node scripts/ui-acceptance/capture-p3-05.cjs",
-    "acceptance:simulated": "node scripts/ui-acceptance/capture-functional-simulated.cjs",
-    "acceptance:p3-06": "node scripts/ui-acceptance/capture-p3-06.cjs",
     "mcp": "node scripts/run-novelforge-mcp.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",
     "@hello-pangea/dnd": "^18.0.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@xenova/transformers": "^2.17.2",
     "antd": "^5.15.0",
     "better-sqlite3": "^9.4.3",
@@ -116,7 +91,7 @@
     "epub-gen-memory": "^1.1.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "react-router-dom": "^6.22.0",
+    "react-router-dom": "^6.30.6",
     "reactflow": "^11.11.3",
     "recharts": "^3.10.1",
     "zustand": "^4.5.2"
@@ -139,11 +114,30 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.26",
     "globals": "^16.5.0",
-    "playwright": "^1.62.1",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.58.0",
     "vite": "^5.2.0",
     "vitest": "^1.6.1"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": {
+      "@hono/node-server": "1.19.15",
+      "fast-uri": "3.1.6",
+      "hono": "4.13.7",
+      "ip-address": "10.7.0",
+      "qs": "6.16.0"
+    },
+    "docx": {
+      "nanoid": "5.1.16"
+    },
+    "drizzle-kit": {
+      "@hono/node-server": "1.19.15",
+      "brace-expansion": "2.1.4",
+      "hono": "4.13.7"
+    },
+    "epub-gen-memory": {
+      "brace-expansion": "2.1.4"
+    }
   },
   "author": "FlyLabs"
 }

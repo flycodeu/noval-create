@@ -17,9 +17,19 @@ const RECENT_VECTOR_CANDIDATES = 768
 
 let embeddingPipeline: any = null
 
+// The local Web RPC backend loads TypeScript through a CommonJS runtime. Its
+// transpiler rewrites a normal `import()` to `require()`, which cannot load the
+// ESM-only transformers package. Keeping the native import behind a function
+// constructor makes Node perform the ESM boundary at runtime in both Web RPC
+// and packaged Electron builds. The specifier below is a fixed project value,
+// never user input.
+const importEsmModule = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<typeof import('@xenova/transformers')>
+
 async function getLocalEmbeddingPipeline() {
   if (!embeddingPipeline) {
-    const { pipeline, env } = await import('@xenova/transformers')
+    const { pipeline, env } = await importEsmModule('@xenova/transformers')
     env.allowLocalModels = true
     env.useBrowserCache = false
     embeddingPipeline = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {

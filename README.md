@@ -262,8 +262,6 @@ NovelForge 基于 `Electron + React + TypeScript + SQLite`，面向的不是“�
 - `修订中心`：系统任务、人工任务、体检问题、自动修复。
 - `质量监控`：全书健康、趋势、漂移、验收门、世界状态稳定性。
 
-阶段化长篇创作、人物关系图谱、地图图谱和阶段交接设计见 [`docs/分阶段长篇创作架构-2026.md`](docs/分阶段长篇创作架构-2026.md)。
-
 ## 5. 工作台通用能力
 
 除了各个业务页面，整个工作台还有一组通用能力：
@@ -393,7 +391,6 @@ npm run setup:win-tools
 
 ```text
 .
-├─ docs/                  文档、模块说明、待办
 ├─ electron/              主进程、服务层、数据库、适配器
 │  ├─ adapters/
 │  ├─ database/
@@ -444,6 +441,35 @@ npm run setup:win-tools
 - 希望让 AI 参与整本书生产流程，而不是只生成几个段落的人。
 - 希望把创作过程沉淀成可复用资产，而不是只留下一堆正文文件的人。
 
-## 13. 一句话总结
+## 13. 开源仓库边界
+
+完整的文件保留规则、逐界面审计、AI 文本自然度标准和修复优先级见
+[开源边界、界面与文本质量审计](docs/open-source-product-audit.md)。
+
+仓库中应当保留并提供给使用者的内容：
+
+- `src/`、`electron/`：应用源码、数据库结构和迁移逻辑。
+- `scripts/`：安装、构建、打包、通用检查和可重复的回归测试。
+- `build/`：安装包图标等打包资源。
+- `package.json`、`package-lock.json`、TypeScript/Vite/Electron/ESLint 配置：保证可重复安装和构建。
+- `README.md` 与正式项目文档：说明安装、使用、架构和贡献方式。
+
+以下内容不应提交或打包给使用者：
+
+- `node_modules/`、`out/`、`release/`、`coverage/`、`*.tsbuildinfo` 等可重新生成的依赖、产物和缓存。
+- `*.db`、`*.sqlite*`、日志、临时测试目录等本地运行数据。
+- `.env*`、私钥、证书包、API Key、模型密钥和个人 IDE 配置。
+- 只服务于某次内部验收、固定小说样例、个人数据库修复或历史工单取证的一次性脚本。
+
+发布源码前建议执行：
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build:app
+```
+
+## 14. 一句话总结
 
 NovelForge 不是“AI 帮你写一章”的工具，而是一套把立项、设定、结构、合同、正文、回写、修订和质量监控串起来的长篇小说生产工作台。

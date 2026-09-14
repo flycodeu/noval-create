@@ -683,6 +683,7 @@ export default function ModelManager() {
       <Modal
         title={isNew ? '新建模型配置' : `编辑模型配置${selected ? `：${selected.name}` : ''}`}
         open={editorOpen}
+        forceRender
         width={760}
         maskClosable={!saving}
         onCancel={() => setEditorOpen(false)}
@@ -877,6 +878,7 @@ export default function ModelManager() {
       <Modal
         title="来源检索配置"
         open={sourceEditorOpen}
+        forceRender
         width={720}
         maskClosable={!sourceSaving}
         onCancel={() => setSourceEditorOpen(false)}

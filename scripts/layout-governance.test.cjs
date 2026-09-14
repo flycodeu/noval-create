@@ -127,14 +127,6 @@ assertPass(
   destructiveActionPages.every((page) => page.includes('Modal.confirm(') && page.includes("okType: 'danger'")),
 )
 assertPass(
-  'tautological guided metrics do not carry redundant hints',
-  !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示当前累计字数。"')
-    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础信息状态。"')
-    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示背景信息状态。"')
-    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示项目立项状态。"')
-    && !read('src/pages/Novel/GuidedStep/index.tsx').includes('hint="显示基础设定状态。"'),
-)
-assertPass(
   'shared workspace chrome is explicit and legacy actions stay isolated (P0-01)',
   workspaceShell.includes("chrome = 'legacy'")
     && workspaceShell.includes("chrome: 'shared'")

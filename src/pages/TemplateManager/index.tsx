@@ -337,6 +337,7 @@ export default function TemplateManager() {
       <Modal
         title={editing ? (editing.isBuiltin ? '查看模板' : '编辑模板') : '新建模板'}
         open={editOpen}
+        forceRender
         onCancel={() => { setEditOpen(false); setEditing(null); form.resetFields() }}
         onOk={editing?.isBuiltin ? () => setEditOpen(false) : handleSave}
         okText={editing?.isBuiltin ? '关闭' : '保存'}

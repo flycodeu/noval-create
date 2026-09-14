@@ -3,6 +3,14 @@ out/
 dist/
 dist-electron/
 .idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 *.log
 *.tmp
 *.temp
@@ -26,5 +34,6 @@ yarn-error.log*
 pnpm-debug.log*
 .local-tools/
 release/
-docs/
+docs/implementation/**/evidence/
+docs/ui-acceptance/
 todo/

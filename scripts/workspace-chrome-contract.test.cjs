@@ -99,7 +99,6 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/QualityDashboard/index.tsx',
   'src/pages/Novel/Timeline/index.tsx',
   'src/pages/Novel/Contracts/index.tsx',
-  'src/pages/Novel/Guide/index.tsx',
   'src/pages/Novel/RevisionCenter/index.tsx',
 ])
 const invalidLegacyContracts = calls.filter(({ tag }) => !/\bchrome\s*=\s*["']shared["']/.test(tag) && /\bactionContract\s*=/.test(tag))

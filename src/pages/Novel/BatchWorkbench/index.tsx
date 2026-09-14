@@ -370,13 +370,13 @@ export default function BatchWorkbench({ novelId }: Props) {
         disabled: !lockDraft,
         onClick: () => void handleSaveLocks(),
       },
-      {
+      ...(activeSnapshot ? [{
         key: 'refresh',
         label: '刷新批次状态',
         icon: <ReloadOutlined />,
         loading,
         onClick: () => void loadData(activeSnapshot?.id),
-      },
+      }] : []),
     ],
   }), [activeSnapshot, handlePreviewRollback, handleSaveLocks, loadData, loading, lockDraft, previewLoading, savingLocks])
 
@@ -462,7 +462,6 @@ export default function BatchWorkbench({ novelId }: Props) {
                 <strong>当前没有批次快照</strong>
                 <p>先运行章节批量生成，系统会在批次启动时自动保存快照；这里不会伪造可恢复批次。</p>
               </div>
-              <Button icon={<ReloadOutlined />} onClick={() => void loadData()}>刷新批次状态</Button>
             </div>
           )}
         </WorkspacePanel>
