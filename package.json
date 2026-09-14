@@ -72,6 +72,9 @@
     "check:encoding": "node scripts/check-encoding.cjs",
     "check:user-messages": "node scripts/check-user-facing-messages.cjs",
     "audit:interfaces": "node scripts/interface-inventory.cjs --check",
+    "audit:reader-first": "node scripts/reader-first-audit.cjs",
+    "test:reader-first-storage": "electron scripts/reader-first-storage.test.cjs",
+    "test:reader-first-policy-storage": "electron scripts/reader-first-policy-storage.test.cjs",
     "audit:complexity": "node scripts/complexity-audit.cjs",
     "audit:complexity:strict": "node scripts/complexity-audit.cjs --strict",
     "mcp": "node scripts/run-novelforge-mcp.cjs"

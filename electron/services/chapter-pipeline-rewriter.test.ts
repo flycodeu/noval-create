@@ -184,6 +184,28 @@ beforeEach(() => {
 })
 
 describe('chapter pipeline rewriter', () => {
+  it('RF-02 skips every candidate model call for high-severity style advice', async () => {
+    const content = '她把碗放在桌上。'
+    const notes = { ...buildFallbackReviewNotes('仅有文风建议'), severity: 'high' as const, rewrite_required: true,
+      issues: [createQualityIssue({ ruleId: 'ai_slogan', message: '文风建议', detector: 'heuristic', content, excerpt: content })!] }
+    const runAttempt = vi.fn()
+    const processOutcome = vi.fn()
+    const evaluateSemantics = vi.fn()
+    const reserve = vi.fn()
+    const startPassthrough = vi.fn(async () => 17)
+    const output = await runRewriterCandidateLoop({ draftContent: content, initialReviewNotes: notes, initialTaskId: 0, startPassthrough,
+      reviewPrioritySummary: buildReviewPrioritySummary(notes, content), requiresFullRewrite: false,
+      genre: '家庭关系', knownTerms: [], criticSemanticReview: null, runAttempt, processOutcome, evaluateSemantics,
+      markAttemptComplete: vi.fn(), resolvePremiumChatOptions: vi.fn(), revisionBudget: { reserveRevisionAttempt: reserve } })
+    expect(output.outcome.content).toBe(content)
+    expect(output.attemptNumber).toBe(0)
+    expect(output.taskId).toBe(17)
+    expect(startPassthrough).toHaveBeenCalledTimes(1)
+    expect(runAttempt).not.toHaveBeenCalled()
+    expect(processOutcome).not.toHaveBeenCalled()
+    expect(evaluateSemantics).not.toHaveBeenCalled()
+    expect(reserve).not.toHaveBeenCalled()
+  })
   it('09-03: accepts patch evidence only when hash, UTF-16 range, and quote match the current draft', () => {
     const content = '😀他咬牙把门推开。'
     const issue = createQualityIssue({

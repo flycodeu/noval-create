@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import type {
   AiContextAssemblyReport,
   AiExecutionMode,
@@ -69,6 +70,9 @@ export interface StepMemoryRuntimeState {
 
 export interface ChapterPipelineSnapshot {
   kind: 'chapter_pipeline'
+  narrativeIdentity?: NarrativeInputIdentity
+  /** Immutable Planner output fixed before Writer starts. */
+  plannerScenePlanJson?: string
   chapterId: number
   workflowTaskId: number
   currentRole: ChapterPipelineRole | null
@@ -118,6 +122,8 @@ export function inheritChapterPipelineRecoveryState(
   if (!downstream || downstream.chapterId !== current.chapterId) return current
   return {
     ...current,
+    narrativeIdentity: downstream.narrativeIdentity ?? current.narrativeIdentity,
+    plannerScenePlanJson: downstream.plannerScenePlanJson ?? current.plannerScenePlanJson,
     revisionBudget: downstream.revisionBudget ?? current.revisionBudget,
     baseContentHash: downstream.baseContentHash ?? current.baseContentHash,
     baseContextVersion: downstream.baseContextVersion ?? current.baseContextVersion,

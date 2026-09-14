@@ -815,8 +815,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <div className="theme-voice__advanced-grid">
                   <div className="theme-voice__field"><Form.Item name="descriptionRules" label="描写规则"><Input.TextArea rows={4} placeholder="写场景、动作、心理描写的比例和取舍。" /></Form.Item></div>
                   <div className="theme-voice__field"><Form.Item name="forbiddenPhrases" label="禁用表达"><Input.TextArea rows={4} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" /></Form.Item></div>
-                  <div className="theme-voice__field"><Form.Item name="targetWorkSampleGuide" label="真实样章对照"><Input.TextArea rows={4} placeholder="写像不像目标作品时要核对的节奏、句式、对白比例、信息密度和现场质感。" /></Form.Item></div>
-                  <div className="theme-voice__field"><Form.Item name="humanStyleSampleLock" label="人工风格样本锁定"><Input.TextArea rows={4} placeholder="写人工样本必须保留的特征，以及哪些 AI 化偏移一出现就退回重写。" /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="targetWorkSampleGuide" label="参考作品写法说明"><Input.TextArea rows={4} placeholder="写像不像目标作品时要核对的节奏、句式、对白比例、信息密度和现场质感。" /></Form.Item></div>
+                  <div className="theme-voice__field"><Form.Item name="humanStyleSampleLock" label="写作偏好说明（非正文样稿）"><Input.TextArea rows={4} placeholder="描述希望保留的表达特点和希望少用的写法；正文样稿请在风格实验室明确认可。" /></Form.Item></div>
                 </div>
               </details>
             </div>

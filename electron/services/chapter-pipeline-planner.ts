@@ -16,7 +16,7 @@ import { reconcileScenePlanForContracts } from './scene-plan-reconciliation'
 import { buildScenePlanPrompt } from './story-prompts'
 import { executeChatTask, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
-import { buildSceneWritingBrief, formatSceneWritingBrief } from '../../src/shared/scene-writing-brief'
+import { buildSceneWritingBrief, formatSceneWritingBrief, formatAuthorStyleReference } from '../../src/shared/scene-writing-brief'
 import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 
 export interface ChapterPromptNarrativeFields {
@@ -79,14 +79,18 @@ export interface ResolvePlannerModelOutputInput {
 
 export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): Message[] {
   const { context } = input
-  const sceneWritingBrief = formatSceneWritingBrief(buildSceneWritingBrief(
+  const material = buildSceneWritingBrief(
     null,
     context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' },
     { knownFacts: [context.chapterGoal, context.currentArc].filter(Boolean) },
-  ))
+  )
+  const sceneWritingBrief = context.narrativeIdentity?.policyVersion === 'reader-first-v1'
+    ? formatAuthorStyleReference(material) : formatSceneWritingBrief(material)
   return [{
     role: 'user',
     content: appendNarrativeNaturalnessPrompt(buildScenePlanPrompt({
+      narrativeIdentity: context.narrativeIdentity,
+      narrativeScenes: [{ purpose: context.chapterGoal, beat: input.plotPoints }],
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -131,11 +135,9 @@ export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): M
       protagonistRule: input.protagonistRule,
       promptTier: input.promptTier,
     }), {
+      policyVersion: context.narrativeIdentity?.policyVersion,
       genre: input.genre,
-      hasAuthorStyleReference: Boolean(
-        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
-        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
-      ),
+      hasAuthorStyleReference: material.authorStyle.samples.length > 0,
       mode: 'write',
     }),
   }]
@@ -188,7 +190,16 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
 export function loadReusablePlannerOutput(
   scenePlanJson: string | null | undefined,
   fallbackScenePlan: ScenePlanStep[],
+  immutableScenePlanJson?: string,
 ): PlannerStageOutput | null {
+  if (immutableScenePlanJson) {
+    const frozen = normalizeScenePlan(JSON.parse(immutableScenePlanJson) as unknown, [])
+    const current = scenePlanJson ? normalizeScenePlan(JSON.parse(scenePlanJson) as unknown, []) : []
+    if (frozen.length === 0 || JSON.stringify(frozen) !== JSON.stringify(current)) {
+      throw new ChapterPipelineStageError('contract_blocked', 'Planner 快照与当前场景计划不一致，请从 Planner 重新生成，保留现有 Writer 稿。', { blocked: true, rewriteScope: 'contract_replan' })
+    }
+    scenePlanJson = immutableScenePlanJson
+  }
   const scenePlan = scenePlanJson?.trim()
     ? normalizeScenePlan(JSON.parse(scenePlanJson) as unknown, fallbackScenePlan)
     : []
@@ -211,6 +222,7 @@ export async function runChapterPlannerStage(input: {
   prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
+  immutableScenePlanJson?: string
   priorTaskId?: number
   startRole: (messages: Message[]) => Promise<number>
   validateContracts: () => string
@@ -220,7 +232,7 @@ export async function runChapterPlannerStage(input: {
   setUpstreamTaskId: (taskId?: number) => void
 }): Promise<PlannerExecutionOutput> {
   if (!input.shouldRun) {
-    const output = loadReusablePlannerOutput(input.storedScenePlanJson, input.fallbackScenePlan)
+    const output = loadReusablePlannerOutput(input.storedScenePlanJson, input.fallbackScenePlan, input.immutableScenePlanJson)
     if (!output) {
       throw new ChapterPipelineStageError('contract_blocked', '没有可复用的 Planner 场景快照，无法从当前节点重试。', {
         blocked: true,
@@ -288,6 +300,7 @@ export async function executeChapterPlannerPhase(input: {
   prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
+  immutableScenePlanJson?: string
   priorTaskId?: number
   startRole: (messages: Message[]) => Promise<number>
   validateContracts: () => string
@@ -308,6 +321,7 @@ export async function executeChapterPlannerPhase(input: {
     prepareInput: input.prepareInput,
     fallbackScenePlan: input.fallbackScenePlan,
     storedScenePlanJson: input.storedScenePlanJson,
+    immutableScenePlanJson: input.immutableScenePlanJson,
     priorTaskId: input.priorTaskId,
     startRole: input.startRole,
     validateContracts: input.validateContracts,

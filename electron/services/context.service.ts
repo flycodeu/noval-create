@@ -1,4 +1,6 @@
-﻿import { asc, eq } from 'drizzle-orm'
+﻿import type { ApprovedStyleSample } from '../../src/shared/style-source'
+import { asc, eq } from 'drizzle-orm'
+import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { getDb, getSqlite } from '../database/db'
 import { and, desc, gte, inArray, isNull, lte, lt, notInArray, or, sql } from 'drizzle-orm'
 import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
@@ -10,6 +12,7 @@ import {
   buildStyleFingerprintPromptSection,
   buildStyleHardGuardPromptSection,
   resolveActiveStyleFingerprint,
+  resolveAuthorStyleMaterial,
 } from './style-analysis.service'
 import {
   buildEndgameDesignSummary,
@@ -450,6 +453,7 @@ export interface ConstraintInjectionStatus {
 }
 
 export interface ChapterContext extends ChapterContextParts {
+  narrativeIdentity?: NarrativeInputIdentity
   hardConstraintContext: string
   hardConstraintSummary: string
   hardConstraintEntries: HardConstraintEntry[]
@@ -463,6 +467,8 @@ export interface ChapterContext extends ChapterContextParts {
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
   authorStyleMaterials?: {
+    approvedSample?: ApprovedStyleSample
+    styleSourceDiagnostics?: string[]
     targetWorkSampleGuide: string
     humanStyleSampleLock: string
   }
@@ -524,6 +530,7 @@ export class HardConstraintOverflowError extends ContextOverflowError {
 type ChapterContextLabel = keyof ChapterContextParts
 
 export interface ChapterContextRawData {
+  narrativeIdentity?: NarrativeInputIdentity
   novel: typeof novels.$inferSelect
   profile: StoryProfile
   chapterRows: Array<typeof chapters.$inferSelect>
@@ -544,6 +551,8 @@ export interface ChapterContextRawData {
   creativeStageContext?: CreativeStageContext
   /** NF-10: explicit author materials kept separate from generated style summaries. */
   authorStyleMaterials?: {
+    approvedSample?: ApprovedStyleSample
+    styleSourceDiagnostics?: string[]
     targetWorkSampleGuide: string
     humanStyleSampleLock: string
   }
@@ -974,6 +983,7 @@ function buildHardConstraintDrafts(
   ]
 
   return draftSpecs
+    .filter((entry) => rawData.narrativeIdentity?.policyVersion !== 'reader-first-v1' || entry.label !== 'genrePacing')
     .filter((entry) => Boolean(entry.content))
     .map((entry) => ({
       ...entry,
@@ -1917,7 +1927,7 @@ function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: numbe
     const resolved = resolveActiveStyleFingerprint(novelId)
     if (!resolved) return baseTemplate
 
-    const section = buildStyleFingerprintPromptSection(resolved.record.id)
+    const section = [resolved.source === 'genre-default' ? '【题材通用参考，非作者认可样稿】' : '', buildStyleFingerprintPromptSection(resolved.record.id, { includeExamples: false })].filter(Boolean).join('\n')
     if (!section) return baseTemplate
 
     return baseTemplate ? `${baseTemplate}\n\n${section}` : section
@@ -1929,16 +1939,16 @@ function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: numbe
 function buildManualStyleSampleConstraint(themeVoiceJson?: string | null): string {
   const themeVoice = parseThemeVoiceDocument(themeVoiceJson)
   const lines = [
-    themeVoice.targetWorkSampleGuide ? `真实样章对照：${themeVoice.targetWorkSampleGuide}` : '',
-    themeVoice.humanStyleSampleLock ? `人工风格样本锁定：${themeVoice.humanStyleSampleLock}` : '',
+    themeVoice.targetWorkSampleGuide ? `参考写法说明：${themeVoice.targetWorkSampleGuide}` : '',
+    themeVoice.humanStyleSampleLock ? `写作偏好说明：${themeVoice.humanStyleSampleLock}` : '',
   ].filter(Boolean)
   if (lines.length === 0) return ''
 
   return [
-    '【真实样章与人工风格锁】',
+    '【作者写法说明（非正文样稿）】',
     ...lines.map((line) => `- ${line}`),
     '- 写作、审校和重写都必须用这些标准判断“读起来像不像目标作品”。',
-    '- 如果只是语言更顺，但节奏、句式、信息密度、对白比例或现场质感偏离样章口径，应触发重写。',
+    '- 这些偏好用于表达参考，不单独触发自动重写；明确的作者硬合同另行校验。',
   ].join('\n')
 }
 
@@ -1950,7 +1960,7 @@ function buildStyleHardConstraintForNovel(
   const manualConstraint = buildManualStyleSampleConstraint(themeVoiceJson)
   try {
     const resolved = resolveActiveStyleFingerprint(novelId)
-    if (!resolved) return layer === 'automatic' ? '' : manualConstraint
+    if (!resolved || resolved.source !== 'active') return layer === 'automatic' ? '' : manualConstraint
     if (layer === 'explicit') return manualConstraint
     if (layer === 'automatic') return buildStyleHardGuardPromptSection(resolved.record.id)
     return [
@@ -3966,6 +3976,7 @@ export async function collectChapterContextRawData(
     recallDiagnostics: recallAugmentation.recallDiagnostics,
     recalledMemorySources: recallAugmentation.recalledMemorySources,
     authorStyleMaterials: {
+      ...resolveAuthorStyleMaterial(novelId),
       targetWorkSampleGuide: parseThemeVoiceDocument(novel.themeVoiceJson).targetWorkSampleGuide,
       humanStyleSampleLock: parseThemeVoiceDocument(novel.themeVoiceJson).humanStyleSampleLock,
     },
@@ -4227,6 +4238,7 @@ export function allocateChapterContext(
     chapterBridgePlan: softAllocation.allocated.chapterBridgePlan || '',
     styleTemplate: softAllocation.allocated.styleTemplate || '',
     authorStyleMaterials: rawData.authorStyleMaterials,
+    narrativeIdentity: rawData.narrativeIdentity,
     chapterGoal: softAllocation.allocated.chapterGoal
       || hardConstraintAllocation.entries.find((entry) => entry.label === 'chapterGoal')?.content
       || '',

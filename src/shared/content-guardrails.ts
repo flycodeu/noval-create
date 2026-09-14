@@ -1,4 +1,5 @@
-﻿import { getBuiltinGenreRules, type RealismLevel } from './genre-system'
+﻿import { createQualityIssue, qualityIssueHasActionableLevel, qualityIssueHasBlockerLevel } from './quality-issue'
+import { getBuiltinGenreRules, type RealismLevel } from './genre-system'
 
 export type GuardrailSeverity = 'low' | 'medium' | 'high'
 
@@ -66,7 +67,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'ai_process_leak',
     severity: 'high',
     message: 'AI 生成过程、思考备注或内部工作流文字进入正文。',
-    pattern: /(AI(?:生成|思考|润色|输出|续写)中|作为AI|以下是(?:优化|改写|生成)|思考过程|我将|我会|本段需要|修订建议|改写说明|【(?:分析|计划|备注|提示)】)/u,
+    pattern: /(AI(?:生成|思考|润色|输出|续写)中|作为(?:一个)?\s*AI(?:语言模型|助手)?|以下是(?:优化|改写|生成)|思考过程|我(?:将|会)(?:为你|为您|按照要求|根据要求)(?:生成|改写|续写|润色)|本段需要|修订建议|改写说明|【(?:分析|计划|备注|提示)】)/u,
   },
   {
     code: 'format_noise',
@@ -152,7 +153,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'double_metaphor_or_simile_stack',
     severity: 'medium',
     message: '连续比喻或双重比喻堆叠，修辞压过了叙事信息。',
-    pattern: /(?:像|仿佛|似乎|好像|宛如).{1,18}(?:又像|又仿佛|又似乎|又好像|又宛如)|(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如)/u,
+    pattern: /(?:好像(?!是)|(?<![摄影录像塑肖图人映佛好])像(?!是)|仿佛|宛如).{1,18}(?:又像|又仿佛|又似乎|又好像|又宛如)|(?:好像(?!是)|(?<![摄影录像塑肖图人映佛好])像(?!是)|仿佛|宛如).{1,20}(?:好像(?!是)|(?<![摄影录像塑肖图人映佛好])像(?!是)|仿佛|宛如).{1,20}(?:好像(?!是)|(?<![摄影录像塑肖图人映佛好])像(?!是)|仿佛|宛如)/u,
   },
   {
     code: 'parallelism_overuse',
@@ -667,7 +668,8 @@ function collectHighFrequencyRepetitions(text: string, knownTerms: string[] = []
   }
 }
 
-const SIMILE_MARKER_PATTERN = /像|仿佛|宛如|好似|好像|如同|恍若|犹如/gu
+// Exclude lexical 像 compounds and tentative judgments; these are not rhetorical evidence.
+const SIMILE_MARKER_PATTERN = /好像(?!是)|(?<![摄影录像塑肖图人映佛好])像(?!是)|仿佛|宛如|好似|如同|恍若|犹如/gu
 
 function collectParagraphSimileStacking(text: string): TextGuardrailFinding | null {
   const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter((item) => item.length >= 30)
@@ -677,8 +679,8 @@ function collectParagraphSimileStacking(text: string): TextGuardrailFinding | nu
   let denseParagraphCount = 0
   for (const paragraph of paragraphs) {
     const count = (paragraph.match(SIMILE_MARKER_PATTERN) || []).length
-    if (count >= 3) {
-      stackedParagraphs.push({ excerpt: paragraph.slice(0, 24), count })
+    if (count >= 3 && count * 120 >= paragraph.length) {
+      stackedParagraphs.push({ excerpt: paragraph, count })
     } else if (count === 2 && paragraph.length <= 120) {
       denseParagraphCount += 1
     }
@@ -690,9 +692,9 @@ function collectParagraphSimileStacking(text: string): TextGuardrailFinding | nu
   return {
     code: 'paragraph_simile_stacking',
     severity: stackedParagraphs.some((item) => item.count >= 4) || stackedParagraphs.length >= 2 ? 'high' : 'medium',
-    message: '同一段落里比喻连用过密，修辞在替代具体叙事信息。',
+    message: '同段比较标记较密，可能有修辞堆叠；需结合语义判断，不能据此认定 AI 写作。',
     excerpt: worst
-      ? `"${worst.excerpt}…"段内比喻×${worst.count}`
+      ? worst.excerpt
       : `${denseParagraphCount} 个短段各含 2 处比喻`,
   }
 }
@@ -775,7 +777,7 @@ function collectNarrativeExplanationOveruse(text: string): TextGuardrailFinding 
     code: 'narrative_explanation_overuse',
     severity: hits.length >= 8 && hits.length / sentences.length >= 0.2 ? 'medium' : 'low',
     message: '旁白反复替读者解释证据或结论，削弱了场景推进和阅读参与感。',
-    excerpt: [...new Set(hits)].slice(0, 4).join('、'),
+    excerpt: sentences.find((sentence) => NARRATIVE_EXPLANATION_PATTERNS.some((pattern) => new RegExp(pattern.source, 'u').test(sentence))) || '',
   }
 }
 
@@ -791,7 +793,7 @@ function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
     .map((item) => item.trim())
     .filter((item) => /^(?:他|她|我|他们|她们)?(?:睁开眼睛|睁眼|闭上眼睛|闭眼|抬起头|低下头|垂下眼|移开视线)[。.!！]?$/.test(item))
 
-  if (dashCount >= 4 || dashCount / sentenceCount >= 0.18) {
+  if (dashCount >= 4 && dashCount / sentenceCount >= 0.18) {
     findings.push({
       code: 'dash_abuse',
       severity: dashCount >= 8 ? 'high' : 'medium',
@@ -800,7 +802,7 @@ function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
     })
   }
 
-  if (parentheticalCount >= 3 || parentheticalCount / sentenceCount >= 0.14) {
+  if (parentheticalCount >= 3 && parentheticalCount / sentenceCount >= 0.14) {
     findings.push({
       code: 'parenthetical_explanation_abuse',
       severity: parentheticalCount >= 6 ? 'high' : 'medium',
@@ -809,7 +811,7 @@ function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
     })
   }
 
-  if (bodyDetailCount >= 5 || bodyDetailCount / sentenceCount >= 0.22) {
+  if (bodyDetailCount >= 5 && bodyDetailCount / sentenceCount >= 0.22) {
     // 按篇幅归一化：绝对次数高但密度正常的长章节不升 high（剧情功能词如“掌心”会天然高频）
     const bodyDetailDensityPerThousand = (bodyDetailCount * 1000) / Math.max(text.length, 1)
     findings.push({
@@ -938,51 +940,24 @@ export function collectQualityGuardrailFindings(
   return dedupeFindings(allFindings).slice(0, 8)
 }
 
-export function shouldForceRepair(findings: TextGuardrailFinding[]): boolean {
-  const highCount = findings.filter((finding) => finding.severity === 'high').length
-  const mediumCount = findings.filter((finding) => finding.severity === 'medium').length
-  const highConfidenceMediumCodes = new Set([
-    'ai_slogan',
-    'ai_opener',
-    'ai_action_cliche',
-    'ai_emotional_cliche',
-    'ai_description_cliche',
-    'ai_dialogue_filler',
-    'abstract_emotion_packaging',
-    'ai_pseudo_philosophy',
-    'zero_cost_resolution',
-    'ai_ending_summary',
-    'system_settlement_wall',
-    'appearance_ad',
-  ])
-  return highCount > 0
-    || mediumCount >= 2
-    || findings.some((finding) => finding.severity === 'medium' && highConfidenceMediumCodes.has(finding.code))
+export function guardrailQualityIssues(findings: TextGuardrailFinding[], content?: string) {
+  return findings.flatMap((finding) => {
+    const issue = createQualityIssue({
+      ruleId: finding.code, message: finding.message,
+      detector: ['prompt_leak', 'ai_process_leak', 'id_pollution', 'format_noise'].includes(finding.code) ? 'deterministic' : 'heuristic',
+      content: content ?? finding.excerpt, excerpt: finding.excerpt, source: 'content-guardrails',
+    })
+    return issue ? [issue] : []
+  })
 }
 
-// 风格密度类命中：应持续施加修复压力并进入审校意见，但不单独构成流水线硬阻断
-const STYLE_DENSITY_FINDING_CODES = new Set([
-  'low_value_body_detail',
-  'dash_abuse',
-  'high_frequency_repetition',
-  'parenthetical_explanation_abuse',
-  'soft_voice_cliche',
-  'paragraph_simile_stacking',
-  'eye_open_close_standalone_paragraph',
-  'uniform_paragraph_rhythm',
-  'uniform_sentence_rhythm',
-  'narrative_explanation_overuse',
-])
+/** Compatibility adapters; raw severity never decides automatic actions. */
+export function shouldForceRepair(findings: TextGuardrailFinding[]): boolean {
+  return guardrailQualityIssues(findings).some(qualityIssueHasActionableLevel)
+}
 
-/**
- * 修复轮次跑完后是否仍需硬阻断流水线：
- * 只有非风格密度类的高危命中（提示词泄漏、格式噪音、ID 污染等），
- * 或风格密度类高危命中堆积到 3 条以上，才值得停线转人工。
- */
 export function hasBlockingGuardrailFindings(findings: TextGuardrailFinding[]): boolean {
-  const highFindings = findings.filter((finding) => finding.severity === 'high')
-  if (highFindings.some((finding) => !STYLE_DENSITY_FINDING_CODES.has(finding.code))) return true
-  return highFindings.length >= 3
+  return guardrailQualityIssues(findings).some(qualityIssueHasBlockerLevel)
 }
 
 export function formatQualityGuardrailSummary(findings: TextGuardrailFinding[]): string[] {

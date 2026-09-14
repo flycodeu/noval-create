@@ -133,7 +133,7 @@ describe('chapter pipeline review', () => {
       chapterContent: '他翻过院墙。',
     })
     expect(notes.summary).toBe('场景连续，但章尾钩子偏弱。')
-    expect(notes.critical_fixes).toContain('强化章尾压力')
+    expect(notes.critical_fixes).toEqual([]) // No current manuscript evidence.
 
     expect(() => parseCriticReviewOutput('not-json', {
       chapterId: 102,
@@ -196,7 +196,7 @@ describe('chapter pipeline review', () => {
       expect.objectContaining({ ruleId: 'AI-001', level: 'advice' }),
       expect.objectContaining({ ruleId: 'dialogue_homogenization', level: 'advice' }),
     ]))
-    expect(output.rewrite_required).toBe(true)
+    expect(output.rewrite_required).toBe(false)
   })
 
   it('runs and persists the chapter 1 Enforcer stage before marking the role complete', async () => {

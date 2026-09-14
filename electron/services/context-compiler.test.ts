@@ -5,6 +5,7 @@ import {
   resolveContextCompilerMode,
 } from './context-compiler'
 import type { ChapterContext, ChapterContextRawData } from './context.service'
+import { buildNarrativeInputIdentity, resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 
 function compilerFixture(contextVersion = 3) {
   const rawContext = {
@@ -23,6 +24,24 @@ function compilerFixture(contextVersion = 3) {
 }
 
 describe('context compiler source mapping', () => {
+  it('RF-05: restores matching identities and rejects stale policy, scene and context in every compiler mode', async () => {
+    for (const mode of ['legacy', 'shadow', 'active'] as const) {
+      const input = compilerFixture()
+      const identity = buildNarrativeInputIdentity({ policy: resolveNarrativePolicy(), styleSource: 'sample',
+        inputSource: 'facts', models: 'fixture', overrides: [], compilerMode: mode, scenePlan: ['frozen scene'] })
+      input.context.narrativeIdentity = identity
+      const original = await compileChapterContextPack({ ...input, stage: 'draft', mode })
+      const restore = (context = input.context, rawContext = input.rawContext) => compileChapterContextPack({
+        context, rawContext, stage: 'draft', mode, restoredPack: original.pack,
+      })
+      expect((await restore()).pack).toEqual(original.pack)
+      for (const field of ['policyRevision', 'scenePlanDigest', 'styleSourceDigest', 'modelDigest', 'overrideDigest'] as const) {
+        await expect(restore({ ...input.context, narrativeIdentity: { ...identity, [field]: 'changed' } }))
+          .rejects.toMatchObject({ code: 'NF_CONTEXT_STALE' })
+      }
+      await expect(restore(input.context, compilerFixture(4).rawContext)).rejects.toMatchObject({ code: 'NF_CONTEXT_STALE' })
+    }
+  })
   it('11-07: maps hard constraints, allocated parts, artifacts, and author materials', () => {
     const { rawContext, context } = compilerFixture()
     const sources = buildChapterContextSources({ rawContext, context, stage: 'draft', upstreamArtifacts: { scenePlanSummary: '计划' } })

@@ -1,5 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
+import { assertChapterNarrativeInputCurrent, currentNarrativeSceneIdentity, resolveChapterNarrativeIdentity } from './chapter-narrative-policy'
 import { getOperatingModeRuntimePolicy, getRecommendedChapterWordsForOperatingMode } from '../../src/shared/operating-mode'
 import type {
   AiExecutionMode,
@@ -28,7 +29,7 @@ import {
 import { markNovelContextChanged } from './context-impact.service'
 import { dedupeTextList, type ChapterReviewNotes } from './chapter-review-notes'
 import type { StepMemoryRuntimeState } from './chapter-pipeline-state'
-import { listPromptOverrides } from './prompt-override.service'
+import { listPromptOverrides, getNarrativePromptSource } from './prompt-override.service'
 import {
   enrichSourceGroundingFromWeb,
   mergeSourceGroundingEnrichmentIntoCurrent,
@@ -86,6 +87,13 @@ async function attachContextPack(
   modelProfile?: string,
   restoredPack?: ContextPackV1,
 ): Promise<ChapterContext> {
+  const chapterId = rawContext.currentChapter?.id
+  if (chapterId) {
+    const currentChapter = getDb().select({ scenePlanJson: chapters.scenePlanJson }).from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    context = { ...context, narrativeIdentity: currentNarrativeSceneIdentity(
+      rawContext.narrativeIdentity || resolveChapterNarrativeIdentity(chapterId), stage === 'scenePlan' ? undefined : currentChapter?.scenePlanJson,
+    ) }
+  }
   const result = await compileChapterContextPack({
     rawContext,
     context,
@@ -113,6 +121,7 @@ export type ChapterStagePrepareInput = (request: {
 export function createChapterStagePrepareInput(
   context: ChapterContext,
   stage: ChapterContextStage,
+  promptKeyOverride?: 'chapterWriting',
 ): ChapterStagePrepareInput {
   const renderSchema = buildStageRenderSchema(stage)
   const protectedText = [
@@ -125,8 +134,20 @@ export function createChapterStagePrepareInput(
     .filter((entry) => entry.content.length > 0 && !protectedText.includes(entry.content))
 
   return (request) => {
+    if (context.narrativeIdentity && context.contextPack?.chapterId) {
+      assertChapterNarrativeInputCurrent(context.contextPack.chapterId, context.narrativeIdentity, context.contextPack.contextVersion)
+    }
     const messages = request.messages.map((message) => ({ ...message }))
-    if (request.budgetReport.allowed) return { messages }
+    const promptKey = promptKeyOverride || { scenePlan: 'scenePlan', draft: 'chapterDraft', review: 'chapterReview', rewrite: 'chapterRewrite' }[stage]
+    const promptSource = context.narrativeIdentity ? getNarrativePromptSource(promptKey) : undefined
+    const inputDiagnostics = () => ({
+      narrativeIdentity: context.narrativeIdentity,
+      promptSource,
+      finalMessagesHash: `sha256:${createHash('sha256').update(JSON.stringify(messages)).digest('hex')}`,
+    })
+    if (request.budgetReport.allowed || (context.narrativeIdentity?.policyVersion === 'reader-first-v1' && promptSource?.source === 'custom')) {
+      return { messages, diagnostics: inputDiagnostics() }
+    }
     const effectiveBudget = request.budgetReport.effectiveBudget
     const deficit = effectiveBudget === null
       ? 0
@@ -153,6 +174,7 @@ export function createChapterStagePrepareInput(
     return {
       messages,
       diagnostics: {
+        ...inputDiagnostics(),
         optionalContextRecompiled: droppedFields.length > 0,
         optionalContextDroppedFields: droppedFields,
         optionalContextEstimatedReclaimedTokens: reclaimedTokens,

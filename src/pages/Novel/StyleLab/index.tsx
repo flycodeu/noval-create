@@ -404,7 +404,7 @@ export default function StyleLabPage({ novelId }: Props) {
             type="info"
             showIcon
             message={`当前按「${RESOLVE_SOURCE_LABEL[resolved.source]}」生效：${resolved.record.name}`}
-            description="尚未手动激活指纹。打开任一卡片上的「设为当前」可以固定生效指纹。"
+            description="这是题材通用参考，尚未认可正文样稿。可在候选卡片上选择「认可并启用」。"
           />
         ) : null}
         {fingerprints.length === 0 ? (
@@ -436,18 +436,18 @@ export default function StyleLabPage({ novelId }: Props) {
                   <div className="style-lab__card-actions">
                     <Popconfirm
                       title={isActive ? '停用当前风格指纹？' : `将「${fingerprint.name}」设为当前指纹？`}
-                      description={isActive ? '停用后会回退到最新指纹或题材默认声线。' : '确认后，后续写作流水线会注入这条指纹。'}
-                      okText={isActive ? '确认停用' : '确认生效'}
+                      description={isActive ? '撤销认可后停止注入，不会自动启用最新候选。' : '认可这份原文作为表达参考。后续写作按预算选取完整段落；修改或删除来源会使认可失效。'}
+                      okText={isActive ? '确认停用' : '认可样稿'}
                       cancelText="取消"
                       onConfirm={() => void handleToggleActive(fingerprint.id, !isActive)}
                     >
                       <Button size="small" type={isActive ? 'default' : 'primary'} loading={switchingId === fingerprint.id}>
-                        {isActive ? '当前生效 · 停用' : '设为当前'}
+                        {isActive ? '当前生效 · 停用' : '认可并启用'}
                       </Button>
                     </Popconfirm>
                     <Popconfirm
                       title="删除这条风格指纹？"
-                      description="删除后无法恢复；若它正在生效，会自动回退到兜底顺序。"
+                      description="删除后无法恢复；关联的样稿认可失效，不会自动启用最新候选。"
                       okText="删除"
                       okType="danger"
                       cancelText="取消"

@@ -1,3 +1,7 @@
+import { resolveReviewAutomaticIssues } from './quality-issue-policy'
+import { qualityIssueHasActionableLevel } from '../../src/shared/quality-issue'
+import { assertChapterNarrativeInputCurrent, resolveChapterNarrativeIdentity } from './chapter-narrative-policy'
+import { narrativeRequestIdentity, type NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import type { ProgressSink } from '../utils/progress-sink'
 import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
@@ -9,6 +13,7 @@ import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { normalizeAiExecutionMode } from '../../src/shared/ai-execution'
 import { resolveChapterPipelineResumeMode } from '../../src/shared/chapter-resume-policy'
 import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
+import { buildSceneWritingBrief, formatAuthorStyleReference } from '../../src/shared/scene-writing-brief'
 import { restoreRevisionBudget } from './revision-budget'
 import {
   ChapterContext,
@@ -23,7 +28,7 @@ import {
   buildContinuityStatePrompt,
 } from './story-prompts'
 import { syncNovelLifecycleStatus } from './novel-lifecycle.service'
-import { buildChapterGenerationRequestKey, isRetryableChapterGenerationStatus } from './chapter-generation-idempotency'
+import { buildChapterGenerationRequestKey, chapterGenerationInputIdentity, isRetryableChapterGenerationStatus } from './chapter-generation-idempotency'
 import {
   cancelTask,
   createTask,
@@ -148,7 +153,6 @@ import {
   ChapterPipelineStageError,
 } from './chapter-pipeline-errors'
 import {
-  allocateStageContextForPipeline,
   allocateDraftContextWithWriterFallback,
   applyUpstreamArtifactsToRawContext,
   buildArcProgressCheckpoint,
@@ -1988,12 +1992,20 @@ async function prepareChapterContinuation(
   options: { executionMode?: AiExecutionMode; sourceTaskId?: number; stageId?: number },
 ): Promise<ChapterContinuationPreparation> {
   const chapter = getRequiredChapterGenerationInput(chapterId)
+  const narrativeIdentity = resolveChapterNarrativeIdentity(chapterId)
+  if (options.sourceTaskId) {
+    const sourceSnapshot = parseChapterPipelineSnapshot(getTaskRecord(options.sourceTaskId)?.progressJson)
+    assertChapterResumeBaseCurrent(chapterId, sourceSnapshot)
+    assertChapterResumeNarrativeCurrent(chapterId, sourceSnapshot)
+  }
   validateChapterContractsForGeneration(chapterId)
   const revisionBudget = getContinuationRevisionBudget(chapterId, options.sourceTaskId)
   const normalizedPartial = partialContent.trim()
   if (!normalizedPartial) throwUserFacingError('workflow.resumeUnsupported')
 
   const rawContext = await loadChapterGenerationRawContext(chapter, options.stageId)
+  assertChapterNarrativeInputCurrent(chapterId, narrativeIdentity)
+  rawContext.narrativeIdentity = narrativeIdentity
   const novel = rawContext.novel
   const profile = rawContext.profile
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
@@ -2038,14 +2050,15 @@ async function prepareChapterContinuation(
     draftText: normalizedPartial,
     previousSummary: '这是断点续写任务：必须承接已保留正文，不得重启章节或改写已完成事实。',
   })
-  draftContext = allocateStageContextForPipeline(
+  draftContext = (await resolveStageContextForPipeline(
+    'draft',
+    chapter,
     applyUpstreamArtifactsToRawContext(draftResolution.effectiveRawContext, {
       stepMemorySummary: continuationStepMemory.summary,
     }),
-    chapter,
     complexity,
-    'draft',
-  )
+    { executionMode: executionModeResolution.mode },
+  )).context
   const workflowTaskId = await createTask({
     type: 'chapter_write',
     novelId: chapter.novelId,
@@ -2067,6 +2080,8 @@ async function prepareChapterContinuation(
   )
   snapshot = {
     ...snapshot,
+    narrativeIdentity: draftContext.narrativeIdentity,
+    plannerScenePlanJson: chapter.scenePlanJson || undefined,
     executionMode: executionModeResolution.mode,
     writerContextResolution: draftResolution.writerContextResolution,
     stepMemory: continuationStepMemory,
@@ -2076,6 +2091,12 @@ async function prepareChapterContinuation(
   }
 
   const continuationBasePrompt = appendNarrativeNaturalnessPrompt(buildChapterWritingPrompt({
+    narrativeIdentity: draftContext.narrativeIdentity,
+    ...(draftContext.narrativeIdentity?.policyVersion === 'reader-first-v1' ? {
+      scenePlan: buildPersistedScenePlanText(chapter.scenePlanJson),
+      sceneWritingBrief: formatAuthorStyleReference(buildSceneWritingBrief(null,
+        draftContext.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' })),
+    } : {}),
     novelTitle: novel.title,
     genre: profile.genre,
     chapterNum: chapter.chapterNum,
@@ -2115,8 +2136,9 @@ async function prepareChapterContinuation(
     protagonistRule: profile.protagonistRule,
     promptTier: complexity,
   }), {
+    policyVersion: draftContext.narrativeIdentity?.policyVersion,
     genre: profile.genre,
-    hasAuthorStyleReference: Boolean(draftContext.styleTemplate?.trim()),
+    hasAuthorStyleReference: false, // Legacy styleTemplate is guidance, not approved sample prose.
     mode: 'write',
   })
   const continuationPrompt = buildContinuationPrompt(continuationBasePrompt, normalizedPartial)
@@ -2168,7 +2190,7 @@ async function runChapterContinuationSuccess(input: {
     messages,
     modelConfigId: novel.modelConfigId || undefined,
     chatOpts: writerChatOpts,
-    prepareInput: createChapterStagePrepareInput(prepared.draftContext, 'draft'),
+    prepareInput: createChapterStagePrepareInput(prepared.draftContext, 'draft', 'chapterWriting'),
     sender,
     onChunk: async (_chunk, fullOutput) => {
       runtime.setSnapshot({
@@ -2465,6 +2487,7 @@ async function continueChapterContent(
 }
 
 const chapterGenerationLocks = new Map<number, Promise<number>>()
+const chapterGenerationInputIdentities = new Map<number, string>()
 const chapterGenerationTaskIds = new Map<number, number>()
 const chapterGenerationTaskObservers = new Map<number, Set<(taskId: number) => void>>()
 
@@ -2758,6 +2781,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
     prepareInput: createChapterStagePrepareInput(scenePlanContext, 'scenePlan'),
     fallbackScenePlan,
     storedScenePlanJson: chapter.scenePlanJson,
+    immutableScenePlanJson: retrySourceWorkflowSnapshot?.plannerScenePlanJson || state.snapshot.plannerScenePlanJson,
     priorTaskId: retrySourceWorkflowSnapshot?.roles?.planner?.taskId,
     state,
     runtime,
@@ -2840,6 +2864,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       consistencyNotes: draftWritingGuidance,
       structuralAlertsSummary,
       scenePlanText,
+      scenePlan: plannerOutput.scenePlan,
       runtimeAssertions: writerStepMemory.runtimeAssertions,
       narrativeFields: draftNarrativeFields,
       guidance: sharedPromptGuidance,
@@ -2957,7 +2982,7 @@ async function resolveGeneratedChapterRewriteContext(input: GeneratedChapterRewr
     executionModeResolution, activePromptOverrideKeys, chapterBridgePlanText, scenePlanText,
     draftContent, lockedParagraphContext, reviewNotes, structuralAlertsSummary,
   } = input
-  const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
+  const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes, draftContent)
   const revisionPatchEvidence = selectCompatibleRevisionPatchEvidence(reviewPrioritySummary, draftContent)
   const patchIssueCount = reviewPrioritySummary.topIssues.filter((issue) => issue.source === 'quality_issues').length
   const canUsePatch = reviewPrioritySummary.rewriteScope === 'paragraph_patch'
@@ -3278,6 +3303,9 @@ async function executeGeneratedChapterRewriteQualityPhase(input: {
 
   const qualityOutput = await runRewriterQualityPipeline({
     candidateLoop: {
+      initialReviewNotes: base.reviewNotes,
+      initialTaskId: rewriterTaskId,
+      startPassthrough: () => session.bindings.startRole('rewriter', 'chapter_rewriter', '当前只有质量建议，保留 Writer 初稿并执行发布检查。', { runnerType: 'workflow' }),
       draftContent,
       reviewPrioritySummary: prepared.reviewPrioritySummary,
       requiresFullRewrite: prepared.rewritePolicy.requiresFullRewrite,
@@ -3444,7 +3472,7 @@ async function executeGeneratedChapterRewritePhase(
   const priorTaskId = retrySourceWorkflowSnapshot?.roles?.rewriter?.taskId || 0
 
   if (shouldRunPipelineRole('rewriter')) {
-    if (!session.canAutomaticallyRevise) {
+    if (!session.canAutomaticallyRevise && resolveReviewAutomaticIssues(reviewNotes, draftContent).some(qualityIssueHasActionableLevel)) {
       const message = '旧版流水线快照无法可靠推导修订额度，已保留候选并转人工复核。'
       failRoleTask('rewriter', priorTaskId || undefined, new ChapterPipelineStageError('human_review_required', message, {
         blocked: true,
@@ -3544,13 +3572,16 @@ async function finalizeGeneratedChapterPipeline(input: GeneratedChapterFinalizeP
   })
 }
 
-function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect, stageId?: number): string {
+function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSelect, stageId?: number, identity?: NarrativeInputIdentity): string {
+  const novel = getDb().select({ contextVersion: novels.contextVersion }).from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   const source = [
     chapter.id,
     chapter.contextVersion || 1,
+    novel?.contextVersion || 1,
     chapter.updatedAt || '',
     chapter.status || 'outline',
     stageId || 'auto-stage',
+    identity ? narrativeRequestIdentity(identity) : '',
   ].join('|')
   return `chapter-write:${chapter.id}:${createHash('sha256').update(source).digest('hex').slice(0, 24)}`
 }
@@ -3571,6 +3602,7 @@ async function loadChapterGenerationRawContext(
   if (stageId && rawContext.creativeStageContext) {
     assertCreativeStageContextReadyForGeneration(rawContext.creativeStageContext)
   }
+  rawContext.narrativeIdentity = resolveChapterNarrativeIdentity(chapter.id)
   return rawContext
 }
 
@@ -3604,8 +3636,13 @@ export async function generateChapterContent(
   sender?: ProgressSink,
   options: ChapterGenerationOptions = {},
 ): Promise<number> {
+  const narrativeIdentity = resolveChapterNarrativeIdentity(chapterId)
+  const requestIdentity = chapterGenerationInputIdentity(narrativeIdentity, options)
   const inFlight = chapterGenerationLocks.get(chapterId)
   if (inFlight) {
+    if (chapterGenerationInputIdentities.get(chapterId) !== requestIdentity) {
+      throw new Error('本章正在使用另一版写作依据，请取消当前任务后按新设置生成。')
+    }
     if (options.onWorkflowTaskCreated) {
       observeChapterGenerationTask(chapterId, options.onWorkflowTaskCreated)
     }
@@ -3615,7 +3652,7 @@ export async function generateChapterContent(
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
-  const idempotencyKey = buildChapterGenerationIdempotencyKey(chapter, options.stageId)
+  const idempotencyKey = `${buildChapterGenerationIdempotencyKey(chapter, options.stageId, narrativeIdentity)}:${requestIdentity}`
   const existing = findExistingChapterGenerationTask(chapterId, idempotencyKey)
   if (existing && !isRetryableChapterGenerationStatus(existing.status)) {
     options.onWorkflowTaskCreated?.(Number(existing.id))
@@ -3636,13 +3673,15 @@ export async function generateChapterContent(
   const run = generateChapterContentInternal(chapterId, sender, {
     ...options,
     onWorkflowTaskCreated: (taskId) => publishChapterGenerationTaskId(chapterId, taskId),
-  }, nextIdempotencyKey)
+  }, nextIdempotencyKey, narrativeIdentity)
   chapterGenerationLocks.set(chapterId, run)
+  chapterGenerationInputIdentities.set(chapterId, requestIdentity)
   try {
     return await run
   } finally {
     if (chapterGenerationLocks.get(chapterId) === run) {
       chapterGenerationLocks.delete(chapterId)
+      chapterGenerationInputIdentities.delete(chapterId)
       chapterGenerationTaskIds.delete(chapterId)
       chapterGenerationTaskObservers.delete(chapterId)
     }
@@ -3654,12 +3693,15 @@ async function generateChapterContentInternal(
   sender?: ProgressSink,
   options: ChapterGenerationOptions = {},
   idempotencyKey?: string,
+  narrativeIdentity = resolveChapterNarrativeIdentity(chapterId),
 ): Promise<number> {
   const db = getDb()
   const chapter = getRequiredChapterGenerationInput(chapterId)
   const initialGenerationInputFingerprint = buildChapterGenerationInputFingerprint(chapter as unknown as Record<string, unknown>)
 
   const rawContext = await loadChapterGenerationRawContext(chapter, options.stageId)
+  assertChapterNarrativeInputCurrent(chapterId, narrativeIdentity)
+  rawContext.narrativeIdentity = narrativeIdentity
   const novel = rawContext.novel
   const profile = rawContext.profile
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
@@ -3679,6 +3721,7 @@ async function generateChapterContentInternal(
     settingsJson: novel.settingsJson,
   })
   const session = await createChapterPipelineSession({
+    narrativeIdentity,
     chapter,
     modelConfigId: novel.modelConfigId || undefined,
     sender,
@@ -3985,6 +4028,16 @@ function assertChapterResumeBaseCurrent(
   if (status === 'context_conflict') throwUserFacingError('chapter.pipelineContextConflict')
 }
 
+function assertChapterResumeNarrativeCurrent(
+  chapterId: number,
+  snapshot: Partial<ChapterPipelineSnapshot> | null,
+): void {
+  if (!snapshot?.narrativeIdentity) {
+    throw new Error('旧任务缺少可复现的写作策略身份，请保留现稿并从 Planner 新建任务。')
+  }
+  assertChapterNarrativeInputCurrent(chapterId, snapshot.narrativeIdentity)
+}
+
 export async function resumeChapterPipeline(taskId: number, sender?: ProgressSink): Promise<number> {
   const inFlight = chapterResumeLocks.get(taskId)
   if (inFlight) return inFlight
@@ -4018,6 +4071,7 @@ export async function retryChapterPipelineNode(nodeRunId: number, sender?: Progr
     .where(eq(chapters.id, chapterId)).all()[0]
   if (!currentChapter) throwUserFacingError('chapter.notFound')
   assertChapterResumeBaseCurrent(chapterId, sourceSnapshot)
+  assertChapterResumeNarrativeCurrent(chapterId, sourceSnapshot)
 
   const retryExecutionPlan = buildChapterPipelineRetryPlan(role)
   const preservedDraft = typeof sourceSnapshot?.partialContent === 'string'
@@ -4068,6 +4122,7 @@ async function resumeChapterPipelineInternal(taskId: number, sender?: ProgressSi
   })
   if (partialContent) {
     assertChapterResumeBaseCurrent(rootTask.relatedEntityId, snapshot)
+    assertChapterResumeNarrativeCurrent(rootTask.relatedEntityId, snapshot)
     if (resumeMode === 'continue_writer') {
       return continueChapterContent(rootTask.relatedEntityId, partialContent, sender, {
         executionMode: snapshot?.executionMode,
@@ -4102,6 +4157,7 @@ export async function getChapterContextPreview(
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
+  rawContext.narrativeIdentity = resolveChapterNarrativeIdentity(chapterId)
   const contractVersion = buildChapterContractVersion(chapterId, { allowMissing: true })
   const contractGate = getChapterContractPreviewGate(chapterId)
   const executionModeResolution = resolveAiExecutionMode({
@@ -4118,7 +4174,7 @@ export async function getChapterContextPreview(
   const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
   const persistedScenePlanText = buildPersistedScenePlanText(chapter.scenePlanJson)
   const persistedReviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
-  const persistedReviewPrioritySummary = buildReviewPrioritySummary(persistedReviewNotes)
+  const persistedReviewPrioritySummary = buildReviewPrioritySummary(persistedReviewNotes, chapter.content || '')
   const previewStepMemory = buildStepMemorySummary({
     chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
     scenePlanText: persistedScenePlanText,
@@ -4240,6 +4296,7 @@ export async function getChapterContextPreview(
     contractBlockers: contractGate.blockers,
     complexity,
     assemblyVersion: 'v2-unified',
+    narrativeIdentity: contexts.draft.narrativeIdentity,
     assemblyNotes: [
       '统一上下文组装器：图谱召回、时间召回与合同召回已合并调度。',
       '解释报告会同步展示执行模式、结构化输出与低置信度事实。',
@@ -4526,6 +4583,7 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export const __testing = {
+  buildChapterGenerationIdempotencyKey,
   buildChapterOptimizationFactGuard,
   collectNarrativeStateWarnings,
   collectUnsupportedNarrativeFactWarnings,

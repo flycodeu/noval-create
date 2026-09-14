@@ -4,6 +4,7 @@ import {
   normalizeQualityIssue,
   qualityIssueHasActionableLevel,
   qualityIssueHasBlockerLevel,
+  validateQualityIssuesForContent,
   type QualityIssueCategory,
   type QualityIssueDetector,
   type QualityIssueLevel,
@@ -190,7 +191,7 @@ export function buildQualityIssuesFromSemanticVerdicts(
       const reportedExcerpt = verdict.evidence?.find((item) => item.excerpt)?.excerpt
       const excerpt = reportedExcerpt && content.includes(reportedExcerpt) ? reportedExcerpt : undefined
       return {
-      ruleId: 'semantic_gate_blocker',
+      ruleId: ['dialogue_voice', 'prose_economy'].includes(verdict.dimension || '') ? 'reading_experience' : 'semantic_gate_blocker',
       message: `${verdict.dimension || '语义门'}：${verdict.summary || '模型判定存在语义风险。'}${verdict.suggestion ? ` 修复方向：${verdict.suggestion}` : ''}`,
       excerpt,
       source,
@@ -205,6 +206,21 @@ export function buildQualityIssuesFromSemanticVerdicts(
 
 export function mergeQualityIssues(...groups: Array<QualityIssueV1[] | undefined>): QualityIssueV1[] {
   return dedupeQualityIssues(groups.flatMap((group) => group || []))
+}
+
+export function resolveReviewAutomaticIssues(notes: {
+  issues?: QualityIssueV1[]
+  contract_validation?: { status?: string; advisoryOnly?: boolean }
+}, content: string): QualityIssueV1[] {
+  const issues = validateQualityIssuesForContent(notes.issues || [], content)
+  if (notes.contract_validation?.status === 'blocker' && !notes.contract_validation.advisoryOnly
+    && !issues.some((issue) => issue.sources?.includes('contract-validator'))) {
+    issues.push(...buildQualityIssuesFromFindings(content, [{
+      ruleId: 'contract_validation', detector: 'deterministic',
+      message: '当前章节未兑现明确合同，沿用合同校验阻断。',
+    }], 'contract-validator'))
+  }
+  return dedupeQualityIssues(issues)
 }
 
 function issueLegacyText(issue: QualityIssueV1): string {
@@ -238,7 +254,7 @@ export function applyQualityIssuesToReviewNotes<T extends QualityIssueReviewNote
       : actionable.length > 0 && currentSeverity === 'low'
         ? 'medium'
         : currentSeverity,
-    rewrite_required: Boolean(notes.rewrite_required) || actionable.length > 0,
+    rewrite_required: actionable.length > 0,
   }
 }
 

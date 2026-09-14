@@ -1,4 +1,6 @@
-﻿import { desc, eq } from 'drizzle-orm'
+﻿import { preserveStyleApproval } from '../../src/shared/style-source'
+import { desc, eq } from 'drizzle-orm'
+import { mergeNarrativePolicySettings } from '../../src/shared/narrative-policy'
 import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
 import {
   normalizeOperatingMode,
@@ -401,7 +403,8 @@ export function updateNovel(id: number, data: Partial<{
   db.update(novels).set({
     ...dbData,
     lifecycleMode,
-    settingsJson: normalizedSettingsJson,
+    settingsJson: normalizedSettingsJson === undefined ? undefined : preserveStyleApproval(current.settingsJson,
+      mergeNarrativePolicySettings(current.settingsJson, normalizedSettingsJson)),
     worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),
   }).where(eq(novels.id, id)).run()

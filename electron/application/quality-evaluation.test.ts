@@ -77,6 +77,15 @@ function dashboard(options: {
 }
 
 describe('agent quality evaluation', () => {
+  it('RF-02 keeps statistical style signals advisory even under the strict report profile', () => {
+    const report = buildAgentQualityReport({ requestFingerprint: 'rf02-style-only', profile: 'recommendation_ready_v1',
+      scope: { type: 'novel', label: '整书', chapterNums: [1, 2] }, contextVersion: 1, maxFindings: 30,
+      dashboard: dashboard({ health: 55, average: 60, aiLike: 80, highRiskAi: 4,
+        risks: [risk({ kind: 'style_compliance', severity: 'critical' })] }) })
+    expect(report.blockers).toEqual([])
+    expect(report.findings.every((finding) => !finding.blocking)).toBe(true)
+    expect(report.status).toBe('needs_revision')
+  })
   it('fails closed for recommendation readiness when coverage and recurrence evidence are unsafe', () => {
     const report = buildAgentQualityReport({
       requestFingerprint: `sha256:${'a'.repeat(64)}`,
@@ -101,8 +110,8 @@ describe('agent quality evaluation', () => {
     expect(report.coverageRate).toBe(50)
     expect(report.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'quality_coverage', blocking: true }),
-      expect.objectContaining({ code: 'high_risk_ai_recurrence', blocking: true }),
-      expect.objectContaining({ code: 'feedback_pause_signals', blocking: true }),
+      expect.objectContaining({ code: 'high_risk_ai_recurrence', blocking: false }),
+      expect.objectContaining({ code: 'feedback_pause_signals', blocking: false }),
     ]))
     expect(report.summary).toContain('硬阻塞')
   })

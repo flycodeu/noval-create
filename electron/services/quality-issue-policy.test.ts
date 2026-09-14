@@ -6,10 +6,19 @@ import {
   buildQualityIssuesFromSemanticVerdicts,
   qualityIssuesToLegacyCriticalFixes,
   readQualityIssuesFromReviewNotesJson,
+  resolveReviewAutomaticIssues,
 } from './quality-issue-policy'
 import { dedupeQualityIssues } from '../../src/shared/quality-issue'
 
 describe('quality issue policy', () => {
+  it('RF-02 validates current evidence and keeps explicit contracts separate from style', () => {
+    const content = '账本已被调包。'
+    const fact = buildQualityIssueFromFinding(content, { ruleId: 'unknown_person_knowledge', message: '使用未知事实', excerpt: '账本已被调包' }, 'enforcer')!
+    const style = buildQualityIssuesFromAntiAiHits(content, [{ code: 'ai_slogan', message: '套话', severity: 'high', excerpt: content }])
+    expect(resolveReviewAutomaticIssues({ issues: [fact, ...style] }, content).map((issue) => issue.level)).toEqual(['blocker', 'advice'])
+    expect(resolveReviewAutomaticIssues({ issues: [fact] }, content + '稿件已变。')[0].level).toBe('advice')
+    expect(resolveReviewAutomaticIssues({ issues: style, contract_validation: { status: 'blocker' } }, content).map((issue) => issue.level)).toEqual(['advice', 'blocker'])
+  })
   it('08-01: a single “突然” style hit is advice and creates no new critical fix', () => {
     const issues = buildQualityIssuesFromAntiAiHits('他突然转身，撞上了门。', [{
       code: 'ai_opener',

@@ -1,3 +1,5 @@
+import { formatScenePlan, type ScenePlanStep } from './chapter-scene-plan'
+import { compileNarrativeTechniques } from '../../src/shared/narrative-techniques'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -22,7 +24,7 @@ import {
 import { buildChapterDraftPrompt } from './story-prompts'
 import { executeChatTask, updateTaskStatus, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
-import { buildSceneWritingBrief, formatSceneWritingBrief } from '../../src/shared/scene-writing-brief'
+import { buildSceneWritingBrief, formatSceneWritingBrief, formatAuthorStyleReference } from '../../src/shared/scene-writing-brief'
 import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
 
 export interface ChapterWriterPromptInput {
@@ -38,6 +40,7 @@ export interface ChapterWriterPromptInput {
   consistencyNotes: string
   structuralAlertsSummary: string
   scenePlanText: string
+  scenePlan?: ScenePlanStep[]
   runtimeAssertions: string[]
   narrativeFields: ChapterPromptNarrativeFields
   guidance: ChapterPromptGuidance
@@ -63,20 +66,30 @@ export interface LockedParagraphContext {
   initialFallbackContent: string
 }
 
+export function buildChapterWriterMaterialReport(input: ChapterWriterPromptInput) {
+  const { context } = input
+  const material = buildSceneWritingBrief(null,
+    context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' })
+  return { ...material, narrativeIdentity: context.narrativeIdentity,
+    techniqueSelection: context.narrativeIdentity?.policyVersion === 'reader-first-v1' ? compileNarrativeTechniques(input.scenePlan || []).selections : [],
+    sceneSource: input.scenePlan?.length ? 'typed' : 'legacy-text',
+    diagnostics: [...material.diagnostics.filter((item) => !item.includes('结构场景')),
+      ...(input.scenePlan?.length ? [] : [input.scenePlanText.trim()
+        ? '历史场景文本可用，未提供结构字段。' : '未提供结构场景或历史场景文本。'])] }
+}
+
 export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Message[] {
   const { context } = input
-  const hasAuthorStyleReference = Boolean(
-    context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
-    || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
-  )
-  const sceneWritingBrief = formatSceneWritingBrief(buildSceneWritingBrief(
-    { sourceText: input.scenePlanText },
-    context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' },
-    { knownFacts: [context.chapterGoal, context.currentArc].filter(Boolean) },
-  ))
+  const material = buildChapterWriterMaterialReport(input)
+  const hasAuthorStyleReference = material.authorStyle.samples.length > 0
+  const sceneWritingBrief = material.authorStyle.guide || hasAuthorStyleReference
+    ? (context.narrativeIdentity?.policyVersion === 'reader-first-v1' ? formatAuthorStyleReference(material) : formatSceneWritingBrief(material)) : ''
+  const scenePlanText = input.scenePlan?.length ? formatScenePlan(input.scenePlan) : input.scenePlanText
   return [{
     role: 'user',
     content: appendNarrativeNaturalnessPrompt(buildChapterDraftPrompt({
+      narrativeIdentity: context.narrativeIdentity,
+      narrativeScenes: input.scenePlan,
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -112,7 +125,7 @@ export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Mes
       recalledMemory: context.recalledMemory,
       consistencyNotes: input.consistencyNotes,
       structuralAlertsSummary: input.structuralAlertsSummary,
-      scenePlan: input.scenePlanText,
+      scenePlan: scenePlanText,
       draftContent: '',
       reviewNotes: '',
       activeThreads: context.activeThreads,
@@ -123,6 +136,7 @@ export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Mes
       promptTier: input.promptTier,
       sceneWritingBrief,
     }), {
+      policyVersion: context.narrativeIdentity?.policyVersion,
       genre: input.genre,
       hasAuthorStyleReference,
       mode: 'write',

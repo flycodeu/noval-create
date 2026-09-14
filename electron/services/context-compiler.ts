@@ -5,6 +5,7 @@ import {
   type ContextPackStage,
   type ContextPackSource,
 } from '../../src/shared/context-pack'
+import { narrativeRequestIdentity } from '../../src/shared/narrative-policy'
 import type { ChapterContext, ChapterContextRawData } from './context.service'
 import {
   getRecallSourceKey,
@@ -194,6 +195,9 @@ export async function compileChapterContextPack(input: {
       && restored.contextVersion === contextVersion
       && restored.contractVersion === contractVersion
       && restored.modelProfile === modelProfile
+      && (!input.context.narrativeIdentity ? !restored.narrativeIdentity : Boolean(restored.narrativeIdentity
+        && narrativeRequestIdentity(restored.narrativeIdentity) === narrativeRequestIdentity(input.context.narrativeIdentity)
+        && restored.narrativeIdentity.scenePlanDigest === input.context.narrativeIdentity.scenePlanDigest))
     if (sameIdentity) {
       return {
         pack: restored,
@@ -207,13 +211,14 @@ export async function compileChapterContextPack(input: {
         },
       }
     }
-    if (mode === 'active') {
+    if (mode === 'active' || input.context.narrativeIdentity) {
       throw new ContextCompilerStaleError('saved pack no longer matches the current chapter, contract, model profile, or context version')
     }
   }
   const sources = buildChapterContextSources(input)
   const report = input.context.contextBudgetReport
   return compileContextPack({
+    narrativeIdentity: input.context.narrativeIdentity,
     novelId,
     chapterId,
     chapterNum,

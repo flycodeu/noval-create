@@ -1,3 +1,4 @@
+import { buildQualityIssueFromFinding } from './quality-issue-policy'
 import type { AgentArtifact } from '../../src/shared/agent-artifacts'
 import type {
   AgentQualityRepairDraftContent,
@@ -357,7 +358,14 @@ function toAgentSemanticFinding(
     code: `semantic_${finding.dimension}`,
     kind: 'semantic',
     severity: finding.severity,
-    blocking: blockCritical && finding.severity === 'critical',
+    blocking: blockCritical && finding.evidence.some((evidence) => {
+      const chapter = sourceChapters.find((item) => item.chapterNum === evidence.chapterNum)
+      return buildQualityIssueFromFinding(chapter?.content || '', {
+        ruleId: finding.dimension === 'world_consistency' ? 'hallucination_fact' : 'reading_experience',
+        detector: 'model', level: finding.severity === 'critical' ? 'blocker' : 'advice',
+        excerpt: evidence.excerpt, message: finding.detail,
+      }, 'agent-semantic')?.level === 'blocker'
+    }),
     title: finding.title,
     detail: finding.detail,
     whyItHappened: finding.whyItHappened,

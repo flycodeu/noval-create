@@ -1010,7 +1010,7 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.find((item) => item.key === 'dialogue_separability')?.status).toBe('warning')
   })
 
-  it('marks style compliance as rewrite when review notes persist severe style drift', () => {
+  it('keeps severe style drift advisory at the publish gate', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {
       reviewNotesJson: JSON.stringify({
@@ -1049,10 +1049,10 @@ describe('runChapterPublishCheck', () => {
 
     const result = runChapterPublishCheck(10)
 
-    expect(result.gateLevel).toBe('rewrite')
-    expect(result.checklist.find((item) => item.key === 'style_compliance')?.status).toBe('rewrite')
+    expect(result.gateLevel).toBe('warning')
+    expect(result.checklist.find((item) => item.key === 'style_compliance')?.status).toBe('warning')
     expect(result.scoreBreakdown.styleComplianceScore).toBeLessThanOrEqual(49)
-    expect(result.checklist.some((item) => item.key === 'style_compliance' && item.status === 'rewrite')).toBe(true)
+    expect(result.checklist.some((item) => item.key === 'style_compliance' && item.status === 'rewrite')).toBe(false)
   })
 
   it('enforce 模式下比例统计仍是独立文风建议', () => {

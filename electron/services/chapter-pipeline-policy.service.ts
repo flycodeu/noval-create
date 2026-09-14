@@ -5,6 +5,7 @@ import type {
 } from '../../src/types'
 import { qualityIssueHasActionableLevel, type QualityIssueV1 } from '../../src/shared/quality-issue'
 import { computeCandidateSimilarity } from './variation-control.service'
+import { resolveReviewAutomaticIssues } from './quality-issue-policy'
 
 export type ReviewPriorityLevel = 'high' | 'medium' | 'low'
 
@@ -55,6 +56,7 @@ export interface ReviewPriorityIssue {
 }
 
 export interface ReviewPrioritySummary {
+  automaticPolicy?: true
   topIssues: ReviewPriorityIssue[]
   deferredIssues: ReviewPriorityIssue[]
   rewriteScope: ChapterRewriteScope
@@ -738,7 +740,8 @@ function resolveRewriteScope(
   return topIssues.length <= 2 ? 'scene_rewrite' : 'chapter_rewrite'
 }
 
-export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike): ReviewPrioritySummary {
+export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike, currentContent?: string): ReviewPrioritySummary {
+  if (currentContent !== undefined) return buildAutomaticReviewPrioritySummary(reviewNotes, currentContent)
   const normalizedIssues = normalizePriorityIssues(reviewNotes)
   const topIssues = normalizedIssues.slice(0, 6)
   const deferredIssues = normalizedIssues.slice(6)
@@ -798,6 +801,25 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
         topIssues.length > 0 ? `本轮优先处理 ${topIssues.length} 个最高优先问题。` : '',
         deferredIssues.length > 0 ? `${deferredIssues.length} 个次级问题可延后到人工精修。` : '',
       ]),
+  }
+}
+
+/** Legacy lists remain displayable; automatic callers supply the current manuscript. */
+function buildAutomaticReviewPrioritySummary(notes: ChapterReviewNotesLike, content: string): ReviewPrioritySummary {
+  const actionable = resolveReviewAutomaticIssues(notes, content).filter(qualityIssueHasActionableLevel)
+  const issues: ReviewPriorityIssue[] = actionable.map((issue) => ({
+    source: 'quality_issues', label: issue.ruleId, detail: issue.message,
+    priority: issue.level === 'blocker' ? 'high' : 'medium',
+    evidenceBacked: issue.evidence.length > 0, issueScope: issue.scope,
+    ...(issue.evidence[0] ? { patchEvidence: { issueId: issue.id, ...issue.evidence[0] } } : {}),
+  }))
+  const requiresFullRewrite = actionable.some((issue) => issue.scope === 'chapter')
+  return { automaticPolicy: true, topIssues: issues.slice(0, 6), deferredIssues: issues.slice(6),
+    rewriteScope: resolveRewriteScope(issues.slice(0, 6), requiresFullRewrite), requiresFullRewrite,
+    forceMaxCoverage: actionable.some((issue) => issue.category === 'fact'),
+    counts: { high: issues.filter((issue) => issue.priority === 'high').length,
+      medium: issues.filter((issue) => issue.priority === 'medium').length, low: 0 },
+    reasons: actionable.length ? ['按当前正文的有效质量问题选择最小修订范围。'] : ['只有建议，保留原稿。'],
   }
 }
 
@@ -893,16 +915,18 @@ export function buildRewriteMiniReviewVerdict(options: {
     reviewNotes: options.reviewNotes,
     similarityToOriginal,
   })
+  const actionable = !options.reviewPrioritySummary.automaticPolicy
+    || resolveReviewAutomaticIssues(options.reviewNotes, options.rewrittenContent).some(qualityIssueHasActionableLevel)
   const surfaceSimilarityTripped = Boolean(
     !options.rewrittenContent.trim()
     || (options.reviewPrioritySummary.requiresFullRewrite && similarityToOriginal >= 0.86)
     || (options.reviewNotes.severity === 'high' && similarityToOriginal >= 0.8),
   )
-  const needsHumanReview = Boolean(
+  const needsHumanReview = !options.rewrittenContent.trim() || (actionable && Boolean(
     surfaceSimilarityTripped
     || narrativeDelta.status === 'fail'
     || (narrativeDelta.status === 'weak' && readingExperience.status === 'rewrite')
-  )
+  ))
   const deltaDrivenOnly = needsHumanReview && !surfaceSimilarityTripped
   const improved = !needsHumanReview
     && similarityToOriginal < 0.8

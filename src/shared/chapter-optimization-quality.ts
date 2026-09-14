@@ -1,5 +1,5 @@
 import type { ChapterOptimizationQualityGate, ChapterStructuralRepairGate, LanguageDriftMetrics } from '../types'
-import { collectQualityGuardrailFindings } from './content-guardrails'
+import { collectQualityGuardrailFindings, hasBlockingGuardrailFindings } from './content-guardrails'
 import { analyzeLanguageDrift } from './language-drift'
 
 const STRONG_AI_FLAVOR_CODES = new Set([
@@ -76,7 +76,7 @@ export function buildChapterOptimizationQualityGate(
   ].filter(Boolean)
 
   return {
-    safeToApply: warnings.length === 0,
+    safeToApply: Boolean(optimizedContent.trim()) && !hasBlockingGuardrailFindings(optimizedFindings),
     warnings,
     originalGuardrailHits,
     optimizedGuardrailHits,

@@ -103,7 +103,7 @@ function riskToFinding(
   profile: AgentQualityProfileSnapshot,
 ): AgentQualityFinding {
   const signature = findingSignature(risk)
-  const blocking = risk.severity === 'critical' && profile.blockCriticalRisks
+  const blocking = agentQualityFindingCanBlock(risk.kind, risk.severity === 'critical' && profile.blockCriticalRisks, risk.detail)
   const evidenceRefs = dedupeStrings([
     `quality-dashboard:risk:${risk.kind}`,
     risk.volumeId ? `volume:${risk.volumeId}` : '',
@@ -146,7 +146,7 @@ function syntheticFinding(input: {
     code: input.code,
     kind: input.kind,
     severity: input.severity,
-    blocking: input.blocking,
+    blocking: agentQualityFindingCanBlock(input.code, input.blocking, input.detail),
     title: input.title,
     detail: input.detail,
     whyItHappened: '该项由版本化质量门槛与当前质量看板快照直接比较得出。',
@@ -446,3 +446,4 @@ export function buildAgentQualityReport(input: {
     createdAt: input.createdAt || new Date().toISOString(),
   }
 }
+import { agentQualityFindingCanBlock } from '../../src/shared/quality-agent-workflow'

@@ -19,6 +19,12 @@ import {
   type ContinuityPromptInput,
 } from '../../src/shared/prompt-library'
 import { applyPromptOverride } from './prompt-override.service'
+import { buildReaderFirstRolePrompt, type NarrativePromptOptions, type ReaderFirstRole } from './reader-first-prompts'
+
+function readerFirstPrompt(role: ReaderFirstRole, key: string, params: object & NarrativePromptOptions): string {
+  const input = params as Record<string, unknown> & NarrativePromptOptions
+  return applyPromptOverride(key, buildReaderFirstRolePrompt(role, input), input, 'reader-first-v1')
+}
 
 export type {
   StoryArcPromptInput,
@@ -84,7 +90,8 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
   return applyPromptOverride('timelineEvents', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
+export function buildScenePlanPrompt(params: ScenePlanPromptInput & NarrativePromptOptions): string {
+  if (params.narrativeIdentity?.policyVersion === 'reader-first-v1') return readerFirstPrompt('planner', 'scenePlan', params)
   const fallback = appendPromptSection(rawBuildScenePlanPrompt(params), '生产补充要求', [
     '- 这份场景计划会直接进入 AI 主写流程，所以每段都必须可落成正文。',
     '- 先保证场景连贯、动作清楚、冲突具体，再考虑节奏和文气。',
@@ -139,7 +146,8 @@ const CHAPTER_DELIVERY_GATE_LINES = [
   '- 如果硬约束或文风参考包含真实样章对照/人工风格样本锁定，必须按其节奏、句式、信息密度、对白比例和现场质感执行。',
 ]
 
-export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): string {
+export function buildChapterDraftPrompt(params: ChapterRewritePromptInput & NarrativePromptOptions): string {
+  if (params.narrativeIdentity?.policyVersion === 'reader-first-v1') return readerFirstPrompt('writer', 'chapterDraft', params)
   const promptTier = normalizePromptTier(params.promptTier)
   const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const withStructuralAlerts = params.structuralAlertsSummary
@@ -159,7 +167,8 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
   return applyPromptOverride('chapterDraft', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): string {
+export function buildChapterWritingPrompt(params: ChapterWritingPromptInput & NarrativePromptOptions): string {
+  if (params.narrativeIdentity?.policyVersion === 'reader-first-v1') return readerFirstPrompt('writer', 'chapterWriting', params)
   const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const fallback = appendPromptSection(rawBuildChapterWritingPrompt(params), '生产补充要求', [
     '- 正文必须像给真实读者看的成稿，不要保留策划腔、提示词腔或解释腔。',
@@ -171,7 +180,8 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
   return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): string {
+export function buildChapterReviewPrompt(params: ChapterReviewPromptInput & NarrativePromptOptions): string {
+  if (params.narrativeIdentity?.policyVersion === 'reader-first-v1') return readerFirstPrompt('critic', 'chapterReview', params)
   const promptTier = normalizePromptTier(params.promptTier)
   const withStructuralAlerts = params.structuralAlertsSummary
     ? appendPromptSection(rawBuildChapterReviewPrompt(params), '近期结构告警', params.structuralAlertsSummary.split('\n'))
@@ -229,7 +239,8 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
   return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): string {
+export function buildChapterRewritePrompt(params: ChapterRewritePromptInput & NarrativePromptOptions): string {
+  if (params.narrativeIdentity?.policyVersion === 'reader-first-v1') return readerFirstPrompt('rewriter', 'chapterRewrite', params)
   const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const withStructuralAlerts = params.structuralAlertsSummary
     ? appendPromptSection(rawBuildChapterRewritePrompt(params), '近期结构告警', params.structuralAlertsSummary.split('\n'))

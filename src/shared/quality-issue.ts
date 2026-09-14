@@ -382,6 +382,20 @@ export function dedupeQualityIssues(issues: QualityIssueV1[]): QualityIssueV1[] 
   return [...byId.values()]
 }
 
+/** Validate stored span identity before it can drive a new automatic action. */
+export function validateQualityIssuesForContent(issues: QualityIssueV1[], content: string): QualityIssueV1[] {
+  const artifactHash = qualityIssueArtifactHash(content)
+  return dedupeQualityIssues(issues.map((issue) => {
+    if (issue.evidence.length === 0) return issue
+    const evidence = issue.evidence.filter((entry) => entry.artifactHash === artifactHash
+      && content.slice(entry.start, entry.end) === entry.quote)
+    return evidence.length === issue.evidence.length ? issue : {
+      ...issue, evidence, level: 'advice' as const,
+      diagnostics: [...(issue.diagnostics || []), 'stale or invalid artifact evidence: automatic action disabled'],
+    }
+  }))
+}
+
 export function qualityIssueHasActionableLevel(issue: QualityIssueV1): boolean {
   return issue.level === 'blocker' || issue.level === 'repair'
 }

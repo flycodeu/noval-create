@@ -260,8 +260,8 @@ function buildPublishReviewReadinessChecklist(input: PublishReadinessChecklistIn
       fixHint: '删除无来源新增，或把标题改回本章核心事件、场景物件、选择压力或反转点。',
     }),
     makePublishCheckItem({
-      key: 'style_compliance', label: '文风硬约束符合度',
-      status: !reviewState.styleComplianceChecked ? 'pass' : reviewState.styleComplianceStatus,
+      key: 'style_compliance', label: '文风参考建议',
+      status: !reviewState.styleComplianceChecked || reviewState.styleComplianceStatus === 'pass' ? 'pass' : 'warning',
       detail: !reviewState.styleComplianceChecked
         ? '当前小说未配置可用的文风指纹，本章暂不执行风格硬约束校验。'
         : reviewState.styleComplianceStatus === 'pass'
@@ -324,8 +324,7 @@ export function buildPublishLanguageAndDynamicsChecklist(input: {
   return [
     makePublishCheckItem({
       key: 'genre_register_drift', label: '题材语域漂移',
-      status: reviewState.genreRegisterRisks.length > 0 && reviewState.sourceGroundingRisks.some((item) => item.includes('历史正剧'))
-        ? 'blocker' : reviewState.genreRegisterRisks.length > 0 ? 'warning' : 'pass',
+      status: reviewState.genreRegisterRisks.length > 0 ? 'warning' : 'pass',
       detail: reviewState.genreRegisterRisks.length > 0 ? reviewState.genreRegisterRisks.slice(0, 3).join('；') : '当前没有识别到明显的题材语域漂移。',
       source: 'review', relatedPage: 'revision',
       fixHint: '收回抽象升华、说明腔和空泛辞藻，让题材语感重新落回动作、制度、生态和人物立场。',

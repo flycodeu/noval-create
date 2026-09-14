@@ -1,4 +1,6 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { parseStyleSettings, readStyleApproval, styleSourceDigest, styleSourceInvalidReason, type ApprovedStyleSample } from '../../src/shared/style-source'
+import { qualityIssueArtifactHash } from '../../src/shared/quality-issue'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { StyleComplianceResult, StyleFingerprint, StyleHardGuard } from '../../src/types'
 import { computeStyleStats, type StyleStats } from '../../src/shared/style-fingerprint-stats'
 import { getDb } from '../database/db'
@@ -350,45 +352,85 @@ export async function createStyleFingerprintFromChapters(
   })
 }
 
+function sourceChapterDigests(record: NonNullable<ReturnType<typeof getStyleFingerprint>>, novelId: number) {
+  if (record.sourceType !== 'chapters') return []
+  const ids: unknown = JSON.parse(record.sourceChapterIdsJson || '[]')
+  if (!Array.isArray(ids) || !ids.length || !ids.every((id) => Number.isSafeInteger(id))) throw new Error('source_chapters_invalid')
+  const rows = getDb().select({ id: chapters.id, content: chapters.content }).from(chapters)
+    .where(and(eq(chapters.novelId, novelId), inArray(chapters.id, ids))).all()
+  return ids.map((chapterId: number) => {
+    const row = rows.find((item) => item.id === chapterId)
+    if (!row?.content?.trim()) throw new Error('source_chapter_deleted_or_wrong_novel')
+    return { chapterId, digest: qualityIssueArtifactHash(row.content) }
+  })
+}
+
+export function resolveAuthorStyleMaterial(novelId: number): { approvedSample?: ApprovedStyleSample; styleSourceDiagnostics: string[] } {
+  const novel = getDb().select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel?.activeStyleFingerprintId) return { styleSourceDiagnostics: ['no_explicit_active_sample'] }
+  const record = getStyleFingerprint(novel.activeStyleFingerprintId)
+  const approval = readStyleApproval(novel.settingsJson)
+  const invalid = styleSourceInvalidReason(record, novelId, approval)
+  if (invalid || !record) return { styleSourceDiagnostics: [invalid || 'source_deleted'] }
+  try {
+    if (record.sourceType === 'chapters' && JSON.stringify(sourceChapterDigests(record, novelId)) !== JSON.stringify(approval?.chapterDigests)) {
+      return { styleSourceDiagnostics: ['source_chapter_changed'] }
+    }
+  } catch (error) { return { styleSourceDiagnostics: [error instanceof Error ? error.message : 'source_chapters_invalid'] } }
+  return { approvedSample: { text: record.sourceText || '', source: `style_fingerprints:${record.id}`, digest: styleSourceDigest(record) }, styleSourceDiagnostics: [] }
+}
+
 export function setActiveStyleFingerprint(novelId: number, fingerprintId: number | null): void {
   const db = getDb()
-  if (fingerprintId !== null) {
-    const record = getStyleFingerprint(fingerprintId)
-    if (!record) throwUserFacingError('styleLab.fingerprintNotFound')
-    if (record.novelId !== null && record.novelId !== novelId) {
+  db.transaction(() => {
+    const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+    if (!novel) throw new Error('Novel not found')
+    const record = fingerprintId === null ? null : getStyleFingerprint(fingerprintId)
+    if (fingerprintId !== null && !record) throwUserFacingError('styleLab.fingerprintNotFound')
+    if (record && record.novelId !== novelId && !(record.novelId === null && record.sourceType === 'genre-default')) {
       throwUserFacingError('styleLab.activateWrongNovel')
     }
-  }
-  db.update(novels)
-    .set({ activeStyleFingerprintId: fingerprintId, updatedAt: new Date().toISOString() })
-    .where(eq(novels.id, novelId))
-    .run()
+    if (record && !record.sourceText?.trim()) throw new Error('Cannot approve empty source text')
+    const settings = parseStyleSettings(novel.settingsJson)
+    settings.styleSourceApproval = { version: 1, status: record ? 'approved' : 'revoked',
+      digest: record ? styleSourceDigest(record) : '', approvedAt: new Date().toISOString(),
+      chapterDigests: record ? sourceChapterDigests(record, novelId) : [] }
+    db.update(novels).set({ activeStyleFingerprintId: fingerprintId, settingsJson: JSON.stringify(settings),
+      contextVersion: (novel.contextVersion || 1) + 1, updatedAt: new Date().toISOString() })
+      .where(eq(novels.id, novelId)).run()
+  })
+
 }
 
 export interface ResolvedStyleFingerprint {
   record: NonNullable<ReturnType<typeof getStyleFingerprint>>
   fingerprint: StyleFingerprint
   source: 'active' | 'latest' | 'genre-default'
+  approvedSample?: ApprovedStyleSample
 }
 
 /**
- * Fingerprint fallback chain: explicitly activated → newest novel fingerprint
- * → genre default seed (novel_id NULL + genre_id) → null.
+ * Only a current human approval authorizes prose. Genre defaults provide general guidance; automatic chapter samples stay candidates.
  */
 export function resolveActiveStyleFingerprint(novelId: number, genreId?: number | null): ResolvedStyleFingerprint | null {
   const db = getDb()
-  const novel = db.select({ activeId: novels.activeStyleFingerprintId, genreId: novels.genreId })
+  const novel = db.select({ activeId: novels.activeStyleFingerprintId, genreId: novels.genreId, settingsJson: novels.settingsJson })
     .from(novels)
     .where(eq(novels.id, novelId))
     .all()[0]
 
   if (novel?.activeId) {
     const payload = getStyleFingerprintPayload(novel.activeId)
-    if (payload?.record) return { record: payload.record, fingerprint: payload.fingerprint, source: 'active' }
+    const material = resolveAuthorStyleMaterial(novelId)
+    if (payload?.record && material.approvedSample) {
+      return { record: payload.record, fingerprint: payload.fingerprint, source: 'active',
+        approvedSample: material.approvedSample }
+    }
+    // An invalid explicit choice must not silently become a different sample.
+    return null
   }
 
-  const latest = getLatestStyleFingerprintForNovel(novelId)
-  if (latest?.record) return { record: latest.record, fingerprint: latest.fingerprint, source: 'latest' }
+  if (readStyleApproval(novel?.settingsJson)?.status === 'revoked') return null
 
   const effectiveGenreId = genreId ?? novel?.genreId
   if (effectiveGenreId) {
@@ -434,7 +476,7 @@ export function deleteStyleFingerprint(id: number) {
   db.delete(styleFingerprints).where(eq(styleFingerprints.id, id)).run()
 }
 
-export function buildStyleFingerprintPromptSection(fingerprintId: number): string {
+export function buildStyleFingerprintPromptSection(fingerprintId: number, options: { includeExamples?: boolean } = {}): string {
   const payload = getStyleFingerprintPayload(fingerprintId)
   if (!payload) return ''
   const { record, fingerprint: fp } = payload
@@ -453,7 +495,7 @@ export function buildStyleFingerprintPromptSection(fingerprintId: number): strin
   if (fp.paceProfile) parts.push(`节奏特征：${fp.paceProfile}`)
   if (fp.toneKeywords.length > 0) parts.push(`语调关键词：${fp.toneKeywords.join('、')}`)
   if (fp.forbiddenPatterns.length > 0) parts.push(`禁用模式：${fp.forbiddenPatterns.join('；')}`)
-  if (fp.exampleExcerpts.length > 0) {
+  if (options.includeExamples !== false && fp.exampleExcerpts.length > 0) {
     parts.push('风格示范：')
     for (const excerpt of fp.exampleExcerpts.slice(0, 3)) {
       parts.push(`> ${excerpt}`)

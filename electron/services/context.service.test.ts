@@ -16,6 +16,7 @@ vi.mock('./style-analysis.service', () => ({
   buildStyleFingerprintPromptSection: vi.fn(() => ''),
   buildStyleHardGuardPromptSection: vi.fn(() => ''),
   resolveActiveStyleFingerprint: vi.fn(() => null),
+  resolveAuthorStyleMaterial: vi.fn(() => ({ styleSourceDiagnostics: ['no_explicit_active_sample'] })),
 }))
 
 vi.mock('./story-memory.service', () => ({

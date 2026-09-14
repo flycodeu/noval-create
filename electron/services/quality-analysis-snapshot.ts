@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { ChapterContractValidationResult } from '../../src/types'
-import type { QualityIssueV1 } from '../../src/shared/quality-issue'
+import { validateQualityIssuesForContent, type QualityIssueV1 } from '../../src/shared/quality-issue'
 import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
 import { readQualityIssuesFromReviewNotesJson } from './quality-issue-policy'
 
 /** Bump when the issue or stored contract normalization rules change. */
-export const QUALITY_ANALYSIS_RULES_VERSION = 'nf16-stored-quality-v1'
+export const QUALITY_ANALYSIS_RULES_VERSION = 'rf02-stored-quality-v2'
 
 export interface QualityAnalysisInput {
   content: string
@@ -62,7 +62,7 @@ export function getQualityAnalysisSnapshot(
   const { reviewHash, ...version } = expected
   return {
     ...version,
-    issues: readQualityIssuesFromReviewNotesJson(input.reviewNotesJson),
+    issues: validateQualityIssuesForContent(readQualityIssuesFromReviewNotesJson(input.reviewNotesJson), input.content),
     metrics: {
       reviewHash,
       contractValidation: parseChapterContractValidationFromReviewNotes(input.reviewNotesJson),

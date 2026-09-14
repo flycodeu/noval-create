@@ -6,7 +6,11 @@ import {
 } from './chapter-optimization-quality'
 
 describe('chapter-optimization-quality', () => {
-  it('blocks optimized drafts when strong AI flavor is not reduced', () => {
+  it('RF-02 still rejects empty output and actual prompt leakage', () => {
+    expect(buildChapterOptimizationQualityGate('她收起碗筷。', '').safeToApply).toBe(false)
+    expect(buildChapterOptimizationQualityGate('她收起碗筷。', '作为一个AI语言模型，我无法完成这个请求。').safeToApply).toBe(false)
+  })
+  it('reports increased style signals without blocking author adoption', () => {
     const original = [
       '他推开门，看见旧仓库里只剩一盏灯。',
       '她按住伤口，等纱布不再渗血才开口。',
@@ -19,7 +23,7 @@ describe('chapter-optimization-quality', () => {
 
     const gate = buildChapterOptimizationQualityGate(original, optimized)
 
-    expect(gate.safeToApply).toBe(false)
+    expect(gate.safeToApply).toBe(true)
     expect(gate.optimizedStrongAiFlavorCount).toBeGreaterThan(gate.originalStrongAiFlavorCount)
     expect(gate.warnings.join('\n')).toContain('强 AI 味命中由')
   })
@@ -44,22 +48,22 @@ describe('chapter-optimization-quality', () => {
     expect(gate.optimizedDriftScore).toBeLessThanOrEqual(gate.originalDriftScore)
   })
 
-  it('blocks split definition-style rewrites instead of masking them with another template', () => {
+  it('reports split definition-style rewrites as advice', () => {
     const original = '机房记录显示参数修改。延时从一点八秒改成二点五秒。'
     const optimized = '机房记录并非报警清除。实际是参数修改。延时从一点八秒改成二点五秒。'
 
     const gate = buildChapterOptimizationQualityGate(original, optimized)
 
-    expect(gate.safeToApply).toBe(false)
+    expect(gate.safeToApply).toBe(true)
     expect(gate.optimizedGuardrailHits).toContain('not_but_definition_pattern')
   })
 
-  it('blocks a candidate that trades one strong AI pattern for stacked similes', () => {
+  it('reports stacked similes without turning them into a hard gate', () => {
     const original = '他把钥匙压在桌边，等电梯重新启动。'
     const optimized = '走廊像一条绷紧的弦，灯光像冷水一样铺开，脚步又像钉子一样敲在地上。'
     const gate = buildChapterOptimizationQualityGate(original, optimized)
 
-    expect(gate.safeToApply).toBe(false)
+    expect(gate.safeToApply).toBe(true)
     expect(gate.warnings.join('\n')).toContain('强 AI 味命中由')
   })
 

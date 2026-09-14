@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildFallbackReviewNotes } from './chapter-review-notes'
 import type { ChapterContext } from './context.service'
+import type { ScenePlanStep } from './chapter-scene-plan'
 
 vi.mock('./prompt-override.service', () => ({
   applyPromptOverride: (_key: string, fallback: string) => fallback,
@@ -9,6 +10,7 @@ vi.mock('./prompt-override.service', () => ({
 import {
   assertContractDrivenStageInputs,
   buildChapterWriterMessages,
+  buildChapterWriterMaterialReport,
   buildLockedParagraphContext,
   enforceLockedParagraphProtection,
   parseLockedParagraphsJson,
@@ -61,6 +63,38 @@ const guidance = {
 }
 
 describe('chapter pipeline writer', () => {
+  it('RF-04 renders each typed scene once and separates approved prose from instructions', () => {
+    const scene = (order: number): ScenePlanStep => ({ scene_order: order, scene_title: `场景${order}`,
+      purpose: `目的标记${order}`, conflict: `冲突标记${order}`, hidden_agendas: [`诉求标记${order}`], irony_gap: `信息差标记${order}`,
+      location: '厨房', time_anchor: '早晨', present_characters: ['姐弟'], key_items: [], beat: '收碗', must_cover: [], climax_variant: '', exit_hook: '', audience: '' })
+    const context = contextFixture(2)
+    context.authorStyleMaterials = { targetWorkSampleGuide: '说明标记', humanStyleSampleLock: '日常中文。',
+      approvedSample: { text: '样稿正文标记。', source: 'style_fingerprints:7', digest: 'fixture' } }
+    const input: Parameters<typeof buildChapterWriterMessages>[0] = { novelTitle: '原创诊断', genre: '家庭关系', chapterNum: 2, chapterTitle: '厨房', emotionTone: '平静', targetWords: 1500,
+      storyCore: '照顾母亲', context, themeChapterTest: '', consistencyNotes: '', structuralAlertsSummary: '', scenePlanText: '旧文本不应重复注入',
+      scenePlan: [scene(1), scene(2)], runtimeAssertions: [], narrativeFields: { povGuidance: '', sensoryGuidance: '', narrativeRatioGuidance: '' }, guidance,
+      protagonistReference: '姐姐', protagonistRule: '', promptTier: 'standard' }
+    const text = buildChapterWriterMessages(input)[0].content
+    for (const marker of ['目的标记1', '目的标记2', '诉求标记1', '诉求标记2', '信息差标记1', '信息差标记2', '样稿正文标记', '说明标记']) {
+      expect(text.split(marker)).toHaveLength(2)
+    }
+    expect(text.indexOf('诉求标记1')).toBeLessThan(text.indexOf('目的标记2'))
+    expect(text).not.toMatch(/旧文本不应重复注入|场景目标与冲突均缺失|来源追踪：|风格材料估算：/)
+    expect(buildChapterWriterMaterialReport(input).sceneSource).toBe('typed')
+    const legacy = { ...input, scenePlan: undefined, scenePlanText: '姐弟约好明天接母亲出院。' }
+    expect(buildChapterWriterMessages(legacy)[0].content.split(legacy.scenePlanText)).toHaveLength(2)
+    expect(buildChapterWriterMaterialReport(legacy).diagnostics.join('')).toContain('未提供结构字段')
+    expect(buildChapterWriterMaterialReport({ ...legacy, scenePlanText: '' }).diagnostics.join('')).toContain('未提供结构场景或历史场景文本')
+    const calm = { ...input, scenePlan: [scene(1)].map((item) => ({ ...item, conflict: '', hidden_agendas: [], irony_gap: '' })) }
+    const calmText = buildChapterWriterMessages(calm)[0].content
+    expect(calmText).toContain('目的标记1')
+    expect(calmText).not.toContain('各方心思=')
+    context.authorStyleMaterials.approvedSample!.text = '长'.repeat(1500)
+    const report = buildChapterWriterMaterialReport(input)
+    expect(report.authorStyle.samples).toEqual([])
+    expect(report.authorStyle.omittedSamples).toBe(1)
+    expect(buildChapterWriterMessages(input)[0].content).not.toContain('作者样稿正文1')
+  })
   it('assembles chapter 1 prompt with the Planner handoff and contract context', () => {
     const messages = buildChapterWriterMessages({
       novelTitle: '雾城旧账',
@@ -92,11 +126,11 @@ describe('chapter pipeline writer', () => {
     expect(messages[0].content).toContain('逐场执行 Planner 计划')
     expect(messages[0].content).toContain('必须交代=带走账册')
     expect(messages[0].content).toContain('近期主角推进过顺')
-    expect(messages[0].content).toContain('作者样稿正文1')
-    expect(messages[0].content).toContain('ThemeVoice.humanStyleSampleLock#1')
-    expect(messages[0].content).toContain('场景材料来源')
+    expect(messages[0].content).not.toContain('作者样稿正文1')
+    expect(messages[0].content).toContain('作者说明（非正文样稿）')
+    expect(messages[0].content.split('必须交代=带走账册')).toHaveLength(2)
     expect(messages[0].content).toContain('【读者自然度校准】')
-    expect(messages[0].content).toContain('作者样章或人工风格锁')
+    expect(messages[0].content).not.toContain('来源追踪：')
   })
 
   it('strips a model-authored chapter 1 heading and reports title mismatch', () => {

@@ -1,3 +1,4 @@
+import { buildQualityIssuesFromSemanticVerdicts } from './quality-issue-policy'
 import { asc, desc, eq } from 'drizzle-orm'
 import type {
   RecallDiagnostics,
@@ -176,14 +177,15 @@ function resolvePublishSemanticGateEvidence(input: {
   if (latestSemanticGateReview?.failed === 1 && semanticGatePolicy.fallbackMode === 'heuristic') {
     semanticGateMode = 'off'
   }
+  const semanticIssues = buildQualityIssuesFromSemanticVerdicts(input.chapter.content || '', input.reviewState.semanticVerdicts)
   const semanticGateStatus: ChapterGateLevel | null = semanticGateMode === 'enforce'
     ? latestSemanticGateReview?.failed === 1
       ? 'warning'
       : latestSemanticGateReview?.mode !== 'enforce' || input.reviewState.semanticVerdicts.length === 0
         ? 'blocker'
-        : input.reviewState.semanticVerdicts.some((item) => item.status === 'blocker')
-          ? 'blocker'
-          : input.reviewState.semanticVerdicts.some((item) => item.status === 'warning') ? 'warning' : 'pass'
+        : semanticIssues.some((item) => item.level === 'blocker' || item.level === 'repair')
+          ? 'rewrite'
+          : input.reviewState.semanticVerdicts.some((item) => item.status !== 'pass') ? 'warning' : 'pass'
     : null
   const semanticGateDetail = semanticGateStatus === 'pass'
     ? '当前正文已有 enforce 语义评审结果。'

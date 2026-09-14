@@ -1,4 +1,5 @@
 import type { SubPlotDraft } from './subplot-framework'
+import type { ReaderFirstSettings } from './narrative-policy'
 import {
   normalizeAiExecutionMode,
   type AiExecutionMode,
@@ -315,6 +316,7 @@ export function parseStorySettingsSnapshot(raw?: string | null): StorySettingsSn
 
 export function buildStorySettingsPayload(
   patch: {
+    readerFirst?: ReaderFirstSettings
     premise?: Partial<StoryPremiseSettings>
     storyDesign?: Partial<StoryDesignSettings>
     endgameDesign?: Partial<StoryEndgameDesignSettings>
@@ -337,6 +339,7 @@ export function buildStorySettingsPayload(
 
   const payload: Record<string, unknown> = {
     ...legacyRoot,
+    ...(patch.readerFirst ? { readerFirst: patch.readerFirst } : {}),
     premise: compactObject({
       positioning: premise.positioning,
       core_hook: premise.coreHook,

@@ -1,4 +1,5 @@
 import type { ProgressSink } from '../utils/progress-sink'
+import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import type { AiExecutionMode, ChapterRewriteScope, TaskRecoveryHint } from '../../src/types'
@@ -83,6 +84,7 @@ interface WorkflowOutputRefs {
 }
 
 export interface CreateChapterPipelineRuntimeInput {
+  narrativeIdentity?: NarrativeInputIdentity
   chapterId: number
   novelId: number
   modelConfigId?: number
@@ -204,6 +206,7 @@ export class ChapterPipelineRuntime {
     )
     const snapshot: ChapterPipelineSnapshot = {
       ...initialSnapshot,
+      ...(input.narrativeIdentity ? { narrativeIdentity: input.narrativeIdentity } : {}),
       executionMode: input.executionMode,
       ...(input.initialContextPacks ? { contextPacks: input.initialContextPacks } : {}),
       ...(input.resumeDraft?.trim()
@@ -213,7 +216,9 @@ export class ChapterPipelineRuntime {
           }
         : {}),
     }
-    return new ChapterPipelineRuntime(input, workflowTaskId, snapshot)
+    const runtime = new ChapterPipelineRuntime(input, workflowTaskId, snapshot)
+    if (input.narrativeIdentity) runtime.sync()
+    return runtime
   }
 
   get snapshot(): ChapterPipelineSnapshot {
@@ -438,6 +443,7 @@ export class ChapterPipelineRuntime {
       chapterId: this.chapterId,
       nodeKey: input.role,
       inputHash: hashWorkflowNodeInput({
+        narrativeIdentity: this.currentSnapshot.narrativeIdentity,
         role: input.role,
         contractVersion: this.currentSnapshot.contractVersion,
         contextVersion,
@@ -509,6 +515,7 @@ export class ChapterPipelineRuntime {
       nodeRunId: lease.nodeRunId,
       leaseToken: lease.leaseToken,
       payload: {
+        narrativeIdentity: this.currentSnapshot.narrativeIdentity,
         role,
         taskId,
         workflowTaskId: this.workflowTaskId,

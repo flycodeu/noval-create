@@ -1,4 +1,6 @@
 import type { ProgressSink } from '../utils/progress-sink'
+import { assertNarrativeResumeIdentity, type NarrativeInputIdentity } from '../../src/shared/narrative-policy'
+import { stableHash } from '../../src/shared/context-pack'
 import type { chapters } from '../database/schema'
 import type { AiExecutionMode } from '../../src/types'
 import type { ChapterContext, HardConstraintSourceLabel } from './context.service'
@@ -115,6 +117,7 @@ export function createChapterPipelineDraftState(init: {
 }
 
 export interface CreateChapterPipelineSessionInput {
+  narrativeIdentity?: NarrativeInputIdentity
   chapter: typeof chapters.$inferSelect
   sender?: ProgressSink
   idempotencyKey?: string
@@ -170,6 +173,12 @@ export async function createChapterPipelineSession(
     ? input.loadRetrySnapshot(input.resumeSourceTaskId)
     : undefined
   const retrySnapshot = parseChapterPipelineSnapshot(retrySnapshotJson)
+  if (input.resumeSourceTaskId && input.narrativeIdentity) {
+    assertNarrativeResumeIdentity(retrySnapshot?.narrativeIdentity, {
+      ...input.narrativeIdentity,
+      scenePlanDigest: chapter.scenePlanJson ? stableHash(JSON.parse(chapter.scenePlanJson)) : '',
+    })
+  }
   const legacyRevisionAttempts = input.resumeSourceTaskId && input.loadLegacyRevisionAttempts
     ? input.loadLegacyRevisionAttempts(input.resumeSourceTaskId)
     : []
@@ -186,6 +195,7 @@ export async function createChapterPipelineSession(
           reliable: true,
         }
   const runtime = await ChapterPipelineRuntime.create({
+    narrativeIdentity: retrySnapshot?.narrativeIdentity ?? input.narrativeIdentity,
     chapterId: chapter.id,
     novelId: chapter.novelId,
     modelConfigId: input.modelConfigId,
@@ -483,6 +493,10 @@ export function commitPlannerStageOutput(input: {
     ...input.state.snapshot,
     contractVersion: input.state.contractVersion,
     stepMemory: input.stepMemory,
+    plannerScenePlanJson: JSON.stringify(input.output.scenePlan),
+    ...(input.state.snapshot.narrativeIdentity ? { narrativeIdentity: {
+      ...input.state.snapshot.narrativeIdentity, scenePlanDigest: stableHash(input.output.scenePlan),
+    } } : {}),
   }
   if (input.output.reused) {
     input.bindings.reuseRole('planner', {

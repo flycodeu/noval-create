@@ -1,4 +1,5 @@
 import { estimateTokens } from './token-budget'
+import type { NarrativeInputIdentity } from './narrative-policy'
 
 export type ContextPackStage = 'scenePlan' | 'draft' | 'review' | 'rewrite' | 'planning'
 export type ContextPackVisibility = 'canon' | 'draft' | 'plan'
@@ -20,6 +21,7 @@ export interface ContextPackSource {
 }
 
 export interface ContextPackV1 {
+  narrativeIdentity?: NarrativeInputIdentity
   schemaVersion: 1
   id: string
   novelId: number
@@ -36,6 +38,7 @@ export interface ContextPackV1 {
 }
 
 export interface ContextPackCompileInput {
+  narrativeIdentity?: NarrativeInputIdentity
   novelId: number
   chapterId?: number | null
   chapterNum?: number | null
@@ -212,6 +215,7 @@ export async function compileContextPack(
   const modelProfile = input.modelProfile || 'default'
   const contextVersion = input.contextVersion
   const identity = {
+    ...(input.narrativeIdentity ? { narrativeIdentity: input.narrativeIdentity } : {}),
     novelId: input.novelId,
     chapterId,
     chapterNum,
@@ -224,6 +228,7 @@ export async function compileContextPack(
   }
   const inputHash = input.inputHash || stableHash(identity)
   const pack: ContextPackV1 = {
+    ...(input.narrativeIdentity ? { narrativeIdentity: input.narrativeIdentity } : {}),
     schemaVersion: 1,
     id: stableHash({ ...identity, inputHash }),
     novelId: input.novelId,

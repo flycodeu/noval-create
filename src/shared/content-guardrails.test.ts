@@ -7,11 +7,44 @@ import {
 } from './content-guardrails'
 
 describe('content guardrail repair threshold', () => {
-  it('repairs a single high-confidence AI cliche instead of letting it pass silently', () => {
+  it('distinguishes camera vocabulary and tentative judgments from dense similes', () => {
+    const normal = [
+      '他把摄像头转向门口，检查摄像机的电源，又从录像里找出昨夜的影像。画面停在九点，他把时间记在纸上。',
+      '看着像是老张，好像是送货来的。他放大图像，还是不能确认，便把录像交给了值班员。',
+      '她长得像母亲，走路却随父亲。弟弟站起来让出椅子，问她吃没吃午饭。',
+    ]
+    for (const content of normal) {
+      expect(collectQualityGuardrailFindings(content).filter((finding) => /simile/.test(finding.code))).toEqual([])
+    }
+    const dense = '雾像棉絮，像碎云，又像潮水，灯光仿佛刀锋，宛如火焰，把他的心照得无处藏身。'
+    const finding = collectQualityGuardrailFindings(dense).find((item) => item.code === 'paragraph_simile_stacking')
+    expect(finding).toBeDefined()
+    expect(dense).toContain(finding!.excerpt)
+  })
+
+  it('keeps isolated clarification, psychology, scenery and technical speech below high risk', () => {
+    const samples = [
+      '这不是原件，而是复印件。她把两张纸放在一起，指出右下角缺了半枚印章。',
+      '他怕回家，怕母亲问起那笔钱。车到了站，他又坐过了一站，直到售票员来提醒才起身。',
+      '河边的芦苇倒了一片，水退到桥墩下面。她沿着干了的泥地走，鞋底带起细小的裂块。',
+      '“摄像机电源没坏。录像缺一段，影像编码也有错。先查码流，再查时间戳。”',
+      '回来吧。她对空院子说。过了一会儿，又说：回来吧。没人应，她收起了第二副碗筷。',
+      '“我会来接你。”他把雨伞往她那边挪了挪。“我将离开这里，不会再回来了。”',
+    ]
+    for (const content of samples) {
+      expect(collectQualityGuardrailFindings(content).filter((item) => item.severity === 'high')).toEqual([])
+    }
+    expect(collectQualityGuardrailFindings('她把手指放在桌上。').some((item) => item.code === 'low_value_body_detail')).toBe(false)
+    const repeated = Array.from({ length: 10 }, () => '他终于明白，这意味着一切。也就是说，这只能说明命运如此。').join('\n')
+    const finding = collectQualityGuardrailFindings(repeated).find((item) => item.code === 'narrative_explanation_overuse')
+    expect(finding).toBeDefined()
+    expect(repeated).toContain(finding!.excerpt)
+  })
+  it('reports a single AI cliche as advice without forcing repair', () => {
     const findings = collectQualityGuardrailFindings('他相信命运的齿轮已经开始转动。')
 
     expect(findings.some((finding) => finding.code === 'ai_slogan')).toBe(true)
-    expect(shouldForceRepair(findings)).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(false)
   })
 
   it('does not turn a single low-severity stylistic hint into a rewrite', () => {
@@ -100,10 +133,10 @@ describe('content guardrail repair threshold', () => {
 
     expect(findings.some((finding) => finding.code === 'ai_description_cliche')).toBe(true)
     expect(findings.some((finding) => finding.code === 'ai_action_cliche')).toBe(true)
-    expect(shouldForceRepair(findings)).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(false)
   })
 
-  it('flags stacked system settlement panels as a hard AI-flavor hit', () => {
+  it('flags stacked system settlement panels as a style signal', () => {
     const findings = collectQualityGuardrailFindings([
       '【击杀B级怪谈‘血色巡考官’！】',
       '【因果命盘吞噬神性力量……】',
@@ -112,7 +145,7 @@ describe('content guardrail repair threshold', () => {
     ].join('\n'))
 
     expect(findings.some((finding) => finding.code === 'system_settlement_wall')).toBe(true)
-    expect(shouldForceRepair(findings)).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(false)
   })
 
   it('flags appearance ads and chapter-end slogans', () => {
@@ -120,7 +153,7 @@ describe('content guardrail repair threshold', () => {
 
     expect(findings.some((finding) => finding.code === 'appearance_ad')).toBe(true)
     expect(findings.some((finding) => finding.code === 'ai_ending_summary')).toBe(true)
-    expect(shouldForceRepair(findings)).toBe(true)
+    expect(shouldForceRepair(findings)).toBe(false)
   })
 
   it('flags repeated narrator explanations without treating one necessary conclusion as AI authorship', () => {

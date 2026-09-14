@@ -70,6 +70,19 @@ function sceneFixture(overrides: Partial<ScenePlanStep> = {}): ScenePlanStep {
 }
 
 describe('chapter pipeline planner', () => {
+  it('RF-04 rejects undeclared model fields instead of silently dropping scene material', () => {
+    const fallback = [sceneFixture({ purpose: '合法旧计划' })]
+    const output = resolvePlannerModelOutput({ chapterId: 101, novelId: 7,
+      rawOutput: JSON.stringify([{ ...sceneFixture(), unexpectedTechnique: '未声明的重要计划' }]),
+      fallbackScenePlan: fallback, contractSeeds: [], persistScenePlan: vi.fn(), writeBackDesignFields: vi.fn(() => 0) })
+    expect(output.scenePlan[0].purpose).toBe('合法旧计划')
+  })
+  it('RF-04-04 rejects a changed database plan after the Planner checkpoint', () => {
+    const frozen = JSON.stringify([sceneFixture()])
+    expect(loadReusablePlannerOutput(frozen, [], frozen)?.scenePlan[0].purpose).toBe('承接追兵压力')
+    expect(() => loadReusablePlannerOutput(JSON.stringify([sceneFixture({ purpose: '新的目标' })]), [], frozen)).toThrow('Planner 快照与当前场景计划不一致')
+    expect(() => loadReusablePlannerOutput('[]', [sceneFixture()], '[]')).toThrow('Planner 快照与当前场景计划不一致')
+  })
   it('assembles chapter 1 prompt from the prepared context without dropping handoff fields', () => {
     const messages = buildChapterPlannerMessages({
       novelTitle: '雾城旧账',
@@ -110,9 +123,9 @@ describe('chapter pipeline planner', () => {
     expect(messages[0].content).toContain('必须承接后巷追兵')
     expect(messages[0].content).toContain('必须推进原创工册制度')
     expect(messages[0].content).toContain('第一拍：追逃')
-    expect(messages[0].content).toContain('作者样稿正文1')
+    expect(messages[0].content).not.toContain('作者样稿正文1')
     expect(messages[0].content).toContain('【读者自然度校准】')
-    expect(messages[0].content).toContain('作者样章或人工风格锁')
+    expect(messages[0].content).toContain('作者说明（非正文样稿）')
   })
 
   it('normalizes and reconciles chapter 1 output before persistence and writeback', () => {

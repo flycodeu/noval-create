@@ -29,28 +29,29 @@ describe('scene writing brief', () => {
     const brief = buildSceneWritingBrief(null, { targetWorkSampleGuide: '', humanStyleSampleLock: '' })
     expect(brief.scene.purpose).toBe('')
     expect(brief.scene.hiddenAgendas).toEqual([])
-    expect(brief.diagnostics.join('\n')).toContain('保持空白')
+    expect(brief.diagnostics.join('\n')).toContain('不补造冲突')
   })
 
   it('selects at most two complete sample paragraphs within 600 estimated tokens', () => {
     const brief = buildSceneWritingBrief(null, {
       targetWorkSampleGuide: '作者说明：句子克制，现场细节优先。',
-      humanStyleSampleLock: '第一段样稿，保留完整。\n\n第二段样稿，也保留完整。\n\n第三段样稿，不应进入。',
+      humanStyleSampleLock: '',
+      approvedSample: { source: 'style_fingerprints:1', digest: 'fixture', text: '第一段样稿，保留完整。\n\n第二段样稿，也保留完整。\n\n第三段样稿，不应进入。' },
     })
     expect(brief.authorStyle.samples).toHaveLength(2)
     expect(brief.authorStyle.samples[0]).toBe('第一段样稿，保留完整。')
     expect(brief.authorStyle.samples[1]).toBe('第二段样稿，也保留完整。')
     expect(brief.authorStyle.estimatedTokens).toBeLessThanOrEqual(600)
     expect(brief.authorStyle.sampleSources).toEqual([
-      'ThemeVoice.humanStyleSampleLock#1',
-      'ThemeVoice.humanStyleSampleLock#2',
+      'style_fingerprints:1#1',
+      'style_fingerprints:1#2',
     ])
     expect(brief.authorStyle.samples.join('')).not.toContain('第三段')
   })
 
   it('omits an overlong paragraph rather than truncating a condition', () => {
     const longSample = '长'.repeat(1200)
-    const brief = buildSceneWritingBrief(null, { targetWorkSampleGuide: '', humanStyleSampleLock: longSample })
+    const brief = buildSceneWritingBrief(null, { targetWorkSampleGuide: '', humanStyleSampleLock: '', approvedSample: { source: 'fixture', digest: 'fixture', text: longSample } })
     expect(brief.authorStyle.samples).toEqual([])
     expect(brief.authorStyle.omittedSamples).toBe(1)
     expect(brief.diagnostics.join('\n')).toContain('未截断片段')

@@ -2600,6 +2600,7 @@ export interface ChapterContextPreviewStage {
 }
 
 export interface ChapterContextPreview {
+  narrativeIdentity?: import('../shared/narrative-policy').NarrativeInputIdentity
   chapterId: number
   chapterNum: number
   creativeStage?: CreativeStage
@@ -5653,6 +5654,7 @@ export interface StyleFingerprintRecord {
 }
 
 export interface ResolvedStyleFingerprintPayload {
+  approvedSample?: import('../shared/style-source').ApprovedStyleSample
   record: StyleFingerprintRecord
   fingerprint: StyleFingerprint
   source: 'active' | 'latest' | 'genre-default'

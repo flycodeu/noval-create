@@ -376,3 +376,16 @@ export interface AgentQualityRunComparison {
   summary: string
   warnings: string[]
 }
+import { createQualityIssue } from './quality-issue'
+
+/** Dashboard severity is descriptive; only mapped operational/fact contracts block. */
+export function agentQualityFindingCanBlock(code: string, requested: boolean, message: string): boolean {
+  const contracts: Record<string, string> = {
+    commitment_delivery: 'contract_validation', typed_ref_coverage: 'typed_ref_unresolved',
+    source_grounding: 'source_grounding_missing', operating_mode_policy: 'operating_mode_contract',
+    chapter_presence: 'chapter_contract', quality_coverage: 'contract_validation', risky_chapter_gates: 'chapter_contract',
+  }
+  const ruleId = code.startsWith('production_readiness_blocker_') ? 'chapter_contract' : contracts[code] || code
+  return createQualityIssue({ ruleId, detector: 'deterministic', message,
+    level: requested ? 'blocker' : 'advice', source: 'quality-dashboard' })?.level === 'blocker'
+}

@@ -31,6 +31,7 @@ export interface ThemeVoiceDocument {
   descriptionRules: string
   forbiddenPhrases: string
   targetWorkSampleGuide: string
+  /** Legacy key: writing instructions, never implicitly approved prose. */
   humanStyleSampleLock: string
 }
 

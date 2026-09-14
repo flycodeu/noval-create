@@ -38,6 +38,7 @@ export async function executeChapterPlannerRuntimePhase(input: {
   prepareInput?: RunTaskOptions['prepareInput']
   fallbackScenePlan: ScenePlanStep[]
   storedScenePlanJson?: string | null
+  immutableScenePlanJson?: string
   priorTaskId?: number
   state: ChapterPipelineDraftState
   runtime: Pick<ChapterPipelineRuntime, 'setUpstreamTaskId'>
@@ -57,6 +58,7 @@ export async function executeChapterPlannerRuntimePhase(input: {
     prepareInput: input.prepareInput,
     fallbackScenePlan: input.fallbackScenePlan,
     storedScenePlanJson: input.storedScenePlanJson,
+    immutableScenePlanJson: input.immutableScenePlanJson,
     priorTaskId: input.priorTaskId,
     startRole: (messages) => input.bindings.startRole(
       'planner',

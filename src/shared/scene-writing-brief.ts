@@ -1,3 +1,4 @@
+import type { ApprovedStyleSample } from './style-source'
 import type { ThemeVoiceDocument } from './theme-voice'
 import { estimateTokens } from './token-budget'
 
@@ -15,7 +16,7 @@ export interface SceneWritingSceneInput {
   sourceText?: string
 }
 
-export type SceneWritingThemeVoiceInput = Pick<ThemeVoiceDocument, 'targetWorkSampleGuide' | 'humanStyleSampleLock'>
+export type SceneWritingThemeVoiceInput = Pick<ThemeVoiceDocument, 'targetWorkSampleGuide' | 'humanStyleSampleLock'> & { approvedSample?: ApprovedStyleSample; styleSourceDiagnostics?: string[] }
 
 export interface SceneWritingKnownState {
   chapterNum?: number
@@ -74,14 +75,14 @@ function splitCompleteParagraphs(value: string): string[] {
 }
 
 function selectStyleMaterial(themeVoice: SceneWritingThemeVoiceInput): SceneWritingBrief['authorStyle'] & { diagnostics: string[] } {
-  const diagnostics: string[] = []
+  const diagnostics: string[] = [...(themeVoice.styleSourceDiagnostics || [])]
   let remaining = STYLE_MATERIAL_LIMIT
   let guide = ''
   const samples: string[] = []
   const sampleSources: string[] = []
   let omittedSamples = 0
 
-  const explicitGuide = cleanText(themeVoice.targetWorkSampleGuide)
+  const explicitGuide = [cleanText(themeVoice.targetWorkSampleGuide), cleanText(themeVoice.humanStyleSampleLock)].filter(Boolean).join('\n')
   if (explicitGuide && estimateTokens(explicitGuide) <= remaining) {
     guide = explicitGuide
     remaining -= estimateTokens(guide)
@@ -89,7 +90,7 @@ function selectStyleMaterial(themeVoice: SceneWritingThemeVoiceInput): SceneWrit
     diagnostics.push('作者样稿说明超过风格材料上限，未注入。')
   }
 
-  const sampleParts = splitCompleteParagraphs(cleanText(themeVoice.humanStyleSampleLock))
+  const sampleParts = splitCompleteParagraphs(cleanText(themeVoice.approvedSample?.text))
   sampleParts.forEach((sample, index) => {
     if (samples.length >= MAX_SAMPLES) {
       omittedSamples += 1
@@ -98,7 +99,7 @@ function selectStyleMaterial(themeVoice: SceneWritingThemeVoiceInput): SceneWrit
     const cost = estimateTokens(sample)
     if (cost <= remaining) {
       samples.push(sample)
-      sampleSources.push(`ThemeVoice.humanStyleSampleLock#${index + 1}`)
+      sampleSources.push(`${themeVoice.approvedSample?.source}#${index + 1}`)
       remaining -= cost
     } else {
       omittedSamples += 1
@@ -160,7 +161,7 @@ export function buildSceneWritingBrief(
     sourceKeys,
     diagnostics: [
       ...authorStyle.diagnostics,
-      ...(!normalizedScene.purpose && !normalizedScene.conflict ? ['场景目标与冲突均缺失，保持空白，不补造动机或事实。'] : []),
+      ...(!normalizedScene.purpose && !normalizedScene.conflict ? [normalizedScene.sourceText ? '历史文本可用，结构字段不可用；不推断缺少目标。' : '未提供结构场景字段；不补造冲突。'] : []),
     ],
   }
 }
@@ -182,20 +183,23 @@ export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
   const styleLines = [
     brief.authorStyle.guide ? `作者说明（非正文样稿）：${brief.authorStyle.guide}` : '',
     ...brief.authorStyle.samples.map((sample, index) => `作者样稿正文${index + 1}（${brief.authorStyle.sampleSources[index] || '显式样稿'}）：${sample}`),
-    `风格材料估算：${brief.authorStyle.estimatedTokens}/600 tokens`,
   ].filter(Boolean)
   const knownLines = brief.knownState.knownFacts.length > 0
     ? `已知状态（仅用于边界，不新增事实）：${brief.knownState.knownFacts.join('；')}`
     : ''
-  const diagnostics = brief.diagnostics.length > 0 ? `诊断：${brief.diagnostics.join('；')}` : ''
   return [
     '【场景写作材料】',
     ...sceneLines,
     ...styleLines,
     knownLines,
-    diagnostics,
-    `来源追踪：${brief.sourceKeys.join('、') || '无显式来源'}`,
     '冲突取舍：已确认状态和场景任务优先；作者样稿控制表达方式，不得改写事实、补造设定或复制样稿内容。',
     '规则：只使用以上显式材料；缺失项留空，不补造人物动机、经历、物件或关系。',
   ].filter(Boolean).join('\n')
+}
+
+/** Reader-first carries only selected author expression material; scene facts are rendered by the role builder. */
+export function formatAuthorStyleReference(brief: SceneWritingBrief): string {
+  return [brief.authorStyle.guide ? `作者说明（非正文样稿）：${brief.authorStyle.guide}` : '',
+    ...brief.authorStyle.samples.map((sample, index) => `作者样稿正文${index + 1}：${sample}`),
+  ].filter(Boolean).join('\n\n')
 }

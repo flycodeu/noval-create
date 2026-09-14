@@ -1,5 +1,6 @@
 ﻿import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
+import { stableHash } from '../../src/shared/context-pack'
 import { promptOverrideAudits, promptOverrides } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
@@ -93,8 +94,14 @@ function recordAudit(key: string, action: 'save' | 'delete' | 'apply', contentPr
   }).run()
 }
 
-export function buildProtectedFooter(key: string, params: Record<string, unknown> = {}): string {
+export function buildProtectedFooter(key: string, params: Record<string, unknown> = {}, policyVersion?: 'reader-first-v1'): string {
   if (!CHAPTER_PROMPT_KEYS.has(key)) return ''
+  if (policyVersion === 'reader-first-v1') {
+    return ['【系统保留的事实与稿件边界】',
+      '已确认事实、当前视角知识边界和明确作者合同不得被覆盖；锁定段落逐字保留。',
+      ...['hardConstraintContext', 'chapterBridgePlan', 'scenePlan', 'protagonistRule', 'lockedParagraphs'].map((key) => stringifyParam(params[key])).filter(Boolean),
+    ].join('\n\n')
+  }
   const runtimeLines = PROTECTED_RUNTIME_FIELDS
     .map(({ token, label }) => {
       const rendered = stringifyParam(params[token]).trim()
@@ -164,6 +171,7 @@ export function applyPromptOverride(
   key: string,
   fallback: string,
   params: Record<string, unknown>,
+  policyVersion?: 'reader-first-v1',
 ): string {
   const override = getPromptOverride(key)
   if (!override?.content?.trim()) {
@@ -171,10 +179,15 @@ export function applyPromptOverride(
   }
 
   const overridden = renderPromptOverrideTemplate(override.content, params)
-  const protectedFooter = buildProtectedFooter(key, params)
+  const protectedFooter = buildProtectedFooter(key, params, policyVersion)
   const finalPrompt = protectedFooter
     ? `${overridden}\n\n${protectedFooter}`
     : overridden
   recordAudit(key, 'apply', finalPrompt)
   return finalPrompt
+}
+
+export function getNarrativePromptSource(key: string): { key: string; source: 'built-in' | 'custom'; digest: string; scope: 'global-template' } {
+  const override = getPromptOverride(key)
+  return { key, source: override ? 'custom' : 'built-in', digest: stableHash(override?.content ?? null), scope: 'global-template' }
 }

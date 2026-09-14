@@ -1,3 +1,5 @@
+import { resolveReviewAutomaticIssues } from './quality-issue-policy'
+import { qualityIssueHasActionableLevel } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { parseAiJsonResult } from '../utils/json'
@@ -20,7 +22,7 @@ import { analyzeChapterDialogueAgainstNovel } from './dialogue-fingerprint.servi
 import { validateChapterContractDelivery } from './chapter-contract-validator.service'
 import type { ChapterContext } from './context.service'
 import type { ChapterPublishCheck } from './context-impact.service'
-import type { ChapterComplexity } from './chapter-pipeline-context'
+import { createChapterStagePrepareInput, type ChapterComplexity } from './chapter-pipeline-context'
 import type { RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import type {
@@ -449,6 +451,9 @@ function isCandidateBetter(input: {
 }
 
 export async function runRewriterCandidateLoop(input: {
+  initialReviewNotes?: ChapterReviewNotes
+  initialTaskId?: number
+  startPassthrough?: () => Promise<number>
   draftContent: string
   reviewPrioritySummary: ReviewPrioritySummary
   requiresFullRewrite: boolean
@@ -472,6 +477,18 @@ export async function runRewriterCandidateLoop(input: {
   resolvePremiumChatOptions: () => RewriterChatOptions | undefined
   revisionBudget?: RevisionAttemptHooks
 }): Promise<RewriterCandidateLoopOutput> {
+  if (input.initialReviewNotes && !resolveReviewAutomaticIssues(input.initialReviewNotes, input.draftContent).some(qualityIssueHasActionableLevel)) {
+    if (!input.draftContent.trim()) throw new Error('Missing reusable Writer content')
+    const taskId = input.initialTaskId || await input.startPassthrough?.()
+    if (!taskId) throw new Error('Missing workflow task identity for unchanged Writer content')
+    const miniReview = buildRewriteMiniReviewVerdict({ originalContent: input.draftContent, rewrittenContent: input.draftContent,
+      reviewPrioritySummary: input.reviewPrioritySummary, reviewNotes: input.initialReviewNotes })
+    return { taskId, attemptNumber: 0, rejectedDigests: [], rawResult: { output: input.draftContent },
+      outcome: { content: input.draftContent, reviewNotes: input.initialReviewNotes,
+        miniReview: { ...miniReview, needsHumanReview: false, deltaDrivenOnly: false, improved: false, reason: '仅有建议，沿用 Writer 初稿；未执行自动修订。' },
+        dialogueAnalysis: { fingerprintSummary: '', voiceLockSummary: '', risks: [], similarities: [], drifts: [], fillerRisks: [], infoDensityRisks: [], requiredVoiceLockCharacterIds: [] },
+      } }
+  }
   let attemptNumber = 1
   let rejectedDigests: string[] = []
   if (!reserveRevisionAttempt(input.revisionBudget, `rewriter:candidate:${attemptNumber}`)) {
@@ -506,7 +523,7 @@ export async function runRewriterCandidateLoop(input: {
     fillerRisks: outcome.dialogueAnalysis.fillerRisks,
     infoDensityRisks: outcome.dialogueAnalysis.infoDensityRisks,
   })
-  const retryDialogue = dialogueDirective.length > 0
+  const retryDialogue = dialogueDirective.length > 0 && resolveReviewAutomaticIssues(outcome.reviewNotes, outcome.content).some(qualityIssueHasActionableLevel)
   if ((outcome.miniReview.needsHumanReview || retryDialogue) && outcome.content.trim()) {
     let structuralDirective = [
       buildStructuralRepairDirective(outcome.miniReview.narrativeDelta, [
@@ -882,6 +899,8 @@ export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput):
       ].join('\n')
     : ''
   const prompt = appendNarrativeNaturalnessPrompt(buildChapterRewritePrompt({
+    narrativeIdentity: context.narrativeIdentity,
+    outputFormat: input.revisionMode === 'patch' ? 'patch' : undefined,
     novelTitle: input.novelTitle,
     genre: input.genre,
     chapterNum: input.chapterNum,
@@ -932,14 +951,12 @@ export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput):
     attemptNumber: input.attemptNumber,
     rejectedDigests: input.rejectedDigests,
   }), {
+    policyVersion: context.narrativeIdentity?.policyVersion,
     genre: input.genre,
-    hasAuthorStyleReference: Boolean(
-      context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
-      || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
-    ),
+    hasAuthorStyleReference: false, // This stage receives the draft and style guidance, not approved sample prose.
     mode: 'rewrite',
   })
-  const finalPrompt = input.revisionMode === 'patch'
+  const finalPrompt = input.revisionMode === 'patch' && context.narrativeIdentity?.policyVersion !== 'reader-first-v1'
     ? `${prompt}\n\n【局部补丁最终输出格式（覆盖前文整章正文输出要求）】\n只输出 C-07 JSON 对象，不要输出整章正文、Markdown 或解释；校验失败时不要猜测，返回可被拒绝的 JSON。`
     : prompt
   return [{
@@ -959,6 +976,7 @@ function buildGuardrailRepairMessages(
   return [{
     role: 'user',
     content: appendNarrativeNaturalnessPrompt(buildChapterRewritePrompt({
+      narrativeIdentity: context.narrativeIdentity,
       novelTitle: novel.title,
       genre: profile.genre,
       chapterNum: chapter.chapterNum,
@@ -1001,11 +1019,9 @@ function buildGuardrailRepairMessages(
       attemptNumber,
       rejectedDigests,
     }), {
+      policyVersion: context.narrativeIdentity?.policyVersion,
       genre: profile.genre,
-      hasAuthorStyleReference: Boolean(
-        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
-        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
-      ),
+      hasAuthorStyleReference: false, // This stage receives the draft and style guidance, not approved sample prose.
       mode: 'rewrite',
     }),
   }]
@@ -1031,6 +1047,7 @@ async function runGuardrailRepairAttempt(
       rejectedDigests,
     ),
     modelConfigId: input.novel.modelConfigId || undefined,
+    prepareInput: createChapterStagePrepareInput(input.context, 'rewrite'),
   })).trim()
 }
 
@@ -1343,7 +1360,7 @@ export async function processChapterRewriteOutcome(input: {
   const miniReview = buildRewriteMiniReviewVerdict({
     originalContent: input.originalDraft,
     rewrittenContent: repairedContent,
-    reviewPrioritySummary: buildReviewPrioritySummary(reviewNotes),
+    reviewPrioritySummary: buildReviewPrioritySummary(reviewNotes, repairedContent),
     reviewNotes,
   })
   return {

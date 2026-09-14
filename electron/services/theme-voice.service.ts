@@ -141,7 +141,7 @@ function buildCurrentThemeVoiceSummary(document: ThemeVoiceDocument): string {
     document.descriptionRules ? `描写规则：${document.descriptionRules}` : '',
     document.forbiddenPhrases ? `禁用表达：${document.forbiddenPhrases}` : '',
     document.targetWorkSampleGuide ? `真实样章对照：${document.targetWorkSampleGuide}` : '',
-    document.humanStyleSampleLock ? `人工风格样本锁定：${document.humanStyleSampleLock}` : '',
+    document.humanStyleSampleLock ? `写作偏好说明：${document.humanStyleSampleLock}` : '',
   ].filter(Boolean)
 
   return lines.length > 0 ? lines.join('\n') : '当前还没有可用的主题与文风草稿。'
@@ -196,7 +196,7 @@ function buildThemeVoicePrompt(
       '- styleRules / dialogueRules / descriptionRules 都要写成可执行规则，建议每行一条。',
       '- forbiddenPhrases 写应避免的总结腔、模板句、引号强调、对称排比、空泛抒情等。',
       '- targetWorkSampleGuide 写真实样章对照评测口径：像不像目标作品时要看哪些节奏、句式、信息密度、对白比例和现场质感。',
-      '- humanStyleSampleLock 写人工风格样本锁定规则：哪些人工样本特征必须保留，哪些 AI 化偏移一出现就要退回重写。',
+      '- humanStyleSampleLock 只写表达偏好说明，不是正文样稿，不声明作者认可，也不把一般文风偏好写成强制重写条件。正文样稿由作者在风格实验室明确认可。',
     ].join('\n')),
     section('上下文护栏', buildContextAlignmentRules({
       background: profile.background,

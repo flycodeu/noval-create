@@ -1,6 +1,7 @@
 import { getBuiltinGenreRules } from './genre-system'
 
 export interface NarrativeNaturalnessPromptOptions {
+  policyVersion?: 'legacy' | 'reader-first-v1'
   genre?: string | null
   hasAuthorStyleReference?: boolean
   mode?: 'write' | 'rewrite' | 'review'
@@ -113,6 +114,7 @@ export function appendNarrativeNaturalnessPrompt(
   prompt: string,
   options: NarrativeNaturalnessPromptOptions = {},
 ): string {
+  if (options.policyVersion === 'reader-first-v1') return prompt
   const base = sanitizeNarrativeRuntimePrompt(prompt)
   const guidance = buildNarrativeNaturalnessPrompt(options)
   return base ? `${base}\n\n${guidance}` : guidance

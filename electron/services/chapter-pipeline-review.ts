@@ -149,6 +149,7 @@ export function buildChapterCriticMessages(input: ChapterReviewPromptInput): Mes
   return [{
     role: 'user',
     content: appendNarrativeNaturalnessPrompt(buildChapterReviewPrompt({
+      narrativeIdentity: context.narrativeIdentity,
       novelTitle: input.novelTitle,
       genre: input.genre,
       chapterNum: input.chapterNum,
@@ -195,11 +196,9 @@ export function buildChapterCriticMessages(input: ChapterReviewPromptInput): Mes
       protagonistRule: input.protagonistRule,
       promptTier: input.promptTier,
     }), {
+      policyVersion: context.narrativeIdentity?.policyVersion,
       genre: input.genre,
-      hasAuthorStyleReference: Boolean(
-        context.authorStyleMaterials?.targetWorkSampleGuide?.trim()
-        || context.authorStyleMaterials?.humanStyleSampleLock?.trim(),
-      ),
+      hasAuthorStyleReference: false, // This stage receives the draft and style guidance, not approved sample prose.
       mode: 'review',
     }),
   }]
