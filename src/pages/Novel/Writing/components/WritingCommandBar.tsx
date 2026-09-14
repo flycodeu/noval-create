@@ -1,8 +1,9 @@
-import { Button, Dropdown, Select } from 'antd'
-import { DownOutlined, LoadingOutlined, RobotOutlined } from '@ant-design/icons'
+import { Button, Dropdown, Popover, Select, Tag } from 'antd'
+import { DownOutlined, FileProtectOutlined, LoadingOutlined, RobotOutlined } from '@ant-design/icons'
 import ActionBar from '../../../../components/novel/common/ActionBar'
 import CreativeStageScope from '../../../../components/novel/CreativeStageScope'
 import { AI_EXECUTION_MODE_OPTIONS, type AiExecutionMode } from '../../../../shared/ai-execution'
+import type { GenerationHandoffViewModel } from '../writing-generation-handoff'
 
 export interface WritingCommandBarProps {
   novelId: number
@@ -17,6 +18,7 @@ export interface WritingCommandBarProps {
   generationBlockedReason?: string
   rewritingSelection: boolean
   optimizingChapter: boolean
+  handoff: GenerationHandoffViewModel
   onCreativeStageChange(stageId: number | null): void
   onDefaultAiModeChange(mode: AiExecutionMode): void
   onSave(): void
@@ -47,6 +49,7 @@ export default function WritingCommandBar({
   onOptimize,
   onSave,
   optimizingChapter,
+  handoff,
   rewritingSelection,
   savingAiMode,
   selectedSnippetLength,
@@ -68,6 +71,42 @@ export default function WritingCommandBar({
       </div>
       <div className="chapter-console-page__editor-actions">
         <Button onClick={onSave} disabled={!hasChapter || hasMultiSegments}>保存</Button>
+        <Popover
+          placement="bottomRight"
+          trigger="click"
+          content={(
+            <div className="writing-generation-handoff" data-handoff-status={handoff.status}>
+              <div className="writing-generation-handoff__head">
+                <div>
+                  <strong>生成前交接单</strong>
+                  <span>{handoff.summary}</span>
+                </div>
+                <Tag color={handoff.status === 'ready' ? 'success' : handoff.status === 'blocked' ? 'error' : 'warning'}>{handoff.label}</Tag>
+              </div>
+              <div className="writing-generation-handoff__style">
+                <span>风格依据</span>
+                <strong>{handoff.styleSource}</strong>
+              </div>
+              <div className="writing-generation-handoff__items">
+                {handoff.items.map((item) => (
+                  <div key={item.key} className={`writing-generation-handoff__item${item.ready ? ' is-ready' : ' is-missing'}`}>
+                    <span aria-hidden="true">{item.ready ? '✓' : '!'}</span>
+                    <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        >
+          <Button
+            icon={<FileProtectOutlined />}
+            disabled={!hasChapter}
+            className="chapter-console-page__handoff-button"
+            aria-label={`查看生成前交接单，${handoff.readyCount}/${handoff.totalCount} 项就绪`}
+          >
+            {`交接单 ${handoff.readyCount}/${handoff.totalCount}`}
+          </Button>
+        </Popover>
         {generating ? (
           <Button danger icon={<LoadingOutlined />} onClick={onCancelGeneration}>停止</Button>
         ) : (

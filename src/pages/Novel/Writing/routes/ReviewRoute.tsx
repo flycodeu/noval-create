@@ -182,7 +182,7 @@ export default function ReviewRoute({ model, actions, title = '审校视图' }: 
       <div className="writing-route-view__body">
         <ReviewSpotlight model={model} />
         <div className="novel-writing-shell__insight-stack">
-          <InsightCard title="审校意见分层" eyebrow="必须处理 / 建议处理 / 仅参考" tone="soft"><ReviewNotesPanel notes={model.reviewNotes as Record<string, unknown> | null} /></InsightCard>
+          <InsightCard title="审校意见" eyebrow="事实连续性 / 人物声音 / 语言读感" tone="soft"><ReviewNotesPanel notes={model.reviewNotes as Record<string, unknown> | null} /></InsightCard>
           <PublishCheckCard model={model} actions={actions} />
           <ReviewDiagnostics model={model} actions={actions} />
         </div>

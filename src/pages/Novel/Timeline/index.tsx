@@ -265,9 +265,17 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           message={workspace.generationBlockers.length > 0 ? '时间轴生成前置条件需要处理' : '时间轴草稿状态'}
           description={(
             <div className="novel-timeline-page__notice-list">
-              {workspace.generationBlockers.map((blocker) => (
+              {workspace.generationBlockers.slice(0, 3).map((blocker) => (
                 <div key={`blocker-${blocker}`}><strong>生成阻塞：</strong>{blocker}</div>
               ))}
+              {workspace.generationBlockers.length > 3 ? (
+                <details>
+                  <summary>{`查看其余 ${workspace.generationBlockers.length - 3} 项`}</summary>
+                  {workspace.generationBlockers.slice(3).map((blocker) => (
+                    <div key={`blocker-more-${blocker}`}><strong>生成阻塞：</strong>{blocker}</div>
+                  ))}
+                </details>
+              ) : null}
               {draftWarnings.map((warning) => <div key={`draft-${warning}`}><strong>草稿提示：</strong>{warning}</div>)}
               {draft?.appliedAt ? <div><strong>未保存草稿：</strong>已恢复最近一次应用的 AI 结果，保存后清除。</div> : null}
             </div>

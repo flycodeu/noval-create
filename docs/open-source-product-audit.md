@@ -6,7 +6,7 @@
 
 当前仓库已经具备作为开源桌面应用发布的主体结构，但正式公开前仍有两个阻塞项：仓库没有 `LICENSE`，并且依赖审计还剩 8 条只能通过破坏性大版本迁移解决的生产依赖告警。没有许可证并不等于默认开源，外部用户通常无权复制、修改或分发代码。需要先明确选择 MIT、Apache-2.0、GPL-3.0 等许可证，再补许可证正文和 README 徽章。
 
-本轮已删除不可达页面、废弃状态层、一次性样例/验收脚本与已失效入口，共 88 个受版本控制文件；保留后的 TypeScript/TSX 文件均可从生产入口或测试入口到达。剩余 `scripts/` 都有 `package.json` 或其他维护脚本引用，不再包含只适用于作者本机、指定小说或旧任务卡的入口。
+本轮已删除不可达页面、废弃状态层、一次性样例/验收脚本与已失效入口；提交 `c542941` 的 Git 记录包含 94 个删除项。保留后的 TypeScript/TSX 文件均可从生产入口或测试入口到达。剩余 `scripts/` 都有 `package.json` 或其他维护脚本引用，不再包含只适用于作者本机、指定小说或旧任务卡的入口。
 
 产品功能不宜按“页面多就是多余”直接删除。写作、合同、回写、修订和质量页共同构成长篇生产闭环；可调整的是入口层级、默认可见性和页面职责，而不是删掉底层数据能力。
 
@@ -170,6 +170,16 @@
 
 这些能力说明问题不在“再堆一份禁止词表”，而在真实模型效果验证、用户可见的生成前预检，以及对规则误报的治理。
 
+### 5.4 市面方案与研究依据（2026-09-14 核对）
+
+- Sudowrite 把 Style、Genre、Characters、Worldbuilding 与 Scenes 一起作为正文生成输入；Style 明确影响语气、词汇和句法。这支持“风格参考应进入首稿链路”，不支持写完后再统一润色。来源：[Style](https://docs.sudowrite.com/using-sudowrite/1ow1qkGqof9rtcyGnrWUBS/style/4gqKgVVjdN6XTKo71HChqV)、[Story Bible](https://docs.sudowrite.com/using-sudowrite/1ow1qkGqof9rtcyGnrWUBS/what-is-story-bible/jmWepHcQdJetNrE991fjJC)。
+- NovelAI 区分全局 Memory 与更靠近当前正文、影响更强的 Author's Note；Lorebook 则按关键词激活局部资料。这支持把“长期正典、近章交接、局部知识”分层注入，而不是把整本资料无差别塞入模型。来源：[Story Settings](https://docs.novelai.net/en/text/editor/storysettings/)、[Lorebook](https://docs.novelai.net/en/text/lorebook/)。
+- Novelcrafter 将 Codex（故事资料库）贯穿构思、写作与审校，并允许自定义提示词；它的更新记录也明确加入 previous prose styling 和 context validation。来源：[Novelcrafter](https://www.novelcrafter.com/)、[2024-01-28 更新](https://feedback.novelcrafter.com/changelog/january-28th-2024)。
+- OpenAI 的提示工程指南建议把指令放前、明确上下文与风格并用示例约束输出；模型行为可能随版本变化，因此仍需固定模型版本并建立评测。来源：[Prompt engineering](https://help.openai.com/en/articles/6654000-comprehensive-step-by-step-guide-to-prompt-engineering-with-chatgpt)、[API backward compatibility](https://platform.openai.com/docs/api-reference/backward-compatibility)。
+- 长篇故事研究采用结构化计划、反复注入上下文和人类成对偏好判断。它说明自动规则只能做护栏，不能替代跨题材真人盲读。来源：[Long-form Story Generation and Evaluation](https://storyrl.github.io/)、[Learning to Reason for Long-Form Story Generation](https://arxiv.org/abs/2503.22828)。
+
+因此，NovelForge 的风格参考有必要，但必须遵守三个边界：参考作者本人有权使用的样章或本书已接受正文；只学习叙事距离、句法节奏、词汇偏好和对白方式，不复制句子、情节、动作或专有细节；任何风格要求都不能覆盖正典事实、章节合同和视角人物的知识边界。
+
 ## 6. 上下文连贯性应如何判断
 
 每次生成至少要让用户能核对一张简短的“章节交接单”：
@@ -184,6 +194,16 @@
 连贯不等于每章复述上一章。好的承接通常只需一个仍在继续的动作、一个未消散的情绪后果、一个位置/时间信号，或人物对既有信息的自然反应。系统应拦截无解释跳变，不应强迫正文把数据库状态逐项念出来。
 
 ## 7. 修复与扩展优先级
+
+### 本轮已落地
+
+- Writer 首稿运行时增加明确优先级：正典与状态、章节/场景合同、人物视角边界、作者样章/本书正文、通用题材建议。
+- 作者样章与参考说明从硬规则数组中分离，避免把样本文字误当成必须复现的内容。
+- 正文生成按钮旁增加“生成前交接单”，直接显示章节输入、上一章承接、衔接桥、模型上下文和实际风格来源。
+- 审校界面按“事实连续性、人物声音、语言读感”组织；启发式 AI 味信号附正文连续短片段，模型风险在归一化阶段逐字回指正文，无有效证据的条目不进入审校结果。
+- Style Lab 改成先匿名盲选 A/B，再揭晓是否使用风格指纹及诊断指标。
+- Structure 接入统一操作栏；跨页上一步/下一步进入更多菜单，普通页面不再同时显示推荐下一步。
+- 合同和时间轴高密度字段开始按首稿必须、建议补充与高级约束渐进展示；人物和主题页沿用已有折叠结构。
 
 ### P0：开源发布前
 

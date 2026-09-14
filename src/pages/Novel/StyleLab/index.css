@@ -227,6 +227,11 @@
   background: color-mix(in srgb, var(--accent-soft, #f4eadb) 32%, transparent);
 }
 
+.style-lab__blind-actions {
+  display: flex;
+  justify-content: center;
+}
+
 .style-lab__ab-column-head {
   display: flex;
   align-items: center;

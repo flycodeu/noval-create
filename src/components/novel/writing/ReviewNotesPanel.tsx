@@ -23,17 +23,21 @@ function ItemLines({ item }: { item: ReviewNotesViewItem }) {
 export default function ReviewNotesPanel({ notes }: ReviewNotesPanelProps) {
   const model = useMemo(() => buildReviewNotesViewModel(notes), [notes])
   const [referenceOpen, setReferenceOpen] = useState(false)
+  const criticalFixes = model.critical.filter((item) => item.key === 'critical_fixes')
+  const populatedFocusGroups = model.focusGroups.filter((group) => group.items.length > 0)
+  const groupedKeys = new Set(model.focusGroups.flatMap((group) => group.items.map((item) => item.key)))
+  const supplementalReference = model.reference.filter((item) => !groupedKeys.has(item.key))
 
   const total = model.critical.length + model.advisory.length + model.reference.length
   if (total === 0) {
-    return <div className="novel-copy-block">先运行审校流水线，这里会按「必须处理 / 建议处理 / 仅参考」分层展示审校意见。</div>
+    return <div className="novel-copy-block">先运行审校流水线，这里会分别显示事实连续性、人物声音和语言读感。</div>
   }
 
   return (
     <div className="writing-layout-stack writing-layout-stack--sm">
-      {model.critical.length > 0 ? (
+      {criticalFixes.length > 0 ? (
         <div className="writing-layout-stack writing-layout-stack--sm">
-          {model.critical.map((item) => (
+          {criticalFixes.map((item) => (
             <Alert
               key={item.key}
               type="error"
@@ -43,45 +47,45 @@ export default function ReviewNotesPanel({ notes }: ReviewNotesPanelProps) {
             />
           ))}
         </div>
-      ) : (
+      ) : model.critical.length === 0 ? (
         <Alert type="success" showIcon message="没有必须处理的审校阻塞项" />
-      )}
+      ) : null}
 
-      {model.advisory.length > 0 ? (
+      {populatedFocusGroups.length > 0 ? (
         <Collapse
           size="small"
-          items={[
-            {
-              key: 'advisory',
+          defaultActiveKey={populatedFocusGroups.map((group) => group.key)}
+          items={populatedFocusGroups.map((group) => ({
+              key: group.key,
               label: (
                 <span>
-                  建议处理
+                  {group.label}
                   <Badge
-                    count={model.advisory.reduce((sum, item) => sum + item.texts.length, 0)}
+                    count={group.items.reduce((sum, item) => sum + item.texts.length, 0)}
                     style={{ marginLeft: 8 }}
-                    color="orange"
+                    color={group.key === 'continuity' ? 'red' : group.key === 'voice' ? 'blue' : 'orange'}
                   />
                 </span>
               ),
               children: (
                 <div className="writing-layout-stack writing-layout-stack--sm">
-                  {model.advisory.map((item) => (
+                  <div className="workspace-text-small workspace-text-muted">{group.description}</div>
+                  {group.items.map((item) => (
                     <div key={item.key}>
-                      <Tag color="warning">{item.label}</Tag>
+                      <Tag color={item.severity === 'critical' ? 'error' : item.severity === 'advisory' ? 'warning' : 'default'}>{item.label}</Tag>
                       <ItemLines item={item} />
                     </div>
                   ))}
                 </div>
               ),
-            },
-          ]}
+            }))}
         />
       ) : null}
 
-      {model.reference.length > 0 ? (
+      {supplementalReference.length > 0 ? (
         <div>
           <Button type="link" size="small" onClick={() => setReferenceOpen(true)}>
-            {`查看全部参考信息（${model.reference.length} 项）`}
+            {`查看其他参考信息（${supplementalReference.length} 项）`}
           </Button>
           <Drawer
             title="审校参考信息"
@@ -93,7 +97,7 @@ export default function ReviewNotesPanel({ notes }: ReviewNotesPanelProps) {
               rowKey="key"
               size="small"
               pagination={false}
-              dataSource={model.reference}
+              dataSource={supplementalReference}
               columns={[
                 { title: '字段', dataIndex: 'label', width: 160 },
                 {

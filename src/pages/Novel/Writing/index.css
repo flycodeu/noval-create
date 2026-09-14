@@ -81,6 +81,67 @@
   margin-top: 8px;
 }
 
+.writing-generation-handoff {
+  width: min(420px, calc(100vw - 40px));
+  max-height: min(560px, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 14px;
+  padding-right: 4px;
+}
+
+.writing-generation-handoff__head,
+.writing-generation-handoff__style {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.writing-generation-handoff__head > div,
+.writing-generation-handoff__item > div {
+  display: grid;
+  gap: 3px;
+}
+
+.writing-generation-handoff__head span,
+.writing-generation-handoff__style span,
+.writing-generation-handoff__item small {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.writing-generation-handoff__style {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(122, 93, 52, 0.07);
+}
+
+.writing-generation-handoff__items {
+  display: grid;
+  gap: 8px;
+}
+
+.writing-generation-handoff__item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: 8px;
+}
+
+.writing-generation-handoff__item > span {
+  color: #8a6a36;
+  font-weight: 700;
+}
+
+.writing-generation-handoff__item.is-ready > span {
+  color: #39835d;
+}
+
 .novel-writing-console-page .novel-writing-shell__editor-sheet--readonly {
   opacity: 0.88;
   border-style: dashed;

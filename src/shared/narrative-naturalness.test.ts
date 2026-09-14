@@ -27,6 +27,9 @@ describe('narrative naturalness prompt', () => {
     expect(prompt).toContain('都市情感')
     expect(prompt).toContain('作者样章或人工风格锁')
     expect(prompt).toContain('第一风格依据')
+    expect(prompt).toContain('已确认的事实与状态 > 章节/场景合同')
+    expect(prompt).toContain('不得复刻样章中的句子')
+    expect(prompt).toContain('首稿就按可直接阅读的正文完成')
   })
 
   it('adds cautious reader-review criteria instead of an authorship detector claim', () => {
@@ -38,6 +41,8 @@ describe('narrative naturalness prompt', () => {
     expect(prompt).toContain('基础审校')
     expect(prompt).toContain('不代表作者身份')
     expect(prompt).toContain('最多指出三项')
+    expect(prompt).toContain('每条结论')
+    expect(prompt).toContain('【证据】')
   })
 
   it('removes frozen sample-novel rules and rewrites mechanical quotas only at runtime', () => {

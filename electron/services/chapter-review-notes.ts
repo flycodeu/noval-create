@@ -370,6 +370,19 @@ export function annotateRiskEvidence(items: string[], normalizedCorpus: string):
   })
 }
 
+function hasVerifiedRiskEvidence(item: string, normalizedCorpus: string): boolean {
+  const markerIndex = item.indexOf(RISK_EVIDENCE_MARKER)
+  if (markerIndex < 0 || item.startsWith(UNVERIFIED_EVIDENCE_PREFIX)) return false
+  const excerpt = item.slice(markerIndex + RISK_EVIDENCE_MARKER.length).trim()
+  const needle = normalizeForEvidence(excerpt)
+  return needle.length >= MIN_RISK_EVIDENCE_NEEDLE_LENGTH && normalizedCorpus.includes(needle)
+}
+
+function hasVerifiedHumanizationEvidence(signal: HumanizationSignal, normalizedCorpus: string): boolean {
+  const needle = normalizeForEvidence(signal.evidenceExcerpt || '')
+  return needle.length >= MIN_RISK_EVIDENCE_NEEDLE_LENGTH && normalizedCorpus.includes(needle)
+}
+
 function parseSemanticStatus(value: unknown): SemanticGateStatus | null {
   return value === 'pass' || value === 'warning' || value === 'blocker' || value === 'uncertain'
     ? value
@@ -472,6 +485,7 @@ export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotes
           title: asText(current.title) || issueType,
           severity: normalizeHumanizationSignalSeverity(current.severity),
           detail: asText(current.detail),
+          evidenceExcerpt: asText(current.evidenceExcerpt) || undefined,
           avoid: asText(current.avoid),
           prefer: asText(current.prefer) || undefined,
           metricKey: asText(current.metricKey) || undefined,
@@ -594,9 +608,14 @@ export function normalizeReviewNotes(raw: unknown, options: NormalizeReviewNotes
     EVIDENCE_ANNOTATED_RISK_KEYS.forEach((key) => {
       const list = notes[key]
       if (Array.isArray(list) && list.length > 0) {
-        ;(notes as unknown as Record<string, unknown>)[key] = annotateRiskEvidence(list, normalizedCorpus)
+        ;(notes as unknown as Record<string, unknown>)[key] = list.filter((item) => (
+          hasVerifiedRiskEvidence(item, normalizedCorpus)
+        ))
       }
     })
+    notes.humanization_signals = notes.humanization_signals.filter((signal) => (
+      hasVerifiedHumanizationEvidence(signal, normalizedCorpus)
+    ))
     if (Array.isArray(record.verdicts) && record.verdicts.length > 0) {
       const semanticReview = normalizeSemanticGateReview({
         chapterContent,
@@ -796,7 +815,7 @@ export function formatReviewNotes(notes: ChapterReviewNotes): string {
       ? `角色语音漂移：\n- ${notes.dialogue_drift_alerts.map((item) => `${item.characterName} (${item.driftRate})：${item.reason}`).join('\n- ')}`
       : '',
     notes.humanization_signals.length > 0
-      ? `去 AI 味风险：\n- ${notes.humanization_signals.map((item) => `${item.title}：${item.detail}`).join('\n- ')}`
+      ? `去 AI 味风险：\n- ${notes.humanization_signals.map((item) => `${item.title}：${item.detail}${item.evidenceExcerpt ? `【证据】${item.evidenceExcerpt}` : ''}`).join('\n- ')}`
       : '',
     notes.style_compliance
       ? `风格合规：${notes.style_compliance.status} · ${notes.style_compliance.score} 分${notes.style_compliance.summary ? ` · ${notes.style_compliance.summary}` : ''}`
@@ -1553,7 +1572,10 @@ export function applyHumanizationAnalysisToReviewNotes(
     return reviewNotes
   }
 
-  const signalDetails = signals.map((item) => `${item.title}：${item.detail}`)
+  const withEvidence = (item: HumanizationSignal) => (
+    `${item.detail}${item.evidenceExcerpt ? `【证据】${item.evidenceExcerpt}` : ''}`
+  )
+  const signalDetails = signals.map((item) => `${item.title}：${withEvidence(item)}`)
   const qualityIssues = buildQualityIssuesFromFindings(content, signals.map((item) => ({
     ruleId: item.issueType,
     message: `${item.title}：${item.detail}`,
@@ -1563,16 +1585,16 @@ export function applyHumanizationAnalysisToReviewNotes(
   })), 'humanization')
   const languageRisks = signals
     .filter((item) => item.issueType === 'template_connector' || item.issueType === 'explanatory_narration' || item.issueType === 'ornament_overload' || item.issueType === 'world_exposition_dump')
-    .map((item) => item.detail)
+    .map(withEvidence)
   const coherenceRisks = signals
     .filter((item) => item.issueType === 'sensory_anchor_missing' || item.issueType === 'weak_stance' || item.issueType === 'transition_density')
-    .map((item) => item.detail)
+    .map(withEvidence)
   const readerHookRisks = signals
     .filter((item) => item.issueType === 'emotion_monotony' || item.issueType === 'transition_density')
-    .map((item) => item.detail)
+    .map(withEvidence)
   const genreHollowingRisks = signals
     .filter((item) => item.issueType === 'world_exposition_dump')
-    .map((item) => item.detail)
+    .map(withEvidence)
   const reviewSignalMap = new Map(reviewNotes.humanization_signals.map((item) => [item.issueType, item] as const))
   signals.forEach((item) => {
     const existing = reviewSignalMap.get(item.issueType)

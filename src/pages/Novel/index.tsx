@@ -1248,7 +1248,7 @@ export default function NovelRouter() {
           ],
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board'}
-        showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
+        showNextStep={currentPage === 'guide' && currentPage !== workspaceSnapshot.nextStep.targetPage}
         showWindowControls={showWindowControls}
         moreMenu={{
           items: [

@@ -195,6 +195,7 @@ export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
     knownLines,
     diagnostics,
     `来源追踪：${brief.sourceKeys.join('、') || '无显式来源'}`,
+    '冲突取舍：已确认状态和场景任务优先；作者样稿控制表达方式，不得改写事实、补造设定或复制样稿内容。',
     '规则：只使用以上显式材料；缺失项留空，不补造人物动机、经历、物件或关系。',
   ].filter(Boolean).join('\n')
 }

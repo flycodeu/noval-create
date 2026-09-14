@@ -115,6 +115,28 @@ export default function ProjectTopbar({
       }
     }
 
+    if (onPrevPage || onNextPage) {
+      if (onPrevPage) {
+        items.push({
+          key: 'workspace-prev-page',
+          icon: <LeftOutlined />,
+          label: prevPageLabel ? `上一页：${prevPageLabel}` : '上一页',
+          disabled: !canPrevPage,
+          onClick: onPrevPage,
+        })
+      }
+      if (onNextPage) {
+        items.push({
+          key: 'workspace-next-page',
+          icon: <RightOutlined />,
+          label: nextPageLabel ? `下一页：${nextPageLabel}` : '下一页',
+          disabled: !canNextPage,
+          onClick: onNextPage,
+        })
+      }
+      appendDivider()
+    }
+
     if (showQuality && onQuality) {
       items.push({
         key: 'workspace-quality',
@@ -198,13 +220,19 @@ export default function ProjectTopbar({
     return { items }
   }, [
     canUndo,
+    canNextPage,
+    canPrevPage,
     exportMenu.items,
     moreMenu.items,
     onClear,
     onJumpChapter,
+    onNextPage,
+    onPrevPage,
     onQuality,
     onShortcuts,
     onUndo,
+    nextPageLabel,
+    prevPageLabel,
     setTheme,
     showQuality,
     theme,
@@ -298,30 +326,6 @@ export default function ProjectTopbar({
             ) : null}
             <div ref={onPageActionsTargetChange} className="project-topbar__page-actions">
             </div>
-            {onPrevPage ? (
-              <Button
-                className="project-topbar__control project-topbar__control--ghost"
-                icon={<LeftOutlined />}
-                onClick={onPrevPage}
-                disabled={!canPrevPage}
-                aria-label={prevPageLabel || '上一步'}
-                title={prevPageLabel || '上一步'}
-              >
-                上一步
-              </Button>
-            ) : null}
-            {onNextPage ? (
-              <Button
-                className="project-topbar__control project-topbar__control--ghost"
-                icon={<RightOutlined />}
-                onClick={onNextPage}
-                disabled={!canNextPage}
-                aria-label={nextPageLabel || '下一步'}
-                title={nextPageLabel || '下一步'}
-              >
-                下一步
-              </Button>
-            ) : null}
             {showNextStep && onNextStep ? (
               <Button
                 className="project-topbar__control project-topbar__control--accent"

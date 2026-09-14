@@ -299,7 +299,7 @@ const wrappers = [
   {"file":"story-prompts","mode":"fallback","name":"buildScenePlanPrompt","hash":"c4b18efa6c7f7083dfa94d377a9fe8ee6dae5002e7902fd706c164e87b9a9dca","key":null},
   {"file":"story-prompts","mode":"fallback","name":"buildChapterWritingPrompt","hash":"50b6e332ee20d4b68c959e05ab420138ce2004b801aefce67393e410475e81c6","key":null},
   {"file":"story-prompts","mode":"fallback","name":"buildChapterDraftPrompt","hash":"306756d0110122bf543e896ea4425460e49afbf583b746215f1ef32489201081","key":null},
-  {"file":"story-prompts","mode":"fallback","name":"buildChapterReviewPrompt","hash":"7b438bebcc7bb8a46354cef8c1704028439243d2b7d1302d879fe803ea118306","key":null},
+  {"file":"story-prompts","mode":"fallback","name":"buildChapterReviewPrompt","hash":"78dbfbfc4ca216a6af6a98fe08f24f71f2d929673ee834be21bf972e0ed3ccfc","key":null},
   {"file":"story-prompts","mode":"fallback","name":"buildChapterRewritePrompt","hash":"c4457ef54b83e4dee77b9aea3490d77a880b817e234ee8519e35988847d581a8","key":null},
   {"file":"story-prompts","mode":"fallback","name":"buildContinuityStatePrompt","hash":"46043067eb1270e9a45e2fd814a24cdd4239d1893e108387dcfe0288fb765592","key":null},
   {"file":"story-prompts","mode":"override","name":"buildStoryArcPlanningPrompt","hash":"84666472350d4c1f6846f141b30f8399cf4086cd71ffbc9c21cac08c83f18772","key":"storyArcs"},

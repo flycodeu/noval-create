@@ -249,8 +249,6 @@ export function buildAuthorStyleLockSummary(novelId: number, themeVoiceJson?: st
     ...splitTextHints(themeVoice.styleRules, 4),
     ...splitTextHints(themeVoice.dialogueRules, 4),
     ...splitTextHints(themeVoice.descriptionRules, 4),
-    ...splitTextHints(themeVoice.targetWorkSampleGuide, 2),
-    ...splitTextHints(themeVoice.humanStyleSampleLock, 2),
   ], 8)
   const preferredLexicon = dedupeStrings(
     Object.values(fingerprint?.wordFrequencyProfile || {})

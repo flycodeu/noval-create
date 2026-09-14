@@ -33,7 +33,7 @@ vi.mock('./style-analysis.service', () => ({
 }))
 
 import { getModelConfigRecord } from './model.service'
-import { buildAiExplainabilityReport, buildAiModelRouteReport, buildChatOptionsFromRoute } from './ai-engine.service'
+import { buildAiExplainabilityReport, buildAiModelRouteReport, buildAuthorStyleLockSummary, buildChatOptionsFromRoute } from './ai-engine.service'
 
 describe('ai-engine route policy', () => {
   beforeEach(() => {
@@ -115,5 +115,19 @@ describe('ai-engine route policy', () => {
 
     expect(route.providerOptions).toEqual({ kimiThinking: 'enabled' })
     expect(buildChatOptionsFromRoute(route).providerOptions).toEqual({ kimiThinking: 'enabled' })
+  })
+
+  it('keeps style samples separate from hard rules so generation learns voice without copying content', () => {
+    const styleLock = buildAuthorStyleLockSummary(1, JSON.stringify({
+      styleRules: '近距离第三人称；句子长短交替。',
+      targetWorkSampleGuide: '只学习叙事距离和句法节奏。',
+      humanStyleSampleLock: '雨落在窗台上，他没有回头。',
+    }))
+
+    expect(styleLock.hardRules).toContain('近距离第三人称')
+    expect(styleLock.hardRules).not.toContain('只学习叙事距离和句法节奏')
+    expect(styleLock.hardRules).not.toContain('雨落在窗台上，他没有回头')
+    expect(styleLock.targetWorkSampleGuide).toBe('只学习叙事距离和句法节奏。')
+    expect(styleLock.humanStyleSampleLock).toBe('雨落在窗台上，他没有回头。')
   })
 })

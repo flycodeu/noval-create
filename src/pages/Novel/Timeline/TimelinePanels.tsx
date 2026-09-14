@@ -353,10 +353,11 @@ export function TimelineEditorPanel({
         </div>
       </div>
       <div className="novel-panel__body">
-        {!selectedEvent && !creating && !loading ? (
-          <div className="novel-empty">{TIMELINE_TEXT.selectEventHint}</div>
-        ) : (
-          <Form className="novel-timeline-page__editor-form" form={form} layout="vertical" onValuesChange={onValuesChange}>
+        <Form className="novel-timeline-page__editor-form" form={form} layout="vertical" onValuesChange={onValuesChange}>
+          {!selectedEvent && !creating && !loading ? (
+            <div className="novel-empty">{TIMELINE_TEXT.selectEventHint}</div>
+          ) : (
+            <>
             {selectedEvent?.anchorInvalid ? (
               <Alert
                 className="novel-timeline-page__alert-bottom"
@@ -427,6 +428,8 @@ export function TimelineEditorPanel({
               </Form.Item>
             </div>
 
+            <details className="novel-timeline-page__field-group">
+              <summary>建议补充 · 结构、地点与角色关联</summary>
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionStructureTitle}</div>
@@ -518,6 +521,7 @@ export function TimelineEditorPanel({
                 </Form.Item>
               </div>
             </div>
+            </details>
 
             <div className="novel-form-section">
               <div className="novel-form-section__header">
@@ -544,8 +548,9 @@ export function TimelineEditorPanel({
                 <Input.TextArea rows={6} />
               </Form.Item>
             </div>
-          </Form>
-        )}
+            </>
+          )}
+        </Form>
       </div>
     </section>
   )

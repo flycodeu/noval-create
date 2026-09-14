@@ -92,6 +92,7 @@ const approvedSharedFiles = new Set([
   'src/pages/Novel/VolumeDesign/index.tsx',
   'src/pages/Novel/StagePlanner/index.tsx',
   'src/pages/Novel/Outline/index.tsx',
+  'src/pages/Novel/Structure/index.tsx',
   'src/pages/Novel/Studio/index.tsx',
   'src/pages/Novel/Overview/index.tsx',
   'src/pages/Novel/WritebackCenter/index.tsx',

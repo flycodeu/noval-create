@@ -184,6 +184,14 @@ function analyzeOrnamentOverloadRate(text: string, sentences: string[]): number 
   return clampPercent(((tokenHits + overloadedSentences) / sentences.length) * 12)
 }
 
+export function findOrnamentOverloadEvidence(text: string): string {
+  const sentences = splitSentences(text)
+  return sentences
+    .map((sentence) => ({ sentence, hits: countTokenHits(sentence, ORNAMENT_TOKENS) }))
+    .filter((item) => item.hits > 0)
+    .sort((left, right) => right.hits - left.hits)[0]?.sentence || ''
+}
+
 function analyzeNonHumanCollocationRate(text: string, sentences: string[]): number {
   if (sentences.length === 0) return 0
   const patternHits = NON_HUMAN_PATTERNS.reduce((total, pattern) => total + (text.match(pattern) || []).length, 0)

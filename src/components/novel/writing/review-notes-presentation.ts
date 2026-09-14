@@ -25,6 +25,16 @@ export interface ReviewNotesViewModel {
   critical: ReviewNotesViewItem[]
   advisory: ReviewNotesViewItem[]
   reference: ReviewNotesViewItem[]
+  focusGroups: ReviewNotesFocusGroup[]
+}
+
+export type ReviewNotesFocusKey = 'continuity' | 'voice' | 'readability'
+
+export interface ReviewNotesFocusGroup {
+  key: ReviewNotesFocusKey
+  label: string
+  description: string
+  items: ReviewNotesViewItem[]
 }
 
 const CRITICAL_FIELDS = [
@@ -46,6 +56,27 @@ const ADVISORY_FIELDS = [
   'dialogue_drift_alerts',
   'cross_character_similarity',
 ] as const
+
+const FOCUS_GROUPS: Array<Omit<ReviewNotesFocusGroup, 'items'> & { fields: readonly string[] }> = [
+  {
+    key: 'continuity',
+    label: '事实连续性',
+    description: '正典、时间、地点、因果和章节合同是否对得上。',
+    fields: ['continuity_risks', 'context_drift_risks', 'coherence_risks', 'realism_risks', 'arc_progress_risks', 'step_memory_risks', 'hallucination_risks', 'typed_ref_risks', 'source_grounding_risks', 'contract_validation'],
+  },
+  {
+    key: 'voice',
+    label: '人物声音',
+    description: '人物是否按自己的知识、关系、目的和说话习惯行动。',
+    fields: ['dialogue_homogenization_risks', 'dialogue_fingerprint_summary', 'dialogue_voice_lock_summary', 'dialogue_filler_risks', 'dialogue_info_density_risks', 'required_voice_lock_character_ids', 'cross_character_similarity', 'dialogue_drift_alerts', 'dialogue_separability_risks'],
+  },
+  {
+    key: 'readability',
+    label: '语言读感',
+    description: '文字是否自然、具体、有节奏，并保留本书自己的风格。',
+    fields: ['language_risks', 'human_language_repairs', 'humanization_signals', 'style_compliance', 'reading_experience', 'reader_hook_risks', 'genre_hollowing_risks', 'opening_hook_risks', 'title_alignment_risks', 'long_window_humanization_risks', 'genre_register_risks'],
+  },
+]
 
 const FIELD_LABELS: Record<string, string> = {
   summary: '审校摘要',
@@ -112,12 +143,14 @@ function formatObjectEntry(key: string, entry: Record<string, unknown>): string 
     const severity = stringifyEntry(entry.severity)
     const title = stringifyEntry(entry.title)
     const detail = stringifyEntry(entry.detail)
+    const evidence = stringifyEntry(entry.evidenceExcerpt)
     const avoid = stringifyEntry(entry.avoid)
     const prefer = stringifyEntry(entry.prefer)
     return [
       severity ? `[${severity}]` : '',
       title,
       detail,
+      evidence ? `正文：“${evidence}”` : '',
       avoid ? `避免：${avoid}` : '',
       prefer ? `建议：${prefer}` : '',
     ].filter(Boolean).join(' · ')
@@ -164,7 +197,12 @@ function classifyField(key: string): ReviewNoteSeverity {
 }
 
 export function buildReviewNotesViewModel(notes: Record<string, unknown> | null | undefined): ReviewNotesViewModel {
-  const model: ReviewNotesViewModel = { critical: [], advisory: [], reference: [] }
+  const model: ReviewNotesViewModel = {
+    critical: [],
+    advisory: [],
+    reference: [],
+    focusGroups: FOCUS_GROUPS.map(({ fields: _fields, ...group }) => ({ ...group, items: [] })),
+  }
   if (!notes || typeof notes !== 'object' || Array.isArray(notes)) return model
 
   const orderedKeys = [
@@ -177,12 +215,15 @@ export function buildReviewNotesViewModel(notes: Record<string, unknown> | null 
     const severity = classifyField(key)
     const texts = reviewNoteValueToTexts(key, notes[key])
     if (texts.length === 0) return
-    model[severity].push({
+    const item = {
       key,
       label: FIELD_LABELS[key] || key,
       texts,
       severity,
-    })
+    }
+    model[severity].push(item)
+    const groupIndex = FOCUS_GROUPS.findIndex((group) => group.fields.includes(key))
+    if (groupIndex >= 0) model.focusGroups[groupIndex].items.push(item)
   })
 
   return model

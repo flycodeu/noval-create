@@ -1,7 +1,6 @@
 import React from 'react'
-import { Alert, Button, Drawer, Dropdown, Form, Input, InputNumber, Modal, Progress, Segmented, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Progress, Segmented, Space, Spin, Tag, message } from 'antd'
 import {
-  EllipsisOutlined,
   LinkOutlined,
   MenuOutlined,
   PlusOutlined,
@@ -1021,44 +1020,33 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       layout="wide"
       title="卷章结构"
       heroVariant="compact"
-      actions={(
-        <Space wrap className="novel-structure-page__top-actions">
-          <Button icon={<PlusOutlined />} onClick={() => runGuardedAction(async () => {
+      chrome="shared"
+      actionContract={{
+        primary: {
+          key: 'new-volume',
+          label: '新建卷',
+          icon: <PlusOutlined />,
+          onClick: () => runGuardedAction(async () => {
             await addVolume()
             setEditorMode('chapter')
-          })}>
-            新建卷
-          </Button>
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'batch', label: '批量新增' },
-                { key: 'planner', label: 'AI 批量规划' },
-                { key: 'compile', label: '编译当前章节', disabled: !selection.chapterId },
-                { key: 'event', label: '创建关联事件', disabled: !selection.volumeId },
-                { key: 'linkage', label: '补齐结构联动' },
-                { key: 'memory', label: '刷新检查点' },
-                { key: 'refresh', label: '刷新结构' },
-                { type: 'divider' },
-                { key: 'writing', label: '去正文页', disabled: !selection.chapterId },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'batch') setBatchDrawerOpen(true)
-                if (key === 'planner') setPlannerOpen(true)
-                if (key === 'compile') runGuardedAction(compileChapter)
-                if (key === 'event') runGuardedAction(openCreateEvent)
-                if (key === 'linkage') runGuardedAction(handleSyncLinkage)
-                if (key === 'memory') runGuardedAction(refreshMemory)
-                if (key === 'refresh') runGuardedAction(refreshStructure)
-                if (key === 'writing') runGuardedAction(openWritingPage)
-              },
-            }}
-          >
-            <Button icon={<EllipsisOutlined />}>更多</Button>
-          </Dropdown>
-        </Space>
-      )}
+          }),
+        },
+        secondary: [
+          { key: 'planner', label: 'AI 批量规划', onClick: () => setPlannerOpen(true) },
+          { key: 'batch', label: '批量新增', onClick: () => setBatchDrawerOpen(true) },
+        ],
+        more: {
+          items: [
+            { key: 'compile', label: '编译当前章节', disabled: !selection.chapterId, onClick: () => runGuardedAction(compileChapter) },
+            { key: 'event', label: '创建关联事件', disabled: !selection.volumeId, onClick: () => runGuardedAction(openCreateEvent) },
+            { key: 'linkage', label: '补齐结构联动', onClick: () => runGuardedAction(handleSyncLinkage) },
+            { key: 'memory', label: '刷新检查点', onClick: () => runGuardedAction(refreshMemory) },
+            { key: 'refresh', label: '刷新结构', onClick: () => runGuardedAction(refreshStructure) },
+            { type: 'divider' },
+            { key: 'writing', label: '去正文页', disabled: !selection.chapterId, onClick: () => runGuardedAction(openWritingPage) },
+          ],
+        },
+      }}
     >
       {loading ? (
         <div className="novel-empty">

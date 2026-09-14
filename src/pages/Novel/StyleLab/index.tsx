@@ -38,6 +38,9 @@ interface Props {
   novelId: number
 }
 
+type AbVariantKey = 'withFingerprint' | 'without'
+type AbBlindChoice = 'A' | 'B' | 'tie'
+
 const SOURCE_TYPE_META: Record<string, { label: string; color: string }> = {
   pasted: { label: '粘贴样本', color: 'blue' },
   chapters: { label: '章节采样', color: 'green' },
@@ -149,6 +152,8 @@ export default function StyleLabPage({ novelId }: Props) {
   const [abFingerprintId, setAbFingerprintId] = useState<number | null>(null)
   const [sceneBrief, setSceneBrief] = useState('')
   const [abResult, setAbResult] = useState<StyleAbTestResult | null>(null)
+  const [abBlindOrder, setAbBlindOrder] = useState<AbVariantKey[]>(['withFingerprint', 'without'])
+  const [abBlindChoice, setAbBlindChoice] = useState<AbBlindChoice | null>(null)
   const abGeneration = useTrackedGeneration<StyleAbTestResult | null>()
 
   const loadData = useCallback(async () => {
@@ -260,10 +265,21 @@ export default function StyleLabPage({ novelId }: Props) {
     )
     if (result) {
       setAbResult(result)
+      setAbBlindOrder(Math.random() >= 0.5 ? ['withFingerprint', 'without'] : ['without', 'withFingerprint'])
+      setAbBlindChoice(null)
       setDrawerMode(null)
       message.success(getUserFacingMessage('styleLab.abTestDone'))
     }
   }
+
+  const abCandidates = useMemo(() => {
+    if (!abResult) return []
+    return abBlindOrder.map((variant, index) => ({
+      label: index === 0 ? 'A' as const : 'B' as const,
+      variant,
+      value: variant === 'withFingerprint' ? abResult.withFingerprint : abResult.without,
+    }))
+  }, [abBlindOrder, abResult])
 
   const abDiffRows = useMemo(() => {
     if (!abResult) return []
@@ -597,46 +613,74 @@ export default function StyleLabPage({ novelId }: Props) {
           ) : null}
           {abResult ? (
             <div className="workspace-stack-16">
+              {!abBlindChoice ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="先盲选，再看指标"
+                  description="两段文本的生成方式已隐藏。请只按人物声音、叙事距离和阅读感受选择，避免分数与标签影响判断。"
+                />
+              ) : (
+                <Alert
+                  type="success"
+                  showIcon
+                  message={abBlindChoice === 'tie' ? '已记录：两版都不合适' : `已记录：更偏好样稿 ${abBlindChoice}`}
+                  description={`结果揭晓：${abCandidates.find((item) => item.variant === 'withFingerprint')?.label} 使用了「${abResult.fingerprintName}」，另一版未使用指纹。`}
+                />
+              )}
               <div className="style-lab__ab-columns">
-                <div className="style-lab__ab-column style-lab__ab-column--with">
-                  <div className="style-lab__ab-column-head">
-                    <Tag color="green">A · 注入指纹</Tag>
-                    <span className="workspace-text-small workspace-text-muted">{abResult.fingerprintName}</span>
+                {abCandidates.map((candidate) => (
+                  <div key={candidate.label} className="style-lab__ab-column">
+                    <div className="style-lab__ab-column-head">
+                      <Tag color={abBlindChoice && candidate.variant === 'withFingerprint' ? 'green' : undefined}>
+                        {abBlindChoice
+                          ? `${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用指纹' : '未使用指纹'}`
+                          : `样稿 ${candidate.label}`}
+                      </Tag>
+                      {abBlindChoice && candidate.variant === 'withFingerprint' ? (
+                        <span className="workspace-text-small workspace-text-muted">{abResult.fingerprintName}</span>
+                      ) : null}
+                    </div>
+                    <div className="style-lab__ab-text">{candidate.value.text}</div>
+                    {!abBlindChoice ? (
+                      <Button onClick={() => setAbBlindChoice(candidate.label)}>这版更像我的书</Button>
+                    ) : null}
                   </div>
-                  <div className="style-lab__ab-text">{abResult.withFingerprint.text}</div>
-                </div>
-                <div className="style-lab__ab-column">
-                  <div className="style-lab__ab-column-head">
-                    <Tag>B · 不注入</Tag>
-                  </div>
-                  <div className="style-lab__ab-text">{abResult.without.text}</div>
-                </div>
+                ))}
               </div>
-              <details className="style-lab__diagnostics">
-                <summary>查看对照诊断指标</summary>
-                <div className="style-lab__ab-table-wrap">
-                  <table className="style-lab__ab-table">
-                  <thead>
-                    <tr>
-                      <th>指标</th>
-                      <th>A · 注入指纹</th>
-                      <th>B · 不注入</th>
-                      <th>指纹参考值</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {abDiffRows.map((row) => (
-                      <tr key={row.key}>
-                        <td>{row.label}</td>
-                        <td>{row.withValue}</td>
-                        <td>{row.withoutValue}</td>
-                        <td>{row.referenceValue}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  </table>
+              {!abBlindChoice ? (
+                <div className="style-lab__blind-actions">
+                  <Button onClick={() => setAbBlindChoice('tie')}>两版都不合适</Button>
                 </div>
-              </details>
+              ) : (
+                <details className="style-lab__diagnostics">
+                  <summary>查看揭晓后的诊断指标</summary>
+                  <div className="style-lab__ab-table-wrap">
+                    <table className="style-lab__ab-table">
+                    <thead>
+                      <tr>
+                        <th>指标</th>
+                        {abCandidates.map((candidate) => (
+                          <th key={candidate.label}>{`${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用指纹' : '未使用指纹'}`}</th>
+                        ))}
+                        <th>指纹参考值</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {abDiffRows.map((row) => (
+                        <tr key={row.key}>
+                          <td>{row.label}</td>
+                          {abCandidates.map((candidate) => (
+                            <td key={candidate.label}>{candidate.variant === 'withFingerprint' ? row.withValue : row.withoutValue}</td>
+                          ))}
+                          <td>{row.referenceValue}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
             </div>
           ) : (
             <div className="style-lab__ab-empty">

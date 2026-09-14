@@ -126,8 +126,16 @@ describe('buildReviewNotesViewModel', () => {
   })
 
   it('returns an empty model for null / non-object input', () => {
-    expect(buildReviewNotesViewModel(null)).toEqual({ critical: [], advisory: [], reference: [] })
-    expect(buildReviewNotesViewModel(undefined)).toEqual({ critical: [], advisory: [], reference: [] })
+    expect(buildReviewNotesViewModel(null).critical).toEqual([])
+    expect(buildReviewNotesViewModel(null).focusGroups.map((group) => group.label)).toEqual(['事实连续性', '人物声音', '语言读感'])
+    expect(buildReviewNotesViewModel(undefined).reference).toEqual([])
+  })
+
+  it('organizes review evidence around reader-facing concerns', () => {
+    const model = buildReviewNotesViewModel(FULL_NOTES)
+    expect(model.focusGroups.find((group) => group.key === 'continuity')?.items.some((item) => item.key === 'continuity_risks')).toBe(true)
+    expect(model.focusGroups.find((group) => group.key === 'voice')?.items.some((item) => item.key === 'dialogue_drift_alerts')).toBe(true)
+    expect(model.focusGroups.find((group) => group.key === 'readability')?.items.some((item) => item.key === 'language_risks')).toBe(true)
   })
 })
 

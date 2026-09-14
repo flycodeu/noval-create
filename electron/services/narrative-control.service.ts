@@ -80,6 +80,7 @@ export interface TransitionDensityAnalysis {
   thinParagraphCount: number
   maxDenseRun: number
   releasedDenseClusters: number
+  evidenceExcerpt?: string
 }
 
 export interface EmotionFocusAnalysis {
@@ -92,6 +93,7 @@ export interface EmotionFocusAnalysis {
   dominantShare: number
   contrastEmotionCount: number
   matchedFocus: boolean
+  evidenceExcerpt?: string
 }
 
 export interface ExpositionDeliveryAnalysis {
@@ -102,6 +104,7 @@ export interface ExpositionDeliveryAnalysis {
   consecutiveBlockLength: number
   explanatorySentenceCount: number
   worldSentenceCount: number
+  evidenceExcerpt?: string
 }
 
 export interface NarrativeControlReport {
@@ -769,6 +772,18 @@ function analyzeTransitionDensity(input: AnalyzeNarrativeControlsInput, paragrap
     || asText(input.chapterFunction).includes('breather')
   const overlyUniform = paragraphs.length >= 4 && variance < 18 && thinParagraphCount === 0
   const overloadedBridge = maxDenseRun >= 3 || (denseClusterCount > 0 && releasedDenseClusters === 0 && thinParagraphCount === 0)
+  let currentDenseEvidence: string[] = []
+  let longestDenseEvidence: string[] = []
+  denseFlags.forEach((isDense, index) => {
+    if (!isDense) {
+      currentDenseEvidence = []
+      return
+    }
+    currentDenseEvidence = [...currentDenseEvidence, paragraphs[index]]
+    if (currentDenseEvidence.length > longestDenseEvidence.length) {
+      longestDenseEvidence = [...currentDenseEvidence]
+    }
+  })
 
   let status: NarrativeGateStatus = 'pass'
   if (transitionChapter && overloadedBridge) {
@@ -807,6 +822,7 @@ function analyzeTransitionDensity(input: AnalyzeNarrativeControlsInput, paragrap
     thinParagraphCount,
     maxDenseRun,
     releasedDenseClusters,
+    evidenceExcerpt: longestDenseEvidence.slice(0, 2).join('\n').slice(0, 180) || undefined,
   }
 }
 
@@ -844,6 +860,13 @@ function analyzeEmotionFocus(input: AnalyzeNarrativeControlsInput, sentences: st
   }
 
   const dominantEmotion = dominantBucket ? EMOTION_BUCKET_LABELS[dominantBucket] : '未识别'
+  const dominantEmotionEvidence = dominantBucket
+    ? sentences
+      .filter((sentence) => detectPrimaryEmotionBucket(sentence) === dominantBucket)
+      .slice(0, 2)
+      .join('。')
+      .slice(0, 180)
+    : ''
   const summary = status === 'rewrite'
     ? `当前章节情绪几乎被“${dominantEmotion}”单色占满，缺少必要的温差和回弹。`
     : status === 'warning'
@@ -875,6 +898,7 @@ function analyzeEmotionFocus(input: AnalyzeNarrativeControlsInput, sentences: st
     dominantShare,
     contrastEmotionCount,
     matchedFocus,
+    evidenceExcerpt: dominantEmotionEvidence || undefined,
   }
 }
 
@@ -917,6 +941,12 @@ function analyzeExpositionDelivery(input: AnalyzeNarrativeControlsInput, sentenc
       : directMode
         ? '当前世界观说明量仍在“允许短直述”的范围内。'
         : '当前没有明显的世界观说明文堆积。'
+  const firstExpositionIndex = pureExpositionFlags.findIndex(Boolean)
+  const expositionEvidence = firstExpositionIndex >= 0
+    ? sentences
+      .slice(firstExpositionIndex, firstExpositionIndex + Math.max(1, Math.min(consecutiveBlockLength, 2)))
+      .join('。')
+    : sentences.find((sentence) => hasAnyToken(sentence, WORLD_EXPOSITION_TOKENS)) || ''
 
   return {
     status,
@@ -930,6 +960,7 @@ function analyzeExpositionDelivery(input: AnalyzeNarrativeControlsInput, sentenc
     consecutiveBlockLength,
     explanatorySentenceCount,
     worldSentenceCount,
+    evidenceExcerpt: expositionEvidence.slice(0, 180) || undefined,
   }
 }
 

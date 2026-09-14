@@ -4796,6 +4796,8 @@ export interface HumanizationSignal {
   title: string
   severity: 'low' | 'medium' | 'high'
   detail: string
+  /** 正文中的连续短片段；用于证明该结论确实来自当前文本。 */
+  evidenceExcerpt?: string
   avoid: string
   prefer?: string
   metricKey?: string

@@ -21,6 +21,8 @@ describe('scene writing brief', () => {
     expect(brief.sourceKeys).toContain('ScenePlanStep.theme_cost')
     expect(brief.knownState.knownFacts).toEqual(['只确认账册缺页'])
     expect(formatSceneWritingBrief(brief)).toContain('不补造人物动机、经历、物件或关系')
+    expect(formatSceneWritingBrief(brief)).toContain('作者样稿控制表达方式')
+    expect(formatSceneWritingBrief(brief)).toContain('不得改写事实')
   })
 
   it('keeps empty scene inputs empty instead of filling a template motive', () => {

@@ -116,6 +116,56 @@ describe('annotateRiskEvidence', () => {
   })
 })
 
+describe('normalizeReviewNotes humanization evidence', () => {
+  it('preserves the exact source excerpt attached to a humanization signal', () => {
+    const notes = normalizeReviewNotes({
+      humanization_signals: [{
+        issueType: 'template_connector',
+        title: '模板衔接',
+        severity: 'medium',
+        detail: '承接方式重复。',
+        evidenceExcerpt: '与此同时，她只是静静站着。',
+        avoid: '模板连接词',
+      }],
+    })
+
+    expect(notes.humanization_signals[0]?.evidenceExcerpt).toBe('与此同时，她只是静静站着。')
+  })
+
+  it('有正文时只保留能逐字回指的 AI 味证据', () => {
+    const notes = normalizeReviewNotes({
+      humanization_signals: [
+        {
+          issueType: 'template_connector',
+          title: '模板衔接',
+          severity: 'medium',
+          detail: '承接方式重复。',
+          evidenceExcerpt: '陈默把铜牌按进泥里，指节因为用力而发白',
+          avoid: '模板连接词',
+        },
+        {
+          issueType: 'explanatory_narration',
+          title: '解释腔',
+          severity: 'medium',
+          detail: '旁白重复解释。',
+          evidenceExcerpt: '这句并不在正文里出现',
+          avoid: '重复解释',
+        },
+        {
+          issueType: 'ornament_overload',
+          title: '修辞过密',
+          severity: 'medium',
+          detail: '修辞数量过多。',
+          avoid: '堆叠修辞',
+        },
+      ],
+    }, { chapterContent: CHAPTER_CONTENT })
+
+    expect(notes.humanization_signals).toHaveLength(1)
+    expect(notes.humanization_signals[0]?.issueType).toBe('template_connector')
+  })
+})
+
 describe('normalizeReviewNotes 证据核实', () => {
   it('不传 chapterContent 时行为与旧版一致（不做证据标注、不挂 semantic_verdicts）', () => {
     const notes = normalizeReviewNotes({
@@ -126,7 +176,7 @@ describe('normalizeReviewNotes 证据核实', () => {
     expect(notes.semantic_verdicts).toBeUndefined()
   })
 
-  it('传 chapterContent 时对风险条目做证据回指标注', () => {
+  it('传 chapterContent 时只保留能逐字回指的风险条目', () => {
     const notes = normalizeReviewNotes({
       critical_fixes: [
         '代价没有落地。【证据】陈默把铜牌按进泥里，指节因为用力而发白',
@@ -134,9 +184,10 @@ describe('normalizeReviewNotes 证据核实', () => {
       ],
       language_risks: ['翻译腔明显，建议改写。'],
     }, { chapterContent: CHAPTER_CONTENT })
-    expect(notes.critical_fixes[0].startsWith(UNVERIFIED_EVIDENCE_PREFIX)).toBe(false)
-    expect(notes.critical_fixes[1].startsWith(UNVERIFIED_EVIDENCE_PREFIX)).toBe(true)
-    expect(notes.language_risks).toEqual(['翻译腔明显，建议改写。'])
+    expect(notes.critical_fixes).toEqual([
+      '代价没有落地。【证据】陈默把铜牌按进泥里，指节因为用力而发白',
+    ])
+    expect(notes.language_risks).toEqual([])
   })
 
   it('payload.verdicts 经 normalizeSemanticGateReview 归一后挂到 semantic_verdicts', () => {

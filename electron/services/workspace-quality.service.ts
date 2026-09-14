@@ -12,7 +12,7 @@ import type {
   WorkspaceQualityRepairRequest,
   WorkspaceQualitySeverity,
 } from '../../src/types'
-import { analyzeLanguageDrift } from '../../src/shared/language-drift'
+import { analyzeLanguageDrift, findOrnamentOverloadEvidence } from '../../src/shared/language-drift'
 import { collectQualityGuardrailFindings } from '../../src/shared/content-guardrails'
 import * as taskService from './task.service'
 import { safeParseJson } from '../utils/json'
@@ -531,6 +531,40 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
   if (narrativeControlReport.emotionFocus.status !== 'pass') humanizationDirections.push(narrativeControlReport.emotionFocus.fixHint)
   if (narrativeControlReport.exposition.status !== 'pass') humanizationDirections.push(narrativeControlReport.exposition.fixHint)
 
+  const firstSentenceMatching = (tokens: string[]) => sentences.find((sentence) => (
+    tokens.some((token) => sentence.includes(token))
+  ))
+  const firstGuardrailExcerpt = (codes: string[]) => cleanText(
+    guardrailFindings.find((finding) => codes.includes(finding.code) && cleanText(finding.excerpt))?.excerpt || '',
+  )
+  const resolveEvidenceExcerpt = (signal: HumanizationSignal): string => {
+    if (signal.issueType === 'ai_slogan') return firstGuardrailExcerpt(['ai_slogan'])
+    if (signal.issueType === 'template_emotion') return firstGuardrailExcerpt(['template_emotion'])
+    if (signal.issueType === 'template_connector' || signal.issueType === 'transition_density') {
+      return signal.issueType === 'transition_density'
+        ? narrativeControlReport.transitionDensity.evidenceExcerpt || ''
+        : firstSentenceMatching(TEMPLATE_CONNECTORS) || ''
+    }
+    if (signal.issueType === 'explanatory_narration' || signal.issueType === 'world_exposition_dump') {
+      return signal.issueType === 'world_exposition_dump'
+        ? narrativeControlReport.exposition.evidenceExcerpt || ''
+        : firstSentenceMatching(EXPLANATORY_TOKENS) || ''
+    }
+    if (signal.issueType === 'sensory_anchor_missing') {
+      return sentences.find((sentence) => !ACTION_OR_SENSORY_TOKENS.some((token) => sentence.includes(token))) || ''
+    }
+    if (signal.issueType === 'weak_stance') {
+      return sentences.find((sentence) => !STANCE_TOKENS.some((token) => sentence.includes(token))) || ''
+    }
+    if (signal.issueType === 'ornament_overload') return findOrnamentOverloadEvidence(normalized)
+    if (signal.issueType === 'emotion_monotony') return narrativeControlReport.emotionFocus.evidenceExcerpt || ''
+    return ''
+  }
+  const humanizationSignalsWithEvidence = humanizationSignals.flatMap((signal) => {
+    const excerpt = cleanText(resolveEvidenceExcerpt(signal)).slice(0, 180)
+    return excerpt ? [{ ...signal, evidenceExcerpt: excerpt }] : []
+  })
+
   return {
     score,
     severity,
@@ -542,7 +576,7 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
     breakdown,
     sampleFindings,
     humanizationDirections,
-    humanizationSignals,
+    humanizationSignals: humanizationSignalsWithEvidence,
   }
 }
 

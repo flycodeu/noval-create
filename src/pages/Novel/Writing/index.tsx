@@ -22,6 +22,7 @@ import { useWritingInspectorComposition } from './useWritingInspectorComposition
 import { useWritingPipelineItems } from './useWritingPipelineItems'
 import { useWritingChapterCrudController } from './useWritingChapterCrudController'
 import { useWritingCommandBindings } from './useWritingCommandBindings'
+import { buildGenerationHandoffViewModel } from './writing-generation-handoff'
 import { useWritingContractSections } from './useWritingContractSections'
 import { useWritingEditorLifecycle } from './useWritingEditorLifecycle'
 import { useWritingHistoryLifecycle } from './useWritingHistoryLifecycle'
@@ -494,6 +495,13 @@ export default function Writing({ novelId }: Props) {
     sceneCount: scenePlan.length,
   }, retryPipeline)
 
+  const generationHandoff = useMemo(() => buildGenerationHandoffViewModel({
+    hasChapter: Boolean(currentChapter),
+    writability: chapterWritability,
+    contextPreview: chapterContextPreview,
+    contextPreviewError: chapterContextPreviewError,
+  }), [chapterContextPreview, chapterContextPreviewError, chapterWritability, currentChapter])
+
   const commandBindings = useWritingCommandBindings({
     navigator: {
       novelId,
@@ -522,6 +530,7 @@ export default function Writing({ novelId }: Props) {
       generationBlockedReason: generationPreflight.messages[0],
       rewritingSelection,
       optimizingChapter,
+      handoff: generationHandoff,
       setCreativeStageId,
       changeDefaultAiMode: handleDefaultAiModeChange,
       save: handleSaveCurrentChapter,

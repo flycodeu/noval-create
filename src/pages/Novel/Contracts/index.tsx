@@ -866,12 +866,17 @@ export default function ContractsPage({ novelId }: Props) {
         )}
       >
         <Form form={form} layout="vertical" onValuesChange={() => setChapterDirty(true)}>
+          <div className="novel-contracts-page__field-level">首稿必须</div>
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="chapterGoal" label="本章目标">
                 <Input.TextArea rows={6} placeholder="写这一章写完后，主线、人物或局势必须发生什么变化。" />
               </Form.Item>
             </div>
+          </div>
+          <details className="novel-contracts-page__field-group" open>
+            <summary>建议补充 · 开场、情绪与收尾</summary>
+            <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="openingStyle" label="开场方式">
                 <Select
@@ -922,6 +927,11 @@ export default function ContractsPage({ novelId }: Props) {
                 <Input placeholder="例如：信息反转 / 危机升级 / 情绪留钩" />
               </Form.Item>
             </div>
+            </div>
+          </details>
+          <details className="novel-contracts-page__field-group">
+            <summary>高级约束 · 弧线、阻力、资产与验收</summary>
+            <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
               <Form.Item name="requiredArcProgressText" label="必须推进的弧线">
                 <Input.TextArea rows={5} placeholder={'建议每行一条，例如：\n主角第一次承认自身代价\n反派开始反向布局'} />
@@ -1028,6 +1038,7 @@ export default function ContractsPage({ novelId }: Props) {
               </Form.Item>
             </div>
           </div>
+          </details>
         </Form>
       </WorkspacePanel>
 

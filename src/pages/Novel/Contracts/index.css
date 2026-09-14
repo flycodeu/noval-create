@@ -270,6 +270,28 @@
   font-weight: 600;
 }
 
+.novel-contracts-page__field-level,
+.novel-contracts-page__field-group > summary,
+.novel-timeline-page__field-group > summary {
+  color: var(--text-secondary, #746b60);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.novel-contracts-page__field-level {
+  margin-bottom: 10px;
+}
+
+.novel-contracts-page__field-group {
+  margin-top: 12px;
+  border-top: 1px solid rgba(128, 128, 128, 0.14);
+}
+
+.novel-contracts-page__field-group > summary {
+  padding: 12px 0;
+  cursor: pointer;
+}
+
 @media (max-width: 768px) {
   .novel-contracts-page__chapter-select {
     min-width: 100%;
