@@ -1,6 +1,17 @@
 ﻿import { preserveStyleApproval } from '../../src/shared/style-source'
 import { desc, eq } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
 import { mergeNarrativePolicySettings } from '../../src/shared/narrative-policy'
+import {
+  appendReaderFeedbackSettings,
+  createReaderFeedbackSourceRef,
+  parseReaderFeedbackSettings,
+  preserveReaderFeedbackSettings,
+  revokeReaderFeedbackSettings,
+  throwReaderFeedbackError,
+  type ReaderFeedbackScope,
+  type ReaderFeedbackSentiment,
+} from '../../src/shared/reader-feedback'
 import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
 import {
   normalizeOperatingMode,
@@ -399,12 +410,15 @@ export function updateNovel(id: number, data: Partial<{
   const lifecycleMode = Object.prototype.hasOwnProperty.call(data, 'status') ? 'manual' : current.lifecycleMode || 'automatic'
 
   const changeReasons = deriveNovelChangeReasons(current, data)
+  const feedbackProtectedSettings = normalizedSettingsJson === undefined
+    ? undefined
+    : preserveReaderFeedbackSettings(current.settingsJson, normalizedSettingsJson)
 
   db.update(novels).set({
     ...dbData,
     lifecycleMode,
-    settingsJson: normalizedSettingsJson === undefined ? undefined : preserveStyleApproval(current.settingsJson,
-      mergeNarrativePolicySettings(current.settingsJson, normalizedSettingsJson)),
+    settingsJson: feedbackProtectedSettings === undefined ? undefined : preserveStyleApproval(current.settingsJson,
+      mergeNarrativePolicySettings(current.settingsJson, feedbackProtectedSettings)),
     worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),
   }).where(eq(novels.id, id)).run()
@@ -423,6 +437,88 @@ export function updateNovel(id: number, data: Partial<{
       payload: data,
     })
   }
+}
+
+export interface SaveNovelReaderFeedbackInput {
+  expectedRevision: number
+  chapterId: number
+  start: number
+  end: number
+  note: string
+  topic: string
+  sentiment: ReaderFeedbackSentiment
+  scope: ReaderFeedbackScope
+}
+
+function getReaderFeedbackNovel(id: number) {
+  const novel = getDb().select().from(novels).where(eq(novels.id, id)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+  return novel
+}
+
+function assertReaderFeedbackScopeBelongsToNovel(
+  novelId: number,
+  chapter: typeof chapters.$inferSelect,
+  scope: ReaderFeedbackScope,
+) {
+  if (scope.type === 'character') {
+    const candidates = getDb().select().from(characters).where(eq(characters.novelId, novelId)).all()
+    const character = scope.characterId !== undefined
+      ? candidates.find((entry) => entry.id === scope.characterId)
+      : candidates.find((entry) => entry.fullName === scope.characterName)
+    if (!character || !scope.characterName || character.fullName !== scope.characterName) {
+      throwReaderFeedbackError('RF_FEEDBACK_CHARACTER_SCOPE_MISMATCH')
+    }
+  }
+  if (scope.type === 'scene') {
+    let plan: unknown = null
+    try { plan = JSON.parse(chapter.scenePlanJson || 'null') } catch { /* Invalid old plans cannot prove scene scope. */ }
+    const exists = Array.isArray(plan) && plan.some((entry) => entry && typeof entry === 'object'
+      && !Array.isArray(entry) && (entry as Record<string, unknown>).scene_order === scope.sceneOrder)
+    if (!exists) throwReaderFeedbackError('RF_FEEDBACK_SCENE_SCOPE_MISMATCH')
+  }
+}
+
+export function getNovelReaderFeedback(novelId: number) {
+  return parseReaderFeedbackSettings(getReaderFeedbackNovel(novelId).settingsJson)
+}
+
+/** Writes feedback into the latest settings JSON so unrelated model and story settings survive. */
+export function saveNovelReaderFeedback(novelId: number, input: SaveNovelReaderFeedbackInput) {
+  const db = getDb()
+  const novel = getReaderFeedbackNovel(novelId)
+  const chapter = db.select().from(chapters).where(eq(chapters.id, input.chapterId)).all()[0]
+  if (!chapter || chapter.novelId !== novelId) throwReaderFeedbackError('RF_FEEDBACK_CHAPTER_SCOPE_MISMATCH')
+  assertReaderFeedbackScopeBelongsToNovel(novelId, chapter, input.scope)
+  const timestamp = new Date().toISOString()
+  const result = appendReaderFeedbackSettings(novel.settingsJson, input.expectedRevision, {
+    id: randomUUID(),
+    novelId,
+    source: createReaderFeedbackSourceRef(chapter.content || '', chapter.id, input.start, input.end),
+    note: input.note,
+    topic: input.topic,
+    sentiment: input.sentiment,
+    scope: input.scope,
+    status: 'approved',
+    version: 1,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+  if (!result.changed) return result
+  db.update(novels).set({ settingsJson: result.settingsJson, updatedAt: timestamp }).where(eq(novels.id, novelId)).run()
+  markNovelContextChanged(novelId, ['Author feedback changed'])
+  return result
+}
+
+export function revokeNovelReaderFeedback(novelId: number, input: { id: string; expectedRevision: number }) {
+  const db = getDb()
+  const novel = getReaderFeedbackNovel(novelId)
+  const timestamp = new Date().toISOString()
+  const result = revokeReaderFeedbackSettings(novel.settingsJson, { ...input, revokedAt: timestamp })
+  if (!result.changed) return result
+  db.update(novels).set({ settingsJson: result.settingsJson, updatedAt: timestamp }).where(eq(novels.id, novelId)).run()
+  markNovelContextChanged(novelId, ['Author feedback revoked'])
+  return result
 }
 
 export function deleteNovel(id: number) {

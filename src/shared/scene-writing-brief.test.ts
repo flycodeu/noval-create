@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSceneWritingBrief, formatSceneWritingBrief } from './scene-writing-brief'
+import { buildSceneWritingBrief, formatAuthorStyleReference, formatSceneWritingBrief } from './scene-writing-brief'
 
 describe('scene writing brief', () => {
   it('RF-09 carries independent wants and calm aftermath as one scene material', () => {
@@ -65,5 +65,25 @@ describe('scene writing brief', () => {
     expect(brief.authorStyle.samples).toEqual([])
     expect(brief.authorStyle.omittedSamples).toBe(1)
     expect(brief.diagnostics.join('\n')).toContain('未截断片段')
+  })
+
+  it('renders selected author feedback even when no style sample is active', () => {
+    const brief = buildSceneWritingBrief(null, {
+      targetWorkSampleGuide: '',
+      humanStyleSampleLock: '',
+      readerFeedback: {
+        settingsRevision: 3,
+        selected: [{
+          id: 'feedback-1', novelId: 1,
+          source: { chapterId: 2, contentHash: 'hash', start: 0, end: 2, excerptHash: 'excerpt' },
+          note: '让她先停顿，再回答。', topic: '对白节奏', sentiment: 'reduce',
+          scope: { type: 'character', characterName: '沈宁' }, status: 'approved', version: 1,
+          createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+        }],
+        states: [{ id: 'feedback-1', state: 'selected' }], conflicts: [], omittedCount: 0, diagnostics: [],
+      },
+    })
+    expect(formatAuthorStyleReference(brief)).toContain('角色 沈宁')
+    expect(brief.sourceKeys).toContain('ReaderFeedback.feedback-1')
   })
 })

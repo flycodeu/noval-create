@@ -1,5 +1,6 @@
 import type { ApprovedStyleSample } from './style-source'
 import type { ThemeVoiceDocument } from './theme-voice'
+import type { ReaderFeedbackItem, ResolvedReaderFeedback } from './reader-feedback'
 import { estimateTokens } from './token-budget'
 import { formatSceneStoryDesign, isSceneStoryDesign, type SceneStoryDesign } from './story-thread-generation'
 
@@ -18,7 +19,11 @@ export interface SceneWritingSceneInput {
   sourceText?: string
 }
 
-export type SceneWritingThemeVoiceInput = Pick<ThemeVoiceDocument, 'targetWorkSampleGuide' | 'humanStyleSampleLock'> & { approvedSample?: ApprovedStyleSample; styleSourceDiagnostics?: string[] }
+export type SceneWritingThemeVoiceInput = Pick<ThemeVoiceDocument, 'targetWorkSampleGuide' | 'humanStyleSampleLock'> & {
+  approvedSample?: ApprovedStyleSample
+  styleSourceDiagnostics?: string[]
+  readerFeedback?: ResolvedReaderFeedback
+}
 
 export interface SceneWritingKnownState {
   chapterNum?: number
@@ -47,6 +52,11 @@ export interface SceneWritingBrief {
     sampleSources: string[]
     omittedSamples: number
     estimatedTokens: number
+  }
+  authorFeedback: {
+    selected: ReaderFeedbackItem[]
+    conflicts: ResolvedReaderFeedback['conflicts']
+    settingsRevision: number
   }
   knownState: {
     chapterNum: number | null
@@ -134,6 +144,14 @@ export function buildSceneWritingBrief(
     sourceText: cleanText(source.sourceText),
   }
   const authorStyle = selectStyleMaterial(themeVoice)
+  const authorFeedback = themeVoice.readerFeedback || {
+    settingsRevision: 0,
+    selected: [],
+    conflicts: [],
+    states: [],
+    omittedCount: 0,
+    diagnostics: [],
+  }
   const knownFacts = cleanList(knownState.knownFacts)
   const sourceKeys = [
     normalizedScene.purpose ? 'ScenePlanStep.purpose' : '',
@@ -147,6 +165,7 @@ export function buildSceneWritingBrief(
     normalizedScene.sourceText ? 'ChapterPipeline.scenePlanText' : '',
     authorStyle.guide ? 'ThemeVoice.targetWorkSampleGuide' : '',
     ...authorStyle.sampleSources,
+    ...authorFeedback.selected.map((item) => `ReaderFeedback.${item.id}`),
   ].filter(Boolean)
   return {
     scene: normalizedScene,
@@ -157,6 +176,11 @@ export function buildSceneWritingBrief(
       omittedSamples: authorStyle.omittedSamples,
       estimatedTokens: authorStyle.estimatedTokens,
     },
+    authorFeedback: {
+      selected: authorFeedback.selected,
+      conflicts: authorFeedback.conflicts,
+      settingsRevision: authorFeedback.settingsRevision,
+    },
     knownState: {
       chapterNum: typeof knownState.chapterNum === 'number' ? knownState.chapterNum : null,
       chapterTitle: cleanText(knownState.chapterTitle),
@@ -165,9 +189,30 @@ export function buildSceneWritingBrief(
     sourceKeys,
     diagnostics: [
       ...authorStyle.diagnostics,
+      ...authorFeedback.diagnostics,
       ...(!normalizedScene.purpose && !normalizedScene.conflict ? [normalizedScene.sourceText ? '历史文本可用，结构字段不可用；不推断缺少目标。' : '未提供结构场景字段；不补造冲突。'] : []),
     ],
   }
+}
+
+function formatFeedbackScope(item: ReaderFeedbackItem): string {
+  switch (item.scope.type) {
+    case 'book': return '全书（作者显式指定）'
+    case 'passage': return `来源章节 ${item.source.chapterId} 的当前段落`
+    case 'scene': return `来源章节 ${item.source.chapterId} / 场景 ${item.scope.sceneOrder}`
+    case 'character': return `角色 ${item.scope.characterName || `#${item.scope.characterId}`}`
+  }
+}
+
+function formatAuthorFeedback(brief: SceneWritingBrief): string[] {
+  if (brief.authorFeedback.selected.length === 0) return []
+  return [
+    `【作者反馈｜版本 ${brief.authorFeedback.settingsRevision}｜仅限标注范围】`,
+    ...brief.authorFeedback.selected.map((item) => `${item.sentiment === 'keep' ? '保留' : '减少'}｜${formatFeedbackScope(item)}｜${item.topic}：${item.note}`),
+    ...(brief.authorFeedback.conflicts.length > 0
+      ? ['存在同范围同主题的相反反馈；两侧均保留，按当前场景语境取舍，不自行改写成永久规则。'] : []),
+    '这些反馈是当前场景的软偏好；不得扩大到未标注角色或全书，也不得改写成“禁止某种写法”。',
+  ]
 }
 
 export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
@@ -196,6 +241,7 @@ export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
     '【场景写作材料】',
     ...sceneLines,
     ...styleLines,
+    ...formatAuthorFeedback(brief),
     knownLines,
     '冲突取舍：已确认状态和场景任务优先；作者样稿控制表达方式，不得改写事实、补造设定或复制样稿内容。',
     '规则：只使用以上显式材料；缺失项留空，不补造人物动机、经历、物件或关系。',
@@ -206,5 +252,6 @@ export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
 export function formatAuthorStyleReference(brief: SceneWritingBrief): string {
   return [brief.authorStyle.guide ? `作者说明（非正文样稿）：${brief.authorStyle.guide}` : '',
     ...brief.authorStyle.samples.map((sample, index) => `作者样稿正文${index + 1}：${sample}`),
+    ...formatAuthorFeedback(brief),
   ].filter(Boolean).join('\n\n')
 }

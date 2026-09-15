@@ -55,6 +55,7 @@ describe('chapter pipeline session factory', () => {
       loadRetrySnapshot: () => JSON.stringify({
         kind: 'chapter_pipeline',
         chapterId: 1,
+        contractVersion: 'chapter:1#ready#scenes:1',
         roles: { planner: { taskId: 77 } },
       }),
       buildRecoveryHint: () => ({
@@ -79,11 +80,13 @@ describe('chapter pipeline session factory', () => {
       modelConfigId: 9,
       initialContent: '第一章旧稿',
       initialContextVersion: 3,
+      initialContractVersion: 'chapter:1#ready#scenes:1',
       resumeSourceTaskId: 88,
     }))
     expect(session.state).toMatchObject({
       expectedContent: '第一章旧稿',
       expectedContextVersion: 3,
+      contractVersion: 'chapter:1#ready#scenes:1',
       hasCommittedContent: false,
     })
     expect(session.retrySnapshot?.roles?.planner?.taskId).toBe(77)

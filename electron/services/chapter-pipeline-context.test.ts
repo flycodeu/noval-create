@@ -15,6 +15,7 @@ import {
   classifyChapterComplexity,
   createChapterStagePrepareInput,
   prepareChapterPipelineStageContexts,
+  restoreContextPackAfterContractValidation,
   resolveChapterReferenceWords,
   resolveContextBudgetForStage,
   summarizeStageArtifactLines,
@@ -187,5 +188,13 @@ describe('chapter pipeline context', () => {
     expect(summarizeStageArtifactText('  a\n b  ', 10)).toBe('a b')
     expect(summarizeStageArtifactLines(['风险 A', '风险 A', '', '风险 B'], 4, 20)).toBe('风险 A 风险 B')
     expect(summarizeStageArtifactText('1234567890', 8)).toBe('12345...')
+  })
+
+  it('recompiles a bootstrap draft pack after Planner validates the contract', () => {
+    const bootstrapPack = { contractVersion: '' } as never
+    const validatedPack = { contractVersion: 'contract-v2' } as never
+
+    expect(restoreContextPackAfterContractValidation(bootstrapPack, 'contract-v2')).toBeUndefined()
+    expect(restoreContextPackAfterContractValidation(validatedPack, 'contract-v2')).toBe(validatedPack)
   })
 })

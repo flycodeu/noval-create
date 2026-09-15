@@ -339,7 +339,13 @@ export function buildStorySettingsPayload(
 
   const payload: Record<string, unknown> = {
     ...legacyRoot,
-    ...(patch.readerFirst ? { readerFirst: patch.readerFirst } : {}),
+    ...(patch.readerFirst ? {
+      readerFirst: {
+        ...(legacyRoot.readerFirst && typeof legacyRoot.readerFirst === 'object' && !Array.isArray(legacyRoot.readerFirst)
+          ? legacyRoot.readerFirst as Record<string, unknown> : {}),
+        ...patch.readerFirst,
+      },
+    } : {}),
     premise: compactObject({
       positioning: premise.positioning,
       core_hook: premise.coreHook,

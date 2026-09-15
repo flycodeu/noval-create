@@ -173,6 +173,7 @@ export async function createChapterPipelineSession(
     ? input.loadRetrySnapshot(input.resumeSourceTaskId)
     : undefined
   const retrySnapshot = parseChapterPipelineSnapshot(retrySnapshotJson)
+  const initialContractVersion = retrySnapshot?.contractVersion || ''
   if (input.resumeSourceTaskId && input.narrativeIdentity) {
     assertNarrativeResumeIdentity(retrySnapshot?.narrativeIdentity, {
       ...input.narrativeIdentity,
@@ -207,7 +208,7 @@ export async function createChapterPipelineSession(
     executionMode: input.executionMode,
     initialContent: chapter.content || '',
     initialContextVersion: input.initialContextVersion,
-    initialContractVersion: '',
+    initialContractVersion,
     revisionBudget: revisionBudgetDerivation.budget,
     initialContextPacks: retrySnapshot?.contextPacks,
     retry: {
@@ -226,7 +227,7 @@ export async function createChapterPipelineSession(
   })
   const state = createChapterPipelineDraftState({
     snapshot: runtime.snapshot,
-    contractVersion: '',
+    contractVersion: initialContractVersion,
     latestReviewNotesJson: chapter.reviewNotesJson || '',
     expectedContent: chapter.content || '',
     expectedContextVersion: input.initialContextVersion,

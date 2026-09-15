@@ -75,6 +75,16 @@ export type {
 export type { GlossaryCategory } from '../shared/glossary'
 export type { SceneTemplateCategory } from '../shared/scene-templates'
 export type {
+  ReaderFeedbackConflict,
+  ReaderFeedbackItem,
+  ReaderFeedbackScope,
+  ReaderFeedbackSentiment,
+  ReaderFeedbackSettings,
+  ReaderFeedbackSourceRef,
+  ReaderFeedbackSourceState,
+  ResolvedReaderFeedback,
+} from '../shared/reader-feedback'
+export type {
   CreativeStage,
   CreativeStageAssetBinding,
   CreativeStageAssetInput,

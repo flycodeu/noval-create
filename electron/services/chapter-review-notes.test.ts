@@ -70,6 +70,7 @@ import {
   applyContractValidationToReviewNotes,
   applyCriticSemanticGateOutcomeToReviewNotes,
   collectSemanticGateHeuristicHints,
+  isShortformStructureOverLimit,
   normalizeReviewNotes,
 } from './chapter-review-notes'
 import {
@@ -307,6 +308,38 @@ describe('applyContractValidationToReviewNotes advisoryOnly 聚合', () => {
     // verdict 与提示文本保留
     expect(notes.contract_validation?.itemResults[0]?.verdict).toBe('missing')
     expect(notes.critical_fixes).toContain('把章节目标写成可核验的动作与结果。')
+  })
+
+  it('软契约未命中只生成 advice，不触发自动重写', () => {
+    const notes = applyContractValidationToReviewNotes(normalizeReviewNotes({}), {
+      status: 'warning',
+      summary: '标题与核心事件关联偏弱',
+      itemResults: [{
+        contractItemType: 'chapter_title_alignment',
+        expected: '标题应贴合本章核心事件',
+        verdict: 'missing',
+        evidenceExcerpt: '',
+        rewriteHint: '让标题与核心事件建立更清晰的关联。',
+      }],
+      rewriteHints: ['让标题与核心事件建立更清晰的关联。'],
+    } as never)
+
+    expect(notes.rewrite_required).toBe(false)
+    expect(notes.issues).toEqual([
+      expect.objectContaining({ ruleId: 'chapter_title_alignment', level: 'advice' }),
+    ])
+  })
+})
+
+describe('isShortformStructureOverLimit', () => {
+  it('允许 ensureStoryStructure 创建的一卷一部与少量场景', () => {
+    expect(isShortformStructureOverLimit({ volumeCount: 1, partCount: 1, scenePlanCount: 3 })).toBe(false)
+  })
+
+  it('卷、部或场景超过短篇上限时返回 true', () => {
+    expect(isShortformStructureOverLimit({ volumeCount: 2, partCount: 1, scenePlanCount: 3 })).toBe(true)
+    expect(isShortformStructureOverLimit({ volumeCount: 1, partCount: 2, scenePlanCount: 3 })).toBe(true)
+    expect(isShortformStructureOverLimit({ volumeCount: 1, partCount: 1, scenePlanCount: 6 })).toBe(true)
   })
 })
 

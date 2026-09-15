@@ -73,6 +73,8 @@
     "check:user-messages": "node scripts/check-user-facing-messages.cjs",
     "audit:interfaces": "node scripts/interface-inventory.cjs --check",
     "audit:reader-first": "node scripts/reader-first-audit.cjs",
+    "test:reader-first-pilot": "electron scripts/reader-first-pilot.test.cjs",
+    "test:reader-first-feedback": "electron scripts/reader-first-feedback.test.cjs",
     "test:reader-first-storage": "electron scripts/reader-first-storage.test.cjs",
     "test:reader-first-policy-storage": "electron scripts/reader-first-policy-storage.test.cjs",
     "audit:complexity": "node scripts/complexity-audit.cjs",

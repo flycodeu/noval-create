@@ -944,7 +944,7 @@ export function applyContractValidationToReviewNotes(
     excerpt: item.evidenceExcerpt,
     source: 'contract-validator',
     detector: 'deterministic' as const,
-    level: advisoryOnly ? 'advice' as const : 'blocker' as const,
+    level: advisoryOnly || !isHardContractValidationItem(item) ? 'advice' as const : 'blocker' as const,
   })), 'contract-validator')
   return applyQualityIssuesToReviewNotes(next, contractIssues)
 }
@@ -1270,6 +1270,14 @@ export function buildTypedRefRiskSummary(novelId: number): {
   }
 }
 
+export function isShortformStructureOverLimit(input: {
+  volumeCount: number
+  partCount: number
+  scenePlanCount: number
+}): boolean {
+  return input.volumeCount > 1 || input.partCount > 1 || input.scenePlanCount >= 6
+}
+
 export function applyProvenanceAndOperatingModeToReviewNotes(
   reviewNotes: ChapterReviewNotes,
   input: {
@@ -1326,6 +1334,7 @@ export function applyProvenanceAndOperatingModeToReviewNotes(
       return 0
     }
   })()
+  const shortformStructureOverLimit = isShortformStructureOverLimit({ volumeCount, partCount, scenePlanCount })
   const sourceGroundingRisks = groundingAssessment.mode !== 'none' && groundingAssessment.coverage !== 'grounded'
     ? [
         groundingAssessment.mode === 'historical_realist'
@@ -1340,7 +1349,7 @@ export function applyProvenanceAndOperatingModeToReviewNotes(
     runtimePolicy.operatingMode === 'million_longform' && checkpointLag > runtimePolicy.checkpointGapWarningThreshold
       ? `百万字模式下 story-memory checkpoint 已落后 ${checkpointLag} 章，超过阈值 ${runtimePolicy.checkpointGapWarningThreshold}。`
       : '',
-    runtimePolicy.operatingMode === 'shortform' && (volumeCount > 1 || partCount > 0 || scenePlanCount >= 6)
+    runtimePolicy.operatingMode === 'shortform' && shortformStructureOverLimit
       ? `短篇模式当前结构深度过高：卷 ${volumeCount} / 部 ${partCount} / 场景 ${scenePlanCount}，已偏离 shortform operatingMode。`
       : '',
   ].filter(Boolean)
@@ -1356,7 +1365,7 @@ export function applyProvenanceAndOperatingModeToReviewNotes(
       runtimePolicy.operatingMode === 'million_longform' && checkpointLag > runtimePolicy.checkpointGapWarningThreshold
         ? '先刷新 story-memory checkpoint，再继续按百万字模式推进。'
         : '',
-      runtimePolicy.operatingMode === 'shortform' && (volumeCount > 1 || partCount > 0 || scenePlanCount >= 6)
+      runtimePolicy.operatingMode === 'shortform' && shortformStructureOverLimit
         ? '收缩卷/部/场景复杂度，或把项目切换到更匹配的 operatingMode。'
         : '',
       ...reviewNotes.critical_fixes,

@@ -82,7 +82,7 @@ export function buildChapterWriterMessages(input: ChapterWriterPromptInput): Mes
   const { context } = input
   const material = buildChapterWriterMaterialReport(input)
   const hasAuthorStyleReference = material.authorStyle.samples.length > 0
-  const sceneWritingBrief = material.authorStyle.guide || hasAuthorStyleReference
+  const sceneWritingBrief = material.authorStyle.guide || hasAuthorStyleReference || material.authorFeedback.selected.length > 0
     ? (context.narrativeIdentity?.policyVersion === 'reader-first-v1' ? formatAuthorStyleReference(material) : formatSceneWritingBrief(material)) : ''
   const scenePlanText = input.scenePlan?.length ? formatScenePlan(input.scenePlan) : input.scenePlanText
   return [{

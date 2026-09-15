@@ -991,6 +991,13 @@ export interface PreparedChapterPipelineStageContexts {
   contextVersion: number
 }
 
+export function restoreContextPackAfterContractValidation(
+  pack: ContextPackV1 | undefined,
+  contractVersion: string,
+): ContextPackV1 | undefined {
+  return pack?.contractVersion === contractVersion ? pack : undefined
+}
+
 export interface ChapterPipelinePromptGuidanceBundle {
   draftWritingGuidance: string
   chapterBridgePlan: ReturnType<typeof buildChapterBridgePlan>
@@ -1165,6 +1172,7 @@ export async function prepareChapterPipelineStageContexts(
     totalBudget: options.totalBudget,
     activePromptOverrideKeys,
   }
+  const preparedContractVersion = buildContractVersionArtifactSummary(options.contractVersion)
   const scenePlanResolution = await resolveStageContextForPipeline(
     'scenePlan',
     chapter,
@@ -1172,10 +1180,15 @@ export async function prepareChapterPipelineStageContexts(
     complexity,
     {
       ...sharedOptions,
+      contractVersion: options.contractVersion,
       upstreamArtifacts: {
-        contractVersionSummary: buildContractVersionArtifactSummary(options.contractVersion),
+        contractVersionSummary: preparedContractVersion,
       },
-      restoredContextPack: options.contextPacks?.scenePlan,
+      // A saved scene-plan pack was compiled before Planner validated the
+      // chapter contract. On a later-stage resume, rebuild this non-executed
+      // planning context from the current contract instead of replaying that
+      // pre-validation bootstrap pack.
+      restoredContextPack: options.contractVersion ? undefined : options.contextPacks?.scenePlan,
     },
   )
   const draftResolution = await resolveStageContextForPipeline(
@@ -1183,7 +1196,14 @@ export async function prepareChapterPipelineStageContexts(
     chapter,
     rawContext,
     complexity,
-    { ...sharedOptions, restoredContextPack: options.contextPacks?.draft },
+    {
+      ...sharedOptions,
+      upstreamArtifacts: { contractVersionSummary: preparedContractVersion },
+      restoredContextPack: restoreContextPackAfterContractValidation(
+        options.contextPacks?.draft,
+        preparedContractVersion,
+      ),
+    },
   )
   // Review and rewrite depend on the actual Writer/Critic artifacts. Resolve
   // them at their stage boundary instead of pre-building stale copies here;

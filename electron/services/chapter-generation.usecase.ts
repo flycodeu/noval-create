@@ -169,6 +169,7 @@ import {
   getActiveChapterPromptOverrideKeys,
   logConstraintInjectionStatus,
   prepareChapterPipelineStageContexts,
+  restoreContextPackAfterContractValidation,
   resolveChapterReferenceWords,
   resolveContextBudgetForStage,
   resolveStageContextForPipeline,
@@ -2863,7 +2864,10 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
         contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
         stepMemorySummary: writerStepMemory.summary,
       },
-      restoredContextPack: retrySourceWorkflowSnapshot?.contextPacks?.draft,
+      restoredContextPack: restoreContextPackAfterContractValidation(
+        retrySourceWorkflowSnapshot?.contextPacks?.draft,
+        buildContractVersionArtifactSummary(state.contractVersion),
+      ),
     },
   )
   const draftContext = finalDraftResolution.context
@@ -3675,6 +3679,12 @@ export async function generateChapterContent(
   sender?: ProgressSink,
   options: ChapterGenerationOptions = {},
 ): Promise<number> {
+  // Empty/imported projects may not have volume/part assignments yet. That
+  // write-side bootstrap is part of the formal generation entry and must
+  // finish before we freeze the request identity, otherwise the same request
+  // changes its own chapter input and is rejected as a stale resume.
+  const chapter = getRequiredChapterGenerationInput(chapterId)
+  ensureStoryStructure(chapter.novelId)
   const narrativeIdentity = resolveChapterNarrativeIdentity(chapterId)
   const requestIdentity = chapterGenerationInputIdentity(narrativeIdentity, options)
   const inFlight = chapterGenerationLocks.get(chapterId)
@@ -3689,9 +3699,9 @@ export async function generateChapterContent(
   }
 
   const db = getDb()
-  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
-  const idempotencyKey = `${buildChapterGenerationIdempotencyKey(chapter, options.stageId, narrativeIdentity)}:${requestIdentity}`
+  const initializedChapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!initializedChapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  const idempotencyKey = `${buildChapterGenerationIdempotencyKey(initializedChapter, options.stageId, narrativeIdentity)}:${requestIdentity}`
   const existing = findExistingChapterGenerationTask(chapterId, idempotencyKey)
   if (existing && !isRetryableChapterGenerationStatus(existing.status)) {
     options.onWorkflowTaskCreated?.(Number(existing.id))
@@ -3916,7 +3926,10 @@ async function generateChapterContentInternal(
           contractVersionSummary: buildContractVersionArtifactSummary(state.contractVersion),
           stepMemorySummary: initialStepMemory.summary,
         },
-        restoredContextPack: session.retrySnapshot?.contextPacks?.scenePlan,
+        restoredContextPack: restoreContextPackAfterContractValidation(
+          session.retrySnapshot?.contextPacks?.scenePlan,
+          buildContractVersionArtifactSummary(state.contractVersion),
+        ),
       },
     )).context
     state.snapshot = {

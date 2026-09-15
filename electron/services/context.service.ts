@@ -1,6 +1,11 @@
 ﻿import type { ApprovedStyleSample } from '../../src/shared/style-source'
 import { asc, eq } from 'drizzle-orm'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
+import {
+  parseReaderFeedbackSettings,
+  resolveReaderFeedbackForContext,
+  type ResolvedReaderFeedback,
+} from '../../src/shared/reader-feedback'
 import { getDb, getSqlite } from '../database/db'
 import { and, desc, gte, inArray, isNull, lte, lt, notInArray, or, sql } from 'drizzle-orm'
 import { chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
@@ -476,6 +481,7 @@ export interface ChapterContext extends ChapterContextParts {
     styleSourceDiagnostics?: string[]
     targetWorkSampleGuide: string
     humanStyleSampleLock: string
+    readerFeedback?: ResolvedReaderFeedback
   }
   contextPack?: ContextPackV1
   visibilityReport?: ContextVisibilityReport
@@ -560,6 +566,7 @@ export interface ChapterContextRawData {
     styleSourceDiagnostics?: string[]
     targetWorkSampleGuide: string
     humanStyleSampleLock: string
+    readerFeedback?: ResolvedReaderFeedback
   }
   contextVisibilityInput?: ContextVisibilityPolicyInput
 }
@@ -3802,6 +3809,42 @@ export async function collectChapterContextRawData(
     mentionValidationFactions,
   })
 
+  const readerFeedbackSettings = parseReaderFeedbackSettings(novel.settingsJson)
+  const feedbackSourceIds = [...new Set(readerFeedbackSettings.items.map((item) => item.source.chapterId))]
+  const feedbackSourceRows = feedbackSourceIds.length > 0
+    ? db.select({ id: chapters.id, content: chapters.content }).from(chapters)
+      .where(and(eq(chapters.novelId, novelId), inArray(chapters.id, feedbackSourceIds))).all()
+    : []
+  const feedbackSourceContents = Object.fromEntries(feedbackSourceRows.map((row) => [String(row.id), row.content || '']))
+  let currentScenePlan: unknown = null
+  try { currentScenePlan = JSON.parse(currentChapter?.scenePlanJson || 'null') } catch { /* Invalid legacy plans have no scoped scenes. */ }
+  const feedbackSceneOrders = Array.isArray(currentScenePlan)
+    ? currentScenePlan.flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      && Number.isSafeInteger((entry as Record<string, unknown>).scene_order)
+      ? [Number((entry as Record<string, unknown>).scene_order)] : [])
+    : []
+  const feedbackSceneCharacterNames = Array.isArray(currentScenePlan)
+    ? currentScenePlan.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const names = (entry as Record<string, unknown>).present_characters
+      return Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string' && Boolean(name.trim())) : []
+    })
+    : []
+  const feedbackTargetCharacterNames = feedbackSceneCharacterNames.length > 0
+    ? [...new Set(feedbackSceneCharacterNames)]
+    : [...mentionedCharacterNames]
+  const feedbackCharacterIds = entityCatalogs.characters
+    .filter((character) => character.fullName && feedbackTargetCharacterNames.includes(character.fullName))
+    .map((character) => character.id)
+  const readerFeedback = resolveReaderFeedbackForContext(readerFeedbackSettings, {
+    novelId,
+    chapterId: currentChapter?.id || 0,
+    sceneOrders: feedbackSceneOrders,
+    characterIds: feedbackCharacterIds,
+    characterNames: feedbackTargetCharacterNames,
+    sourceContentsByChapterId: feedbackSourceContents,
+  })
+
   return {
     novel,
     profile,
@@ -3826,6 +3869,7 @@ export async function collectChapterContextRawData(
       ...resolveAuthorStyleMaterial(novelId),
       targetWorkSampleGuide: parseThemeVoiceDocument(novel.themeVoiceJson).targetWorkSampleGuide,
       humanStyleSampleLock: parseThemeVoiceDocument(novel.themeVoiceJson).humanStyleSampleLock,
+      readerFeedback,
     },
     contextVisibilityInput: currentChapter
       ? loadContextVisibilityPolicyInput(novel.id, currentChapter.id, currentChapter.chapterNum, 'writer', {
