@@ -3,6 +3,7 @@ import { getDb } from '../database/db'
 import { chapterSegments, chapters, sceneContracts } from '../database/schema'
 import type { SceneContractSeed } from './scene-plan-reconciliation'
 import { asText, toStringArray } from './chapter-review-notes'
+import { isSceneStoryDesign, formatSceneStoryDesign, type SceneStoryDesign } from '../../src/shared/story-thread-generation'
 
 function parseStoredStringArray(raw?: string | null): string[] {
   if (!raw?.trim()) return []
@@ -14,6 +15,7 @@ function parseStoredStringArray(raw?: string | null): string[] {
 }
 
 export interface ScenePlanStep {
+  story_design?: SceneStoryDesign
   scene_order: number
   scene_title: string
   purpose: string
@@ -38,6 +40,7 @@ export interface ScenePlanStep {
 }
 
 const SCENE_PLAN_ALLOWED_KEYS = new Set([
+  'story_design',
   'scene_order',
   'scene_title',
   'purpose',
@@ -118,6 +121,9 @@ export function validateScenePlanModelOutput(raw: unknown): { valid: boolean; is
     }
 
     const record = item as Record<string, unknown>
+    if ('story_design' in record && !isSceneStoryDesign(record.story_design)) {
+      return { valid: false, issue: `第 ${index + 1} 个场景的 story_design 未通过嵌套字段校验` }
+    }
     const unknownKey = Object.keys(record).find((key) => !SCENE_PLAN_ALLOWED_KEYS.has(key))
     if (unknownKey) {
       return { valid: false, issue: `第 ${index + 1} 个场景包含未声明字段“${unknownKey}”` }
@@ -175,6 +181,7 @@ export function normalizeScenePlan(raw: unknown, fallback: ScenePlanStep[]): Sce
       if (!purpose && !beat && !title) return null
 
       return {
+        ...(isSceneStoryDesign(record.story_design) ? { story_design: structuredClone(record.story_design) } : {}),
         scene_order: typeof record.scene_order === 'number' ? Math.round(record.scene_order) : index + 1,
         scene_title: title || `场景 ${index + 1}`,
         purpose,
@@ -411,6 +418,7 @@ export function formatScenePlan(scenePlan: ScenePlanStep[]): string {
   return scenePlan
     .map((step) => {
       const parts = [
+        formatSceneStoryDesign(step.story_design),
         `目标=${step.purpose}`,
         step.location ? `地点=${step.location}` : '',
         step.time_anchor ? `时间=${step.time_anchor}` : '',

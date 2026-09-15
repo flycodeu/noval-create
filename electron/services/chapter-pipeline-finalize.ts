@@ -9,7 +9,7 @@ import { scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.servi
 import { generateChapterEmbeddings } from './embedding.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import type { ChapterPipelineRuntimeBindings } from './chapter-pipeline-runtime'
-import { prepareChapterWritebackRunWithRetry } from './chapter-writeback.service'
+import { isChapterWritebackRunCurrent, prepareChapterWritebackRunWithRetry, refreshFinalizedChapterCanonRun } from './chapter-writeback.service'
 import { updateTaskStatus } from './task.service'
 
 export type ChapterCanonRun = Awaited<ReturnType<typeof prepareChapterWritebackRunWithRetry>>
@@ -43,7 +43,7 @@ export async function loadOrPrepareChapterCanonRun(input: {
     .where(eq(chapterWritebackRuns.chapterId, input.chapterId))
     .orderBy(desc(chapterWritebackRuns.id))
     .all()
-    .find((run) => ['draft', 'ready', 'applying', 'applied'].includes(run.status || ''))
+    .find((run) => ['ready', 'applied'].includes(run.status || '') && isChapterWritebackRunCurrent(run))
   if (!reusableCanonRun) {
     throw new ChapterPipelineStageError('canon_pending', '没有可复用的 Canon 快照，无法从 Finalize 节点重试。', {
       blocked: true,
@@ -150,12 +150,13 @@ export async function runChapterCanonizerAndFinalize(input: {
       contractVersion: input.contractVersion,
     })
   }
-  const { canonRun, reused } = await loadOrPrepareChapterCanonRun({
+  let { canonRun } = await loadOrPrepareChapterCanonRun({
     chapterId: input.chapterId,
     prepare: input.prepareCanon,
   })
+  const reused = !input.prepareCanon
   if (!reused && typeof canonizerTaskId === 'number') {
-    if (canonRun.status === 'failed') {
+    if (!['ready', 'applied'].includes(canonRun.status)) {
       updateTaskStatus(canonizerTaskId, 'failed', input.sender, {
         pipelineStage: 'failed',
         contractVersion: input.contractVersion,
@@ -186,6 +187,9 @@ export async function runChapterCanonizerAndFinalize(input: {
     canonRunId: canonRun.id,
   })
   const result = await input.finalizeContent()
+  // The final node records the refreshed run ID; the earlier Canonizer
+  // snapshot remains an immutable record of its original candidate.
+  canonRun = await refreshFinalizedChapterCanonRun(canonRun.id)
   const finalizeDetail = buildChapterFinalizeDetail({
     publishSummary: input.publishSummary,
     nextChapterSeed: result.nextChapterSeed,

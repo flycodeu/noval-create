@@ -913,10 +913,10 @@ describe('allocateChapterContext', () => {
     expect(feed.previousChapterContext).toContain('副手压着伤口')
     expect(feed.previousChapterContext).not.toContain('下章引子')
     expect(feed.previousChapterContext).not.toContain('衔接提示')
-    expect(feed.lastChapterEnding).toContain('地下层的灯忽然亮了')
+    expect(feed.lastChapterEnding).toBe('')
   })
 
-  it('samples a long previous chapter into structured prior segments', () => {
+  it('keeps a long previous chapter as a complete candidate before visibility and budget selection', () => {
     vi.mocked(getDb).mockReturnValue(createMockSelectDb([
       [{
         id: 3,
@@ -961,12 +961,11 @@ describe('allocateChapterContext', () => {
     const feed = buildPreviousChapterContextFeed(previousChapter)
     const segmentTypes = feed.previousChapterSampleReport.segments.map((segment) => segment.type)
 
-    expect(feed.previousChapterSampleReport.fullyInjected).toBe(false)
-    expect(feed.previousChapterSampleReport.coverageRate).toBeGreaterThan(0)
-    expect(feed.previousChapterSampleReport.coverageRate).toBeLessThan(100)
-    expect(segmentTypes).toContain('tail')
-    expect(segmentTypes).toContain('continuity')
-    expect(feed.previousChapterContext).toContain('Canon / 状态回写')
+    expect(feed.previousChapterSampleReport.fullyInjected).toBe(true)
+    expect(feed.previousChapterSampleReport.coverageRate).toBe(100)
+    expect(segmentTypes).toEqual(['full_text'])
+    expect(feed.previousChapterContext).toContain('仓库里的灯泡一闪一闪。'.repeat(180))
+    expect(feed.previousChapterContext).not.toContain('必须在天亮前改道')
   })
 
   it('measures sampled chars and coverage only from source-derived text windows', () => {
@@ -985,19 +984,19 @@ describe('allocateChapterContext', () => {
 
     const feed = buildPreviousChapterContextFeed(previousChapter)
     const sourceSegments = feed.previousChapterSampleReport.segments
-      .filter((segment) => ['opening', 'middle', 'tail'].includes(segment.type))
+      .filter((segment) => ['full_text'].includes(segment.type))
     const sourceSampledChars = sourceSegments.reduce((sum, segment) => sum + segment.chars, 0)
 
-    expect(feed.previousChapterSampleReport.segments.map((segment) => segment.type)).toContain('middle')
+    expect(feed.previousChapterSampleReport.segments.map((segment) => segment.type)).toContain('full_text')
     expect(feed.previousChapterSampleReport.sampledChars).toBe(sourceSampledChars)
-    expect(feed.previousChapterSampleReport.sampledChars).toBe(740)
-    expect(feed.previousChapterSampleReport.coverageRate).toBe(61.7)
+    expect(feed.previousChapterSampleReport.sampledChars).toBe(1200)
+    expect(feed.previousChapterSampleReport.coverageRate).toBe(100)
     expect(
       feed.previousChapterContext.length + feed.lastChapterEnding.length,
     ).toBeGreaterThan(feed.previousChapterSampleReport.sampledChars)
   })
 
-  it('keeps the previous chapter ending in one dedicated prompt field', () => {
+  it('keeps the ending once in original prose and excludes unexecuted seeds', () => {
     vi.mocked(getDb).mockReturnValue(createMockSelectDb([[], []]) as never)
 
     const previousChapter = {
@@ -1012,8 +1011,9 @@ describe('allocateChapterContext', () => {
     } as never
 
     const feed = buildPreviousChapterContextFeed(previousChapter)
-    expect(feed.lastChapterEnding).toContain('结尾证据')
-    expect(feed.lastChapterEnding).toContain('下一章必须先核对这份证据')
+    expect(feed.lastChapterEnding).toBe('')
+    expect(feed.previousChapterContext).toContain('结尾证据')
+    expect(feed.previousChapterContext).not.toContain('下一章必须先核对这份证据')
     expect(feed.previousChapterContext).not.toContain('上章结尾原文')
     expect(feed.previousChapterContext).not.toContain('下章引子')
   })

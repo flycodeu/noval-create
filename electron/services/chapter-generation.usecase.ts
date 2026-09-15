@@ -58,6 +58,7 @@ import {
 } from '../../src/shared/chapter-optimization-quality'
 import {
   markChapterContextCurrent,
+  markChapterContentChanged,
   markSubsequentChaptersStale,
   getChapterContractBlockers,
   runChapterPublishCheck,
@@ -199,6 +200,7 @@ import {
   createRewriterStreamAttemptRunner,
   processChapterRewriteOutcome,
   selectCompatibleRevisionPatchEvidence,
+  resolveRewriterCandidateAttemptKey,
   RepairSemanticEvaluator,
   runRewriterQualityPipeline,
   runRewriteRiskRecheck,
@@ -807,6 +809,20 @@ function persistArcProgressWarnings(chapterId: number, warnings: string[]): void
   }).where(eq(chapters.id, chapterId)).run()
 }
 
+function persistCurrentChapterDerivatives(chapter: typeof chapters.$inferSelect, novelContextVersion: number, work: () => void): void {
+  const sqlite = getSqlite()
+  const transaction = sqlite.transaction(() => {
+    const current = getDb().select().from(chapters).where(eq(chapters.id, chapter.id)).all()[0]
+    const novel = getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+    if (!current || current.content !== chapter.content || (novel?.contextVersion || 1) !== novelContextVersion) {
+      throwUserFacingError('chapter.pipelineContentConflict')
+    }
+    work()
+  })
+  if (sqlite.inTransaction) transaction()
+  else transaction.immediate()
+}
+
 async function updateChapterContinuityState(
   chapterId: number,
   summaryData: ChapterSummaryData,
@@ -875,9 +891,10 @@ async function updateChapterContinuityState(
     nextState = fallback
   }
 
-  db.update(chapters).set({
-    continuityStateJson: serializeContinuityState(nextState),
-    updatedAt: new Date().toISOString(),
+  persistCurrentChapterDerivatives(chapter, novel.contextVersion || 1, () => {
+    db.update(chapters).set({
+      continuityStateJson: serializeContinuityState(nextState),
+      updatedAt: new Date().toISOString(),
   }).where(eq(chapters.id, chapterId)).run()
 
   if (arc) {
@@ -889,6 +906,8 @@ async function updateChapterContinuityState(
     }).where(eq(storyArcs.id, arc.id)).run()
     persistArcProgressWarnings(chapterId, progressState.warnings)
   }
+
+  })
 
   return nextState
 }
@@ -942,11 +961,14 @@ async function updateChapterSummaryData(chapterId: number): Promise<ChapterSumma
     summaryData.summary = chapter.content.slice(0, 180)
   }
 
-  db.update(chapters).set({
-    summary: summaryData.summary,
-    nextChapterSeed: summaryData.nextChapterSeed,
-    updatedAt: new Date().toISOString(),
+  persistCurrentChapterDerivatives(chapter, novel?.contextVersion || 1, () => {
+    db.update(chapters).set({
+      summary: summaryData.summary,
+      nextChapterSeed: summaryData.nextChapterSeed,
+      updatedAt: new Date().toISOString(),
   }).where(eq(chapters.id, chapterId)).run()
+
+  })
 
   return summaryData
 }
@@ -960,18 +982,22 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFound')
+  const novelContextVersion = getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]?.contextVersion || 1
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
   const summaryHealth = await refreshSummaryHealthSemantic(chapterId)
-  refreshCharacterStateVersionsForChapter(chapterId)
-  syncCharacterArcsFromChapterState(chapterId)
-  refreshWorldStateVersionsForChapter(chapterId)
-  refreshStoryMemoryCheckpointsIfNeeded(chapter.novelId, {
-    refreshMode: 'schedule_only',
-    reason: `chapter ${chapter.chapterNum} derived state refreshed`,
-    trigger: 'chapter_memory_refresh',
+  let contextVersion = novelContextVersion
+  persistCurrentChapterDerivatives(chapter, novelContextVersion, () => {
+    refreshCharacterStateVersionsForChapter(chapterId)
+    syncCharacterArcsFromChapterState(chapterId)
+    refreshWorldStateVersionsForChapter(chapterId)
+    refreshStoryMemoryCheckpointsIfNeeded(chapter.novelId, {
+      refreshMode: 'schedule_only',
+      reason: `chapter ${chapter.chapterNum} derived state refreshed`,
+      trigger: 'chapter_memory_refresh',
   })
-  const contextVersion = markChapterContextCurrent(chapterId)
+  contextVersion = markChapterContextCurrent(chapterId)
+  })
   return { summary, continuity, summaryHealth, contextVersion }
 }
 
@@ -1142,17 +1168,20 @@ export function sanitizeChapterUpdatePayload(data: unknown): Record<string, unkn
 }
 
 /** IPC/Web 只允许选择编辑器版本来源，不能传入内部事务和失效跟踪开关。 */
-export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 'manual-save' | 'ai-rewrite' } {
+export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 'manual-save' | 'ai-rewrite'; expectedContent?: string } {
   if (value === undefined || value === null) return {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throwUserFacingError('ipc.invalidObject', { name: 'options' })
   }
   const source = (value as Record<string, unknown>).versionSource
-  if (source === undefined) return {}
-  if (source !== 'manual-save' && source !== 'ai-rewrite') {
+  const expectedContent = (value as Record<string, unknown>).expectedContent
+  if (expectedContent !== undefined && typeof expectedContent !== 'string') {
+    throwUserFacingError('ipc.invalidObject', { name: 'options.expectedContent' })
+  }
+  if (source !== undefined && source !== 'manual-save' && source !== 'ai-rewrite') {
     throwUserFacingError('ipc.invalidObject', { name: 'options.versionSource' })
   }
-  return { versionSource: source }
+  return { ...(source ? { versionSource: source } : {}), ...(typeof expectedContent === 'string' ? { expectedContent } : {}) }
 }
 
 const CHAPTER_GENERATION_CONSTRAINT_LABELS = [
@@ -1465,12 +1494,26 @@ export function updateChapter(id: number, data: Partial<{
   hookContinuityJson: string
   writebackStatusJson: string
 }>, options: {
+  expectedContent?: string
   skipStaleTracking?: boolean
   versionSource?: ChapterVersionSource | false
   allowChapterNumberChange?: boolean
   /** Internal pipeline writes must still use content CAS before setting this. */
   allowDuringGeneration?: boolean
-} = {}) {
+} = {}): void {
+  if (!getSqlite().inTransaction) {
+    getSqlite().transaction(() => updateChapter(id, data, options)).immediate()
+    return
+  }
+  if (options.expectedContent !== undefined) {
+    getSqlite().transaction(() => {
+      const current = getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(id) as { content: string | null } | undefined
+      if (!current) throwUserFacingError('chapter.notFound')
+      if ((current.content || '') !== options.expectedContent) throwUserFacingError('chapter.pipelineContentConflict')
+      updateChapter(id, data, { ...options, expectedContent: undefined })
+    }).immediate()
+    return
+  }
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
   if (!previous) throwUserFacingError('chapter.notFound')
@@ -1586,11 +1629,7 @@ export function updateChapter(id: number, data: Partial<{
   }
 
   if (!options.skipStaleTracking && previous && contentChanged) {
-    markSubsequentChaptersStale(
-      previous.novelId,
-      previous.chapterNum,
-      `第${previous.chapterNum}章内容已更新`,
-    )
+    markChapterContentChanged(previous.novelId, previous.chapterNum)
   }
 }
 
@@ -3174,7 +3213,7 @@ async function prepareGeneratedChapterRewriteRuntime(input: GeneratedChapterRewr
     revisionBudget,
     resolveAttemptKey: (attemptNumber) => attemptNumber === 5
       ? 'rewriter:publish-gate:1'
-      : `rewriter:candidate:${attemptNumber}`,
+      : resolveRewriterCandidateAttemptKey(reviewPrioritySummary, attemptNumber),
     buildMessages: (attemptNumber, rejectedDigests, draftContentOverride) => rewriterMessageBuilder(
       attemptNumber,
       rejectedDigests,
@@ -4304,10 +4343,10 @@ export async function getChapterContextPreview(
     contextAssemblyReport,
     authorStyleLock,
     generationExplainability,
-    previousChapterContext: rawContext.contextParts.previousChapterContext,
+    previousChapterContext: contexts.draft.previousChapterContext,
     chapterBridgePlan: contexts.draft.chapterBridgePlan,
     stepMemorySummary: contexts.draft.stepMemorySummary,
-    previousChapterSampleReport: rawContext.previousChapterSampleReport,
+    previousChapterSampleReport: contexts.draft.previousChapterSampleReport,
     recalledMemory: contexts.draft.recalledMemory,
     recallSnapshot: contexts.draft.recallSnapshot,
     recallDiagnostics: contexts.draft.recallDiagnostics,
@@ -4389,7 +4428,8 @@ export async function optimizeChapterContent(
   })
 
   const supportingCastNames = collectSupportingCastNames(chapter.novelId)
-  const structuralGateOptions = { supportingRoleNames: supportingCastNames }
+  const structuralGateOptions = { supportingRoleNames: supportingCastNames,
+    ...(repairMode === 'language' ? { goldenChapterNums: [] } : {}) }
 
   let optimizationTaskId: number | undefined
   let optimizationPasses = 1
@@ -4422,7 +4462,7 @@ export async function optimizeChapterContent(
   if (!optimizedContent) throwUserFacingError('writing.rewriteNoResult')
   let factGuard = buildChapterOptimizationFactGuard(chapter.novelId, originalContent, optimizedContent, {
     allowEndingHookChange: repairMode === 'structural',
-    structuralRepair: repairMode === 'structural',
+    structuralRepair: true,
   })
   let qualityGate = buildChapterOptimizationQualityGate(originalContent, optimizedContent, genreName, trackedEntityNames)
   let structuralGate = buildChapterStructuralRepairGate(originalContent, optimizedContent, chapter.chapterNum, structuralGateOptions)
@@ -4431,7 +4471,8 @@ export async function optimizeChapterContent(
   // let the online flow repair the exact fact/quality failure before surfacing a
   // result. The UI still blocks applying every unsafe result.
   const originalNumbers = extractNarrativeNumbers(originalContent).slice(0, 80)
-  while ((!factGuard.safeToApply || !qualityGate.safeToApply || !structuralGate.safeToApply) && optimizationPasses < MAX_CHAPTER_OPTIMIZATION_PASSES) {
+  while ((repairMode === 'language' ? !factGuard.safeToApply : (!factGuard.safeToApply || !qualityGate.safeToApply || !structuralGate.safeToApply))
+    && optimizationPasses < (repairMode === 'language' ? 2 : MAX_CHAPTER_OPTIMIZATION_PASSES)) {
     const gateFeedback = dedupeTextList([...factGuard.warnings, ...qualityGate.warnings, ...structuralGate.warnings])
     const targetedQualityFixes = [
       qualityGate.optimizedGuardrailHits.includes('not_but_definition_pattern')
@@ -4473,7 +4514,7 @@ export async function optimizeChapterContent(
 
       const retryFactGuard = buildChapterOptimizationFactGuard(chapter.novelId, originalContent, retryContent, {
         allowEndingHookChange: repairMode === 'structural',
-        structuralRepair: repairMode === 'structural',
+        structuralRepair: true,
       })
       const retryQualityGate = buildChapterOptimizationQualityGate(originalContent, retryContent, genreName, trackedEntityNames)
       const retryStructuralGate = buildChapterStructuralRepairGate(originalContent, retryContent, chapter.chapterNum, structuralGateOptions)

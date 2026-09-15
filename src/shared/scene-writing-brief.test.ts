@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { buildSceneWritingBrief, formatSceneWritingBrief } from './scene-writing-brief'
 
 describe('scene writing brief', () => {
+  it('RF-09 carries independent wants and calm aftermath as one scene material', () => {
+    const brief = buildSceneWritingBrief({ purpose: '照护安排后的相处', story_design: {
+      choices: [{ character: '周宁', wants: '陪母亲又不耽误交班', options: ['吃饭后回店'], stake: '同事也要回家' }],
+      result: '安静吃完饭', aftermath: '母亲送她出门',
+    } }, { targetWorkSampleGuide: '', humanStyleSampleLock: '' })
+    const text = formatSceneWritingBrief(brief)
+    expect(text.split('同事也要回家')).toHaveLength(2)
+    expect(text).toContain('后续余波：母亲送她出门')
+    expect(brief.diagnostics).toEqual([])
+  })
   it('projects explicit scene design fields without inventing facts', () => {
     const brief = buildSceneWritingBrief({
       scene_order: 2,

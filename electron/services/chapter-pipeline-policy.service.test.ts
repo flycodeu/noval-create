@@ -16,6 +16,21 @@ import {
 } from './chapter-pipeline-policy.service'
 import type { QualityIssueV1 } from '../../src/shared/quality-issue'
 
+it('RF-08 accepts a verified tiny edit despite high severity and 0.99 similarity; unverified changes remain candidates', () => {
+  vi.mocked(computeCandidateSimilarity).mockReturnValue(0.99)
+  const notes = createReviewNotes({ severity: 'high' })
+  const summary = buildReviewPrioritySummary(notes, '她收好钥匙。')
+  const options = { originalContent: '她收好钥匙。', rewrittenContent: '他收好钥匙。',
+    reviewPrioritySummary: summary, reviewNotes: notes }
+  expect(buildRewriteMiniReviewVerdict(options).needsHumanReview).toBe(true)
+  expect(buildRewriteMiniReviewVerdict({ ...options, boundedRevision: {
+    targetsAddressed: true, factsPreserved: true, requiresAuthorReview: false,
+  } })).toMatchObject({ improved: true, needsHumanReview: false, similarityToOriginal: 0.99 })
+  expect(buildRewriteMiniReviewVerdict({ ...options, boundedRevision: {
+    targetsAddressed: true, factsPreserved: false, requiresAuthorReview: false,
+  } }).needsHumanReview).toBe(true)
+})
+
 function createReviewNotes(overrides: Partial<Parameters<typeof buildReviewPrioritySummary>[0]> = {}) {
   return {
     critical_fixes: [],

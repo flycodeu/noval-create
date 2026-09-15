@@ -19,6 +19,12 @@ export interface RevisionPatchLockedRange {
   end: number
 }
 
+export interface RevisionPatchEvidence extends RevisionPatchLockedRange {
+  issueId: string
+  artifactHash: string
+  quote: string
+}
+
 export type RevisionPatchErrorCode =
   | 'NF_PATCH_INVALID'
   | 'NF_PATCH_BASE_MISMATCH'
@@ -26,6 +32,7 @@ export type RevisionPatchErrorCode =
   | 'NF_PATCH_EXPECTED'
   | 'NF_PATCH_OVERLAP'
   | 'NF_PATCH_LOCKED'
+  | 'NF_PATCH_EVIDENCE'
 
 export class RevisionPatchValidationError extends Error {
   readonly code: RevisionPatchErrorCode
@@ -46,6 +53,12 @@ export function buildRevisionPatchArtifactHash(content: string): string {
 
 function isInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value)
+}
+
+function splitsSurrogatePair(content: string, offset: number): boolean {
+  const before = content.charCodeAt(offset - 1)
+  const after = content.charCodeAt(offset)
+  return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff
 }
 
 function fail(
@@ -108,7 +121,8 @@ export function validateRevisionPatch(
       fail('NF_PATCH_INVALID', `第 ${index + 1} 条补丁不是对象。`, index)
     }
     if (!isInteger(entry.start) || !isInteger(entry.end)
-      || entry.start < 0 || entry.end < entry.start || entry.end > content.length) {
+      || entry.start < 0 || entry.end < entry.start || entry.end > content.length
+      || splitsSurrogatePair(content, entry.start) || splitsSurrogatePair(content, entry.end)) {
       fail('NF_PATCH_RANGE', `第 ${index + 1} 条补丁范围越界。`, index)
     }
     if (typeof entry.expectedText !== 'string' || typeof entry.replacement !== 'string') {
@@ -146,6 +160,36 @@ export function validateRevisionPatch(
     }
   })
   return sorted
+}
+
+/** Bind automatic edits to this review's current evidence, never just a model-supplied id. */
+export function validateRevisionPatchEvidence(
+  content: string,
+  patch: RevisionPatch,
+  evidence: readonly RevisionPatchEvidence[],
+): void {
+  const entries = validateRevisionPatch(content, patch)
+  const current = evidence.filter((item) => item.artifactHash === patch.baseArtifactHash
+    && isInteger(item.start) && isInteger(item.end) && item.start >= 0 && item.end > item.start
+    && item.end <= content.length && content.slice(item.start, item.end) === item.quote)
+  if (!current.length || current.length !== evidence.length) fail('NF_PATCH_EVIDENCE', '缺少本轮有效问题证据。')
+  for (const entry of entries) {
+    if (!entry.expectedText || entry.replacement.includes(entry.expectedText)
+      || entry.issueIds.some((id) => !current.some((item) => item.issueId === id
+        && entry.start >= item.start && entry.end <= item.end))) {
+      fail('NF_PATCH_EVIDENCE', '补丁未修改目标问题或超出其证据范围。')
+    }
+  }
+  if (current.some((item) => !entries.some((entry) => entry.issueIds.includes(item.issueId)))) {
+    fail('NF_PATCH_EVIDENCE', '本轮目标问题未全部处理。')
+  }
+}
+
+/** Scope is a routing diagnostic, never a minimum amount of rewriting. */
+export function revisionPatchNeedsAuthorReview(content: string, patch: RevisionPatch): boolean {
+  const entries = validateRevisionPatch(content, patch)
+  const touched = entries.reduce((sum, entry) => sum + Math.max(entry.end - entry.start, entry.replacement.length), 0)
+  return touched > content.length * 0.25
 }
 
 /** Apply a validated batch in reverse order so all offsets remain original UTF-16 offsets. */

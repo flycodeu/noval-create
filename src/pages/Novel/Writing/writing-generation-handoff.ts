@@ -50,7 +50,11 @@ export function buildGenerationHandoffViewModel(input: {
       detail: preview?.chapterNum === 1
         ? '首章不需要上一章承接。'
         : preview?.previousChapterContext.trim()
-          ? '已加载上一章关键先验。'
+          ? preview.previousChapterSampleReport?.sources
+            ? preview.previousChapterSampleReport.fullyInjected
+              ? '已加载上一章完整原文；发送前会再次核对预算。'
+              : '已加载视角允许的相关原文；省略内容可在上下文视图查看。'
+            : '已加载上一章关键先验。'
           : '尚未加载上一章关键先验。',
     },
     {

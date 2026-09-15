@@ -2,6 +2,8 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, characters, sceneContracts, storyFacts } from '../database/schema'
 import type { ContextPackSource } from '../../src/shared/context-pack'
+import { stableHash } from '../../src/shared/context-pack'
+import { estimateTokens } from './context-token-budget'
 import type { ChapterContext, ChapterContextParts, ChapterContextPromptProfile, ChapterContextRawData } from './context.service'
 import {
   isFactKnownByCharacter,
@@ -313,6 +315,45 @@ function findMentionedFacts(text: string, facts: ContextVisibilityFact[]): Conte
   return facts.filter((fact) => factNeedles(fact).some((needle) => text.includes(needle)))
 }
 
+/** Project complete original paragraphs before selection. No generated plan is treated as prose. */
+export function projectPreviousChapterSources(
+  chapter: { id: number; chapterNum: number; content?: string | null },
+  policy: ContextVisibilityPolicy | undefined,
+  dependencyText: string,
+  dependencyTerms: string[] = [],
+): ContextPackSource[] {
+  const original = chapter.content || ''
+  const paragraphs = [...original.matchAll(/[^\r\n]+/g)].filter((match) => match[0].trim())
+  const dependencyPhrases = new Set(dependencyText.match(/[\p{L}\p{N}]{4,}/gu)?.flatMap((phrase) => (
+    Array.from({ length: phrase.length - 3 }, (_, index) => phrase.slice(index, index + 4))
+  )) || [])
+  const artifactHash = stableHash(original)
+  dependencyTerms.map((term) => term.trim()).filter((term) => term.length >= 2).forEach((term) => dependencyPhrases.add(term))
+  return paragraphs.map((match, index) => {
+    const text = match[0].trim()
+    const start = match.index! + match[0].indexOf(text)
+    const denied = policy ? findMentionedFacts(text, policy.deniedFacts) : []
+    const known = policy ? findMentionedFacts(text, policy.allowedFacts) : []
+    const unclassified = Boolean(policy && policy.purpose !== 'review' && policy.deniedFacts.length > 0 && !known.length && !denied.length)
+    const future = Boolean(policy && chapter.chapterNum >= policy.chapterNum)
+    const included = !future && !denied.length && !unclassified
+    const depends = [...dependencyPhrases].some((phrase) => text.includes(phrase))
+    const required = depends || index === paragraphs.length - 1
+    return {
+      key: `chapter:${chapter.id}:original:${start}`,
+      sourceKind: 'previous_chapter_original', sourceId: String(chapter.id), sourceVersion: artifactHash, artifactHash,
+      start, end: start + text.length, visibility: 'canon',
+      text: included ? text : `[redacted chapter:${chapter.id}:${start}]`,
+      required: depends || (required && included),
+      included,
+      reason: future ? 'future_chapter' : denied.length ? 'pov_forbidden_fact' : unclassified ? 'unclassified_visibility' : depends ? 'scene_dependency' : required ? 'continuation_ending' : 'original_candidate',
+      projectionKind: required ? 'required_evidence' : 'scene_excerpt',
+      knowledgeLayer: policy?.purpose === 'review' ? 'reader_known' : included ? 'pov_experience' : 'unclassified',
+      estimatedTokens: included ? estimateTokens(text) : 0,
+    }
+  })
+}
+
 function buildRecallVisibilitySourceKey(
   source: ChapterContext['recalledMemorySources'][number],
   index: number,
@@ -345,10 +386,14 @@ function toPackSource(
   }
 }
 
-export function filterChapterContextByVisibility(
-  context: ChapterContext,
+type VisibilityContext = ChapterContextParts & Pick<ChapterContext,
+  'hardConstraintContext' | 'hardConstraintSummary' | 'hardConstraintEntries' | 'recalledMemorySources'
+  | 'authorStyleMaterials' | 'previousChapterSampleReport' | 'visibilityReport'>
+
+export function filterChapterContextByVisibility<T extends VisibilityContext>(
+  context: T,
   policy: ContextVisibilityPolicy,
-): ChapterContext {
+): T {
   if (policy.purpose === 'review') {
     return {
       ...context,
@@ -372,6 +417,8 @@ export function filterChapterContextByVisibility(
   const requiredMissingFactIds = new Set<number>()
 
   ;(Object.keys(FIELD_CHANNELS) as Array<keyof ChapterContextParts>).forEach((field) => {
+    // These paragraphs already passed this exact policy before allocation.
+    if ((field === 'previousChapterContext' || field === 'lastChapterEnding') && context.previousChapterSampleReport.sources) return
     const text = next[field]
     if (typeof text !== 'string' || !text.trim()) return
     const channel = FIELD_CHANNELS[field] || 'writer_override'
@@ -446,6 +493,13 @@ export function filterChapterContextByVisibility(
       })
     })
     next.authorStyleMaterials = authorStyleMaterials
+    const sample = authorStyleMaterials.approvedSample
+    const deniedSampleFacts = findMentionedFacts(sample?.text || '', policy.deniedFacts)
+    if (deniedSampleFacts.length > 0) {
+      delete authorStyleMaterials.approvedSample
+      decisions.push({ sourceKey: 'authorStyle:approvedSample', channel: 'writer_override', included: false,
+        reason: 'pov_forbidden_fact', factIds: deniedSampleFacts.map((fact) => fact.fact.id) })
+    }
   }
 
   const keptHardEntries = context.hardConstraintEntries.filter((entry) => {
@@ -520,11 +574,11 @@ export function resolveContextReadPurpose(profile: ChapterContextPromptProfile):
   return 'writer'
 }
 
-export function applyContextVisibility(
+export function applyContextVisibility<T extends VisibilityContext>(
   rawData: ChapterContextRawData,
-  context: ChapterContext,
+  context: T,
   profile: ChapterContextPromptProfile,
-): ChapterContext {
+): T {
   const chapter = rawData.currentChapter
   if (!chapter?.id || !chapter.chapterNum || !rawData.contextVisibilityInput) return context
   const purpose = resolveContextReadPurpose(profile)

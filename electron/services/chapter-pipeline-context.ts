@@ -13,6 +13,10 @@ import type {
 import type { ThemeVoiceDocument } from '../../src/shared/theme-voice'
 import type { Message } from '../adapters/base.adapter'
 import type { RequestBudgetReport } from './request-budget'
+import { estimateRequestBudget } from './request-budget'
+import { stableHash } from '../../src/shared/context-pack'
+import { buildSceneWritingBrief } from '../../src/shared/scene-writing-brief'
+import { reconcilePreviousChapterSampleReport } from './context.service'
 import { estimateTokens } from '../../src/shared/token-budget'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, glossary, novels, storyArcs } from '../database/schema'
@@ -111,6 +115,7 @@ async function attachContextPack(
 export type ChapterStagePrepareInput = (request: {
   readonly messages: readonly Message[]
   readonly budgetReport: RequestBudgetReport
+  readonly systemPrompt?: string
 }) => { messages: Message[]; diagnostics?: Record<string, unknown> }
 
 /**
@@ -130,8 +135,14 @@ export function createChapterStagePrepareInput(
   ].filter(Boolean).join('\n')
   const optionalSegments = [...renderSchema.optionalAllocatorFields]
     .reverse()
+    .filter((field) => !(context.previousChapterSampleReport?.sources && ['previousChapterContext', 'lastChapterEnding'].includes(field)))
     .map((field) => ({ field, content: context[field]?.trim() || '' }))
     .filter((entry) => entry.content.length > 0 && !protectedText.includes(entry.content))
+  const style = buildSceneWritingBrief(null, context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' }).authorStyle
+  optionalSegments.push(...style.samples.map((content, index) => ({ field: `authorStyle:sample:${index + 1}` as typeof optionalSegments[number]['field'], content })))
+  optionalSegments.push(...(context.previousChapterSampleReport?.sources || [])
+    .filter((source) => source.included && !source.required)
+    .reverse().map((source) => ({ field: source.key as typeof optionalSegments[number]['field'], content: source.text })))
 
   return (request) => {
     if (context.narrativeIdentity && context.contextPack?.chapterId) {
@@ -140,21 +151,49 @@ export function createChapterStagePrepareInput(
     const messages = request.messages.map((message) => ({ ...message }))
     const promptKey = promptKeyOverride || { scenePlan: 'scenePlan', draft: 'chapterDraft', review: 'chapterReview', rewrite: 'chapterRewrite' }[stage]
     const promptSource = context.narrativeIdentity ? getNarrativePromptSource(promptKey) : undefined
-    const inputDiagnostics = () => ({
+    const finalBudget = () => estimateRequestBudget({ messages, systemPrompt: request.systemPrompt,
+      maxTokens: request.budgetReport.outputReserveTokens,
+      modelContextTokens: request.budgetReport.modelContextTokens,
+      tokenSafetyMarginPct: request.budgetReport.tokenSafetyMarginPct,
+      stageBudget: request.budgetReport.stageBudget,
+    })
+    const inputDiagnostics = () => {
+      const transcript = messages.map((message) => message.content).join('\n')
+      const missingEvidence = context.previousChapterSampleReport?.sources?.filter((source) => source.required && source.included && !transcript.includes(source.text)) || []
+      if (missingEvidence.length) {
+        throw new HardConstraintOverflowError('NF_CONTEXT_REQUIRED_OVERFLOW：最终请求缺少上章关键依据，请检查提示覆盖或缩小本章范围。', context, context.contextBudgetReport, {
+          requiredTokens: missingEvidence.reduce((sum, source) => sum + source.estimatedTokens, 0),
+          availableTokens: request.budgetReport.effectiveBudget || 0, deficitTokens: 0,
+          missingConstraintIds: missingEvidence.map((source) => source.key), missingConstraintLabels: [],
+        })
+      }
+      const sources = context.contextPack?.sources.map((source) => ({ ...source,
+        included: transcript.includes(source.text),
+        reason: transcript.includes(source.text) ? 'final_request_included' : source.included ? 'final_request_omitted' : source.reason,
+      }))
+      return {
       narrativeIdentity: context.narrativeIdentity,
       promptSource,
+      contextCompilerMode: context.contextPack?.compilerMode || resolveContextCompilerMode(),
+      finalBudget: finalBudget(),
+      finalContextSources: sources,
+      finalContextSourcesHash: sources ? stableHash(sources) : undefined,
+      previousChapterSampleReport: context.previousChapterSampleReport
+        ? reconcilePreviousChapterSampleReport(context.previousChapterSampleReport, transcript) : undefined,
+      authorStyleSamples: style.samples.map((text, index) => ({ source: style.sampleSources[index],
+        included: transcript.includes(text), reason: transcript.includes(text) ? 'final_request_included' : 'final_request_omitted',
+      })),
       finalMessagesHash: `sha256:${createHash('sha256').update(JSON.stringify(messages)).digest('hex')}`,
-    })
+    } }
     if (request.budgetReport.allowed || (context.narrativeIdentity?.policyVersion === 'reader-first-v1' && promptSource?.source === 'custom')) {
       return { messages, diagnostics: inputDiagnostics() }
     }
-    const effectiveBudget = request.budgetReport.effectiveBudget
-    const deficit = effectiveBudget === null
-      ? 0
-      : Math.max(0, request.budgetReport.estimatedTotalTokens - effectiveBudget)
     let reclaimedTokens = 0
     const droppedFields: string[] = []
     for (const segment of optionalSegments) {
+      if (protectedText.includes(segment.content) || context.previousChapterSampleReport?.sources?.some((source) => (
+        source.required && source.included && segment.content.includes(source.text)
+      ))) continue
       let removed = false
       for (let index = messages.length - 1; index >= 0; index -= 1) {
         const offset = messages[index].content.lastIndexOf(segment.content)
@@ -169,7 +208,7 @@ export function createChapterStagePrepareInput(
       if (!removed) continue
       droppedFields.push(segment.field)
       reclaimedTokens += estimateTokens(segment.content)
-      if (reclaimedTokens >= deficit + 32) break
+      if (finalBudget().allowed) break
     }
     return {
       messages,
@@ -1037,6 +1076,7 @@ export function createChapterPipelinePromptGuidance(input: {
     curve.warning || '',
   ].filter(Boolean).join('\n')
   const chapterBridgePlan = buildChapterBridgePlan(chapter.id, {
+    originalContextManaged: true,
     themeVoice: input.themeVoice,
     chapterGoal: input.scenePlanContext.chapterGoal,
   })

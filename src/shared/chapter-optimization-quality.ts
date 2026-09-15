@@ -1,6 +1,15 @@
 import type { ChapterOptimizationQualityGate, ChapterStructuralRepairGate, LanguageDriftMetrics } from '../types'
 import { collectQualityGuardrailFindings, hasBlockingGuardrailFindings } from './content-guardrails'
 import { analyzeLanguageDrift } from './language-drift'
+import { diffChars } from 'diff'
+
+export function buildRevisionScopeReport(original: string, candidate: string): { changedRatio: number; requiresAuthorReview: boolean } {
+  const changes = diffChars(original, candidate)
+  const removed = changes.filter((part) => part.removed).reduce((sum, part) => sum + part.value.length, 0)
+  const added = changes.filter((part) => part.added).reduce((sum, part) => sum + part.value.length, 0)
+  const changedRatio = Math.max(removed, added) / Math.max(1, original.length)
+  return { changedRatio, requiresAuthorReview: !candidate.trim() || changedRatio > 0.25 }
+}
 
 const STRONG_AI_FLAVOR_CODES = new Set([
   'ai_process_leak',
@@ -64,6 +73,8 @@ export function buildChapterOptimizationQualityGate(
     .slice(0, 6)
 
   const warnings = [
+    buildRevisionScopeReport(originalContent, optimizedContent).requiresAuthorReview
+      ? '候选改动范围较大，请逐段比较必要线索、情绪与视角；不为保长补字。' : '',
     optimizedHighSeverityCount > originalHighSeverityCount
       ? `优化稿高危质量问题由 ${originalHighSeverityCount} 增至 ${optimizedHighSeverityCount}。`
       : '',

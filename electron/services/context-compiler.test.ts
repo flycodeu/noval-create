@@ -68,7 +68,7 @@ describe('context compiler source mapping', () => {
       mode: 'legacy',
       restoredPack: first.pack,
     })
-    expect(restored.pack).toEqual(first.pack)
+    expect(restored.pack).toEqual({ ...first.pack, compilerMode: 'legacy' })
     expect(restored.rendered).toContain('角色在门口')
     expect(restored.rendered).not.toContain('当前数据库已变化')
   })

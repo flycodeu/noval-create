@@ -194,6 +194,7 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('thread_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_context_version'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('source_manifest_json'))
+  assert.ok(getColumns(db, 'chapter_writeback_runs').has('source_identity_json'))
   assert.ok(getColumns(db, 'tasks').has('runner_type'))
   assert.ok(getColumns(db, 'tasks').has('progress_json'))
   const attemptColumns = getColumns(db, 'model_request_attempts')
@@ -530,6 +531,7 @@ function testFreshDbIsIdempotent() {
       '0065_model_request_attempts',
       '0066_checkpoint_source_manifest',
       '0067_agent_artifact_kind_contract',
+      '0068_writeback_source_identity',
     ])
 
     runMigrations(db)
@@ -676,6 +678,7 @@ function testPartialSchemaCanResume() {
       '0065_model_request_attempts',
       '0066_checkpoint_source_manifest',
       '0067_agent_artifact_kind_contract',
+      '0068_writeback_source_identity',
     ])
 
     const configs = db.prepare(`
@@ -972,6 +975,29 @@ function testCheckpointSourceManifestMigrationRollbackAndRecovery() {
   }
 }
 
+function testWritebackSourceIdentityMigrationRollbackAndRecovery() {
+  const db = openDb('writeback-source-identity.db')
+  try {
+    runMigrations(db)
+    const novelId = Number(db.prepare("INSERT INTO novels (title) VALUES ('旧回写迁移')").run().lastInsertRowid)
+    const chapterId = Number(db.prepare("INSERT INTO chapters (novel_id, chapter_num, content) VALUES (?, 1, '旧正文保留')").run(novelId).lastInsertRowid)
+    const runId = Number(db.prepare("INSERT INTO chapter_writeback_runs (novel_id, chapter_id, status) VALUES (?, ?, 'ready')").run(novelId, chapterId).lastInsertRowid)
+    db.exec('ALTER TABLE chapter_writeback_runs DROP COLUMN source_identity_json')
+    db.prepare('DELETE FROM _schema_migrations WHERE id = ?').run('0068_writeback_source_identity')
+    db.exec(`CREATE TRIGGER reject_rf10_migration BEFORE INSERT ON _schema_migrations
+      WHEN NEW.id = '0068_writeback_source_identity' BEGIN SELECT RAISE(ABORT, 'rf10 migration rollback'); END`)
+    assert.throws(() => runMigrations(db), /rf10 migration rollback/)
+    assert.equal(getColumns(db, 'chapter_writeback_runs').has('source_identity_json'), false)
+    db.exec('DROP TRIGGER reject_rf10_migration')
+    runMigrations(db)
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT source_identity_json FROM chapter_writeback_runs WHERE id = ?').get(runId).source_identity_json, null)
+    assert.equal(db.prepare('SELECT status FROM chapter_writeback_runs WHERE id = ?').get(runId).status, 'ready')
+    assert.equal(db.prepare('SELECT content FROM chapters WHERE id = ?').get(chapterId).content, '旧正文保留')
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM _schema_migrations WHERE id = ?').get('0068_writeback_source_identity').count, 1)
+  } finally { db.close() }
+}
+
 function testLegacyArtifactKindConstraintMigration() {
   const control = openDb('legacy-artifact-kind-control.db')
   let priorMigrationIds
@@ -1182,6 +1208,7 @@ function testRecommendationGovernanceTriggers() {
 function runAllTests() {
   prepareTempDir()
   testFreshDbIsIdempotent()
+  testWritebackSourceIdentityMigrationRollbackAndRecovery()
   testPartialSchemaCanResume()
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
   testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()

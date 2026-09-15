@@ -373,6 +373,29 @@ export function markSubsequentChaptersStale(
   else transaction.immediate()
 }
 
+/** Manual source edits invalidate downstream inputs without rewriting bodies or committed canon. */
+export function markChapterContentChanged(novelId: number, chapterNum: number): void {
+  const sqlite = getSqlite()
+  const work = sqlite.transaction(() => {
+    const reason = `第${chapterNum}章正文版本已修改，派生材料和后章输入需重新核对`
+    const now = new Date().toISOString()
+    sqlite.prepare('UPDATE novels SET context_version = COALESCE(context_version, 1) + 1, updated_at = ? WHERE id = ?').run(now, novelId)
+    markChapterRowsStale(sqlite, { novelId, afterChapterNum: chapterNum - 1, reasons: [reason], updatedAt: now })
+    sqlite.prepare(`UPDATE chapter_writeback_runs SET status = 'failed', error_message = ?, failed_at = ?, updated_at = ?
+      WHERE novel_id = ? AND status IN ('draft', 'ready', 'applying', 'partially_failed')
+      AND chapter_id IN (SELECT id FROM chapters WHERE novel_id = ? AND chapter_num >= ?)`)
+      .run(reason, now, now, novelId, novelId, chapterNum)
+    sqlite.prepare(`UPDATE chapters SET writeback_status_json = json_set(
+      CASE WHEN json_valid(writeback_status_json) THEN writeback_status_json ELSE '{}' END,
+      '$.phase', CASE WHEN chapter_num = ? THEN 'idle' ELSE 'failed' END, '$.canonApplied', json('false'), '$.readyForNextChapter', json('false'),
+      '$.blockedGeneration', json('true'), '$.lastError', ?)
+      WHERE novel_id = ? AND chapter_num >= ?`).run(chapterNum, reason, novelId, chapterNum)
+    markStoryMemoryCheckpointsDirty(novelId, now)
+  })
+  if (sqlite.inTransaction) work()
+  else work.immediate()
+}
+
 export function markChapterContextCurrent(chapterId: number): number {
   const db = getDb()
   const sqlite = getSqlite()

@@ -18,9 +18,12 @@ export interface ContextPackSource {
   included: boolean
   reason: string
   estimatedTokens: number
+  projectionKind?: 'full_text' | 'scene_excerpt' | 'required_evidence'
+  knowledgeLayer?: 'pov_experience' | 'reader_known' | 'unclassified'
 }
 
 export interface ContextPackV1 {
+  compilerMode?: 'legacy' | 'shadow' | 'active'
   narrativeIdentity?: NarrativeInputIdentity
   schemaVersion: 1
   id: string
@@ -123,6 +126,8 @@ function normalizeSource(source: ContextPackCompileInput['sources'][number], ind
     included: source.included !== false,
     reason: source.reason || 'budget_pending',
     estimatedTokens: Number.isFinite(source.estimatedTokens) ? Number(source.estimatedTokens) : estimateTokens(text),
+    ...(source.projectionKind ? { projectionKind: source.projectionKind } : {}),
+    ...(source.knowledgeLayer ? { knowledgeLayer: source.knowledgeLayer } : {}),
   }
 }
 

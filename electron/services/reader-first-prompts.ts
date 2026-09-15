@@ -1,8 +1,10 @@
 import { section, sectionUnlessCovered } from '../../src/shared/prompts/prompt-common'
 import { compileNarrativeTechniques, type NarrativeTechniqueScene } from '../../src/shared/narrative-techniques'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
+import { STORY_DESIGN_SCHEMA } from '../../src/shared/story-thread-generation'
 
 export interface NarrativePromptOptions {
+  recentStoryDesign?: string
   outputFormat?: 'patch'
   scenePlan?: string
   sceneWritingBrief?: string
@@ -57,12 +59,13 @@ export function buildReaderFirstRolePrompt(role: ReaderFirstRole, params: Prompt
     section('视角边界', text(params, 'protagonistRule')),
     section('视角指导', text(params, 'povGuidance')),
     role === 'planner' ? section('本章已有安排', text(params, 'plotPoints')) : section('场景计划', text(params, 'scenePlan')),
+    role === 'planner' ? text(params, 'recentStoryDesign') : '',
     section('作品表达参考', text(params, 'sceneWritingBrief')),
     (role === 'planner' || role === 'writer') ? section('本场可选写法', methodMaterial.text) : '',
     role === 'critic' || role === 'rewriter' ? section('待处理正文', text(params, 'draftContent')) : '',
     role === 'rewriter' ? section('本次修订要求', text(params, 'reviewNotes')) : '',
     role === 'rewriter' && Array.isArray(params.lockedParagraphs) ? section('锁定段落（逐字保留）', params.lockedParagraphs.join('\n\n')) : '',
-    role === 'planner' ? PLANNER_SCHEMA : role === 'critic' ? CRITIC_SCHEMA : params.outputFormat === 'patch'
+    role === 'planner' ? `${PLANNER_SCHEMA.replace('不增加其他字段。', '允许下述可选扩展。')}\n${STORY_DESIGN_SCHEMA}` : role === 'critic' ? CRITIC_SCHEMA : params.outputFormat === 'patch'
       ? '只输出本次修订要求中的 C-07 补丁 JSON，不输出整章正文或检查过程。'
       : '只输出小说正文，不输出标题、分析、检查过程、计划、规则或自述。',
   ]

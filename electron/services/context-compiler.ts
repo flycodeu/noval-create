@@ -6,6 +6,7 @@ import {
   type ContextPackSource,
 } from '../../src/shared/context-pack'
 import { narrativeRequestIdentity } from '../../src/shared/narrative-policy'
+import { estimateTokens } from '../../src/shared/token-budget'
 import type { ChapterContext, ChapterContextRawData } from './context.service'
 import {
   getRecallSourceKey,
@@ -60,8 +61,11 @@ function addSource(sources: ContextPackSource[], source: Partial<ContextPackSour
     reason: source.reason || 'candidate',
     estimatedTokens: typeof source.estimatedTokens === 'number' && Number.isFinite(source.estimatedTokens) && source.estimatedTokens >= 0
       ? source.estimatedTokens
-      : Math.max(1, Math.ceil(source.text.trim().length / 2)),
+      : estimateTokens(source.text.trim()),
     ...(source.artifactHash ? { artifactHash: source.artifactHash } : {}),
+    ...(source.start !== undefined ? { start: source.start, end: source.end } : {}),
+    ...(source.projectionKind ? { projectionKind: source.projectionKind } : {}),
+    ...(source.knowledgeLayer ? { knowledgeLayer: source.knowledgeLayer } : {}),
   })
 }
 
@@ -95,6 +99,7 @@ export function buildChapterContextSources(input: {
     estimatedTokens: entry.allocatedTokens,
   }))
   context.softContextDecisions.forEach((decision) => {
+    if (context.previousChapterSampleReport?.sources && ['previousChapterContext', 'lastChapterEnding'].includes(decision.label)) return
     const field = STRUCTURED_FIELDS.find((candidate) => candidate === decision.label)
     const text = field ? context[field] : ''
     if (!text) return
@@ -111,6 +116,7 @@ export function buildChapterContextSources(input: {
       estimatedTokens: decision.allocatedTokens || decision.originalTokens,
     })
   })
+  context.previousChapterSampleReport?.sources?.forEach((source) => addSource(sources, source))
   if (useGranularRecallSources) {
     selectedRecallSources.forEach((source) => addSource(sources, {
       key: getRecallSourceKey(source),
@@ -200,7 +206,7 @@ export async function compileChapterContextPack(input: {
         && restored.narrativeIdentity.scenePlanDigest === input.context.narrativeIdentity.scenePlanDigest))
     if (sameIdentity) {
       return {
-        pack: restored,
+        pack: { ...restored, compilerMode: mode },
         rendered: restored.sources.filter((source) => source.included).map((source) => `[${source.visibility}] ${source.key}: ${source.text}`).join('\n'),
         diagnostics: {
           droppedOptional: restored.sources.filter((source) => !source.included && source.reason === 'budget_insufficient').map((source) => source.key),
@@ -217,7 +223,7 @@ export async function compileChapterContextPack(input: {
   }
   const sources = buildChapterContextSources(input)
   const report = input.context.contextBudgetReport
-  return compileContextPack({
+  const result = await compileContextPack({
     narrativeIdentity: input.context.narrativeIdentity,
     novelId,
     chapterId,
@@ -231,4 +237,6 @@ export async function compileChapterContextPack(input: {
     budget: report.availableContextBudget,
     outputReserve: report.reservedForOutput,
   })
+  result.pack.compilerMode = mode
+  return result
 }

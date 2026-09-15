@@ -91,9 +91,13 @@ import type { ChapterRewriteScope } from '../../src/types'
 import {
   applyRevisionPatch,
   buildRevisionPatchArtifactHash,
+  validateRevisionPatchEvidence,
+  revisionPatchNeedsAuthorReview,
   RevisionPatchValidationError,
   type RevisionPatch,
 } from '../../src/shared/revision-patch'
+import { buildRevisionScopeReport } from '../../src/shared/chapter-optimization-quality'
+import { buildChapterOptimizationFactGuard } from './chapter-optimization-guards'
 
 /** A logical revision reservation shared by every automatic repair entry. */
 export interface RevisionAttemptHooks {
@@ -216,6 +220,12 @@ export interface RewriteOutcome {
   miniReview: RewriteMiniReviewVerdict
   dialogueAnalysis: ReturnType<typeof analyzeChapterDialogueAgainstNovel>
   revisionRejected?: boolean
+  requiresAuthorReview?: boolean
+}
+
+export function resolveRewriterCandidateAttemptKey(summary: ReviewPrioritySummary, attemptNumber: number): string {
+  const key = `rewriter:candidate:${attemptNumber}`
+  return summary.automaticPolicy ? `${summary.readingRevision !== false ? 'reading' : 'fact'}:${key}` : key
 }
 
 export interface RepairSemanticEvaluatorInput {
@@ -429,6 +439,7 @@ function isCandidateBetter(input: {
   knownTerms: string[]
   compareDialogueOnTie?: boolean
 }): boolean {
+  if (input.candidate.revisionRejected || input.candidate.requiresAuthorReview) return false
   if (input.candidateSemantic) {
     return chooseBetterRepairCandidate(
       { content: input.current.content, reviewNotes: input.current.reviewNotes },
@@ -491,7 +502,7 @@ export async function runRewriterCandidateLoop(input: {
   }
   let attemptNumber = 1
   let rejectedDigests: string[] = []
-  if (!reserveRevisionAttempt(input.revisionBudget, `rewriter:candidate:${attemptNumber}`)) {
+  if (!reserveRevisionAttempt(input.revisionBudget, resolveRewriterCandidateAttemptKey(input.reviewPrioritySummary, attemptNumber))) {
     throw new ChapterPipelineStageError(
       'human_review_required',
       '自动修订额度已用尽或恢复状态不确定，保留现有候选并转人工复核。',
@@ -500,7 +511,7 @@ export async function runRewriterCandidateLoop(input: {
   }
   let run = await input.runAttempt(attemptNumber, rejectedDigests, 'Rewriter 正在按 Critic 结论修正文稿。')
 
-  if (isCandidateTooSimilar(run.result.output, [input.draftContent])
+  if (!input.reviewPrioritySummary.automaticPolicy && isCandidateTooSimilar(run.result.output, [input.draftContent])
     && (input.requiresFullRewrite || input.reviewPrioritySummary.counts.high > 0)) {
     rejectedDigests = [buildVariationDigest(run.result.output)]
     if (reserveRevisionAttempt(input.revisionBudget, 'rewriter:candidate:2')) {
@@ -517,6 +528,11 @@ export async function runRewriterCandidateLoop(input: {
   }
 
   let outcome = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
+  // Current evidence drives one bounded candidate. Similarity and advisory
+  // statistics cannot widen it into another scene or structural rewrite.
+  if (input.reviewPrioritySummary.automaticPolicy) {
+    return { taskId: run.taskId, attemptNumber, rejectedDigests, rawResult: run.result, outcome }
+  }
   const dialogueDirective = buildDialogueRepairDirective({
     similarities: outcome.dialogueAnalysis.similarities,
     drifts: outcome.dialogueAnalysis.drifts,
@@ -695,6 +711,8 @@ export async function runPublishGateRepair(input: {
   const directive = buildPublishGateRepairDirective(input.publishCheck, input.reviewNotes)
   const current = { ...input }
   if (!directive || !input.content.trim() || input.attemptNumber >= 5) return current
+  // A remaining reading defect is author feedback after the bounded round.
+  if (buildReviewPrioritySummary(input.reviewNotes, input.content).readingRevision) return current
 
   const rejectedDigests = [...input.rejectedDigests, buildVariationDigest(input.content)]
   if (!reserveRevisionAttempt(input.revisionBudget, 'rewriter:publish-gate:1')) {
@@ -712,9 +730,7 @@ export async function runPublishGateRepair(input: {
       input.content,
     )
     const candidate = await input.processOutcome(run.result.output, attemptNumber, rejectedDigests)
-    const accepted = !candidate.miniReview.needsHumanReview
-      || rewriteOutcomeScore(candidate, input.genre, input.knownTerms)
-        < rewriteOutcomeScore({ content: input.content, miniReview: input.miniReview }, input.genre, input.knownTerms)
+    const accepted = !candidate.revisionRejected && !candidate.requiresAuthorReview && !candidate.miniReview.needsHumanReview
     if (!accepted || !candidate.content.trim()) {
       console.warn(`[chapter:pipeline] 章节验收门候选未改善，保留原稿 chapter=${input.chapterId}`)
       return { ...current, taskId: run.taskId, attemptNumber, rejectedDigests }
@@ -817,13 +833,16 @@ export async function runRewriterQualityPipeline(input: {
     ...input.candidateLoop,
     revisionBudget: input.revisionBudget || input.candidateLoop.revisionBudget,
   })
-  if (candidate.outcome.revisionRejected) {
-    const message = '局部补丁未通过校验或事实差异门，候选未写回，需人工处理。'
-    input.failRole(candidate.taskId, new ChapterPipelineStageError('human_review_required', message, {
-      blocked: true,
-      rewriteScope: input.rewriteScope,
-      outputText: buildPipelineFailureOutput('human_review_required', message, { rewriteScope: input.rewriteScope }),
+  const holdCandidate = (message: string): never => input.failRole(candidate.taskId,
+    new ChapterPipelineStageError('human_review_required', message, {
+      blocked: true, rewriteScope: input.rewriteScope,
+      outputText: JSON.stringify({ code: 'human_review_required', message, rewriteScope: input.rewriteScope,
+        originalContent: input.candidateLoop.draftContent, candidateContent: candidate.outcome.content,
+        rawCandidate: candidate.rawResult.output, review: candidate.outcome.miniReview }),
     }), true)
+  if (candidate.outcome.revisionRejected || candidate.outcome.requiresAuthorReview
+    || (input.candidateLoop.reviewPrioritySummary.automaticPolicy && candidate.outcome.miniReview.needsHumanReview)) {
+    holdCandidate('候选未通过采纳检查或需作者比较，原稿保留，候选未写回。')
   }
   let content = candidate.outcome.content
   let reviewNotes = candidate.outcome.reviewNotes
@@ -831,12 +850,20 @@ export async function runRewriterQualityPipeline(input: {
   let taskId = candidate.taskId
   const prepared = await prepareRewriterCandidateForPublish({
     ...input.postProcess,
+    preserveExactContent: input.candidateLoop.reviewPrioritySummary.automaticPolicy,
+    // Do not register an unchecked candidate as the failure handler's writable
+    // fallback. The normal persist callback does that only after all checks.
+    onRiskRechecked: input.candidateLoop.reviewPrioritySummary.automaticPolicy ? undefined : input.postProcess.onRiskRechecked,
     revisionBudget: input.revisionBudget || input.postProcess.revisionBudget,
     content,
     reviewNotes,
   })
   content = prepared.content
   reviewNotes = prepared.reviewNotes
+  if (input.candidateLoop.reviewPrioritySummary.automaticPolicy
+    && (prepared.failureError || resolveReviewAutomaticIssues(reviewNotes, content).some(qualityIssueHasActionableLevel))) {
+    holdCandidate('候选后验检查仍有当前问题，保留原稿与候选供作者比较。')
+  }
   if (prepared.failureError) input.failRole(taskId, prepared.failureError)
 
   let publishCheck = await input.persistCandidate({
@@ -895,6 +922,7 @@ export function buildChapterRewriterMessages(input: ChapterRewriterPromptInput):
         '{"baseArtifactHash":"...","patches":[{"start":0,"end":0,"expectedText":"","replacement":"","issueIds":["..."]}]}',
         `baseArtifactHash 必须精确使用：${patchArtifactHash}`,
         'start/end 使用 JavaScript UTF-16 偏移；expectedText 必须逐字等于当前正文对应片段；所有补丁必须针对同一 baseArtifactHash。',
+        '仅修改所列 issueIds 对应的证据范围；删除冗余时 replacement 使用空串。保留必要线索、情绪和视角边界，不为字数或相似度补写邻段。',
         ...(input.revisionPatchEvidence || []).map((evidence) => `证据 JSON：${JSON.stringify(evidence)}`),
       ].join('\n')
     : ''
@@ -1211,17 +1239,22 @@ export async function processChapterRewriteOutcome(input: {
     .filter((issue) => issue.category === 'fact')
     .map((issue) => issue.id))
   let revisionRejected = false
+  let targetsAddressed = false
+  let factsPreserved = false
+  let requiresAuthorReview = input.revisionMode !== 'patch'
+  const originalPriority = buildReviewPrioritySummary(input.reviewNotes, input.originalDraft)
   let safePatchBase = input.originalDraft
   let protectedOutput: { content: string; reviewNotes: ChapterReviewNotes }
   if (input.revisionMode === 'patch') {
     const patchBase = input.originalDraft
     const lockedFallbackContent = input.lockedFallbackContent || patchBase
-    safePatchBase = enforceLockedParagraphProtection(
+    const baseProtection = enforceLockedParagraphProtection(
       patchBase,
       repairInput.lockedParagraphs,
       lockedFallbackContent,
       input.reviewNotes,
-    ).content
+    )
+    safePatchBase = baseProtection.violated ? lockedFallbackContent : patchBase
     const candidatePatch = parseRevisionPatchCandidate(input.rewriteOutput)
     if (!candidatePatch) {
       revisionRejected = true
@@ -1236,16 +1269,16 @@ export async function processChapterRewriteOutcome(input: {
       }
     } else {
       try {
-        protectedOutput = enforceLockedParagraphProtection(
-          applyRevisionPatch(
-            patchBase,
-            candidatePatch,
-            findLockedPatchRanges(patchBase, repairInput.lockedParagraphs),
-          ),
-          repairInput.lockedParagraphs,
-          lockedFallbackContent,
-          input.reviewNotes,
-        )
+        if (baseProtection.violated) throw new RevisionPatchValidationError('NF_PATCH_LOCKED', '当前原稿不再包含锁定正文。')
+        const evidence = selectCompatibleRevisionPatchEvidence(originalPriority, patchBase)
+        if (evidence.length !== originalPriority.topIssues.length || originalPriority.deferredIssues.length) {
+          throw new RevisionPatchValidationError('NF_PATCH_EVIDENCE', '存在未覆盖的当前问题证据。')
+        }
+        validateRevisionPatchEvidence(patchBase, candidatePatch, evidence)
+        requiresAuthorReview = revisionPatchNeedsAuthorReview(patchBase, candidatePatch)
+        protectedOutput = { content: applyRevisionPatch(patchBase, candidatePatch,
+          findLockedPatchRanges(patchBase, repairInput.lockedParagraphs)), reviewNotes: input.reviewNotes }
+        targetsAddressed = true
       } catch (error) {
         revisionRejected = true
         const detail = error instanceof RevisionPatchValidationError
@@ -1265,6 +1298,7 @@ export async function processChapterRewriteOutcome(input: {
     }
     if (!revisionRejected && repairInput.factGuard && protectedOutput.content.trim() !== patchBase.trim()) {
       const factGuard = repairInput.factGuard(patchBase, protectedOutput.content)
+      factsPreserved = factGuard.safeToApply
       if (!factGuard.safeToApply) {
         revisionRejected = true
         protectedOutput = {
@@ -1296,7 +1330,7 @@ export async function processChapterRewriteOutcome(input: {
         reviewNotes: protectedOutput.reviewNotes,
         content: protectedOutput.content,
       })
-  let repairedContent = stripChapterHeadingNoise(
+  let repairedContent = input.revisionMode === 'patch' ? repaired.content : stripChapterHeadingNoise(
     repaired.content,
     repairInput.chapter.chapterNum,
     input.chapterTitle,
@@ -1360,15 +1394,18 @@ export async function processChapterRewriteOutcome(input: {
   const miniReview = buildRewriteMiniReviewVerdict({
     originalContent: input.originalDraft,
     rewrittenContent: repairedContent,
-    reviewPrioritySummary: buildReviewPrioritySummary(reviewNotes, repairedContent),
+    reviewPrioritySummary: originalPriority,
     reviewNotes,
+    boundedRevision: { targetsAddressed: targetsAddressed && !revisionRejected, factsPreserved, requiresAuthorReview },
   })
   return {
     content: repairedContent,
-    reviewNotes: applyRewriteDeltaToReviewNotes(reviewNotes, miniReview.narrativeDelta),
+    reviewNotes: originalPriority.automaticPolicy ? { ...reviewNotes, rewrite_delta: miniReview.narrativeDelta }
+      : applyRewriteDeltaToReviewNotes(reviewNotes, miniReview.narrativeDelta),
     miniReview,
     dialogueAnalysis,
     revisionRejected,
+    requiresAuthorReview,
   }
 }
 
@@ -1395,7 +1432,7 @@ export async function applyPostRewriteStyleRepair(input: {
   if (!hasBlockingGuardrailFindings(findings) || !styleOnly || !content.trim()) {
     return { content, findings }
   }
-  if (!reserveRevisionAttempt(input.revisionBudget, `rewriter:style:${input.chapterId}`)) {
+  if (!reserveRevisionAttempt(input.revisionBudget, `reading:rewriter:style:${input.chapterId}`)) {
     console.warn(`[chapter:pipeline] 后验风格修订额度已用尽，保留候选 chapter=${input.chapterId}`)
     return { content, findings }
   }
@@ -1416,7 +1453,7 @@ export async function applyPostRewriteStyleRepair(input: {
           '破折号和括号：删除解释型、假停顿型用法，只有真实抢话、打断或语气断裂才保留。',
           '解释性旁白：动作、对白或物件已经呈现的结论不要再解释；专业流程只保留真正改变选择的环节。',
           '不要为了降低命中率机械换词、强行切分长短句或插入口头词。',
-          '保持原文至少 75% 的篇幅，保留全部事件顺序、冲突结果、伏笔和代价。',
+          '有证据的冗余可以删除，不为保长补字；保留事件顺序、冲突结果、伏笔、必要情绪和代价。',
           '',
           '正文：',
           content,
@@ -1425,7 +1462,6 @@ export async function applyPostRewriteStyleRepair(input: {
       modelConfigId: input.modelConfigId,
     })).trim()
     const candidate = stripChapterHeadingNoise(rawOutput, input.chapterNum, input.chapterTitle).content
-    const candidateWords = countNarrativeWords(candidate)
     const currentScore = guardrailRepairScore(findings)
     const candidateFindings = collectQualityGuardrailFindings(candidate, input.genre, { knownTerms: input.knownTerms })
     const candidateScore = guardrailRepairScore(candidateFindings)
@@ -1438,8 +1474,13 @@ export async function applyPostRewriteStyleRepair(input: {
       : false
     if (
       candidate
+      && candidateSemantic
       && !semanticRegressed
-      && candidateWords >= Math.round(countNarrativeWords(content) * 0.75)
+      && !candidateSemantic.failed
+      && candidateSemantic.verdicts.length > 0
+      && collectBlockerDimensions(candidateSemantic).length === 0
+      && buildChapterOptimizationFactGuard(input.novelId, content, candidate, { structuralRepair: true }).safeToApply
+      && !buildRevisionScopeReport(content, candidate).requiresAuthorReview
       && candidateScore < currentScore
     ) {
       content = candidate
@@ -1456,6 +1497,7 @@ export async function applyPostRewriteStyleRepair(input: {
 
 export async function prepareRewriterCandidateForPublish(input: {
   content: string
+  preserveExactContent?: boolean
   reviewNotes: ChapterReviewNotes
   genre: string
   knownTerms: string[]
@@ -1496,7 +1538,9 @@ export async function prepareRewriterCandidateForPublish(input: {
     genre: input.genre,
     knownTerms: input.knownTerms,
   })
-  const styleRepair = await applyPostRewriteStyleRepair({
+  const styleRepair = input.preserveExactContent
+    ? { content: input.content, findings: collectQualityGuardrailFindings(input.content, input.genre, { knownTerms: input.knownTerms }) }
+    : await applyPostRewriteStyleRepair({
     ...input,
     criticSemanticReview: input.criticSemanticReview,
     content: input.content,

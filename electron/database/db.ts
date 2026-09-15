@@ -3054,6 +3054,11 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0067_agent_artifact_kind_contract', () => {
     repairLegacyArtifactKindConstraint(sqlite)
   })
+  runMigrationStep(sqlite, '0068_writeback_source_identity', () => {
+    if (hasTable(sqlite, 'chapter_writeback_runs')) {
+      ensureColumn(sqlite, 'chapter_writeback_runs', 'source_identity_json', 'TEXT')
+    }
+  })
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {

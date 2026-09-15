@@ -32,7 +32,7 @@ function useChapterPersistence(
 ) {
   const { currentChapterIdRef, refreshContextStatus, refreshPublishCheck, updateChapter } = input
   const [saveCoordinator] = useState(() => createChapterSaveCoordinator())
-  const persistChapter = useCallback(async (chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => {
+  const persistChapter = useCallback(async (chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save', expectedContent?: string) => {
     setCurrentSaveState(chapterId, 'saving')
     try {
       await persistWritingChapter({
@@ -43,7 +43,7 @@ function useChapterPersistence(
         updateRemote: (id, nextText, wordCount, source) => window.electron.chapter.update(
           id,
           { content: nextText, wordCount },
-          { versionSource: source },
+          { versionSource: source, ...(expectedContent !== undefined ? { expectedContent } : {}) },
         ),
         refreshContextStatus,
         refreshPublishCheck,
@@ -55,8 +55,8 @@ function useChapterPersistence(
       throw error
     }
   }, [currentChapterIdRef, refreshContextStatus, refreshPublishCheck, setCurrentSaveState, updateChapter])
-  const saveNow = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => (
-    saveCoordinator.runNow(chapterId, () => persistChapter(chapterId, text, versionSource))
+  const saveNow = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save', expectedContent?: string) => (
+    saveCoordinator.runNow(chapterId, () => persistChapter(chapterId, text, versionSource, expectedContent))
   ), [persistChapter, saveCoordinator])
   const queueSave = useCallback((chapterId: number, text: string, versionSource: WritingChapterVersionSource = 'manual-save') => {
     setCurrentSaveState(chapterId, 'unsaved')

@@ -25,6 +25,8 @@ import {
 import { listRhythmTemplatesForGenre } from '../../src/shared/rhythm-templates'
 import { buildArcRhythmSection } from './rhythm-template.service'
 import { assertCreativeStageContextReadyForGeneration, upsertCreativeStageAsset } from './creative-stage.service'
+import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
+import { buildRecentStoryDesignProjection, formatRecentStoryDesignProjection } from './story-thread.service'
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -401,6 +403,10 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
 
   // 弧上挂了节奏模板时，把全节拍换算成本弧章节区间注入细纲规划 prompt。
   const arcRhythmSection = buildArcRhythmSection(arc)
+  const recentStoryDesign = resolveNarrativePolicy(novel.settingsJson, true).policyVersion === 'reader-first-v1'
+    ? formatRecentStoryDesignProjection(buildRecentStoryDesignProjection(arc.novelId, batchStart, {
+      characterStates: context.characterStates, worldRules: context.worldRulesSummary, openLoops: context.openLoops,
+    })) : ''
 
   const generateOutlineBatch = async (designGateDirective?: string): Promise<Record<string, unknown>[]> => {
     const raw = await taskService.runChatTask({
@@ -427,7 +433,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
           continuitySummary: context.continuitySummary,
           openLoops: context.openLoops,
           worldRulesSummary: context.worldRulesSummary,
-          previousChapterOutlines: existingOutlines || undefined,
+          previousChapterOutlines: [existingOutlines, recentStoryDesign].filter(Boolean).join('\n\n') || undefined,
           protagonistReference: context.profile.protagonistReference,
           protagonistRule: context.profile.protagonistRule,
           designGateDirective,

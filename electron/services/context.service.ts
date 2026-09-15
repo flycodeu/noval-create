@@ -3,7 +3,7 @@ import { asc, eq } from 'drizzle-orm'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { getDb, getSqlite } from '../database/db'
 import { and, desc, gte, inArray, isNull, lte, lt, notInArray, or, sql } from 'drizzle-orm'
-import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
+import { chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { assessHistoricalGrounding, buildWorldRulesSummary, getGroundingSourceLedgerEntries, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
@@ -101,10 +101,13 @@ import {
   type RecallSnapshot,
 } from './context-recall-core'
 import { runRecallAugmentation } from './context-recall-runtime'
-import { estimateTokens, truncateToTokens } from './context-token-budget'
-import type { ContextPackV1 } from '../../src/shared/context-pack'
+import { estimateTokens, truncateToTokens, selectOriginalSources } from './context-token-budget'
+import type { ContextPackSource, ContextPackV1 } from '../../src/shared/context-pack'
 import {
   applyContextVisibility,
+  buildContextVisibilityPolicy,
+  projectPreviousChapterSources,
+  resolveContextReadPurpose,
   loadContextVisibilityPolicyInput,
   type ContextVisibilityPolicyInput,
   type ContextVisibilityReport,
@@ -368,6 +371,7 @@ export interface HardConstraintEntry {
 
 export type PreviousChapterSampleSegmentType =
   | 'full_text'
+  | 'scene_excerpt'
   | 'opening'
   | 'middle'
   | 'summary'
@@ -386,6 +390,7 @@ export interface PreviousChapterSampleSegment {
 }
 
 export interface PreviousChapterSampleReport {
+  sources?: ContextPackSource[]
   sourceChapterId: number | null
   sourceChapterNum: number | null
   sourceChapterChars: number
@@ -2923,6 +2928,11 @@ function resolveArcForChapter(
   }) || null
 }
 
+function projectCurrentChapterDerivatives(row: typeof chapters.$inferSelect): typeof chapters.$inferSelect {
+  if (!/正文版本已修改|第\d+章内容已更新/u.test(row.staleReasonJson || '')) return row
+  return { ...row, summary: '', nextChapterSeed: '', continuityStateJson: '', summaryHealthJson: '' }
+}
+
 function toChapterWithContinuity(row: typeof chapters.$inferSelect): ChapterWithContinuity {
   return {
     chapterNum: row.chapterNum,
@@ -3033,214 +3043,47 @@ function createEmptyPreviousChapterSampleReport(): PreviousChapterSampleReport {
   }
 }
 
-function extractTextWindow(text: string, mode: 'head' | 'middle' | 'tail', maxChars: number): string {
-  const normalized = text.replace(/\r\n/g, '\n').trim()
-  if (!normalized) return ''
-  if (normalized.length <= maxChars) return normalized
-
-  if (mode === 'head') return normalized.slice(0, maxChars).trim()
-  if (mode === 'tail') return normalized.slice(-maxChars).trim()
-
-  const start = Math.max(Math.floor((normalized.length - maxChars) / 2), 0)
-  return normalized.slice(start, start + maxChars).trim()
-}
-
-function parseSceneAnchorLines(raw?: string | null): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return dedupe(parsed
-      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-      .map((item) => {
-        const record = item as Record<string, unknown>
-        const title = asText(record.scene_title)
-        const purpose = asText(record.purpose)
-        const conflict = asText(record.conflict)
-        const exitHook = asText(record.exit_hook)
-        const parts = [
-          purpose ? `目标 ${compactRecallLine(purpose, 28)}` : '',
-          conflict ? `冲突 ${compactRecallLine(conflict, 24)}` : '',
-          exitHook ? `收尾 ${compactRecallLine(exitHook, 22)}` : '',
-        ].filter(Boolean)
-        if (!title && parts.length === 0) return ''
-        return `${title || '场景'}：${parts.join('；')}`
-      })
-      .filter(Boolean), 3)
-  } catch {
-    return []
-  }
-}
-
-function parseReviewHighlightLines(raw?: string | null): string[] {
-  const parsed = parseJsonRecord(raw)
-  return dedupe([
-    ...toStringArray(parsed.critical_fixes).map((item) => `修订重点：${compactRecallLine(item, 42)}`),
-    ...toStringArray(parsed.continuity_risks).map((item) => `连续性风险：${compactRecallLine(item, 42)}`),
-    ...toStringArray(parsed.human_language_repairs).map((item) => `语言修复：${compactRecallLine(item, 42)}`),
-  ], 3)
-}
-
-function loadPreviousChapterWritebackLines(chapterId: number): string[] {
-  const db = getDb()
-  const latestRun = db.select().from(chapterWritebackRuns).where(eq(chapterWritebackRuns.chapterId, chapterId)).all()
-    .sort((left, right) => right.id - left.id)[0]
-  if (!latestRun) return []
-
-  const diffLines = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.runId, latestRun.id)).all()
-    .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0) || left.id - right.id)
-    .map((row) => compactRecallLine(row.diffReason || '', 42))
-    .filter(Boolean)
-
-  return dedupe([
-    latestRun.summaryText ? `Canon 摘要：${compactRecallLine(latestRun.summaryText, 56)}` : '',
-    ...diffLines.map((item) => `状态回写：${item}`),
-  ].filter(Boolean), 3)
-}
-
-function formatPreviousChapterContextText(segments: PreviousChapterSampleSegment[]): string {
-  return segments
-    .map((segment) => `${segment.label}：\n${segment.text}`)
-    .join('\n\n')
-    .trim()
-}
-
-const SOURCE_DERIVED_PREVIOUS_CHAPTER_SEGMENT_TYPES = new Set<PreviousChapterSampleSegmentType>([
-  'full_text',
-  'opening',
-  'middle',
-  'tail',
-])
-
-function calculatePreviousChapterSampledChars(segments: PreviousChapterSampleSegment[]): number {
-  return segments.reduce((sum, segment) => (
-    SOURCE_DERIVED_PREVIOUS_CHAPTER_SEGMENT_TYPES.has(segment.type)
-      ? sum + segment.chars
-      : sum
-  ), 0)
-}
-
+/** Raw candidates only; allocation projects visibility and decides actual injection. */
 export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapterFeedSource | null): {
   previousChapterContext: string
   lastChapterEnding: string
   previousChapterSampleReport: PreviousChapterSampleReport
 } {
-  if (!previousChapter) {
-    return {
-      previousChapterContext: '',
-      lastChapterEnding: '',
-      previousChapterSampleReport: createEmptyPreviousChapterSampleReport(),
-    }
-  }
-
-  const sourceText = (previousChapter.content || '').trim()
-  const sourceChars = sourceText.length
-  const continuity = parseContinuityState(previousChapter.continuityStateJson)
-  const seedText = previousChapter.nextChapterSeed
-    ? `下章引子：${compactRecallLine(previousChapter.nextChapterSeed, 88)}`
-    : ''
-  const continuityLines = dedupe([
-    ...continuity.plotProgress.map((item) => `推进：${compactRecallLine(item, 42)}`),
-    ...continuity.characterStateChanges.map((item) => `人物变化：${compactRecallLine(item, 42)}`),
-    ...continuity.worldStateChanges.map((item) => `世界变化：${compactRecallLine(item, 42)}`),
-    ...continuity.openLoops.map((item) => `未回收：${compactRecallLine(item, 42)}`),
-    ...continuity.continuityNotes.map((item) => `承接提醒：${compactRecallLine(item, 42)}`),
-    continuity.arcProgress ? `故事弧：${compactRecallLine(continuity.arcProgress, 42)}` : '',
-  ].filter(Boolean), 4)
-  const sceneAnchorLines = parseSceneAnchorLines(previousChapter.scenePlanJson)
-  const reviewLines = parseReviewHighlightLines(previousChapter.reviewNotesJson)
-  const writebackLines = loadPreviousChapterWritebackLines(previousChapter.id)
-
-  const segments: PreviousChapterSampleSegment[] = []
-  const seenTexts = new Set<string>()
-  const pushSegment = (
-    type: PreviousChapterSampleSegmentType,
-    label: string,
-    text: string,
-  ) => {
-    const normalized = text.replace(/\r\n/g, '\n').trim()
-    if (!normalized || seenTexts.has(normalized)) return
-    seenTexts.add(normalized)
-    segments.push({
-      type,
-      label,
-      text: normalized,
-      chars: normalized.length,
-    })
-  }
-
-  if (sourceChars > 0 && sourceChars < 1000) {
-    pushSegment('full_text', '上一章全文', sourceText)
-    if (seedText) pushSegment('seed', '衔接提示', seedText)
-  } else {
-    pushSegment('opening', '上一章开场', extractTextWindow(sourceText, 'head', 220))
-    if (previousChapter.summary) {
-      pushSegment('summary', '上一章摘要', compactRecallLine(previousChapter.summary, 140))
-    }
-    if (continuityLines.length > 0) {
-      pushSegment('continuity', '状态变化与承接', continuityLines.join('\n'))
-    }
-    if (sceneAnchorLines.length > 0) {
-      pushSegment('scene_anchor', '场景锚点', sceneAnchorLines.join('\n'))
-    }
-    if (reviewLines.length > 0) {
-      pushSegment('review', '审校重点', reviewLines.join('\n'))
-    }
-    if (writebackLines.length > 0) {
-      pushSegment('writeback', 'Canon / 状态回写', writebackLines.join('\n'))
-    }
-    if (seedText) pushSegment('seed', '衔接提示', seedText)
-    if (sourceChars > 0) {
-      pushSegment('tail', '上章结尾原文', extractTextWindow(sourceText, 'tail', 300))
-    }
-
-    let composed = formatPreviousChapterContextText(segments)
-    if (composed.length < 1000 && sourceChars > 0) {
-      pushSegment('middle', '上章中段片段', extractTextWindow(sourceText, 'middle', 220))
-      composed = formatPreviousChapterContextText(segments)
-    }
-    if (composed.length > 1800) {
-      const optionalTypes: PreviousChapterSampleSegmentType[] = ['review', 'writeback', 'summary', 'opening']
-      for (const type of optionalTypes) {
-        const index = segments.findIndex((segment) => segment.type === type)
-        if (index < 0) continue
-        segments.splice(index, 1)
-        composed = formatPreviousChapterContextText(segments)
-        if (composed.length <= 1800) break
-      }
-    }
-  }
-
-  const fullyInjected = sourceChars > 0 && sourceChars < 1000
-  // The ending is a dedicated prompt slot. Keep it out of the general prior
-  // context so the same tail/seed is not injected twice into every stage.
-  const priorContextSegments = segments.filter((segment) => (
-    segment.type !== 'tail' && segment.type !== 'seed'
-  ))
-  const previousChapterContext = formatPreviousChapterContextText(priorContextSegments)
-  const lastChapterEnding = [
-    fullyInjected ? '' : extractTextWindow(sourceText, 'tail', 300),
-    seedText,
-  ].filter(Boolean).join('\n')
-  const sampledChars = calculatePreviousChapterSampledChars(segments)
-  const coverageBase = sourceChars > 0
-    ? Math.min(sampledChars, sourceChars)
-    : 0
-  const previousChapterSampleReport: PreviousChapterSampleReport = {
-    sourceChapterId: previousChapter.id,
-    sourceChapterNum: previousChapter.chapterNum,
-    sourceChapterChars: sourceChars,
-    sampledChars,
-    coverageRate: sourceChars > 0 ? Math.round((coverageBase / sourceChars) * 1000) / 10 : 0,
-    segmentCount: segments.length,
-    fullyInjected,
-    segments,
-  }
-
+  const text = previousChapter?.content?.trim() || ''
+  const segments: PreviousChapterSampleSegment[] = text ? [{ type: 'full_text', label: '上一章全文', text, chars: text.length }] : []
   return {
-    previousChapterContext,
-    lastChapterEnding,
-    previousChapterSampleReport,
+    previousChapterContext: text ? `上一章全文：\n${text}` : previousChapter?.summary || '',
+    // Future seeds/old plans are not established experience. The current scene contract carries plans.
+    lastChapterEnding: '',
+    previousChapterSampleReport: {
+      ...createEmptyPreviousChapterSampleReport(),
+      sourceChapterId: previousChapter?.id || null,
+      sourceChapterNum: previousChapter?.chapterNum || null,
+      sourceChapterChars: text.length,
+      sampledChars: text.length,
+      coverageRate: text ? 100 : 0,
+      segmentCount: segments.length,
+      fullyInjected: Boolean(text),
+      segments,
+    },
+  }
+}
+
+export function reconcilePreviousChapterSampleReport(
+  report: PreviousChapterSampleReport, text: string,
+): PreviousChapterSampleReport {
+  if (!report.sources) return report
+  const sources = report.sources.map((source) => ({ ...source,
+    included: source.included && text.includes(source.text),
+    reason: source.included && !text.includes(source.text) ? 'final_request_omitted' : source.reason,
+  }))
+  const kept = sources.filter((source) => source.included)
+  const fullyInjected = kept.length > 0 && kept.length === sources.length
+  const sampledChars = fullyInjected ? report.sourceChapterChars : kept.reduce((sum, source) => sum + source.text.length, 0)
+  return { ...report, sources, fullyInjected, sampledChars,
+    coverageRate: report.sourceChapterChars ? Math.round(sampledChars / report.sourceChapterChars * 1000) / 10 : 0,
+    segmentCount: kept.length,
+    segments: kept.map((source) => ({ type: fullyInjected ? 'full_text' : 'scene_excerpt', label: '上章原文', text: source.text, chars: source.text.length })),
   }
 }
 
@@ -3420,12 +3263,13 @@ export async function buildOutlineGenerationContext(arcId: number, stageId?: num
   )
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, arc.novelId)).all()
   const chapterCount = getNovelChapterCount(arc.novelId)
-  const chapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
+  const storedChapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
     ? loadBoundedChapterRows(arc.novelId, chapterStart, novel, arc)
     : db.select().from(chapters)
       .where(eq(chapters.novelId, arc.novelId))
       .orderBy(asc(chapters.chapterNum))
       .all()
+  const chapterRows = storedChapterRows.map(projectCurrentChapterDerivatives)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterStart)
 
   const recentChapters = selectRecentContextRows(
@@ -3485,12 +3329,13 @@ export async function collectChapterContextRawData(
     .limit(1)
     .all()[0]
   const currentArc = resolveArcForChapter(chapterNum, currentChapterBase?.arcId, arcs)
-  const chapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
+  const storedChapterRows = chapterCount > BOUNDED_CONTEXT_CHAPTER_THRESHOLD
     ? loadBoundedChapterRows(novelId, chapterNum, novel, currentArc)
     : db.select().from(chapters)
       .where(eq(chapters.novelId, novelId))
       .orderBy(asc(chapters.chapterNum))
       .all()
+  const chapterRows = storedChapterRows.map(projectCurrentChapterDerivatives)
   const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum) || currentChapterBase
   const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapterNum, stageId)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
@@ -3685,6 +3530,7 @@ export async function collectChapterContextRawData(
   const storyMemoryPromptPackage = buildStoryMemoryPromptPackage(novelId, {
     chapterId: currentChapter?.id,
     refreshMode: storyMemoryRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
+    readOnly: options.ensureStructure !== true,
   })
   const longTermMemory = storyMemoryPromptPackage.summary
   const threadContextLimit = Math.max(10, Math.min(32, mentionedEntityLimits.characters))
@@ -3806,6 +3652,7 @@ export async function collectChapterContextRawData(
 
   const chapterBridgePlan = currentChapter
     ? formatChapterBridgePlan(buildChapterBridgePlan(currentChapter.id, {
+        originalContextManaged: true,
         themeVoice: parseThemeVoiceDocument(novel.themeVoiceJson),
         chapterGoal,
       }))
@@ -4042,7 +3889,32 @@ export function allocateChapterContext(
   const contextBudget = Math.max(0, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterCount || rawData.chapterRows.length)
   const preservedConstraintSet = buildPreservedConstraintSet(normalizedOptions.preserveConstraintLabels)
-  const hardConstraintDrafts = buildHardConstraintDrafts(rawData, preservedConstraintSet)
+  let hardConstraintDrafts = buildHardConstraintDrafts(rawData, preservedConstraintSet)
+  // Project before any truncation: a cut summary must not hide a forbidden fact
+  // from the visibility checker, and reveal instructions must consume budget.
+  const visibleInput = applyContextVisibility(rawData, {
+    ...rawData.contextParts,
+    hardConstraintContext: '', hardConstraintSummary: '',
+    hardConstraintEntries: hardConstraintDrafts.map((draft) => ({ ...draft,
+      originalTokens: estimateTokens(draft.content), allocatedTokens: estimateTokens(draft.content), truncated: false,
+    })),
+    authorStyleMaterials: rawData.authorStyleMaterials,
+    recalledMemorySources: rawData.recalledMemorySources,
+    visibilityReport: undefined as ContextVisibilityReport | undefined,
+    previousChapterSampleReport: rawData.chapterRows.some((row) => row.content && row.chapterNum < (rawData.currentChapter?.chapterNum || 0))
+      ? { ...rawData.previousChapterSampleReport, sources: [] } : rawData.previousChapterSampleReport,
+  }, promptProfile)
+  rawData = { ...rawData,
+    contextParts: Object.fromEntries(Object.keys(rawData.contextParts).map((key) => [key, visibleInput[key as keyof ChapterContextParts]])) as unknown as ChapterContextParts,
+    authorStyleMaterials: visibleInput.authorStyleMaterials,
+    recalledMemorySources: visibleInput.recalledMemorySources,
+  }
+  hardConstraintDrafts = hardConstraintDrafts.filter((draft) => visibleInput.hardConstraintEntries.some((entry) => entry.label === draft.label)).map((entry) => ({ ...entry,
+    content: entry.label === 'writingContractSummary' ? [entry.content,
+      ...(visibleInput.visibilityReport?.sources || []).filter((source) => source.sourceKind === 'reveal_instruction')
+        .map((source) => `场景限定揭示，不得提前到章首或其他 POV：${source.text}`),
+    ].join('\n') : entry.content,
+  }))
   const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)
   const minimumSoftContextBudget = Math.min(2400, Math.max(1200, Math.floor(contextBudget * 0.28)))
   const initialHardConstraintBudget = contextBudget <= minimumSoftContextBudget
@@ -4098,7 +3970,38 @@ export function allocateChapterContext(
     return result
   }, [])
 
-  const softAllocation = allocateTokens(parts, softContextBudget)
+  const previousChapter = rawData.chapterRows
+    .filter((row) => row.chapterNum < (rawData.currentChapter?.chapterNum || 0))
+    .sort((left, right) => right.chapterNum - left.chapterNum)[0]
+  const visibilityPolicy = rawData.contextVisibilityInput ? buildContextVisibilityPolicy({
+    ...rawData.contextVisibilityInput, purpose: resolveContextReadPurpose(promptProfile),
+  }) : undefined
+  const originalSources = previousChapter?.content ? projectPreviousChapterSources(previousChapter, visibilityPolicy, [
+    effectiveContextParts.chapterGoal, effectiveContextParts.scenePlanSummary, effectiveContextParts.chapterBridgePlan,
+  ].filter(Boolean).join('\n'), rawData.mentionedItems) : undefined
+  const otherParts = originalSources ? parts.filter((part) => part.label !== 'previousChapterContext' && part.label !== 'lastChapterEnding') : parts
+  const coreReserve = otherParts.filter((part) => part.priority === 0).reduce((sum, part) => sum + estimateTokens(part.content), 0)
+  const originalSelection = originalSources ? selectOriginalSources(originalSources, Math.max(0, softContextBudget - coreReserve), previousChapter.content!) : undefined
+  const originalText = originalSelection?.text || ''
+  const originalTokens = estimateTokens(originalText)
+  const softAllocation = allocateTokens(otherParts, Math.max(0, softContextBudget - originalTokens))
+  if (originalSelection) {
+    softAllocation.allocated.previousChapterContext = originalText
+    softAllocation.allocated.lastChapterEnding = ''
+    softAllocation.totalUsed += originalTokens
+    if (originalSelection.sources.some((source) => source.reason === 'budget_insufficient')) {
+      softAllocation.warnings.push({ label: 'previousChapterContext', priority: 1,
+        originalTokens: estimateTokens(previousChapter.content || ''), allocatedTokens: originalTokens,
+        reason: originalText ? 'truncated' : 'dropped',
+      })
+    }
+    softAllocation.decisions.push({ label: 'previousChapterContext', title: '上章相关原文', priority: 0,
+      originalTokens: estimateTokens(previousChapter.content || ''), allocatedTokens: originalTokens,
+      status: originalSelection.sources.every((source) => source.included) ? 'kept' : originalText ? 'truncated' : 'dropped',
+      reason: originalSelection.sources.some((source) => source.reason === 'budget_insufficient') ? 'budget_insufficient' : 'budget_fit',
+      sourceKind: 'previous_chapter',
+    })
+  }
   const truncatedHardConstraintLabels = hardConstraintAllocation.entries
     .filter((entry) => entry.truncated)
     .map((entry) => entry.label)
@@ -4224,7 +4127,7 @@ export function allocateChapterContext(
         .filter((label) => !constraintInjectionStatus.injectedLabels.includes(label))
         .join(', '))
   }
-  let result: ChapterContext = {
+  const result: ChapterContext = {
     storyCore: softAllocation.allocated.storyCore || '',
     currentArc: softAllocation.allocated.currentArc || '',
     worldRules: softAllocation.allocated.worldRules || '',
@@ -4280,13 +4183,26 @@ export function allocateChapterContext(
     softContextBudgetUsage,
     contextBudgetReport,
     droppedConstraintCount,
-    previousChapterSampleReport: rawData.previousChapterSampleReport,
+    previousChapterSampleReport: originalSelection ? reconcilePreviousChapterSampleReport({
+      ...rawData.previousChapterSampleReport,
+      sourceChapterId: previousChapter.id, sourceChapterNum: previousChapter.chapterNum,
+      sourceChapterChars: previousChapter.content?.trim().length || 0, sources: originalSelection.sources,
+    }, originalText) : rawData.previousChapterSampleReport,
     softContextDecisions,
     recallSnapshot: finalizeRecallSnapshot(rawData.recallSnapshot, softAllocation.allocated.recalledMemory || ''),
     recallDiagnostics: rawData.recallDiagnostics,
     recalledMemorySources: rawData.recalledMemorySources,
+    visibilityReport: visibleInput.visibilityReport,
   }
 
+  if (originalSelection?.overflow) {
+    throw new HardConstraintOverflowError('NF_CONTEXT_REQUIRED_OVERFLOW：上章关键承接原文无法完整注入，请检查视角权限或缩小本章范围。', result, contextBudgetReport, {
+      requiredTokens: originalSelection.requiredTokens, availableTokens: Math.max(0, softContextBudget - coreReserve),
+      deficitTokens: Math.max(0, originalSelection.requiredTokens - Math.max(0, softContextBudget - coreReserve)),
+      missingConstraintIds: originalSelection.sources.filter((source) => source.required).map((source) => source.key),
+      missingConstraintLabels: [],
+    })
+  }
   if (hardConstraintFailed) {
     const hardOverflowDiagnostics = {
       requiredTokens: hardConstraintAllocation.requiredTokens,
@@ -4306,7 +4222,6 @@ export function allocateChapterContext(
     )
   }
 
-  result = applyContextVisibility(rawData, result, promptProfile)
   const visibilityMissing = result.visibilityReport
   if (visibilityMissing && visibilityMissing.requiredMissingSourceKeys.length > 0) {
     const missingConstraintLabels = visibilityMissing.requiredMissingSourceKeys

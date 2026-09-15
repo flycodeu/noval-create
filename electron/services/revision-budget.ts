@@ -121,7 +121,12 @@ export function reserveRevisionAttempt(
     state,
     key,
   )
-  if (!hasRevisionBudget(state)) throw new RevisionBudgetError(
+  // Older used snapshots cannot prove their previous attempt was factual.
+  // Conservatively count unclassified attempts as the one reading round.
+  const readingSpent = state.attemptKeys.some((entry) => entry.startsWith('reading:')
+    || (!entry.startsWith('fact:') && !entry.startsWith('rewriter:repair:') && !entry.startsWith('rewriter:publish-gate:')))
+    || state.used > state.attemptKeys.length
+  if (!hasRevisionBudget(state) || (key.startsWith('reading:') && readingSpent)) throw new RevisionBudgetError(
     'NF_REVISION_BUDGET_EXHAUSTED',
     `内容修订额度已用尽（${state.used}/${state.limit}）。`,
     state,

@@ -1,4 +1,7 @@
+import type { SceneStoryDesign } from '../../src/shared/story-thread-generation'
+
 export interface ScenePlanReconciliationStep {
+  story_design?: SceneStoryDesign
   scene_order: number
   scene_title: string
   purpose: string
@@ -32,6 +35,7 @@ export interface SceneContractSeed {
 export interface ScenePlanReconciliationResult {
   plan: ScenePlanReconciliationStep[]
   corrections: string[]
+  stateConflicts: string[]
 }
 
 function hasAny(text: string, patterns: RegExp[]): boolean {
@@ -74,8 +78,10 @@ function buildCoverageStep(seed: SceneContractSeed, fallbackOrder: number): Scen
 export function reconcileScenePlanForContracts(
   input: ScenePlanReconciliationStep[],
   contractSeeds: SceneContractSeed[] = [],
+  options: { preserveUnprovenState?: boolean } = {},
 ): ScenePlanReconciliationResult {
   const corrections: string[] = []
+  const stateConflicts: string[] = []
   const plan = input.map((step) => ({
     ...step,
     present_characters: [...step.present_characters],
@@ -99,6 +105,11 @@ export function reconcileScenePlanForContracts(
       /再也找不回|再也找不到|丢失/u,
     ])
     if (!hasCollectedState || !hasLostState) return
+
+    if (options.preserveUnprovenState) {
+      stateConflicts.push(`场景${step.scene_order}的凭证同时被收走和不可找回：${hookText}`)
+      return
+    }
 
     step.exit_hook = '韩铁根已收缴铜腰牌并放入口袋，沈砚青接到去工册股补录事故经过的命令。腰间挂钩空了，岗位资格也被收走，下一场转入工册股。'
     corrections.push(`场景${step.scene_order}：统一铜腰牌状态为“韩铁根收缴”，移除与运渣车掩埋/遗失互斥的退出钩子。`)
@@ -152,5 +163,5 @@ export function reconcileScenePlanForContracts(
     plan.sort((left, right) => left.scene_order - right.scene_order)
   }
 
-  return { plan, corrections }
+  return { plan, corrections, stateConflicts }
 }

@@ -11,6 +11,19 @@ import {
 } from './revision-budget'
 
 describe('revision budget', () => {
+  it('RF-08 restores the one reading round and retains the shared factual repair boundary', () => {
+    const controller = new RevisionBudgetController(createRevisionBudget('RF08'))
+    expect(controller.tryReserve('reading:rewriter:candidate:1')).not.toBeNull()
+    const saved = JSON.parse(JSON.stringify({ revisionBudget: controller.snapshot }))
+    const resumed = new RevisionBudgetController(restoreRevisionBudget('RF08', saved).budget)
+    expect(resumed.tryReserve('reading:rewriter:style:1')).toBeNull()
+    expect(resumed.snapshot.used).toBe(1)
+    expect(resumed.tryReserve('fact:rewriter:candidate:2')).not.toBeNull()
+    expect(resumed.tryReserve('rewriter:publish-gate:1')).toBeNull()
+    expect(resumed.snapshot.used).toBe(2)
+    const legacy = new RevisionBudgetController(createRevisionBudget('old', 2, 1, ['rewriter:candidate:1']))
+    expect(legacy.tryReserve('reading:rewriter:candidate:2')).toBeNull()
+  })
   it.each([
     { id: 'old' },
     { id: 'old', used: '2', limit: 2 },

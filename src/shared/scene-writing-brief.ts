@@ -1,8 +1,10 @@
 import type { ApprovedStyleSample } from './style-source'
 import type { ThemeVoiceDocument } from './theme-voice'
 import { estimateTokens } from './token-budget'
+import { formatSceneStoryDesign, isSceneStoryDesign, type SceneStoryDesign } from './story-thread-generation'
 
 export interface SceneWritingSceneInput {
+  story_design?: SceneStoryDesign
   scene_order?: number
   scene_title?: string
   purpose?: string
@@ -26,6 +28,7 @@ export interface SceneWritingKnownState {
 
 export interface SceneWritingBrief {
   scene: {
+    storyDesign?: SceneStoryDesign
     order: number | null
     title: string
     purpose: string
@@ -117,6 +120,7 @@ export function buildSceneWritingBrief(
 ): SceneWritingBrief {
   const source = scene || {}
   const normalizedScene = {
+    ...(isSceneStoryDesign(source.story_design) ? { storyDesign: structuredClone(source.story_design) } : {}),
     order: typeof source.scene_order === 'number' && Number.isSafeInteger(source.scene_order) ? source.scene_order : null,
     title: cleanText(source.scene_title),
     purpose: cleanText(source.purpose),
@@ -169,6 +173,7 @@ export function buildSceneWritingBrief(
 export function formatSceneWritingBrief(brief: SceneWritingBrief): string {
   const scene = brief.scene
   const sceneLines = [
+    formatSceneStoryDesign(scene.storyDesign),
     scene.order ? `场景${scene.order}${scene.title ? `《${scene.title}》` : ''}` : '',
     scene.purpose ? `目标：${scene.purpose}` : '',
     scene.conflict ? `冲突：${scene.conflict}` : '',

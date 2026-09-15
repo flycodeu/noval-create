@@ -146,6 +146,7 @@ export function buildChapterBridgePlan(
   options: {
     themeVoice?: ThemeVoiceDocument | null
     chapterGoal?: string
+    originalContextManaged?: boolean
   } = {},
 ): ChapterBridgePlan | null {
   const db = getDb()
@@ -167,7 +168,7 @@ export function buildChapterBridgePlan(
   const currentLocation = firstScene?.timeLocation || extractLocationFromScenePlan(chapter.scenePlanJson, 'first')
   const chapterGoal = asText(options.chapterGoal || chapter.outline)
   const openingMove = dedupeStrings([
-    previousChapter.nextChapterSeed || '',
+    options.originalContextManaged ? chapterGoal : previousChapter.nextChapterSeed || '',
     previousContinuity.openLoops[0] || '',
     chapterGoal,
   ], 1)[0] || '先接住上章未完成动作，再推进本章主任务。'
@@ -198,7 +199,7 @@ export function buildChapterBridgePlan(
   // 抽象 seed 只承接“事”，不承接上一章真实的结尾画面；强收尾意象若无人呼应，
   // 读者会感到断链。取上一章正文尾段作为回响义务注入。
   const previousEndingText = asText(previousChapter.content).trim()
-  const endingEcho = previousEndingText
+  const endingEcho = previousEndingText && !options.originalContextManaged
     ? `上一章结尾原文（收尾画面/悬念）：“${previousEndingText.slice(-160).replace(/\s+/g, ' ')}”。本章前半部分必须至少呼应一次（推进它、让人物提及或以环境细节回响）；确要延后回收时，需在正文中给出可见的挂起理由，不允许无痕丢弃。`
     : ''
 

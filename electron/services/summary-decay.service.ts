@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import type { SummaryHealthReport } from '../../src/types'
 import { getDb } from '../database/db'
 import { chapters, characters, foreshadowLedger, storyThreads } from '../database/schema'
@@ -248,6 +248,8 @@ export async function refreshSummaryHealthSemantic(chapterId: number): Promise<S
       }],
     })
     const semanticSummary = normalizeSemanticSummary(safeParseJson(raw))
+    const current = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    if (!current || current.content !== chapter.content || current.summary !== chapter.summary) return null
     if (!semanticSummary) {
       return refreshSummaryHealth(chapterId)
     }
@@ -265,11 +267,14 @@ export async function refreshSummaryHealthSemantic(chapterId: number): Promise<S
       eventCoverageScore: scoreEventCoverage(summaryText),
       updatedAt: new Date().toISOString(),
     }
-    db.update(chapters).set({
+    const written = db.update(chapters).set({
       summary: summaryText,
       summaryHealthJson: JSON.stringify(report),
       updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.id, chapterId)).run()
+    }).where(and(eq(chapters.id, chapterId),
+      sql`COALESCE(${chapters.content}, '') = ${chapter.content || ''}`,
+      sql`COALESCE(${chapters.summary}, '') = ${chapter.summary || ''}`)).run()
+    if (written.changes === 0) return null
     return report
   } catch {
     return refreshSummaryHealth(chapterId)

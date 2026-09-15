@@ -18,6 +18,8 @@ import { executeChatTask, type RunTaskOptions } from './task.service'
 import { buildPipelineFailureOutput, ChapterPipelineStageError } from './chapter-pipeline-errors'
 import { buildSceneWritingBrief, formatSceneWritingBrief, formatAuthorStyleReference } from '../../src/shared/scene-writing-brief'
 import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
+import { buildRecentStoryDesignProjection, formatRecentStoryDesignProjection } from './story-thread.service'
+import { reviewRecentStoryDesign, type RecentStoryDesignProjection } from '../../src/shared/story-thread-generation'
 
 export interface ChapterPromptNarrativeFields {
   povGuidance: string
@@ -35,6 +37,7 @@ export interface ChapterPromptGuidance {
 }
 
 export interface ChapterPlannerPromptInput {
+  recentStoryDesign?: RecentStoryDesignProjection
   novelTitle: string
   genre: string
   chapterNum: number
@@ -68,6 +71,7 @@ export interface PlannerExecutionOutput extends PlannerStageOutput {
 }
 
 export interface ResolvePlannerModelOutputInput {
+  recentStoryDesign?: RecentStoryDesignProjection
   chapterId: number
   novelId: number
   rawOutput: string
@@ -90,6 +94,7 @@ export function buildChapterPlannerMessages(input: ChapterPlannerPromptInput): M
     role: 'user',
     content: appendNarrativeNaturalnessPrompt(buildScenePlanPrompt({
       narrativeIdentity: context.narrativeIdentity,
+      recentStoryDesign: input.recentStoryDesign ? formatRecentStoryDesignProjection(input.recentStoryDesign) : undefined,
       narrativeScenes: [{ purpose: context.chapterGoal, beat: input.plotPoints }],
       novelTitle: input.novelTitle,
       genre: input.genre,
@@ -155,6 +160,11 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
     },
   })
   const shape = parsed.success ? validateScenePlanModelOutput(parsed.data) : { valid: false, issue: 'JSON 解析失败' }
+  if (input.recentStoryDesign && (!parsed.success || !shape.valid)) {
+    throw new ChapterPipelineStageError('contract_blocked', `近期场景计划需要重新规划：${shape.issue}`, {
+      blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: parsed.success ? parsed.data : input.rawOutput, issue: shape.issue }),
+    })
+  }
   if (parsed.success && !shape.valid) {
     console.warn(`[chapter:plan] 模型场景计划结构不完整 chapter=${input.chapterId}：${shape.issue}`)
   }
@@ -164,6 +174,7 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
   const reconciliation = reconcileScenePlanForContracts(
     normalized,
     input.contractSeeds || loadScenePlanContractSeeds(input.chapterId),
+    { preserveUnprovenState: Boolean(input.recentStoryDesign) },
   )
 
   if (reconciliation.corrections.length > 0) {
@@ -171,11 +182,18 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
       `[chapter:plan] 已按章节合同收口场景计划 chapter=${input.chapterId}：${reconciliation.corrections.join('；')}`,
     )
   }
+  if (input.recentStoryDesign) {
+    const findings = reviewRecentStoryDesign(reconciliation.plan, input.recentStoryDesign)
+    if (findings.length || reconciliation.stateConflicts.length) throw new ChapterPipelineStageError('contract_blocked', '近期故事设计需回到规划处理，原计划与正文保留。', {
+      blocked: true, rewriteScope: 'contract_replan',
+      outputText: JSON.stringify({ candidate: normalized, findings, stateConflicts: reconciliation.stateConflicts, sourceProjection: input.recentStoryDesign }),
+    })
+  }
   input.persistScenePlan(reconciliation.plan)
   const writeBack = input.writeBackDesignFields || writeBackSceneDesignFields
   writeBack(input.chapterId, reconciliation.plan)
 
-  const sceneDesignFieldGaps = collectSceneDesignFieldGaps(reconciliation.plan)
+  const sceneDesignFieldGaps = [...collectSceneDesignFieldGaps(reconciliation.plan), ...(input.recentStoryDesign?.diagnostics || [])]
   if (sceneDesignFieldGaps.length > 0) {
     console.warn(`[chapter:plan] 场景设计字段缺口 chapter=${input.chapterId}：${sceneDesignFieldGaps.length} 项`)
   }
@@ -212,6 +230,8 @@ export function loadReusablePlannerOutput(
 }
 
 export async function runChapterPlannerStage(input: {
+  recentStoryDesign?: RecentStoryDesignProjection
+  reloadStoryDesign?: () => RecentStoryDesignProjection
   shouldRun: boolean
   chapterId: number
   novelId: number
@@ -237,6 +257,12 @@ export async function runChapterPlannerStage(input: {
       throw new ChapterPipelineStageError('contract_blocked', '没有可复用的 Planner 场景快照，无法从当前节点重试。', {
         blocked: true,
         rewriteScope: 'contract_replan',
+      })
+    }
+    if (input.recentStoryDesign) {
+      const findings = reviewRecentStoryDesign(output.scenePlan, input.recentStoryDesign)
+      if (findings.length) throw new ChapterPipelineStageError('contract_blocked', '旧 Planner 计划与当前期待或状态依据不符，请返回规划。', {
+        blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: output.scenePlan, findings }),
       })
     }
     const contractVersion = input.validateContracts()
@@ -271,14 +297,24 @@ export async function runChapterPlannerStage(input: {
     retryable: true,
     sender: input.sender,
   })
-  return {
-    ...resolvePlannerModelOutput({
+  let resolved: PlannerStageOutput
+  try {
+    if (input.reloadStoryDesign && JSON.stringify(input.reloadStoryDesign()) !== JSON.stringify(input.recentStoryDesign)) {
+      throw new ChapterPipelineStageError('contract_blocked', '规划期间故事线或状态依据已变化，保留候选并重新规划。', {
+        blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: rawOutput, sourceProjection: input.recentStoryDesign }),
+      })
+    }
+    resolved = resolvePlannerModelOutput({
+      recentStoryDesign: input.recentStoryDesign,
       chapterId: input.chapterId,
       novelId: input.novelId,
       rawOutput,
       fallbackScenePlan: input.fallbackScenePlan,
       persistScenePlan: input.persistScenePlan,
-    }),
+    })
+  } catch (error) { return input.failRole(taskId, error) }
+  return {
+    ...resolved,
     taskId,
     contractVersion,
     reused: false,
@@ -309,8 +345,12 @@ export async function executeChapterPlannerPhase(input: {
   persistScenePlan: (scenePlan: ScenePlanStep[]) => void
   setUpstreamTaskId: (taskId?: number) => void
 }): Promise<PlannerExecutionOutput> {
-  const messages = buildChapterPlannerMessages(input.prompt)
+  const recentStoryDesign = input.prompt.context.narrativeIdentity?.policyVersion === 'reader-first-v1'
+    ? buildRecentStoryDesignProjection(input.novelId, input.prompt.chapterNum, input.prompt.context) : undefined
+  const messages = buildChapterPlannerMessages({ ...input.prompt, recentStoryDesign })
   return runChapterPlannerStage({
+    recentStoryDesign,
+    reloadStoryDesign: recentStoryDesign ? () => buildRecentStoryDesignProjection(input.novelId, input.prompt.chapterNum, input.prompt.context) : undefined,
     shouldRun: input.shouldRun,
     chapterId: input.chapterId,
     novelId: input.novelId,

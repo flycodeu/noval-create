@@ -72,12 +72,97 @@ import {
   runRewriterQualityPipeline,
   runRewriteRiskRecheck,
   selectCompatibleRevisionPatchEvidence,
+  resolveRewriterCandidateAttemptKey,
   type RewriteOutcome,
 } from './chapter-pipeline-rewriter'
 import { createRevisionBudget, RevisionBudgetController } from './revision-budget'
 import { buildReviewPrioritySummary } from './chapter-pipeline-policy.service'
 import { createQualityIssue } from '../../src/shared/quality-issue'
 import { buildRevisionPatchArtifactHash } from '../../src/shared/revision-patch'
+
+function rf08PatchInput(originalDraft: string, expectedText: string, replacement: string) {
+  const issue = createQualityIssue({ ruleId: 'motivation_irrational', detector: 'model',
+    content: originalDraft, excerpt: expectedText, message: '本轮指代或重复问题', scope: 'span' })!
+  const evidence = issue.evidence[0]
+  return {
+    originalDraft, lockedFallbackContent: originalDraft, chapterTitle: '', chapterWordTarget: 200,
+    semanticGateMode: 'off' as const, glossaryTerms: [], revisionMode: 'patch' as const,
+    rewriteOutput: JSON.stringify({ baseArtifactHash: evidence.artifactHash, patches: [{
+      start: evidence.start, end: evidence.end, expectedText, replacement, issueIds: [issue.id],
+    }] }),
+    reviewNotes: { ...buildFallbackReviewNotes(''), severity: 'high' as const, issues: [issue] },
+    repairInput: {
+      chapter: { id: 101, novelId: 7, chapterNum: 1, title: '' }, novel: { title: '测试' },
+      context: contextFixture(1), storyCore: '', profile: { genre: '悬疑', protagonistReference: '阿青', protagonistRule: '限知' },
+      scenePlanText: '', consistencyNotes: '', structuralAlertsSummary: '', lockedParagraphs: [],
+      promptTier: 'standard' as const, knownTerms: ['阿青'], targetWords: 200,
+      factGuard: vi.fn(() => ({ safeToApply: true, warnings: [] as string[] })),
+    },
+  }
+}
+
+describe('RF-08 bounded adoption', () => {
+  it('keeps a one-character fix above 0.95 similarity and consumes only one reading attempt', async () => {
+    const original = '😀阿青把钥匙放在桌上。她关上门。窗外的雨已经停了，院子里留着几处积水。厨房飘出米饭的香气，炉子上的汤还在沸腾。老人从抽屉里取出信，摊在灯下，信封上的地址已经模糊。远处有人骑车经过，车铃响过两声。等院门重新安静下来，两人才继续商量明早的行程。东面的桥还没修好，只能沿河岸走到渡口，再搭第一班船。行李放在楼梯下面，干粮装进布袋，留给邻居的字条压在杯底。夜深以后，楼上传来收拾床铺的声音，随后灯也熄了。'
+    const input = rf08PatchInput(original, '她', '他')
+    const summary = buildReviewPrioritySummary(input.reviewNotes, original)
+    const budget = new RevisionBudgetController(createRevisionBudget('small'))
+    const runAttempt = vi.fn().mockResolvedValue({ taskId: 88, result: { output: input.rewriteOutput } })
+    const result = await runRewriterCandidateLoop({
+      initialReviewNotes: input.reviewNotes, draftContent: original, reviewPrioritySummary: summary,
+      requiresFullRewrite: false, genre: '悬疑', knownTerms: [], criticSemanticReview: null,
+      runAttempt, processOutcome: () => processChapterRewriteOutcome(input), evaluateSemantics: vi.fn(),
+      markAttemptComplete: vi.fn(), resolvePremiumChatOptions: vi.fn(),
+      revisionBudget: { reserveRevisionAttempt: (key) => Boolean(budget.tryReserve(key)) },
+    })
+    expect(result.outcome.content).toBe(original.replace('她', '他'))
+    expect(result.outcome.miniReview.similarityToOriginal).toBeGreaterThan(0.95)
+    expect(result.outcome.miniReview).toMatchObject({ improved: true, needsHumanReview: false })
+    expect(runAttempt).toHaveBeenCalledOnce()
+    expect(budget.snapshot.attemptKeys).toEqual(['reading:rewriter:candidate:1'])
+    expect(resolveRewriterCandidateAttemptKey({ ...summary, readingRevision: false }, 1)).toBe('fact:rewriter:candidate:1')
+  })
+
+  it('preserves clues and emotion in a large deletion candidate, without canonical persistence', async () => {
+    const redundant = '这说明她确实不愿离开，这一点不用再怀疑。'.repeat(8)
+    const original = `钥匙藏在盒底。${redundant}阿青还是舍不得走。`
+    const input = rf08PatchInput(original, redundant, '')
+    const outcome = await processChapterRewriteOutcome(input)
+    expect(outcome.content).toBe('钥匙藏在盒底。阿青还是舍不得走。')
+    expect(outcome.requiresAuthorReview).toBe(true)
+    expect(outcome.miniReview.needsHumanReview).toBe(true)
+    const persistCandidate = vi.fn()
+    const pipeline: Parameters<typeof runRewriterQualityPipeline>[0] = { candidateLoop: { draftContent: original,
+      reviewPrioritySummary: buildReviewPrioritySummary(input.reviewNotes, original),
+      requiresFullRewrite: false, genre: '悬疑', knownTerms: [], criticSemanticReview: null,
+      evaluateSemantics: vi.fn(), markAttemptComplete: vi.fn(), resolvePremiumChatOptions: vi.fn(),
+      runAttempt: async () => ({ taskId: 89, result: { output: input.rewriteOutput } }), processOutcome: async () => outcome,
+    }, persistCandidate, failRole: (_id: number, error: unknown) => { throw error }, rewriteScope: 'paragraph_patch',
+      // These later stages must be unreachable for an author-only candidate.
+      postProcess: {} as never, gateRepair: {} as never, goldenReview: {} as never,
+      persistGoldenReview: vi.fn(), rerunHeuristicPublishCheck: vi.fn(), finalizePublishArtifacts: vi.fn(), syncRevisionState: vi.fn(),
+    }
+    await expect(runRewriterQualityPipeline(pipeline))
+      .rejects.toMatchObject({ outputText: expect.stringContaining('钥匙藏在盒底。阿青还是舍不得走。') })
+    expect(persistCandidate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a lower-noise candidate when the fact guard detects an invented fact', async () => {
+    const original = `😀阿青把钥匙放在桌上。她关上门。${'窗外的雨已经停了。'.repeat(10)}`
+    const input = rf08PatchInput(original, '她关上门。', '她拿到了新的证据。')
+    input.repairInput.factGuard.mockReturnValue({ safeToApply: false, warnings: ['新增物证和知识越界'] })
+    const outcome = await processChapterRewriteOutcome(input)
+    expect(outcome.content).toBe(original)
+    expect(outcome.revisionRejected).toBe(true)
+    expect(outcome.miniReview.needsHumanReview).toBe(true)
+  })
+
+  it('preserves all whitespace and heading bytes outside a valid UTF-16 patch', async () => {
+    const original = '  第1章\r\n😀她收好钥匙。\r\n灯下摊着信，窗外还有雨。  \r\n'
+    const outcome = await processChapterRewriteOutcome(rf08PatchInput(original, '她', '他'))
+    expect(outcome.content).toBe(original.replace('她', '他'))
+  })
+})
 
 function contextFixture(chapterNum: number): ChapterContext {
   const prefix = `chapter-${chapterNum}`
@@ -232,6 +317,8 @@ describe('chapter pipeline rewriter', () => {
     const expectedText = '坏句。'
     const start = originalDraft.indexOf(expectedText)
     const factGuard = vi.fn(() => ({ safeToApply: true, warnings: [] }))
+    const issue = createQualityIssue({ ruleId: 'motivation_irrational', detector: 'model',
+      content: originalDraft, excerpt: expectedText, message: '修正坏句。' })!
     const output = await processChapterRewriteOutcome({
       rewriteOutput: JSON.stringify({
         baseArtifactHash: buildRevisionPatchArtifactHash(originalDraft),
@@ -240,7 +327,7 @@ describe('chapter pipeline rewriter', () => {
           end: start + expectedText.length,
           expectedText,
           replacement: '好句。',
-          issueIds: ['quality:test:bad-sentence'],
+          issueIds: [issue.id],
         }],
       }),
       originalDraft,
@@ -264,7 +351,7 @@ describe('chapter pipeline rewriter', () => {
         targetWords: 20,
         factGuard,
       },
-      reviewNotes: buildFallbackReviewNotes(''),
+      reviewNotes: { ...buildFallbackReviewNotes(''), issues: [issue] },
       revisionMode: 'patch',
     })
 

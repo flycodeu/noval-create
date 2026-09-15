@@ -1,5 +1,5 @@
 import type { ProgressSink } from '../utils/progress-sink'
-import { asc, eq, inArray } from 'drizzle-orm'
+import { asc, eq, inArray, and, lt, desc } from 'drizzle-orm'
 import type {
   StoryThreadBatchGenerateOptions,
   StoryThreadBatchGenerationResult,
@@ -21,7 +21,11 @@ import { parseWorldRulesJson } from '../../src/shared/genre-system'
 import type { EntityRegenerateOptions } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { getDb, getSqlite } from '../database/db'
-import { chapters, novels, storyThreads, worldMap } from '../database/schema'
+import { chapters, novels, storyThreads, worldMap, characters, characterArcs, characterRelations } from '../database/schema'
+import { qualityIssueArtifactHash } from '../../src/shared/quality-issue'
+import { estimateTokens } from '../../src/shared/token-budget'
+import { isSceneStoryDesign, type RecentStoryDesignProjection, type StoryDesignStateSource, type StoryDesignScene } from '../../src/shared/story-thread-generation'
+
 import { safeParseAiJson } from '../utils/json'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
@@ -43,6 +47,90 @@ import {
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { listForeshadowLedger } from './endgame-asset.service'
 
+/** Read-only editing projection. Existing plans and unconfirmed records do not become canon. */
+export function buildRecentStoryDesignProjection(novelId: number, chapterNum: number, visible: {
+  characterStates?: string; relationSummary?: string; worldRules?: string; activeThreads?: string; openLoops?: string
+} = {}): RecentStoryDesignProjection {
+  const db = getDb()
+  const projection: RecentStoryDesignProjection = { novelId, chapterNum, threads: [], sources: [], recentPlans: [], diagnostics: [] }
+  const visibleThreads = [visible.activeThreads, visible.openLoops].filter(Boolean).join('\n')
+  const restrictThreads = 'activeThreads' in visible || 'openLoops' in visible
+  const rows = db.select().from(storyThreads).where(eq(storyThreads.novelId, novelId)).all()
+  projection.threads = rows.filter((row) => (row.startChapter ?? row.plantedChapter ?? 1) <= chapterNum
+    && (!restrictThreads || visibleThreads.includes(row.title)))
+    .sort((a, b) => (a.targetPayoffChapter ?? Infinity) - (b.targetPayoffChapter ?? Infinity) || a.id - b.id)
+    .slice(0, 12).map((row) => ({ id: row.id, title: row.title, payoff: row.payoffCondition || row.premise || row.summary || '',
+      state: row.resolvedChapter && row.resolvedChapter > chapterNum ? '后续状态不用于当前章' : row.currentState || '',
+      status: row.resolvedChapter && row.resolvedChapter > chapterNum ? 'active' : row.status || 'planned',
+      dueChapter: row.targetPayoffChapter, provenance: 'registered-unconfirmed' }))
+  const recent = db.select().from(chapters).where(and(eq(chapters.novelId, novelId), lt(chapters.chapterNum, chapterNum)))
+    .orderBy(desc(chapters.chapterNum)).limit(3).all().reverse()
+  for (const row of recent) {
+    try {
+      const parsed: unknown = JSON.parse(row.scenePlanJson || '[]')
+      if (!Array.isArray(parsed)) continue
+      const scenes: StoryDesignScene[] = parsed.filter((scene) => scene && typeof scene === 'object').map((scene) => ({
+        scene_order: Number(scene.scene_order) || 1, purpose: asText(scene.purpose), conflict: asText(scene.conflict),
+        beat: asText(scene.beat), location: asText(scene.location), present_characters: Array.isArray(scene.present_characters) ? scene.present_characters.filter((name: unknown) => typeof name === 'string') : [],
+        ...(isSceneStoryDesign(scene.story_design) ? { story_design: scene.story_design } : {}),
+      }))
+      projection.recentPlans.push({ chapterNum: row.chapterNum, hash: qualityIssueArtifactHash(row.scenePlanJson || ''), scenes })
+    } catch { projection.diagnostics.push(`第${row.chapterNum}章历史计划不可解析，未推断剧情。`) }
+  }
+  const addSource = (id: string, kind: StoryDesignStateSource['kind'], state: string | null, authority: StoryDesignStateSource['authority'], material: string, subject = '') => {
+    if (!state?.trim() || !material.includes(state.trim())) return
+    const attributedState = subject ? `${subject}：${state.trim()}` : state.trim()
+    projection.sources.push({ id, kind, state: attributedState, authority, hash: qualityIssueArtifactHash(attributedState) })
+  }
+  const characterMaterial = visible.characterStates || ''
+  const cast = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+    .filter((row) => characterMaterial.includes(row.fullName))
+  for (const row of cast) {
+    addSource(`character:${row.id}:rank`, 'ability', row.rankLevel, row.recordStatus === 'confirmed' ? 'confirmed' : 'candidate', characterMaterial, row.fullName)
+    let abilities: unknown
+    try { abilities = JSON.parse(row.abilitiesJson || '[]') } catch { abilities = [] }
+    if (Array.isArray(abilities)) abilities.filter((value) => typeof value === 'string').forEach((value, index) =>
+      addSource(`character:${row.id}:ability:${index}`, 'ability', value, row.recordStatus === 'confirmed' ? 'confirmed' : 'candidate', characterMaterial, row.fullName))
+  }
+  for (const arc of db.select().from(characterArcs).where(eq(characterArcs.novelId, novelId)).all()) {
+    const character = cast.find((item) => item.id === arc.characterId)
+    if (character) addSource(`character-arc:${arc.id}:belief`, 'belief', arc.misbelief, 'belief', characterMaterial, character.fullName)
+  }
+  for (const relation of db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()) {
+    const left = cast.find((character) => character.id === relation.charAId)
+    const right = cast.find((character) => character.id === relation.charBId)
+    if (left && right) addSource(`relationship:${relation.id}`, 'relationship', relation.description, 'confirmed', visible.relationSummary || '', `${left.fullName}与${right.fullName}`)
+  }
+  // Only material already selected by the existing visibility/budget path may
+  // provide rule authority; no second raw-world/secret-fact fetch.
+  for (const [index, paragraph] of (visible.worldRules || '').split(/\r?\n/).filter(Boolean).entries()) {
+    addSource(`visible-rule:${index}`, 'rule', paragraph, 'confirmed', visible.worldRules || '')
+  }
+  // Use exactly the same bounded records for prompt and post-model validation.
+  let remaining = 1500
+  const select = <T>(entries: T[]): T[] => entries.filter((entry) => {
+    const cost = estimateTokens(JSON.stringify(entry)) + 25
+    if (cost > remaining) { projection.diagnostics.push('整条编辑记录因预算省略，不能作为本轮状态依据。'); return false }
+    remaining -= cost
+    return true
+  })
+  projection.threads = select(projection.threads)
+  projection.sources = select(projection.sources)
+  projection.recentPlans = select(projection.recentPlans)
+  return projection
+}
+
+/** Whole records only; final request budgeting remains the stage prepare hook's responsibility. */
+export function formatRecentStoryDesignProjection(projection: RecentStoryDesignProjection): string {
+  const lines = ['【近期故事编辑投影】', '登记约定与本轮推断分开：历史记录未标明作者确认来源，不擅自认作已确认；所有拟回应仍是候选。',
+    '满足、照护后的相处和配角工作安排均可成立；不要求每场都有冲突、代价、悬念。旧期待逐项进展/回应/有因延后，不能用新线索批量替代。',
+    '已有能力、关系或关键权限决定事件结果时，在 state_uses 中引用下列当前依据；没有依据就退回规划，不临时增加万能解法。误信使用 belief，保持是谁相信什么。']
+  const append = (line: string) => { lines.push(line) }
+  projection.threads.forEach((thread) => append(`登记约定（确认来源未知）：${JSON.stringify(thread)}`))
+  projection.sources.forEach((source) => append(`当前可见状态依据：${JSON.stringify(source)}`))
+  projection.recentPlans.forEach((plan) => append(`第${plan.chapterNum}章计划候选（不是事实）：${JSON.stringify(plan)}`))
+  return lines.join('\n')
+}
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
 type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
 type StoryThreadPriority = 'high' | 'medium' | 'low'

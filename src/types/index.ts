@@ -405,6 +405,7 @@ export interface WritebackSyncStatus {
 }
 
 export interface ChapterUpdateOptions {
+  expectedContent?: string
   skipStaleTracking?: boolean
   versionSource?: 'manual-save' | 'ai-rewrite' | 'pipeline-generate' | 'version-restore' | false
 }
@@ -2411,6 +2412,7 @@ export interface SoftContextBudgetUsage {
 
 export type PreviousChapterSampleSegmentType =
   | 'full_text'
+  | 'scene_excerpt'
   | 'opening'
   | 'middle'
   | 'summary'
@@ -2429,6 +2431,7 @@ export interface PreviousChapterSampleSegment {
 }
 
 export interface PreviousChapterSampleReport {
+  sources?: import('../shared/context-pack').ContextPackSource[]
   sourceChapterId: number | null
   sourceChapterNum: number | null
   sourceChapterChars: number

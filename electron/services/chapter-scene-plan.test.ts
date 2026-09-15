@@ -13,7 +13,25 @@ import {
   loadScenePlanContractSeeds,
   writeBackSceneDesignFields,
   type ScenePlanStep,
+  validateScenePlanModelOutput,
+  normalizeScenePlan,
+  formatScenePlan,
 } from './chapter-scene-plan'
+
+it('RF-09 round-trips optional design without requiring it on legacy plans', () => {
+  const plan = buildStep({ conflict: '', hidden_agendas: [], irony_gap: '', story_design: {
+    choices: [{ character: '周宁', wants: '陪母亲吃饭', options: ['饭后去交班'], stake: '不让同事一直代班' }],
+    result: '照护照常进行', aftermath: '周宁回店工作',
+  } })
+  expect(validateScenePlanModelOutput([plan]).valid).toBe(true)
+  const restored = normalizeScenePlan(JSON.parse(JSON.stringify([plan])), [])
+  expect(restored[0].story_design).toEqual(plan.story_design)
+  expect(formatScenePlan(restored)).toContain('不让同事一直代班')
+  expect(collectSceneDesignFieldGaps(restored)).toEqual([])
+  expect(validateScenePlanModelOutput([{ ...plan, story_design: { result: '饭后离开', unknown: true } }]).valid).toBe(false)
+  const legacy = { ...plan }; delete legacy.story_design
+  expect(validateScenePlanModelOutput([legacy]).valid).toBe(true)
+})
 
 function buildStep(overrides: Partial<ScenePlanStep> = {}): ScenePlanStep {
   return {

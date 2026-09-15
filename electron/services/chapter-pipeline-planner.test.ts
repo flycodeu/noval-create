@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ChapterContext } from './context.service'
 import type { ScenePlanStep } from './chapter-scene-plan'
+import type { RecentStoryDesignProjection } from '../../src/shared/story-thread-generation'
 
 vi.mock('./prompt-override.service', () => ({
   applyPromptOverride: (_key: string, fallback: string) => fallback,
@@ -12,6 +13,27 @@ import {
   resolvePlannerModelOutput,
   runChapterPlannerStage,
 } from './chapter-pipeline-planner'
+
+it('RF-09 returns a malformed or unsupported authority plan before any persistence', () => {
+  const projection: RecentStoryDesignProjection = { novelId: 7, chapterNum: 4, threads: [], sources: [], recentPlans: [], diagnostics: [] }
+  const persistScenePlan = vi.fn()
+  const writeBackDesignFields = vi.fn()
+  const candidate = sceneFixture({ story_design: { state_uses: [{ source_id: 'invented-rule', source_hash: 'new',
+    expected_state: '万能权限可以打开所有门', resulting_state: '万能权限可以打开所有门', interpretation: 'fact' }] } })
+  const input = { chapterId: 104, novelId: 7, fallbackScenePlan: [sceneFixture()], rawOutput: JSON.stringify([candidate]),
+    recentStoryDesign: projection, contractSeeds: [], persistScenePlan, writeBackDesignFields }
+  expect(() => resolvePlannerModelOutput(input)).toThrowError(expect.objectContaining({ rewriteScope: 'contract_replan', outputText: expect.stringContaining('invented-rule') }))
+  expect(() => resolvePlannerModelOutput({ ...input, rawOutput: JSON.stringify([{ ...candidate, story_design: { authorConfirmed: true } }]) })).toThrow(/近期场景计划需要重新规划/)
+  expect(persistScenePlan).not.toHaveBeenCalled()
+  expect(writeBackDesignFields).not.toHaveBeenCalled()
+})
+
+it('RF-09 preserves optional design in the immutable planner snapshot and detects changed declarations', () => {
+  const plan = [sceneFixture({ story_design: { result: '已经取得资格，尚未比赛' } })]
+  const snapshot = JSON.stringify(plan)
+  expect(loadReusablePlannerOutput(snapshot, [], snapshot)?.scenePlan[0].story_design).toEqual(plan[0].story_design)
+  expect(() => loadReusablePlannerOutput(JSON.stringify([sceneFixture({ story_design: { result: '已经夺冠' } })]), [], snapshot)).toThrow(/快照/)
+})
 
 function contextFixture(chapterNum: number): ChapterContext {
   const prefix = `chapter-${chapterNum}`

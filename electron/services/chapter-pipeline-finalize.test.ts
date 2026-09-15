@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   scheduleDialogueRefresh: vi.fn(),
   generateEmbeddings: vi.fn(),
   prepareCanon: vi.fn(),
+  refreshCanon: vi.fn(),
   updateTaskStatus: vi.fn(),
 }))
 
@@ -29,6 +30,7 @@ vi.mock('./embedding.service', () => ({
 
 vi.mock('./chapter-writeback.service', () => ({
   prepareChapterWritebackRunWithRetry: mocks.prepareCanon,
+  refreshFinalizedChapterCanonRun: mocks.refreshCanon,
 }))
 
 vi.mock('./task.service', () => ({
@@ -52,6 +54,7 @@ const finalizeResult: GeneratedChapterFinalizeResult = {
 }
 
 beforeEach(() => {
+  mocks.refreshCanon.mockReset().mockImplementation(async (id: number) => ({ id, status: 'ready' }))
   mocks.events.length = 0
   mocks.createHandoff.mockReset().mockImplementation(async () => {
     mocks.events.push('handoff')
@@ -117,8 +120,9 @@ describe('chapter pipeline finalize', () => {
       .toBe('章节已入稿，并刷新摘要、连续性与长期记忆。')
   })
 
-  it('runs chapter 1 Canonizer before Finalize and closes both role tasks', async () => {
+  it('records the current refreshed Canon run in Finalize while preserving the earlier candidate snapshot', async () => {
     mocks.prepareCanon.mockResolvedValue({ id: 81, status: 'ready', summaryText: 'Canon 草案就绪' })
+    mocks.refreshCanon.mockResolvedValue({ id: 82, status: 'ready' })
     const finishCanonizer = vi.fn()
     const finishFinalize = vi.fn()
 
@@ -136,11 +140,11 @@ describe('chapter pipeline finalize', () => {
       publishSummary: '验收通过',
     })
 
-    expect(output.canonRun.id).toBe(81)
+    expect(output.canonRun.id).toBe(82)
     expect(finishCanonizer).toHaveBeenCalledWith(71, 'Canon 草案就绪', 81)
-    expect(finishFinalize).toHaveBeenCalledWith(72, expect.stringContaining('验收通过'), 81)
+    expect(finishFinalize).toHaveBeenCalledWith(72, expect.stringContaining('验收通过'), 82)
     expect(mocks.updateTaskStatus).toHaveBeenCalledWith(72, 'success', undefined, expect.objectContaining({
-      canonRunId: 81,
+      canonRunId: 82,
     }))
   })
 

@@ -819,6 +819,7 @@ export const chapterWritebackRuns = sqliteTable('chapter_writeback_runs', {
   retryCount: integer('retry_count').notNull().default(0),
   lastAttemptAt: text('last_attempt_at'),
   sourceChapterVersion: integer('source_chapter_version'),
+  sourceIdentityJson: text('source_identity_json'),
   startedAt: text('started_at').default(sql`CURRENT_TIMESTAMP`),
   completedAt: text('completed_at'),
   failedAt: text('failed_at'),

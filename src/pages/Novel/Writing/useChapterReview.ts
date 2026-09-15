@@ -39,7 +39,7 @@ interface UseChapterReviewOptions {
   navigateToWritingRoute(route: WritingRouteKey): void
   applyChapterContent(text: string, versionSource?: 'manual-save' | 'ai-rewrite'): void
   commitContentState(text: string): string
-  saveNow(chapterId: number, text: string, versionSource?: 'manual-save' | 'ai-rewrite'): Promise<void>
+  saveNow(chapterId: number, text: string, versionSource?: 'manual-save' | 'ai-rewrite', expectedContent?: string): Promise<void>
   currentChapterIdRef: { current: number | null }
   loadChapters(preferredChapterId?: number): Promise<void>
   refreshMeta(): Promise<void>
@@ -211,17 +211,21 @@ export function useChapterReview(options: UseChapterReviewOptions) {
       message.warning(getUserFacingMessage('writing.optimizeBlockedByQuality'))
       return
     }
+    if (normalizeEditorText(editorText()) !== normalizeEditorText(optimizationResult.originalContent)) {
+      message.warning(getUserFacingMessage('chapter.pipelineContentConflict'))
+      return
+    }
     setApplyingOptimizedChapter(true)
     const chapterId = currentChapter.id
     try {
       const normalized = normalizeEditorText(optimizationResult.optimizedContent)
-      await saveNow(chapterId, normalized, 'ai-rewrite')
+      await saveNow(chapterId, normalized, 'ai-rewrite', optimizationResult.originalContent)
       if (currentChapterIdRef.current !== chapterId) {
         setOptimizeModalOpen(false)
         setOptimizationResult(null)
         return
       }
-      commitContentState(normalized)
+      if (normalizeEditorText(editorText()) === normalizeEditorText(optimizationResult.originalContent)) commitContentState(normalized)
       await Promise.all([refreshQualityDashboard(), refreshVersionHistory(chapterId)])
       setOptimizeModalOpen(false)
       setOptimizationResult(null)
@@ -236,6 +240,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     currentChapter,
     currentChapterIdRef,
     optimizationResult,
+    editorText,
     refreshQualityDashboard,
     refreshVersionHistory,
     saveNow,

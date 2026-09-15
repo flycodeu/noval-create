@@ -57,6 +57,7 @@ export interface ReviewPriorityIssue {
 
 export interface ReviewPrioritySummary {
   automaticPolicy?: true
+  readingRevision?: boolean
   topIssues: ReviewPriorityIssue[]
   deferredIssues: ReviewPriorityIssue[]
   rewriteScope: ChapterRewriteScope
@@ -815,6 +816,7 @@ function buildAutomaticReviewPrioritySummary(notes: ChapterReviewNotesLike, cont
   }))
   const requiresFullRewrite = actionable.some((issue) => issue.scope === 'chapter')
   return { automaticPolicy: true, topIssues: issues.slice(0, 6), deferredIssues: issues.slice(6),
+    readingRevision: actionable.some((issue) => issue.category === 'narrative' || issue.category === 'style'),
     rewriteScope: resolveRewriteScope(issues.slice(0, 6), requiresFullRewrite), requiresFullRewrite,
     forceMaxCoverage: actionable.some((issue) => issue.category === 'fact'),
     counts: { high: issues.filter((issue) => issue.priority === 'high').length,
@@ -905,6 +907,8 @@ export function buildRewriteMiniReviewVerdict(options: {
   rewrittenContent: string
   reviewPrioritySummary: ReviewPrioritySummary
   reviewNotes: ChapterReviewNotesLike
+  /** Supplied only after current patch evidence and fact/knowledge checks. */
+  boundedRevision?: { targetsAddressed: boolean; factsPreserved: boolean; requiresAuthorReview: boolean }
 }): RewriteMiniReviewVerdict {
   const similarityToOriginal = computeCandidateSimilarity(options.originalContent, options.rewrittenContent)
   const readingExperience = analyzeChapterReadingExperience(options.rewrittenContent)
@@ -917,6 +921,23 @@ export function buildRewriteMiniReviewVerdict(options: {
   })
   const actionable = !options.reviewPrioritySummary.automaticPolicy
     || resolveReviewAutomaticIssues(options.reviewNotes, options.rewrittenContent).some(qualityIssueHasActionableLevel)
+  if (options.reviewPrioritySummary.automaticPolicy) {
+    const assessment = options.boundedRevision
+    const changed = options.originalContent !== options.rewrittenContent
+    const accepted = Boolean(options.rewrittenContent.trim()) && !actionable
+      && (!changed || Boolean(assessment?.targetsAddressed && assessment.factsPreserved && !assessment.requiresAuthorReview))
+    return {
+      improved: accepted && changed,
+      needsHumanReview: !accepted,
+      deltaDrivenOnly: false,
+      similarityToOriginal,
+      readingExperience,
+      narrativeDelta: { ...narrativeDelta, status: accepted ? 'pass' : 'weak', findings: [],
+        recommendation: accepted ? '按目标问题与事实检查采纳；改动比例仅作诊断。' : '保留原稿与候选，交作者核对目标问题和事实。' },
+      reason: accepted ? '本轮目标问题已处理，事实检查通过；不要求扩大改动。'
+        : '候选仍有问题、范围较大或缺少验证证据，需要作者比较。',
+    }
+  }
   const surfaceSimilarityTripped = Boolean(
     !options.rewrittenContent.trim()
     || (options.reviewPrioritySummary.requiresFullRewrite && similarityToOriginal >= 0.86)

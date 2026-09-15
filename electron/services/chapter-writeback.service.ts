@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
+import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import type {
   Chapter as AppChapter,
   ChapterFactExtract as AppChapterFactExtract,
@@ -54,6 +56,48 @@ import {
 } from './canon-ledger.service'
 
 type ChapterRow = typeof chapters.$inferSelect
+
+function buildWritebackSourceIdentity(chapter: ChapterRow): string {
+  const novel = getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+  const hash = (value: string | null) => createHash('sha256').update(value || '').digest('hex')
+  return JSON.stringify({ schemaVersion: 1, novelId: chapter.novelId, chapterId: chapter.id,
+    contentHash: hash(chapter.content), reviewHash: hash(chapter.reviewNotesJson),
+    settingsHash: hash(novel?.settingsJson ?? null), novelContextVersion: novel?.contextVersion || 1 })
+}
+
+/** Historical runs remain readable; reader-first cannot reuse an unbound candidate. */
+export function isChapterWritebackRunCurrent(run: typeof chapterWritebackRuns.$inferSelect): boolean {
+  const chapter = getChapterRow(run.chapterId)
+  if (!run.sourceIdentityJson) {
+    const novel = getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+    return resolveNarrativePolicy(novel?.settingsJson, true).policyVersion !== 'reader-first-v1'
+      && (run.sourceChapterVersion || 1) === (chapter.contextVersion || 1)
+  }
+  const source = parseJsonObject(run.sourceIdentityJson)
+  const current = parseJsonObject(buildWritebackSourceIdentity(chapter))!
+  if (!source || source.schemaVersion !== 1) return false
+  if (['novelId', 'chapterId', 'contentHash', 'reviewHash', 'settingsHash'].some((key) => source[key] !== current[key])) return false
+  if (source.novelContextVersion === current.novelContextVersion) return true
+  // A partial apply may have advanced the version through its own committed
+  // ledger. It may resume at that exact version, never past another edit.
+  const commit = getSqlite().prepare('SELECT context_version_after FROM canon_commits WHERE source_run_id = ? AND status = ? ORDER BY id DESC LIMIT 1')
+    .get(run.id, 'committed') as { context_version_after: number } | undefined
+  return commit?.context_version_after === current.novelContextVersion
+}
+
+function assertWritebackSourceCurrent(run: typeof chapterWritebackRuns.$inferSelect): void {
+  if (!isChapterWritebackRunCurrent(run)) throw new Error('正文、审校或前章依据已变化，旧回写候选已失效，请从当前选稿重新提取。')
+}
+
+function assertBoundWritebackSource(run: typeof chapterWritebackRuns.$inferSelect, chapter: ChapterRow): void {
+  if (run.sourceIdentityJson) { assertWritebackSourceCurrent(run); return }
+  const novel = getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+  if (resolveNarrativePolicy(novel?.settingsJson, true).policyVersion === 'reader-first-v1') assertWritebackSourceCurrent(run)
+}
+
+function getWritebackLedgerContextVersion(chapter: ChapterRow): number {
+  return getDb().select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]?.contextVersion || chapter.contextVersion || 1
+}
 type NovelRow = typeof novels.$inferSelect
 type CharacterRow = typeof characters.$inferSelect
 type ChapterWritebackRunRow = typeof chapterWritebackRuns.$inferSelect
@@ -647,13 +691,14 @@ function buildWorldStateRecord(state: WorldStateLike): Record<string, unknown> {
 }
 
 function buildDeterministicStateDraft(chapter: ChapterRow): { extracts: DraftExtract[]; diffs: DraftDiff[] } {
+  if (/正文已更新|正文版本已修改/u.test(chapter.staleReasonJson || '')) return { extracts: [], diffs: [] }
   const extracts: DraftExtract[] = []
   const diffs: DraftDiff[] = []
 
   const currentCharacterStates = listLatestCharacterStates(chapter.novelId, {
     upToChapterNum: chapter.chapterNum,
     limit: 1000,
-  }).filter((item) => item.chapterId === chapter.id)
+  }).filter((item) => item.chapterId === chapter.id && !/正文已更新|正文版本已修改/u.test(chapter.staleReasonJson || ''))
   const previousCharacterStates = new Map(
     listLatestCharacterStates(chapter.novelId, {
       upToChapterNum: Math.max((chapter.chapterNum || 0) - 1, 0),
@@ -692,7 +737,7 @@ function buildDeterministicStateDraft(chapter: ChapterRow): { extracts: DraftExt
   const currentWorldStates = listLatestWorldStates(chapter.novelId, {
     upToChapterNum: chapter.chapterNum,
     limit: 1000,
-  }).filter((item) => item.chapterId === chapter.id)
+  }).filter((item) => item.chapterId === chapter.id && !/正文已更新|正文版本已修改/u.test(chapter.staleReasonJson || ''))
     .filter((item) => item.entityType === 'faction' || item.entityType === 'location')
   const previousWorldStates = new Map(
     listLatestWorldStates(chapter.novelId, {
@@ -739,11 +784,11 @@ function buildWritebackPrompt(context: ExistingAssetContext): string {
   const currentCharacterStates = listLatestCharacterStates(chapter.novelId, {
     upToChapterNum: chapter.chapterNum,
     limit: 24,
-  }).filter((item) => item.chapterId === chapter.id)
+  }).filter((item) => item.chapterId === chapter.id && !/正文已更新|正文版本已修改/u.test(chapter.staleReasonJson || ''))
   const currentWorldStates = listLatestWorldStates(chapter.novelId, {
     upToChapterNum: chapter.chapterNum,
     limit: 24,
-  }).filter((item) => item.chapterId === chapter.id)
+  }).filter((item) => item.chapterId === chapter.id && !/正文已更新|正文版本已修改/u.test(chapter.staleReasonJson || ''))
 
   return [
     '你是小说 Canonizer。',
@@ -755,6 +800,7 @@ function buildWritebackPrompt(context: ExistingAssetContext): string {
     'assetType 只能用：character, world, item, relation, thread, foreshadow, puzzle, timeline。',
     'entityType 只能用：character-state, world-state, story-item, relationship-arc, story-thread, foreshadow-ledger, story-fact, timeline-event。',
     '最多输出 24 条 diffs，没有明确候选就不输出。',
+    '没有新增持续事实时返回 {"extracts":[],"diffs":[]}；日常相处、暂时情绪不强制创建资产。人物猜测保留是谁的认识，关系推断不是客观事实；只提出有正文依据的候选。',
     `小说：${context.novel?.title || '未命名小说'}`,
     `章节：${chapterLabel}`,
     `章节摘要：${chapter.summary || ''}`,
@@ -778,7 +824,7 @@ function buildWritebackPrompt(context: ExistingAssetContext): string {
     `现有物品：${JSON.stringify(context.items.slice(0, 40).map((item) => ({ id: item.id, itemName: item.itemName, status: item.status, ownerCharacterId: item.ownerCharacterId })))}`,
     `现有关系统弧：${JSON.stringify(context.relationshipArcs.slice(0, 40).map((item) => ({ id: item.id, charAId: item.charAId, charBId: item.charBId, charAName: item.charAName, charBName: item.charBName, currentStatus: item.currentStatus })))}`,
     '章节正文：',
-    clipText(chapter.content || '', 12000),
+    chapter.content || '',
   ].join('\n')
 }
 
@@ -1072,17 +1118,21 @@ async function buildAiDraft(context: ExistingAssetContext): Promise<{ extracts: 
     })
     const parsed = parseAiJsonResult<Record<string, unknown>>(result, 'object', {
       channel: 'writeback',
-      message: '章节回写候选 JSON 解析失败，已回退到结构化保底草案。',
+      message: '章节回写候选 JSON 解析失败，尚未确认是否存在增量，请重新提取。',
       consoleSummary: `[writeback:warn] chapter-writeback-json chapter=${context.chapter.id}`,
       context: { chapterId: context.chapter.id, novelId: context.chapter.novelId },
     })
-    if (!parsed.success || !parsed.data) return { extracts: [], diffs: [] }
-    return {
-      extracts: sanitizeAiExtracts(parsed.data.extracts),
-      diffs: sanitizeAiDiffs(parsed.data.diffs, context),
+    if (!parsed.success || !parsed.data || !Array.isArray(parsed.data.extracts) || !Array.isArray(parsed.data.diffs)) {
+      throw new Error('回写抽取未返回有效候选结构，不能视为无增量完成。')
     }
-  } catch {
-    return { extracts: [], diffs: [] }
+    const extracts = sanitizeAiExtracts(parsed.data.extracts)
+    const diffs = sanitizeAiDiffs(parsed.data.diffs, context)
+    if (extracts.length !== parsed.data.extracts.length || diffs.length !== parsed.data.diffs.length) {
+      throw new Error('回写候选含不可识别条目，不能丢弃后当作已同步。')
+    }
+    return { extracts, diffs }
+  } catch (error) {
+    throw new Error(`回写抽取失败，尚未确认是否无增量：${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -1581,6 +1631,8 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
       ))
       .all()[0]
     if (!activeRun) throwUserFacingError('chapterWriteback.runInvalidated')
+    const sourceRun = getRunRow(row.runId)
+    if (sourceRun.sourceIdentityJson) assertWritebackSourceCurrent(sourceRun)
     const current = db.select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, row.id)).all()[0]
     const currentDecision = current ? normalizeDecision(current.canonDecision) : 'pending'
     if (
@@ -1592,6 +1644,7 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
       throwUserFacingError('chapterWriteback.decisionLocked')
     }
     const entityId = applySingleDiff(current, chapter)
+    if (sourceRun.sourceIdentityJson) assertWritebackSourceCurrent(sourceRun)
     const result = db.update(chapterWritebackDiffs).set({
       entityId: entityId ?? current.entityId,
       writebackStatus: 'applied',
@@ -1607,6 +1660,7 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
 export async function prepareChapterWritebackRun(chapterId: number, triggerSource = 'manual'): Promise<AppChapterWritebackRun> {
   const db = getDb()
   const chapter = getChapterRow(chapterId)
+  const sourceIdentityJson = buildWritebackSourceIdentity(chapter)
   const now = new Date().toISOString()
   const currentSyncStatus = parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
   const reservation = getSqlite().transaction(() => {
@@ -1615,6 +1669,7 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
     const reusableRun = loadRunRowsByChapter(chapterId).find((run) => (
       ['draft', 'ready', 'applying'].includes(run.status)
       && (run.sourceChapterVersion || 1) === (chapter.contextVersion || 1)
+      && isChapterWritebackRunCurrent(run)
     ))
     if (reusableRun) return { existing: reusableRun, runId: null as number | null }
 
@@ -1636,11 +1691,14 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
       retryCount: currentSyncStatus.retryCount,
       lastAttemptAt: now,
       sourceChapterVersion: chapter.contextVersion || 1,
+      sourceIdentityJson,
       startedAt: now,
       createdAt: now,
       updatedAt: now,
     }).run()
-    return { existing: null, runId: Number(insert.lastInsertRowid) }
+    const runId = Number(insert.lastInsertRowid)
+    updateChapterWritebackSyncStatus(chapterId, { runId })
+    return { existing: null, runId }
   })()
   if (reservation.existing) return mapRunRow(reservation.existing)
   const runId = reservation.runId
@@ -1688,46 +1746,32 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
           updatedAt: now,
         }))).run()
       }
+      const currentRun = getRunRow(runId)
+      const valid = currentRun.status === 'draft' && isChapterWritebackRunCurrent(currentRun)
+      const errorMessage = valid ? null : '抽取期间正文、审校或前章依据变化，候选保留但不可应用。'
       db.update(chapterWritebackRuns).set({
-        // 没有事实或差异时不需要等待人工“应用空写回”。这不是 Canon 写入，
-        // 而是把本次无变化结果收口，避免下一章被无意义地永久阻塞。
-        status: hasCandidateData ? 'ready' : 'applied',
+        status: valid ? (hasCandidateData ? 'ready' : 'applied') : 'failed',
+        errorMessage,
         completedAt: new Date().toISOString(),
-        lastAttemptAt: new Date().toISOString(),
+        failedAt: valid ? null : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }).where(eq(chapterWritebackRuns.id, runId)).run()
-    })
-    persistDraft()
-    refreshRunSummary(runId)
-    const persistedRun = getRunRow(runId)
-    if (!hasCandidateData) {
-      updateChapterWritebackSyncStatus(chapterId, {
-        phase: 'applied',
+      refreshRunSummary(runId)
+      const currentStatus = parseWritebackSyncStatus(getChapterRow(chapterId).writebackStatusJson)
+      if (currentStatus.runId === runId) updateChapterWritebackSyncStatus(chapterId, {
+        phase: valid ? (hasCandidateData ? 'ready' : 'applied') : 'failed',
         runId,
-        candidateReady: false,
-        canonApplied: true,
-        blockedGeneration: false,
-        readyForNextChapter: true,
-        lastError: undefined,
-        lastAttemptAt: new Date().toISOString(),
-        retryCount: currentSyncStatus.retryCount,
+        candidateReady: valid && hasCandidateData,
+        canonApplied: valid && !hasCandidateData,
+        blockedGeneration: !valid || hasCandidateData,
+        readyForNextChapter: valid && !hasCandidateData,
+        lastError: errorMessage || undefined,
         contextVersion: chapter.contextVersion || 1,
       })
-      return mapRunRow(persistedRun)
-    }
-    updateChapterWritebackSyncStatus(chapterId, {
-      phase: 'ready',
-      runId,
-      candidateReady: true,
-      canonApplied: false,
-      blockedGeneration: true,
-      readyForNextChapter: false,
-      lastError: undefined,
-      lastAttemptAt: new Date().toISOString(),
-      retryCount: currentSyncStatus.retryCount,
-      contextVersion: chapter.contextVersion || 1,
     })
-    loadDiffRows(runId).forEach((diff) => {
+    persistDraft()
+    const persistedRun = getRunRow(runId)
+    if (persistedRun.status === 'ready') loadDiffRows(runId).forEach((diff) => {
       createWritebackVerificationTask(persistedRun, diff, chapter)
     })
   } catch (error) {
@@ -1740,7 +1784,7 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
       errorMessage: error instanceof Error ? error.message : '章后回写草案生成失败',
       updatedAt: new Date().toISOString(),
     }).where(eq(chapterWritebackRuns.id, runId)).run()
-    updateChapterWritebackSyncStatus(chapterId, {
+    if (parseWritebackSyncStatus(getChapterRow(chapterId).writebackStatusJson).runId === runId) updateChapterWritebackSyncStatus(chapterId, {
       phase: 'failed',
       runId,
       blockedGeneration: true,
@@ -1769,6 +1813,20 @@ export async function prepareChapterWritebackRunWithRetry(
     throwUserFacingError('chapterWriteback.writebackDraftFailed')
   }
   return lastRun
+}
+
+/** Finalize may refresh derived assets; bind its Canon candidate to that final input. */
+export async function refreshFinalizedChapterCanonRun(runId: number): Promise<AppChapterWritebackRun> {
+  const run = getRunRow(runId)
+  if (isChapterWritebackRunCurrent(run) && ['ready', 'applied'].includes(run.status)) return mapRunRow(run)
+  const source = parseJsonObject(run.sourceIdentityJson)
+  const current = parseJsonObject(buildWritebackSourceIdentity(getChapterRow(run.chapterId)))
+  if (!source || source.contentHash !== current?.contentHash) assertWritebackSourceCurrent(run)
+  const refreshed = await prepareChapterWritebackRunWithRetry(run.chapterId, 'pipeline-final-source-refresh', 3)
+  const finalRun = getRunRow(refreshed.id)
+  assertWritebackSourceCurrent(finalRun)
+  if (!['ready', 'applied'].includes(finalRun.status)) throw new Error('最终选稿的 Canon 抽取尚未完成，请重试 Canonizer。')
+  return refreshed
 }
 
 export async function listChapterWritebackRuns(chapterId: number): Promise<AppChapterWritebackRun[]> {
@@ -1874,6 +1932,7 @@ async function executeRunApply(
   const db = getDb()
   const run = getRunRow(runId)
   const chapter = getChapterRow(run.chapterId)
+  assertBoundWritebackSource(run, chapter)
   const idempotencyKey = normalizeWritebackApplyKey(runId, retryFailedOnly, options)
   const keyOwner = db.select({ id: chapterWritebackRuns.id })
     .from(chapterWritebackRuns)
@@ -1913,7 +1972,8 @@ async function executeRunApply(
 
   const sourceChapterVersion = run.sourceChapterVersion || 1
   const currentContextVersion = chapter.contextVersion || 1
-  if (sourceChapterVersion !== currentContextVersion) {
+  const ledgerContextVersion = getWritebackLedgerContextVersion(chapter)
+  if (!run.sourceIdentityJson && sourceChapterVersion !== currentContextVersion) {
     const errorMessage = `上下文版本已从 v${sourceChapterVersion} 变为 v${currentContextVersion}，需要重新生成章后回写草案后再应用。`
     db.update(chapterWritebackRuns).set({
       status: 'failed',
@@ -1999,6 +2059,8 @@ async function executeRunApply(
   // one recoverable commit. If any part fails the run stays `applying`; stale
   // recovery can safely finish it without losing a context-version increment.
   runImmediateTransaction(() => {
+    if (run.sourceIdentityJson) assertWritebackSourceCurrent(getRunRow(run.id))
+    if (getRunRow(run.id).status !== 'applying') throwUserFacingError('chapterWriteback.runInvalidated')
     if (hasNovelSourceCanonWritebackPayload(run.id)) {
       syncNovelSourceCanonWriteback(chapter, run)
     }
@@ -2022,12 +2084,12 @@ async function executeRunApply(
       retryCount: run.retryCount || 0,
       contextVersion: chapter.contextVersion || 1,
     })
-    let committedContextVersion = currentContextVersion
+    let committedContextVersion = ledgerContextVersion
     if (shouldMarkContextChanged) {
       const nextContextVersion = markNovelContextChanged(chapter.novelId, 'Chapter writeback applied')
       committedContextVersion = Number.isInteger(nextContextVersion) && nextContextVersion > 0
         ? nextContextVersion
-        : currentContextVersion + 1
+        : ledgerContextVersion + 1
       const ledgerEntries = buildCanonLedgerEntries(chapter, run, finalDiffs)
       if (ledgerEntries.length > 0) {
         recordCommittedCanonLedger({
@@ -2037,13 +2099,15 @@ async function executeRunApply(
           inputHash: hashCanonInput({
             runId: run.id,
             sourceChapterVersion: run.sourceChapterVersion || 1,
+            sourceIdentity: parseJsonObject(run.sourceIdentityJson),
             entries: ledgerEntries,
           }),
           idempotencyKey: buildWritebackCanonIdempotencyKey(run.id),
-          contextVersionBefore: currentContextVersion,
+          contextVersionBefore: ledgerContextVersion,
           contextVersionAfter: committedContextVersion,
           payload: {
             source: 'chapter_writeback',
+            sourceIdentity: parseJsonObject(run.sourceIdentityJson),
             runId: run.id,
             chapterId: chapter.id,
             appliedDiffIds: finalDiffs
