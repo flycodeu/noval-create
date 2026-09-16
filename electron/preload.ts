@@ -125,6 +125,9 @@ const api = {
     getWorldStateLedgerSnapshot: (id: number, upToChapterNum?: number) => invokeIpc('novel:getWorldStateLedgerSnapshot', id, upToChapterNum),
     getWorldStateHistory: (novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
       invokeIpc('novel:getWorldStateHistory', novelId, entityType, entityId, stateKey, limit),
+    getReaderFeedback: (id: number) => invokeIpc('novel:getReaderFeedback', id),
+    saveReaderFeedback: (id: number, input: import('../src/shared/reader-feedback').SaveReaderFeedbackInput) => invokeIpc('novel:saveReaderFeedback', id, input),
+    revokeReaderFeedback: (id: number, input: { id: string; expectedRevision: number }) => invokeIpc('novel:revokeReaderFeedback', id, input),
     getContextStatus: (id: number) => invokeIpc('novel:getContextStatus', id),
     getImpactSummary: (id: number) => invokeIpc('novel:getImpactSummary', id),
     listImpactEvents: (id: number) => invokeIpc('novel:listImpactEvents', id),
@@ -618,6 +621,7 @@ const api = {
 
   // Style Analysis
   style: {
+    approveTrial: (novelId: number, text: string) => invokeIpc('style:approveTrial', novelId, text),
     analyze: (text: string, modelConfigId?: number) => invokeIpc('style:analyze', text, modelConfigId),
     create: (novelId: number | null, name: string, text: string, modelConfigId?: number) => invokeIpc('style:create', novelId, name, text, modelConfigId),
     createFromChapters: (novelId: number, name: string, chapterIds: number[], modelConfigId?: number) => invokeIpc('style:createFromChapters', novelId, name, chapterIds, modelConfigId),
@@ -626,7 +630,7 @@ const api = {
     delete: (id: number) => invokeIpc('style:delete', id),
     setActive: (novelId: number, fingerprintId: number | null) => invokeIpc('style:setActive', novelId, fingerprintId),
     resolveActive: (novelId: number) => invokeIpc('style:resolveActive', novelId),
-    abTest: (novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) => invokeIpc('style:abTest', novelId, fingerprintId, sceneBrief, modelConfigId),
+    abTest: (novelId: number, fingerprintId: number | null, sceneBrief: string, modelConfigId?: number) => invokeIpc('style:abTest', novelId, fingerprintId, sceneBrief, modelConfigId),
   },
 
   // Parallel Generation
@@ -651,7 +655,8 @@ const api = {
       originalParagraph: string
       contextBefore: string
       specificRequirements: string
-      modelConfigId?: number
+      chapterId?: number
+          modelConfigId?: number
       novelId?: number
       executionMode?: import('../src/shared/ai-execution').AiExecutionMode
     }) => invokeIpc('ai:rewriteParagraph', data),
@@ -670,7 +675,10 @@ const api = {
       content: string
       genreContext: string
       novelBackground: string
-      modelConfigId?: number
+      chapterId?: number
+          novelId?: number
+          executionMode?: import('../src/shared/ai-execution').AiExecutionMode
+          modelConfigId?: number
     }) => invokeIpc('ai:scoreContent', data),
     analyzeWorkspaceQuality: (data: unknown) => invokeIpc('ai:analyzeWorkspaceQuality', data),
     repairWorkspaceQuality: (data: unknown) => invokeIpc('ai:repairWorkspaceQuality', data),

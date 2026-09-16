@@ -8,6 +8,9 @@ import type { WritingRouteKey } from './components/InsightPanel'
 import { resolvePublishFinalizationDecision } from './chapter-review-policy'
 
 export interface UseChapterPublicationOptions {
+  currentChapterIdRef?: { current: number | null }
+  editorText?(): string
+  saveNow?(chapterId: number, text: string): Promise<void>
   novelId: number
   currentChapter: Chapter | null
   selectedVersionId: number | null
@@ -36,6 +39,9 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
   const statusChangeInFlightRef = useRef(false)
   const {
     currentChapter,
+    currentChapterIdRef,
+    editorText,
+    saveNow,
     loadChapters,
     navigate,
     navigateToWritingRoute,
@@ -100,7 +106,9 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
 
   const changeStatusInternal = useCallback(async (status: Chapter['status']) => {
     if (!currentChapter) return
+    const reviewedContent = editorText?.() ?? currentChapter.content ?? ''
     if (status === 'final') {
+      await saveNow?.(currentChapter.id, reviewedContent)
       const nextPublishCheck = await window.electron.chapter.runPublishCheck(currentChapter.id)
       setPublishCheck(nextPublishCheck)
       setCurrentChapter((current) => current && current.id === currentChapter.id
@@ -140,10 +148,18 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
         if (!shouldContinue) return
       }
     }
+    if (status === 'final' && ((currentChapterIdRef && currentChapterIdRef.current !== currentChapter.id)
+      || (editorText && editorText() !== reviewedContent))) {
+      message.warning('正文已变化，请重新审校后定稿。')
+      return
+    }
     await window.electron.chapter.update(currentChapter.id, { status })
     await Promise.all([loadChapters(currentChapter.id), refreshMeta(), refreshContextStatus()])
   }, [
     currentChapter,
+    currentChapterIdRef,
+    editorText,
+    saveNow,
     loadChapters,
     navigate,
     novelId,

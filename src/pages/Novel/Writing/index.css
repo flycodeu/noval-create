@@ -523,7 +523,6 @@
   min-width: 0;
 }
 
-.app-layout .novel-route-shell--single:has(.novel-writing-console-page) > .workspace-chat-assistant,
 .app-layout .novel-route-shell--single:has(.novel-writing-console-page) > .novel-route-shell__assistant-tab {
   display: none;
 }
@@ -1509,4 +1508,28 @@
 
 .novel-writing-console-page .novel-empty--writing {
   min-height: clamp(220px, 32dvh, 340px);
+}
+
+/* RF-14: respond to available workspace width, including host sidebars. */
+.novel-writing-console-page { container-type: inline-size; container-name: writing; }
+.writing-contract-disclosure { padding: 12px; border: 1px solid var(--border-default); border-radius: 8px; }
+.writing-contract-disclosure > summary { cursor: pointer; font-weight: 600; }
+.writing-passage-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.writing-passage-comparison label { min-width: 0; line-height: 2; }
+.writing-feedback-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+@container writing (max-width: 1250px) {
+  .app-layout .novel-writing-console-page .chapter-console-page__grid.has-assist-panel { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); }
+  .novel-writing-console-page .chapter-console-page__column--right { grid-column: 1 / -1; position: static; }
+}
+@container writing (max-width: 760px) {
+  .app-layout .novel-writing-console-page .chapter-console-page__grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .novel-writing-console-page .chapter-console-page__editor-actions { flex-wrap: wrap; }
+}
+@media (max-width: 600px) { .writing-passage-comparison { grid-template-columns: minmax(0, 1fr); } }
+
+@media (min-width: 1200px) {
+  .app-layout .novel-route-shell--single.novel-route-shell--assistant-open:has(.novel-writing-console-page) {
+    grid-template-columns: minmax(0, 1fr) var(--novel-shell-assistant-width) !important;
+    grid-template-areas: "topbar topbar" "content assistant" !important;
+  }
 }

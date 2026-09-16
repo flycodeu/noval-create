@@ -14,6 +14,8 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type {
+  Chapter,
+  Task,
   NovelConsistencyReport,
   NovelContextStatus,
   OperationLog,
@@ -34,6 +36,7 @@ import {
 } from '../components/WorkspaceShell'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
 import { getErrorMessage } from '@/utils/user-facing-message'
+import { getStudioNextStep, getRecentStudioChapter, getStudioSceneLabel } from './studio-next-step'
 import './index.css'
 
 dayjs.extend(relativeTime)
@@ -70,6 +73,9 @@ export default function StudioPage({ novelId }: Props) {
   const location = useLocation()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [approvedVoice, setApprovedVoice] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
@@ -84,7 +90,7 @@ export default function StudioPage({ novelId }: Props) {
 
   const loadConsoleData = useCallback(async () => {
     const requestId = ++loadRequestRef.current
-    const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
+    const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities, chapterList, taskList, voice] = await Promise.all([
       window.electron.novel.get(novelId),
       loadWorkflowStats(novelId),
       window.electron.novel.runConsistencyCheck(novelId),
@@ -92,10 +98,16 @@ export default function StudioPage({ novelId }: Props) {
       window.electron.quality.getDashboard(novelId).catch(() => null),
       window.electron.revision.getSnapshot(novelId).catch(() => null),
       window.electron.history.listRecent(novelId, 8).catch(() => []),
+      window.electron.chapter.list(novelId),
+      window.electron.task.list(novelId),
+      window.electron.style.resolveActive(novelId),
     ])
     if (loadRequestRef.current !== requestId) return
 
     if (novel) setCurrentNovel(novel)
+    setChapters(chapterList)
+    setTasks(taskList)
+    setApprovedVoice(Boolean(voice?.approvedSample))
     setStats(workflowStats)
     setConsistencyReport(report)
     setContextStatus(nextContextStatus)
@@ -193,11 +205,13 @@ export default function StudioPage({ novelId }: Props) {
     { key: 'quality', label: '质量监控', route: 'quality', hint: '检查生产健康和趋势' },
   ]), [])
 
-  const nextStepPriority = nextStepPriorityPresentation(workspaceSnapshot.nextStep.priority)
+  const nextStep = useMemo(() => getStudioNextStep(chapters, tasks, approvedVoice), [chapters, tasks, approvedVoice])
+  const recentScene = getStudioSceneLabel(getRecentStudioChapter(chapters))
+  const nextStepPriority = nextStepPriorityPresentation(nextStep.priority)
 
   const openRecommendedStep = useCallback(() => {
-    navigate(buildWorkspaceRoute(novelId, workspaceSnapshot.nextStep.targetPage))
-  }, [navigate, novelId, workspaceSnapshot.nextStep.targetPage])
+    navigate(nextStep.targetPage.startsWith('/') ? nextStep.targetPage : buildWorkspaceRoute(novelId, nextStep.targetPage))
+  }, [navigate, novelId, nextStep.targetPage])
 
   if (loading && !currentNovel) {
     return (
@@ -217,7 +231,7 @@ export default function StudioPage({ novelId }: Props) {
       actionContract={{
         primary: {
           key: 'recommended-next-step',
-          label: workspaceSnapshot.nextStep.actionLabel,
+          label: nextStep.actionLabel,
           icon: <ThunderboltOutlined />,
           onClick: openRecommendedStep,
         },
@@ -260,23 +274,28 @@ export default function StudioPage({ novelId }: Props) {
           </div>
         ) : null}
 
+        <div className="studio-page__scene-status" data-studio-phase>
+          <Tag>{chapters.some((chapter) => chapter.content?.trim()) ? '正文创作' : '开书试写'}</Tag>
+          <span>最近场景：{recentScene}</span>
+          <Tag color={approvedVoice ? 'green' : 'default'}>{approvedVoice ? '声音已认可' : '声音试用中'}</Tag>
+        </div>
         <section
           className={`studio-page__next-step${queryPanel === 'next-step' ? ' is-focused' : ''}`}
           data-studio-next-step
-          data-target-route={workspaceSnapshot.nextStep.targetPage}
+          data-target-route={nextStep.targetPage}
         >
           <div className="studio-page__section-heading">
             <div>
               <span className="studio-page__eyebrow">推荐下一步</span>
-              <h2>{workspaceSnapshot.nextStep.title}</h2>
-              <p>{workspaceSnapshot.nextStep.reason}</p>
+              <h2>{nextStep.title}</h2>
+              <p>{nextStep.reason}</p>
             </div>
             <Tag color={nextStepPriority.color}>
               {nextStepPriority.label}
             </Tag>
           </div>
           <div className="studio-page__next-step-footer">
-            <span>{workspaceSnapshot.nextStep.estimatedMinutes ? `预计 ${workspaceSnapshot.nextStep.estimatedMinutes} 分钟` : '预计耗时未记录'}</span>
+            <span>{nextStep.estimatedMinutes ? `预计 ${nextStep.estimatedMinutes} 分钟` : '预计耗时未记录'}</span>
             <span className="studio-page__primary-hint">使用顶部主操作进入</span>
           </div>
         </section>
@@ -286,8 +305,8 @@ export default function StudioPage({ novelId }: Props) {
           data-studio-blockers
         >
           <SectionHeader
-            eyebrow="需要先处理"
-            title="当前阻塞"
+            eyebrow="正式创作检查"
+            title="资料与事实待办"
             extra={availableBlockers.length > 0 ? <Tag color="volcano">{`${availableBlockers.length} 项`}</Tag> : null}
           />
           {availableBlockers.length > 0 ? (

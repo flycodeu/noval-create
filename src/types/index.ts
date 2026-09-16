@@ -273,6 +273,7 @@ export interface Chapter {
   nextChapterSeed?: string
   bridgePlanJson?: string
   continuityStateJson?: string
+  lockedParagraphsJson?: string
   reviewNotesJson?: string
   status: 'outline' | 'writing' | 'draft' | 'reviewing' | 'final'
   aiScoreJson?: string
@@ -1669,6 +1670,7 @@ export type AssetReviewTarget =
   | 'theme_voice'
 
 export interface AssetReviewResult {
+  issues?: import('../shared/quality-issue').QualityIssueV1[]
   summary: string
   severity: 'low' | 'medium' | 'high'
   rewriteRequired: boolean
@@ -5945,6 +5947,9 @@ declare global {
         getWorldStateSnapshot: (id: number, upToChapterNum?: number) => Promise<{ currentStates: WorldStateSummary[]; alerts: WorldStateAlert[]; worldStatesText: string; trendSummary: string[] }>
         getWorldStateLedgerSnapshot: (id: number, upToChapterNum?: number) => Promise<WorldStateLedgerSnapshot>
         getWorldStateHistory: (novelId: number, entityType: WorldStateEntityType, entityId: number, stateKey?: string, limit?: number) => Promise<WorldStateVersion[]>
+        getReaderFeedback: (id: number) => Promise<import('../shared/reader-feedback').ReaderFeedbackSettings>
+        saveReaderFeedback: (id: number, input: import('../shared/reader-feedback').SaveReaderFeedbackInput) => Promise<import('../shared/reader-feedback').ReaderFeedbackMutationResult>
+        revokeReaderFeedback: (id: number, input: { id: string; expectedRevision: number }) => Promise<import('../shared/reader-feedback').ReaderFeedbackMutationResult>
         getContextStatus: (id: number) => Promise<NovelContextStatus>
         getImpactSummary: (id: number) => Promise<AssetImpactSummary>
         listImpactEvents: (id: number) => Promise<AssetChangeEvent[]>
@@ -6478,7 +6483,8 @@ declare global {
         delete: (id: number) => Promise<void>
         setActive: (novelId: number, fingerprintId: number | null) => Promise<void>
         resolveActive: (novelId: number) => Promise<ResolvedStyleFingerprintPayload | null>
-        abTest: (novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) => Promise<StyleAbTestResult>
+        approveTrial: (novelId: number, text: string) => Promise<number>
+        abTest: (novelId: number, fingerprintId: number | null, sceneBrief: string, modelConfigId?: number) => Promise<StyleAbTestResult>
       }
       parallel: {
         analyzePlan: (novelId: number, chapterStart: number, chapterEnd: number) => Promise<ParallelGenerationPlan>
@@ -6499,6 +6505,7 @@ declare global {
           originalParagraph: string
           contextBefore: string
           specificRequirements: string
+          chapterId?: number
           modelConfigId?: number
           novelId?: number
           executionMode?: AiExecutionMode
@@ -6515,6 +6522,9 @@ declare global {
           content: string
           genreContext: string
           novelBackground: string
+          chapterId?: number
+          novelId?: number
+          executionMode?: AiExecutionMode
           modelConfigId?: number
         }) => Promise<AIScoreResult>
         analyzeWorkspaceQuality: (data: WorkspaceQualityAnalyzeRequest) => Promise<WorkspaceQualityAnalyzeResult>

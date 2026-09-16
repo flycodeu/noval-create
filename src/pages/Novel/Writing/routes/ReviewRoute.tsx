@@ -1,3 +1,4 @@
+import { readCurrentReviewIssues } from '../reading-review-evidence'
 import React from 'react'
 import { Button, Tag } from 'antd'
 import AIScorePanel from '../../../../components/AIScorePanel'
@@ -167,7 +168,7 @@ function ReviewDiagnostics({ model, actions }: Pick<Props, 'model' | 'actions'>)
       <InsightCard title="主角与节奏风险" eyebrow="跨章节结构告警" tone="soft"><StoryDynamicsHealthCard dashboard={model.qualityDashboard} currentChapter={model.chapter} reviewNotes={model.reviewNotes} /></InsightCard>
       <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft"><WorldStateHealthCard dashboard={model.qualityDashboard} /></InsightCard>
       <InsightCard title="AI 检测与复检" eyebrow="局部诊断" tone="soft">
-        <AIScorePanel getContent={actions.getEditorContent} contentType="chapter" genreContext={model.aiScore.genreContext} novelBackground={model.aiScore.novelBackground} modelConfigId={model.aiScore.modelConfigId} novelId={model.aiScore.novelId} disabled={model.aiScore.disabled} onRegenerate={actions.onRegenerate} drawCount={1} />
+        <AIScorePanel getContent={actions.getEditorContent} contentType="chapter" genreContext={model.aiScore.genreContext} novelBackground={model.aiScore.novelBackground} modelConfigId={model.aiScore.modelConfigId} novelId={model.aiScore.novelId} chapterId={model.chapter?.id} disabled={model.aiScore.disabled} onRegenerate={actions.onRegenerate} drawCount={1} />
         {model.aiResult ? <div className="writing-layout-note-space-top"><AiCheckResult result={model.aiResult} /></div> : <div className="novel-copy-block writing-layout-note-space-top">点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
       </InsightCard>
       <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={model.focusAreas} empty="最近没有新的高优先项，继续推进正文即可。" /></InsightCard>
@@ -175,16 +176,34 @@ function ReviewDiagnostics({ model, actions }: Pick<Props, 'model' | 'actions'>)
   )
 }
 
+function CurrentDraftIssues({ model, actions }: Props) {
+  const issues = readCurrentReviewIssues(model.chapter?.reviewNotesJson, actions.getEditorContent())
+  return <InsightCard title="当前稿问题" eyebrow="原文依据 / 最小修订">
+    {issues.length ? issues.map(({ issue, current }) => <div key={issue.id} className="novel-issue-item">
+      <Tag>{issue.level === 'blocker' ? '事实或格式阻断' : issue.level === 'repair' ? '可修订' : '阅读建议'}</Tag>
+      <strong>{issue.message}</strong>
+      {issue.evidence.map((evidence, index) => <div key={index}>
+        <blockquote>{evidence.quote}</blockquote>
+        <Button size="small" disabled={!current} onClick={() => actions.onLocateEvidence?.(evidence)}>定位原文</Button>
+      </div>)}
+      {!current ? <p role="status">缺少当前稿证据或原稿已变化，请重新审校。</p> : null}
+    </div>) : <p>当前没有可定位的问题证据。可在正文选择文段，比较修订候选或记录阅读偏好。</p>}
+  </InsightCard>
+}
+
 export default function ReviewRoute({ model, actions, title = '审校视图' }: Props) {
   return (
     <section className="writing-route-view writing-route-view--review" data-route="review">
       <header className="writing-route-view__header"><strong>{title}</strong></header>
       <div className="writing-route-view__body">
-        <ReviewSpotlight model={model} />
+        <CurrentDraftIssues model={model} actions={actions} />
         <div className="novel-writing-shell__insight-stack">
           <InsightCard title="审校意见" eyebrow="事实连续性 / 人物声音 / 语言读感" tone="soft"><ReviewNotesPanel notes={model.reviewNotes as Record<string, unknown> | null} /></InsightCard>
-          <PublishCheckCard model={model} actions={actions} />
-          <ReviewDiagnostics model={model} actions={actions} />
+          <details className="writing-contract-disclosure"><summary>定稿检查与合同对账</summary><PublishCheckCard model={model} actions={actions} /></details>
+          <details className="writing-contract-disclosure"><summary>全书体检与详细诊断</summary>
+            <ReviewSpotlight model={model} />
+            <ReviewDiagnostics model={model} actions={actions} />
+          </details>
         </div>
       </div>
     </section>

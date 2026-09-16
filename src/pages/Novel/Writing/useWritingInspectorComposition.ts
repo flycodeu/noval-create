@@ -67,6 +67,7 @@ interface WritingInspectorCompositionInput {
     deleteForeshadow(entry: ForeshadowLedgerEntry): void
     openGateIssue: Parameters<typeof useWritingInspector>[0]['actions']['openGateIssue']
     setGateReportExpanded: Dispatch<SetStateAction<boolean>>
+    onLocateEvidence?(evidence: import('../../../shared/quality-issue').QualityIssueEvidence): void
     getEditorContent(): string
     regenerate(content: string): void
     setSelectedVersionId: Dispatch<SetStateAction<number | null>>

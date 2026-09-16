@@ -1,3 +1,4 @@
+import { generateChapterContent } from './chapter.service'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb } from '../database/db'
@@ -632,6 +633,22 @@ describe('chapter batch workflow', () => {
       completedChapterIds: [101, 102],
       completed: true,
     })
+  })
+
+  it('RF-13 reader-first pauses before using an unconfirmed previous chapter', async () => {
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [novels, [{ id: 1, launchMode: 'fast_launch', targetWords: 10000, settingsJson: JSON.stringify({ readerFirst: { schemaVersion: 1, policyVersion: 'reader-first-v1', revision: 1 } }) }]],
+    ])) as never)
+    chapterRows.set(101, { id: 101, novelId: 1, chapterNum: 1 })
+    chapterRows.set(102, { id: 102, novelId: 1, chapterNum: 2 })
+    setScenario(101, { status: 'success' })
+    setScenario(102, { status: 'success' })
+    setPublishChecks(101, { gateLevel: 'pass', ready: true, summary: '通过' })
+    createBatchTask(19, [101, 102])
+    await __testing.runChapterBatchGenerateWorkflow(19)
+    expect(taskRows.get(19)?.status).toBe('paused')
+    expect(getProgress(19).blockedChapterId).toBe(101)
+    expect(generateChapterContent).toHaveBeenCalledTimes(1)
   })
 
   it('pauses when a chapter workflow fails', async () => {

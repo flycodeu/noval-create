@@ -26,6 +26,9 @@ app.whenReady().then(async () => {
     const { getChapter } = require('../electron/services/chapter.service.ts')
     const novelId = Number(sqlite.prepare('INSERT INTO novels (title, settings_json) VALUES (?, ?)').run('RF policy fixture', '{"other":{"keep":7}}').lastInsertRowid)
     const chapterId = Number(sqlite.prepare('INSERT INTO chapters (novel_id, chapter_num, title, content, status) VALUES (?, ?, ?, ?, ?)').run(novelId, 1, '晚饭', '确认正文保留。', 'final').lastInsertRowid)
+    // The formal entry bootstraps volume/part assignments before freezing identity.
+    // Match that boundary before constructing an already-existing task fixture.
+    require('../electron/services/story-structure.service.ts').ensureStoryStructure(novelId)
     const old = resolveChapterNarrativeIdentity(chapterId)
     assert.equal(old.policyVersion, 'legacy')
     updateNovel(novelId, { settingsJson: '{"readerFirst":{"schemaVersion":1,"policyVersion":"reader-first-v1","revision":1}}' })
@@ -76,7 +79,7 @@ app.whenReady().then(async () => {
     assert.throws(() => assertChapterNarrativeInputCurrent(chapterId, identity), /不能混用旧稿恢复/)
     await rejectedResume(/不能混用旧稿恢复/)
     const { createChapterStagePrepareInput } = require('../electron/services/chapter-pipeline-context.ts')
-    const customContext = { narrativeIdentity: resolveChapterNarrativeIdentity(chapterId), contextPack: { chapterId, contextVersion: 2 } }
+    const customContext = { narrativeIdentity: resolveChapterNarrativeIdentity(chapterId), contextPack: { chapterId, contextVersion: 2, sources: [] } }
     const customMessages = [{ role: 'user', content: 'LITERAL: 每章至少一个代价。$KEEP [原样]' }]
     const prepared = createChapterStagePrepareInput(customContext, 'draft')({ messages: customMessages,
       budgetReport: { allowed: false, effectiveBudget: 1, estimatedTotalTokens: 1000 } })

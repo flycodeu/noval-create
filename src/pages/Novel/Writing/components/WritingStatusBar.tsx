@@ -67,7 +67,7 @@ export default function WritingStatusBar({
           trigger={['click']}
           menu={{
             items: [
-              { key: 'editor', label: '焦点与合同' },
+              { key: 'editor', label: '编辑与合同' },
               { key: 'context', label: '上下文' },
               { key: 'review', label: '审校' },
               { key: 'history', label: '版本' },

@@ -55,6 +55,29 @@ function testNormalizationDoesNotPromoteDryRunEvidence() {
   assert.equal(normalized.metrics.observed, false)
 }
 
+function testFixedLongformWindowAndInvalidObservations() {
+  const thresholds = buildThresholds(parseSoakArgs(['--chapters=20']))
+  // Schema fixture, not actual model/reader evidence.
+  const report = { realModelCalled: true, provenance: { provider: 'fixture', model: 'fixture', runId: 'fixture' },
+    metrics: { observed: true, requestedChapters: 20, completedChapters: 20, failedChapters: 0,
+      p95ChapterDurationMs: 1000, consecutiveRecallFallbackChapters: 0, minWordRatio: 1,
+      contextHitRate: 1, aliasHitRate: 1, contractAssetHitRate: 1, recallFallbackRate: 0,
+      publishGateFailures: 0, blockedWritebacks: 0, pipelineRolesCovered: thresholds.requiredPipelineRoles } }
+  const validate = (patch) => validateRealReport({ ...report, metrics: { ...report.metrics, ...patch } }, thresholds)
+  assert.equal(validate({}).status, 'pass')
+  assert.equal(validate({ requestedChapters: 1, completedChapters: 1 }).status, 'fail')
+  assert.equal(validate({ completedChapters: 21 }).status, 'fail')
+  for (const field of ['requestedChapters', 'completedChapters', 'failedChapters', 'p95ChapterDurationMs',
+    'consecutiveRecallFallbackChapters', 'minWordRatio', 'contextHitRate', 'aliasHitRate',
+    'contractAssetHitRate', 'recallFallbackRate', 'publishGateFailures', 'blockedWritebacks']) {
+    for (const value of [null, undefined, 'invalid', -1, Infinity]) {
+      assert.equal(validate({ [field]: value }).status, 'fail', `${field}=${value} cannot pass`)
+    }
+  }
+  assert.equal(validate({ failedChapters: 0.5 }).status, 'fail')
+  assert.equal(validate({ contextHitRate: 2 }).status, 'fail')
+}
+
 function testInventoryUsesReadonlyDatabaseAndSelectOnlyQueries() {
   let openedPath = ''
   let openedOptions
@@ -212,6 +235,7 @@ function testQualityInspectionUsesBoundedReadonlyQueries() {
 
 testDryRunEvidenceCannotPassAsObserved()
 testNormalizationDoesNotPromoteDryRunEvidence()
+testFixedLongformWindowAndInvalidObservations()
 testInventoryUsesReadonlyDatabaseAndSelectOnlyQueries()
 testInventoryFlagParsing()
 testQualityInspectionUsesBoundedReadonlyQueries()

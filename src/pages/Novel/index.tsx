@@ -189,6 +189,9 @@ export default function NovelRouter() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  // Route-only navigation must not reload the novel and unmount the editor.
+  const novelLoadNavigateRef = useRef(navigate)
+  novelLoadNavigateRef.current = navigate
   const {
     chapters,
     currentChapterId,
@@ -884,7 +887,7 @@ export default function NovelRouter() {
       if (novel) {
         setCurrentNovel(novel)
       } else {
-        navigate('/novels')
+        novelLoadNavigateRef.current('/novels')
       }
 
       setLoading(false)
@@ -893,14 +896,14 @@ export default function NovelRouter() {
       console.error(error)
       setLoading(false)
       message.error(getErrorMessage(error, 'common.loadFailed'))
-      navigate('/novels', { replace: true })
+      novelLoadNavigateRef.current('/novels', { replace: true })
     })
 
     return () => {
       alive = false
       resetWorkspace()
     }
-  }, [hasValidNovelId, navigate, novelId, resetWorkspace, setCurrentNovel])
+  }, [hasValidNovelId, novelId, resetWorkspace, setCurrentNovel])
 
   useEffect(() => {
     void refreshWorkflowStats()
@@ -1142,7 +1145,7 @@ export default function NovelRouter() {
       >
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
-        workspaceLabel={currentPageMeta.label}
+        workspaceLabel={['theme-voice', 'style-lab'].includes(currentPage) ? '作品声音' : currentPageMeta.label}
         onPageActionsTargetChange={setWorkspaceActionPortal}
         onInformationTargetChange={setWorkspaceInformationPortal}
         statusTone={statusTone}
@@ -1248,7 +1251,7 @@ export default function NovelRouter() {
           ],
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' && currentPage !== 'narrative-board'}
-        showNextStep={currentPage === 'guide' && currentPage !== workspaceSnapshot.nextStep.targetPage}
+        showNextStep={false}
         showWindowControls={showWindowControls}
         moreMenu={{
           items: [

@@ -10,7 +10,6 @@ import {
   revokeReaderFeedbackSettings,
   throwReaderFeedbackError,
   type ReaderFeedbackScope,
-  type ReaderFeedbackSentiment,
 } from '../../src/shared/reader-feedback'
 import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
 import {
@@ -439,16 +438,7 @@ export function updateNovel(id: number, data: Partial<{
   }
 }
 
-export interface SaveNovelReaderFeedbackInput {
-  expectedRevision: number
-  chapterId: number
-  start: number
-  end: number
-  note: string
-  topic: string
-  sentiment: ReaderFeedbackSentiment
-  scope: ReaderFeedbackScope
-}
+export type SaveNovelReaderFeedbackInput = import('../../src/shared/reader-feedback').SaveReaderFeedbackInput
 
 function getReaderFeedbackNovel(id: number) {
   const novel = getDb().select().from(novels).where(eq(novels.id, id)).all()[0]
@@ -489,6 +479,9 @@ export function saveNovelReaderFeedback(novelId: number, input: SaveNovelReaderF
   const novel = getReaderFeedbackNovel(novelId)
   const chapter = db.select().from(chapters).where(eq(chapters.id, input.chapterId)).all()[0]
   if (!chapter || chapter.novelId !== novelId) throwReaderFeedbackError('RF_FEEDBACK_CHAPTER_SCOPE_MISMATCH')
+  if (input.expectedContentHash !== undefined && input.expectedContentHash !== createReaderFeedbackSourceRef(chapter.content || '', chapter.id, input.start, input.end).contentHash) {
+    throwReaderFeedbackError('RF_FEEDBACK_INVALID_SELECTION')
+  }
   assertReaderFeedbackScopeBelongsToNovel(novelId, chapter, input.scope)
   const timestamp = new Date().toISOString()
   const result = appendReaderFeedbackSettings(novel.settingsJson, input.expectedRevision, {

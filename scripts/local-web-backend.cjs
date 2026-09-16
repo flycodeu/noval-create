@@ -105,6 +105,7 @@ function createRuntime() {
   const schema = requireProject('electron/database/schema.ts')
   const modelService = requireProject('electron/services/model.service.ts')
   const sourceSearchSettingsService = requireProject('electron/services/source-search-settings.service.ts')
+  const proseOperationService = requireProject('electron/services/prose-operation.service.ts')
   const taskService = requireProject('electron/services/task.service.ts')
   const novelService = requireProject('electron/services/novel.service.ts')
   const consistencyService = requireProject('electron/services/consistency.service.ts')
@@ -419,23 +420,8 @@ function createRuntime() {
       generateCharacter: (novelId, options) => characterService.generateProtagonist(requireId(novelId, 'novelId'), options),
       generateRelations: (novelId) => characterService.generateCharacterRelations(requireId(novelId, 'novelId')),
       generateSubplotBatch: (data) => subplotService.generateSubplotBatch(data, { sender: webEventSender }),
-      rewriteParagraph: (data) => runPrompt({
-        novelId: data && data.novelId,
-        modelConfigId: data && data.modelConfigId,
-        executionMode: data && data.executionMode,
-        messages: [{
-          role: 'user',
-          content: `请只改写下面这一段，保留事实、人物和叙事视角。\n上下文：${data && data.contextBefore || ''}\n要求：${data && data.specificRequirements || ''}\n原文：${data && data.originalParagraph || ''}`,
-        }],
-      }).then((outputs) => Array.isArray(outputs) ? outputs[0] || '' : outputs),
-      scoreContent: (data) => runPrompt({
-        novelId: data && data.novelId,
-        modelConfigId: data && data.modelConfigId,
-        messages: [{
-          role: 'user',
-          content: `请按 JSON 返回内容评分（结构、连贯、人物、AI味风险），只输出 JSON。题材：${data && data.genreContext || ''}\n背景：${data && data.novelBackground || ''}\n内容：${data && data.content || ''}`,
-        }],
-      }).then((outputs) => Array.isArray(outputs) ? outputs[0] || '' : outputs),
+      rewriteParagraph: (data) => proseOperationService.rewriteProse(requireObject(data, 'data')),
+      scoreContent: (data) => proseOperationService.scoreProse(requireObject(data, 'data')),
       analyzeWorkspaceQuality: (data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data, 'data')),
       repairWorkspaceQuality: (data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data, 'data')),
     },
@@ -449,6 +435,9 @@ function createRuntime() {
       export: (id, format) => exportService.exportNovel(requireId(id), format),
       formatForPlatform: (id, options) => exportService.formatNovelForPlatform(requireId(id), options || {}),
       stats: (id) => novelService.getNovelStats(requireId(id)),
+      getReaderFeedback: (id) => novelService.getNovelReaderFeedback(requireId(id)),
+      saveReaderFeedback: (id, input) => novelService.saveNovelReaderFeedback(requireId(id), requireObject(input, 'input')),
+      revokeReaderFeedback: (id, input) => novelService.revokeNovelReaderFeedback(requireId(id), requireObject(input, 'input')),
       getContextStatus: (id) => contextImpactService.getNovelContextStatus(requireId(id)),
       runConsistencyCheck: (id) => consistencyService.buildNovelConsistencyReport(requireId(id)),
       getStoryMemory: (id) => storyMemoryService.buildStoryMemorySnapshot(requireId(id)),
@@ -1000,9 +989,10 @@ function createRuntime() {
         fingerprintId === null || fingerprintId === undefined ? null : requireId(fingerprintId, 'fingerprintId'),
       ),
       resolveActive: (novelId) => styleAnalysisService.resolveActiveStyleFingerprint(requireId(novelId, 'novelId')),
+      approveTrial: (novelId, text) => styleAnalysisService.approveStyleTrial(requireId(novelId, 'novelId'), text),
       abTest: (novelId, fingerprintId, sceneBrief, modelConfigId) => styleAnalysisService.runStyleAbTest(
         requireId(novelId, 'novelId'),
-        requireId(fingerprintId, 'fingerprintId'),
+        fingerprintId === null ? null : requireId(fingerprintId, 'fingerprintId'),
         sceneBrief,
         modelConfigId,
       ),

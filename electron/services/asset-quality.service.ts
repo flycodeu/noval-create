@@ -1,3 +1,5 @@
+import { normalizeStoredQualityIssues, classifyQualityIssueLevels } from './quality-issue-policy'
+import { validateQualityIssuesForContent, qualityIssueArtifactHash } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
@@ -17,6 +19,7 @@ import {
 type ReviewSeverity = AssetReviewResult['severity']
 
 export interface AssetQualityLoopOptions {
+  narrativePolicyVersion?: 'legacy' | 'reader-first-v1'
   targetType: AssetReviewTarget
   novelId: number
   modelConfigId?: number
@@ -106,13 +109,18 @@ function isQualityBudgetSpent(startedAt: number, budgetMs: number): boolean {
   return Date.now() - startedAt >= budgetMs
 }
 
-function parseAssetReviewResult(raw: string): AssetReviewResult {
+export function parseAssetReviewResult(raw: string, content?: string, policyVersion?: 'legacy' | 'reader-first-v1'): AssetReviewResult {
   const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(raw))
+  const issues = policyVersion === 'reader-first-v1' ? validateQualityIssuesForContent(normalizeStoredQualityIssues(
+    Array.isArray(parsed.issues) ? parsed.issues.map((issue) => ({ ...issue as Record<string, unknown>, detector: 'model' })) : [],
+  ), content || '') : undefined
+  const levels = issues ? classifyQualityIssueLevels(issues) : undefined
   return {
+    ...(issues ? { issues } : {}),
     summary: asText(parsed.summary) || '未返回可用审校摘要。',
     severity: normalizeSeverity(parsed.severity),
-    rewriteRequired: parsed.rewrite_required === true,
-    rejectRequired: parsed.reject_required === true,
+    rewriteRequired: levels ? levels.repair.length > 0 : parsed.rewrite_required === true,
+    rejectRequired: levels ? levels.blocker.length > 0 : parsed.reject_required === true,
     genreDriftRisks: toStringArray(parsed.genre_drift_risks),
     themeDriftRisks: toStringArray(parsed.theme_drift_risks),
     backgroundDriftRisks: toStringArray(parsed.background_drift_risks),
@@ -239,14 +247,17 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
       contextSummary: options.contextSummary,
       generatedOutput: options.generatedOutput,
       schemaHint: options.schemaHint,
-      reviewFocus: options.reviewFocus,
+      reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
+        '阅读问题按 fact/format/narrative/style 与 blocker/repair/advice 分级；风格偏好仅为 advice，不因数量或模型布尔判断强制改写。',
+        `在 JSON 中补充 issues 数组：每项含 id、ruleId、category、level、detector=model、confidence、scope、message、evidence。evidence 含 artifactHash=${qualityIssueArtifactHash(options.generatedOutput)}、start、end（JS UTF-16 索引）、quote。没有证据不补造。`,
+      ] : [])],
     }),
     chatOpts: options.chatOpts,
     stage: 'review',
     onTaskCreated: options.onQualityTaskCreated,
   })
 
-  return parseAssetReviewResult(raw)
+  return parseAssetReviewResult(raw, options.generatedOutput, options.narrativePolicyVersion)
 }
 
 export async function rewriteGeneratedAsset(

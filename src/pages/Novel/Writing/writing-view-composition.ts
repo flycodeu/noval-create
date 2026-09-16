@@ -75,6 +75,9 @@ export function buildWritingViewComposition(input: WritingViewCompositionInput):
         onRequirementsChange: input.modals.state.setRewriteRequirements,
         onOpenChange: input.modals.state.setRewriteModalOpen,
         onConfirm: input.modals.actions.rewriteSelectedText,
+        candidate: input.modals.actions.rewriteCandidate,
+        onFeedback: input.modals.actions.savePassageFeedback,
+        onApply: input.modals.actions.applyRewriteCandidate,
       },
       optimize: {
         open: input.modals.state.optimizeModalOpen,

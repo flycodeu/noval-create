@@ -36,6 +36,7 @@ interface InspectorActionInput {
   deleteForeshadow(entry: ForeshadowLedgerEntry): void
   openGateIssue: WritingInspectorActions['review']['onOpenGateIssue']
   setGateReportExpanded: Dispatch<SetStateAction<boolean>>
+  onLocateEvidence?(evidence: import('../../../shared/quality-issue').QualityIssueEvidence): void
   getEditorContent(): string
   regenerate(content: string): void
   setSelectedVersionId: Dispatch<SetStateAction<number | null>>
@@ -198,6 +199,7 @@ function useInspectorActions(input: InspectorActionInput): WritingInspectorActio
     createForeshadow,
     deleteForeshadow,
     getEditorContent,
+    onLocateEvidence,
     navigate,
     navigateToWritingRoute,
     novelId,
@@ -226,6 +228,7 @@ function useInspectorActions(input: InspectorActionInput): WritingInspectorActio
       onOpenForeshadowLedger: () => navigate(buildWorkspaceRoute(novelId, 'foreshadow-ledger')),
     },
     review: {
+      onLocateEvidence,
       onOpenGateIssue: openGateIssue,
       onToggleGateReport: () => setGateReportExpanded((current) => !current),
       onOpenQualityDashboard: () => navigate(buildWorkspaceRoute(novelId, 'quality')),
@@ -247,6 +250,7 @@ function useInspectorActions(input: InspectorActionInput): WritingInspectorActio
     createForeshadow,
     deleteForeshadow,
     getEditorContent,
+    onLocateEvidence,
     navigate,
     navigateToWritingRoute,
     novelId,

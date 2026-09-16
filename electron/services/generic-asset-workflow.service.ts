@@ -1,3 +1,4 @@
+import { resolveProsePolicyMaterial } from './prose-operation.service'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -404,7 +405,9 @@ export async function generateGenericAssetDraft(
   }
 
   const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
+  const narrative = input.assetType === 'chapter' ? resolveProsePolicyMaterial(input.novelId) : undefined
   const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
+    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n\n阅读策略：保留事实、视角和有效表达；未确认计划不当作已经发生的事实。此入口只产出外部候选，没有章节身份，不可直接作为正典。\n${narrative.reference}` : '')
   const contextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
@@ -445,6 +448,7 @@ export async function generateGenericAssetDraft(
   })
   const qualityTaskIds: number[] = []
   const quality = await runAssetQualityLoop({
+    narrativePolicyVersion: narrative?.policy.policyVersion,
     targetType: input.assetType,
     novelId: input.novelId,
     modelConfigId: qualityRoute.modelConfigId,
@@ -599,10 +603,13 @@ export async function reviewGenericAssetDraft(
   }
 
   const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
+  const narrative = sourceArtifact.content.assetType === 'chapter' ? resolveProsePolicyMaterial(input.novelId) : undefined
   const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
+    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n${narrative.reference}` : '')
   let currentContextVersion = novel.contextVersion || 1
   const qualityTaskIds: number[] = []
   const quality = await runAssetQualityLoop({
+    narrativePolicyVersion: narrative?.policy.policyVersion,
     targetType: sourceArtifact.content.assetType,
     novelId: input.novelId,
     modelConfigId: route.modelConfigId,

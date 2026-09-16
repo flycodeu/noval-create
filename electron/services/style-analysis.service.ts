@@ -9,6 +9,7 @@ import { getDefaultAdapter, getAdapterById } from './model.service'
 import { analyzeStyleCompliance } from './style-compliance.service'
 import { runChatTask } from './task.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 
 export type { StyleFingerprint, StyleHardGuard }
 
@@ -554,6 +555,22 @@ export interface StyleAbTestResult {
 
 const AB_TEST_TARGET_WORDS = 400
 
+/** Explicit author approval; stores the original candidate without another model call. */
+export function approveStyleTrial(novelId: number, text: string): number {
+  if (typeof text !== 'string' || !text.trim() || text.length > 50000) throw new Error('Invalid trial sample')
+  const db = getDb()
+  return db.transaction(() => {
+    if (!db.select().from(novels).where(eq(novels.id, novelId)).get()) throw new Error('Novel not found')
+    const stats = computeStyleStats(text)
+    const result = db.insert(styleFingerprints).values({ novelId, name: '试写认可样稿', sourceType: 'pasted',
+      sourceText: text, fingerprintJson: JSON.stringify({ ...getDefaultFingerprint(), ...stats }),
+      statsJson: JSON.stringify(stats) }).run()
+    const id = Number(result.lastInsertRowid)
+    setActiveStyleFingerprint(novelId, id)
+    return id
+  })
+}
+
 function buildAbTestBasePrompt(sceneBrief: string): string {
   return [
     `你是一位中文小说写手。请根据下面的场景梗概写一段约 ${AB_TEST_TARGET_WORDS} 字的正文片段。`,
@@ -566,20 +583,32 @@ function buildAbTestBasePrompt(sceneBrief: string): string {
 
 export async function runStyleAbTest(
   novelId: number,
-  fingerprintId: number,
+  fingerprintId: number | null,
   sceneBrief: string,
   modelConfigId?: number,
 ): Promise<StyleAbTestResult> {
   if (!sceneBrief.trim()) {
     throwUserFacingError('styleLab.sceneBriefRequired')
   }
-  const payload = getStyleFingerprintPayload(fingerprintId)
-  if (!payload?.record) {
+  const novel = getDb().select().from(novels).where(eq(novels.id, novelId)).get()
+  if (!novel) throw new Error('Novel not found')
+  const payload = fingerprintId === null ? null : getStyleFingerprintPayload(fingerprintId)
+  if (fingerprintId !== null && !payload?.record) {
     throwUserFacingError('styleLab.fingerprintMissing')
   }
+  if (payload && payload.record.novelId !== novelId && !(payload.record.novelId === null && payload.record.sourceType === 'genre-default')) {
+    throwUserFacingError('styleLab.activateWrongNovel')
+  }
 
-  const basePrompt = buildAbTestBasePrompt(sceneBrief)
-  const fingerprintSections = [
+  const readerFirst = resolveNarrativePolicy(novel.settingsJson, true).policyVersion === 'reader-first-v1'
+  const basePrompt = [
+    readerFirst || fingerprintId === null ? '这是非正式试写。只使用场景给定事实；不得擅自补全人物关系、世界规则或结局。' : '',
+    buildAbTestBasePrompt(sceneBrief),
+  ].filter(Boolean).join('\n')
+  const fingerprintSections = readerFirst || fingerprintId === null ? [
+    novel.themeVoiceJson ? `作者声音说明（未认可样稿时为试用）：${novel.themeVoiceJson}` : '声音尚在试用，请贴合当前人物与事件。',
+    payload?.record.sourceText ? `候选声音参考，仅借鉴表达，不引入其中人物或事实：\n${payload.record.sourceText}` : '',
+  ].filter(Boolean).join('\n\n') : [
     buildStyleFingerprintPromptSection(fingerprintId),
     buildStyleHardGuardPromptSection(fingerprintId),
   ].filter(Boolean).join('\n\n')
@@ -588,8 +617,8 @@ export async function runStyleAbTest(
     type: 'style_ab_test',
     novelId,
     relatedEntityType: 'style_fingerprint',
-    relatedEntityId: fingerprintId,
-    modelConfigId,
+    relatedEntityId: fingerprintId ?? undefined,
+    modelConfigId: modelConfigId ?? novel.modelConfigId ?? undefined,
     messages: [{ role: 'user', content: `${fingerprintSections}\n\n${basePrompt}` }],
   })).trim()
 
@@ -597,21 +626,22 @@ export async function runStyleAbTest(
     type: 'style_ab_test',
     novelId,
     relatedEntityType: 'style_fingerprint',
-    relatedEntityId: fingerprintId,
-    modelConfigId,
+    relatedEntityId: fingerprintId ?? undefined,
+    modelConfigId: modelConfigId ?? novel.modelConfigId ?? undefined,
     messages: [{ role: 'user', content: basePrompt }],
   })).trim()
 
+  if (!withFingerprintText || !withoutText) throw new Error('试写返回空正文，请在任务中心查看并重试。')
   const buildVariant = (text: string): StyleAbTestVariant => ({
     text,
     stats: computeStyleStats(text),
-    compliance: analyzeStyleCompliance(text, payload.fingerprint),
+    compliance: analyzeStyleCompliance(text, payload?.fingerprint || getDefaultFingerprint()),
   })
 
   return {
     withFingerprint: buildVariant(withFingerprintText),
     without: buildVariant(withoutText),
-    fingerprintName: payload.record.name,
+    fingerprintName: payload?.record.name || '当前声音说明（试用）',
   }
 }
 

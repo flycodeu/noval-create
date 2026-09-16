@@ -874,7 +874,8 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
 
   let response: Response
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), LOCAL_BACKEND_RPC_TIMEOUT_MS)
+  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000 : LOCAL_BACKEND_RPC_TIMEOUT_MS
+  const timeout = window.setTimeout(() => controller.abort(), rpcTimeout)
   try {
     response = await fetch(`${LOCAL_BACKEND_URL}/rpc`, {
       method: 'POST',
@@ -980,6 +981,9 @@ export function installWebElectronBridge(): void {
           characterCount: novel ? 3 : 0,
         }
       }),
+      getReaderFeedback: (...args) => withLocalBackend('novel', 'getReaderFeedback', args, async () => ({ schemaVersion: 1, revision: 0, items: [] })),
+      saveReaderFeedback: (...args) => withLocalBackend('novel', 'saveReaderFeedback', args, async () => readOnlyMutation('novel.saveReaderFeedback')),
+      revokeReaderFeedback: (...args) => withLocalBackend('novel', 'revokeReaderFeedback', args, async () => readOnlyMutation('novel.revokeReaderFeedback')),
       getContextStatus: async (id) => withLocalBackend('novel', 'getContextStatus', [id], async () => ({
         novelId: Number(id),
         totalChapterCount: demoChapters.length,
@@ -1151,6 +1155,7 @@ export function installWebElectronBridge(): void {
       delete: async (id?: unknown) => withLocalBackend('style', 'delete', [id], async () => undefined),
       setActive: async (novelId?: unknown, fingerprintId?: unknown) => withLocalBackend('style', 'setActive', [novelId, fingerprintId], async () => undefined),
       resolveActive: async (novelId?: unknown) => withLocalBackend('style', 'resolveActive', [novelId], async () => null),
+      approveTrial: async (novelId?: unknown, text?: unknown) => withLocalBackend('style', 'approveTrial', [novelId, text], async () => { throw new Error('Local backend required') }),
       abTest: async (novelId?: unknown, fingerprintId?: unknown, sceneBrief?: unknown, modelConfigId?: unknown) => withLocalBackend('style', 'abTest', [novelId, fingerprintId, sceneBrief, modelConfigId], async () => null),
     }),
     parallel: createService('parallel', {

@@ -649,6 +649,35 @@ export default function NovelList() {
     }
   }, [wizardForm])
 
+  const handleTrialCreate = async () => {
+    if (wizardLoading) return
+    const values = await wizardForm.validateFields(['userBackground']).catch(() => null)
+    if (!values) return
+    const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
+    const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
+    const error = getWritingContractValidationError(writingContractTags)
+    if (error) { message.error(error); return }
+    const requestId = ++wizardGenerationRef.current
+    setWizardLoading(true)
+    try {
+      const novelId = await window.electron.novel.create({
+        title: allValues.title?.trim() || '未命名试写',
+        genreId: allValues.genreId,
+        launchMode: 'professional_longform',
+        userBackground: values.userBackground.trim(),
+        modelConfigId: allValues.modelConfigId,
+        styleTemplateId: allValues.styleTemplateId,
+        worldTemplateId: allValues.worldTemplateId,
+        themeVoiceJson: buildThemeVoicePayload({ writingContractTags }),
+      })
+      await loadNovels()
+      if (requestId !== wizardGenerationRef.current) return
+      resetWizard()
+      navigate(buildWorkspaceRoute(novelId, 'style-lab?view=ab'))
+    } catch (error) { message.error(getErrorMessage(error, 'novel.createFailed')) }
+    finally { setWizardLoading(false) }
+  }
+
   const handleWizardNext = async () => {
     if (wizardLoading) return
     if (selectedLaunchMode === 'fast_launch') {
@@ -1183,6 +1212,9 @@ export default function NovelList() {
           </div>
 
           <div className="novel-list-page__wizard-footer">
+            {selectedLaunchMode === 'professional_longform' && wizardStep === 1 ? (
+              <Button onClick={() => void handleTrialCreate()} disabled={wizardLoading}>保存背景并试写</Button>
+            ) : null}
             {wizardStep > 0 ? (
               <Button onClick={() => setWizardStep((step) => step - 1)}>上一步</Button>
             ) : null}

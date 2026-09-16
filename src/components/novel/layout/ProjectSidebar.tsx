@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import StatusTag from '../common/StatusTag'
+import { organizeAuthorNavigation } from '../../../pages/Novel/shared/workspace-navigation'
 import './ProjectSidebar.css'
 
 interface ProjectSidebarProps {
@@ -21,7 +22,7 @@ export default function ProjectSidebar({
   stageLabel,
   progressText,
   currentTask,
-  navGroups,
+  navGroups: originalNavGroups,
   activeKey,
   pendingKey,
   recentKey,
@@ -29,9 +30,11 @@ export default function ProjectSidebar({
   onNavigate,
   onPrefetchRoute,
 }: ProjectSidebarProps) {
+  const navGroups = useMemo(() => organizeAuthorNavigation(originalNavGroups), [originalNavGroups])
+  const visibleActiveKey = activeKey === 'style-lab' ? 'theme-voice' : activeKey
   const activeGroup = useMemo(
-    () => navGroups.find((group) => group.items.some((item) => item.key === activeKey))?.key || navGroups[0]?.key,
-    [activeKey, navGroups],
+    () => navGroups.find((group) => group.items.some((item) => item.key === visibleActiveKey))?.key || navGroups[0]?.key,
+    [visibleActiveKey, navGroups],
   )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
@@ -98,7 +101,7 @@ export default function ProjectSidebar({
               {isOpen ? (
                 <div className="project-sidebar__group-items">
                   {group.items.map((item) => {
-                    const active = item.key === activeKey
+                    const active = item.key === visibleActiveKey
                     const pending = !active && item.key === pendingKey
                     const recent = !active && item.key === recentKey
                     const attention = item.hasBlocker

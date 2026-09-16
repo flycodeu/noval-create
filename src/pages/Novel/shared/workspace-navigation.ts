@@ -129,6 +129,17 @@ export interface TaskRecoveryAction {
   path?: string
 }
 
+/** Presentation only: existing routes and stored assets remain available. */
+export function organizeAuthorNavigation(groups: import('../../../shared/workspace-types').WorkspaceNavGroup[]) {
+  const optional = new Set(['map', 'growth-system', 'timeline', 'batch-workbench', 'narrative-board'])
+  const tools = groups.flatMap((group) => group.items.filter((item) => optional.has(item.key)))
+  const main = groups.map((group) => ({ ...group,
+    items: group.items.filter((item) => !optional.has(item.key) && item.key !== 'style-lab')
+      .map((item) => item.key === 'theme-voice' ? { ...item, label: '作品声音' } : item),
+  })).filter((group) => group.items.length)
+  return tools.length ? [...main, { key: 'author-tools', title: '按需资料与任务', items: tools }] : main
+}
+
 const RESUMABLE_WORKFLOW_TYPES = new Set([
   'faction_auto_generate',
   'map_auto_generate',

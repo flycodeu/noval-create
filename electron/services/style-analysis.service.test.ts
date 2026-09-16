@@ -200,6 +200,7 @@ describe('runStyleAbTest', () => {
       select: () => ({
         from: () => ({
           where: () => ({
+            get: () => ({ id: 3, settingsJson: null, modelConfigId: 4 }),
             all: () => [fingerprintRecord],
           }),
         }),

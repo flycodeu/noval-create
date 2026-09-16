@@ -1,3 +1,4 @@
+import type { PassageFeedbackInput } from './ReaderFeedbackPanel'
 import React from 'react'
 import type { Chapter, ChapterOptimizeResult } from '../../../../types'
 import OptimizeCandidateModal from './modals/OptimizeCandidateModal'
@@ -14,6 +15,9 @@ export interface WritingModalsProps {
     loading: boolean
     onRequirementsChange(value: string): void
     onOpenChange(open: boolean): void
+    candidate?: { original: string; replacement: string; stale?: boolean } | null
+    onFeedback?(input: PassageFeedbackInput): Promise<void>
+    onApply?(): void
     onConfirm(): Promise<void>
   }
   optimize: {
@@ -32,6 +36,10 @@ export default function WritingModals({ chapters, novelId, optimize, rewrite }: 
     <>
       <RewriteSelectionModal
         open={rewrite.open}
+        candidate={rewrite.candidate}
+        novelId={novelId}
+        onFeedback={rewrite.onFeedback}
+        onApply={rewrite.onApply}
         selectedText={rewrite.selectedText}
         requirements={rewrite.requirements}
         confirmLoading={rewrite.loading}

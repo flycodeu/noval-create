@@ -76,6 +76,18 @@ export interface ReaderFeedbackTargetContext {
   limit?: number
 }
 
+export interface SaveReaderFeedbackInput {
+  expectedRevision: number
+  chapterId: number
+  start: number
+  end: number
+  expectedContentHash?: string
+  note: string
+  topic: string
+  sentiment: ReaderFeedbackSentiment
+  scope: ReaderFeedbackScope
+}
+
 export interface ReaderFeedbackMutationResult {
   settingsJson: string
   feedback: ReaderFeedbackSettings

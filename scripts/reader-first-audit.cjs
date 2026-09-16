@@ -19,6 +19,14 @@ function workingTreeIdentity() {
 
 async function main() {
   const args = process.argv.slice(2)
+  if (args.length === 1 && args[0] === '--case=longform') {
+    return require('./reader-first-longform.cjs').prepareLongform({ root, identity: workingTreeIdentity() })
+  }
+  if (args.includes('--case=expansion')) {
+    if (args.some((arg) => !/^--(?:case=expansion|config=.+|results=.+|feedback=.+)$/.test(arg))) throw new Error('Unknown expansion argument')
+    const get = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
+    return require('./reader-first-expansion.cjs').runExpansion({ root, identity: workingTreeIdentity(), configPath: get('config'), resultsPath: get('results'), feedbackPath: get('feedback') })
+  }
   if (args.some((arg) => !['--case=all', '--case=guardrails', '--case=writer', '--case=policy'].includes(arg)) || args.length > 1) {
     throw new Error('Unsupported argument/case. Real-model mode is not implemented: explicit provider configuration and budget are required; no provider fallback.')
   }

@@ -495,3 +495,5 @@
     padding-inline: 18px;
   }
 }
+
+.studio-page__scene-status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--text-secondary); }

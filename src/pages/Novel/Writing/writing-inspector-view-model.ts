@@ -112,6 +112,7 @@ export interface ReviewInspectorViewModel {
 }
 
 export interface ReviewInspectorActions {
+  onLocateEvidence?(evidence: import('../../../shared/quality-issue').QualityIssueEvidence): void
   onOpenGateIssue(item: ChapterPublishCheck['checklist'][number]): void
   onToggleGateReport(): void
   onOpenQualityDashboard(): void

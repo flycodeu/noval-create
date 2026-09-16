@@ -20,7 +20,6 @@ import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-gene
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type { AiExecutionMode } from '../src/shared/ai-execution'
-import { appendNarrativeNaturalnessPrompt } from '../src/shared/narrative-naturalness'
 import type {
   AgentToolCallRequest,
   AgentToolApprovalRequest,
@@ -121,16 +120,14 @@ import { parseObjectPayload, requireId, requireIds, requireObject, requireString
 import {
   buildBackgroundExpansionRepairPrompt,
   collectForbiddenBackgroundNaming,
-  contentScoringPrompt,
   expandBackgroundPrompt,
   normalizeBackgroundExpansionPayload,
-  rewriteParagraphPrompt,
   sanitizeBackgroundExpansionResult,
 } from './services/prompts'
 import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
 import { getNovelContextStatus } from './services/context-impact.service'
-import { enhanceAiScoreResult } from './services/ai-score.service'
+import { rewriteProse, scoreProse, type RewriteProseInput, type ScoreProseInput } from './services/prose-operation.service'
 import { wrapIpcHandler } from './utils/ipc-wrapper'
 import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
 import { consumeApprovalGrant, createApprovalGrant } from './services/approval.service'
@@ -501,6 +498,8 @@ function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
   })
 
   // Style Analysis
+  handle('style:approveTrial', (_, novelId: number, text: string) =>
+    styleAnalysisService.approveStyleTrial(requireId(novelId, 'novelId'), requireString(text, 'text')))
   handle('style:analyze', (_, text: string, modelConfigId?: number) =>
     styleAnalysisService.analyzeReferenceText(text, modelConfigId))
   handle('style:create', (_, novelId: number | null, name: string, text: string, modelConfigId?: number) =>
@@ -525,10 +524,10 @@ function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
     ))
   handle('style:resolveActive', (_, novelId: number) =>
     styleAnalysisService.resolveActiveStyleFingerprint(requireId(novelId, 'novelId')))
-  handle('style:abTest', (_, novelId: number, fingerprintId: number, sceneBrief: string, modelConfigId?: number) =>
+  handle('style:abTest', (_, novelId: number, fingerprintId: number | null, sceneBrief: string, modelConfigId?: number) =>
     styleAnalysisService.runStyleAbTest(
       requireId(novelId, 'novelId'),
-      requireId(fingerprintId, 'fingerprintId'),
+      fingerprintId === null ? null : requireId(fingerprintId, 'fingerprintId'),
       requireString(sceneBrief, 'sceneBrief'),
       modelConfigId,
     ))
@@ -554,6 +553,9 @@ function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
       stateKey,
       typeof limit === 'number' ? limit : 12,
     ))
+  handle('novel:getReaderFeedback', (_, id) => novelService.getNovelReaderFeedback(requireId(id)))
+  handle('novel:saveReaderFeedback', (_, id, input) => novelService.saveNovelReaderFeedback(requireId(id), input))
+  handle('novel:revokeReaderFeedback', (_, id, input) => novelService.revokeNovelReaderFeedback(requireId(id), input))
   handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
   handle('novel:getImpactSummary', (_, id) => assetImpactService.getNovelAssetImpactSummary(requireId(id)))
   handle('novel:listImpactEvents', (_, id) => assetImpactService.listAssetChangeEvents(requireId(id)))
@@ -1430,45 +1432,7 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
 
-  handle('ai:rewriteParagraph', async (_, data: {
-    originalParagraph: string
-    contextBefore: string
-    specificRequirements: string
-    modelConfigId?: number
-    novelId?: number
-    executionMode?: AiExecutionMode
-  }) => {
-    const novel = typeof data.novelId === 'number'
-      ? getDb().select().from(novelsTable).where(eq(novelsTable.id, data.novelId)).all()[0]
-      : null
-    const executionMode = resolveAiExecutionMode({
-      explicitMode: data.executionMode,
-      settingsJson: novel?.settingsJson,
-    })
-    const route = buildAiModelRouteReport({
-      taskKind: 'paragraph_rewrite',
-      stageLabel: 'Paragraph Rewrite',
-      executionMode: executionMode.mode,
-      resolutionSource: executionMode.source,
-      modelConfigId: data.modelConfigId ?? novel?.modelConfigId,
-    })
-    const result = await taskService.runChatTask({
-      type: 'review',
-      retryable: true,
-      messages: [{
-        role: 'user',
-        content: rewriteParagraphPrompt({
-          originalParagraph: data.originalParagraph,
-          contextBefore: data.contextBefore,
-          specificRequirements: data.specificRequirements,
-        }),
-      }],
-      modelConfigId: route.modelConfigId,
-      chatOpts: buildChatOptionsFromRoute(route),
-    })
-
-    return result
-  })
+  handle('ai:rewriteParagraph', (_, data: RewriteProseInput) => rewriteProse(data))
 
   handle('ai:generateSubplotBatch', async (_, data: SubplotGenerationRequest) => {
     return subplotService.generateSubplotBatch(data)
@@ -1534,28 +1498,7 @@ function registerAiIpcHandlers(handle: IpcHandle) {
     return accepted
   })
 
-  handle('ai:scoreContent', async (_, data: {
-    contentType: string
-    content: string
-    genreContext: string
-    novelBackground: string
-    modelConfigId?: number
-  }) => {
-    const result = await taskService.runChatTask({
-      type: 'review',
-      retryable: true,
-      messages: [{
-        role: 'user',
-        content: appendNarrativeNaturalnessPrompt(contentScoringPrompt(data), {
-          genre: data.genreContext,
-          mode: 'review',
-        }),
-      }],
-      modelConfigId: data.modelConfigId,
-    })
-
-    return enhanceAiScoreResult(safeParseJson(result), data.content)
-  })
+  handle('ai:scoreContent', (_, data: ScoreProseInput) => scoreProse(data))
   handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
   handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }

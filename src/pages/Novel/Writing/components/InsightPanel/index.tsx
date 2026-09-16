@@ -29,7 +29,7 @@ export {
   ChapterRevealConstraintCard,
 } from './writeback-cards'
 const UTILITY_TABS: Array<{ key: WritingRouteKey; label: string }> = [
-  { key: 'editor', label: '焦点 / 合同' },
+  { key: 'editor', label: '编辑' },
   { key: 'context', label: '上下文' },
   { key: 'history', label: '版本' },
   { key: 'review', label: '审校' },
@@ -56,7 +56,7 @@ export default function InsightPanel({
     <aside className={`chapter-console-page__column chapter-console-page__column--right${open ? '' : ' is-hidden'}`}>
       <section className="chapter-console-page__panel">
         <SectionHeader
-          title="合同 / 上下文 / 审校 / 版本"
+          title={{ editor: '当前章节', context: '写作依据', review: '当前稿审校', history: '版本比较' }[activeRoute]}
         />
         <div className="chapter-console-page__route-switch">
           {UTILITY_TABS.map((tab) => (
@@ -71,6 +71,9 @@ export default function InsightPanel({
           ))}
         </div>
       </section>
+      {open && (activeRoute === 'editor' || activeRoute === 'context') ? (
+        <details className="writing-contract-disclosure">
+          <summary>查看章节与场景合同</summary>
       <ContractPanel
         title="章节合同"
         sections={chapterContractSections}
@@ -84,6 +87,8 @@ export default function InsightPanel({
           tone: 'danger',
         }]}
       />
+        </details>
+      ) : null}
       {open ? children : null}
     </aside>
   )

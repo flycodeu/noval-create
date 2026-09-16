@@ -225,6 +225,30 @@ function validateRealReport(report, thresholds) {
   const modelConfigId = asOptionalText(provenance.modelConfigId || metrics.modelConfigId || report.modelConfigId)
   const runId = asOptionalText(provenance.runId || metrics.runId || report.runId)
 
+  // The caller fixes the window. A report cannot shorten it or use NaN/null
+  // metrics to bypass comparisons; unknown observations are not zero failures.
+  const counters = { requestedChapters, completedChapters, failedChapters,
+    consecutiveRecallFallbackChapters, publishGateFailures, blockedWritebacks }
+  for (const [key, value] of Object.entries(counters)) {
+    if (metrics[key] === null || metrics[key] === undefined || !Number.isSafeInteger(value) || value < 0) {
+      failures.push(`${key} must be an observed non-negative integer`)
+    }
+  }
+  if (requestedChapters !== thresholds.requestedChapters) failures.push(`requestedChapters must match fixed window ${thresholds.requestedChapters}`)
+  if (completedChapters + failedChapters > requestedChapters) failures.push('chapter counts exceed requested window')
+  const measurements = { p95ChapterDurationMs, minWordRatio, contextHitRate, aliasHitRate, contractAssetHitRate }
+  for (const [key, value] of Object.entries(measurements)) {
+    if (metrics[key] === null || metrics[key] === undefined || !Number.isFinite(value) || value < 0) {
+      failures.push(`${key} must be an observed non-negative number`)
+    }
+  }
+  if ((metrics.recallFallbackRate == null && metrics.recallFallbackChapters == null)
+    || !Number.isFinite(recallFallbackRate) || recallFallbackRate < 0 || recallFallbackRate > 1) {
+    failures.push('recallFallbackRate must be an observed rate between 0 and 1')
+  }
+  for (const [key, value] of Object.entries({ contextHitRate, aliasHitRate, contractAssetHitRate })) {
+    if (value > 1) failures.push(`${key} cannot exceed 1`)
+  }
   if (!realModelCalled) failures.push('realModelCalled must be true for report validation')
   if (!metricsObserved) failures.push('metrics.observed must be true for report validation')
   if (!modelProvider) failures.push('missing model provenance: provider')

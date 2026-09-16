@@ -509,7 +509,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     message.success(templateApplyMode === 'fill_blanks' ? '模板已补入空白文风字段，现有内容保持不变。' : '模板文风字段已覆盖到表单，保存后生效。')
   }
 
-  const navigateWithUnsavedGuard = (target: 'world-rules' | 'style-lab') => {
+  const navigateWithUnsavedGuard = (target: 'world-rules' | 'style-lab' | 'writing/editor') => {
     const leave = () => navigate(buildWorkspaceRoute(novelId, target))
     if (!hasUnsavedChanges) {
       leave()
@@ -623,7 +623,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       chrome="shared"
-      title="主题与文风"
+      title="作品声音 · 声音说明"
       actionContract={{
         primary: {
           key: 'save',
@@ -633,6 +633,18 @@ export default function ThemeVoicePage({ novelId }: Props) {
           onClick: () => void handleSave(),
         },
         secondary: [
+          {
+            key: 'style-lab',
+            label: '认可样稿与 A/B 试写',
+            icon: <ExperimentOutlined />,
+            onClick: () => navigateWithUnsavedGuard('style-lab'),
+          },
+          {
+            key: 'return-writing',
+            label: '返回正文',
+            icon: <ArrowRightOutlined />,
+            onClick: () => navigateWithUnsavedGuard('writing/editor'),
+          },
           {
             key: 'template',
             label: '应用文风模板',
@@ -650,24 +662,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
             disabled: Boolean(generatingMode),
             onClick: () => setAiAssistOpen(true),
           },
-          {
-            key: 'style-lab',
-            label: '去文风实验室',
-            icon: <ExperimentOutlined />,
-            onClick: () => navigateWithUnsavedGuard('style-lab'),
-          },
-          {
-            key: 'world-rules',
-            label: '去世界规则',
-            icon: <ArrowRightOutlined />,
-            onClick: () => navigateWithUnsavedGuard('world-rules'),
-          },
         ],
       }}
     >
       <div className="theme-voice__status-rail" data-theme-voice-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <div>
-          <strong>{hasUnsavedChanges ? '有未保存修改' : '已确认的标准文风'}</strong>
+          <strong>{hasUnsavedChanges ? '有未保存修改' : '声音说明已保存（样稿认可见试写页）'}</strong>
           <span>{formatWritingContractTags(currentValues.writingContractTags) || '待设定写作契约'} · 核心约束 {foundationCount}/8</span>
         </div>
         <div className="theme-voice__status-meta">
@@ -825,7 +825,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       </WorkspacePanel>
 
       <section className="theme-voice__lab-handoff">
-        <Button type="link" icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>文风实验室</Button>
+        <Button type="link" icon={<ExperimentOutlined />} onClick={() => navigateWithUnsavedGuard('style-lab')}>认可样稿与试写</Button>
       </section>
 
       <Modal

@@ -11,6 +11,7 @@ import {
   Tabs,
   Tag,
   message,
+  Modal,
 } from 'antd'
 import {
   DeleteOutlined,
@@ -32,6 +33,8 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import './index.css'
 
 interface Props {
@@ -133,12 +136,15 @@ function HistogramBar({ histogram }: { histogram: NonNullable<FingerprintCardSta
 }
 
 export default function StyleLabPage({ novelId }: Props) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [approving, setApproving] = useState(false)
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [fingerprints, setFingerprints] = useState<StyleFingerprintRecord[]>([])
   const [resolved, setResolved] = useState<ResolvedStyleFingerprintPayload | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [switchingId, setSwitchingId] = useState<number | null>(null)
-  const [activeView, setActiveView] = useState<'fingerprints' | 'ab'>('fingerprints')
+  const [activeView, setActiveView] = useState<'fingerprints' | 'ab'>(new URLSearchParams(location.search).get('view') === 'ab' ? 'ab' : 'fingerprints')
   const [drawerMode, setDrawerMode] = useState<'create' | 'ab' | null>(null)
 
   const [pasteName, setPasteName] = useState('')
@@ -150,7 +156,7 @@ export default function StyleLabPage({ novelId }: Props) {
   const chapterGeneration = useTrackedGeneration<number | null>()
 
   const [abFingerprintId, setAbFingerprintId] = useState<number | null>(null)
-  const [sceneBrief, setSceneBrief] = useState('')
+  const [sceneBrief, setSceneBrief] = useState(currentNovel?.id === novelId ? currentNovel.userBackground || '' : '')
   const [abResult, setAbResult] = useState<StyleAbTestResult | null>(null)
   const [abBlindOrder, setAbBlindOrder] = useState<AbVariantKey[]>(['withFingerprint', 'without'])
   const [abBlindChoice, setAbBlindChoice] = useState<AbBlindChoice | null>(null)
@@ -168,7 +174,7 @@ export default function StyleLabPage({ novelId }: Props) {
       setChapters(chapterList)
       setAbFingerprintId((current) => {
         if (current && list.some((item) => item.id === current)) return current
-        return resolvedPayload?.record.id || list[0]?.id || null
+        return resolvedPayload?.approvedSample ? list.find((item) => item.id === resolvedPayload.record.id)?.id || null : null
       })
     } catch (error) {
       console.error(error)
@@ -184,7 +190,8 @@ export default function StyleLabPage({ novelId }: Props) {
     setSwitchingId(fingerprintId)
     try {
       await window.electron.style.setActive(novelId, next ? fingerprintId : null)
-      message.success(getUserFacingMessage(next ? 'styleLab.activated' : 'styleLab.deactivated'))
+      if (!next) setAbFingerprintId(null)
+      message.success(next ? '已认可并启用样稿。' : '已撤销认可，后续写作不再使用该样稿；原文仍保留。')
       await loadData()
     } catch (error) {
       console.error(error)
@@ -252,10 +259,6 @@ export default function StyleLabPage({ novelId }: Props) {
   }
 
   const handleRunAbTest = async () => {
-    if (!abFingerprintId) {
-      message.warning(getUserFacingMessage('styleLab.fingerprintNotFound'))
-      return
-    }
     if (!sceneBrief.trim()) {
       message.warning(getUserFacingMessage('styleLab.sceneBriefRequired'))
       return
@@ -280,6 +283,18 @@ export default function StyleLabPage({ novelId }: Props) {
       value: variant === 'withFingerprint' ? abResult.withFingerprint : abResult.without,
     }))
   }, [abBlindOrder, abResult])
+
+  const approveChoice = async () => {
+    const candidate = abCandidates.find((item) => item.label === abBlindChoice)
+    if (!candidate || approving) return
+    setApproving(true)
+    try {
+      await window.electron.style.approveTrial(novelId, candidate.value.text)
+      message.success('已认可为作品声音，可随时撤销；样稿不会写入正文。')
+      await loadData()
+    } catch (error) { message.error(getErrorMessage(error, 'styleLab.operationFailed')) }
+    finally { setApproving(false) }
+  }
 
   const abDiffRows = useMemo(() => {
     if (!abResult) return []
@@ -343,13 +358,21 @@ export default function StyleLabPage({ novelId }: Props) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedCandidate])
 
+  const leaveFor = (route: string) => {
+    const leave = () => navigate(buildWorkspaceRoute(novelId, route))
+    if (abGeneration.running || approving) { message.info('请等待当前试写或保存完成。'); return }
+    if (hasUnsavedCandidate) {
+      Modal.confirm({ title: '离开试写？', content: '未保存的输入与对照将丢失；已认可样稿会保留。', okText: '离开', cancelText: '继续试写', onOk: leave })
+    } else leave()
+  }
+
   return (
     <WorkspacePage
       className="novel-style-lab-page"
       layout="wide"
       heroVariant="compact"
       chrome="shared"
-      title="文风实验室"
+      title="作品声音 · 样稿与试写"
       actionContract={{
         primary: {
           key: activeView === 'ab' ? 'ab-settings' : 'create-fingerprint',
@@ -380,8 +403,14 @@ export default function StyleLabPage({ novelId }: Props) {
         </div>
         <div className="style-lab__status-meta">
           <span>{fingerprints.length} 条指纹</span>
-          <span>{resolved ? `${RESOLVE_SOURCE_LABEL[resolved.source]} · ${resolved.record.name}` : '当前无生效指纹'}</span>
+          <span>{resolved?.approvedSample ? `已认可 · ${resolved.record.name}` : '声音试用中 · 尚未认可样稿'}</span>
         </div>
+      </div>
+
+      <div className="style-lab__blind-actions">
+        <Button onClick={() => leaveFor('theme-voice')}>声音说明</Button>
+        <Button onClick={() => leaveFor('writing/editor')}>{resolved?.approvedSample ? '返回正文' : '跳过试写，声音保持试用'}</Button>
+        {activeFingerprintId ? <Popconfirm title="撤销当前样稿认可？后续写作将不再采用这份样稿。" onConfirm={() => handleToggleActive(activeFingerprintId, false)}><Button loading={switchingId !== null}>撤销样稿认可</Button></Popconfirm> : null}
       </div>
 
       <Tabs
@@ -597,13 +626,13 @@ export default function StyleLabPage({ novelId }: Props) {
               message="A/B 试写失败"
               description={abGeneration.error.message}
               action={(
-                <Button size="small" onClick={() => void abGeneration.retry()}>重试</Button>
+                <Button size="small" onClick={() => void handleRunAbTest()}>重试</Button>
               )}
             />
           ) : null}
           <div className="style-lab__ab-brief">
             <div>
-              <strong>{fingerprints.find((item) => item.id === abFingerprintId)?.name || '尚未选择指纹'}</strong>
+              <strong>{fingerprints.find((item) => item.id === abFingerprintId)?.name || '使用声音说明试写（无需已有样稿）'}</strong>
               <span>{sceneBrief.trim() || '尚未填写试写场景；打开参数后再开始对照。'}</span>
             </div>
             <Button icon={<ExperimentOutlined />} onClick={() => setDrawerMode('ab')}>调整试写参数</Button>
@@ -624,17 +653,24 @@ export default function StyleLabPage({ novelId }: Props) {
                 <Alert
                   type="success"
                   showIcon
-                  message={abBlindChoice === 'tie' ? '已记录：两版都不合适' : `已记录：更偏好样稿 ${abBlindChoice}`}
-                  description={`结果揭晓：${abCandidates.find((item) => item.variant === 'withFingerprint')?.label} 使用了「${abResult.fingerprintName}」，另一版未使用指纹。`}
+                  message={abBlindChoice === 'tie' ? '本次偏好：两版都不合适' : `本次偏好：更偏好样稿 ${abBlindChoice}`}
+                  description={`结果揭晓：${abCandidates.find((item) => item.variant === 'withFingerprint')?.label} 使用了「${abResult.fingerprintName}」，另一版为基础试写。`}
                 />
               )}
+              {abBlindChoice ? <div className="style-lab__blind-actions">
+                {abBlindChoice !== 'tie' ? <Button type="primary" loading={approving} disabled={resolved?.approvedSample?.text === abCandidates.find((item) => item.label === abBlindChoice)?.value.text} onClick={() => void approveChoice()}>认可所选样稿为作品声音</Button> : null}
+                <Button onClick={() => setAbBlindChoice(null)}>重选</Button>
+                <Button onClick={() => leaveFor('characters')}>回到人物</Button>
+                <Button onClick={() => leaveFor('story-design')}>回到事件</Button>
+                <Button onClick={() => leaveFor('theme-voice')}>调整声音</Button>
+              </div> : null}
               <div className="style-lab__ab-columns">
                 {abCandidates.map((candidate) => (
                   <div key={candidate.label} className="style-lab__ab-column">
                     <div className="style-lab__ab-column-head">
                       <Tag color={abBlindChoice && candidate.variant === 'withFingerprint' ? 'green' : undefined}>
                         {abBlindChoice
-                          ? `${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用指纹' : '未使用指纹'}`
+                          ? `${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用声音参考' : '基础试写'}`
                           : `样稿 ${candidate.label}`}
                       </Tag>
                       {abBlindChoice && candidate.variant === 'withFingerprint' ? (
@@ -661,7 +697,7 @@ export default function StyleLabPage({ novelId }: Props) {
                       <tr>
                         <th>指标</th>
                         {abCandidates.map((candidate) => (
-                          <th key={candidate.label}>{`${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用指纹' : '未使用指纹'}`}</th>
+                          <th key={candidate.label}>{`${candidate.label} · ${candidate.variant === 'withFingerprint' ? '使用声音参考' : '基础试写'}`}</th>
                         ))}
                         <th>指纹参考值</th>
                       </tr>
@@ -685,7 +721,7 @@ export default function StyleLabPage({ novelId }: Props) {
           ) : (
             <div className="style-lab__ab-empty">
               <span>A / B</span>
-              <strong>先确定指纹与场景，再生成第一组对照</strong>
+              <strong>写下人物、眼前事件与已知事实，即可试写</strong>
               <Button type="primary" icon={<ExperimentOutlined />} onClick={() => setDrawerMode('ab')}>设置试写参数</Button>
             </div>
           )}
@@ -704,16 +740,17 @@ export default function StyleLabPage({ novelId }: Props) {
           <Select
             id="style-lab-ab-fingerprint"
             className="style-lab__ab-select"
-            placeholder="选择用于对照的风格指纹"
+            allowClear
+            placeholder="可选；留空使用声音说明"
             value={abFingerprintId ?? undefined}
-            onChange={(value) => setAbFingerprintId(value)}
+            onChange={(value) => setAbFingerprintId(value ?? null)}
             options={fingerprints.map((fingerprint) => ({ value: fingerprint.id, label: fingerprint.name }))}
           />
           <label htmlFor="style-lab-scene-brief">场景梗概</label>
           <Input.TextArea
             id="style-lab-scene-brief"
             rows={7}
-            placeholder="例如：主角在酒馆被三个人围住，他要在不惊动官府的情况下脱身。"
+            placeholder="写明人物、此刻要做的事、阻碍及已知事实。尚未确定的关系或规则请先明确；无需地图、境界或全卷大纲。"
             value={sceneBrief}
             onChange={(event) => setSceneBrief(event.target.value)}
           />
@@ -722,7 +759,7 @@ export default function StyleLabPage({ novelId }: Props) {
             type="primary"
             icon={<ExperimentOutlined />}
             loading={abGeneration.running}
-            disabled={!abFingerprintId || !sceneBrief.trim()}
+            disabled={!sceneBrief.trim()}
             onClick={() => void handleRunAbTest()}
           >
             开始 A/B 试写

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { Button, Progress, Collapse, Tag, Input, message } from 'antd'
 import { BarChartOutlined, LoadingOutlined, SyncOutlined } from '@ant-design/icons'
 import { AIScoreResult } from '../../types'
@@ -20,6 +20,7 @@ interface Props {
   genreContext?: string
   modelConfigId?: number
   novelId?: number
+  chapterId?: number
   disabled?: boolean
   /** 重新生成后的回调，将新内容（已去除 Markdown）应用到字段 */
   onRegenerate?: (newContent: string) => void
@@ -76,6 +77,7 @@ export default function AIScorePanel({
   genreContext = '',
   modelConfigId,
   novelId,
+  chapterId,
   disabled = false,
   onRegenerate,
   drawCount = 1,
@@ -84,6 +86,9 @@ export default function AIScorePanel({
   customRunGeneration,
 }: Props) {
   const [loading, setLoading] = useState(false)
+  const scoredSourceRef = useRef<{ content: string; novelId?: number; chapterId?: number } | null>(null)
+  const currentSourceRef = useRef({ getContent, novelId, chapterId })
+  currentSourceRef.current = { getContent, novelId, chapterId }
   const [result, setResult] = useState<AIScoreResult | null>(null)
   const [extraReqs, setExtraReqs] = useState('')
   const [showRegen, setShowRegen] = useState(false)
@@ -98,12 +103,16 @@ export default function AIScorePanel({
     setLoading(true)
     try {
       const r = await window.electron.ai.scoreContent({
+        novelId,
+        chapterId,
         contentType,
         content,
         genreContext,
         novelBackground,
         modelConfigId,
       })
+      if (currentSourceRef.current.novelId !== novelId || currentSourceRef.current.chapterId !== chapterId || currentSourceRef.current.getContent() !== content) return
+      scoredSourceRef.current = { content, novelId, chapterId }
       setResult(r)
       setShowRegen(false)
     } catch (e: unknown) {
@@ -117,6 +126,9 @@ export default function AIScorePanel({
 
   const buildRegenMessages = (): Message[] => {
     if (!result) return []
+    if (scoredSourceRef.current?.content !== getContent() || scoredSourceRef.current?.novelId !== novelId || scoredSourceRef.current?.chapterId !== chapterId) {
+      throw new Error('原稿已变化，请重新体检。')
+    }
     const content = getContent()
 
     if (buildCustomRegenMessages) {
@@ -379,11 +391,18 @@ export default function AIScorePanel({
               label="AI 修复·按体检改写"
               intent="repair"
               buildMessages={buildRegenMessages}
-              runGeneration={customRunGeneration}
+              runGeneration={customRunGeneration || (buildCustomRegenMessages ? undefined : async ({ messages }) => [await window.electron.ai.rewriteParagraph({
+                novelId, chapterId, modelConfigId, originalParagraph: scoredSourceRef.current?.content || '', contextBefore: '',
+                specificRequirements: messages.map((item) => item.content).join('\n'),
+              })])}
               drawCount={drawCount}
               isJson={!!buildCustomRegenMessages && customIsJson}
               disabled={disabled}
               onResult={content => {
+                if (scoredSourceRef.current?.content !== currentSourceRef.current.getContent() || scoredSourceRef.current?.novelId !== currentSourceRef.current.novelId || scoredSourceRef.current?.chapterId !== currentSourceRef.current.chapterId) {
+                  message.warning('原稿已变化，旧体检候选不可应用。')
+                  return
+                }
                 onRegenerate(content)
                 setShowRegen(false)
                 message.success(getUserFacingMessage('aiScore.optimizedApplied'))

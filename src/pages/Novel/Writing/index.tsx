@@ -1,3 +1,4 @@
+import { locateReviewEvidence } from './reading-review-evidence'
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal, message } from 'antd'
 import { getErrorMessage } from '@/utils/user-facing-message'
@@ -467,6 +468,13 @@ export default function Writing({ novelId }: Props) {
       deleteForeshadow: handleDeleteForeshadowWriteback,
       openGateIssue: handleOpenGateIssue,
       setGateReportExpanded,
+      onLocateEvidence: (evidence) => {
+        if (!editorRef.current || !locateReviewEvidence(editorRef.current, getEditorText(), evidence)) {
+          message.warning('当前编辑格式无法精确定位，请按问题引文手动选择原文。')
+          return
+        }
+        setSelectedSnippet({ start: evidence.start, end: evidence.end, text: evidence.quote })
+      },
       getEditorContent: getEditorText,
       regenerate: applyChapterContent,
       setSelectedVersionId,

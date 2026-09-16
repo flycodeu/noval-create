@@ -1,3 +1,4 @@
+import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import type { ProgressSink } from '../utils/progress-sink'
 import { asc, desc, eq } from 'drizzle-orm'
 import type {
@@ -404,11 +405,13 @@ function appendUniqueStrings(values: string[], next?: string | string[] | null):
 function getChapterBatchRuntimePolicy(novelId: number) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).get()
-  return getOperatingModeRuntimePolicy({
+  const runtime = getOperatingModeRuntimePolicy({
     launchMode: novel?.launchMode,
     targetWords: novel?.targetWords,
     settingsJson: novel?.settingsJson,
   })
+  const readerFirstEnabled = resolveNarrativePolicy(novel?.settingsJson, true).policyVersion === 'reader-first-v1'
+  return { ...runtime, readerFirstEnabled, requireWritebackReady: runtime.requireWritebackReady || readerFirstEnabled }
 }
 
 function toRuntimePolicySnapshot(runtimePolicy: ReturnType<typeof getOperatingModeRuntimePolicy>): NonNullable<ChapterBatchAutoGenerateStatus['runtimePolicySnapshot']> {
@@ -1437,14 +1440,14 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: Progress
 
       const refreshedChapter = getChapter(chapterId)
       const writebackStatus = parseChapterWritebackSyncStatus(refreshedChapter?.writebackStatusJson)
-      if (runtimePolicy.requireWritebackReady && (writebackStatus?.blockedGeneration || writebackStatus?.canonApplied === false || writebackStatus?.readyForNextChapter === false)) {
+      if (runtimePolicy.requireWritebackReady && ((runtimePolicy.readerFirstEnabled && (!writebackStatus || !writebackStatus.canonApplied || !writebackStatus.readyForNextChapter)) || writebackStatus?.blockedGeneration || writebackStatus?.canonApplied === false || writebackStatus?.readyForNextChapter === false)) {
         pauseChapterBatchWorkflow(taskId, sender, progress, {
           chapterId,
           chapterNum,
           childTaskId,
-          message: `第 ${chapterNum} 章等待章后回写完成，章节批量任务已暂停：${writebackStatus.lastError || '请先处理当前章的回写同步状态。'}`,
-          errorMessage: writebackStatus.lastError || '章后回写未完成',
-          warnings: `第 ${chapterNum} 章回写状态：${getWritebackPhaseLabel(writebackStatus.phase)}`,
+          message: `第 ${chapterNum} 章等待章后回写完成，章节批量任务已暂停：${writebackStatus?.lastError || '请先处理当前章的回写同步状态。'}`,
+          errorMessage: writebackStatus?.lastError || '章后回写未完成',
+          warnings: `第 ${chapterNum} 章回写状态：${getWritebackPhaseLabel(writebackStatus?.phase)}`,
           currentWritebackStatus: writebackStatus,
           activeGuardrailReason: runtimePolicy.operatingMode === 'million_longform'
             ? '百万字模式护栏生效：章后回写未闭环前，不允许推进下一章，避免状态乱序。'
