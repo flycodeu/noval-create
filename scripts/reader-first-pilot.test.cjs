@@ -10,7 +10,8 @@ const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 const { pilotDrafts, pilotScene, pilotStory } = require('./reader-first-fixtures.cjs')
 
 const root = path.resolve(__dirname, '..')
-const output = path.resolve(root, 'docs/implementation/reader-first-v1/evidence/RF-11/2026-09-15-final')
+const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID()}`
+const output = path.resolve(root, 'docs/implementation/reader-first-v1/evidence/RF-11', runId)
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf11-'))
 process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
@@ -312,7 +313,7 @@ app.whenReady().then(async () => {
         assert.ok(runtime.rootTaskId, 'cancelled workflow root id must be captured')
         const interruptedTaskId = runtime.rootTaskId
         const interrupted = taskService.getTaskRecord(interruptedTaskId)
-        assert.ok(['cancelled', 'failed'].includes(interrupted.status), `unexpected interrupted status ${interrupted.status}`)
+        assert.equal(interrupted.status, 'cancelled', 'formal cancellation must not be recorded as a failure')
         try {
           const taskId = await chapterService.resumeChapterPipeline(interruptedTaskId, sink)
           return { taskId, interruptedTaskId }
@@ -371,6 +372,10 @@ app.whenReady().then(async () => {
         WHERE r.workflow_task_id = ? ORDER BY r.id
       `).all(rootTask.id))
       const finalTask = roots.find((row) => row.id === finalTaskId)
+      assert.equal(finalTask?.status, 'success', `chapter ${chapterId} workflow must finish successfully`)
+      for (const node of nodes.filter((row) => row.status === 'produced')) {
+        assert.ok(node.snapshot_id, `produced node ${node.id} must have an immutable snapshot`)
+      }
       const snapshot = finalTask?.progress_json ? JSON.parse(finalTask.progress_json) : null
       return { roots, nodes, finalSnapshot: snapshot }
     }
@@ -470,7 +475,7 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(output, 'reader-manifest.json'), json(readerManifest))
     const report = {
       task: 'RF-11',
-      runId: '2026-09-15-final',
+      runId,
       commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
       workingTree: workingTreeIdentity(),
       kind: 'isolated-integration',
