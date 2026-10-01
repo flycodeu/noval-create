@@ -12,6 +12,7 @@ const SECTION_LABELS = [
   { key: '/templates', label: '风格模板' },
   { key: '/prompts', label: '提示词' },
   { key: '/tasks', label: '任务中心' },
+  { key: '/settings', label: '应用设置' },
 ]
 
 export default function AppShellBar() {

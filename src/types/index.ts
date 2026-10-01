@@ -5934,6 +5934,10 @@ declare global {
       app: {
         getDatabasePath: () => Promise<string>
         getMaintenanceStatus: () => Promise<MaintenanceWorkerStatus>
+        getUpdateStatus: () => Promise<import('../shared/desktop-update').DesktopUpdateStatus>
+        checkForUpdates: () => Promise<import('../shared/desktop-update').DesktopUpdateStatus>
+        installUpdate: () => Promise<boolean>
+        openReleasePage: () => Promise<void>
         getLocalBackendStatus?: () => Promise<{
           isWebPreview: boolean
           status: 'checking' | 'connected' | 'unavailable'

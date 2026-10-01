@@ -1,0 +1,85 @@
+.app-settings .novel-workspace__main {
+  max-width: 850px;
+}
+
+.app-settings .novel-panel__body {
+  display: grid;
+  gap: 20px;
+}
+
+.app-settings__version,
+.app-settings__update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px;
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  background: var(--bg-surface);
+}
+
+.app-settings__version > div,
+.app-settings__update-copy {
+  display: grid;
+  gap: 7px;
+}
+
+.app-settings__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.app-settings__version strong {
+  color: var(--text-primary);
+  font-size: clamp(26px, 3vw, 36px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.app-settings__edition {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.app-settings__update-copy strong {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.app-settings__update-copy > span:last-child:not(.app-settings__label) {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.app-settings__success {
+  color: var(--accent);
+  font-size: 23px;
+}
+
+.app-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.app-settings__note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 600px) {
+  .app-settings__version,
+  .app-settings__update {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 17px;
+  }
+}

@@ -1,58 +1,156 @@
 import path from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
 import electronUpdater, { type NsisUpdater } from 'electron-updater'
+import type { DesktopUpdateMode, DesktopUpdateStatus } from '../../src/shared/desktop-update'
 import { canUseDesktopUpdater } from './desktop-updater-policy'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
 
 const FIRST_CHECK_DELAY_MS = 30_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+const { autoUpdater } = electronUpdater
 
-export function startDesktopUpdater(
-  getWindow: () => BrowserWindow | null,
-): void {
-  if (!canUseDesktopUpdater(app.isPackaged, process.platform, process.env.PORTABLE_EXECUTABLE_FILE)) return
+let windowProvider: (() => BrowserWindow | null) | null = null
+let checkPromise: Promise<DesktopUpdateStatus> | null = null
+let installing = false
+let promptedVersion = ''
+let updateState: Omit<DesktopUpdateStatus, 'currentVersion' | 'mode'> = {
+  phase: 'idle',
+  latestVersion: null,
+  downloadPercent: null,
+  checkedAt: null,
+  error: null,
+}
 
-  // electron-updater 6 is CommonJS; destructuring also works in the Electron Vite bundle.
-  const { autoUpdater } = electronUpdater
+function updateMode(): DesktopUpdateMode {
+  if (!app.isPackaged) return 'development'
+  if (process.env.PORTABLE_EXECUTABLE_FILE) return 'portable'
+  if (process.platform !== 'win32') return 'unsupported'
   const executablePath = app.getPath('exe')
-  if (!path.isAbsolute(executablePath) || path.extname(executablePath).toLowerCase() !== '.exe') {
+  return path.isAbsolute(executablePath) && path.extname(executablePath).toLowerCase() === '.exe'
+    ? 'installed' : 'unsupported'
+}
+
+export function getDesktopUpdateStatus(): DesktopUpdateStatus {
+  return { currentVersion: app.getVersion(), mode: updateMode(), ...updateState }
+}
+
+function publishStatus(patch: Partial<typeof updateState>): DesktopUpdateStatus {
+  updateState = { ...updateState, ...patch }
+  const status = getDesktopUpdateStatus()
+  const window = windowProvider?.()
+  if (window && !window.isDestroyed()) window.webContents.send('app:update-status', status)
+  return status
+}
+
+async function showUpdateDialog(options: Electron.MessageBoxOptions): Promise<number> {
+  const window = windowProvider?.()
+  const result = window && !window.isDestroyed()
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options)
+  return result.response
+}
+
+function beginInstall(version: string): boolean {
+  if (installing || updateState.phase !== 'ready') return false
+  installing = true
+  try {
+    // The main process releases the SQLite writer lock in its before-quit handler.
+    logInfo('desktop-updater', 'User requested update install', { context: { version } })
+    autoUpdater.quitAndInstall(true, true)
+    return true
+  } catch (error) {
+    installing = false
+    logError('desktop-updater', 'Could not start installer', { error })
+    const message = error instanceof Error ? error.message : String(error)
+    publishStatus({ phase: 'ready', error: message })
+    void showUpdateDialog({
+      type: 'error',
+      title: '更新未安装',
+      message: '启动更新安装器失败，请稍后重试。',
+      detail: message,
+      buttons: ['知道了'],
+      noLink: true,
+    }).catch((dialogError: unknown) => logError('desktop-updater', 'Could not show installer error', { error: dialogError }))
+    return false
+  }
+}
+
+export async function installDownloadedUpdate(): Promise<boolean> {
+  if (getDesktopUpdateStatus().mode !== 'installed' || updateState.phase !== 'ready') return false
+  const version = updateState.latestVersion || '新版本'
+  const answer = await showUpdateDialog({
+    type: 'warning',
+    title: '安装 NovelForge 更新',
+    message: `现在重启并安装 ${version}？`,
+    detail: '请先保存正在编辑的内容。重启会中断正在运行的 AI 任务，更新将沿用当前安装位置。',
+    buttons: ['重启并安装', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  })
+  return answer === 0 ? beginInstall(version) : false
+}
+
+export function checkDesktopUpdates(): Promise<DesktopUpdateStatus> {
+  if (getDesktopUpdateStatus().mode !== 'installed' || !windowProvider || installing || updateState.phase === 'ready') {
+    return Promise.resolve(getDesktopUpdateStatus())
+  }
+  if (checkPromise) return checkPromise
+  publishStatus({ phase: 'checking', latestVersion: null, error: null, downloadPercent: null, checkedAt: new Date().toISOString() })
+  checkPromise = autoUpdater.checkForUpdates()
+    .then(() => updateState.phase === 'checking' ? publishStatus({ phase: 'up_to_date' }) : getDesktopUpdateStatus())
+    .catch((error: unknown) => {
+      logWarn('desktop-updater', 'Update check failed', { error })
+      return publishStatus({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
+    })
+    .finally(() => { checkPromise = null })
+  return checkPromise
+}
+
+export function startDesktopUpdater(getWindow: () => BrowserWindow | null): void {
+  if (!canUseDesktopUpdater(app.isPackaged, process.platform, process.env.PORTABLE_EXECUTABLE_FILE)) return
+  const executablePath = app.getPath('exe')
+  if (updateMode() !== 'installed') {
     logWarn('desktop-updater', 'Cannot determine installed application directory', { context: { executablePath } })
     return
   }
-  // NSIS uses /D to keep the current location when a silent update runs.
-  (autoUpdater as NsisUpdater).installDirectory = path.dirname(executablePath)
+  windowProvider = getWindow
+  updateState = { phase: 'idle', latestVersion: null, downloadPercent: null, checkedAt: null, error: null }
+  installing = false
+  promptedVersion = ''
+
+  // NSIS uses /D to retain a custom installation directory during a silent update.
+  const nsisUpdater = autoUpdater as NsisUpdater
+  nsisUpdater.installDirectory = path.dirname(executablePath)
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false
 
-  let checking = false
-  let installing = false
-  let promptedVersion = ''
-
-  const check = async () => {
-    if (checking || installing) return
-    checking = true
-    try {
-      await autoUpdater.checkForUpdates()
-    } catch (error) {
-      logWarn('desktop-updater', 'Update check failed', { error })
-    } finally {
-      checking = false
-    }
-  }
-
+  autoUpdater.on('checking-for-update', () => {
+    publishStatus({ phase: 'checking', latestVersion: null, error: null, checkedAt: new Date().toISOString() })
+  })
+  autoUpdater.on('update-available', (info) => {
+    publishStatus({ phase: 'downloading', latestVersion: info.version, downloadPercent: 0, error: null })
+  })
+  autoUpdater.on('update-not-available', (info) => {
+    publishStatus({ phase: 'up_to_date', latestVersion: info.version, downloadPercent: null, error: null })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    publishStatus({ phase: 'downloading', downloadPercent: Math.max(0, Math.min(100, Math.round(progress.percent))) })
+  })
   autoUpdater.on('error', (error) => {
     logError('desktop-updater', 'Update failed', { error })
+    publishStatus({ phase: 'error', error: error.message })
   })
-
   autoUpdater.on('update-downloaded', (info) => {
-    if (installing || promptedVersion === info.version) return
+    if (installing) return
+    publishStatus({ phase: 'ready', latestVersion: info.version, downloadPercent: 100, error: null })
+    if (promptedVersion === info.version) return
     promptedVersion = info.version
     logInfo('desktop-updater', 'Update downloaded', { context: { version: info.version } })
-
     void (async () => {
-      const options = {
-        type: 'info' as const,
+      const answer = await showUpdateDialog({
+        type: 'info',
         title: 'NovelForge 更新已就绪',
         message: `NovelForge ${info.version} 已下载`,
         detail: '重启后将安装更新。请先保存正在编辑的内容；正在运行的 AI 任务会被中断。',
@@ -60,41 +158,16 @@ export function startDesktopUpdater(
         defaultId: 1,
         cancelId: 1,
         noLink: true,
-      }
-      const window = getWindow()
-      const answer = window
-        ? await dialog.showMessageBox(window, options)
-        : await dialog.showMessageBox(options)
-      if (answer.response !== 0 || installing) return
-
-      installing = true
-      try {
-        // The existing before-quit handler stops the worker, closes SQLite and
-        // releases the writer lock before Electron exits.
-        logInfo('desktop-updater', 'User requested update install', { context: { version: info.version } })
-        autoUpdater.quitAndInstall(true, true)
-      } catch (error) {
-        installing = false
-        logError('desktop-updater', 'Could not start installer', { error })
-        const message = error instanceof Error ? error.message : String(error)
-        const failure = {
-          type: 'error' as const,
-          title: '更新未安装',
-          message: '启动更新安装器失败，请稍后重启并重试。',
-          detail: message,
-          buttons: ['知道了'],
-          noLink: true,
-        }
-        const activeWindow = getWindow()
-        if (activeWindow) await dialog.showMessageBox(activeWindow, failure)
-        else await dialog.showMessageBox(failure)
-      }
-    })()
+      })
+      if (answer === 0) beginInstall(info.version)
+    })().catch((error: unknown) => {
+      logError('desktop-updater', 'Could not show update prompt', { error })
+    })
   })
 
-  const firstCheck = setTimeout(() => void check(), FIRST_CHECK_DELAY_MS)
+  const firstCheck = setTimeout(() => void checkDesktopUpdates(), FIRST_CHECK_DELAY_MS)
   firstCheck.unref()
-  const periodicCheck = setInterval(() => void check(), CHECK_INTERVAL_MS)
+  const periodicCheck = setInterval(() => void checkDesktopUpdates(), CHECK_INTERVAL_MS)
   periodicCheck.unref()
   app.once('before-quit', () => {
     clearTimeout(firstCheck)

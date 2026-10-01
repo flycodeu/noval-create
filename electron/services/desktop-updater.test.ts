@@ -1,10 +1,12 @@
+import type { BrowserWindow } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  events: new Map<string, (info: { version: string }) => void>(),
+  events: new Map<string, (info: { version: string; percent?: number }) => void>(),
   beforeQuit: null as null | (() => void),
   app: {
     isPackaged: true,
+    getVersion: vi.fn(() => '1.1.1'),
     getPath: vi.fn(() => 'D:\\My Novels\\NovelForge.exe'),
     once: vi.fn((_event: string, listener: () => void) => { mocks.beforeQuit = listener }),
   },
@@ -15,7 +17,7 @@ const mocks = vi.hoisted(() => ({
     allowPrerelease: true,
     checkForUpdates: vi.fn(),
     quitAndInstall: vi.fn(),
-    on: vi.fn((event: string, listener: (info: { version: string }) => void) => {
+    on: vi.fn((event: string, listener: (info: { version: string; percent?: number }) => void) => {
       mocks.events.set(event, listener)
     }),
   },
@@ -33,7 +35,7 @@ vi.mock('../utils/runtime-log', () => ({
   logWarn: vi.fn(),
 }))
 
-import { startDesktopUpdater } from './desktop-updater'
+import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './desktop-updater'
 
 describe('desktop updater installation', () => {
   const portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE
@@ -48,6 +50,7 @@ describe('desktop updater installation', () => {
     mocks.showMessageBox.mockReset().mockResolvedValue({ response: 0 })
     mocks.updater.quitAndInstall.mockClear()
     mocks.updater.on.mockClear()
+    mocks.updater.checkForUpdates.mockReset().mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -71,6 +74,38 @@ describe('desktop updater installation', () => {
     mocks.events.get('update-downloaded')?.({ version: '1.0.2' })
     await vi.waitFor(() => expect(mocks.showMessageBox).toHaveBeenCalledOnce())
     expect(mocks.updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(getDesktopUpdateStatus()).toMatchObject({ currentVersion: '1.1.1', phase: 'ready', latestVersion: '1.0.2' })
+    mocks.showMessageBox.mockResolvedValue({ response: 0 })
+    expect(await installDownloadedUpdate()).toBe(true)
+    expect(mocks.updater.quitAndInstall).toHaveBeenCalledWith(true, true)
+  })
+
+  it('reports the current version and manual check result', async () => {
+    startDesktopUpdater(() => null)
+    expect(getDesktopUpdateStatus()).toMatchObject({ currentVersion: '1.1.1', mode: 'installed', phase: 'idle' })
+    const result = await checkDesktopUpdates()
+    expect(mocks.updater.checkForUpdates).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ phase: 'up_to_date', currentVersion: '1.1.1' })
+  })
+
+  it('shows a failure and permits retry after a failed manual check', async () => {
+    startDesktopUpdater(() => null)
+    mocks.updater.checkForUpdates.mockRejectedValueOnce(new Error('network unavailable'))
+    expect(await checkDesktopUpdates()).toMatchObject({ phase: 'error', error: 'network unavailable' })
+    expect(await checkDesktopUpdates()).toMatchObject({ phase: 'up_to_date', error: null })
+  })
+
+  it('sends download state to the settings page', async () => {
+    const send = vi.fn()
+    const window = { isDestroyed: () => false, webContents: { send } } as unknown as BrowserWindow
+    mocks.showMessageBox.mockResolvedValue({ response: 1 })
+    startDesktopUpdater(() => window)
+    mocks.events.get('update-available')?.({ version: '1.1.2' })
+    mocks.events.get('download-progress')?.({ version: '1.1.2', percent: 42.4 })
+    expect(getDesktopUpdateStatus()).toMatchObject({ phase: 'downloading', latestVersion: '1.1.2', downloadPercent: 42 })
+    mocks.events.get('update-downloaded')?.({ version: '1.1.2' })
+    expect(getDesktopUpdateStatus()).toMatchObject({ phase: 'ready', latestVersion: '1.1.2', downloadPercent: 100 })
+    expect(send).toHaveBeenLastCalledWith('app:update-status', expect.objectContaining({ phase: 'ready' }))
   })
 
   it('does not configure an updater in development, portable, or invalid installations', () => {

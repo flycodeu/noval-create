@@ -10,6 +10,7 @@ import {
   MoonOutlined,
   SunOutlined,
   HighlightOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
@@ -47,6 +48,11 @@ const menuItems = [
     key: '/tasks',
     icon: <ScheduleOutlined />,
     label: '任务中心',
+  },
+  {
+    key: '/settings',
+    icon: <SettingOutlined />,
+    label: '应用设置',
   },
 ]
 

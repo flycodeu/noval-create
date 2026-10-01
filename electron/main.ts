@@ -74,7 +74,7 @@ import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
-import { startDesktopUpdater } from './services/desktop-updater'
+import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './services/desktop-updater'
 import { startMcpStdio } from './mcp-stdio'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
@@ -397,6 +397,10 @@ function registerIpcHandlers() {
 
   handle('app:getDatabasePath', () => getDatabasePath())
   handle('app:getMaintenanceStatus', () => maintenanceWorker.getStatus())
+  handle('app:getUpdateStatus', () => getDesktopUpdateStatus())
+  handle('app:checkForUpdates', () => checkDesktopUpdates())
+  handle('app:installUpdate', () => installDownloadedUpdate())
+  handle('app:openReleasePage', () => shell.openExternal('https://github.com/flycodeu/noval-create/releases/latest'))
 
   // Stable agent-tool surface. Caller identity and scopes are supplied here,
   // never accepted from renderer input.
@@ -1551,5 +1555,3 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
   handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }
-
-

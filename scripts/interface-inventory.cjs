@@ -12,7 +12,12 @@ const DEFAULT_SOURCE_FILES = Object.freeze({
 // These are platform capabilities, not business APIs. Window controls have no
 // meaningful Web equivalent; the Web app exposes its real-backend capability
 // probe explicitly, while desktop uses the native window/runtime surface.
+// Installed-app updates likewise cannot run from a browser preview.
 const DESKTOP_WEB_PLATFORM_ONLY = new Set([
+  'app.checkForUpdates',
+  'app.getUpdateStatus',
+  'app.installUpdate',
+  'app.openReleasePage',
   'window.close',
   'window.isMaximized',
   'window.minimize',

@@ -317,7 +317,7 @@ NovelForge 基于 `Electron + React + TypeScript + SQLite`，面向的不是“�
 
 Windows 用户可从 [GitHub Releases](https://github.com/flycodeu/noval-create/releases/latest) 下载 `NovelForge-Setup-*-x64.exe`。双击安装器，按向导选择安装位置；安装完成后可从开始菜单或桌面快捷方式启动。`NovelForge-Portable-*-x64.exe` 可直接运行，适合不想安装的场景。
 
-安装版会在启动后检查 GitHub Releases，此后定期检查。新版本下载完成时，应用会询问是否重启安装；正在编辑的内容请先保存。便携版需要自行下载新版本。小说数据保存在本机用户数据目录，安装位置不是小说数据目录；更换安装位置前请先备份重要项目。
+在左侧“应用设置 → 版本与更新”可查看当前版本、手动检查更新、查看下载进度，并在下载完成后选择重启安装。安装版也会在启动后检查 GitHub Releases，此后定期检查；正在编辑的内容请先保存。便携版可从设置页打开发布页自行下载新版本。小说数据保存在本机用户数据目录，安装位置不是小说数据目录；更换安装位置前请先备份重要项目。
 
 当前 Windows 安装包未使用代码签名证书，系统可能显示来源提示。发布前的本地检查和 GitHub Release 产物校验记录在对应版本的发行说明中。
 

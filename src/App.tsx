@@ -12,6 +12,7 @@ const ModelManager = React.lazy(() => import('./pages/ModelManager'))
 const TemplateManager = React.lazy(() => import('./pages/TemplateManager'))
 const TaskCenter = React.lazy(() => import('./pages/TaskCenter'))
 const PromptManager = React.lazy(() => import('./pages/PromptManager'))
+const AppSettings = React.lazy(() => import('./pages/AppSettings'))
 const NovelRouter = React.lazy(() => import('./pages/Novel'))
 
 type LocalBackendStatus = {
@@ -119,6 +120,7 @@ export default function App() {
               <Route path="/templates" element={<TemplateManager />} />
               <Route path="/tasks" element={<TaskCenter />} />
               <Route path="/prompts" element={<PromptManager />} />
+              <Route path="/settings" element={<AppSettings />} />
               <Route path="*" element={<Navigate to="/novels" replace />} />
             </Routes>
           </Suspense>

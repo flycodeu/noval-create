@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { DesktopUpdateStatus } from '../src/shared/desktop-update'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
 import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
 import type { StoryThreadBatchGenerateOptions } from '../src/shared/story-thread-generation'
@@ -93,6 +94,10 @@ const api = {
   app: {
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
     getMaintenanceStatus: () => invokeIpc<MaintenanceWorkerStatus>('app:getMaintenanceStatus'),
+    getUpdateStatus: () => invokeIpc<DesktopUpdateStatus>('app:getUpdateStatus'),
+    checkForUpdates: () => invokeIpc<DesktopUpdateStatus>('app:checkForUpdates'),
+    installUpdate: () => invokeIpc<boolean>('app:installUpdate'),
+    openReleasePage: () => invokeIpc<void>('app:openReleasePage'),
   },
 
   agentTools: {
@@ -697,6 +702,7 @@ const api = {
       'ai:premise-progress',
       'ai:world-rules-progress',
       'chapter:generation-progress',
+      'app:update-status',
     ]
     if (validChannels.includes(channel)) {
       const subscription: EventSubscription = (_event, ...args) => callback(...args)
@@ -731,5 +737,3 @@ const api = {
 contextBridge.exposeInMainWorld('electron', api)
 
 export type ElectronAPI = typeof api
-
-
