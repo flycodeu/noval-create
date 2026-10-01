@@ -91,6 +91,11 @@ jobs:
           $silentUpdateNote = if ($version -eq '1.0.2') {
             '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
           } else { $null }
+          $releaseChangesNote = if ($version -eq '1.0.3') {
+            '1.0.3 用于实测 1.0.2 到 1.0.3 的静默升级，除版本号外无功能改动。'
+          } elseif ($version -in @('1.0.0', '1.0.1', '1.0.2')) {
+            '本版改进章节衔接和正文生成门禁，清理占位主角；任务中心可查看逐请求的提示词与输出记录。'
+          } else { $null }
           $upgradeNote = if ($version -eq '1.0.0') {
             '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
           } else {
@@ -100,7 +105,7 @@ jobs:
             "Windows 安装版：下载 NovelForge-Setup-$version-x64.exe，可自选安装位置。便携版：下载 NovelForge-Portable-$version-x64.exe。",
             '安装版启动后会从本仓库的 GitHub Releases 检查并下载更新，安装前提示重启。便携版不自动更新。',
             '',
-            '本版改进章节衔接和正文生成门禁，清理占位主角；任务中心可查看逐请求的提示词与输出记录。',
+            $releaseChangesNote,
             $startupFixNote,
             $silentUpdateNote,
             '本版已做本地工程验证，未做真实付费模型的长篇生成和真人读者验收。',
