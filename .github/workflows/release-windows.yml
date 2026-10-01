@@ -4,30 +4,43 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
 
       - name: Check tag and package version
         shell: pwsh
         run: |
           $version = node -p "require('./package.json').version"
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
+          if ($env:RELEASE_TAG -ne "v$version") {
+            throw "Tag $env:RELEASE_TAG does not match package version $version"
           }
+          git ls-remote --exit-code --refs --tags origin "refs/tags/$env:RELEASE_TAG" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Tag $env:RELEASE_TAG does not exist on origin" }
 
       - name: Install dependencies
         run: npm ci
@@ -72,11 +85,19 @@ jobs:
           $setup = "release/NovelForge-Setup-$version-x64.exe"
           $blockmap = "$setup.blockmap"
           $portable = "release/NovelForge-Portable-$version-x64.exe"
+          $upgradeNote = if ($version -eq '1.0.0') {
+            '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
+          } else {
+            '发布后请在已安装的上一版本上实测自动升级与数据保留。'
+          }
           @(
             "Windows 安装版：下载 NovelForge-Setup-$version-x64.exe，可自选安装位置。便携版：下载 NovelForge-Portable-$version-x64.exe。",
             '安装版启动后会从本仓库的 GitHub Releases 检查并下载更新，安装前提示重启。便携版不自动更新。',
             '',
+            '本版改进章节衔接和正文生成门禁，清理占位主角；任务中心可查看逐请求的提示词与输出记录。',
+            '本版已做本地工程验证，未做真实付费模型的长篇生成和真人读者验收。',
+            '',
             '当前安装包未进行 Windows 代码签名，首次安装可能出现 SmartScreen 提示。SHA256SUMS.txt 可用于核对下载文件。',
-            '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
+            $upgradeNote
           ) | Set-Content -LiteralPath 'release-notes.md' -Encoding utf8
-          gh release create $env:GITHUB_REF_NAME $setup $blockmap $portable 'release/latest.yml' 'release/SHA256SUMS.txt' --verify-tag --title "NovelForge $version" --notes-file 'release-notes.md' --latest
+          gh release create $env:RELEASE_TAG $setup $blockmap $portable 'release/latest.yml' 'release/SHA256SUMS.txt' --verify-tag --title "NovelForge $version" --notes-file 'release-notes.md' --latest
