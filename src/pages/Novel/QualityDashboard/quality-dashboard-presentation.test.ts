@@ -128,7 +128,7 @@ describe('getTopLanguageDriftMetrics', () => {
     const top = getTopLanguageDriftMetrics(metrics, 3)
     expect(top[1].value).toBe(50)
     expect(top[2].value).toBe(50)
-    expect(top[1].label.localeCompare(top[2].label)).toBeLessThan(0)
+    expect(top[1].label.localeCompare(top[2].label, 'zh-CN')).toBeLessThan(0)
   })
 })
 

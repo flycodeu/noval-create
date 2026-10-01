@@ -483,7 +483,7 @@ export const LANGUAGE_DRIFT_LABELS: Array<{ key: keyof LanguageDriftMetrics; lab
 export function getTopLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit = 3) {
   return [...LANGUAGE_DRIFT_LABELS]
     .map(({ key, label }) => ({ key, label, value: metrics[key] }))
-    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, 'zh-CN'))
     .slice(0, limit)
 }
 

@@ -272,7 +272,7 @@ function sortStoryAlerts(left: StoryDynamicsAlert, right: StoryDynamicsAlert): n
   const rightMax = right.chapterNums[right.chapterNums.length - 1] || 0
   return rank(right.severity) - rank(left.severity)
     || rightMax - leftMax
-    || left.title.localeCompare(right.title)
+    || left.title.localeCompare(right.title, 'zh-CN')
 }
 
 export function parseStoryDynamics(raw?: string | null): StoryDynamicsParseResult {
