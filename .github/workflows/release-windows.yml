@@ -88,6 +88,9 @@ jobs:
           $startupFixNote = if ($version -eq '1.0.1') {
             '1.0.1 修复 Windows 安装版启动后白屏：主窗口现在正确加载打包后的页面。'
           } else { $null }
+          $silentUpdateNote = if ($version -eq '1.0.2') {
+            '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
+          } else { $null }
           $upgradeNote = if ($version -eq '1.0.0') {
             '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
           } else {
@@ -99,6 +102,7 @@ jobs:
             '',
             '本版改进章节衔接和正文生成门禁，清理占位主角；任务中心可查看逐请求的提示词与输出记录。',
             $startupFixNote,
+            $silentUpdateNote,
             '本版已做本地工程验证，未做真实付费模型的长篇生成和真人读者验收。',
             '',
             '当前安装包未进行 Windows 代码签名，首次安装可能出现 SmartScreen 提示。SHA256SUMS.txt 可用于核对下载文件。',

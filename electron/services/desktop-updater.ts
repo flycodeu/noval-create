@@ -1,5 +1,6 @@
+import path from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
-import electronUpdater from 'electron-updater'
+import electronUpdater, { type NsisUpdater } from 'electron-updater'
 import { canUseDesktopUpdater } from './desktop-updater-policy'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
 
@@ -13,6 +14,13 @@ export function startDesktopUpdater(
 
   // electron-updater 6 is CommonJS; destructuring also works in the Electron Vite bundle.
   const { autoUpdater } = electronUpdater
+  const executablePath = app.getPath('exe')
+  if (!path.isAbsolute(executablePath) || path.extname(executablePath).toLowerCase() !== '.exe') {
+    logWarn('desktop-updater', 'Cannot determine installed application directory', { context: { executablePath } })
+    return
+  }
+  // NSIS uses /D to keep the current location when a silent update runs.
+  (autoUpdater as NsisUpdater).installDirectory = path.dirname(executablePath)
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false
@@ -64,7 +72,7 @@ export function startDesktopUpdater(
         // The existing before-quit handler stops the worker, closes SQLite and
         // releases the writer lock before Electron exits.
         logInfo('desktop-updater', 'User requested update install', { context: { version: info.version } })
-        autoUpdater.quitAndInstall(false, true)
+        autoUpdater.quitAndInstall(true, true)
       } catch (error) {
         installing = false
         logError('desktop-updater', 'Could not start installer', { error })
