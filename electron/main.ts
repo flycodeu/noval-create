@@ -224,7 +224,7 @@ function createWindow() {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173'
     mainWindow.loadURL(devUrl)
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
   if (process.env.NOVELFORGE_OPEN_DEVTOOLS === '1') {
@@ -1506,7 +1506,6 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
   handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }
-
 
 
 

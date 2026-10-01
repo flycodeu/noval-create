@@ -80,6 +80,19 @@ function ensureBuildIcons() {
   }
 }
 
+function verifyPackagedRendererEntry() {
+  const rendererEntry = path.resolve(projectRoot, 'out', 'renderer', 'index.html')
+  const mainBundle = path.resolve(projectRoot, 'out', 'main', 'main.js')
+  if (!fs.existsSync(rendererEntry) || !fs.existsSync(mainBundle)) {
+    process.stderr.write('[package:win] Run npm run build:app before packaging.\n')
+    process.exit(1)
+  }
+  if (!fs.readFileSync(mainBundle, 'utf8').includes('../renderer/index.html')) {
+    process.stderr.write('[package:win] Main window does not load out/renderer/index.html.\n')
+    process.exit(1)
+  }
+}
+
 function hasNsisBundle(targetDir) {
   return fs.existsSync(path.join(targetDir, 'Bin', 'makensis.exe'))
     && fs.existsSync(path.join(targetDir, 'elevate.exe'))
@@ -254,6 +267,7 @@ function buildSigned() {
 }
 
 ensureBuildIcons()
+verifyPackagedRendererEntry()
 runTestPreflight()
 
 if (signed) {

@@ -8,29 +8,15 @@ const { LOCAL_WEB_BACKEND_VERSION } = require('./local-web-contract.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const testDataRoot = path.join(workspaceRoot, '.tmp-tests', `web-rpc-user-data-${process.pid}-${randomUUID()}`)
-const electronCommand = process.platform === 'win32' ? 'electron.cmd' : 'electron'
+const electronCommand = require('electron')
 const requestedPort = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 0)
 
-function quoteWindowsArg(value) {
-  const text = String(value)
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(text)) return text
-  return `"${text.replace(/"/g, '\\"')}"`
-}
-
 function spawnElectron(args, env) {
-  if (process.platform === 'win32') {
-    const command = [electronCommand, ...args].map(quoteWindowsArg).join(' ')
-    return spawn('cmd.exe', ['/d', '/s', '/c', command], {
-      cwd: workspaceRoot,
-      env,
-      stdio: 'inherit',
-      windowsHide: true,
-    })
-  }
   return spawn(electronCommand, args, {
     cwd: workspaceRoot,
     env,
     stdio: 'inherit',
+    windowsHide: true,
   })
 }
 
@@ -85,7 +71,7 @@ async function waitForBackend(port, child) {
 }
 
 function stopProcessTree(child) {
-  if (!child || child.exitCode !== null || child.killed) return
+  if (!child || child.exitCode !== null) return
   if (process.platform === 'win32') {
     spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
   } else {
@@ -95,7 +81,7 @@ function stopProcessTree(child) {
 
 function waitForExit(child) {
   if (child.exitCode !== null) return Promise.resolve()
-  return new Promise((resolve) => child.once('exit', resolve))
+  return new Promise((resolve) => child.once('close', resolve))
 }
 
 async function runSmoke(port) {
@@ -129,11 +115,15 @@ async function main() {
   } finally {
     stopProcessTree(backend)
     await waitForExit(backend)
+    const tempParent = path.resolve(workspaceRoot, '.tmp-tests')
+    if (path.dirname(path.resolve(testDataRoot)) !== tempParent) {
+      throw new Error('Refusing to remove a Web RPC test profile outside .tmp-tests')
+    }
     fs.rmSync(testDataRoot, {
       recursive: true,
       force: true,
-      maxRetries: 10,
-      retryDelay: 200,
+      maxRetries: 20,
+      retryDelay: 500,
     })
   }
   if (smokeCode !== 0) process.exitCode = smokeCode
