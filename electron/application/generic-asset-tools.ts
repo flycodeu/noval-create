@@ -4,11 +4,14 @@ import type {
   GenerateGenericAssetDraftResult,
   GenericAssetDraftContent,
   GenericAssetReviewContent,
+  ImportGenericAssetDraftInput,
+  ImportGenericAssetDraftResult,
   ReviewGenericAssetDraftInput,
   ReviewGenericAssetDraftResult,
 } from '../../src/shared/generic-asset-workflow'
 import type { AgentToolJsonSchema } from '../../src/shared/tool-contracts'
 import { AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
+import type { AgentToolActor } from '../../src/shared/tool-contracts'
 import { artifactReferenceSchema, compactArtifact } from './artifact-tools'
 import { ArtifactServiceError } from './artifact-error'
 import { GenericAssetWorkflowError } from './generic-asset-workflow-error'
@@ -17,10 +20,12 @@ import { AgentToolInvocationError, AgentToolRegistry } from './tool-registry'
 export interface GenericAssetToolDependencies {
   generateDraft: (input: GenerateGenericAssetDraftInput) => Promise<GenerateGenericAssetDraftResult>
   reviewDraft: (input: ReviewGenericAssetDraftInput) => Promise<ReviewGenericAssetDraftResult>
+  importDraft: (input: ImportGenericAssetDraftInput, actor: AgentToolActor) => ImportGenericAssetDraftResult
 }
 
 type GenerateInput = Record<string, unknown> & GenerateGenericAssetDraftInput
 type ReviewInput = Record<string, unknown> & ReviewGenericAssetDraftInput
+type ImportInput = Record<string, unknown> & ImportGenericAssetDraftInput
 
 function objectSchema(
   properties: Record<string, AgentToolJsonSchema>,
@@ -91,6 +96,61 @@ export function registerGenericAssetTools(
   registry: AgentToolRegistry,
   dependencies: GenericAssetToolDependencies,
 ): AgentToolRegistry {
+  registry.register<ImportInput, Record<string, unknown>>({
+    descriptor: {
+      id: 'novelforge.assets.import_draft',
+      version: '1.0.0',
+      domain: 'assets',
+      title: '导入外部分析后的候选草稿',
+      description: '把 Codex 等客户端已完成的需求分析和指定阶段候选稿保存为可查询的不可变工件。此操作不调用 NovelForge 模型、不执行独立审校，也不改写正式资料；请用 review_draft 复核，并由作者审查后确认应用。',
+      inputSchema: objectSchema({
+        novelId: { type: 'integer', minimum: 1 },
+        expectedContextVersion: { type: 'integer', minimum: 1 },
+        assetType: assetTypeSchema,
+        title: { type: 'string', minLength: 1, maxLength: 200 },
+        userRequest: { type: 'string', minLength: 1, maxLength: 4000 },
+        analysis: { type: 'string', minLength: 1, maxLength: 8000 },
+        stageScope: { type: 'string', minLength: 1, maxLength: 200 },
+        unresolvedQuestions: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 1200 }, maxItems: 12 },
+        requirements: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 1200 }, maxItems: 20 },
+        outputFormat: { enum: ['json', 'markdown', 'text'] },
+        schemaHint: { type: 'string', maxLength: 6000 },
+        output: { type: 'string', minLength: 1, maxLength: 120000 },
+        parentArtifactId: { type: 'string', minLength: 1, maxLength: 160 },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+      }, [
+        'novelId', 'expectedContextVersion', 'assetType', 'title', 'userRequest',
+        'analysis', 'stageScope', 'output', 'idempotencyKey',
+      ]),
+      outputSchema: objectSchema({
+        draftArtifact: artifactReferenceSchema,
+        outputPreview: { type: 'string', maxLength: 901 },
+        warnings: { type: 'array', items: { type: 'string' } },
+        idempotentReplay: { type: 'boolean' },
+      }, ['draftArtifact', 'outputPreview', 'warnings', 'idempotentReplay']),
+      effect: 'draft_write',
+      approval: 'policy',
+      scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.contextRead, AGENT_TOOL_SCOPES.draftCreate],
+      idempotent: true,
+      taskMode: 'sync',
+      timeoutClass: 'short',
+      tags: ['assets', 'external-ai', 'draft', 'provenance'],
+    },
+    handler: (input, context) => {
+      try {
+        const result = dependencies.importDraft(input, context.actor)
+        return {
+          draftArtifact: compact(result.draftArtifact),
+          outputPreview: result.outputPreview,
+          warnings: result.warnings,
+          idempotentReplay: result.idempotentReplay,
+        }
+      } catch (error) {
+        return mapError(error)
+      }
+    },
+  })
+
   registry.register<GenerateInput, Record<string, unknown>>({
     descriptor: {
       id: 'novelforge.assets.generate_draft',

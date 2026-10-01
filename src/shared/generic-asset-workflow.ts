@@ -22,9 +22,39 @@ export interface GenericAssetDraftContent {
   schemaHint: string
   output: string
   contextSummaryHash: string
-  taskId: number
-  quality: GenericAssetQualitySnapshot
+  taskId: number | null
+  quality?: GenericAssetQualitySnapshot
+  externalSource?: {
+    userRequest: string
+    analysis: string
+    stageScope: string
+    unresolvedQuestions: string[]
+  }
   createdAt: string
+}
+
+export interface ImportGenericAssetDraftInput {
+  novelId: number
+  expectedContextVersion: number
+  assetType: GenericAssetType
+  title: string
+  userRequest: string
+  analysis: string
+  stageScope: string
+  unresolvedQuestions?: string[]
+  requirements?: string[]
+  outputFormat?: GenericAssetOutputFormat
+  schemaHint?: string
+  output: string
+  parentArtifactId?: string
+  idempotencyKey: string
+}
+
+export interface ImportGenericAssetDraftResult {
+  draftArtifact: AgentArtifact<GenericAssetDraftContent>
+  outputPreview: string
+  warnings: string[]
+  idempotentReplay: boolean
 }
 
 export interface GenericAssetReviewCheck {

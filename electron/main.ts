@@ -75,6 +75,7 @@ import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
 import { startDesktopUpdater } from './services/desktop-updater'
+import { startMcpStdio } from './mcp-stdio'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
 import * as batchWorkflowService from './services/batch-workflow.service'
@@ -144,6 +145,13 @@ let mainWindow: BrowserWindow | null = null
 let writerLock: SingleWriterLockHandle | null = null
 
 app.setName('NovelForge')
+if (process.platform === 'win32') app.setAppUserModelId('com.novelforge.app')
+const mcpMode = process.argv.includes('--mcp')
+if (mcpMode && process.env.NOVELFORGE_USER_DATA_DIR) {
+  const userDataDir = path.resolve(process.env.NOVELFORGE_USER_DATA_DIR)
+  fs.mkdirSync(userDataDir, { recursive: true })
+  app.setPath('userData', userDataDir)
+}
 
 interface WindowState {
   x?: number
@@ -195,6 +203,9 @@ function sendWindowState(win: BrowserWindow) {
 
 function createWindow() {
   const winState = loadWindowState()
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.ico')
+    : path.join(__dirname, '../../build/icon.ico')
 
   mainWindow = new BrowserWindow({
     x: winState.x,
@@ -205,6 +216,7 @@ function createWindow() {
     minHeight: 700,
     frame: false,
     backgroundColor: '#0f1117',
+    icon: iconPath,
     titleBarStyle: 'hidden',
     titleBarOverlay: false,
     autoHideMenuBar: true,
@@ -236,8 +248,33 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  mainWindow.on('close', () => {
-    if (mainWindow) saveWindowState(mainWindow)
+  const window = mainWindow
+  window.on('close', (event) => {
+    // Programmatic quits (including an approved update) have already finished
+    // the shutdown path. Only a user's window-close request needs this choice.
+    if (shutdownComplete) {
+      saveWindowState(window)
+      return
+    }
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'question',
+      title: '关闭 NovelForge',
+      message: '要最小化窗口，还是退出 NovelForge？',
+      detail: '最小化后可从任务栏恢复。退出会中断正在运行的 AI 任务；请先保存正在编辑的内容。',
+      buttons: ['最小化', '退出', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    })
+    if (choice === 2) {
+      event.preventDefault()
+      return
+    }
+    saveWindowState(window)
+    if (choice === 0) {
+      event.preventDefault()
+      window.minimize()
+    }
   })
 
   mainWindow.on('maximize', () => {
@@ -261,6 +298,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (mcpMode) {
+    void startMcpStdio().catch((error) => {
+      console.error('[novelforge-mcp] fatal:', error)
+      app.quit()
+    })
+    return
+  }
   const lockHandle = acquireSingleWriterLock(app.getPath('userData'), 'desktop-main')
   if (!lockHandle) {
     dialog.showErrorBox(
@@ -301,6 +345,7 @@ function shutdownApplication(): Promise<void> {
 }
 
 app.on('before-quit', (event) => {
+  if (mcpMode) return
   if (shutdownComplete) return
   event.preventDefault()
   void shutdownApplication().then(() => app.quit())
@@ -1506,7 +1551,5 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
   handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }
-
-
 
 

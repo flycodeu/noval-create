@@ -63,12 +63,12 @@ export default function WindowControls({
           {isMaximized ? <ShrinkOutlined /> : <BorderOutlined />}
         </button>
       </Tooltip>
-      <Tooltip title="关闭">
+      <Tooltip title="关闭或最小化">
         <button
           type="button"
           className={[buttonClassName, dangerButtonClassName].filter(Boolean).join(' ')}
           onClick={() => void window.electron.windowControls.close()}
-          aria-label="关闭窗口"
+          aria-label="关闭或最小化窗口"
         >
           <CloseOutlined />
         </button>

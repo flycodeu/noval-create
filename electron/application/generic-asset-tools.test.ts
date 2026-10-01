@@ -116,6 +116,12 @@ function dependencies() {
       review: reviewContent,
       idempotentReplay: false,
     })),
+    importDraft: vi.fn(() => ({
+      draftArtifact: { ...draftArtifact, status: 'draft' as const, reviewArtifactId: null, taskId: null },
+      outputPreview: draftContent.output,
+      warnings: ['候选稿仅已保存，未执行独立审校。'],
+      idempotentReplay: false,
+    })),
   }
 }
 
@@ -158,6 +164,29 @@ describe('generic asset tools', () => {
     }, { actor, scopes: allScopes.filter((scope) => scope !== AGENT_TOOL_SCOPES.qualityRepair) })
     expect(result).toMatchObject({ ok: false, error: { code: 'AUTH_SCOPE_REQUIRED' } })
     expect(deps.reviewDraft).not.toHaveBeenCalled()
+  })
+
+  it('imports external text only as a draft with source and context requirements', async () => {
+    const deps = dependencies()
+    const registry = registerGenericAssetTools(new AgentToolRegistry(), deps)
+    const input = {
+      novelId: 9,
+      expectedContextVersion: 8,
+      assetType: 'project_brief',
+      title: '项目定位第一版',
+      userRequest: '写一部边境商路背景的小说，只先完成立项。',
+      analysis: '先确定人物目标和持续冲突，地名与场景细节待确认。',
+      stageScope: '立项，不写正文',
+      output: '主角想保住一条商路，第一阶段需找到通行凭据。',
+      idempotencyKey: 'external-draft-key-001',
+    }
+    const result = await registry.invoke({ toolId: 'novelforge.assets.import_draft', input }, {
+      actor,
+      scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.contextRead, AGENT_TOOL_SCOPES.draftCreate],
+    })
+    expect(result).toMatchObject({ ok: true, data: { draftArtifact: { status: 'draft', reviewArtifactId: null } } })
+    expect(deps.importDraft).toHaveBeenCalledWith(input, actor)
+    expect(registry.get('novelforge.assets.import_draft')?.effect).toBe('draft_write')
   })
 
   it('maps stable workflow error codes', async () => {

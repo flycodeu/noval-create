@@ -58,6 +58,9 @@ jobs:
       - name: Test and build Windows packages
         run: npm run build:win
 
+      - name: Verify installed-app MCP entry
+        run: node scripts/packaged-mcp-smoke.cjs
+
       - name: Verify update metadata and assets
         shell: pwsh
         run: |
@@ -91,13 +94,17 @@ jobs:
           $silentUpdateNote = if ($version -eq '1.0.2') {
             '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
           } else { $null }
-          $releaseChangesNote = if ($version -eq '1.0.3') {
+          $releaseChangesNote = if ($version -eq '1.1.0') {
+            '1.1.0 新增 Codex 可用的本机 MCP 草稿导入与审阅入口；项目立项 JSON 草稿经确认后可回填表单。修复步骤 AI 助手可能覆盖已有字段的问题，关闭窗口时可选择最小化、退出或取消，并完善窗口图标。'
+          } elseif ($version -eq '1.0.3') {
             '1.0.3 用于实测 1.0.2 到 1.0.3 的静默升级，除版本号外无功能改动。'
           } elseif ($version -in @('1.0.0', '1.0.1', '1.0.2')) {
             '本版改进章节衔接和正文生成门禁，清理占位主角；任务中心可查看逐请求的提示词与输出记录。'
           } else { $null }
           $upgradeNote = if ($version -eq '1.0.0') {
             '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
+          } elseif ($version -eq '1.1.0') {
+            '此前已验证 1.0.2 到 1.0.3 的静默升级；本版发布后仍需在已安装的 1.0.3 上复测升级与数据保留。'
           } else {
             '发布后请在已安装的上一版本上实测自动升级与数据保留。'
           }

@@ -27,6 +27,30 @@
   margin-bottom: 16px;
 }
 
+.project-brief__import-preview {
+  display: grid;
+  gap: 10px;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.project-brief__import-preview p {
+  margin: 0;
+}
+
+.project-brief__import-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--project-brief-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.project-brief__import-row span {
+  color: var(--project-brief-muted);
+}
+
 .project-brief__ai-assist {
   display: grid;
   gap: 14px;

@@ -36,6 +36,7 @@ export function createNovelForgeToolRegistry(): AgentToolRegistry {
   registerGenericAssetTools(registry, {
     generateDraft: (input) => genericAssetWorkflowService.generateGenericAssetDraft(input),
     reviewDraft: (input) => genericAssetWorkflowService.reviewGenericAssetDraft(input),
+    importDraft: (input, actor) => genericAssetWorkflowService.importGenericAssetDraft(input, actor),
   })
   registerArtifactTools(registry, {
     getArtifact: (artifactId) => artifactService.getArtifact(artifactId),

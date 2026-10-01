@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Empty, Spin, Tag, message } from 'antd'
+import { Alert, Button, Drawer, Empty, Spin, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
   ExclamationCircleOutlined,
   FileSearchOutlined,
   HistoryOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
+import type { AgentArtifact } from '../../../shared/agent-artifacts'
+import type { GenericAssetDraftContent } from '../../../shared/generic-asset-workflow'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -37,6 +40,7 @@ import {
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import { getStudioNextStep, getRecentStudioChapter, getStudioSceneLabel } from './studio-next-step'
+import { isExternalImportedDraft } from './imported-drafts'
 import './index.css'
 
 dayjs.extend(relativeTime)
@@ -47,6 +51,8 @@ interface Props {
 }
 
 type QualitySummary = Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null
+type ImportedDraftRef = Pick<AgentArtifact, 'id' | 'kind' | 'status' | 'createdAt' | 'producerClient' | 'producerType' | 'contextVersion'>
+type ImportedDraft = ImportedDraftRef & { content: GenericAssetDraftContent; novelId: number }
 
 interface KeyEntrance {
   key: string
@@ -86,7 +92,53 @@ export default function StudioPage({ novelId }: Props) {
   const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
   const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false)
+  const [importDrawerOpen, setImportDrawerOpen] = useState(false)
+  const [importedDrafts, setImportedDrafts] = useState<ImportedDraftRef[]>([])
+  const [selectedImportedDraft, setSelectedImportedDraft] = useState<ImportedDraft | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importError, setImportError] = useState('')
   const loadRequestRef = React.useRef(0)
+  const importRequestRef = React.useRef(0)
+
+  const loadImportedDrafts = useCallback(async () => {
+    const requestId = ++importRequestRef.current
+    setImportLoading(true)
+    setImportError('')
+    try {
+      const result = await window.electron.agentTools.call({
+        toolId: 'novelforge.artifacts.list',
+        input: { novelId, kind: 'generic_draft', limit: 50 },
+      })
+      if (!result.ok) throw new Error(result.error.message)
+      if (requestId !== importRequestRef.current) return
+      const references = (result.data as { artifacts: ImportedDraftRef[] }).artifacts
+      setImportedDrafts(references.filter(isExternalImportedDraft).sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    } catch (error) {
+      if (requestId === importRequestRef.current) setImportError(error instanceof Error ? error.message : '草稿读取失败')
+    } finally {
+      if (requestId === importRequestRef.current) setImportLoading(false)
+    }
+  }, [novelId])
+
+  const openImportedDraft = useCallback(async (artifactId: string) => {
+    setSelectedImportedDraft(null)
+    setImportLoading(true)
+    setImportError('')
+    try {
+      const result = await window.electron.agentTools.call({
+        toolId: 'novelforge.artifacts.get',
+        input: { artifactId },
+      })
+      if (!result.ok) throw new Error(result.error.message)
+      const artifact = (result.data as { artifact: ImportedDraft }).artifact
+      if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error('草稿不属于当前作品或不是外部导入')
+      setSelectedImportedDraft(artifact)
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : '草稿读取失败')
+    } finally {
+      setImportLoading(false)
+    }
+  }, [novelId])
 
   const loadConsoleData = useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -154,6 +206,16 @@ export default function StudioPage({ novelId }: Props) {
     }
   }, [loadConsoleData])
 
+  useEffect(() => {
+    void loadImportedDrafts()
+  }, [loadImportedDrafts])
+
+  useEffect(() => {
+    if (importDrawerOpen && !importLoading && !importError && !selectedImportedDraft && importedDrafts.length > 0) {
+      void openImportedDraft(importedDrafts[0].id)
+    }
+  }, [importDrawerOpen, importError, importedDrafts, importLoading, openImportedDraft, selectedImportedDraft])
+
   const workspaceSnapshot = useMemo(
     () => getWorkspaceSnapshot(currentNovel, stats, {
       viewMode: getWorkspaceViewModeForNovel(currentNovel),
@@ -208,6 +270,8 @@ export default function StudioPage({ novelId }: Props) {
   const nextStep = useMemo(() => getStudioNextStep(chapters, tasks, approvedVoice), [chapters, tasks, approvedVoice])
   const recentScene = getStudioSceneLabel(getRecentStudioChapter(chapters))
   const nextStepPriority = nextStepPriorityPresentation(nextStep.priority)
+  const importedDraftStale = Boolean(selectedImportedDraft && currentNovel?.id === novelId
+    && selectedImportedDraft.contextVersion !== (currentNovel.contextVersion || 1))
 
   const openRecommendedStep = useCallback(() => {
     navigate(nextStep.targetPage.startsWith('/') ? nextStep.targetPage : buildWorkspaceRoute(novelId, nextStep.targetPage))
@@ -296,7 +360,12 @@ export default function StudioPage({ novelId }: Props) {
           </div>
           <div className="studio-page__next-step-footer">
             <span>{nextStep.estimatedMinutes ? `预计 ${nextStep.estimatedMinutes} 分钟` : '预计耗时未记录'}</span>
-            <span className="studio-page__primary-hint">使用顶部主操作进入</span>
+            <div className="studio-page__next-step-actions">
+              <Button size="small" onClick={() => setImportDrawerOpen(true)}>
+                查看导入草稿{importedDrafts.length > 0 ? ` (${importedDrafts.length})` : ''}
+              </Button>
+              <span className="studio-page__primary-hint">使用顶部主操作进入</span>
+            </div>
           </div>
         </section>
 
@@ -464,6 +533,74 @@ export default function StudioPage({ novelId }: Props) {
           </div>
         </details>
       </div>
+      <Drawer
+        title="外部导入草稿"
+        width={760}
+        rootClassName="studio-page__import-drawer"
+        open={importDrawerOpen}
+        onClose={() => setImportDrawerOpen(false)}
+        extra={<Button size="small" onClick={() => void loadImportedDrafts()} loading={importLoading}>刷新</Button>}
+      >
+        <div className="studio-page__imported-drafts">
+          <Alert type="info" showIcon message="这里是 Codex 等外部工具导入的候选内容；外部导入未经系统审校，导入本身不会修改小说设定。" />
+          {importError ? <Alert type="error" showIcon message={importError} /> : null}
+          <div className="studio-page__imported-layout">
+            <div className="studio-page__imported-list">
+              {importedDrafts.length === 0 && !importLoading ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这部作品还没有外部草稿" /> : null}
+              {importedDrafts.map((artifact) => (
+                <button
+                  key={artifact.id}
+                  type="button"
+                  className={`studio-page__imported-item${selectedImportedDraft?.id === artifact.id ? ' is-selected' : ''}`}
+                  onClick={() => void openImportedDraft(artifact.id)}
+                >
+                  <strong>{artifact.producerClient === 'novelforge-mcp' ? 'Codex / MCP 导入' : artifact.producerClient || '外部草稿'}</strong>
+                  <span>{dayjs(artifact.createdAt).format('YYYY-MM-DD HH:mm')} · {artifact.status === 'draft' ? '待审' : artifact.status === 'reviewed' ? '已审校' : '旧版本或阻断'}</span>
+                </button>
+              ))}
+            </div>
+            <div className="studio-page__imported-detail">
+              {importLoading && !selectedImportedDraft ? <Spin /> : null}
+              {selectedImportedDraft ? (
+                <>
+                  <div className="studio-page__imported-heading">
+                    <div>
+                      <strong>{selectedImportedDraft.content.title}</strong>
+                      <span>{selectedImportedDraft.content.assetType === 'project_brief' ? '项目立项' : selectedImportedDraft.content.assetType} · {selectedImportedDraft.content.externalSource?.stageScope || '未标注阶段'} · {dayjs(selectedImportedDraft.createdAt).format('YYYY-MM-DD HH:mm')}</span>
+                    </div>
+                    <div><Tag>{selectedImportedDraft.status === 'draft' ? '未审校' : '请人工核对'}</Tag>{importedDraftStale ? <Tag color="orange">旧上下文</Tag> : null}<Tag>未应用</Tag></div>
+                  </div>
+                  {selectedImportedDraft.content.externalSource ? (
+                    <div className="studio-page__imported-source">
+                      <strong>原始要求</strong><p>{selectedImportedDraft.content.externalSource.userRequest}</p>
+                      <strong>分析依据</strong><p>{selectedImportedDraft.content.externalSource.analysis}</p>
+                      {selectedImportedDraft.content.externalSource.unresolvedQuestions?.length > 0 ? (
+                        <><strong>待确认</strong><p>{selectedImportedDraft.content.externalSource.unresolvedQuestions.join('；')}</p></>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <strong>草稿全文</strong>
+                  <pre className="studio-page__imported-output">{selectedImportedDraft.content.output}</pre>
+                  <div className="studio-page__imported-actions">
+                    <Button icon={<CopyOutlined />} onClick={() => {
+                      void (navigator.clipboard?.writeText(selectedImportedDraft.content.output) || Promise.reject(new Error('Clipboard unavailable')))
+                        .then(() => message.success('已复制草稿全文'))
+                        .catch(() => message.error('复制失败，请手动选中正文复制'))
+                    }}>复制全文</Button>
+                    {selectedImportedDraft.content.assetType === 'project_brief' && selectedImportedDraft.content.outputFormat === 'json' ? (
+                      <Button type="primary" disabled={importedDraftStale} onClick={() => {
+                        setImportDrawerOpen(false)
+                        navigate(buildWorkspaceRoute(novelId, `project-brief?importArtifact=${encodeURIComponent(selectedImportedDraft.id)}`))
+                      }}>去项目立项核对并回填</Button>
+                    ) : <span>此类型暂需复制到对应页面，人工核对后保存。</span>}
+                    {importedDraftStale ? <span>项目资料已变化，请用当前版本重新导入后再回填。</span> : null}
+                  </div>
+                </>
+              ) : !importLoading ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一份草稿查看原始要求和全文" /> : null}
+            </div>
+          </div>
+        </div>
+      </Drawer>
     </WorkspacePage>
   )
 }

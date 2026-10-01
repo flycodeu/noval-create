@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import type { ProjectPlatformMode } from '../../../shared/project-brief'
+import type { ProjectBriefDocument, ProjectPlatformMode } from '../../../shared/project-brief'
+import type { AgentArtifact } from '../../../shared/agent-artifacts'
+import type { GenericAssetDraftContent, GenericAssetReviewContent } from '../../../shared/generic-asset-workflow'
 import {
   buildProjectBriefPayload,
   getPlatformDesignProfile,
@@ -30,6 +32,7 @@ import {
 import { useNovelWorkspaceActions, useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { assertDraftContextCurrent, parseImportableProjectBriefDraft } from './import-draft'
 import './index.css'
 
 interface Props {
@@ -64,6 +67,17 @@ const EMPTY_PROJECT_BRIEF_VALUES: ProjectBriefFormValues = {
   compTitles: '',
   tabooRules: '',
   deliveryRhythm: '',
+}
+
+const PROJECT_BRIEF_FIELD_LABELS: Record<keyof ProjectBriefDocument, string> = {
+  platformMode: '目标平台',
+  targetAudience: '目标赛道',
+  targetReader: '目标读者',
+  readerPromise: '读者承诺',
+  sellingPoints: '核心卖点',
+  compTitles: '参考作品',
+  tabooRules: '创作禁区',
+  deliveryRhythm: '交付节奏',
 }
 
 function normalizeText(value?: string | null): string {
@@ -123,15 +137,19 @@ function mergeGeneratedValues(
 
 export default function ProjectBriefPage({ novelId }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const { notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ProjectBriefFormValues>()
+  const [importModal, importModalContext] = Modal.useModal()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [generatingMode, setGeneratingMode] = useState<ProjectBriefGenerationMode | null>(null)
   const [aiAssistOpen, setAiAssistOpen] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
+  const [importedDraftNotice, setImportedDraftNotice] = useState('')
+  const handledImportRef = React.useRef('')
   const [stats, setStats] = useState({ threadCount: 0, outlineCount: 0, timelineCount: 0, chapterCount: 0 })
 
   const snapshot = useMemo(
@@ -170,6 +188,84 @@ export default function ProjectBriefPage({ novelId }: Props) {
   const applyProjectBriefDraft = React.useCallback((draft: Partial<ProjectBriefFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
   }, [form, snapshot])
+
+  useEffect(() => {
+    const artifactId = new URLSearchParams(location.search).get('importArtifact')
+    if (!artifactId || currentNovel?.id !== novelId) return
+    const importKey = `${novelId}:${artifactId}`
+    if (handledImportRef.current === importKey) return
+    let active = true
+    void (async () => {
+      try {
+        const result = await window.electron.agentTools.call({
+          toolId: 'novelforge.artifacts.get',
+          input: { artifactId },
+        })
+        if (!result.ok) throw new Error(result.error.message)
+        if (!active) return
+        const artifact = (result.data as { artifact: AgentArtifact<GenericAssetDraftContent> }).artifact
+        if (artifact.novelId !== novelId || artifact.kind !== 'generic_draft' || artifact.producerType !== 'api_client'
+          || artifact.content.assetType !== 'project_brief' || artifact.content.outputFormat !== 'json') {
+          throw new Error('这份工件不是当前作品的 JSON 项目立项草稿。')
+        }
+        if (artifact.status !== 'draft' && artifact.status !== 'reviewed') {
+          throw new Error('这份草稿已被阻断或取代，不能回填。请重新导入当前版本。')
+        }
+        assertDraftContextCurrent(artifact.contextVersion, currentNovel.contextVersion || 1)
+        let reviewSummary = ''
+        if (artifact.reviewArtifactId) {
+          const reviewResult = await window.electron.agentTools.call({
+            toolId: 'novelforge.artifacts.get',
+            input: { artifactId: artifact.reviewArtifactId },
+          })
+          if (!reviewResult.ok) throw new Error(reviewResult.error.message)
+          if (!active) return
+          const reviewArtifact = (reviewResult.data as { artifact: AgentArtifact<GenericAssetReviewContent> }).artifact
+          const review = reviewArtifact.content
+          if (reviewArtifact.novelId !== novelId || reviewArtifact.kind !== 'quality_report'
+            || (review.effectiveArtifactId !== artifact.id && review.draftArtifactId !== artifact.id)) {
+            throw new Error('草稿的审校报告与当前工件不匹配。')
+          }
+          if (review.status === 'blocked') throw new Error('这份草稿已被审校阻断，不能回填。')
+          reviewSummary = review.summary
+        }
+        const patch = parseImportableProjectBriefDraft(artifact.content.output)
+        const current = buildCurrentFormValues(snapshot, form.getFieldsValue(true))
+        const changes = Object.entries(patch).filter(([key, value]) => value !== current[key as keyof ProjectBriefFormValues])
+        if (!active) return
+        handledImportRef.current = importKey
+        if (changes.length === 0) {
+          setImportedDraftNotice('草稿中的可用字段与当前表单相同，没有需要回填的内容。')
+          return
+        }
+        importModal.confirm({
+          title: '核对导入的项目立项草稿',
+          width: 720,
+          content: (
+            <div className="project-brief__import-preview">
+              <p>来源：{artifact.producerClient} · {artifact.content.title}。{artifact.status === 'draft' ? '这份草稿未经过模型审校；你正在进行人工审核。' : `模型审校摘要：${reviewSummary || '未提供摘要'}。请继续人工核对。`}确认后只回填表单，仍需点击“保存项目立项”。</p>
+              {changes.map(([key, value]) => (
+                <div key={key} className="project-brief__import-row">
+                  <strong>{PROJECT_BRIEF_FIELD_LABELS[key as keyof ProjectBriefDocument]}</strong>
+                  <span>当前：{current[key as keyof ProjectBriefFormValues] || '未填写'}</span>
+                  <span>导入：{value}</span>
+                </div>
+              ))}
+            </div>
+          ),
+          okText: '回填以上字段',
+          cancelText: '暂不回填',
+          onOk: () => {
+            form.setFieldsValue({ ...form.getFieldsValue(true), ...patch })
+            setImportedDraftNotice(`已回填 ${changes.length} 个字段，检查后点击“保存项目立项”才会写入作品。`)
+          },
+        })
+      } catch (error) {
+        if (active) message.error(error instanceof Error ? error.message : '导入草稿读取失败')
+      }
+    })()
+    return () => { active = false }
+  }, [currentNovel?.contextVersion, currentNovel?.id, form, importModal, location.search, novelId, snapshot])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ProjectBriefFormValues>({
     novelId,
     pageKey: 'project-brief',
@@ -373,6 +469,8 @@ export default function ProjectBriefPage({ novelId }: Props) {
         ],
       }}
     >
+      {importModalContext}
+      {importedDraftNotice ? <Alert type="info" showIcon message={importedDraftNotice} /> : null}
       {!currentNovel?.synopsis && !currentNovel?.expandedBackground ? (
         <Alert
           type="warning"

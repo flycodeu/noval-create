@@ -10,6 +10,11 @@ const testUserData = path.join(workspaceRoot, '.tmp-tests', `mcp-user-data-${pro
 const launcher = path.join(workspaceRoot, 'scripts', 'run-novelforge-mcp.cjs')
 
 async function removeWithRetry(target) {
+  const resolved = path.resolve(target)
+  const tempBase = path.resolve(workspaceRoot, '.tmp-tests')
+  if (!resolved.startsWith(`${tempBase}${path.sep}`) || !fs.realpathSync(tempBase).startsWith(`${workspaceRoot}${path.sep}`)) {
+    throw new Error(`Refusing recursive removal outside workspace test directory: ${resolved}`)
+  }
   let lastError
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
@@ -67,6 +72,7 @@ async function main() {
     assert(toolIds.includes('novelforge.characters.review'))
     assert(toolIds.includes('novelforge.characters.commit_draft'))
     assert(toolIds.includes('novelforge.assets.generate_draft'))
+    assert(toolIds.includes('novelforge.assets.import_draft'))
     assert(toolIds.includes('novelforge.assets.review_draft'))
     assert(toolIds.includes('novelforge.quality.run_evaluation'))
     assert(toolIds.includes('novelforge.quality.run_semantic_evaluation'))
@@ -92,10 +98,12 @@ async function main() {
     const resource = await client.readResource({ uri: 'novelforge://capabilities' })
     const document = JSON.parse(resource.contents[0].text)
     assert.equal(document.server.name, 'novelforge')
+    assert.equal(document.server.version, require('../package.json').version)
     assert.equal(document.tools.length, toolIds.length)
     assert(!document.grantedScopes.includes('canon:write'))
     assert(!document.grantedScopes.includes('recommendation:record'))
     assert(document.grantedScopes.includes('quality:repair'))
+    assert.equal(document.tools.find((tool) => tool.id === 'novelforge.assets.import_draft')?.effect, 'draft_write')
 
     const qualityApplyTool = listed.tools.find((tool) => tool.name === 'novelforge.quality.apply_repair_draft')
     assert.equal(qualityApplyTool.execution.taskSupport, 'optional')

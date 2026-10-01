@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -57,7 +57,7 @@
     "test:delete-integrity": "electron scripts/delete-integrity.test.cjs",
     "test:chapter-writeback-idempotency": "electron scripts/chapter-writeback-idempotency.test.cjs",
     "test:web-rpc": "node scripts/run-web-rpc-smoke.cjs",
-    "test:mcp": "node scripts/mcp-server.test.cjs",
+    "test:mcp": "node scripts/mcp-server.test.cjs && electron scripts/mcp-import-draft.test.cjs",
     "test:agent-workflow": "electron scripts/agent-workflow-integration.test.cjs",
     "test:workflow-node": "electron scripts/workflow-node-integrity.test.cjs",
     "test:longform-soak": "node scripts/longform-soak.cjs",

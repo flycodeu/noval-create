@@ -321,6 +321,16 @@ Windows 用户可从 [GitHub Releases](https://github.com/flycodeu/noval-create/
 
 当前 Windows 安装包未使用代码签名证书，系统可能显示来源提示。发布前的本地检查和 GitHub Release 产物校验记录在对应版本的发行说明中。
 
+## Codex 与本机 MCP
+
+安装版可用 `NovelForge.exe --mcp` 启动无窗口 MCP 服务。在 NovelForge 中先创建项目，彻底退出桌面端，再把实际安装路径注册到本机 Codex：
+
+```powershell
+codex mcp add novelforge -- "C:\你的安装位置\NovelForge.exe" --mcp
+```
+
+Codex 可读取项目、按指定阶段分析需求并导入候选草稿。重新打开 NovelForge 后，在项目控制台查看“导入草稿”；项目立项的 JSON 草稿可审阅差异、回填表单，再由作者保存。最小化窗口仍占用数据库，无法同时启动 MCP。具体字段、审校与权限说明见 [Codex MCP 使用指南](docs/CODEX_MCP.md)。
+
 ## 7. 开发环境
 
 建议环境：

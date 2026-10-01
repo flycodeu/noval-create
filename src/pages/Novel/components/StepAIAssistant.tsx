@@ -13,6 +13,7 @@ import { inspectDraftQuality, type DraftContextSection, type DraftFieldDefinitio
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { cleanAiValue } from '../../../utils/text'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
+import { pickChangedDraftFields } from './step-ai-assistant-patch'
 import './StepAIAssistant.css'
 
 type ChatRole = 'user' | 'assistant'
@@ -35,7 +36,6 @@ export interface StepAIAssistantPatch {
 interface StepAIAssistantDraft {
   assistantMessage: string
   draftPatch: StepAIAssistantPatch
-  toolCalls: Array<{ tool: string; reason: string }>
   checks: string[]
   suggestions: string[]
 }
@@ -52,7 +52,7 @@ interface StepAIAssistantProps<TPatch extends StepAIAssistantPatch> {
   onApplyDraft: (patch: Partial<TPatch>) => void
 }
 
-const DEFAULT_USER_PROMPT = '我只有一个大概想法，请补齐这一步能用的基础信息。'
+const DEFAULT_USER_PROMPT = '请根据我已提供的想法，检查这一步的缺口；不确定的内容请标明待确认。'
 const MAX_ASSISTANT_MESSAGES = 24
 const STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
   basics: '基础信息',
@@ -141,7 +141,11 @@ function extractJsonObject(raw: string): string {
   throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
 }
 
-function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssistantDraft {
+function normalizeDraft(
+  raw: string,
+  fields: DraftFieldDefinition[],
+  currentValues: StepAIAssistantPatch,
+): StepAIAssistantDraft {
   let candidate: unknown
   try {
     candidate = cleanAiValue(JSON.parse(extractJsonObject(raw)))
@@ -152,24 +156,17 @@ function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssi
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: '根节点必须是 JSON 对象' }))
   }
   const parsed = candidate as Record<string, unknown>
-  const requiredKeys = ['assistantMessage', 'toolCalls', 'draftPatch', 'checks', 'suggestions']
+  const requiredKeys = ['assistantMessage', 'draftPatch', 'checks', 'suggestions']
   const missingKey = requiredKeys.find((key) => !Object.prototype.hasOwnProperty.call(parsed, key))
   if (missingKey) {
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `缺少字段“${missingKey}”` }))
   }
-  const unknownRootKey = Object.keys(parsed).find((key) => !requiredKeys.includes(key))
+  const unknownRootKey = Object.keys(parsed).find((key) => ![...requiredKeys, 'toolCalls'].includes(key))
   if (unknownRootKey) {
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `出现未要求的字段“${unknownRootKey}”` }))
   }
   if (typeof parsed.assistantMessage !== 'string') {
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'assistantMessage 必须是字符串' }))
-  }
-  if (!Array.isArray(parsed.toolCalls) || !parsed.toolCalls.every((item) => (
-    item && typeof item === 'object' && !Array.isArray(item)
-      && typeof (item as Record<string, unknown>).tool === 'string'
-      && typeof (item as Record<string, unknown>).reason === 'string'
-  ))) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'toolCalls 必须是包含 tool/reason 字符串的数组' }))
   }
   if (!Array.isArray(parsed.checks) || parsed.checks.some((item) => typeof item !== 'string')) {
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'checks 必须是字符串数组' }))
@@ -190,7 +187,7 @@ function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssi
   }
   const isValidFieldValue = (value: unknown, field: DraftFieldDefinition) => {
     if (value === null || value === undefined) return true
-    if (field.type === 'number') return typeof value === 'number' && Number.isSafeInteger(value)
+    if (field.type === 'number') return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     if (field.type === 'string[]') return Array.isArray(value) && value.every((item) => typeof item === 'string')
     if (field.type === 'object[]') return Array.isArray(value) && value.every((item) => item && typeof item === 'object' && !Array.isArray(item))
     return typeof value === 'string'
@@ -202,19 +199,7 @@ function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssi
   if (invalidPatchKey) {
     throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `draftPatch 字段“${invalidPatchKey}”类型不正确` }))
   }
-  const draftPatch = Object.fromEntries(
-    Object.entries(rawPatch)
-      .filter(([key]) => fieldByKey.has(key)),
-  ) as StepAIAssistantPatch
-
-  const toolCalls = Array.isArray(parsed.toolCalls)
-    ? parsed.toolCalls
-      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-      .map((item) => ({
-        tool: typeof item.tool === 'string' ? item.tool : 'unknown',
-        reason: typeof item.reason === 'string' ? item.reason : '',
-      }))
-    : []
+  const draftPatch = pickChangedDraftFields(rawPatch, currentValues) as StepAIAssistantPatch
   const qualityChecks = inspectDraftQuality(draftPatch)
     .slice(0, 4)
     .map((issue) => `${issue.key}：${issue.message}`)
@@ -222,7 +207,6 @@ function normalizeDraft(raw: string, fields: DraftFieldDefinition[]): StepAIAssi
   return {
     assistantMessage: typeof parsed.assistantMessage === 'string' ? parsed.assistantMessage.trim() : '已生成候选补丁。',
     draftPatch,
-    toolCalls,
     checks: [
       ...qualityChecks,
       ...(Array.isArray(parsed.checks) ? parsed.checks.filter((item): item is string => typeof item === 'string') : []),
@@ -238,7 +222,6 @@ function buildAssistantPrompt(input: {
   fields: DraftFieldDefinition[]
   context: DraftContextSection[]
   values: StepAIAssistantPatch
-  tools: StepAssistantTool[]
   history: StepAssistantMessage[]
 }) {
   const continuityBlock = buildStepContinuityBlock(input.stepKey, input.stepTitle)
@@ -253,21 +236,15 @@ function buildAssistantPrompt(input: {
       field.hint ? `  字段要求：${field.hint}` : '',
     ].filter(Boolean).join('\n'))
     .join('\n')
-  const toolBlock = input.tools
-    .map((tool) => `- ${tool.id}：${tool.label}。${tool.description}`)
-    .join('\n')
   const historyBlock = input.history
     .slice(-8)
     .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${truncateForPrompt(item.content, 700)}`)
     .join('\n')
   const skeleton = `{
-  "assistantMessage": "给用户看的简短回复",
-  "toolCalls": [{"tool": "read_step_context", "reason": "为什么需要"}],
-  "draftPatch": {
-${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '0' : field.type === 'string[]' || field.type === 'object[]' ? '[]' : '""'}`).join(',\n')}
-  },
-  "checks": ["质量自检"],
-  "suggestions": ["下一步建议"]
+  "assistantMessage": "简短说明本次依据和待确认之处",
+  "draftPatch": {},
+  "checks": [],
+  "suggestions": []
 }`
 
   return [
@@ -276,14 +253,15 @@ ${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '
     `步骤连续性：\n${continuityBlock}`,
     contextBlock ? `当前小说上下文：\n${contextBlock}` : '',
     `当前步骤字段：\n${fieldBlock}`,
-    `本步骤允许使用的工具能力：\n${toolBlock}`,
     historyBlock ? `最近对话：\n${historyBlock}` : '',
     `用户这次的要求：${input.userRequest}`,
     [
       '硬性规则：',
       '- 只输出 JSON 对象，不要 Markdown，不要解释性外壳。',
-      '- draftPatch 只能包含上面列出的字段键；用户要求只改某字段时，其它字段保持当前值或留空。',
-      '- 如果用户给的信息不足，可以合理补全，但要让补全落在目标、阻力、代价、环境压力和人物选择上。',
+      '- draftPatch 只包含确实需要修改的字段；未改字段必须省略，不要用空串、空数组或 null 占位。',
+      '- 用户只要求修改某字段时，draftPatch 只包含那个字段。',
+      '- 事实不足时在 assistantMessage 或 suggestions 中标明待确认，不要把虚构的人物、地点、时间、动机或事件写成项目既有事实。',
+      '- 原始背景等作者原话已有内容时，保留原话；不要擅自替作者改写。',
       '- 当前值或最近对话已经有的信息不要换同义词重复；优先补缺口、修冲突或明确“不需要改”。',
       '- 每个字段承担不同职责，不要把同一段结论复制到多个字段里。',
       '- 当前步骤的输出必须能被下一步直接调用：至少留下目标、阻力、代价、验证方式、人物选择或后续影响中的两类信息。',
@@ -349,7 +327,6 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
         fields,
         context,
         values,
-        tools,
         history: messages,
       })
       const outputs = await window.electron.ai.runPrompt({
@@ -358,13 +335,13 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
         executionMode: 'balanced',
         messages: [{ role: 'user', content: prompt }],
       })
-      const parsed = normalizeDraft(outputs[0] || '', fields)
+      const parsed = normalizeDraft(outputs[0] || '', fields, values)
       setDraft(parsed)
       setMessages([
         ...nextMessages,
         { role: 'assistant' as const, content: parsed.assistantMessage },
       ].slice(-MAX_ASSISTANT_MESSAGES))
-      setSelectedKeys(fields.map((field) => field.key).filter((key) => parsed.draftPatch[key] !== undefined))
+      setSelectedKeys(Object.keys(parsed.draftPatch))
       setInput('')
     } catch (error) {
       message.error(error instanceof Error ? error.message : getUserFacingMessage('guidedStep.aiAssistantFailed'))
@@ -376,9 +353,14 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
   const handleApply = () => {
     if (!draft) return
     const allowed = new Set(selectedKeys)
-    const patch = Object.fromEntries(
+    const selectedPatch = Object.fromEntries(
       Object.entries(draft.draftPatch).filter(([key]) => allowed.has(key)),
-    ) as Partial<TPatch>
+    )
+    const patch = pickChangedDraftFields(selectedPatch, values) as Partial<TPatch>
+    if (Object.keys(patch).length === 0) {
+      message.info('没有可回填的新内容。')
+      return
+    }
     onApplyDraft(patch)
     message.success(getUserFacingMessage('guidedStep.aiDraftApplied'))
   }
@@ -389,12 +371,12 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
         <div>
           <div className="step-ai-assistant__eyebrow">上下文 AI 助手</div>
         </div>
-        <Tooltip title="本面板只生成候选补丁，点击回填后才会写入表单。">
-          <Tag icon={<ToolOutlined />} color="processing">工具受控</Tag>
+        <Tooltip title="模型只会生成供你检查的候选内容；回填后仍需保存表单。">
+          <Tag icon={<ToolOutlined />} color="processing">仅生成候选</Tag>
         </Tooltip>
       </div>
 
-      <div className="step-ai-assistant__tool-row">
+      <div className="step-ai-assistant__tool-row" aria-label="本步骤参考范围">
         {tools.map((tool) => (
           <Tooltip key={tool.id} title={tool.description}>
             <span className="step-ai-assistant__tool-chip">
@@ -443,11 +425,12 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
       {draft ? (
         <div className="step-ai-assistant__draft">
           <div className="step-ai-assistant__draft-head">
-            <strong>候选补丁</strong>
+            <strong>可回填内容</strong>
             <Button size="small" type="primary" icon={<CheckOutlined />} disabled={selectedKeys.length === 0} onClick={handleApply}>
               回填选中字段
             </Button>
           </div>
+          {patchEntries.length === 0 ? <Alert type="info" showIcon message="这次没有可回填的新内容，请补充信息或重新描述要改的字段。" /> : null}
           <Checkbox.Group value={selectedKeys} onChange={(keys) => setSelectedKeys(keys.map(String))}>
             <div className="step-ai-assistant__patch-list">
               {patchEntries.map(({ field, value }) => (

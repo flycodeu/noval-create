@@ -12,6 +12,7 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { InMemoryTaskStore } = require('@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js')
 
 const workspaceRoot = path.resolve(__dirname, '..')
+const packageVersion = require(path.join(workspaceRoot, 'package.json')).version
 const electronExecutable = require('electron')
 const runtimeEntry = path.join(workspaceRoot, 'scripts', 'novelforge-mcp.cjs')
 
@@ -205,7 +206,7 @@ async function main() {
   const grantedScopes = Array.isArray(readyState.scopes) ? readyState.scopes : []
 
   const server = new Server(
-    { name: 'novelforge', version: '1.0.0' },
+    { name: 'novelforge', version: packageVersion },
     {
       capabilities: {
         tools: { listChanged: false },
@@ -221,6 +222,8 @@ async function main() {
       instructions: [
         'NovelForge exposes stable, schema-validated novel creation tools.',
         'Start by listing projects or reading the capabilities resource.',
+        'Analyze the user request and import one explicitly scoped stage via novelforge.assets.import_draft when Codex authored the content.',
+        'Imported text is an immutable candidate and must be reviewed before the author applies it in the app.',
         'Model-backed analysis tools create recorded NovelForge tasks but do not write canonical assets unless their effect explicitly says canonical_write.',
         'Treat contextVersion as an optimistic-concurrency token and review blocked/needs_revision results before continuing.',
         'Canonical writes are disabled by default. Operator-enabled writes require both explicit scopes and a matching novelforge/approvalToken call metadata value.',
@@ -308,7 +311,7 @@ async function main() {
         uri: request.params.uri,
         mimeType: 'application/json',
         text: JSON.stringify({
-          server: { name: 'novelforge', version: '1.0.0' },
+          server: { name: 'novelforge', version: packageVersion },
           grantedScopes,
           tools: descriptors,
         }, null, 2),

@@ -7,9 +7,12 @@ import type {
   GenericAssetReviewCheck,
   GenericAssetReviewContent,
   GenericAssetQualitySnapshot,
+  ImportGenericAssetDraftInput,
+  ImportGenericAssetDraftResult,
   ReviewGenericAssetDraftInput,
   ReviewGenericAssetDraftResult,
 } from '../../src/shared/generic-asset-workflow'
+import type { AgentToolActor } from '../../src/shared/tool-contracts'
 import { asc, desc, eq } from 'drizzle-orm'
 import { GenericAssetWorkflowError } from '../application/generic-asset-workflow-error'
 import { safeParseJson } from '../utils/json'
@@ -365,6 +368,110 @@ function outputPreview(output: string): string {
   return normalized.length <= OUTPUT_PREVIEW_LIMIT ? normalized : `${normalized.slice(0, OUTPUT_PREVIEW_LIMIT)}…`
 }
 
+/** Store Codex-authored text as a candidate. Review and canonical application stay separate. */
+export function importGenericAssetDraft(
+  input: ImportGenericAssetDraftInput,
+  actor: AgentToolActor,
+): ImportGenericAssetDraftResult {
+  const title = requireMeaningfulText(input.title, 'VALIDATION_FAILED', '资产标题不能为空。')
+  const userRequest = requireMeaningfulText(input.userRequest, 'VALIDATION_FAILED', '请保留用户原始需求。')
+  const analysis = requireMeaningfulText(input.analysis, 'VALIDATION_FAILED', '请先记录需求分析。')
+  const stageScope = requireMeaningfulText(input.stageScope, 'VALIDATION_FAILED', '请说明本轮只完成哪个阶段。')
+  const output = requireMeaningfulText(input.output, 'VALIDATION_FAILED', '候选正文不能为空。')
+  const idempotencyKey = requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
+  if (output.length > 120_000 || userRequest.length > 4_000 || analysis.length > 8_000 || stageScope.length > 200) {
+    throw new GenericAssetWorkflowError('VALIDATION_FAILED', '需求、分析、阶段范围或候选正文超出长度上限。')
+  }
+  const outputFormat = input.outputFormat || 'markdown'
+  if (outputFormat === 'json' && !isJsonShapeValid(output)) {
+    throw new GenericAssetWorkflowError('OUTPUT_SHAPE_INVALID', 'JSON 候选稿必须是可解析的对象或数组。')
+  }
+  const novel = requireNovel(input.novelId)
+  const currentContextVersion = novel.contextVersion || 1
+  const requirements = uniqueLines(input.requirements || [], 20)
+  const unresolvedQuestions = uniqueLines(input.unresolvedQuestions || [], 12)
+  const fingerprint = hashArtifactContent({
+    novelId: input.novelId,
+    expectedContextVersion: input.expectedContextVersion,
+    assetType: input.assetType,
+    title,
+    userRequest,
+    analysis,
+    stageScope,
+    unresolvedQuestions,
+    requirements,
+    outputFormat,
+    schemaHint: input.schemaHint?.trim() || '',
+    output,
+    parentArtifactId: input.parentArtifactId || null,
+  })
+  const replay = findArtifactByIdempotency<GenericAssetDraftContent>(input.novelId, 'generic_draft', idempotencyKey)
+  if (replay) {
+    if (replay.content.requestFingerprint !== fingerprint || !replay.content.externalSource) {
+      throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产草稿。')
+    }
+    return {
+      draftArtifact: replay,
+      outputPreview: outputPreview(replay.content.output),
+      warnings: [
+        '这是原草稿的幂等重放，未执行独立审校，也未写入正式资料。',
+        ...(replay.contextVersion === currentContextVersion ? [] : ['项目上下文已变化，请重新分析并创建新版本。']),
+      ],
+      idempotentReplay: true,
+    }
+  }
+  if (input.expectedContextVersion !== currentContextVersion) {
+    throw new GenericAssetWorkflowError('CONTEXT_VERSION_CONFLICT', `项目上下文已从 v${input.expectedContextVersion} 变为 v${currentContextVersion}，请重新读取项目后再导入。`)
+  }
+  if (input.parentArtifactId) {
+    const parent = requireArtifact<GenericAssetDraftContent>(input.parentArtifactId)
+    if (parent.novelId !== input.novelId || parent.kind !== 'generic_draft' || parent.content.assetType !== input.assetType) {
+      throw new GenericAssetWorkflowError('ARTIFACT_PARENT_INVALID', '父草稿必须属于同一项目和资产类型。')
+    }
+  }
+  const content: GenericAssetDraftContent = {
+    schemaVersion: 'generic-asset-draft-v1',
+    requestFingerprint: fingerprint,
+    assetType: input.assetType,
+    title,
+    outputFormat,
+    requirements,
+    schemaHint: input.schemaHint?.trim() || '',
+    output,
+    contextSummaryHash: hashArtifactContent({ novelId: input.novelId, contextVersion: currentContextVersion }),
+    taskId: null,
+    externalSource: { userRequest, analysis, stageScope, unresolvedQuestions },
+    createdAt: new Date().toISOString(),
+  }
+  let draftArtifact: ImportGenericAssetDraftResult['draftArtifact']
+  try {
+    draftArtifact = createArtifact({
+      novelId: input.novelId,
+      kind: 'generic_draft',
+      status: 'draft',
+      parentArtifactId: input.parentArtifactId || null,
+      content,
+      contextVersion: currentContextVersion,
+      producerType: 'api_client',
+      producerId: actor.actorId.slice(0, 200),
+      producerClient: actor.clientId.slice(0, 200),
+      idempotencyKey,
+    })
+  } catch (error) {
+    return mapArtifactError(error)
+  }
+  return {
+    draftArtifact,
+    outputPreview: outputPreview(output),
+    warnings: [
+      '候选稿仅已保存，未执行独立审校，也未写入正式资料。',
+      ...(PROCESS_LEAK_PATTERN.test(output) ? ['检测到可能的模型自述或交付套话，请审校时检查。'] : []),
+      ...(unresolvedQuestions.length ? ['仍有待确认问题，审校前不要将其当作既定事实。'] : []),
+    ],
+    idempotentReplay: false,
+  }
+}
+
 function readReplay(
   input: GenerateGenericAssetDraftInput,
   fingerprint: string,
@@ -373,6 +480,9 @@ function readReplay(
   if (!draft) return null
   if (draft.content.schemaVersion !== 'generic-asset-draft-v1' || draft.content.requestFingerprint !== fingerprint) {
     throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产草稿请求。')
+  }
+  if (!draft.content.taskId) {
+    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '该幂等键已用于外部导入草稿。')
   }
   if (!draft.reviewArtifactId) {
     throw new GenericAssetWorkflowError('ARTIFACT_REVIEW_MISSING', '幂等草稿缺少审校工件，无法安全重放。')
