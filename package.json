@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "node scripts/dev-web-full.cjs",
-    "dev:web:frontend": "vite --host 127.0.0.1 --port 4175",
+    "dev:web:frontend": "vite",
     "dev:web:backend": "electron scripts/local-web-backend.cjs",
     "dev:web:full": "node scripts/dev-web-full.cjs",
     "build:web": "vite build",
@@ -94,6 +94,7 @@
     "diff": "^9.0.0",
     "docx": "^8.5.0",
     "drizzle-orm": "^0.30.8",
+    "electron-updater": "6.8.10",
     "epub-gen-memory": "^1.1.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

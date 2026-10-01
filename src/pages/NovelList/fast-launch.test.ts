@@ -5,7 +5,7 @@ import { parseThemeVoiceSnapshot } from '../../shared/theme-voice'
 import { buildFastLaunchBootstrapPlan } from './fast-launch'
 
 describe('fast-launch bootstrap plan', () => {
-  it('builds the minimal starter structure for a fast-launch project', () => {
+  it('builds a source-backed draft without inventing people or plot events', () => {
     const plan = buildFastLaunchBootstrapPlan({
       genreLabel: '末世求生',
       protagonistStart: '被逐出避难所的维修员',
@@ -24,22 +24,24 @@ describe('fast-launch bootstrap plan', () => {
     expect(plan.chapters).toHaveLength(3)
     expect(plan.chapters[0].targetWords).toBeLessThan(plan.chapters[1].targetWords)
     expect(plan.chapters[1].targetWords).toBeLessThan(plan.chapters[2].targetWords)
-    expect(plan.timelineEvents).toHaveLength(3)
-    expect(plan.characterArcs).toHaveLength(2)
-    expect(plan.characterArcs.map((arc) => arc.characterRole)).toEqual(['protagonist', 'antagonist'])
-    expect(plan.relationshipArc.relationTypeSnapshot).toBe('对抗')
-    expect(plan.resistanceTrack.title).toBe('主要阻力轨道')
     expect(plan.chapterContracts).toHaveLength(3)
     expect(plan.chapterContracts.every((contract) => contract.chapterGoal.length > 0)).toBe(true)
-    expect(plan.sceneContracts).toHaveLength(3)
-    expect(plan.sceneContracts.every((contract) => contract.obstacle.length > 0 && contract.resultState.length > 0)).toBe(true)
-    expect(plan.protagonist.roleType).toBe('protagonist')
-    expect(plan.antagonist.roleType).toBe('antagonist')
-    expect(projectBrief.readerPromise).toContain('前三章')
+    expect(plan).not.toHaveProperty('protagonist')
+    expect(plan.novel.userBackground).toContain('主角起点：被逐出避难所的维修员')
+    expect(settings.premise.protagonistStart).toBe('被逐出避难所的维修员')
+    expect(plan.novel.synopsis).toBe('他修好的旧终端突然出现主城求救信号')
+    expect(plan.chapters[1].outline).toContain('承接第1章实际正文')
+    expect(plan.chapters[2].outline).toContain('承接第2章实际正文')
+    expect(JSON.stringify(plan)).not.toMatch(/再次被抛下|信息封锁|异常现场|关系裂缝/)
+    expect(projectBrief.readerPromise).toBe('他修好的旧终端突然出现主城求救信号')
     expect(settings.premise.coreHook).toContain('主城求救信号')
     expect(settings.storyDesign.coreConflict).toContain('背叛过他的主城')
+    expect(settings.storyDesign.endingType).toBeUndefined()
+    expect(settings.endgameDesign.endingMode).toBeUndefined()
     expect(themeVoice.writingContractTags).toContain('强剧情')
     expect(themeVoice.forbiddenPhrases).toContain('禁止全知旁白')
+    expect(themeVoice.pov).toBe('')
+    expect(themeVoice.tense).toBe('')
   })
 
   it('preserves a natural-language idea and editor-approved title/synopsis hints', () => {

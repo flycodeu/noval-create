@@ -228,7 +228,7 @@ function validateSigningInputs() {
 
 function buildUnsigned() {
   cleanReleaseArtifacts()
-  const result = runBuilder(['--win'], createBuildEnv())
+  const result = runBuilder(['--win', '--publish', 'never'], createBuildEnv())
   process.exit(result.status ?? (result.error ? 1 : 0))
 }
 
@@ -237,14 +237,14 @@ function buildSigned() {
   cleanReleaseArtifacts()
   const env = createBuildEnv()
 
-  let result = runBuilder(['--win', 'dir'], env)
+  let result = runBuilder(['--win', 'dir', '--publish', 'never'], env)
   if (result.status !== 0) {
     process.exit(result.status || 1)
   }
 
   signFiles(collectUnpackedExecutables())
 
-  result = runBuilder(['--prepackaged', path.resolve(releaseDir, 'win-unpacked'), '--win', 'nsis', 'portable'], env)
+  result = runBuilder(['--prepackaged', path.resolve(releaseDir, 'win-unpacked'), '--win', 'nsis', 'portable', '--publish', 'never'], env)
   if (result.status !== 0) {
     process.exit(result.status || 1)
   }

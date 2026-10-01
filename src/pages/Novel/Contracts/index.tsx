@@ -30,7 +30,7 @@ import {
   normalizeStringArray,
   parseDraftJson,
 } from '../shared/ai-draft'
-import { buildPlanningContextSections } from '../shared/planning-context'
+import { buildPlanningContextSections, buildPreviousStructureChapterSections } from '../shared/planning-context'
 import { useResponsivePanelHeight } from '../../../shared/use-responsive-panel-height'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
@@ -783,6 +783,7 @@ export default function ContractsPage({ novelId }: Props) {
               ]) ? 'optimize' : 'replace',
               context: buildPlanningContextSections(currentNovel, {
                 includeSubplots: true,
+                prioritySections: activeChapter ? buildPreviousStructureChapterSections(activeChapter.chapterNum, chapters) : [],
                 extraSections: [
                   { label: '当前章节', value: activeChapter ? `第${activeChapter.chapterNum}章 ${activeChapter.title || ''}`.trim() : '' },
                   { label: '本章场景', value: sceneContracts.map((item) => item.segmentTitle) },
@@ -1140,6 +1141,7 @@ export default function ContractsPage({ novelId }: Props) {
                         ]) ? 'optimize' : 'replace',
                         context: buildPlanningContextSections(currentNovel, {
                           includeSubplots: true,
+                          prioritySections: buildPreviousStructureChapterSections(scene.chapterNum, chapters),
                           extraSections: [
                             { label: '当前章节合同', value: [
                               currentContractValues.chapterGoal ? `本章目标：${currentContractValues.chapterGoal}` : '',

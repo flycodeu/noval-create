@@ -86,7 +86,7 @@ export function isChapterWritebackRunCurrent(run: typeof chapterWritebackRuns.$i
 }
 
 function assertWritebackSourceCurrent(run: typeof chapterWritebackRuns.$inferSelect): void {
-  if (!isChapterWritebackRunCurrent(run)) throw new Error('正文、审校或前章依据已变化，旧回写候选已失效，请从当前选稿重新提取。')
+  if (!isChapterWritebackRunCurrent(run)) throwUserFacingError('chapterWriteback.candidateStale')
 }
 
 function assertBoundWritebackSource(run: typeof chapterWritebackRuns.$inferSelect, chapter: ChapterRow): void {
@@ -1123,12 +1123,12 @@ async function buildAiDraft(context: ExistingAssetContext): Promise<{ extracts: 
       context: { chapterId: context.chapter.id, novelId: context.chapter.novelId },
     })
     if (!parsed.success || !parsed.data || !Array.isArray(parsed.data.extracts) || !Array.isArray(parsed.data.diffs)) {
-      throw new Error('回写抽取未返回有效候选结构，不能视为无增量完成。')
+      throwUserFacingError('chapterWriteback.extractStructureInvalid')
     }
     const extracts = sanitizeAiExtracts(parsed.data.extracts)
     const diffs = sanitizeAiDiffs(parsed.data.diffs, context)
     if (extracts.length !== parsed.data.extracts.length || diffs.length !== parsed.data.diffs.length) {
-      throw new Error('回写候选含不可识别条目，不能丢弃后当作已同步。')
+      throwUserFacingError('chapterWriteback.unknownCandidateEntries')
     }
     return { extracts, diffs }
   } catch (error) {
@@ -1825,7 +1825,7 @@ export async function refreshFinalizedChapterCanonRun(runId: number): Promise<Ap
   const refreshed = await prepareChapterWritebackRunWithRetry(run.chapterId, 'pipeline-final-source-refresh', 3)
   const finalRun = getRunRow(refreshed.id)
   assertWritebackSourceCurrent(finalRun)
-  if (!['ready', 'applied'].includes(finalRun.status)) throw new Error('最终选稿的 Canon 抽取尚未完成，请重试 Canonizer。')
+  if (!['ready', 'applied'].includes(finalRun.status)) throwUserFacingError('chapterWriteback.finalCanonPending')
   return refreshed
 }
 

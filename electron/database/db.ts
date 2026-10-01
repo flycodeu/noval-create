@@ -3059,6 +3059,16 @@ export function runMigrations(sqlite: Database.Database) {
       ensureColumn(sqlite, 'chapter_writeback_runs', 'source_identity_json', 'TEXT')
     }
   })
+  runMigrationStep(sqlite, '0069_model_attempt_output', () => {
+    ensureColumn(sqlite, 'model_request_attempts', 'prompt_hash', 'TEXT')
+    ensureColumn(sqlite, 'model_request_attempts', 'prompt_text', 'TEXT')
+    ensureColumn(sqlite, 'model_request_attempts', 'prompt_truncated', 'INTEGER NOT NULL DEFAULT 0')
+    ensureColumn(sqlite, 'model_request_attempts', 'options_json', 'TEXT')
+    ensureColumn(sqlite, 'model_request_attempts', 'output_text', 'TEXT')
+    ensureColumn(sqlite, 'model_request_attempts', 'output_sha256', 'TEXT')
+    ensureColumn(sqlite, 'model_request_attempts', 'output_chars', 'INTEGER NOT NULL DEFAULT 0')
+    ensureColumn(sqlite, 'model_request_attempts', 'output_truncated', 'INTEGER NOT NULL DEFAULT 0')
+  })
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {

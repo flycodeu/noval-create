@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Novel } from '../../../types'
-import { buildPlanningContextSections, PLANNING_CONTEXT_DEFAULT_TOKEN_BUDGET, PLANNING_CONTEXT_MAX_CHARS } from './planning-context'
+import { buildPlanningContextSections, buildPreviousStructureChapterSections, PLANNING_CONTEXT_DEFAULT_TOKEN_BUDGET, PLANNING_CONTEXT_MAX_CHARS } from './planning-context'
 import { estimateTokens } from '../../../shared/token-budget'
 
 describe('planning context assembly', () => {
@@ -48,5 +48,31 @@ describe('planning context assembly', () => {
     expect(estimatedTokens).toBeLessThanOrEqual(120)
     expect(totalChars).toBeLessThanOrEqual(PLANNING_CONTEXT_MAX_CHARS)
     expect(PLANNING_CONTEXT_DEFAULT_TOKEN_BUDGET).toBeGreaterThan(120)
+  })
+
+  it('separates saved previous-chapter plans from written prose', () => {
+    const planned = buildPreviousStructureChapterSections(3, [{
+      chapterNum: 2, title: '夜渡', outline: '计划在河边发现线索', content: '',
+    }])
+    expect(planned[0].value).toContain('尚无正文')
+    expect(planned[1].label).toContain('计划')
+
+    const written = buildPreviousStructureChapterSections(3, [{
+      chapterNum: 2, title: '夜渡', outline: '计划在河边发现线索', content: '他们已经过河。',
+    }])
+    expect(written[0].label).toContain('已写')
+    expect(written[0].value).toContain('他们已经过河')
+    expect(buildPreviousStructureChapterSections(3, []).at(0)?.value).toContain('未保存')
+  })
+
+  it('reserves a tight planning budget for the immediate continuation before long background', () => {
+    const sections = buildPlanningContextSections({
+      title: '长篇', genreName: '悬疑', expandedBackground: '背景信息'.repeat(800),
+    } as unknown as Novel, {
+      tokenBudget: 90,
+      prioritySections: [{ label: '紧邻前章已写结尾', value: '主角把唯一钥匙交给了姐姐。' }],
+    })
+    expect(sections[0]).toEqual({ label: '紧邻前章已写结尾', value: '主角把唯一钥匙交给了姐姐。' })
+    expect(sections.reduce((total, section) => total + estimateTokens(`${section.label}：${section.value || ''}`), 0)).toBeLessThanOrEqual(90)
   })
 })

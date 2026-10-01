@@ -107,6 +107,7 @@ function createRuntime() {
   const sourceSearchSettingsService = requireProject('electron/services/source-search-settings.service.ts')
   const proseOperationService = requireProject('electron/services/prose-operation.service.ts')
   const taskService = requireProject('electron/services/task.service.ts')
+  const modelAttemptLedgerService = requireProject('electron/services/model-attempt-ledger.service.ts')
   const novelService = requireProject('electron/services/novel.service.ts')
   const consistencyService = requireProject('electron/services/consistency.service.ts')
   const storyMemoryService = requireProject('electron/services/story-memory.service.ts')
@@ -855,6 +856,7 @@ function createRuntime() {
       getStats: (novelId) => taskService.getTaskStats(novelId),
       getPipelineStats: (novelId) => taskService.getTaskPipelineStats(novelId),
       getLatestChapterPipeline: (chapterId) => taskService.getLatestChapterPipelineTask(requireId(chapterId, 'chapterId')),
+      modelAttempts: (taskId) => modelAttemptLedgerService.listModelAttemptsForTaskTree(requireId(taskId, 'taskId')),
       get: (id) => taskService.getTaskRecord(requireId(id)),
       clearHistory: (filters) => taskService.clearTaskHistory(filters || {}),
       cancel: (id) => taskService.cancelTask(requireId(id), webEventSender),

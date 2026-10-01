@@ -3635,6 +3635,20 @@ function getRequiredChapterGenerationInput(chapterId: number): typeof chapters.$
   return chapter
 }
 
+function assertPreviousChapterContentReady(
+  chapterNum: number,
+  chapterRows: Array<Pick<typeof chapters.$inferSelect, 'chapterNum' | 'content'>>,
+): void {
+  if (chapterNum <= 1) return
+  const previous = chapterRows.find((row) => row.chapterNum === chapterNum - 1)
+  if (!previous) {
+    throw new Error(`生成第${chapterNum}章前，请先建立第${chapterNum - 1}章并写出正文草稿；当前没有可承接的紧邻前章。`)
+  }
+  if (!previous.content?.trim()) {
+    throw new Error(`生成第${chapterNum}章前，请先补上第${chapterNum - 1}章正文草稿；只有大纲或摘要不能作为跨章续写依据。`)
+  }
+}
+
 async function loadChapterGenerationRawContext(
   chapter: typeof chapters.$inferSelect,
   stageId?: number,
@@ -3642,6 +3656,7 @@ async function loadChapterGenerationRawContext(
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, stageId, {
     ensureStructure: true,
   })
+  assertPreviousChapterContentReady(chapter.chapterNum, rawContext.chapterRows)
   if (stageId && rawContext.creativeStageContext) {
     assertCreativeStageContextReadyForGeneration(rawContext.creativeStageContext)
   }
@@ -3690,7 +3705,7 @@ export async function generateChapterContent(
   const inFlight = chapterGenerationLocks.get(chapterId)
   if (inFlight) {
     if (chapterGenerationInputIdentities.get(chapterId) !== requestIdentity) {
-      throw new Error('本章正在使用另一版写作依据，请取消当前任务后按新设置生成。')
+      throwUserFacingError('chapter.pipelineInputInUse')
     }
     if (options.onWorkflowTaskCreated) {
       observeChapterGenerationTask(chapterId, options.onWorkflowTaskCreated)
@@ -4085,7 +4100,7 @@ function assertChapterResumeNarrativeCurrent(
   snapshot: Partial<ChapterPipelineSnapshot> | null,
 ): void {
   if (!snapshot?.narrativeIdentity) {
-    throw new Error('旧任务缺少可复现的写作策略身份，请保留现稿并从 Planner 新建任务。')
+    throwUserFacingError('chapter.resumePolicyIdentityMissing')
   }
   assertChapterNarrativeInputCurrent(chapterId, snapshot.narrativeIdentity)
 }
@@ -4441,8 +4456,16 @@ export async function optimizeChapterContent(
   })
 
   const supportingCastNames = collectSupportingCastNames(chapter.novelId)
-  const structuralGateOptions = { supportingRoleNames: supportingCastNames,
-    ...(repairMode === 'language' ? { goldenChapterNums: [] } : {}) }
+  // The repair plan and independent semantic review specify which story beats
+  // matter here. A fixed rule for chapter 2/3 would force unrelated novels to
+  // invent a misjudgment, supporting-cast betrayal, or lasting loss.
+  const structuralGateOptions = {
+    supportingRoleNames: supportingCastNames,
+    goldenChapterNums: repairMode === 'structural' ? [chapter.chapterNum] : [],
+    agencyChapterNums: [],
+    payoffChapterNums: [],
+    scopeOnly: true,
+  }
 
   let optimizationTaskId: number | undefined
   let optimizationPasses = 1
@@ -4637,6 +4660,7 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export const __testing = {
+  assertPreviousChapterContentReady,
   buildChapterGenerationIdempotencyKey,
   buildChapterOptimizationFactGuard,
   collectNarrativeStateWarnings,

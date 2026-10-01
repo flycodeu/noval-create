@@ -24,19 +24,24 @@ function readinessTone(rate: number): 'success' | 'warning' | 'error' {
 export default function QualityPriorityPanel({ data, pipelineStats, filters, onOpenRevisionQueue }: Props) {
   const risks = filterQualityRisks(data.novelQualityMetrics.topRisks, filters).slice(0, 3)
   const styleWarningCount = data.styleCompliance.warningCount + data.styleCompliance.rewriteCount
+  const hasAnalyzedProse = data.novelQualityMetrics.analyzedChapterCount > 0
 
   return (
     <div className="quality-dashboard-page__priority" data-quality-priority>
       <section className="quality-dashboard-page__priority-metrics" aria-label="关键质量信号">
         <div className="quality-dashboard-page__priority-metric">
-          <span>生产就绪度</span>
-          <strong>{data.productionReadiness.readyRate}%</strong>
-          <Tag color={readinessTone(data.productionReadiness.readyRate)}>{data.productionReadiness.status}</Tag>
+          <span>续批条件</span>
+          <strong>{hasAnalyzedProse ? `${data.productionReadiness.readyRate}%` : '待验证'}</strong>
+          <Tag color={hasAnalyzedProse ? readinessTone(data.productionReadiness.readyRate) : 'default'}>
+            {hasAnalyzedProse ? data.productionReadiness.status : '尚无正文评估'}
+          </Tag>
         </div>
         <div className="quality-dashboard-page__priority-metric">
-          <span>全书健康</span>
-          <strong>{data.novelQualityMetrics.healthScore} 分</strong>
-          <small>{`已分析 ${data.novelQualityMetrics.analyzedChapterCount}/${data.novelQualityMetrics.totalChapterCount} 章`}</small>
+          <span>正文健康</span>
+          <strong>{hasAnalyzedProse ? `${data.novelQualityMetrics.healthScore} 分` : '待评估'}</strong>
+          <small>{hasAnalyzedProse
+            ? `已分析 ${data.novelQualityMetrics.analyzedChapterCount}/${data.novelQualityMetrics.totalChapterCount} 章`
+            : `${data.novelQualityMetrics.totalChapterCount} 章草案，尚无已分析正文`}</small>
         </div>
         <div className="quality-dashboard-page__priority-metric">
           <span>高优先风险</span>
@@ -58,6 +63,9 @@ export default function QualityPriorityPanel({ data, pipelineStats, filters, onO
           </div>
           <Button type="primary" onClick={() => onOpenRevisionQueue()}>进入修订队列</Button>
         </div>
+        {!hasAnalyzedProse ? (
+          <p className="quality-dashboard-page__body-copy">当前风险来自已有设定和章节草案；尚未分析正文，不能据此判断成稿质量。</p>
+        ) : null}
         {risks.length > 0 ? risks.map((risk) => (
           <article key={`${risk.kind}-${risk.title}`} className="quality-dashboard-page__priority-risk">
             <div className="quality-dashboard-page__priority-risk-head">

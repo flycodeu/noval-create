@@ -1,4 +1,4 @@
-import type { Novel } from '../../../types'
+import type { Chapter, Novel } from '../../../types'
 import {
   buildWorldRulesSummary,
   parseWorldRulesJson,
@@ -25,6 +25,7 @@ import { compileContextPack, type ContextPackCompileResult } from '../../../shar
 export interface PlanningContextOptions {
   includeSubplots?: boolean
   includeWorldRules?: boolean
+  prioritySections?: DraftContextSection[]
   extraSections?: DraftContextSection[]
   tokenBudget?: number
 }
@@ -165,7 +166,32 @@ export function buildPlanningContextSections(
   appendContextSection(sections, options.includeWorldRules !== false && Boolean(novel?.worldRulesJson), '世界规则', compactText(buildWorldRulesSummary(worldRules), 1400))
   appendContextSection(sections, storySettings.endgameReadyCount > 0, '终局设计', compactText(buildEndgameDesignSummary(storySettings.endgameDesign), 900))
 
-  return normalizeContextSections(sections.concat(options.extraSections || []), options.tokenBudget)
+  return normalizeContextSections([
+    ...(options.prioritySections || []),
+    ...sections,
+    ...(options.extraSections || []),
+  ], options.tokenBudget)
+}
+
+/** The outline is a plan; only saved chapter prose can establish an event. */
+export function buildPreviousStructureChapterSections(
+  chapterNum: number,
+  chapterRows: Array<Pick<Chapter, 'chapterNum' | 'title' | 'outline' | 'content'>>,
+): DraftContextSection[] {
+  if (chapterNum <= 1) return []
+  const previousNum = chapterNum - 1
+  const previous = chapterRows.find((row) => row.chapterNum === previousNum)
+  if (!previous) {
+    return [{ label: '紧邻前章状态', value: `第${previousNum}章未保存；不要编造前章结果或承接动作。` }]
+  }
+  const plan: DraftContextSection = {
+    label: '已保存前章结构（计划，不能当作已发生事实）',
+    value: `第${previousNum}章${previous.title?.trim() ? `《${previous.title.trim()}》` : ''}：${previous.outline?.trim() || '暂无章节目标'}`,
+  }
+  const prose = previous.content?.trim()
+  return prose
+    ? [{ label: '已写前章正文结尾（草稿也可能未定稿）', value: prose.slice(-500) }, plan]
+    : [{ label: '紧邻前章状态', value: `第${previousNum}章尚无正文；只可承接已保存的规划，不可声称计划已发生。` }, plan]
 }
 
 /** Pure planning projection sharing the ContextPack schema used by chapter stages. */

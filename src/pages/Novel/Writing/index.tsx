@@ -1,7 +1,7 @@
 import { locateReviewEvidence } from './reading-review-evidence'
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal, message } from 'antd'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { formatStaleReasonsSummary } from '../../../shared/context-change-reasons'
 import { type AiExecutionMode } from '../../../shared/ai-execution'
 import { parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -250,6 +250,7 @@ export default function Writing({ novelId }: Props) {
   } = preGenerationPresentation
   const chapterReadiness = useWritingChapterReadiness({
     chapter: currentChapter,
+    chapters,
     publishCheck,
     sceneCount: scenePlan.length,
     chapterSegments,
@@ -470,7 +471,7 @@ export default function Writing({ novelId }: Props) {
       setGateReportExpanded,
       onLocateEvidence: (evidence) => {
         if (!editorRef.current || !locateReviewEvidence(editorRef.current, getEditorText(), evidence)) {
-          message.warning('当前编辑格式无法精确定位，请按问题引文手动选择原文。')
+          message.warning(getUserFacingMessage('writing.evidenceLocateFailed'))
           return
         }
         setSelectedSnippet({ start: evidence.start, end: evidence.end, text: evidence.quote })
@@ -505,10 +506,12 @@ export default function Writing({ novelId }: Props) {
 
   const generationHandoff = useMemo(() => buildGenerationHandoffViewModel({
     hasChapter: Boolean(currentChapter),
+    chapterNum: currentChapter?.chapterNum,
     writability: chapterWritability,
+    preflight: generationPreflight,
     contextPreview: chapterContextPreview,
     contextPreviewError: chapterContextPreviewError,
-  }), [chapterContextPreview, chapterContextPreviewError, chapterWritability, currentChapter])
+  }), [chapterContextPreview, chapterContextPreviewError, chapterWritability, currentChapter, generationPreflight])
 
   const commandBindings = useWritingCommandBindings({
     navigator: {

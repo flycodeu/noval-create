@@ -125,7 +125,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     const latestText = editorText()
     const before = latestText.slice(0, selectedSnippet.start)
     if (latestText.slice(selectedSnippet.start, selectedSnippet.end) !== selectedSnippet.text) {
-      message.warning('选区已变化，请重新选择。')
+      message.warning(getUserFacingMessage('writing.selectionChanged'))
       return
     }
     setRewritingSelection(true)
@@ -183,14 +183,16 @@ export function useChapterReview(options: UseChapterReviewOptions) {
       setRewriteModalOpen(false)
       navigateToWritingRoute('review')
     } catch {
-      message.warning('原稿已变化或候选触及锁定文段，请重新选择。')
+      message.warning(getUserFacingMessage('writing.rewriteCandidateStaleOrLocked'))
     }
   }, [rewriteCandidate, currentChapter, currentChapterIdRef, editorText, applyChapterContent, setRewriteModalOpen, navigateToWritingRoute])
 
   const savePassageFeedback = useCallback(async (input: PassageFeedbackInput) => {
     if (!currentChapter || !selectedSnippet || currentChapterIdRef.current !== currentChapter.id) return
     const text = editorText()
-    if (text.slice(selectedSnippet.start, selectedSnippet.end) !== selectedSnippet.text) throw new Error('选区已变化，请重新选择。')
+    if (text.slice(selectedSnippet.start, selectedSnippet.end) !== selectedSnippet.text) {
+      throw new Error(getUserFacingMessage('writing.selectionChanged'))
+    }
     const source = createReaderFeedbackSourceRef(text, currentChapter.id, selectedSnippet.start, selectedSnippet.end)
     await saveNow(currentChapter.id, text)
     await window.electron.novel.saveReaderFeedback(novelId, { ...input, chapterId: currentChapter.id, start: source.start, end: source.end, expectedContentHash: source.contentHash })

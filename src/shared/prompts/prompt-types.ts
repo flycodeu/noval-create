@@ -123,6 +123,7 @@ export interface ChapterOutlinePromptInput {
   openLoops: string
   worldRulesSummary: string
   previousChapterOutlines?: string
+  adjacentChapterEvidence?: string
   protagonistReference: string
   protagonistRule: string
   attemptNumber?: number

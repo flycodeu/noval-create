@@ -1172,6 +1172,7 @@ export function installWebElectronBridge(): void {
       getStats: async (novelId?: unknown) => withLocalBackend('task', 'getStats', [novelId], async () => emptyStats),
       getPipelineStats: async (novelId?: unknown) => withLocalBackend('task', 'getPipelineStats', [novelId], async () => emptyPipelineStats),
       getLatestChapterPipeline: async (chapterId?: unknown) => withLocalBackend('task', 'getLatestChapterPipeline', [chapterId], async () => null),
+      modelAttempts: async (taskId?: unknown) => withLocalBackend('task', 'modelAttempts', [taskId], async () => []),
       get: async (id?: unknown) => withLocalBackend('task', 'get', [id], async () => null),
       cancel: (...args) => withLocalBackend('task', 'cancel', args, async () => readOnlyMutation('task.cancel')),
     }),

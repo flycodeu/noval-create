@@ -21,6 +21,8 @@ import { logWarn } from '../utils/runtime-log'
 import type { CallCompletion, ModelRequestObserver } from '../../src/shared/model-call-telemetry'
 import {
   createModelAttemptLedgerSink,
+  snapshotModelOptions,
+  snapshotModelPrompt,
   interruptStartedModelAttempts,
   type ModelAttemptLedgerSink,
 } from './model-attempt-ledger.service'
@@ -1166,7 +1168,15 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     const chatOpts = opts.chatOpts || {}
     const effectiveChatOpts = { ...chatOpts }
     const preparedRequest = await prepareTaskRequest(acquired.runtime, opts, effectiveChatOpts)
-    ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
+    ledgerSink = createModelAttemptLedgerSink({
+      taskId, novelId: opts.novelId,
+      ...snapshotModelPrompt(preparedRequest.messages, effectiveChatOpts.systemPrompt),
+      optionsJson: snapshotModelOptions({
+        temperature: effectiveChatOpts.temperature ?? acquired.runtime.temperature,
+        maxTokens: effectiveChatOpts.maxTokens ?? acquired.runtime.maxTokens,
+        providerOptions: { ...acquired.runtime.providerOptions, ...effectiveChatOpts.providerOptions },
+      }),
+    })
     let completion: CallCompletion | null = null
 
     for (let attemptNumber = 0; ; attemptNumber += 1) {
@@ -1186,6 +1196,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
           },
           signal: controller.signal,
           onStream: (chunk) => {
+            ledgerSink?.appendOutput(chunk)
             fullOutput += chunk
             if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
               outputLimitExceeded = true
@@ -1310,7 +1321,15 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     const chatOpts = opts.chatOpts || {}
     const effectiveChatOpts = { ...chatOpts }
     const preparedRequest = await prepareTaskRequest(acquired.runtime, opts, effectiveChatOpts)
-    ledgerSink = createModelAttemptLedgerSink({ taskId, novelId: opts.novelId })
+    ledgerSink = createModelAttemptLedgerSink({
+      taskId, novelId: opts.novelId,
+      ...snapshotModelPrompt(preparedRequest.messages, effectiveChatOpts.systemPrompt),
+      optionsJson: snapshotModelOptions({
+        temperature: effectiveChatOpts.temperature ?? acquired.runtime.temperature,
+        maxTokens: effectiveChatOpts.maxTokens ?? acquired.runtime.maxTokens,
+        providerOptions: { ...acquired.runtime.providerOptions, ...effectiveChatOpts.providerOptions },
+      }),
+    })
     let completion: CallCompletion | null = null
 
     for (let attemptNumber = 0; ; attemptNumber += 1) {
@@ -1332,6 +1351,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
         }, () => {
           assertTaskRequestBudget(acquired.runtime, preparedRequest.messages, effectiveChatOpts, opts.requestBudget || effectiveChatOpts.requestBudget)
         })
+        ledgerSink.recordOutput(result)
         break
       } catch (error) {
         if (!shouldRetryTransientModelTaskError(error, {

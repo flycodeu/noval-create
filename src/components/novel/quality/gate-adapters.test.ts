@@ -32,8 +32,8 @@ describe('fromStructuralGate', () => {
     choiceSignals: [],
     supportingAgencySignals: [],
     misjudgmentSignals: [],
-    changedSentenceRate: 0.18,
-    scopeExpansionRatio: 0.05,
+    changedSentenceRate: 18,
+    scopeExpansionRatio: 1.05,
   }
 
   it('maps a passing gate with signal and stat items', () => {
@@ -42,7 +42,7 @@ describe('fromStructuralGate', () => {
     expect(report.passed).toBe(true)
     expect(report.items.some((item) => item.message.includes('状态变化信号：主角丢失信物'))).toBe(true)
     expect(report.items.some((item) => item.message.includes('代价信号：左手受伤'))).toBe(true)
-    expect(report.items.some((item) => item.message.includes('句级改动率 18%'))).toBe(true)
+    expect(report.items.some((item) => item.message === '句级改动率 18%，范围扩张比 105%')).toBe(true)
     expect(report.items.every((item) => item.severity === 'info')).toBe(true)
   })
 

@@ -28,6 +28,22 @@ import { assertCreativeStageContextReadyForGeneration, upsertCreativeStageAsset 
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { buildRecentStoryDesignProjection, formatRecentStoryDesignProjection } from './story-thread.service'
 
+export function buildAdjacentChapterPlanningEvidence(
+  chapterNum: number,
+  chapterRows: Array<{ chapterNum: number; title?: string | null; outline?: string | null; content?: string | null }>,
+): string {
+  if (chapterNum <= 1) return ''
+  const previousNum = chapterNum - 1
+  const previous = chapterRows.find((row) => row.chapterNum === previousNum)
+  if (!previous) return `第${previousNum}章尚未保存；不能假定前章发生了任何具体事件。`
+  const plan = previous.outline?.trim()
+  const planLine = plan ? `第${previousNum}章已保存细纲（仅为计划）：${plan.slice(0, 300)}` : ''
+  const prose = previous.content?.trim()
+  return prose
+    ? [`第${previousNum}章已保存正文结尾（草稿可能尚未定稿）：${prose.slice(-500)}`, planLine].filter(Boolean).join('\n')
+    : [`第${previousNum}章尚无正文；细纲只可作为规划，不能声称其中事件已经发生。`, planLine].filter(Boolean).join('\n')
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -434,6 +450,7 @@ export async function generateChapterOutlines(arcId: number, options: { batchSiz
           openLoops: context.openLoops,
           worldRulesSummary: context.worldRulesSummary,
           previousChapterOutlines: [existingOutlines, recentStoryDesign].filter(Boolean).join('\n\n') || undefined,
+          adjacentChapterEvidence: buildAdjacentChapterPlanningEvidence(batchStart, chapterRows),
           protagonistReference: context.profile.protagonistReference,
           protagonistRule: context.profile.protagonistRule,
           designGateDirective,

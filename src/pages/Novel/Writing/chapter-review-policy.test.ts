@@ -76,10 +76,16 @@ describe('chapter review policy', () => {
     })
   })
 
-  it('keeps both optimization guards mandatory before applying a candidate', () => {
+  it('blocks applying an optimization candidate when any required gate fails', () => {
     expect(canApplyChapterOptimization(null)).toBe(false)
     expect(canApplyChapterOptimization({ factGuard: { safeToApply: true }, qualityGate: { safeToApply: true } })).toBe(true)
     expect(canApplyChapterOptimization({ factGuard: { safeToApply: false }, qualityGate: { safeToApply: true } })).toBe(false)
     expect(canApplyChapterOptimization({ factGuard: { safeToApply: true }, qualityGate: { safeToApply: false } })).toBe(false)
+    expect(canApplyChapterOptimization({
+      factGuard: { safeToApply: true }, qualityGate: { safeToApply: true }, structuralGate: { safeToApply: false },
+    })).toBe(false)
+    expect(canApplyChapterOptimization({
+      factGuard: { safeToApply: true }, qualityGate: { safeToApply: true }, structuralGate: { safeToApply: true },
+    })).toBe(true)
   })
 })

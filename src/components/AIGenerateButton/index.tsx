@@ -17,7 +17,7 @@ interface RetryConfig {
 interface Props {
   label?: string
   intent?: 'generate' | 'complete' | 'repair' | 'review'
-  buildMessages: () => { role: 'user' | 'assistant'; content: string }[]
+  buildMessages: () => { role: 'user' | 'assistant'; content: string }[] | Promise<{ role: 'user' | 'assistant'; content: string }[]>
   runGeneration?: (input: {
     messages: { role: 'user' | 'assistant'; content: string }[]
     count: number
@@ -109,7 +109,7 @@ export default function AIGenerateButton({
     setRetryAttempt(null)
 
     try {
-      const messages = buildMessages()
+      const messages = await buildMessages()
       const draftFields = isJson ? inferDraftFieldDefinitions(messages) : null
       const count = Math.max(1, Math.min(drawCount, 3))
       const retryConfig = resolveRetryConfig(intent, retry)

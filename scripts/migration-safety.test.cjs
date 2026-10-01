@@ -202,6 +202,8 @@ function assertRequiredColumns(db) {
     'request_id', 'task_id', 'novel_id', 'kind', 'provider', 'model_id',
     'attempt_index', 'status', 'started_at', 'finished_at', 'usage_json',
     'completion_json', 'error_code', 'context_pack_id',
+    'prompt_hash', 'prompt_text', 'prompt_truncated', 'options_json', 'output_text',
+    'output_sha256', 'output_chars', 'output_truncated',
   ]) assert.ok(attemptColumns.has(column))
   const attemptIndexes = db.prepare('PRAGMA index_list(model_request_attempts)').all().map((row) => row.name)
   assert.ok(attemptIndexes.includes('idx_model_request_attempts_task_index'))
@@ -532,6 +534,7 @@ function testFreshDbIsIdempotent() {
       '0066_checkpoint_source_manifest',
       '0067_agent_artifact_kind_contract',
       '0068_writeback_source_identity',
+      '0069_model_attempt_output',
     ])
 
     runMigrations(db)
@@ -679,6 +682,7 @@ function testPartialSchemaCanResume() {
       '0066_checkpoint_source_manifest',
       '0067_agent_artifact_kind_contract',
       '0068_writeback_source_identity',
+      '0069_model_attempt_output',
     ])
 
     const configs = db.prepare(`

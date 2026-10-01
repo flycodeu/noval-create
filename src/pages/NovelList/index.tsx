@@ -120,6 +120,7 @@ function getWizardStepItems(launchMode: NovelLaunchMode) {
 
 export default function NovelList() {
   const navigate = useNavigate()
+  const [messageApi, messageContext] = message.useMessage()
   const novels = useNovelStore((state) => state.novels)
   const setNovels = useNovelStore((state) => state.setNovels)
   const loadVersionRef = React.useRef(0)
@@ -304,7 +305,7 @@ export default function NovelList() {
     const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
     const writingContractError = getWritingContractValidationError(writingContractTags)
     if (writingContractError) {
-      message.error(writingContractError)
+      messageApi.error(writingContractError)
       return
     }
 
@@ -357,31 +358,13 @@ export default function NovelList() {
       const volumeId = await window.electron.structure.createVolume(createdNovelId, plan.volume)
       const arcId = await window.electron.outline.createArc(createdNovelId, plan.outlineArc)
 
-      const [protagonistId, antagonistId, threadId] = await Promise.all([
-        window.electron.character.create(createdNovelId, plan.protagonist),
-        window.electron.character.create(createdNovelId, plan.antagonist),
-        window.electron.thread.create(createdNovelId, {
-          threadType: 'main',
-          title: plan.thread.title,
-          summary: plan.thread.summary,
-          premise: plan.thread.premise,
-          status: 'planned',
-          priority: 'high',
-          currentState: '前三章内必须完成主线起势。',
-        }),
-      ])
-
-      await window.electron.character.upsertRelation({
-        novelId: createdNovelId,
-        charAId: protagonistId,
-        charBId: antagonistId,
-        relationType: plan.relationshipArc.relationTypeSnapshot,
-        relationLabel: plan.relationshipArc.relationLabelSnapshot,
-        description: plan.relationshipArc.startState,
-        bilateral: 1,
-        tensionLevel: 80,
-        interactionStyle: '围绕核心冲突进行试探、施压与反制。',
-        subtextRule: '双方都不直接说出真正代价，但每次交锋都提高压力。',
+      const threadId = await window.electron.thread.create(createdNovelId, {
+        threadType: 'main',
+        title: plan.thread.title,
+        summary: plan.thread.summary,
+        premise: plan.thread.premise,
+        status: 'planned',
+        priority: 'high',
       })
 
       const chapterIds: number[] = []
@@ -395,207 +378,29 @@ export default function NovelList() {
         chapterIds.push(chapterId)
       }
 
-      const timelineIdsByChapterNum = new Map<number, number>()
-      for (const event of plan.timelineEvents) {
-        const timelineId = await window.electron.timeline.create(createdNovelId, {
-          ...event,
-          timeMode: 'relative-disaster',
-          volumeId,
-          isMajorEvent: 1,
-          protagonistPresent: 1,
-        })
-        timelineIdsByChapterNum.set(event.sortOrder, timelineId)
-      }
-
-      const chapterIdByNum = new Map(plan.chapters.map((chapter, index) => [chapter.chapterNum, chapterIds[index]] as const))
-      const protagonistArcPlan = plan.characterArcs.find((arc) => arc.characterRole === 'protagonist')
-      const antagonistArcPlan = plan.characterArcs.find((arc) => arc.characterRole === 'antagonist')
-      if (!protagonistArcPlan || !antagonistArcPlan) throw new Error(getUserFacingMessage('novel.fastLaunchArcTemplateMissing'))
-
-      const protagonistArc = await window.electron.characterArc.upsertCharacterArc({
-        novelId: createdNovelId,
-        characterId: protagonistId,
-        startState: protagonistArcPlan.startState,
-        surfaceWant: protagonistArcPlan.surfaceWant,
-        deepNeed: protagonistArcPlan.deepNeed,
-        coreFear: protagonistArcPlan.coreFear,
-        misbelief: protagonistArcPlan.misbelief,
-        firstCrackChapterId: chapterIdByNum.get(1),
-        changeEvent: protagonistArcPlan.changeEvent,
-        changeTimelineEventId: timelineIdsByChapterNum.get(1),
-        endState: protagonistArcPlan.endState,
-        currentStatus: 'active',
-        notes: protagonistArcPlan.notes,
-      })
-      const antagonistArc = await window.electron.characterArc.upsertCharacterArc({
-        novelId: createdNovelId,
-        characterId: antagonistId,
-        startState: antagonistArcPlan.startState,
-        surfaceWant: antagonistArcPlan.surfaceWant,
-        deepNeed: antagonistArcPlan.deepNeed,
-        coreFear: antagonistArcPlan.coreFear,
-        misbelief: antagonistArcPlan.misbelief,
-        firstCrackChapterId: chapterIdByNum.get(1),
-        changeEvent: antagonistArcPlan.changeEvent,
-        changeTimelineEventId: timelineIdsByChapterNum.get(1),
-        endState: antagonistArcPlan.endState,
-        currentStatus: 'active',
-        notes: antagonistArcPlan.notes,
-      })
-      const relationshipArc = await window.electron.characterArc.upsertRelationshipArc({
-        novelId: createdNovelId,
-        charAId: protagonistId,
-        charBId: antagonistId,
-        relationLabelSnapshot: plan.relationshipArc.relationLabelSnapshot,
-        relationTypeSnapshot: plan.relationshipArc.relationTypeSnapshot,
-        startState: plan.relationshipArc.startState,
-        crackPoint: plan.relationshipArc.crackPoint,
-        changeEvent: plan.relationshipArc.changeEvent,
-        changeTimelineEventId: timelineIdsByChapterNum.get(1),
-        endState: plan.relationshipArc.endState,
-        currentStatus: 'active',
-        lastProgressChapterId: chapterIdByNum.get(1),
-        notes: plan.relationshipArc.notes,
-      })
-      const resistanceTrack = await window.electron.resistance.upsertTrack({
-        novelId: createdNovelId,
-        sourceType: 'character',
-        sourceId: antagonistId,
-        resistanceKind: 'antagonist',
-        title: plan.resistanceTrack.title,
-        goal: plan.resistanceTrack.goal,
-        intelSource: plan.resistanceTrack.intelSource,
-        resourcePool: plan.resistanceTrack.resourcePool,
-        escalationPlan: plan.resistanceTrack.escalationPlan,
-        heroKnowledgeShift: plan.resistanceTrack.heroKnowledgeShift,
-        stageVictory: plan.resistanceTrack.stageVictory,
-        counterMove: plan.resistanceTrack.counterMove,
-        currentPressureMode: plan.resistanceTrack.currentPressureMode,
-        currentStatus: 'active',
-        lastActionChapterId: chapterIdByNum.get(1),
-        nextEscalationChapterId: chapterIdByNum.get(2),
-        linkedVolumeId: volumeId,
-        notes: plan.resistanceTrack.notes,
-      })
-
-      if (typeof protagonistArc.id !== 'number' || typeof antagonistArc.id !== 'number' || typeof relationshipArc.id !== 'number' || typeof resistanceTrack.id !== 'number' || typeof threadId !== 'number') {
+      if (typeof threadId !== 'number') {
         throw new Error(getUserFacingMessage('novel.fastLaunchScaffoldReferenceFailed'))
       }
 
-      await Promise.all([
-        window.electron.characterArc.upsertCharacterArcBeat({
-          novelId: createdNovelId,
-          arcId: protagonistArc.id,
-          beatType: 'start',
-          chapterId: chapterIdByNum.get(1),
-          timelineEventId: timelineIdsByChapterNum.get(1),
-          title: '主角被迫进入主线',
-          summary: protagonistArcPlan.changeEvent,
-          status: 'planned',
-          sortOrder: 1,
-        }),
-        window.electron.characterArc.upsertCharacterArcBeat({
-          novelId: createdNovelId,
-          arcId: antagonistArc.id,
-          beatType: 'crack',
-          chapterId: chapterIdByNum.get(1),
-          timelineEventId: timelineIdsByChapterNum.get(1),
-          title: '主要阻力开始升级',
-          summary: antagonistArcPlan.changeEvent,
-          status: 'planned',
-          sortOrder: 1,
-        }),
-        window.electron.resistance.upsertBeat({
-          novelId: createdNovelId,
-          trackId: resistanceTrack.id,
-          beatType: 'strike',
-          chapterId: chapterIdByNum.get(1),
-          timelineEventId: timelineIdsByChapterNum.get(1),
-          title: '主要阻力第一次出手',
-          summary: plan.resistanceTrack.counterMove,
-          actionMode: plan.resistanceTrack.currentPressureMode,
-          successLevel: '部分成功',
-          counterResponse: '主角保住继续追查的资格，但失去一条安全退路。',
-          protagonistImpact: '主角确认必须主动追查核心钩子。',
-          status: 'logged',
-          sortOrder: 1,
-        }),
-      ])
-
-      for (const scene of plan.sceneContracts) {
-        const chapterId = chapterIdByNum.get(scene.chapterNum)
-        if (typeof chapterId !== 'number') throw new Error(`章节 ${scene.chapterNum} 不存在`)
-        const existingSegments = await window.electron.structure.listSegments(chapterId)
-        const segmentId = existingSegments[0]?.id || await window.electron.structure.createSegment(chapterId, {
-          title: scene.segmentTitle,
-          segmentType: 'scene',
-          purpose: scene.purpose,
-          timeAnchor: scene.timeLocation,
-          locationName: '开篇主线现场',
-          presentCharacterIdsJson: JSON.stringify([protagonistId, antagonistId]),
-          inputState: scene.chapterNum === 1 ? '主角仍处在原有处境' : '承接上一章尚未解决的压力',
-          outputState: scene.resultState,
-          summary: scene.sceneGoal,
-          status: 'planned',
-        })
-        if (existingSegments[0]?.id) {
-          await window.electron.structure.updateSegment(segmentId, {
-            title: scene.segmentTitle,
-            segmentType: 'scene',
-            purpose: scene.purpose,
-            timeAnchor: scene.timeLocation,
-            locationName: '开篇主线现场',
-            presentCharacterIdsJson: JSON.stringify([protagonistId, antagonistId]),
-            inputState: scene.chapterNum === 1 ? '主角仍处在原有处境' : '承接上一章尚未解决的压力',
-            outputState: scene.resultState,
-            summary: scene.sceneGoal,
-            status: 'planned',
-          })
-        }
-        await window.electron.contract.upsertScene(chapterId, segmentId, {
-          pov: plan.protagonist.fullName,
-          timeLocation: scene.timeLocation,
-          sceneGoal: scene.sceneGoal,
-          obstacle: scene.obstacle,
-          conflictType: scene.conflictType,
-          emotionShift: scene.emotionShift,
-          resultState: scene.resultState,
-          linkageMode: scene.linkageMode,
-          status: 'ready',
-        })
-      }
-
+      const chapterIdByNum = new Map(plan.chapters.map((chapter, index) => [chapter.chapterNum, chapterIds[index]] as const))
       for (const contract of plan.chapterContracts) {
         const chapterId = chapterIdByNum.get(contract.chapterNum)
-        if (typeof chapterId !== 'number') throw new Error(`章节 ${contract.chapterNum} 不存在`)
+        if (typeof chapterId !== 'number') {
+          throw new Error(getUserFacingMessage('novel.fastLaunchScaffoldReferenceFailed'))
+        }
         await window.electron.contract.upsertChapter(chapterId, {
           chapterGoal: contract.chapterGoal,
-          openingStyle: contract.openingStyle,
-          endingStyle: contract.endingStyle,
-          expositionMode: contract.expositionMode,
-          emotionFocus: contract.emotionFocus,
           servedThreadIds: [threadId],
-          requiredArcProgress: contract.requiredArcProgress,
-          requiredCharacterArcIds: [protagonistArc.id, antagonistArc.id],
-          requiredRelationshipArcIds: [relationshipArc.id],
-          requiredResistanceTrackIds: [resistanceTrack.id],
-          requiredResistanceActions: contract.requiredResistanceActions,
-          requiredAssetRefs: [],
-          requiredEndgameCommitmentIds: [],
-          requiredForeshadowIds: [],
-          hookType: contract.hookType,
           forbiddenActions: contract.forbiddenActions,
-          acceptanceNotes: contract.acceptanceNotes,
           status: 'ready',
         })
       }
-
       bootstrapCompleted = true
       await loadNovels()
       if (requestId !== wizardGenerationRef.current) return
       resetWizard()
       navigate(buildWorkspaceRoute(createdNovelId, 'overview'))
-      message.success(getUserFacingMessage('novel.fastLaunchCreated'))
+      messageApi.success(getUserFacingMessage('novel.fastLaunchCreated'))
     } catch (error) {
       console.error(error)
       if (createdNovelId !== null && !bootstrapCompleted) {
@@ -603,14 +408,14 @@ export default function NovelList() {
           await window.electron.novel.delete(createdNovelId)
         } catch (rollbackError) {
           console.error('Fast launch rollback failed', rollbackError)
-          message.warning(getUserFacingMessage('novel.fastLaunchRollbackFailed'))
+          messageApi.warning(getUserFacingMessage('novel.fastLaunchRollbackFailed'))
         }
       }
-      message.error(getErrorMessage(error, 'novel.createFailed'))
+      messageApi.error(getErrorMessage(error, 'novel.createFailed'))
     } finally {
       setWizardLoading(false)
     }
-  }, [loadNovels, navigate, resetWizard, wizardForm, wizardLoading])
+  }, [loadNovels, messageApi, navigate, resetWizard, wizardForm, wizardLoading])
 
   const handleExtractLaunchIdea = useCallback(async () => {
     const values = await wizardForm.validateFields(['genreId', 'launchIdea']).catch(() => null)
@@ -794,6 +599,7 @@ export default function NovelList() {
   )
   return (
     <>
+      {messageContext}
       <div className="novel-list-page">
         <div className="novel-list-page__shell">
           <div className="novel-list-page__header">
@@ -1225,7 +1031,7 @@ export default function NovelList() {
               icon={wizardLoading ? <LoadingOutlined /> : undefined}
             >
               {selectedLaunchMode === 'fast_launch'
-                ? (wizardStep === wizardSteps.length - 1 ? '创建并生成骨架' : '下一步')
+                ? (wizardStep === wizardSteps.length - 1 ? '创建开书草案' : '下一步')
                 : (wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步')}
             </Button>
           </div>

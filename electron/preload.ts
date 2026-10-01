@@ -572,6 +572,7 @@ const api = {
     getStats: (novelId?: number) => invokeIpc('task:getStats', novelId),
     getPipelineStats: (novelId?: number) => invokeIpc('task:getPipelineStats', novelId),
     getLatestChapterPipeline: (chapterId: number) => invokeIpc('task:getLatestChapterPipeline', chapterId),
+    modelAttempts: (taskId: number) => invokeIpc('task:modelAttempts', taskId),
     clearHistory: (filters?: unknown) => invokeIpc('task:clearHistory', filters),
     get: (id: number) => invokeIpc('task:get', id),
     cancel: (id: number) => invokeIpc('task:cancel', id),
@@ -730,6 +731,5 @@ const api = {
 contextBridge.exposeInMainWorld('electron', api)
 
 export type ElectronAPI = typeof api
-
 
 

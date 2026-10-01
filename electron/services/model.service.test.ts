@@ -10,9 +10,12 @@ vi.mock('electron', () => ({
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
+  getSqlite: vi.fn(),
 }))
 
+import { getSqlite } from '../database/db'
 import {
+  createAdapter,
   getKimiModelContextWindow,
   getModelProviderOptions,
   isNativeAgentProvider,
@@ -70,5 +73,33 @@ describe('model service normalization', () => {
     expect(isNativeAgentProvider('claude_code')).toBe(true)
     expect(providerRequiresApiKey('codex')).toBe(false)
     expect(providerRequiresApiKey('claude_code')).toBe(false)
+  })
+
+  it('records output from direct adapter chat calls outside task.service', async () => {
+    const inserts: unknown[][] = []
+    const outputWrites: unknown[][] = []
+    vi.mocked(getSqlite).mockReturnValue({
+      transaction: (operation: () => void) => ({ immediate: operation }),
+      prepare: (sql: string) => {
+        if (sql.includes('COALESCE(MAX(attempt_index)')) return { get: () => ({ next_index: 1 }) }
+        if (sql.includes('INSERT INTO model_request_attempts')) return { run: (...values: unknown[]) => { inserts.push(values) } }
+        if (sql.includes('SET output_text = ?')) return { run: (...values: unknown[]) => { outputWrites.push(values) } }
+        return { run: () => ({ changes: 1 }) }
+      },
+    } as never)
+    const oldFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '对白摘要' }, finish_reason: 'stop' }],
+    }), { status: 200 }))
+    try {
+      const adapter = createAdapter({ provider: 'custom', modelId: 'local-test', baseUrl: 'http://127.0.0.1:1/v1' })
+      await expect(adapter.chat([{ role: 'user', content: '分析对白' }])).resolves.toBe('对白摘要')
+      expect(inserts).toHaveLength(1)
+      expect(String(inserts[0][11])).toContain('分析对白')
+      expect(outputWrites).toHaveLength(1)
+      expect(outputWrites[0][0]).toBe('对白摘要')
+    } finally {
+      globalThis.fetch = oldFetch
+    }
   })
 })

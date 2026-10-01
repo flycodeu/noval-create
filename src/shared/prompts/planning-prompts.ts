@@ -201,6 +201,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '本批章节只展开当前阶段真正需要的资产；未登记的新资产先以占位或待规划状态处理，不要提前扩写成全书设定。',
     ].join('\n')) : '',
     section('节奏模板约束（本弧已选定，必须执行）', params.rhythmSection),
+    params.adjacentChapterEvidence ? section('紧邻前章证据', params.adjacentChapterEvidence) : '',
     sectionLines('连续性上下文', [
       params.previousSummary ? '前情摘要：\n' + params.previousSummary : '',
       params.continuitySummary ? '连续性记忆：\n' + params.continuitySummary : '',

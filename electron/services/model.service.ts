@@ -1,7 +1,7 @@
 import { safeStorage } from 'electron'
 import CryptoJS from 'crypto-js'
 import { getDb } from '../database/db'
-import { createModelAttemptLedgerSink } from './model-attempt-ledger.service'
+import { createModelAttemptLedgerSink, snapshotModelOptions, snapshotModelPrompt } from './model-attempt-ledger.service'
 import { modelConfigs } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { BaseAdapter, type ChatOptions } from '../adapters/base.adapter'
@@ -191,7 +191,46 @@ export function decryptApiKey(encrypted: string): string {
 }
 
 export function createAdapter(config: Parameters<typeof createProviderAdapter>[0]): BaseAdapter {
-  return createProviderAdapter(config).setDefaultRequestObserver(createModelAttemptLedgerSink({}))
+  const adapter = createProviderAdapter(config).setDefaultRequestObserver(createModelAttemptLedgerSink({}))
+  const chat = adapter.chat.bind(adapter)
+  const stream = adapter.stream.bind(adapter)
+
+  // Most generation runs enter task.service with their own task-scoped observer.
+  // A few analysis/connection flows call adapters directly; retain those outputs too.
+  adapter.chat = async (messages, opts) => {
+    if (opts?.requestObserver) return chat(messages, opts)
+    const sink = createModelAttemptLedgerSink({
+      ...snapshotModelPrompt(messages, opts?.systemPrompt),
+      optionsJson: snapshotModelOptions({
+        temperature: opts?.temperature ?? adapter.defaultTemperature,
+        maxTokens: opts?.maxTokens ?? adapter.defaultMaxTokens,
+        providerOptions: opts?.providerOptions,
+      }),
+    })
+    const result = await chat(messages, { ...opts, requestObserver: sink })
+    sink.recordOutput(result)
+    return result
+  }
+  adapter.stream = async (messages, opts) => {
+    if (opts?.requestObserver) return stream(messages, opts)
+    const sink = createModelAttemptLedgerSink({
+      ...snapshotModelPrompt(messages, opts?.systemPrompt),
+      optionsJson: snapshotModelOptions({
+        temperature: opts?.temperature ?? adapter.defaultTemperature,
+        maxTokens: opts?.maxTokens ?? adapter.defaultMaxTokens,
+        providerOptions: opts?.providerOptions,
+      }),
+    })
+    return stream(messages, {
+      ...opts,
+      requestObserver: sink,
+      onStream: (chunk) => {
+        sink.appendOutput(chunk)
+        opts?.onStream?.(chunk)
+      },
+    })
+  }
+  return adapter
 }
 
 function createProviderAdapter(config: {

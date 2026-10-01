@@ -290,7 +290,7 @@ export default function StyleLabPage({ novelId }: Props) {
     setApproving(true)
     try {
       await window.electron.style.approveTrial(novelId, candidate.value.text)
-      message.success('已认可为作品声音，可随时撤销；样稿不会写入正文。')
+      message.success(getUserFacingMessage('styleLab.trialApproved'))
       await loadData()
     } catch (error) { message.error(getErrorMessage(error, 'styleLab.operationFailed')) }
     finally { setApproving(false) }
@@ -360,7 +360,7 @@ export default function StyleLabPage({ novelId }: Props) {
 
   const leaveFor = (route: string) => {
     const leave = () => navigate(buildWorkspaceRoute(novelId, route))
-    if (abGeneration.running || approving) { message.info('请等待当前试写或保存完成。'); return }
+    if (abGeneration.running || approving) { message.info(getUserFacingMessage('styleLab.busy')); return }
     if (hasUnsavedCandidate) {
       Modal.confirm({ title: '离开试写？', content: '未保存的输入与对照将丢失；已认可样稿会保留。', okText: '离开', cancelText: '继续试写', onOk: leave })
     } else leave()

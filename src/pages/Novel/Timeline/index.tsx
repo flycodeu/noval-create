@@ -11,6 +11,7 @@ import {
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateTimelineDraft } from '../shared/planning-ai-service'
 import {
@@ -89,17 +90,21 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       }}
       buildMessages={() => {
         const values = workspace.form.getFieldsValue(true)
+        const visibleEvents = workspace.pageData.items
+          .filter((event) => event.id !== workspace.selectedEvent?.id)
+          .slice(0, 5)
+          .map((event) => `${event.timeLabel || ''} ${event.eventTitle}：${event.eventResult || event.eventSummary || ''}（${event.status}）`)
+          .join('\n')
         return buildDraftMessages({
           task: 'timeline event draft',
           mode: values.eventTitle ? 'optimize' : 'replace',
-          context: [
-            { label: '书名', value: workspace.currentNovel?.title || '' },
-            { label: '题材', value: workspace.currentNovel?.genreName || '' },
-            { label: '一句话简介', value: workspace.currentNovel?.synopsis || '' },
-            { label: '扩展背景', value: workspace.currentNovel?.expandedBackground || '' },
-            { label: '时间模式', value: workspace.modeLabel },
-            { label: '结构筛选', value: workspace.structureFilterSummary },
-          ],
+          context: buildPlanningContextSections(workspace.currentNovel, {
+            prioritySections: visibleEvents ? [{ label: '当前列表可见的已保存时间线事件（状态可能仍为计划）', value: visibleEvents }] : [],
+            extraSections: [
+              { label: '时间模式', value: workspace.modeLabel },
+              { label: '结构筛选', value: workspace.structureFilterSummary },
+            ],
+          }),
           fields: [
             { key: 'eventTitle', label: '事件标题', value: values.eventTitle, hint: '用一句话明确这件事是什么。' },
             { key: 'eventSummary', label: '事件摘要', value: values.eventSummary, hint: '说明它为什么重要。' },
@@ -116,6 +121,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           ],
           requirements: [
             '不要改动已经选定的结构、地点、人物或物品关联。',
+            '已保存规划和时间线中状态为计划的事件不等于正文既成事实；不得编造未提供的前因或后果。',
             '避免口号式总结、空泛概述和宣传腔。',
           ],
         })

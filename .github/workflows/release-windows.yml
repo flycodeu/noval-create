@@ -1,0 +1,82 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Check tag and package version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test release asset verification
+        run: node --test scripts/verify-release-assets.test.cjs
+
+      # package:win runs the full test suite before building the NSIS and portable targets.
+      - name: Test and build Windows packages
+        run: npm run build:win
+
+      - name: Verify update metadata and assets
+        shell: pwsh
+        run: |
+          node scripts/verify-release-assets.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release metadata verification failed' }
+          $version = node -p "require('./package.json').version"
+          $names = @(
+            "NovelForge-Setup-$version-x64.exe",
+            "NovelForge-Setup-$version-x64.exe.blockmap",
+            "NovelForge-Portable-$version-x64.exe",
+            'latest.yml'
+          )
+          $checksums = foreach ($name in $names) {
+            $hash = (Get-FileHash -LiteralPath "release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          $checksums | Set-Content -LiteralPath 'release/SHA256SUMS.txt' -Encoding ascii
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $setup = "release/NovelForge-Setup-$version-x64.exe"
+          $blockmap = "$setup.blockmap"
+          $portable = "release/NovelForge-Portable-$version-x64.exe"
+          @(
+            "Windows 安装版：下载 NovelForge-Setup-$version-x64.exe，可自选安装位置。便携版：下载 NovelForge-Portable-$version-x64.exe。",
+            '安装版启动后会从本仓库的 GitHub Releases 检查并下载更新，安装前提示重启。便携版不自动更新。',
+            '',
+            '当前安装包未进行 Windows 代码签名，首次安装可能出现 SmartScreen 提示。SHA256SUMS.txt 可用于核对下载文件。',
+            '1.0.0 是首个发布版，真实跨版本自动升级需在后续版本实测。'
+          ) | Set-Content -LiteralPath 'release-notes.md' -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME $setup $blockmap $portable 'release/latest.yml' 'release/SHA256SUMS.txt' --verify-tag --title "NovelForge $version" --notes-file 'release-notes.md' --latest

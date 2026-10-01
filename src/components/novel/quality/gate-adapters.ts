@@ -54,7 +54,7 @@ export function fromStructuralGate(gate: ChapterStructuralRepairGate): GateRepor
     ...listItem('误判信号', gate.misjudgmentSignals, 'info'),
     {
       severity: 'info',
-      message: `句级改动率 ${Math.round((gate.changedSentenceRate || 0) * 100)}%，范围扩张比 ${Math.round((gate.scopeExpansionRatio || 0) * 100)}%`,
+      message: `句级改动率 ${Math.round(gate.changedSentenceRate || 0)}%，范围扩张比 ${Math.round((gate.scopeExpansionRatio || 0) * 100)}%`,
     },
   ]
   return { gateName: '结构修复门', passed, items }

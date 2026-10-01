@@ -6,6 +6,7 @@ import {
   fromStructuralGate,
 } from '../../../../../components/novel/quality/gate-adapters'
 import type { ChapterOptimizeResult } from '../../../../../types'
+import { canApplyChapterOptimization } from '../../chapter-review-policy'
 
 interface OptimizeCandidateModalProps {
   open: boolean
@@ -33,11 +34,7 @@ export default function OptimizeCandidateModal({
       onCancel={onCancel}
       onOk={onApply}
       okButtonProps={{
-        disabled: Boolean(
-          applying
-          || (result?.factGuard && !result.factGuard.safeToApply)
-          || (result?.qualityGate && !result.qualityGate.safeToApply),
-        ),
+        disabled: applying || !canApplyChapterOptimization(result),
         loading: applying,
       }}
       okText="应用优化稿"

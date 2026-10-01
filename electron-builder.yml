@@ -9,6 +9,11 @@ directories:
   output: release
   buildResources: build
 
+publish:
+  provider: github
+  owner: flycodeu
+  repo: noval-create
+
 files:
   - out/**/*
   - "!out/novel-ai-eval{,/**/*}"
@@ -58,6 +63,11 @@ nsis:
   uninstallerIcon: build/uninstallerIcon.ico
   oneClick: false
   allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: NovelForge
+  runAfterFinish: true
   installerLanguages:
     - zh_CN
     - en_US

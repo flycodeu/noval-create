@@ -78,6 +78,27 @@ describe('chapter-optimization-quality', () => {
     expect(gate.warnings.join('\n')).toContain('持续代价')
   })
 
+  it('checks a planned local repair without requiring a formulaic setback', () => {
+    const original = [
+      '她把茶杯放在桌上。',
+      '母亲把窗关了。',
+      ...Array.from({ length: 8 }, (_, index) => `她们谈起旧日小事${index}。`),
+    ].join('')
+    const optimized = original.replace('母亲把窗关了。', '母亲关上窗，把她落下的围巾递回来。')
+    const gate = buildChapterStructuralRepairGate(original, optimized, 2, {
+      goldenChapterNums: [2],
+      scopeOnly: true,
+    })
+
+    expect(gate.required).toBe(true)
+    expect(gate.changedSentenceRate).toBeLessThan(15)
+    expect(gate.safeToApply).toBe(true)
+    expect(gate.warnings).toEqual([])
+    expect(buildChapterStructuralRepairGate(original, original, 2, {
+      goldenChapterNums: [2], scopeOnly: true,
+    }).safeToApply).toBe(false)
+  })
+
   it('requires payoff before escalation for chapter three structural repair', () => {
     const original = '她看见面包车消失。有人比她先到了。她停在门口。'
     const optimized = [

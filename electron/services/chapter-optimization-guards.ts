@@ -16,16 +16,13 @@ export function buildChapterOptimizationPrompt(params: {
   repairMode?: 'language' | 'structural'
   supportingCastNames?: string[]
 }): string {
-  const supportingCastText = (params.supportingCastNames || []).length > 0
-    ? `${(params.supportingCastNames || []).slice(0, 6).join('、')} 等出场配角`
-    : '本章出场配角'
   const structuralRepair = params.repairMode === 'structural'
   const lockedNarrativeNumbers = extractNarrativeNumbers(params.content)
   const maxStructuralChars = Math.ceil(params.content.length * MAX_STRUCTURAL_REPAIR_EXPANSION_RATIO)
   const immutableStateExcerpt = params.content.trim().slice(-700)
   return [
     structuralRepair
-      ? '你是一名长篇网文结构修订编辑。请对当前章节做“局部结构性质量修订”，必须修复给定的冲突链、人物选择、状态变化和代价；不能只替换词句，也不能整章重写。'
+      ? '你是一名长篇小说编辑。依据本轮明确的修复目标，对当前章节做局部结构修订；保留未被指出有问题的事件与段落。'
       : '你是一名长篇网文精修编辑。请对当前章节做“整章语言与读感优化”，不要重写剧情。',
     '',
     '硬性要求：',
@@ -33,28 +30,22 @@ export function buildChapterOptimizationPrompt(params: {
     '- 不新增角色、势力、武器、物资、地名、设定规则或背景真相。',
     '- 原文中的日期、年份、数量、编号、距离、等级和时间表达必须逐字保留；拿不准时保留原句，不得把数字改写成新数字或同义数量。',
     structuralRepair
-      ? '- 允许重写场景内动作、对白、判断和结果，只要不破坏既有事实；必须让修复目标落到正文事件，而不是作者说明或段尾总结。'
+      ? '- 只在修复目标涉及的场景内调整动作、对白、判断或结果；修复应体现在正文中，不用作者说明或段尾总结代替。'
       : '- 不改变章节核心剧情，只修语言自然度、连贯性、AI味、空泛细节和读者理解阻力。',
     structuralRepair
-      ? '- 局部替换合同：保留原文大部分句子和段落原样，只改与修复目标直接相关的 1—3 个局部段落；不得把全章改写成同义复述，不得为了增加篇幅重排事件。'
+      ? '- 保留原文大部分句子和段落原样，只改与修复目标直接相关的局部段落；不得把全章改写成同义复述，不得为了增加篇幅重排事件。'
       : '',
     structuralRepair
-      ? '- 既有事实锁定：原文已经写明的物件持有者、证据归属、谁是否阻拦、人物是否离开以及章尾状态不得倒置；不能为了制造代价让角色突然没收、夺回、销毁原文中未被夺走的物件，也不能把原文的含蓄警告改成强制行动。代价必须来自原事实下的新选择。'
+      ? '- 既有事实锁定：原文已经写明的物件归属、人物行动、关系与章尾状态不得倒置；不能为了制造冲突或代价改写已发生的事。'
       : '',
     structuralRepair
-      ? '- 叙事事实锁定：不得新增原文没有的物证折痕、撕裂、日期截断、字迹变化、备忘录/便签/字条或钥匙与照片等物件的交换关系。若需要状态变化，只能沿用原文已出现的物件和动作，通过拒绝、隐瞒、追问、离开或保留选择制造后果。'
+      ? '- 不凭空添物证变化、记录内容、交易关系或外部事件。修复需要关键新事实时，保留原文对应段落，让修复计划先补足依据。'
       : '',
     structuralRepair
-      ? `- 章尾不可逆状态参考（原文末段，必须保持物件归属、是否阻拦和离开状态；不要新增或替换物件）：\n${immutableStateExcerpt}`
+      ? `- 原文章尾状态参考（保留已写明的行动与结果）：\n${immutableStateExcerpt}`
       : '',
     structuralRepair
-      ? '- 主角的未经核实判断必须落成一个实际行动，并让该行动造成可持续的资源、关系或安全损失；同时让配角因自己的目的主动隐瞒、交换或阻止一件事，导致关系或关键资源发生不可逆变化。'
-      : '',
-    structuralRepair
-      ? `- 必须先用具体事实兑现本章大纲或前文已建立的局部问题（悬置的证据、约定或未答的疑问），再让这个兑现直接导致证据暴露、追查失败、关系破裂或现实损失；${supportingCastText}必须有不服务于主角的独立目的。`
-      : '',
-    structuralRepair
-      ? '- 不要用“误判、代价、主动选择、状态变化”等作者标签交差；必须写出人物说了什么、拿走/交出/隐瞒了什么、行动造成了什么后果。'
+      ? '- 只修本轮有正文证据的问题。没有要求的误判、反转、配角隐瞒、交易或持续损失不要补写；日常相处、安静收束和未解问题可以保持原貌。'
       : '',
     structuralRepair
       ? '- 严禁新增原文没有的日期、楼层、金额、次数、数量、年龄或其他数字事实；数字/数量/编号相关句子尽量原样保留，结构修订只改动作、对白和结果。'
@@ -65,9 +56,9 @@ export function buildChapterOptimizationPrompt(params: {
     structuralRepair
       ? '- 不要补写新的楼层或时间定位（例如“一层、负一层、某月某日”）；已有地点描述保持原样，若不需要就不要新增地点数字。'
       : '',
-    '- 删除 AI 过程文字、提示词残留、括号说明、破折号解释腔。',
-    '- 避免“不是……而是……”或“并非……实际是……”、双重比喻、排比堆叠、手指/指节/指腹/瞳孔/声音很轻等低价值细节。',
-    '- 避免“他睁眼/闭眼/抬头/低头”单独成段。',
+    '- 删除 AI 过程文字和提示词残留；处理重复的括号解释与破折号解释。',
+    '- 只在表达显得机械或反复且不影响人物与情节时，删改模板转折、密集比喻、排比和低价值的手眼嗓音细节；有作用的具体观察保留。',
+    '- 睁眼、闭眼、抬头、低头等动作若单独成段且没有新信息，可并回上下文或删去。',
     '- 段落之间空一行，直接输出优化后的完整章节正文，不要 Markdown，不要解释。',
     '',
     `小说：${params.novelTitle}`,
@@ -75,8 +66,8 @@ export function buildChapterOptimizationPrompt(params: {
     `章节：第${params.chapter.chapterNum}章 ${params.chapter.title || ''}`.trim(),
     params.chapter.outline ? `章节大纲：${params.chapter.outline}` : '',
     params.chapter.summary ? `现有摘要：${params.chapter.summary}` : '',
-    params.issueSummary.length > 0 ? `本轮优先修复：\n${params.issueSummary.slice(0, 10).map((item, index) => `${index + 1}. ${item}`).join('\n')}` : '',
-    params.extraRequirements ? `用户追加要求：${params.extraRequirements}` : '',
+    params.extraRequirements ? `用户追加要求（优先于自动诊断）：${params.extraRequirements}` : '',
+    params.issueSummary.length > 0 ? `自动诊断（仅修有正文证据且符合用户要求的项）：\n${params.issueSummary.slice(0, 10).map((item, index) => `${index + 1}. ${item}`).join('\n')}` : '',
     '',
     '【当前完整正文】',
     params.content,

@@ -119,6 +119,15 @@
   line-height: 1.6;
   overflow: auto;
   overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.app-layout .task-center-page .task-center-model-attempts,
+.app-layout .task-center-page .task-center-model-attempt {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .app-layout .task-center-page .ant-collapse > .ant-collapse-item {

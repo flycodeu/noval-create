@@ -74,6 +74,7 @@ import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
+import { startDesktopUpdater } from './services/desktop-updater'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
 import * as batchWorkflowService from './services/batch-workflow.service'
@@ -125,6 +126,7 @@ import {
   sanitizeBackgroundExpansionResult,
 } from './services/prompts'
 import * as taskService from './services/task.service'
+import * as modelAttemptLedgerService from './services/model-attempt-ledger.service'
 import { safeParseJson } from './utils/json'
 import { getNovelContextStatus } from './services/context-impact.service'
 import { rewriteProse, scoreProse, type RewriteProseInput, type ScoreProseInput } from './services/prose-operation.service'
@@ -275,6 +277,7 @@ app.whenReady().then(() => {
   createWindow()
   registerIpcHandlers()
   maintenanceWorker.start()
+  startDesktopUpdater(() => mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -1278,6 +1281,7 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
   handle('task:getStats', (_, novelId) => taskService.getTaskStats(novelId))
   handle('task:getPipelineStats', (_, novelId) => taskService.getTaskPipelineStats(novelId))
   handle('task:getLatestChapterPipeline', (_, chapterId) => taskService.getLatestChapterPipelineTask(chapterId))
+  handle('task:modelAttempts', (_, taskId) => modelAttemptLedgerService.listModelAttemptsForTaskTree(taskId))
   handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
 
   handle('task:get', (_, id) => {
@@ -1502,10 +1506,6 @@ function registerAiIpcHandlers(handle: IpcHandle) {
   handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
   handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }
-
-
-
-
 
 
 

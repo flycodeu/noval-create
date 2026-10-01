@@ -67,13 +67,19 @@ function buildLedgerSqlite() {
       next_index: Math.max(0, ...rows.filter((row) => row.task_id === taskId).map((row) => Number(row.attempt_index))) + 1,
     }) }
     if (sql.includes('INSERT INTO model_request_attempts')) return { run: (...values: unknown[]) => {
-      rows.push({ request_id: values[0], task_id: values[1], attempt_index: values[6], status: 'started', usage_json: values[8] })
+      rows.push({ request_id: values[0], task_id: values[1], attempt_index: values[6], status: 'started', usage_json: values[8], prompt_hash: values[10], prompt_text: values[11] })
       return { changes: 1 }
     } }
     if (sql.includes("WHERE request_id = ? AND status = 'started'")) return { run: (...values: unknown[]) => {
-      const row = rows.find((item) => item.request_id === values[5] && item.status === 'started')
+      const row = rows.find((item) => item.request_id === values[9] && item.status === 'started')
       if (!row) return { changes: 0 }
-      Object.assign(row, { status: values[0], usage_json: values[2], completion_json: values[3], error_code: values[4] })
+      Object.assign(row, { status: values[0], usage_json: values[2], completion_json: values[3], error_code: values[4], output_text: values[5] })
+      return { changes: 1 }
+    } }
+    if (sql.includes('SET output_text = ?')) return { run: (...values: unknown[]) => {
+      const row = rows.find((item) => item.request_id === values[4])
+      if (!row) return { changes: 0 }
+      Object.assign(row, { output_text: values[0], output_sha256: values[1], output_chars: values[2], output_truncated: values[3] })
       return { changes: 1 }
     } }
     throw new Error(`unexpected ledger sql: ${sql}`)
@@ -464,7 +470,10 @@ describe('task service completion gate', () => {
 
     expect(onSuccess).not.toHaveBeenCalled()
     expect(fakeTaskDb.updates.at(-1)).toMatchObject({ status: 'failed', outputText: '半段正文' })
-    expect(ledger.rows).toMatchObject([{ attempt_index: 1, status: 'failed', error_code: 'MODEL_STREAM_INTERRUPTED' }])
+    expect(ledger.rows).toMatchObject([{
+      attempt_index: 1, status: 'failed', error_code: 'MODEL_STREAM_INTERRUPTED',
+      prompt_text: expect.stringContaining('写作'), output_text: '半段正文',
+    }])
   })
 
   it('rejects a large system prompt after chat options are merged', async () => {

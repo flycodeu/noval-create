@@ -86,11 +86,16 @@ export function resolvePublishFinalizationDecision(
 }
 
 export function canApplyChapterOptimization(
-  result: { factGuard?: { safeToApply: boolean }; qualityGate?: { safeToApply: boolean } } | null,
+  result: {
+    factGuard?: { safeToApply: boolean }
+    qualityGate?: { safeToApply: boolean }
+    structuralGate?: { safeToApply: boolean }
+  } | null,
 ): boolean {
   return Boolean(
     result
     && (!result.factGuard || result.factGuard.safeToApply)
-    && (!result.qualityGate || result.qualityGate.safeToApply),
+    && (!result.qualityGate || result.qualityGate.safeToApply)
+    && (!result.structuralGate || result.structuralGate.safeToApply),
   )
 }

@@ -1609,6 +1609,31 @@ export interface Task {
   updatedAt: string
 }
 
+export interface ModelAttempt {
+  request_id: string
+  task_id: number | null
+  novel_id: number | null
+  kind: string
+  provider: string
+  model_id: string
+  attempt_index: number
+  status: string
+  started_at: string
+  finished_at: string | null
+  usage_json: string
+  completion_json: string | null
+  error_code: string | null
+  context_pack_id: string | null
+  prompt_hash: string | null
+  prompt_text: string | null
+  prompt_truncated: number
+  options_json: string | null
+  output_text: string | null
+  output_sha256: string | null
+  output_chars: number
+  output_truncated: number
+}
+
 export type TaskPipelineRole =
   | 'planner'
   | 'writer'
@@ -6396,6 +6421,7 @@ declare global {
         getStats: (novelId?: number) => Promise<TaskStats>
         getPipelineStats: (novelId?: number) => Promise<TaskPipelineStats>
         getLatestChapterPipeline: (chapterId: number) => Promise<Task | null>
+        modelAttempts: (taskId: number) => Promise<ModelAttempt[]>
         clearHistory: (filters?: TaskHistoryClearInput) => Promise<TaskHistoryClearResult>
         get: (id: number) => Promise<Task | null>
         cancel: (id: number) => Promise<boolean>

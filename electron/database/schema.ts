@@ -1060,6 +1060,14 @@ export const modelRequestAttempts = sqliteTable('model_request_attempts', {
   completionJson: text('completion_json'),
   errorCode: text('error_code'),
   contextPackId: text('context_pack_id'),
+  promptHash: text('prompt_hash'),
+  promptText: text('prompt_text'),
+  promptTruncated: integer('prompt_truncated').notNull().default(0),
+  optionsJson: text('options_json'),
+  outputText: text('output_text'),
+  outputSha256: text('output_sha256'),
+  outputChars: integer('output_chars').notNull().default(0),
+  outputTruncated: integer('output_truncated').notNull().default(0),
 })
 
 export const chapterBatchSnapshots = sqliteTable('chapter_batch_snapshots', {

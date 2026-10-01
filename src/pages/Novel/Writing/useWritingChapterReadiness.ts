@@ -14,6 +14,7 @@ import { buildGenerationPreflight } from './writing-chapter-presentation'
 
 interface UseWritingChapterReadinessInput {
   chapter: Chapter | null
+  chapters: Chapter[]
   publishCheck: ChapterPublishCheck | null
   sceneCount: number
   chapterSegments: ChapterSegment[]
@@ -56,9 +57,10 @@ export function useWritingChapterReadiness(input: UseWritingChapterReadinessInpu
 
   const generationPreflight = useMemo(() => buildGenerationPreflight({
     chapter: input.chapter,
-    writability,
+    chapters: input.chapters,
+    publishCheck: input.publishCheck,
     writebackStatus: input.writebackStatus,
-  }), [input.chapter, input.writebackStatus, writability])
+  }), [input.chapter, input.chapters, input.publishCheck, input.writebackStatus])
 
   return { generationPreflight, writability }
 }

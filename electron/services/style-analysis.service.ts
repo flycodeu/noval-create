@@ -631,7 +631,7 @@ export async function runStyleAbTest(
     messages: [{ role: 'user', content: basePrompt }],
   })).trim()
 
-  if (!withFingerprintText || !withoutText) throw new Error('试写返回空正文，请在任务中心查看并重试。')
+  if (!withFingerprintText || !withoutText) throwUserFacingError('styleLab.trialEmpty')
   const buildVariant = (text: string): StyleAbTestVariant => ({
     text,
     stats: computeStyleStats(text),

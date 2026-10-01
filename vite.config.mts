@@ -22,15 +22,17 @@ function splitVendorChunk(id: string): string | undefined {
   return undefined
 }
 
+const backendTarget = `http://127.0.0.1:${process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787}`
+
 export default defineConfig({
   server: {
     host: '127.0.0.1',
-    port: 4175,
-    strictPort: false,
+    port: Number(process.env.NOVELFORGE_WEB_FRONTEND_PORT || 4175),
+    strictPort: true,
     proxy: {
-      '/rpc': { target: 'http://127.0.0.1:8787', changeOrigin: true },
-      '/health': { target: 'http://127.0.0.1:8787', changeOrigin: true },
-      '/events': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/rpc': { target: backendTarget, changeOrigin: true },
+      '/health': { target: backendTarget, changeOrigin: true },
+      '/events': { target: backendTarget, changeOrigin: true },
     },
   },
   plugins: [react()],

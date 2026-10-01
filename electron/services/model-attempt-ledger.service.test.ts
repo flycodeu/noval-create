@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { createUnknownCallUsage, type ModelRequestEvent } from '../../src/shared/model-call-telemetry'
 
 vi.mock('../database/db', () => ({ getSqlite: vi.fn() }))
@@ -8,6 +9,9 @@ import {
   createModelAttemptLedgerSink,
   interruptStartedModelAttempts,
   listModelAttemptsByTask,
+  MAX_RECORDED_MODEL_OUTPUT_CHARS,
+  MAX_RECORDED_MODEL_PROMPT_CHARS,
+  snapshotModelPrompt,
 } from './model-attempt-ledger.service'
 
 interface AttemptRow {
@@ -25,6 +29,14 @@ interface AttemptRow {
   completion_json: string | null
   error_code: string | null
   context_pack_id: string | null
+  prompt_hash: string | null
+  prompt_text: string | null
+  prompt_truncated: number
+  options_json: string | null
+  output_text: string | null
+  output_sha256: string | null
+  output_chars: number
+  output_truncated: number
 }
 
 function buildFakeSqlite(options: { failInsert?: boolean } = {}) {
@@ -41,16 +53,37 @@ function buildFakeSqlite(options: { failInsert?: boolean } = {}) {
           kind: String(values[3]), provider: String(values[4]), model_id: String(values[5]), attempt_index: Number(values[6]),
           status: 'started', started_at: String(values[7]), finished_at: null, usage_json: String(values[8]),
           completion_json: null, error_code: null, context_pack_id: values[9] as string | null,
+          prompt_hash: values[10] as string | null, output_text: null, output_sha256: null,
+          prompt_text: values[11] as string | null, prompt_truncated: Number(values[12]),
+          options_json: values[13] as string | null,
+          output_chars: 0, output_truncated: 0,
         })
         return { changes: 1 }
       } }
     }
     if (sql.includes("WHERE request_id = ? AND status = 'started'")) {
       return { run: (...values: unknown[]) => {
-        const row = rows.find((item) => item.request_id === values[5] && item.status === 'started')
+        const row = rows.find((item) => item.request_id === values[9] && item.status === 'started')
         if (!row) return { changes: 0 }
         row.status = String(values[0]); row.finished_at = String(values[1]); row.usage_json = String(values[2])
         row.completion_json = values[3] as string | null; row.error_code = values[4] as string | null
+        if (values[5] !== null) {
+          row.output_text = values[5] as string
+          row.output_sha256 = values[6] as string
+          row.output_chars = Number(values[7])
+          row.output_truncated = Number(values[8])
+        }
+        return { changes: 1 }
+      } }
+    }
+    if (sql.includes('SET output_text = ?')) {
+      return { run: (...values: unknown[]) => {
+        const row = rows.find((item) => item.request_id === values[4])
+        if (!row) return { changes: 0 }
+        row.output_text = values[0] as string
+        row.output_sha256 = values[1] as string
+        row.output_chars = Number(values[2])
+        row.output_truncated = Number(values[3])
         return { changes: 1 }
       } }
     }
@@ -136,5 +169,87 @@ describe('model attempt ledger service', () => {
     expect(() => sink.onRequestStart?.(event('failed-write', 'started'))).toThrow('disk full')
     expect(sink.getPersistenceFailures()).toHaveLength(1)
     expect(fake.rows).toHaveLength(0)
+  })
+
+  it('stores each chat result beside its prompt fingerprint without request headers', () => {
+    const fake = buildFakeSqlite()
+    vi.mocked(getSqlite).mockReturnValue(fake.sqlite as never)
+    const sink = createModelAttemptLedgerSink({ taskId: 15, novelId: 3, promptHash: `sha256:${'a'.repeat(64)}`, promptText: '<user>写作</user>' })
+    sink.onRequestStart?.(event('chat-one', 'started'))
+    sink.onRequestEnd?.(event('chat-one', 'success'))
+    sink.recordOutput('第一稿')
+    sink.onRequestStart?.(event('chat-two', 'started'))
+    sink.onRequestEnd?.(event('chat-two', 'success'))
+    sink.recordOutput('第二稿')
+
+    expect(listModelAttemptsByTask(15)).toMatchObject([
+      { output_text: '第一稿', prompt_hash: `sha256:${'a'.repeat(64)}`, prompt_text: '<user>写作</user>', output_chars: 3 },
+      { output_text: '第二稿', prompt_hash: `sha256:${'a'.repeat(64)}`, prompt_text: '<user>写作</user>', output_chars: 3 },
+    ])
+    expect(JSON.stringify(fake.rows)).not.toContain('Authorization')
+  })
+
+  it('keeps partial stream output when the physical request fails', () => {
+    const fake = buildFakeSqlite()
+    vi.mocked(getSqlite).mockReturnValue(fake.sqlite as never)
+    const sink = createModelAttemptLedgerSink({ taskId: 16 })
+    sink.onRequestStart?.(event('stream-partial', 'started'))
+    sink.appendOutput('半段')
+    sink.appendOutput('正文')
+    sink.onRequestEnd?.(event('stream-partial', 'failed'))
+
+    expect(listModelAttemptsByTask(16)).toMatchObject([{
+      status: 'failed', output_text: '半段正文', output_chars: 4,
+      output_sha256: createHash('sha256').update('半段正文').digest('hex'),
+      output_truncated: 0,
+    }])
+  })
+
+  it('hashes streamed Unicode correctly when a surrogate pair crosses chunks', () => {
+    const fake = buildFakeSqlite()
+    vi.mocked(getSqlite).mockReturnValue(fake.sqlite as never)
+    const sink = createModelAttemptLedgerSink({ taskId: 18 })
+    const emoji = '📝'
+    sink.onRequestStart?.(event('unicode-stream', 'started'))
+    sink.appendOutput(emoji.slice(0, 1))
+    sink.appendOutput(emoji.slice(1))
+    sink.onRequestEnd?.(event('unicode-stream', 'success'))
+    expect((listModelAttemptsByTask(18) as AttemptRow[])[0]).toMatchObject({
+      output_text: emoji,
+      output_sha256: createHash('sha256').update(emoji).digest('hex'),
+    })
+  })
+
+  it('snapshots actual prompt messages within a size limit and redacts common credential forms', () => {
+    const secret = 'sk-' + 'q'.repeat(24)
+    const snapshot = snapshotModelPrompt([
+      { role: 'user', content: `写作，OPENAI_API_KEY=${secret}；Bearer ${secret}` },
+    ], '遵守章节合同')
+    expect(snapshot.promptText).toContain('遵守章节合同')
+    expect(snapshot.promptText).toContain('写作')
+    expect(snapshot.promptText).not.toContain(secret)
+    expect(snapshot.promptHash).toMatch(/^sha256:[a-f0-9]{64}$/)
+
+    const large = snapshotModelPrompt([{ role: 'user', content: '章'.repeat(MAX_RECORDED_MODEL_PROMPT_CHARS) }])
+    expect(large.promptText.length).toBe(MAX_RECORDED_MODEL_PROMPT_CHARS)
+    expect(large.promptTruncated).toBe(true)
+  })
+
+  it('bounds stored output while retaining exact original length and digest', () => {
+    const fake = buildFakeSqlite()
+    vi.mocked(getSqlite).mockReturnValue(fake.sqlite as never)
+    const sink = createModelAttemptLedgerSink({ taskId: 17 })
+    const secret = `sk-${'k'.repeat(24)}`
+    const output = secret + '正'.repeat(MAX_RECORDED_MODEL_OUTPUT_CHARS)
+    sink.onRequestStart?.(event('large-chat', 'started'))
+    sink.onRequestEnd?.(event('large-chat', 'success'))
+    sink.recordOutput(output)
+
+    const [row] = listModelAttemptsByTask(17) as AttemptRow[]
+    expect(row.output_text).not.toContain(secret)
+    expect(row.output_text!.length).toBe(MAX_RECORDED_MODEL_OUTPUT_CHARS)
+    expect(row.output_truncated).toBe(1)
+    expect(row.output_chars).toBe(output.length)
+    expect(row.output_sha256).toBe(createHash('sha256').update(output).digest('hex'))
   })
 })

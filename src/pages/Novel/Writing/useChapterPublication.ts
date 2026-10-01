@@ -150,7 +150,7 @@ export function useChapterPublication(options: UseChapterPublicationOptions) {
     }
     if (status === 'final' && ((currentChapterIdRef && currentChapterIdRef.current !== currentChapter.id)
       || (editorText && editorText() !== reviewedContent))) {
-      message.warning('正文已变化，请重新审校后定稿。')
+      message.warning(getUserFacingMessage('writing.reviewChangedBeforeFinal'))
       return
     }
     await window.electron.chapter.update(currentChapter.id, { status })

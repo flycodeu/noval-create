@@ -1,5 +1,6 @@
 import type { ChapterContextPreview } from '../../../types'
 import type { ChapterWritabilitySummary } from '../../../shared/novel-workspace'
+import type { WritingGenerationPreflight } from './writing-chapter-presentation'
 
 export interface GenerationHandoffItem {
   key: string
@@ -30,11 +31,15 @@ function formatContextPreviewError(error?: string | null): string {
 
 export function buildGenerationHandoffViewModel(input: {
   hasChapter: boolean
+  chapterNum?: number
   writability: ChapterWritabilitySummary
+  preflight?: WritingGenerationPreflight
   contextPreview: ChapterContextPreview | null
   contextPreviewError?: string | null
 }): GenerationHandoffViewModel {
-  const preview = input.contextPreview
+  const preview = input.contextPreview && (!input.chapterNum || input.contextPreview.chapterNum === input.chapterNum)
+    ? input.contextPreview
+    : null
   const contextPreviewError = formatContextPreviewError(input.contextPreviewError)
   const baseItems = input.writability.checks.map((check) => ({
     key: check.key,
@@ -42,29 +47,27 @@ export function buildGenerationHandoffViewModel(input: {
     ready: check.ready,
     detail: check.detail,
   }))
+  const isOpeningChapter = input.chapterNum === 1 || preview?.chapterNum === 1
   const continuityItems: GenerationHandoffItem[] = [
-    {
+    ...(!isOpeningChapter ? [{
       key: 'previous-chapter',
       label: '上一章承接',
-      ready: Boolean(preview && (preview.chapterNum === 1 || preview.previousChapterContext.trim())),
-      detail: preview?.chapterNum === 1
-        ? '首章不需要上一章承接。'
-        : preview?.previousChapterContext.trim()
-          ? preview.previousChapterSampleReport?.sources
-            ? preview.previousChapterSampleReport.fullyInjected
-              ? '已加载上一章完整原文；发送前会再次核对预算。'
-              : '已加载视角允许的相关原文；省略内容可在上下文视图查看。'
-            : '已加载上一章关键先验。'
-          : '尚未加载上一章关键先验。',
-    },
-    {
+      ready: Boolean(preview?.previousChapterContext.trim()),
+      detail: preview?.previousChapterContext.trim()
+        ? preview.previousChapterSampleReport?.sources
+          ? preview.previousChapterSampleReport.fullyInjected
+            ? '已加载上一章完整原文；发送前会再次核对预算。'
+            : '已加载视角允许的相关原文；省略内容可在上下文视图查看。'
+          : '已加载上一章关键先验。'
+        : '尚未加载上一章关键先验。',
+    }, {
       key: 'chapter-bridge',
       label: '章节衔接桥',
       ready: Boolean(preview?.chapterBridgePlan?.trim()),
       detail: preview?.chapterBridgePlan?.trim()
         ? preview.chapterBridgePlan.trim().slice(0, 120)
         : '尚未形成时间、地点、情绪或视角交接。',
-    },
+    }] : []),
     {
       key: 'context-preview',
       label: '模型上下文',
@@ -72,13 +75,23 @@ export function buildGenerationHandoffViewModel(input: {
       detail: contextPreviewError || preview?.contextAssemblyReport?.summary || '上下文预览尚未完成。',
     },
   ]
-  const items = [...baseItems, ...continuityItems]
+  const preflightBlocked = input.preflight?.ready === false
+  const items = [
+    ...baseItems,
+    ...continuityItems,
+    ...(preflightBlocked ? [{
+      key: 'generation-preflight',
+      label: '生成前阻塞',
+      ready: false,
+      detail: input.preflight?.messages[0] || '请完成生成前检查。',
+    }] : []),
+  ]
   const readyCount = items.filter((item) => item.ready).length
   const styleReady = Boolean(preview?.authorStyleLock?.enabled)
   const styleSource = styleReady
     ? preview?.authorStyleLock?.sourceLabel || '作者风格锁'
     : '未设置作者样章；有已接受正文时沿用本书表达'
-  const status = !input.hasChapter || !input.writability.ready
+  const status = !input.hasChapter || preflightBlocked || (!input.preflight && !input.writability.ready)
     ? 'blocked'
     : readyCount < items.length || !styleReady
       ? 'attention'
@@ -95,7 +108,9 @@ export function buildGenerationHandoffViewModel(input: {
     summary: !input.hasChapter
       ? '先选择章节，再核对首稿输入。'
       : status === 'blocked'
-        ? '关键输入未齐，生成按钮会保持不可用。'
+        ? '生成仍有阻塞项，请按交接单处理。'
+        : !input.writability.ready
+          ? '仍有写作建议待处理；当前生成条件以生成前检查为准。'
         : styleReady
           ? '首稿会按正典、场景任务、人物边界和作者风格的顺序执行。'
           : '事实与场景输入已可用；补作者样章可提高声音稳定性，但不是生成硬门槛。',

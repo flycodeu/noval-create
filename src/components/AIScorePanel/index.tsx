@@ -127,7 +127,7 @@ export default function AIScorePanel({
   const buildRegenMessages = (): Message[] => {
     if (!result) return []
     if (scoredSourceRef.current?.content !== getContent() || scoredSourceRef.current?.novelId !== novelId || scoredSourceRef.current?.chapterId !== chapterId) {
-      throw new Error('原稿已变化，请重新体检。')
+      throw new Error(getUserFacingMessage('aiScore.sourceChanged'))
     }
     const content = getContent()
 
@@ -400,7 +400,7 @@ export default function AIScorePanel({
               disabled={disabled}
               onResult={content => {
                 if (scoredSourceRef.current?.content !== currentSourceRef.current.getContent() || scoredSourceRef.current?.novelId !== currentSourceRef.current.novelId || scoredSourceRef.current?.chapterId !== currentSourceRef.current.chapterId) {
-                  message.warning('原稿已变化，旧体检候选不可应用。')
+                  message.warning(getUserFacingMessage('aiScore.candidateStale'))
                   return
                 }
                 onRegenerate(content)

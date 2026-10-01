@@ -175,6 +175,8 @@ function calculateChangedSentenceRate(originalContent: string, optimizedContent:
 export interface ChapterStructuralRepairGateOptions {
   /** Non-protagonist character names of the current novel, used to detect supporting-cast agency. */
   supportingRoleNames?: string[]
+  /** Check only revision scope. A repair plan and later semantic review own story requirements. */
+  scopeOnly?: boolean
   /** Chapters where structural repair is enforced. Defaults to the golden-three opening chapters. */
   goldenChapterNums?: number[]
   /** Chapters that must show supporting-cast agency and protagonist misjudgment. */
@@ -230,15 +232,17 @@ export function buildChapterStructuralRepairGate(
   const changedSentenceRate = calculateChangedSentenceRate(originalContent, optimizedContent)
   const scopeExpansionRatio = Number((optimizedContent.length / Math.max(originalContent.length, 1)).toFixed(2))
   const warnings = [
-    changedSentenceRate < MIN_STRUCTURAL_CHANGED_SENTENCE_RATE
+    options.scopeOnly && changedSentenceRate === 0
+      ? '结构修订候选与原文没有可识别的句子变化。' : '',
+    !options.scopeOnly && changedSentenceRate < MIN_STRUCTURAL_CHANGED_SENTENCE_RATE
       ? `结构性改写幅度不足：仅 ${changedSentenceRate}% 句子发生变化，低于 ${MIN_STRUCTURAL_CHANGED_SENTENCE_RATE}% 下限。`
       : '',
-    stateChangeSignals.length < 2 ? '没有形成至少两项可见的现实状态变化。' : '',
-    requiresAgency && supportingAgencySignals.length === 0 ? `第 ${chapterNum} 章没有检测到配角基于自身目的采取行动的信号。` : '',
-    requiresAgency && misjudgmentSignals.length === 0 ? `第 ${chapterNum} 章没有检测到主角误判或错误选择信号。` : '',
-    requiresPayoff && payoffSignals.length === 0 ? `第 ${chapterNum} 章没有先回收已建立的局部问题或证据。` : '',
-    costSignals.length === 0 ? '没有检测到回收或选择带来的持续代价。' : '',
-    changedSentenceRate > MAX_STRUCTURAL_CHANGED_SENTENCE_RATE
+    !options.scopeOnly && stateChangeSignals.length < 2 ? '没有形成至少两项可见的现实状态变化。' : '',
+    !options.scopeOnly && requiresAgency && supportingAgencySignals.length === 0 ? `第 ${chapterNum} 章没有检测到配角基于自身目的采取行动的信号。` : '',
+    !options.scopeOnly && requiresAgency && misjudgmentSignals.length === 0 ? `第 ${chapterNum} 章没有检测到主角误判或错误选择信号。` : '',
+    !options.scopeOnly && requiresPayoff && payoffSignals.length === 0 ? `第 ${chapterNum} 章没有先回收已建立的局部问题或证据。` : '',
+    !options.scopeOnly && costSignals.length === 0 ? '没有检测到回收或选择带来的持续代价。' : '',
+    changedSentenceRate > MAX_STRUCTURAL_CHANGED_SENTENCE_RATE && (!options.scopeOnly || originalContent.length >= 240)
       ? `结构修订改动句比例过高：达到 ${changedSentenceRate}%，超过 ${MAX_STRUCTURAL_CHANGED_SENTENCE_RATE}% 上限；请保留原文大部分句子，只局部修复冲突链。`
       : '',
     originalContent.length >= 240 && scopeExpansionRatio > MAX_STRUCTURAL_SCOPE_EXPANSION_RATIO

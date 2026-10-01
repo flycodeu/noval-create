@@ -10,7 +10,7 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { AssetReviewObservability, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
+import { AssetReviewObservability, ModelAttempt, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
 import { hasResumableWorkflowCheckpoint } from '../../shared/workflow-resilience'
 import { formatFailure } from '../../shared/task-labels'
@@ -264,6 +264,9 @@ export default function TaskCenter() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [modelAttempts, setModelAttempts] = useState<ModelAttempt[]>([])
+  const [modelAttemptsLoading, setModelAttemptsLoading] = useState(false)
+  const [modelAttemptsError, setModelAttemptsError] = useState(false)
   const [selectedContextStatus, setSelectedContextStatus] = useState<NovelContextStatus | null>(null)
   const [selectedContextStatusError, setSelectedContextStatusError] = useState(false)
   const { streams, clearStream } = useTaskStore()
@@ -339,6 +342,27 @@ export default function TaskCenter() {
     () => pageData.items.find((task) => task.id === selectedId) || null,
     [pageData.items, selectedId],
   )
+  useEffect(() => {
+    let active = true
+    if (!selectedId) {
+      setModelAttempts([])
+      setModelAttemptsError(false)
+      return () => { active = false }
+    }
+    setModelAttemptsLoading(true)
+    void window.electron.task.modelAttempts(selectedId).then((attempts) => {
+      if (!active) return
+      setModelAttempts(attempts)
+      setModelAttemptsError(false)
+    }).catch(() => {
+      if (!active) return
+      setModelAttempts([])
+      setModelAttemptsError(true)
+    }).finally(() => {
+      if (active) setModelAttemptsLoading(false)
+    })
+    return () => { active = false }
+  }, [selectedId, selectedTask?.status, selectedTask?.updatedAt])
   const selectedRecoveryAction = useMemo(
     () => (selectedTask ? buildTaskRecoveryAction(selectedTask) : null),
     [selectedTask],
@@ -574,6 +598,29 @@ export default function TaskCenter() {
   const failedCount = stats.failedCount
   const canClearHistory = pageData.total > 0 && (statusFilter === 'all' || ENDED_TASK_STATUSES.has(statusFilter))
 
+  const exportModelAttempts = useCallback(() => {
+    if (!selectedTask || modelAttempts.length === 0) return
+    const payload = {
+      task: {
+        id: selectedTask.id,
+        novelId: selectedTask.novelId,
+        type: selectedTask.type,
+        relatedEntityType: selectedTask.relatedEntityType,
+        relatedEntityId: selectedTask.relatedEntityId,
+        contractVersion: selectedTask.contractVersion,
+      },
+      attempts: modelAttempts,
+    }
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `novelforge-model-attempts-task-${selectedTask.id}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }, [selectedTask, modelAttempts])
+
   const detailSections = useMemo<CollapseProps['items']>(() => {
     const items: NonNullable<CollapseProps['items']> = []
 
@@ -598,6 +645,40 @@ export default function TaskCenter() {
         key: 'input',
         label: '请求上下文',
         children: <div className="task-center-code" data-p3-05-task-log>{formatTaskPayload(selectedTask.inputJson)}</div>,
+      })
+    }
+
+    if (selectedTask) {
+      items.push({
+        key: 'model-attempts',
+        label: `模型调用记录${modelAttempts.length ? ` · ${modelAttempts.length} 次` : ''}`,
+        children: modelAttemptsError ? (
+          <Alert type="warning" showIcon message="模型调用记录暂时无法读取" />
+        ) : modelAttemptsLoading ? (
+          <span>正在读取模型调用记录…</span>
+        ) : modelAttempts.length === 0 ? (
+          <span>该任务暂无模型调用记录。旧任务或尚未开始的任务可能没有记录。</span>
+        ) : (
+          <div className="task-center-model-attempts">
+            <Button size="small" onClick={exportModelAttempts}>导出提示词与输出 JSON</Button>
+            <span>记录保存在本机，导出文件可能含小说正文和设定，请自行保管。</span>
+            <Collapse items={modelAttempts.map((attempt) => ({
+              key: attempt.request_id,
+              label: `${attempt.provider} / ${attempt.model_id} · ${attempt.status} · ${new Date(attempt.started_at).toLocaleString('zh-CN')} · 请求 ${attempt.request_id}`,
+              children: (
+                <div className="task-center-model-attempt">
+                  <div>{`任务 #${attempt.task_id ?? '-'} · 第 ${attempt.attempt_index} 次 · 提示词 SHA-256：${attempt.prompt_hash || '-'}`}</div>
+                  <div>{`模型参数：${attempt.options_json || '-'}`}</div>
+                  {attempt.error_code ? <div>{`错误代码：${attempt.error_code}`}</div> : null}
+                  <div>实际提示词快照（常见凭据已脱敏）{attempt.prompt_truncated ? '（超出本地记录上限，已截断）' : ''}</div>
+                  <pre className="task-center-code">{attempt.prompt_text || '无提示词快照'}</pre>
+                  <div>模型输出快照（常见凭据已脱敏）{attempt.output_truncated ? `（仅显示前段，完整长度 ${attempt.output_chars} 字）` : ''}</div>
+                  <pre className="task-center-code">{attempt.output_text ?? '未收到文本输出'}</pre>
+                </div>
+              ),
+            }))} />
+          </div>
+        ),
       })
     }
 
@@ -658,7 +739,7 @@ export default function TaskCenter() {
     }
 
     return items
-  }, [selectedStream, selectedTask])
+  }, [selectedStream, selectedTask, modelAttempts, modelAttemptsError, modelAttemptsLoading, exportModelAttempts])
 
   return (
     <WorkspacePage

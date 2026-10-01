@@ -29,15 +29,14 @@ async function main() {
   const schema = project('electron/database/schema.ts')
   const novelService = project('electron/services/novel.service.ts')
   const characterService = project('electron/services/character.service.ts')
-  const characterArcService = project('electron/services/character-arc.service.ts')
-  const resistanceService = project('electron/services/resistance.service.ts')
   const chapterService = project('electron/services/chapter.service.ts')
-  const timelineService = project('electron/services/timeline.service.ts')
   const storyThreadService = project('electron/services/story-thread.service.ts')
   const storyStructureService = project('electron/services/story-structure.service.ts')
   const endgameAssetService = project('electron/services/endgame-asset.service.ts')
   const { buildFastLaunchBootstrapPlan } = project('src/pages/NovelList/fast-launch.ts')
+  const { buildChapterWritingPrompt } = project('src/shared/prompts/writing-prompts.ts')
   const { validateChapterContractsForGeneration } = project('electron/services/context-impact.service.ts')
+  const { buildStoryProfile, buildChapterContext } = project('electron/services/context.service.ts')
 
   initDb()
   const plan = buildFastLaunchBootstrapPlan({
@@ -68,8 +67,6 @@ async function main() {
     const volumeId = storyStructureService.createStoryVolume(novelId, plan.volume)
     const arcInsert = getDb().insert(schema.storyArcs).values({ novelId, ...plan.outlineArc }).run()
     const arcId = Number(arcInsert.lastInsertRowid)
-    const protagonistId = characterService.createCharacter(novelId, plan.protagonist)
-    const antagonistId = characterService.createCharacter(novelId, plan.antagonist)
     const threadId = storyThreadService.createStoryThread(novelId, {
       threadType: 'main',
       title: plan.thread.title,
@@ -77,18 +74,6 @@ async function main() {
       premise: plan.thread.premise,
       status: 'planned',
       priority: 'high',
-      currentState: '前三章内必须完成主线起势。',
-    })
-
-    characterService.upsertRelation({
-      novelId,
-      charAId: protagonistId,
-      charBId: antagonistId,
-      relationType: plan.relationshipArc.relationTypeSnapshot,
-      relationLabel: plan.relationshipArc.relationLabelSnapshot,
-      description: plan.relationshipArc.startState,
-      bilateral: 1,
-      tensionLevel: 80,
     })
 
     const chapterIds = plan.chapters.map((chapter) => chapterService.createChapter(novelId, {
@@ -99,161 +84,83 @@ async function main() {
     }))
     const chapterIdByNum = new Map(plan.chapters.map((chapter, index) => [chapter.chapterNum, chapterIds[index]]))
 
-    const timelineIdsByChapterNum = new Map()
-    for (const event of plan.timelineEvents) {
-      timelineIdsByChapterNum.set(event.sortOrder, timelineService.createTimelineEvent(novelId, {
-        ...event,
-        timeMode: 'relative-disaster',
-        volumeId,
-        isMajorEvent: 1,
-        protagonistPresent: 1,
-      }))
-    }
-
-    const protagonistArcPlan = plan.characterArcs.find((arc) => arc.characterRole === 'protagonist')
-    const antagonistArcPlan = plan.characterArcs.find((arc) => arc.characterRole === 'antagonist')
-    const protagonistArc = characterArcService.upsertCharacterArc({
-      novelId,
-      characterId: protagonistId,
-      ...protagonistArcPlan,
-      firstCrackChapterId: chapterIdByNum.get(1),
-      changeTimelineEventId: timelineIdsByChapterNum.get(1),
-      currentStatus: 'active',
-    })
-    const antagonistArc = characterArcService.upsertCharacterArc({
-      novelId,
-      characterId: antagonistId,
-      ...antagonistArcPlan,
-      firstCrackChapterId: chapterIdByNum.get(1),
-      changeTimelineEventId: timelineIdsByChapterNum.get(1),
-      currentStatus: 'active',
-    })
-    const relationshipArc = characterArcService.upsertRelationshipArc({
-      novelId,
-      charAId: protagonistId,
-      charBId: antagonistId,
-      ...plan.relationshipArc,
-      changeTimelineEventId: timelineIdsByChapterNum.get(1),
-      currentStatus: 'active',
-      lastProgressChapterId: chapterIdByNum.get(1),
-    })
-    const resistanceTrack = resistanceService.upsertTrack({
-      novelId,
-      sourceType: 'character',
-      sourceId: antagonistId,
-      resistanceKind: 'antagonist',
-      ...plan.resistanceTrack,
-      currentStatus: 'active',
-      lastActionChapterId: chapterIdByNum.get(1),
-      nextEscalationChapterId: chapterIdByNum.get(2),
-      linkedVolumeId: volumeId,
-    })
-
-    characterArcService.upsertCharacterArcBeat({
-      novelId,
-      arcId: protagonistArc.id,
-      beatType: 'start',
-      chapterId: chapterIdByNum.get(1),
-      timelineEventId: timelineIdsByChapterNum.get(1),
-      title: '主角被迫进入主线',
-      summary: protagonistArcPlan.changeEvent,
-      status: 'planned',
-      sortOrder: 1,
-    })
-    characterArcService.upsertCharacterArcBeat({
-      novelId,
-      arcId: antagonistArc.id,
-      beatType: 'crack',
-      chapterId: chapterIdByNum.get(1),
-      timelineEventId: timelineIdsByChapterNum.get(1),
-      title: '主要阻力开始升级',
-      summary: antagonistArcPlan.changeEvent,
-      status: 'planned',
-      sortOrder: 1,
-    })
-    resistanceService.upsertBeat({
-      novelId,
-      trackId: resistanceTrack.id,
-      beatType: 'strike',
-      chapterId: chapterIdByNum.get(1),
-      timelineEventId: timelineIdsByChapterNum.get(1),
-      title: '主要阻力第一次出手',
-      summary: plan.resistanceTrack.counterMove,
-      actionMode: plan.resistanceTrack.currentPressureMode,
-      successLevel: '部分成功',
-      counterResponse: '主角保住继续追查的资格，但失去一条安全退路。',
-      protagonistImpact: '主角确认必须主动追查核心钩子。',
-      status: 'logged',
-      sortOrder: 1,
-    })
-
-    for (const scene of plan.sceneContracts) {
-      const chapterId = chapterIdByNum.get(scene.chapterNum)
-      const existingSegments = storyStructureService.listChapterSegments(chapterId)
-      const segmentId = existingSegments[0]?.id || storyStructureService.createChapterSegment(chapterId, {
-        title: scene.segmentTitle,
-        segmentType: 'scene',
-        purpose: scene.purpose,
-        timeAnchor: scene.timeLocation,
-        locationName: '开篇主线现场',
-        presentCharacterIdsJson: JSON.stringify([protagonistId, antagonistId]),
-        inputState: scene.chapterNum === 1 ? '主角仍处在原有处境' : '承接上一章尚未解决的压力',
-        outputState: scene.resultState,
-        summary: scene.sceneGoal,
-        status: 'planned',
-      })
-      if (existingSegments[0]?.id) {
-        storyStructureService.updateChapterSegment(segmentId, {
-          title: scene.segmentTitle,
-          segmentType: 'scene',
-          purpose: scene.purpose,
-          timeAnchor: scene.timeLocation,
-          locationName: '开篇主线现场',
-          presentCharacterIdsJson: JSON.stringify([protagonistId, antagonistId]),
-          inputState: scene.chapterNum === 1 ? '主角仍处在原有处境' : '承接上一章尚未解决的压力',
-          outputState: scene.resultState,
-          summary: scene.sceneGoal,
-          status: 'planned',
-        })
-      }
-      endgameAssetService.upsertSceneContract(chapterId, segmentId, {
-        pov: plan.protagonist.fullName,
-        timeLocation: scene.timeLocation,
-        sceneGoal: scene.sceneGoal,
-        obstacle: scene.obstacle,
-        conflictType: scene.conflictType,
-        emotionShift: scene.emotionShift,
-        resultState: scene.resultState,
-        linkageMode: scene.linkageMode,
-        status: 'ready',
-      })
-    }
-
     for (const contract of plan.chapterContracts) {
       const chapterId = chapterIdByNum.get(contract.chapterNum)
       endgameAssetService.upsertChapterContract(chapterId, {
-        ...contract,
+        chapterGoal: contract.chapterGoal,
         servedThreadIds: [threadId],
-        requiredCharacterArcIds: [protagonistArc.id, antagonistArc.id],
-        requiredRelationshipArcIds: [relationshipArc.id],
-        requiredResistanceTrackIds: [resistanceTrack.id],
-        requiredAssetRefs: [],
-        requiredEndgameCommitmentIds: [],
-        requiredForeshadowIds: [],
+        forbiddenActions: contract.forbiddenActions,
         status: 'ready',
       })
     }
-
     const db = getDb()
     const count = (table) => db.select().from(table).all().length
-    assert.equal(count(schema.characterArcs), 2)
-    assert.equal(count(schema.relationshipArcs), 1)
-    assert.equal(count(schema.resistanceTracks), 1)
+    assert.equal(count(schema.characters), 0)
+    assert.equal(count(schema.storyThreads), 1)
+    assert.equal(count(schema.characterArcs), 0)
+    assert.equal(count(schema.relationshipArcs), 0)
+    assert.equal(count(schema.resistanceTracks), 0)
+    assert.equal(count(schema.timelineEvents), 0)
     assert.equal(count(schema.chapterContracts), 3)
-    assert.equal(count(schema.sceneContracts), 3)
+    assert.equal(count(schema.sceneContracts), 0)
     assert.equal(count(schema.chapterSegments), 3)
+    const firstChapterProfile = await buildStoryProfile(novelId)
+    assert.equal(firstChapterProfile.hasProtagonist, false)
+    assert.equal(firstChapterProfile.protagonistName, '')
+    assert.doesNotMatch(firstChapterProfile.protagonistRule, /唯一合法姓名|只能使用“主角”/)
+    const firstChapterContext = await buildChapterContext(novelId, 1)
+    assert.equal(JSON.stringify(firstChapterContext).includes('主角（待命名）'), false)
+    const firstChapterPrompt = buildChapterWritingPrompt({
+      ...firstChapterContext,
+      novelTitle: firstChapterProfile.novelTitle,
+      genre: firstChapterProfile.genre,
+      chapterNum: 1,
+      chapterTitle: plan.chapters[0].title,
+      plotPoints: plan.chapters[0].outline,
+      emotionTone: '',
+      targetWords: plan.chapters[0].targetWords,
+      protagonistReference: firstChapterProfile.protagonistReference,
+      protagonistRule: firstChapterProfile.protagonistRule,
+    })
+    assert.doesNotMatch(firstChapterPrompt, /主角（待命名）|唯一合法姓名为“主角/)
+    assert.match(firstChapterPrompt, /主角命名规则：主角尚未命名/)
+    assert.throws(
+      () => validateChapterContractsForGeneration(chapterIds[0]),
+      /场景合同状态仍是草稿/,
+    )
+
+    // Test author confirmation after creation; the launcher itself must not supply this decision.
+    const firstSegmentId = storyStructureService.listChapterSegments(chapterIds[0])[0]?.id
+    assert.equal(typeof firstSegmentId, 'number')
+    endgameAssetService.upsertSceneContract(chapterIds[0], firstSegmentId, {
+      pov: '维修员',
+      sceneGoal: '主角核查旧终端上的主城求救信号',
+      obstacle: plan.outlineArc.arcGoal,
+      resultState: '主角确认信号真实并决定继续核查',
+      status: 'ready',
+    })
     assert.doesNotThrow(() => validateChapterContractsForGeneration(chapterIds[0]))
-    console.log('PASS fast launch bootstrap: arcs, relationship, resistance, chapter/scene contracts pass generation preflight')
+
+    // Old fast-launch drafts may already contain this placeholder character.
+    // It must not become the canonical name or leak into the first chapter context.
+    characterService.createCharacter(novelId, {
+      fullName: '主角（待命名）',
+      roleType: 'protagonist',
+      background: '被逐出避难所的维修员',
+    })
+    endgameAssetService.upsertSceneContract(chapterIds[0], firstSegmentId, {
+      pov: '主角（待命名）',
+      sceneGoal: '主角核查旧终端上的主城求救信号',
+      obstacle: plan.outlineArc.arcGoal,
+      resultState: '主角确认信号真实并决定继续核查',
+      status: 'ready',
+    })
+    assert.equal(db.select().from(schema.sceneContracts).all()[0].pov, '主角（待命名）')
+    const legacyProfile = await buildStoryProfile(novelId)
+    assert.equal(legacyProfile.hasProtagonist, false)
+    assert.equal(legacyProfile.protagonistName, '')
+    assert.equal(JSON.stringify(await buildChapterContext(novelId, 1)).includes('主角（待命名）'), false)
+    console.log('PASS fast launch bootstrap: draft blocks generation until the author confirms the first scene contract')
   } finally {
     closeDb()
     await app.quit()

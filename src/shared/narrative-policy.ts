@@ -1,4 +1,5 @@
 import { stableHash, stableSerialize } from './context-pack'
+import { formatUserFacingMessage } from './user-facing-messages'
 
 export type NarrativePolicyVersion = 'legacy' | 'reader-first-v1'
 export interface ReaderFirstSettings {
@@ -54,7 +55,7 @@ export function mergeNarrativePolicySettings(currentRaw: string | null | undefin
     const currentRevision = Number((current.readerFirst as Partial<ReaderFirstSettings> | undefined)?.revision) || 0
     const nextRevision = (incoming.readerFirst as Partial<ReaderFirstSettings> | null)?.revision
     if (!Number.isSafeInteger(nextRevision) || Number(nextRevision) !== currentRevision + 1) {
-      throw new Error('作品写作策略版本已变化，请刷新设置后重试。')
+      throw new Error(formatUserFacingMessage('narrative.policyRevisionChanged'))
     }
   }
   return JSON.stringify({ ...current, ...incoming })
@@ -81,9 +82,9 @@ export function narrativeRequestIdentity(identity: NarrativeInputIdentity): stri
 }
 
 export function assertNarrativeResumeIdentity(saved: NarrativeInputIdentity | undefined, current: NarrativeInputIdentity): void {
-  if (!saved || saved.schemaVersion !== 1) throw new Error('旧任务缺少可复现的策略与来源身份，请保留现稿并从 Planner 新建任务。')
+  if (!saved || saved.schemaVersion !== 1) throw new Error(formatUserFacingMessage('narrative.resumeSourceMissing'))
   if (narrativeRequestIdentity(saved) !== narrativeRequestIdentity(current)
     || (saved.scenePlanDigest && saved.scenePlanDigest !== current.scenePlanDigest)) {
-    throw new Error('策略、场景、样稿、提示覆盖或模型依据已变化，不能混用旧稿恢复；请保留现稿并从 Planner 新建任务。')
+    throw new Error(formatUserFacingMessage('narrative.resumeInputChanged'))
   }
 }

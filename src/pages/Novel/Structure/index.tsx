@@ -10,6 +10,7 @@ import { parseSceneTemplateStringList } from '../../../shared/scene-templates'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { SceneTemplate, StructureBatchPlan } from '../../../types'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections, buildPreviousStructureChapterSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
   generateStructureChapterDraft,
@@ -439,16 +440,24 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       const runPlannerChunk = async (chunk: StructurePlannerChunk) => {
         const partEnd = chunk.partStart + chunk.partCount
         const batchLabel = describePlannerChunk(chunk, isChunked)
+        const lastDraftVolume = combinedPlan.volumes.at(-1)
+        const lastDraftPart = lastDraftVolume?.parts.at(-1)
+        const lastDraftChapter = lastDraftPart?.chapters.at(-1)
+        const lastDraftScene = lastDraftChapter?.segments.at(-1)
+        const previousDraftSummary = [
+          lastDraftVolume?.title, lastDraftPart?.title, lastDraftChapter?.title,
+          lastDraftChapter?.outline, lastDraftScene?.outputState || lastDraftScene?.summary,
+        ].filter(Boolean).join('；')
         const result = await generateStructureHierarchyPlan({
           count: 1,
           messages: buildDraftMessages({
             task: isChunked ? `长篇结构分块规划 · ${batchLabel}` : '长篇结构批量规划',
             mode: 'replace',
-            context: [
-              { label: '书名', value: currentNovel?.title || '' },
-              { label: '题材', value: currentNovel?.genreName || '' },
-              { label: '小说简介', value: currentNovel?.synopsis || '' },
-              { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+            context: buildPlanningContextSections(currentNovel, {
+              prioritySections: previousDraftSummary
+                ? [{ label: '本轮前块草稿（尚未落库，不是已发生正文）', value: previousDraftSummary }]
+                : [],
+              extraSections: [
               { label: '目标总字数', value: currentNovel?.targetWords || '' },
               { label: '当前卷数', value: volumes.length },
               { label: '当前部数', value: parts.total },
@@ -456,7 +465,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               { label: '当前场景数', value: segments.total },
               isChunked ? { label: '全书结构规模', value: `${planValues.volumeCount} 卷，每卷 ${planValues.partsPerVolume} 部，每部 ${planValues.chaptersPerPart} 章，每章 ${planValues.segmentsPerChapter} 场景。` } : { label: '全书结构规模', value: '' },
               isChunked ? { label: '本次分块', value: batchLabel } : { label: '本次分块', value: '' },
-            ],
+            ] }),
             fields: [
               { key: 'summary', label: '规划摘要', value: '', hint: isChunked ? '概括本分块在全书中的功能，不要概括全书全部细节。' : '先用几句话概括整套卷部章场景结构。' },
               { key: 'volumes', label: '卷结构', type: 'object[]', value: '', hint: '按卷 > 部 > 章 > 场景输出嵌套 JSON。' },
@@ -469,6 +478,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               '所有标题必须像人类编辑写的工作标题，不要写“命运交汇”“最终抉择”这类空泛词。',
               '章节目标和场景作用必须具体，能直接指导后续写作。',
               '这是追加规划，不要重写已经存在的卷部章。',
+              '已保存的立项、设定和规则是规划依据；本轮前块只是未落库草稿，不能当作正文中已发生的事件。',
               isChunked ? '本次只规划指定分块，不要补全其他卷或其他部。' : '',
               values.focus.trim() ? `额外聚焦：${values.focus.trim()}` : '',
               'JSON 结构必须是 { "summary": "", "volumes": [{ "title": "", "summary": "", "targetWords": 0, "parts": [{ "title": "", "summary": "", "targetWords": 0, "chapters": [{ "title": "", "outline": "", "targetWords": 0, "segments": [{ "title": "", "segmentType": "", "purpose": "", "timeAnchor": "", "locationName": "", "inputState": "", "outputState": "", "summary": "", "content": "" }] }] }] }] }。',
@@ -490,6 +500,9 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           createdSegments: plannedSegmentCount,
         })
         const plan = await runPlannerChunk(chunk)
+        if (!plan?.volumes.length || !plan.volumes[0]?.parts.length) {
+          throw new Error(`${describePlannerChunk(chunk, isChunked)}未生成有效结构，本轮不会落库不完整规划。`)
+        }
         collectPlan(plan, chunk)
         setPlannerProgress({
           current: chunkIndex + 1,
@@ -543,11 +556,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     }
   }, [
     chapters.total,
-    currentNovel?.expandedBackground,
-    currentNovel?.genreName,
-    currentNovel?.synopsis,
-    currentNovel?.targetWords,
-    currentNovel?.title,
+    currentNovel,
     novelId,
     parts.total,
     plannerLimits,
@@ -570,21 +579,20 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           setDraftWarnings(result.warnings)
           return result.outputs
         }}
-        buildMessages={() => {
+        buildMessages={async () => {
           const values = chapterForm.getFieldsValue(true)
+          const savedChapters = await window.electron.chapter.list(novelId)
 
           return buildDraftMessages({
             task: '章节结构草稿',
             mode: 'replace',
-            context: [
-              { label: '书名', value: currentNovel?.title || '' },
-              { label: '题材', value: currentNovel?.genreName || '' },
-              { label: '小说简介', value: currentNovel?.synopsis || '' },
-              { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+            context: buildPlanningContextSections(currentNovel, {
+              prioritySections: buildPreviousStructureChapterSections(chapterDetail.chapterNum, savedChapters),
+              extraSections: [
               { label: '当前卷', value: getVolumeLabel(currentVolume) },
               { label: '当前部', value: getPartLabel(currentPart) },
               { label: '已有场景', value: summarizeSegments(segments.items) },
-            ],
+            ] }),
             fields: [
               { key: 'title', label: '章节标题', value: values.title, hint: '短而明确，能体现本章推进。' },
               { key: 'outline', label: '章节目标', value: values.outline, hint: '写清本章推进、转折和留下的问题。' },
@@ -593,6 +601,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
             requirements: [
               '不要改动当前卷和当前部的定位。',
               '如果已有场景列表，章节目标必须能覆盖这些场景。',
+              '上章大纲是规划；只有标记为已写正文的内容可视作故事里已经发生。若前章尚无正文，不得编造其结果。',
             ],
           })
         }}
@@ -655,15 +664,12 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           return buildDraftMessages({
             task: '场景结构草稿',
             mode: 'replace',
-            context: [
-              { label: '书名', value: currentNovel?.title || '' },
-              { label: '题材', value: currentNovel?.genreName || '' },
-              { label: '小说简介', value: currentNovel?.synopsis || '' },
+            context: buildPlanningContextSections(currentNovel, { extraSections: [
               { label: '当前章节', value: getChapterLabel(chapterDetail) },
-              { label: '章节目标', value: chapterForm.getFieldValue('outline') },
+              { label: '章节目标（计划，尚非已发生）', value: chapterForm.getFieldValue('outline') },
               { label: '当前场景序号', value: segmentDetail.segmentOrder },
               { label: '同章场景列表', value: summarizeSegments(segments.items) },
-            ],
+            ] }),
             fields: [
               { key: 'title', label: '场景标题', value: values.title, hint: '一句话点出场景焦点。' },
               { key: 'segmentType', label: '片段类型', value: values.segmentType, hint: '只使用 scene、bridge、turn、reveal、climax 之一。' },

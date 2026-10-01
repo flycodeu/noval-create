@@ -29,12 +29,6 @@ function getVolumeDisplayName(volume?: StoryVolume | null): string {
   return volume.title?.trim() || `第${volume.volumeNumber}卷`
 }
 
-function getVolumeStatusLabel(status?: StoryVolume['status']): string {
-  if (status === 'locked') return '已锁定'
-  if (status === 'draft') return '草稿'
-  return '规划中'
-}
-
 function getGenerationTagMeta(snapshot: WritingGenerationSnapshot) {
   if (snapshot.status === 'running') return { color: 'processing' as const, label: '生成中' }
   if (snapshot.status === 'failed') return { color: 'error' as const, label: '失败' }
@@ -60,10 +54,7 @@ interface VolumeGroup {
   key: string
   volumeId: number | null
   label: string
-  statusLabel?: string
-  targetWords?: number
   chapters: Chapter[]
-  totalWords: number
   sort: number
 }
 
@@ -82,11 +73,10 @@ export default function ChapterNavigator({
 }: ChapterNavigatorProps) {
   const activeGeneration = useWritingViewStore((state) => state.activeGeneration)
   const lastGenerationByChapter = useWritingViewStore((state) => state.lastGenerationByChapter)
-  const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [openVolumeKeys, setOpenVolumeKeys] = useState<Record<string, boolean>>({})
-  const [volumePages, setVolumePages] = useState<Record<string, number>>({})
+  const [openVolumeKeys, setOpenVolumeKeys] = useState<Record<string, { chapterId: number | null; open: boolean }>>({})
+  const [volumePages, setVolumePages] = useState<Record<string, { chapterId: number | null; page: number }>>({})
   const activeChapterRef = useRef<HTMLDivElement | null>(null)
 
   const chapterVolumeGroups = useMemo<VolumeGroup[]>(() => {
@@ -98,10 +88,7 @@ export default function ChapterNavigator({
         key: `volume-${volume.id}`,
         volumeId: volume.id,
         label: getVolumeDisplayName(volume),
-        statusLabel: getVolumeStatusLabel(volume.status),
-        targetWords: volume.targetWords,
         chapters: [],
-        totalWords: 0,
         sort: volume.volumeNumber || 9999,
       })
     })
@@ -114,16 +101,12 @@ export default function ChapterNavigator({
           key,
           volumeId: volume?.id || null,
           label: volume ? getVolumeDisplayName(volume) : '未分卷',
-          statusLabel: volume ? getVolumeStatusLabel(volume.status) : undefined,
-          targetWords: volume?.targetWords,
           chapters: [],
-          totalWords: 0,
           sort: volume?.volumeNumber || 9999,
         })
       }
       const group = grouped.get(key)!
       group.chapters.push(chapter)
-      group.totalWords += chapter.wordCount || 0
     })
 
     return Array.from(grouped.values())
@@ -143,12 +126,6 @@ export default function ChapterNavigator({
     () => chapterVolumeGroups.find((group) => group.key === currentVolumeGroupKey) || null,
     [chapterVolumeGroups, currentVolumeGroupKey],
   )
-
-  useEffect(() => {
-    if (activeChapterRef.current) {
-      activeChapterRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [currentChapterId])
 
   const normalizedKeyword = searchKeyword.trim().toLowerCase()
 
@@ -181,6 +158,10 @@ export default function ChapterNavigator({
       .filter((group) => group.chapters.length > 0)
   }, [chapterVolumeGroups, normalizedKeyword, statusFilter])
 
+  useEffect(() => {
+    activeChapterRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [currentChapterId, volumePages, openVolumeKeys])
+
   const statusOptions = useMemo(() => {
     const statuses = Array.from(new Set(chapters.map((chapter) => chapter.status).filter(Boolean)))
     return [
@@ -195,24 +176,28 @@ export default function ChapterNavigator({
   )
 
   const toggleVolume = useCallback((groupKey: string) => {
+    const stored = openVolumeKeys[groupKey]
+    const isOpen = stored?.chapterId === currentChapterId
+      ? stored.open
+      : groupKey === currentVolumeGroupKey
     setOpenVolumeKeys((prev) => ({
       ...prev,
-      [groupKey]: prev[groupKey] === undefined ? false : !prev[groupKey],
+      [groupKey]: { chapterId: currentChapterId, open: !isOpen },
     }))
-  }, [])
+  }, [currentChapterId, currentVolumeGroupKey, openVolumeKeys])
 
   const setAllVolumesOpen = useCallback((open: boolean) => {
-    const next: Record<string, boolean> = {}
+    const next: Record<string, { chapterId: number | null; open: boolean }> = {}
     chapterVolumeGroups.forEach((g) => {
-      next[g.key] = open
+      next[g.key] = { chapterId: currentChapterId, open }
     })
     setOpenVolumeKeys(next)
-  }, [chapterVolumeGroups])
+  }, [chapterVolumeGroups, currentChapterId])
 
   const isAllOpen = useMemo(() => {
     if (chapterVolumeGroups.length === 0) return true
-    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key] === true)
-  }, [chapterVolumeGroups, openVolumeKeys])
+    return chapterVolumeGroups.every((g) => openVolumeKeys[g.key]?.chapterId === currentChapterId && openVolumeKeys[g.key].open)
+  }, [chapterVolumeGroups, currentChapterId, openVolumeKeys])
 
   return (
     <section className="chapter-console-page__panel chapter-navigator-panel">
@@ -277,16 +262,20 @@ export default function ChapterNavigator({
       <div className="chapter-console-page__chapter-list chapter-navigator__list">
         {filteredGroups.length > 0 ? (
           filteredGroups.map((group) => {
+            const storedOpen = openVolumeKeys[group.key]
             const isOpen = normalizedKeyword
               ? true
-              : openVolumeKeys[group.key] ?? group.key === currentVolumeGroupKey
+              : storedOpen?.chapterId === currentChapterId
+                ? storedOpen.open
+                : group.key === currentVolumeGroupKey
             const currentIndex = group.key === currentVolumeGroupKey && currentChapter
               ? group.chapters.findIndex((chapter) => chapter.id === currentChapter.id)
               : -1
             const isPaginated = !normalizedKeyword && group.chapters.length > CHAPTERS_PER_PAGE
             const maxPage = Math.max(1, Math.ceil(group.chapters.length / CHAPTERS_PER_PAGE))
             const chapterPage = currentIndex >= 0 ? Math.floor(currentIndex / CHAPTERS_PER_PAGE) + 1 : 1
-            const currentPage = Math.min(maxPage, volumePages[group.key] || chapterPage)
+            const savedPage = volumePages[group.key]
+            const currentPage = Math.min(maxPage, savedPage?.chapterId === currentChapterId ? savedPage.page : chapterPage)
             const paginatedChapters = isPaginated
               ? group.chapters.slice((currentPage - 1) * CHAPTERS_PER_PAGE, currentPage * CHAPTERS_PER_PAGE)
               : group.chapters
@@ -348,7 +337,6 @@ export default function ChapterNavigator({
                             ? activeGeneration
                             : lastGenerationByChapter[chapter.id]
                         const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
-                        const isHovered = hoverChapterId === chapter.id
                         const formattedNum = formatChapterNumber(chapter.chapterNum)
                         const displayTitle = chapter.title || `第${chapter.chapterNum}章`
 
@@ -361,8 +349,16 @@ export default function ChapterNavigator({
                             }`}
                             data-writing-chapter-row={chapter.id}
                             onClick={() => onSelectChapter(chapter.id)}
-                            onMouseEnter={() => setHoverChapterId(chapter.id)}
-                            onMouseLeave={() => setHoverChapterId(null)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`选择第${chapter.chapterNum}章：${displayTitle}`}
+                            onKeyDown={(event) => {
+                              if (event.target !== event.currentTarget) return
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                onSelectChapter(chapter.id)
+                              }
+                            }}
                           >
                             <div className="chapter-navigator__chapter-main">
                               <span className="chapter-navigator__chapter-num">
@@ -402,20 +398,19 @@ export default function ChapterNavigator({
                                 </span>
                               )}
 
-                              {isHovered ? (
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    onDeleteChapter(chapter.id, event)
-                                  }}
-                                  className="chapter-navigator__delete-btn"
-                                  title="删除章节"
-                                />
-                              ) : null}
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  onDeleteChapter(chapter.id, event)
+                                }}
+                                className="chapter-navigator__delete-btn"
+                                title="删除章节"
+                                aria-label={`删除第${chapter.chapterNum}章`}
+                              />
                             </div>
                           </div>
                         )
@@ -432,7 +427,7 @@ export default function ChapterNavigator({
                           current={currentPage}
                           pageSize={CHAPTERS_PER_PAGE}
                           total={group.chapters.length}
-                          onChange={(page) => setVolumePages((prev) => ({ ...prev, [group.key]: page }))}
+                          onChange={(page) => setVolumePages((prev) => ({ ...prev, [group.key]: { chapterId: currentChapterId, page } }))}
                         />
                       </div>
                     ) : null}

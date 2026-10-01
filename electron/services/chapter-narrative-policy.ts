@@ -15,7 +15,7 @@ export function resolveChapterNarrativeIdentity(chapterId: number): NarrativeInp
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   const novel = chapter && db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  if (!chapter || !novel) throw new Error('章节或作品不存在。')
+  if (!chapter || !novel) throwUserFacingError('chapter.narrativeSourceMissing')
   const templateIds = [novel.styleTemplateId, novel.worldTemplateId].filter((id): id is number => typeof id === 'number')
   const selectedTemplates = templateIds.length ? db.select().from(templates).where(inArray(templates.id, templateIds)).all() : []
   const models = db.select({ id: modelConfigs.id, provider: modelConfigs.provider, modelId: modelConfigs.modelId,

@@ -2162,7 +2162,15 @@ function getCanonicalProtagonist(
   allCharacters: Array<Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'>>,
 ): Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'> | null {
   return allCharacters.find((character) =>
-    character.roleType === 'protagonist' && Boolean(character.fullName?.trim())) || null
+    character.roleType === 'protagonist'
+    && Boolean(character.fullName?.trim())
+    && !isTemporaryProtagonist(character)) || null
+}
+
+function isTemporaryProtagonist(
+  character: Pick<typeof characters.$inferSelect, 'fullName' | 'roleType'>,
+): boolean {
+  return character.roleType === 'protagonist' && character.fullName?.trim() === '主角（待命名）'
 }
 
 function buildProtagonistPolicy(
@@ -2175,8 +2183,8 @@ function buildProtagonistPolicy(
     return {
       hasProtagonist: false,
       protagonistName: '',
-      protagonistReference: '主角',
-      protagonistRule: '当前尚未创建主角。若涉及核心人物，只能使用“主角”指代，禁止新增任何具体姓名、化名或变体名；若上下文出现旧名字，也应统一视为“主角”。',
+      protagonistReference: '按已确认的身份或自然代词指代',
+      protagonistRule: '主角尚未命名。沿用作者已确认的身份、职业称呼或自然代词，不要自行起具体姓名，也不要把工作台占位称呼写进正文。',
     }
   }
 
@@ -3116,6 +3124,7 @@ export async function buildStoryProfile(
       eq(characters.novelId, novelId),
       eq(characters.roleType, 'protagonist'),
       sql`trim(${characters.fullName}) <> ''`,
+      sql`trim(${characters.fullName}) <> '主角（待命名）'`,
     ))
     .orderBy(asc(characters.id))
     .limit(1)
@@ -3324,9 +3333,18 @@ export async function collectChapterContextRawData(
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 
-  const entityCatalogs = loadChapterEntityMentionCatalogs(novelId, {
+  const loadedEntityCatalogs = loadChapterEntityMentionCatalogs(novelId, {
     contextVersion: novel.contextVersion || 1,
   })
+  const temporaryProtagonistIds = new Set(loadedEntityCatalogs.characters
+    .filter(isTemporaryProtagonist)
+    .map((character) => character.id))
+  const entityCatalogs = temporaryProtagonistIds.size === 0 ? loadedEntityCatalogs : {
+    ...loadedEntityCatalogs,
+    characters: loadedEntityCatalogs.characters.filter((character) => !temporaryProtagonistIds.has(character.id)),
+    relations: loadedEntityCatalogs.relations.filter((relation) =>
+      !temporaryProtagonistIds.has(relation.charAId) && !temporaryProtagonistIds.has(relation.charBId)),
+  }
   const profileThreadRows = loadStoryProfileThreadRows(novel)
   const profile = buildStoryProfileFromSourceRows(novel, entityCatalogs.characters, profileThreadRows)
   const chapterCount = getNovelChapterCount(novelId)
@@ -3655,7 +3673,7 @@ export async function collectChapterContextRawData(
     relationSummary,
     continuityNotes: collectContinuityNotes(continuityChapters),
     limit: 4,
-  }))
+  }).filter((lock) => lock.characterName.trim() !== '主角（待命名）'))
 
   const chapterBridgePlan = currentChapter
     ? formatChapterBridgePlan(buildChapterBridgePlan(currentChapter.id, {

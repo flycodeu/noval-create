@@ -82,17 +82,31 @@ export default function OverviewSection({
   onSelectChapter,
   onLocateChapter,
 }: OverviewSectionProps) {
+  if (data.novelQualityMetrics.analyzedChapterCount === 0) {
+    return (
+      <WorkspacePanel title="正文质量待评估">
+        <div className="quality-dashboard-page__stack">
+          <div className="quality-dashboard-page__body-copy">
+            当前没有已分析章节，无法判断 AI 味、节奏、连续性或全书健康。请先确认章节依据、保存正文并完成质量评估。
+          </div>
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+            已有设定和章节草案中的风险仍可在“重点风险”查看；这些风险不代表成稿质量。
+          </div>
+        </div>
+      </WorkspacePanel>
+    )
+  }
   const filteredEndgameAlerts = filterSeverityAlerts(data.recentEndgameDebtAlerts, filters)
     .filter((alert) => isChapterInRange(alert.targetResolutionChapter, filters))
   return (
     <>
       <RecommendationGovernancePanel novelId={novelId} />
-      <WorkspacePanel title="百万字健康指标">
+      <WorkspacePanel title="续批条件与已知风险">
         <div className="quality-dashboard-page__stack">
           <div className="quality-dashboard-page__grid-220">
             <div className="quality-card">
               <div className="quality-dashboard-page__card-head">
-                <strong>生产就绪度</strong>
+                <strong>续批条件</strong>
                 <Tag color={readinessStatusColor(data.productionReadiness.status)}>{`${data.productionReadiness.readyRate}%`}</Tag>
               </div>
               <div className="quality-dashboard-page__card-summary">{data.productionReadiness.summary}</div>
@@ -203,6 +217,7 @@ export default function OverviewSection({
       <WorkspacePanel title="全书健康总览">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
+          volumeMetrics={data.volumeQualityMetrics}
           topRisks={filterQualityRisks(data.novelQualityMetrics.topRisks, filters)}
           activeVolume={selectedVolumeMetrics}
           onSelectVolume={onSelectVolume}
@@ -539,6 +554,7 @@ function AgentQualityObservabilityPanel({
 
 function NovelHealthOverviewPanel({
   summary,
+  volumeMetrics,
   topRisks,
   activeVolume,
   onSelectVolume,
@@ -549,6 +565,7 @@ function NovelHealthOverviewPanel({
   repairingActionId,
 }: {
   summary: QualityDashboardData['novelQualityMetrics']
+  volumeMetrics: QualityDashboardData['volumeQualityMetrics']
   topRisks: QualityRiskEntry[]
   activeVolume: VolumeQualityEntry | null
   onSelectVolume: (volumeId: number | null) => void
@@ -558,6 +575,9 @@ function NovelHealthOverviewPanel({
   onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
   repairingActionId: string | null
 }) {
+  const analyzedVolumeIds = new Set(volumeMetrics
+    .filter((volume) => volume.analyzedChapterCount > 0)
+    .map((volume) => volume.volumeId))
   return (
     <div className="quality-dashboard-page__stack">
       <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
@@ -565,9 +585,9 @@ function NovelHealthOverviewPanel({
       </div>
       <div className="quality-dashboard-page__metric-grid-180">
         <div className="quality-dashboard-page__stat-card">
-          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">全书健康分</div>
+          <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">正文健康分</div>
           <div className="quality-dashboard-page__big-number" style={{ color: healthScoreColor(summary.healthScore) }}>{summary.healthScore}</div>
-          <div className="quality-dashboard-page__body-copy--soft">综合 AI 味、节奏、推进、召回与状态稳定性</div>
+          <div className="quality-dashboard-page__body-copy--soft">自动化质量信号，仍需人工阅读判断</div>
         </div>
         <div className="quality-dashboard-page__stat-card">
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">已分析章节</div>
@@ -609,7 +629,7 @@ function NovelHealthOverviewPanel({
         <div className="quality-dashboard-page__filter-callout quality-dashboard-page__row quality-dashboard-page__row--between quality-dashboard-page__row--start">
           <div className="quality-dashboard-page__dimension">
             <div className="quality-dashboard-page__section-title">{`当前卷筛选：${activeVolume.volumeName}`}</div>
-            <div className="quality-dashboard-page__body-copy">{`第${activeVolume.chapterStart}-${activeVolume.chapterEnd}章 · 健康分 ${activeVolume.healthScore}`}</div>
+            <div className="quality-dashboard-page__body-copy">{`第${activeVolume.chapterStart}-${activeVolume.chapterEnd}章 · ${activeVolume.analyzedChapterCount > 0 ? `健康分 ${activeVolume.healthScore}` : '健康待评估'}`}</div>
           </div>
           <Button size="small" onClick={onClearVolume}>清除卷筛选</Button>
         </div>
@@ -646,8 +666,8 @@ function NovelHealthOverviewPanel({
             >
               <div className="quality-dashboard-page__row quality-dashboard-page__row--between">
                 <strong>{volume.volumeName}</strong>
-                <Tag color={volume.healthScore < 55 ? 'error' : volume.healthScore < 70 ? 'warning' : 'success'} className="quality-dashboard-page__tag-reset">
-                  健康分 {volume.healthScore}
+                <Tag color={analyzedVolumeIds.has(volume.volumeId) ? volume.healthScore < 55 ? 'error' : volume.healthScore < 70 ? 'warning' : 'success' : 'default'} className="quality-dashboard-page__tag-reset">
+                  {analyzedVolumeIds.has(volume.volumeId) ? `健康分 ${volume.healthScore}` : '健康待评估'}
                 </Tag>
               </div>
               <div className="quality-dashboard-page__body-copy">{volume.summary}</div>
@@ -720,15 +740,15 @@ function VolumeHealthPanel({
             <div className="workspace-grid-auto-220">
               <div className="quality-dashboard-page__ghost-card">
                 <div className="quality-dashboard-page__body-copy--soft-strong">健康分</div>
-                <div className="quality-dashboard-page__medium-number" style={{ color: healthScoreColor(volume.healthScore) }}>{volume.healthScore}</div>
+                <div className="quality-dashboard-page__medium-number" style={{ color: volume.analyzedChapterCount > 0 ? healthScoreColor(volume.healthScore) : undefined }}>{volume.analyzedChapterCount > 0 ? volume.healthScore : '—'}</div>
               </div>
               <div className="quality-dashboard-page__ghost-card">
                 <div className="quality-dashboard-page__body-copy--soft-strong">平均总分</div>
-                <div className="quality-dashboard-page__medium-number">{volume.averageOverallScore}</div>
+                <div className="quality-dashboard-page__medium-number">{volume.analyzedChapterCount > 0 ? volume.averageOverallScore : '—'}</div>
               </div>
               <div className="quality-dashboard-page__ghost-card">
                 <div className="quality-dashboard-page__body-copy--soft-strong">平均 AI 味</div>
-                <div className="quality-dashboard-page__medium-number">{volume.averageAiLikeRate}%</div>
+                <div className="quality-dashboard-page__medium-number">{volume.analyzedChapterCount > 0 ? `${volume.averageAiLikeRate}%` : '—'}</div>
               </div>
             </div>
 
