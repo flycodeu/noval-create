@@ -75,6 +75,7 @@ import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
 import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './services/desktop-updater'
+import { assertNotUpdating, assertUpdateStorageReleased, waitForMcpBridgesToExit } from './utils/update-lifecycle'
 import { configureCodexMcp, getCodexMcpSetupStatus } from './services/codex-mcp-setup.service'
 import { startMcpStdio } from './mcp-stdio'
 import { attachToExistingRuntime, startMcpRuntime, type RuntimeHandle } from './utils/mcp-runtime'
@@ -330,6 +331,7 @@ function createRuntimeTray() {
 }
 
 async function attachToRuntime(): Promise<boolean> {
+  assertNotUpdating(app.getPath('userData'), app.getVersion())
   if (!await attachToExistingRuntime(app.getPath('userData'), app.getVersion(), !runtimeMode)) return false
   shutdownComplete = true
   app.quit()
@@ -337,6 +339,7 @@ async function attachToRuntime(): Promise<boolean> {
 }
 
 app.whenReady().then(async () => {
+  assertNotUpdating(app.getPath('userData'), app.getVersion())
   if (mcpMode) {
     void startMcpStdio(app.isPackaged ? undefined : [process.argv[1] || app.getAppPath(), '--runtime']).catch((error) => {
       console.error('[novelforge-mcp] fatal:', error)
@@ -380,7 +383,11 @@ app.whenReady().then(async () => {
   createRuntimeTray()
   if (!runtimeMode) createWindow()
   maintenanceWorker.start()
-  startDesktopUpdater(() => mainWindow)
+  startDesktopUpdater(() => mainWindow, async () => {
+    await shutdownApplication()
+    await waitForMcpBridgesToExit(app.getPath('exe'))
+    assertUpdateStorageReleased(app.getPath('userData'))
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -401,6 +408,7 @@ let shutdownPromise: Promise<void> | null = null
 function shutdownApplication(): Promise<void> {
   if (shutdownPromise) return shutdownPromise
   shutdownPromise = (async () => {
+    let failure: unknown
     try {
       await runtimeHandle?.close()
       runtimeHandle = null
@@ -414,16 +422,24 @@ function shutdownApplication(): Promise<void> {
       }
       await maintenanceWorker.stop()
     } catch (error) {
+      failure = error
       console.warn('[main] runtime shutdown failed:', error)
     } finally {
-      try { closeDb() } catch (error) { console.warn('[main] storage close failed:', error) }
-      writerLock?.release()
-      writerLock = null
-      databaseReady = false
+      try {
+        closeDb()
+        writerLock?.release()
+        writerLock = null
+        databaseReady = false
+      } catch (error) {
+        // Keep the writer lock if SQLite did not close; update failure may leave this process alive.
+        failure ||= error
+        console.warn('[main] storage close failed:', error)
+      }
       runtimeTray?.destroy()
       runtimeTray = null
       shutdownComplete = true
     }
+    if (failure) throw new Error('后台服务未能完整退出，请重新启动 NovelForge 后再更新。', { cause: failure })
   })()
   return shutdownPromise
 }
@@ -432,7 +448,10 @@ app.on('before-quit', (event) => {
   if (mcpMode) return
   if (shutdownComplete) return
   event.preventDefault()
-  void shutdownApplication().then(() => app.quit())
+  void shutdownApplication().then(() => app.quit(), (error) => {
+    console.warn('[main] shutdown completed with errors:', error)
+    app.quit()
+  })
 })
 
 app.on('window-all-closed', () => {

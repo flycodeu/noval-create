@@ -4,12 +4,15 @@ import electronUpdater, { type NsisUpdater } from 'electron-updater'
 import type { DesktopUpdateMode, DesktopUpdateStatus } from '../../src/shared/desktop-update'
 import { canUseDesktopUpdater } from './desktop-updater-policy'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
+import { beginUpdateMaintenance, type UpdateMaintenance } from '../utils/update-lifecycle'
 
 const FIRST_CHECK_DELAY_MS = 30_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 const { autoUpdater } = electronUpdater
 
 let windowProvider: (() => BrowserWindow | null) | null = null
+let prepareUpdate: (() => Promise<void>) | null = null
+let updateMaintenance: UpdateMaintenance | null = null
 let checkPromise: Promise<DesktopUpdateStatus> | null = null
 let installing = false
 let promptedVersion = ''
@@ -50,23 +53,33 @@ async function showUpdateDialog(options: Electron.MessageBoxOptions): Promise<nu
   return result.response
 }
 
-function beginInstall(version: string): boolean {
+function releaseUpdateMaintenance(): void {
+  const maintenance = updateMaintenance
+  updateMaintenance = null
+  try { maintenance?.release() } catch (error) { logError('desktop-updater', 'Could not clear update maintenance', { error }) }
+}
+
+async function beginInstall(version: string): Promise<boolean> {
   if (installing || updateState.phase !== 'ready') return false
   installing = true
   try {
-    // The main process releases the SQLite writer lock in its before-quit handler.
+    if (!prepareUpdate) throw new Error('更新准备流程尚未就绪，请重新启动 NovelForge。')
+    updateMaintenance = beginUpdateMaintenance(app.getPath('userData'), app.getVersion())
+    // NSIS must not run until storage and background requests have actually stopped.
+    await prepareUpdate()
     logInfo('desktop-updater', 'User requested update install', { context: { version } })
     autoUpdater.quitAndInstall(true, true)
-    return true
+    return installing
   } catch (error) {
     installing = false
+    releaseUpdateMaintenance()
     logError('desktop-updater', 'Could not start installer', { error })
     const message = error instanceof Error ? error.message : String(error)
     publishStatus({ phase: 'ready', error: message })
     void showUpdateDialog({
       type: 'error',
       title: '更新未安装',
-      message: '启动更新安装器失败，请稍后重试。',
+      message: '更新准备或启动失败，请重新启动 NovelForge 后重试。',
       detail: message,
       buttons: ['知道了'],
       noLink: true,
@@ -107,7 +120,7 @@ export function checkDesktopUpdates(): Promise<DesktopUpdateStatus> {
   return checkPromise
 }
 
-export function startDesktopUpdater(getWindow: () => BrowserWindow | null): void {
+export function startDesktopUpdater(getWindow: () => BrowserWindow | null, prepareForUpdate: () => Promise<void>): void {
   if (!canUseDesktopUpdater(app.isPackaged, process.platform, process.env.PORTABLE_EXECUTABLE_FILE)) return
   const executablePath = app.getPath('exe')
   if (updateMode() !== 'installed') {
@@ -115,6 +128,7 @@ export function startDesktopUpdater(getWindow: () => BrowserWindow | null): void
     return
   }
   windowProvider = getWindow
+  prepareUpdate = prepareForUpdate
   updateState = { phase: 'idle', latestVersion: null, downloadPercent: null, checkedAt: null, error: null }
   installing = false
   promptedVersion = ''
@@ -140,7 +154,9 @@ export function startDesktopUpdater(getWindow: () => BrowserWindow | null): void
   })
   autoUpdater.on('error', (error) => {
     logError('desktop-updater', 'Update failed', { error })
-    publishStatus({ phase: 'error', error: error.message })
+    const failedInstall = installing
+    if (failedInstall) { installing = false; releaseUpdateMaintenance() }
+    publishStatus({ phase: failedInstall ? 'ready' : 'error', error: error.message })
   })
   autoUpdater.on('update-downloaded', (info) => {
     if (installing) return
@@ -159,7 +175,7 @@ export function startDesktopUpdater(getWindow: () => BrowserWindow | null): void
         cancelId: 1,
         noLink: true,
       })
-      if (answer === 0) beginInstall(info.version)
+      if (answer === 0) await beginInstall(info.version)
     })().catch((error: unknown) => {
       logError('desktop-updater', 'Could not show update prompt', { error })
     })

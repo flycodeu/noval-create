@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
 const { randomUUID } = require('node:crypto')
+const { execFileSync } = require('node:child_process')
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js')
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js')
 const { seedPackagedMcpSmoke } = require('./seed-packaged-mcp-smoke.cjs')
@@ -25,6 +26,7 @@ const expectedTools = [
   'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
+const bridgePids = new Map()
 let stderr = ''
 let owner
 let fixtureServer
@@ -62,13 +64,34 @@ async function rpc(service, method, args = []) {
   assert.equal(result.ok, true, result.error?.message)
   return result.data
 }
-async function connect() {
+async function connect(timeout = 60_000) {
   const transport = new StdioClientTransport({ command: executable, args, cwd: workspaceRoot, env, stderr: 'pipe' })
   transport.stderr?.on('data', (chunk) => { stderr += String(chunk) })
   const client = new Client({ name: 'packaged-mcp-smoke', version: '2.0.0' })
   clients.push(client)
-  await client.connect(transport, { timeout: 60_000 })
+  const connecting = client.connect(transport, { timeout })
+  bridgePids.set(client, transport.pid)
+  await connecting
   return client
+}
+function verifyInstallFilesReleased() {
+  if (bundled) return
+  const installRoot = fs.realpathSync(path.join(workspaceRoot, 'release/win-unpacked'))
+  const files = [executable, path.join(installRoot, 'resources/app.asar')].map((file) => fs.realpathSync(file))
+  for (const file of files) {
+    const relative = path.relative(installRoot, file)
+    assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'Unsafe packaged file path')
+  }
+  // Write access plus FileShare.None also rejects a mapped Windows executable.
+  // Only open and close the handle; never write bytes or modify an installation.
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    '$ErrorActionPreference = "Stop"; foreach ($testFile in ($env:NOVELFORGE_SMOKE_INSTALL_FILES | ConvertFrom-Json)) { $stream = [System.IO.File]::Open($testFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); $stream.Dispose() }'],
+  { env: { ...process.env, NOVELFORGE_SMOKE_INSTALL_FILES: JSON.stringify(files) }, windowsHide: true, timeout: 10_000, encoding: 'utf8' })
+}
+function profileProcessIds() {
+  return JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    '$ErrorActionPreference = "Stop"; $processIds = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($env:NOVELFORGE_SMOKE_USER_DATA, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -ExpandProperty ProcessId); ConvertTo-Json -InputObject $processIds -Compress'],
+  { env: { ...process.env, NOVELFORGE_SMOKE_USER_DATA: testUserData }, windowsHide: true, timeout: 10_000, encoding: 'utf8' }).trim())
 }
 async function call(client, name, input) {
   const result = await client.callTool({ name: `novelforge.${name}`, arguments: input }, undefined, { timeout: 15_000 })
@@ -168,13 +191,34 @@ async function main() {
     await first.close()
     assert.equal((await (await request('/health')).json()).instanceId, owner.instanceId, 'Disconnecting a bridge must preserve the owner')
     assert((await call(second, 'projects.list', {})).projects.some((row) => row.id === novelId))
+    const third = await connect()
+    const connectedPids = [second, third].map((client) => bridgePids.get(client))
+    assert(connectedPids.every((pid) => Number.isInteger(pid) && processAlive(pid)), 'Both stdio bridges must remain connected before owner shutdown')
+    assert.equal((await request('/shutdown', 'POST')).status, 200)
+    try {
+      await until(() => !processAlive(owner.pid) && connectedPids.every((pid) => !processAlive(pid)), 'Owner and both idle bridges exit without closing client stdin')
+    } catch (error) {
+      throw new Error(`${error.message}; ownerAlive=${processAlive(owner.pid)}; bridgeAlive=${connectedPids.map(processAlive).join(',')}; discoveryExists=${fs.existsSync(discoveryPath)}`, { cause: error })
+    }
+    await assert.rejects(second.listTools(), 'A stopped bridge cannot silently reconnect')
+    await wait(1_500)
+    assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'Established bridges must not resurrect the owner')
+
+    fs.writeFileSync(path.join(testUserData, 'novelforge-update.json'), JSON.stringify({ id: randomUUID(), version: health.version, expiresAt: Date.now() + 60_000 }))
+    await assert.rejects(connect(10_000), 'Update maintenance must reject a new old-version bridge')
+    const blockedPid = bridgePids.get(clients.at(-1))
+    assert(Number.isInteger(blockedPid), 'The rejected bridge must have been launched')
+    await until(() => !processAlive(blockedPid), 'Update-blocked bridge exit')
+    assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'Maintenance must prevent owner restart')
+    await until(() => profileProcessIds().length === 0, 'All Chromium children using the isolated profile exit')
+    verifyInstallFilesReleased()
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error
   } finally {
     await cleanup()
   }
-  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: 18 tools; 2 clients / 1 owner; project + atlas apply/query + model error + workflow start/cancel + explicit shutdown; isolated profile removed\n`)
+  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: 18 tools; 2 clients / 1 owner; project + atlas apply/query + model error + workflow start/cancel; owner-first shutdown releases both bridges and Chromium children; maintenance prevents restart${bundled ? '' : '; executable and app.asar exclusive ReadWrite access (no bytes written)'}; isolated profile removed\n`)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

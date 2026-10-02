@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
     }),
   },
   showMessageBox: vi.fn(),
+  prepare: vi.fn(),
+  beginMaintenance: vi.fn(),
+  releaseMaintenance: vi.fn(),
 }))
 
 vi.mock('electron', () => ({
@@ -34,8 +37,10 @@ vi.mock('../utils/runtime-log', () => ({
   logInfo: vi.fn(),
   logWarn: vi.fn(),
 }))
+vi.mock('../utils/update-lifecycle', () => ({ beginUpdateMaintenance: mocks.beginMaintenance }))
 
-import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './desktop-updater'
+import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater as start } from './desktop-updater'
+const startDesktopUpdater = (getWindow: () => BrowserWindow | null) => start(getWindow, mocks.prepare)
 
 describe('desktop updater installation', () => {
   const portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE
@@ -48,7 +53,10 @@ describe('desktop updater installation', () => {
     mocks.app.getPath.mockReturnValue('D:\\My Novels\\NovelForge.exe')
     mocks.updater.installDirectory = undefined
     mocks.showMessageBox.mockReset().mockResolvedValue({ response: 0 })
-    mocks.updater.quitAndInstall.mockClear()
+    mocks.updater.quitAndInstall.mockReset()
+    mocks.prepare.mockReset().mockResolvedValue(undefined)
+    mocks.releaseMaintenance.mockReset()
+    mocks.beginMaintenance.mockReset().mockReturnValue({ release: mocks.releaseMaintenance })
     mocks.updater.on.mockClear()
     mocks.updater.checkForUpdates.mockReset().mockResolvedValue(null)
   })
@@ -66,6 +74,48 @@ describe('desktop updater installation', () => {
     mocks.events.get('update-downloaded')?.({ version: '1.0.2' })
     await vi.waitFor(() => expect(mocks.updater.quitAndInstall).toHaveBeenCalledWith(true, true))
     expect(mocks.showMessageBox).toHaveBeenCalledOnce()
+    expect(mocks.beginMaintenance.mock.invocationCallOrder[0]).toBeLessThan(mocks.prepare.mock.invocationCallOrder[0])
+    expect(mocks.prepare.mock.invocationCallOrder[0]).toBeLessThan(mocks.updater.quitAndInstall.mock.invocationCallOrder[0])
+  })
+
+  it('waits for shutdown and bridge exit before starting the installer', async () => {
+    let finish!: () => void
+    mocks.prepare.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+    startDesktopUpdater(() => null)
+    mocks.events.get('update-downloaded')?.({ version: '2.0.2' })
+    await vi.waitFor(() => expect(mocks.prepare).toHaveBeenCalledOnce())
+    expect(mocks.updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(mocks.releaseMaintenance).not.toHaveBeenCalled()
+    finish()
+    await vi.waitFor(() => expect(mocks.updater.quitAndInstall).toHaveBeenCalledOnce())
+  })
+
+  it('does not run the installer and releases maintenance when shutdown or bridge waiting fails', async () => {
+    mocks.prepare.mockRejectedValue(new Error('MCP bridges did not exit'))
+    startDesktopUpdater(() => null)
+    mocks.events.get('update-downloaded')?.({ version: '2.0.2' })
+    await vi.waitFor(() => expect(mocks.releaseMaintenance).toHaveBeenCalledOnce())
+    expect(mocks.updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(getDesktopUpdateStatus()).toMatchObject({ phase: 'ready', error: 'MCP bridges did not exit' })
+  })
+
+  it('releases maintenance for updater errors dispatched instead of thrown by quitAndInstall', async () => {
+    mocks.updater.quitAndInstall.mockImplementation(() => {
+      mocks.events.get('error')?.(Object.assign(new Error('Installer could not start'), { version: '' }))
+    })
+    startDesktopUpdater(() => null)
+    mocks.events.get('update-downloaded')?.({ version: '2.0.2' })
+    await vi.waitFor(() => expect(mocks.releaseMaintenance).toHaveBeenCalledOnce())
+    expect(getDesktopUpdateStatus()).toMatchObject({ phase: 'ready', error: 'Installer could not start' })
+  })
+
+  it('also releases maintenance for an asynchronous installer spawn error', async () => {
+    startDesktopUpdater(() => null)
+    mocks.events.get('update-downloaded')?.({ version: '2.0.2' })
+    await vi.waitFor(() => expect(mocks.updater.quitAndInstall).toHaveBeenCalledOnce())
+    mocks.events.get('error')?.(Object.assign(new Error('Async spawn failed'), { version: '' }))
+    expect(mocks.releaseMaintenance).toHaveBeenCalledOnce()
+    expect(getDesktopUpdateStatus()).toMatchObject({ phase: 'ready', error: 'Async spawn failed' })
   })
 
   it('does not start installation when the user postpones it', async () => {
@@ -74,6 +124,7 @@ describe('desktop updater installation', () => {
     mocks.events.get('update-downloaded')?.({ version: '1.0.2' })
     await vi.waitFor(() => expect(mocks.showMessageBox).toHaveBeenCalledOnce())
     expect(mocks.updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(mocks.beginMaintenance).not.toHaveBeenCalled()
     expect(getDesktopUpdateStatus()).toMatchObject({ currentVersion: '1.1.1', phase: 'ready', latestVersion: '1.0.2' })
     mocks.showMessageBox.mockResolvedValue({ response: 0 })
     expect(await installDownloadedUpdate()).toBe(true)
