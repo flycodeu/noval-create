@@ -31,7 +31,7 @@ import type {
   SourceSearchTestResult,
 } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import { WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import { DEEPSEEK_V4_MAX_OUTPUT_TOKENS, getProviderMaxOutputTokens } from '../../shared/model-token-limits'
 import './index.css'
 
@@ -472,7 +472,6 @@ export default function ModelManager() {
   const currentSourceMode = (selectedSourceProvider || sourceSettings?.provider || 'auto') as SourceSearchProviderMode
   const sourceGuide = SOURCE_PROVIDER_GUIDE[currentSourceMode] || SOURCE_PROVIDER_GUIDE.auto
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
-  const providerCount = new Set(configs.map((config) => config.provider)).size
   const activeSourceLabel = sourceSettings?.activeProvider
     ? getSourceProviderLabel(sourceSettings.activeProvider)
     : getSourceProviderLabel(sourceSettings?.provider)
@@ -488,7 +487,7 @@ export default function ModelManager() {
         className="admin-page model-manager-page"
         layout="wide"
         heroVariant="compact"
-        title="模型与搜索管理"
+        title="创作模型"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
@@ -504,14 +503,6 @@ export default function ModelManager() {
               </Button>
             </div>
           </div>
-        )}
-        metrics={(
-          <>
-            <WorkspaceMetric label="模型配置" value={configs.length} tone="cool" />
-            <WorkspaceMetric label="默认配置" value={defaultCount} />
-            <WorkspaceMetric label="接入厂商" value={providerCount} tone="warm" />
-            <WorkspaceMetric label="来源检索" value={activeSourceLabel} />
-          </>
         )}
       >
         <div className="model-manager-layout">
@@ -820,12 +811,12 @@ export default function ModelManager() {
 
             <Form.Item
               name="maxTokens"
-              label="最大输出长度（Max Tokens）"
+              label="单次输出上限（Token）"
               extra={selectedProvider === 'deepseek'
-                ? 'DeepSeek V4 当前最大输出长度为 384K（393216 Token）。这里控制单次回复最多可生成多少 Token。'
-                : '控制单次回复最多可生成多少 Token。实际可用上限仍取决于模型提供方。'}
+                ? '这是输出额度，不是输入窗口。创作流程会按阶段预留输出，正文最多使用 16000 Token；无需把每次请求都设到模型最大值。'
+                : '这是输出额度，不是上下文窗口。创作流程会按阶段预留输出，实际额度受模型窗口限制。'}
             >
-              <InputNumber min={512} max={getProviderMaxOutputTokens(selectedProvider)} step={512} placeholder="例如：65536 / 128000 / 393216" />
+              <InputNumber min={512} max={getProviderMaxOutputTokens(selectedProvider)} step={512} placeholder="例如：16000" />
             </Form.Item>
 
             <Form.Item

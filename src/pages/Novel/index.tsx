@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Drawer, Dropdown, Input, Modal, Spin, message } from 'antd'
 import { ArrowLeftOutlined, EllipsisOutlined, MenuOutlined, SearchOutlined } from '@ant-design/icons'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AUTHOR_WORKSPACE_PAGES, getAuthorWorkspaceKey, type AuthorWorkspaceKey } from '../../shared/author-workspace'
+import { AUTHOR_WORKSPACE_PAGES, getAuthorWorkspaceKey, resolveAuthorWorkspaceRoute, type AuthorWorkspaceKey } from '../../shared/author-workspace'
 import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { useNovelStore } from '../../stores/novel.store'
 import { useThemeStore } from '../../stores/theme.store'
@@ -34,6 +34,7 @@ export default function NovelRouter() {
   const currentPage = getAuthorWorkspaceKey(location.pathname.split('/').filter(Boolean)[2] || 'guide')
   const page = AUTHOR_WORKSPACE_PAGES.find((item) => item.key === currentPage)!
   const Page = PAGES[currentPage]
+  const legacyDestination = resolveAuthorWorkspaceRoute(location.pathname.split('/').filter(Boolean).slice(2).join('/'), location.search)
   const novel = useNovelStore((state) => state.currentNovel)
   const setNovel = useNovelStore((state) => state.setCurrentNovel)
   const resetWorkspace = useNovelStore((state) => state.resetWorkspace)
@@ -84,8 +85,8 @@ export default function NovelRouter() {
     const target = route.startsWith('/') ? route : buildWorkspaceRoute(novelId, route)
     const perform = () => { skipHashGuard.current = true; navigate(target); setDrawerOpen(false) }
     if (!dirtyRef.current?.()) { perform(); return }
-    Modal.confirm({ title: '正文还有未保存的修改', content: '离开后，未保存的修改会丢失。', okText: '放弃并离开', okButtonProps: { danger: true }, cancelText: '继续编辑', onOk: perform })
-  }, [navigate, novelId])
+    Modal.confirm({ title: '当前内容还有未保存的修改', content: '离开后，未保存的修改会丢失。', okText: '放弃并离开', okButtonProps: { danger: true }, cancelText: '继续编辑', onOk: perform })
+  }, [navigate, novelId, setDrawerOpen])
 
   useEffect(() => {
     const guardKey = (hash: string) => hash.replace(/\/writing(?:\/editor|\/review|\/history|\/context)?(?=[?#]|$)/, '/writing')
@@ -96,7 +97,7 @@ export default function NovelRouter() {
       if (guardKey(previous) === guardKey(next) || !dirtyRef.current?.()) { previousHash.current = next; return }
       skipHashGuard.current = true
       window.location.hash = previous
-      Modal.confirm({ title: '正文还有未保存的修改', content: '离开后，未保存的修改会丢失。', okText: '放弃并离开', cancelText: '继续编辑', onOk: () => { skipHashGuard.current = true; window.location.hash = next } })
+      Modal.confirm({ title: '当前内容还有未保存的修改', content: '离开后，未保存的修改会丢失。', okText: '放弃并离开', cancelText: '继续编辑', onOk: () => { skipHashGuard.current = true; window.location.hash = next } })
     }
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirtyRef.current?.()) { event.preventDefault(); event.returnValue = '' } }
     window.addEventListener('hashchange', hashChange)
@@ -107,7 +108,7 @@ export default function NovelRouter() {
   const openSearch = useCallback(() => {
     setSearchOpen(true)
     void window.electron.chapter.list(novelId).then(setChapters).catch((cause) => message.error(cause instanceof Error ? cause.message : '读取章节失败'))
-  }, [novelId])
+  }, [novelId, setSearchOpen])
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveRef.current?.() }
@@ -126,6 +127,7 @@ export default function NovelRouter() {
   if (!Number.isSafeInteger(novelId) || novelId <= 0) return <Navigate to="/novels" replace />
   if (error && novel?.id !== novelId) return <div className="author-shell-error"><h2>作品暂时无法打开</h2><p>{error}</p><Button onClick={() => navigate('/novels')}>返回作品列表</Button></div>
   if (novel?.id !== novelId) return <div className="author-loading"><Spin size="large" /></div>
+  if (legacyDestination) return <Navigate to={buildWorkspaceRoute(novelId, legacyDestination)} replace />
 
   return <WorkspaceErrorBoundary resetKey={`${novelId}:${currentPage}`}><NovelWorkspaceActionsProvider value={actions}><NovelWorkspaceQualityProvider value={qualityContext}><WorkspaceChromePortalContext.Provider value={chromeContext}>
     <div className={`author-shell${currentPage === 'writing' ? ' author-shell--writing' : ''}`}>

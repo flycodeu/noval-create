@@ -54,9 +54,9 @@ describe('generic asset quality gate', () => {
         warnings: ['network unavailable'],
       }),
     })
-    expect(result.status).toBe('needs_revision')
+    expect(result.status).toBe('blocked')
     expect(result.readyForHumanApply).toBe(false)
-    expect(result.checks).toContainEqual(expect.objectContaining({ code: 'model_review', status: 'warn' }))
+    expect(result.checks).toContainEqual(expect.objectContaining({ code: 'model_review', status: 'fail' }))
   })
 
   it('blocks malformed JSON even when the model review says accepted', () => {
@@ -64,6 +64,21 @@ describe('generic asset quality gate', () => {
     expect(result.status).toBe('blocked')
     expect(result.readyForHumanApply).toBe(false)
     expect(result.hardBlockers).toContain('JSON 输出无法解析为对象或数组。')
+  })
+  it('honors rejection even when an inconsistent caller labels the stage accepted', () => {
+    expect(assess({ quality: quality({ review: { ...quality().review, rejectRequired: true } }) }).status).toBe('blocked')
+  })
+  it('reports the real map pilot rewrite transport failure without calling it a model rejection', () => {
+    const result = assess({ quality: quality({ stage: 'rejected', failureStage: 'rewrite', warnings: ['terminated'], review: {
+      ...quality().review, summary: '总体可用。两处地点严格满足数量与层级要求，主要是设定稿语气。', rewriteRequired: true, rejectRequired: false,
+    } }) })
+    expect(result).toMatchObject({ status: 'blocked', readyForHumanApply: false })
+    expect(result.summary).toContain('修订请求未完成：terminated')
+    expect(result.summary).not.toContain('模型审校拒收')
+  })
+  it('uses the final review summary when a completed recheck rejects content', () => {
+    const result = assess({ quality: quality({ stage: 'rejected', rewrittenReview: { ...quality().review, rejectRequired: true, summary: '修订后路线端点不存在' } }) })
+    expect(result.hardBlockers).toContain('模型审校拒收：修订后路线端点不存在')
   })
 
   it('marks a clean current-context asset ready for author application', () => {

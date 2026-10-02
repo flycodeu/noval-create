@@ -135,6 +135,10 @@ function getMigrationIds(db) {
 }
 
 function assertRequiredColumns(db) {
+  const revealPlan = db.prepare('PRAGMA table_info(story_facts)').all().find(row => row.name === 'planned_reveal_chapter_num')
+  assert.ok(revealPlan)
+  assert.equal(revealPlan.notnull, 0)
+  assert.equal(revealPlan.dflt_value, null)
   assert.ok(getColumns(db, 'recommendation_preflight_runs').has('counted_external_attempt'))
   assert.ok(getColumns(db, 'recommendation_preflight_runs').has('content_hash'))
   assert.ok(getColumns(db, 'recommendation_candidates').has('preflight_run_id'))
@@ -536,6 +540,7 @@ function testFreshDbIsIdempotent() {
       '0068_writeback_source_identity',
       '0069_model_attempt_output',
       '0070_story_atlas',
+      '0071_fact_reveal_plan',
     ])
 
     runMigrations(db)
@@ -685,6 +690,7 @@ function testPartialSchemaCanResume() {
       '0068_writeback_source_identity',
       '0069_model_attempt_output',
       '0070_story_atlas',
+      '0071_fact_reveal_plan',
     ])
 
     const configs = db.prepare(`
@@ -709,6 +715,7 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
   const db = openDb('legacy-typed-ref-backfill.db')
   try {
     db.exec(`
+      CREATE TABLE story_facts (id INTEGER PRIMARY KEY);
       CREATE TABLE _schema_migrations (
         id TEXT PRIMARY KEY,
         applied_at TEXT NOT NULL
@@ -833,6 +840,7 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
   const db = openDb('legacy-character-design-backfill.db')
   try {
     db.exec(`
+      CREATE TABLE story_facts (id INTEGER PRIMARY KEY);
       CREATE TABLE _schema_migrations (
         id TEXT PRIMARY KEY,
         applied_at TEXT NOT NULL
@@ -1211,9 +1219,36 @@ function testRecommendationGovernanceTriggers() {
   }
 }
 
+function testFactRevealPlanPreservesExistingKnowledge() {
+  const db = openDb('fact-reveal-plan-migration.db')
+  try {
+    runMigrations(db)
+    // Reproduce the prior schema with a real existing information point.
+    db.prepare('DELETE FROM _schema_migrations WHERE id = ?').run('0071_fact_reveal_plan')
+    db.exec('ALTER TABLE story_facts DROP COLUMN planned_reveal_chapter_num')
+    const novelId = Number(db.prepare('INSERT INTO novels(title) VALUES(?)').run('旧信息点迁移').lastInsertRowid)
+    const chapterId = Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title) VALUES(?,2,?)').run(novelId, '读信').lastInsertRowid)
+    const knowledge = JSON.stringify([{ characterId: 12, knownChapterId: null }, { characterId: 13, knownChapterId: chapterId, evidenceQuote: '信上写着割绳者的名字。' }])
+    const factId = Number(db.prepare('INSERT INTO story_facts(novel_id,title,summary,reader_known_chapter_id,protagonist_known_chapter_id,character_knowledge_json,notes) VALUES(?,?,?,?,?,?,?)')
+      .run(novelId, '割绳者', '信中有确切名字。', chapterId, chapterId, knowledge, '保留作者原文，不混入迁移说明。').lastInsertRowid)
+    const before = db.prepare('SELECT * FROM story_facts WHERE id=?').get(factId)
+    runMigrations(db)
+    const { planned_reveal_chapter_num: planned, ...after } = db.prepare('SELECT * FROM story_facts WHERE id=?').get(factId)
+    assert.deepEqual(after, before, 'migration preserves every existing fact field and legacy unknown knowledge')
+    assert.equal(planned, null, 'migration must not infer a planned or actual reveal from existing data')
+    db.prepare('UPDATE story_facts SET planned_reveal_chapter_num=8 WHERE id=?').run(factId)
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT planned_reveal_chapter_num FROM story_facts WHERE id=?').get(factId).planned_reveal_chapter_num, 8)
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM _schema_migrations WHERE id=?').get('0071_fact_reveal_plan').count, 1)
+  } finally {
+    db.close()
+  }
+}
+
 function runAllTests() {
   prepareTempDir()
   testFreshDbIsIdempotent()
+  testFactRevealPlanPreservesExistingKnowledge()
   testWritebackSourceIdentityMigrationRollbackAndRecovery()
   testPartialSchemaCanResume()
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()

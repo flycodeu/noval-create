@@ -32,7 +32,10 @@ interface ProjectRecord {
 }
 
 interface CharacterRecord {
-  id: number
+  id: number | string
+  nativeId?: number | null
+  summary?: string
+  attributes?: Record<string, unknown>
   novelId: number
   roleType?: string | null
   recordStatus?: string | null
@@ -207,6 +210,9 @@ function projectSummary(project: ProjectRecord) {
 function characterSummary(character: CharacterRecord) {
   return {
     id: character.id,
+    nativeId: character.nativeId ?? (typeof character.id === 'number' ? character.id : null),
+    summary: character.summary || '',
+    attributes: character.attributes || {},
     novelId: character.novelId,
     fullName: character.fullName,
     roleType: toNullableString(character.roleType) || 'minor',
@@ -249,7 +255,10 @@ const projectSummarySchema = objectSchema({
 ])
 
 const characterSummarySchema = objectSchema({
-  id: positiveId,
+  id: { anyOf: [positiveId, { type: 'string', minLength: 1 }] },
+  nativeId: nullableInteger,
+  summary: { type: 'string' },
+  attributes: { type: 'object', additionalProperties: true },
   novelId: positiveId,
   fullName: { type: 'string', minLength: 1 },
   roleType: { type: 'string', minLength: 1 },
@@ -427,7 +436,7 @@ export function registerCoreReadTools(
       id: 'novelforge.characters.list',
       domain: 'characters',
       title: 'List character ecology',
-      description: 'Call before character planning or review to inspect existing roles, motivations, tensions, and narrative functions.',
+      description: '读取正式图谱人物及完整属性；id是atlas稳定ID，nativeId仅用于内部旧表引用。关系请调用atlas.query。',
       scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.contextRead],
       tags: ['characters', 'cast', 'ecology', 'context'],
       inputSchema: objectSchema({

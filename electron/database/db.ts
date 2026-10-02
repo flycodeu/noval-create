@@ -3071,6 +3071,9 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'model_request_attempts', 'output_truncated', 'INTEGER NOT NULL DEFAULT 0')
   })
   runMigrationStep(sqlite, '0070_story_atlas', () => migrateStoryAtlas(sqlite))
+  runMigrationStep(sqlite, '0071_fact_reveal_plan', () => {
+    ensureColumn(sqlite, 'story_facts', 'planned_reveal_chapter_num', 'INTEGER')
+  })
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {

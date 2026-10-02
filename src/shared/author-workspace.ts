@@ -7,7 +7,7 @@ export const AUTHOR_WORKSPACE_PAGES = [
 ] as const
 
 export type AuthorWorkspaceKey = typeof AUTHOR_WORKSPACE_PAGES[number]['key']
-const WORLD_ROUTES = new Set(['world-rules', 'map', 'narrative-board', 'characters', 'arc-center', 'resistance', 'factions', 'items', 'glossary', 'growth-system'])
+const WORLD_ROUTES = new Set(['map', 'narrative-board', 'characters', 'arc-center', 'resistance', 'factions', 'items', 'glossary', 'growth-system', 'timeline'])
 const WRITING_ROUTES = new Set(['contracts', 'writing', 'writeback'])
 const HISTORY_ROUTES = new Set(['revision', 'quality', 'batch-workbench'])
 
@@ -22,4 +22,25 @@ export function getAuthorWorkspaceKey(route: string): AuthorWorkspaceKey {
 
 export function chapterPositionLabel(atChapter: number | null | undefined) {
   return atChapter == null ? '全部已知设定' : `截至第 ${atChapter} 章`
+}
+
+const LEGACY_DESTINATIONS: Record<string, string> = {
+  overview: 'story-design?section=background', 'project-brief': 'story-design?section=background',
+  'core-settings': 'story-design?section=story', premise: 'story-design?section=story', endgame: 'story-design?section=story', threads: 'story-design?section=story',
+  'theme-voice': 'story-design?section=style', 'style-lab': 'story-design?section=style',
+  'world-rules': 'story-design?section=world', 'growth-system': 'story-design?section=world',
+  outline: 'story-design?section=structure', structure: 'story-design?section=structure', 'volume-design': 'story-design?section=structure', contracts: 'story-design?section=structure', 'scene-templates': 'story-design?section=structure',
+  'stage-planner': 'guide', map: 'narrative-board?view=locations', characters: 'narrative-board?view=characters&kind=character', 'arc-center': 'narrative-board?view=characters&kind=character', resistance: 'narrative-board?view=characters&kind=character',
+  factions: 'narrative-board?kind=faction', items: 'narrative-board?kind=item', timeline: 'narrative-board?kind=event', glossary: 'narrative-board',
+  writeback: 'writing/editor?panel=changes', 'writing/review': 'writing/editor?panel=review', 'writing/context': 'writing/editor?panel=arrangement', 'writing/history': 'writing/editor?panel=history',
+  quality: 'revision?view=issues', 'batch-workbench': 'revision?view=runs', 'foreshadow-ledger': 'story-design?section=story', 'info-gap-board': 'story-design?section=story',
+}
+
+export function resolveAuthorWorkspaceRoute(route: string, search = ''): string | null {
+  const destination = LEGACY_DESTINATIONS[route]
+  if (!destination) return null
+  const [path, defaults] = destination.split('?')
+  const params = new URLSearchParams(search)
+  new URLSearchParams(defaults).forEach((value, key) => params.set(key, value))
+  return `${path}${params.size ? `?${params}` : ''}`
 }

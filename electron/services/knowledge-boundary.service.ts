@@ -18,11 +18,14 @@ export interface StoryFactKnowledgeRow {
 export interface CharacterKnowledgeEntry {
   characterId: number
   knownChapterId: number | null
+  /** Explicit initial knowledge. A missing chapter alone remains unknown. */
+  knownFromStart?: boolean
 }
 
 export interface CharacterKnowledgeProjection {
   characterId: number
   knownChapterNum: number | null
+  knownFromStart?: boolean
 }
 
 /**
@@ -99,13 +102,14 @@ function parseKnowledgeEntries(raw: string | null | undefined): ParsedCharacterK
 
     const entries = parsed
       .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
-      .map((entry) => ({
-        characterId: toPositiveInteger(entry.characterId),
-        knownChapterId: entry.knownChapterId === null || entry.knownChapterId === undefined
-          ? null
-          : toPositiveInteger(entry.knownChapterId),
-      }))
-      .filter((entry): entry is CharacterKnowledgeEntry => typeof entry.characterId === 'number')
+      .flatMap((entry): CharacterKnowledgeEntry[] => {
+        const characterId = toPositiveInteger(entry.characterId)
+        if (characterId === null) return []
+        return [{ characterId,
+          knownChapterId: entry.knownChapterId === null || entry.knownChapterId === undefined ? null : toPositiveInteger(entry.knownChapterId),
+          ...(entry.knownFromStart === true && entry.knownChapterId === null ? { knownFromStart: true } : {}),
+        }]
+      })
 
     return { entries, malformed: false }
   } catch {
@@ -155,6 +159,9 @@ export function isFactKnownByCharacter(
   const boundary = options.boundary || 'end'
   const entry = fact.characterKnowledge.find((item) => item.characterId === characterId)
   if (entry) {
+    if (entry.knownFromStart === true && entry.knownChapterNum === null && isValidBoundaryChapter(upToChapterNum)) {
+      return { known: true, source: 'character_knowledge' }
+    }
     return evaluateKnowledge(entry.knownChapterNum, 'character_knowledge', upToChapterNum, boundary)
   }
 
@@ -278,6 +285,7 @@ function projectFact(
 
   const characterKnowledge = parsed.entries.map((entry) => {
     let knownChapterNum: number | null = null
+    if (entry.knownFromStart === true) return { characterId: entry.characterId, knownChapterNum, knownFromStart: true }
     if (entry.knownChapterId === null) {
       addDiagnostic(diagnostics, {
         code: 'knowledge_time_unknown',

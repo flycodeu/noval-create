@@ -55,9 +55,19 @@ export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
   economy: '当地产业', access: '出入通路', routes: '通行路线', transport: '交通', resources: '资源',
   intimacyLevel: '亲近程度', tensionLevel: '紧张程度', interactionStyle: '相处方式', subtextRule: '潜台词',
   relationType: '关系类型', timeLabel: '发生时间', chapterNum: '章节', significance: '事件影响',
+  relationLabelSnapshot: '关系称谓', relationTypeSnapshot: '关系类型', startState: '起初状态', crackPoint: '关系裂痕', changeEvent: '变化事件', endState: '当前关系状态', currentStatus: '进展状态', lastProgressChapterId: '最近推进章节', stalledReason: '停滞原因', notes: '补充说明',
   abilities: '能力与限制', goal: '目标', memberPolicy: '成员规则', currentPhase: '当前阶段',
   category: '类型', plotFunction: '故事作用', limitations: '使用限制', abilitySpec: '作用', cost: '代价', risk: '风险',
   eventType: '事件类型', eventCause: '前因', eventProcess: '经过', eventResult: '结果',
+}
+
+export function atlasDisplayAttributes(attributes: Record<string, unknown>, chapters: Array<{ id: number; chapterNum: number }>) {
+  const result = { ...attributes }
+  if (result.lastProgressChapterId != null && result.lastProgressChapterId !== '') {
+    const chapter = chapters.find(item => item.id === Number(result.lastProgressChapterId))
+    result.lastProgressChapterId = chapter ? `第 ${chapter.chapterNum} 章` : '关联章节不可用'
+  }
+  return result
 }
 
 export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, { x: number; y: number }> {
@@ -79,6 +89,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 }
 
 export function atlasAttributeValue(key: string, value: unknown) {
+  if (key === 'currentStatus') return ({ active: '推进中', stalled: '暂时停滞', completed: '已完成', resolved: '已解决', planned: '待推进', abandoned: '已放弃' } as Record<string, string>)[String(value)] || value
   if (key === 'roleType') return ({ protagonist: '主角', major: '主要人物', antagonist: '对立人物', supporting: '配角', minor: '次要人物' } as Record<string, string>)[String(value)] || value
   if (key === 'nodeType' || key === 'locationType') return ({ region: '地域', country: '国家', province: '州郡', city: '城市', town: '城镇', village: '村庄', building: '建筑', room: '屋室', site: '场景地点', location: '地点' } as Record<string, string>)[String(value)] || value
   if (key === 'routeOpen') return value === false || value === 0 ? '关闭' : '可通行'

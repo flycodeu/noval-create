@@ -5,10 +5,9 @@ import {
   DeleteOutlined,
   ExportOutlined,
   MoreOutlined,
-  ThunderboltOutlined,
+  ArrowRightOutlined,
 } from '@ant-design/icons'
 import type { Novel } from '../../../types'
-import type { WorkspaceSnapshot } from '../../../shared/novel-workspace'
 import './cards.css'
 
 const STATUS_META: Record<Novel['status'], { label: string }> = {
@@ -20,7 +19,6 @@ const STATUS_META: Record<Novel['status'], { label: string }> = {
 
 interface ProjectCardProps {
   novel: Novel
-  snapshot: WorkspaceSnapshot
   onOpen: () => void
   onDelete: () => void
   onExport: (format: string) => void
@@ -29,7 +27,6 @@ interface ProjectCardProps {
 
 export default function ProjectCard({
   novel,
-  snapshot,
   onOpen,
   onDelete,
   onExport,
@@ -54,7 +51,7 @@ export default function ProjectCard({
   ]
 
   return (
-    <article className="novel-project-card" onClick={onOpen}>
+    <article className="novel-project-card">
       <div className="novel-project-card__head">
         <div className="novel-project-card__title-block">
           <strong className="novel-project-card__title">{novel.title}</strong>
@@ -74,21 +71,13 @@ export default function ProjectCard({
         </div>
       </div>
 
-      <div className="novel-project-card__next-step">
-        <span className="novel-project-card__next-step-label">下一步</span>
-        <Tag
-          color="gold"
-          className="novel-project-card__next-step-tag"
-          title={snapshot.nextStep.reason}
-        >
-          {snapshot.nextStep.title}
-        </Tag>
-      </div>
+      <p className="novel-project-card__synopsis">{novel.synopsis || novel.userBackground || '故事尚在构思中，进入创作台继续完善。'}</p>
+      <div className="novel-project-card__metadata"><span>{(novel.totalWords || 0).toLocaleString()} 字正文</span><span>{novel.updatedAt ? `更新于 ${novel.updatedAt.slice(0, 10)}` : '尚未开始写作'}</span></div>
 
       <div className="novel-project-card__actions">
         <Button
           type="primary"
-          icon={<ThunderboltOutlined />}
+          icon={<ArrowRightOutlined />}
           onClick={(event) => {
             event.stopPropagation()
             onOpen()

@@ -11,13 +11,12 @@ import {
   throwReaderFeedbackError,
   type ReaderFeedbackScope,
 } from '../../src/shared/reader-feedback'
-import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
 import {
   normalizeOperatingMode,
   resolveOperatingMode,
   writeOperatingModeSettings,
 } from '../../src/shared/operating-mode'
-import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
+import { createEmptyWorldRules, normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -352,7 +351,7 @@ export function createNovel(data: {
     status: 'draft',
     lifecycleMode: 'automatic',
     totalWords: 0,
-    worldRulesJson: stringifyWorldRules(getBuiltinGenreRules(genre?.name)),
+    worldRulesJson: stringifyWorldRulesDraft(createEmptyWorldRules(genre?.name)),
   }).run()
 
   return Number(result.lastInsertRowid)
@@ -397,7 +396,7 @@ export function updateNovel(id: number, data: Partial<{
     if (typeof current.worldRulesJson === 'string' && current.worldRulesJson.trim()) {
       normalizedWorldRules = normalizeWorldRulesJson(current.worldRulesJson, nextGenre?.name)
     } else {
-      normalizedWorldRules = stringifyWorldRules(getBuiltinGenreRules(nextGenre?.name))
+      normalizedWorldRules = stringifyWorldRulesDraft(createEmptyWorldRules(nextGenre?.name))
     }
   }
 
@@ -540,5 +539,4 @@ export function getNovelStats(id: number) {
 }
 
 export { getNovelContextStatus }
-
 

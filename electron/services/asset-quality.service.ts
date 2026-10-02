@@ -1,9 +1,9 @@
-import { normalizeStoredQualityIssues, classifyQualityIssueLevels } from './quality-issue-policy'
-import { validateQualityIssuesForContent, qualityIssueArtifactHash } from '../../src/shared/quality-issue'
+import { classifyQualityIssueLevels } from './quality-issue-policy'
+import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
-import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { cleanAiFieldText, cleanAiStringArray } from '../../src/utils/text'
 import { safeParseJson } from '../utils/json'
 import { assetReviewPrompt, assetRewritePrompt } from './prompts'
 import {
@@ -44,6 +44,8 @@ export interface AssetQualityLoopResult {
   review: AssetReviewResult
   rewrittenReview?: AssetReviewResult
   warnings: string[]
+  /** The workflow could not finish this operation; distinct from a model rejecting the content. */
+  failureStage?: 'review' | 'rewrite' | 'recheck'
 }
 
 const DEFAULT_ASSET_QUALITY_BUDGET_MS = 240_000
@@ -87,7 +89,7 @@ function fallbackReview(summary: string, warning?: string): AssetReviewResult {
     summary: finalSummary,
     severity: 'medium',
     rewriteRequired: false,
-    rejectRequired: false,
+    rejectRequired: true,
     genreDriftRisks: [],
     themeDriftRisks: [],
     backgroundDriftRisks: [],
@@ -110,14 +112,26 @@ function isQualityBudgetSpent(startedAt: number, budgetMs: number): boolean {
 }
 
 export function parseAssetReviewResult(raw: string, content?: string, policyVersion?: 'legacy' | 'reader-first-v1'): AssetReviewResult {
-  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(raw))
+  // Evidence quotes and offsets describe the exact candidate; never clean their text before validation.
+  const parsed = safeParseJson<Record<string, unknown>>(raw)
   if (!parsed || typeof parsed !== 'object' || typeof parsed.summary !== 'string' || !parsed.summary.trim()
     || typeof parsed.rewrite_required !== 'boolean' || typeof parsed.reject_required !== 'boolean') {
     throw new Error('审校结果缺少有效摘要或明确的修订、拒收判断。')
   }
-  const issues = policyVersion === 'reader-first-v1' ? validateQualityIssuesForContent(normalizeStoredQualityIssues(
-    Array.isArray(parsed.issues) ? parsed.issues.map((issue) => ({ ...issue as Record<string, unknown>, detector: 'model' })) : [],
-  ), content || '') : undefined
+  const issues = policyVersion === 'reader-first-v1' ? (() => {
+    if (!Array.isArray(parsed.issues)) throw new Error('审校结果不完整：必须返回 issues 数组，无问题时返回空数组。')
+    if (!parsed.issues.length && (parsed.reject_required || parsed.rewrite_required)) throw new Error('审校结果不完整：拒收或修订判断缺少对应问题与证据。')
+    return parsed.issues.map((rawIssue) => {
+      const issue = normalizeQualityIssue(rawIssue && typeof rawIssue === 'object' ? { ...rawIssue, detector: 'model' } : rawIssue)
+      const spec = issue && getQualityIssueRuleSpec(issue.ruleId)
+      if (!issue || !spec) throw new Error('审校结果不完整：问题缺少有效规则或说明。')
+      const verified = validateQualityIssuesForContent([issue], content || '')[0]
+      if ((spec.requiresEvidence && !verified.evidence.length) || verified.evidence.length !== issue.evidence.length) {
+        throw new Error(`审校结果不完整：${issue.ruleId} 缺少当前候选的有效原文证据。`)
+      }
+      return verified
+    })
+  })() : undefined
   const levels = issues ? classifyQualityIssueLevels(issues) : undefined
   return {
     ...(issues ? { issues } : {}),
@@ -253,7 +267,8 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
       schemaHint: options.schemaHint,
       reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
         '阅读问题按 fact/format/narrative/style 与 blocker/repair/advice 分级；风格偏好仅为 advice，不因数量或模型布尔判断强制改写。',
-        `在 JSON 中补充 issues 数组：每项含 id、ruleId、category、level、detector=model、confidence、scope、message、evidence。evidence 含 artifactHash=${qualityIssueArtifactHash(options.generatedOutput)}、start、end（JS UTF-16 索引）、quote。没有证据不补造。`,
+        `必须返回 issues 数组，无问题返回 []；拒收/修订判断必须有对应问题。每项含 id、ruleId、category、level、detector=model、confidence、scope、message、evidence。evidence 是数组，每项含 artifactHash=${qualityIssueArtifactHash(options.generatedOutput)}、start、end（JS UTF-16 索引）、quote（逐字原文，不清洗）。没有证据不补造。`,
+        `ruleId 只能使用以下规则，分类/默认级别为：${JSON.stringify(QUALITY_ISSUE_RULE_SPECS)}。`,
       ] : [])],
     }),
     chatOpts: options.chatOpts,
@@ -318,21 +333,22 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
     review = fallbackReview('资产审校失败，已保留原始输出。', warning)
     updateAssetReviewProgress(options.parentTaskId, options.sender, {
       targetType: options.targetType,
-      stage: 'accepted',
+      stage: 'rejected',
       reviewSummary: review.summary,
       severity: review.severity,
       rewriteRequired: false,
-      rejectRequired: false,
+      rejectRequired: true,
       topFixes: [],
       risks: [],
       warnings: [warning],
       message: '资产审校失败，已保留原始输出。',
     })
     return {
-      stage: 'accepted',
+      stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [warning],
+      failureStage: 'review',
     }
   }
 
@@ -389,21 +405,22 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
   if (skipRewriteWarning) {
     updateAssetReviewProgress(options.parentTaskId, options.sender, {
       targetType: options.targetType,
-      stage: 'accepted',
+      stage: 'rejected',
       reviewSummary: review.summary,
       severity: review.severity,
-      rewriteRequired: false,
+      rewriteRequired: true,
       rejectRequired: false,
       topFixes: review.topFixes,
       risks: collectReviewRisks(review),
       warnings: [skipRewriteWarning],
-      message: '资产审校已记录待复核问题，当前结果先进入落库。',
+      message: '资产审校问题尚未修订，已保留候选并阻止应用。',
     })
     return {
-      stage: 'accepted',
+      stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [skipRewriteWarning],
+      failureStage: 'rewrite',
     }
   }
 
@@ -426,10 +443,10 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
     const warning = error instanceof Error ? error.message : '资产重写失败，已保留原始输出。'
     updateAssetReviewProgress(options.parentTaskId, options.sender, {
       targetType: options.targetType,
-      stage: 'accepted',
+      stage: 'rejected',
       reviewSummary: review.summary,
       severity: review.severity,
-      rewriteRequired: false,
+      rewriteRequired: true,
       rejectRequired: false,
       topFixes: review.topFixes,
       risks: collectReviewRisks(review),
@@ -437,32 +454,34 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       message: '资产重写失败，已保留原始输出。',
     })
     return {
-      stage: 'accepted',
+      stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [warning],
+      failureStage: 'rewrite',
     }
   }
 
   if (isQualityBudgetSpent(startedAt, qualityBudgetMs)) {
-    const warning = `资产已完成定向重写，但质量循环已达到 ${Math.round(qualityBudgetMs / 1000)} 秒预算，已跳过复检并采用重写结果。`
+    const warning = `资产已完成定向重写，但质量循环已达到 ${Math.round(qualityBudgetMs / 1000)} 秒预算，候选已保留，复检通过前不能应用。`
     updateAssetReviewProgress(options.parentTaskId, options.sender, {
       targetType: options.targetType,
-      stage: 'accepted',
+      stage: 'rejected',
       reviewSummary: review.summary,
       severity: review.severity,
       rewriteRequired: false,
-      rejectRequired: false,
+      rejectRequired: true,
       topFixes: review.topFixes,
       risks: collectReviewRisks(review),
       warnings: [warning],
       message: '资产重写完成，已因预算限制跳过复检。',
     })
     return {
-      stage: 'rewritten',
+      stage: 'rejected',
       finalOutput: rewrittenOutput,
       review,
       warnings: [warning],
+      failureStage: 'recheck',
     }
   }
 
@@ -479,49 +498,50 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
   try {
     rewrittenReview = await reviewGeneratedAsset(recheckOptions)
   } catch (error) {
-    const warning = error instanceof Error ? error.message : '重写复检失败，已采用重写结果。'
-    const fallback = fallbackReview('重写后复检失败，已采用重写结果。', warning)
+    const warning = error instanceof Error ? error.message : '重写复检失败，已保留候选并阻止应用。'
+    const fallback = fallbackReview('重写后复检失败，已保留候选并阻止应用。', warning)
     updateAssetReviewProgress(options.parentTaskId, options.sender, {
       targetType: options.targetType,
-      stage: 'accepted',
+      stage: 'rejected',
       reviewSummary: fallback.summary,
       severity: fallback.severity,
       rewriteRequired: false,
-      rejectRequired: false,
+      rejectRequired: true,
       topFixes: review.topFixes,
       risks: collectReviewRisks(review),
       warnings: [warning],
-      message: '重写复检失败，已采用重写结果。',
+      message: '重写复检失败，已保留候选并阻止应用。',
     })
     return {
-      stage: 'rewritten',
+      stage: 'rejected',
       finalOutput: rewrittenOutput,
       review,
       rewrittenReview: fallback,
       warnings: [warning],
+      failureStage: 'recheck',
     }
   }
 
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
     targetType: options.targetType,
-    stage: rewrittenReview.rejectRequired ? 'rejected' : 'accepted',
+    stage: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired ? 'rejected' : 'accepted',
     reviewSummary: rewrittenReview.summary,
     severity: rewrittenReview.severity,
     rewriteRequired: rewrittenReview.rewriteRequired,
     rejectRequired: rewrittenReview.rejectRequired,
     topFixes: rewrittenReview.topFixes,
     risks: collectReviewRisks(rewrittenReview),
-    message: rewrittenReview.rejectRequired
+    message: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired
       ? '资产重写后复检仍不通过，当前结果已拒收。'
       : '资产重写完成并通过复检。',
   })
 
   return {
-    stage: rewrittenReview.rejectRequired ? 'rejected' : 'rewritten',
+    stage: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired ? 'rejected' : 'rewritten',
     finalOutput: rewrittenOutput,
     review,
     rewrittenReview,
-    warnings: rewrittenReview.rejectRequired ? [rewrittenReview.summary] : [],
+    warnings: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired ? [rewrittenReview.summary] : [],
   }
 }
 

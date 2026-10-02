@@ -3,12 +3,17 @@ import { hasHardContractValidationBlocker } from '../../src/shared/contract-vali
 import { estimateTokens } from '../../src/shared/token-budget'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasChange } from '../../src/shared/story-atlas'
+import type { GenericAssetDraftContent } from '../../src/shared/generic-asset-workflow'
+import { parseStorySettingsDocument } from '../../src/shared/story-settings'
+import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { listChapters } from './chapter.service'
 import { getNovel } from './novel.service'
 import { queryStoryAtlas } from './story-atlas.service'
 import { getChapterContractBlockers, loadChapterContractAuditContext } from './chapter-publish-contract-gate'
 import { validateChapterContractDelivery } from './chapter-contract-validator.service'
 import { listSceneContracts } from './endgame-asset.service'
+import { requireArtifact } from './artifact.service'
+import { resolveProsePolicyMaterial } from './prose-operation.service'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -70,6 +75,48 @@ function publicFields(attributes: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(attributes).filter(([key]) => publicAttributes.has(key)))
 }
 
+/** Only saved material is projected: no genre defaults or inferred canon. */
+export function creativeProjectSources(novel: { worldRulesJson?: string | null; settingsJson?: string | null; themeVoiceJson?: string | null }, chapter = false) {
+  const entries: Array<{ key: string; value: unknown; required: boolean }> = []
+  const add = (key: string, value: unknown) => {
+    if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) return
+    const required = /^(?:premise:(?:constraints|languageGuardrails)|writing_rules:|world_rules:(?:powerSystems|writingConstraints)|voice:(?:pov|tense|viewpointMode|narratorDistance|styleRules|dialogueRules|descriptionRules|forbiddenPhrases|writingContractTags)|story_design:(?:storyGoal|coreConflict))/u.test(key)
+    entries.push({ key, value, required })
+  }
+  const settings = parseStorySettingsDocument(novel.settingsJson)
+  for (const [key, value] of Object.entries(settings.premise)) add(`premise:${key}`, value)
+  for (const [key, value] of Object.entries(settings.writingRules)) add(`writing_rules:${key}`, value)
+  for (const [key, value] of Object.entries(settings.storyDesign)) {
+    if (!chapter || key === 'storyGoal' || key === 'coreConflict') add(`story_design:${key}`, value)
+  }
+  if (!chapter) for (const [key, value] of Object.entries(settings.endgameDesign)) add(`endgame_design:${key}`, value)
+  for (const [key, value] of Object.entries(parseThemeVoiceDocument(novel.themeVoiceJson))) add(`voice:${key}`, value)
+  if (novel.worldRulesJson?.trim()) {
+    let world: unknown
+    try { world = JSON.parse(novel.worldRulesJson) } catch { fail('WORLD_RULES_INVALID', '已保存世界规则不是有效 JSON，请先修复规则资料。') }
+    if (!world || typeof world !== 'object' || Array.isArray(world)) fail('WORLD_RULES_INVALID', '已保存世界规则必须为 JSON 对象。')
+    const publicSections = new Set(['genreProfile', 'powerSystems', 'speciesSystem', 'factionSystem', 'characterEcology', 'mapBlueprint', 'worldDynamics', 'timelineConfig', 'writingConstraints'])
+    for (const [section, value] of Object.entries(world)) {
+      if (section === 'version' || (chapter && !publicSections.has(section))) continue
+      // Keep each rule intact, but a hidden item must not suppress unrelated public rules.
+      if (Array.isArray(value)) value.forEach((item, index) => add(`world_rules:${section}:${index}`, item))
+      else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) add(`world_rules:${section}:${key}`, item)
+      else add(`world_rules:${section}`, value)
+    }
+  }
+  return entries
+}
+
+export function creativeRevisionSource(input: CreativeWorkflowInput): string | undefined {
+  if (!input.sourceArtifactId) return undefined
+  const artifact = requireArtifact<GenericAssetDraftContent>(input.sourceArtifactId)
+  if (artifact.novelId !== input.novelId || artifact.kind !== 'generic_draft' || artifact.content.schemaVersion !== 'generic-asset-draft-v1'
+    || typeof artifact.content.output !== 'string' || !artifact.content.output.trim()) {
+    fail('REVISION_SOURCE_INVALID', '修订来源必须是当前项目的有效创作候选。')
+  }
+  return artifact.content.output
+}
+
 /** The chapter writer never receives raw expanded background, private attributes or future graph states. */
 export async function compileCreativeChapterContext(
   input: CreativeWorkflowInput,
@@ -82,7 +129,7 @@ export async function compileCreativeChapterContext(
   if (!novel) fail('PROJECT_NOT_FOUND', '项目不存在。')
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: chapterNum - 1, includePlanned: false })
   const sources: Partial<ContextPackSource>[] = []
-  const omitted = ['expanded_background:author_only', 'world_rules:unscoped_author_material']
+  const omitted = ['expanded_background:author_only', 'story_design:future_plan', 'endgame_design:author_only']
   const add = (key: string, value: unknown, required = false, visibility: ContextPackSource['visibility'] = 'canon', sourcePolicy = policy) => {
     const text = typeof value === 'string' ? value.trim() : JSON.stringify(value)
     if (!text) return
@@ -93,17 +140,36 @@ export async function compileCreativeChapterContext(
     }
     sources.push({ key, sourceKind: key.split(':')[0], sourceId: key, sourceVersion: stableHash(text), text: safe, required, included: true, visibility })
   }
-  add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan')
-  // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
-  for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
   const revealIds = new Set(policy.revealDirectives.map(directive => directive.factId))
   const contractPolicy = { ...policy, deniedFacts: policy.deniedFacts.filter(item => !revealIds.has(item.fact.id)) }
+  add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan', contractPolicy)
+  for (const source of creativeProjectSources(novel, true)) {
+    const text = typeof source.value === 'string' ? source.value : JSON.stringify(source.value)
+    if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')
+    else omitted.push(`${source.key}:pov_forbidden_fact`)
+  }
+  // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
+  for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
+  if (input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  const revisionSource = creativeRevisionSource(input)
+  if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
   add(`chapter:${context.chapter.id}:contract`, {
     chapterNum, title: context.chapter.title, ...context.chapterContract,
     forbiddenActions: context.chapterContractRow?.forbiddenActionsJson,
     scenes: context.sceneSnapshots,
   }, true, 'plan', contractPolicy)
   for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'))
+  if (input.operation === 'review') {
+    const original = `${context.chapter.content || ''}\n${input.request}`
+    for (const item of policy.deniedFacts) {
+      if (![item.fact.title, item.fact.summary].some(text => text && text.trim().length >= 2 && original.includes(text.trim()))) continue
+      add(`review_boundary:fact:${item.fact.id}`, {
+        instruction: '仅供评审核对：下列信息在本章开场对视角人物不可知；仅已授权场景揭示可出现，不能把原文出现视为已知授权。',
+        title: item.fact.title, summary: item.fact.summary,
+        authorizedScenes: policy.revealDirectives.filter(directive => directive.factId === item.fact.id),
+      }, true, 'plan', { ...policy, deniedFacts: [] })
+    }
+  }
   for (const directive of policy.revealDirectives) {
     add(`reveal:${directive.sceneId}:${directive.factId}`, `仅限指定场景，不能作为章首已知事实。${directive.text}`, true, 'plan', contractPolicy)
   }
@@ -138,6 +204,12 @@ export async function compileCreativeChapterContext(
       } else if (source.included) sources.push(source)
       else omitted.push(`${source.key}:${source.reason}`)
     }
+  }
+  // Samples and chapter-scoped feedback pass through the same visibility and token selection as prose.
+  const narrative = resolveProsePolicyMaterial(input.novelId, context.chapter.id)
+  if (narrative.policy.policyVersion === 'reader-first-v1') {
+    add('reader_policy', '保留事实、视角和有效表达；未确认计划不当作已经发生的事实。作者样稿仅用于语感，不得复制情节或当作本章已知事实。', true, 'plan')
+    for (const [index, paragraph] of narrative.reference.split(/\r?\n+/).entries()) add(`author_reference:${index}`, paragraph, false, 'plan')
   }
   // Include rendering overhead in selection; compiler otherwise counts payload text alone.
   const compiled = await compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',

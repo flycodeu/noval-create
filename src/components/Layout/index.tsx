@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layout, Menu } from 'antd'
+import { Button, Dropdown, Layout, Menu } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   BookOutlined,
@@ -11,6 +11,7 @@ import {
   SunOutlined,
   HighlightOutlined,
   SettingOutlined,
+  MoreOutlined,
 } from '@ant-design/icons'
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
@@ -23,7 +24,7 @@ interface AppLayoutProps {
   children: React.ReactNode
 }
 
-const menuItems = [
+const primaryItems = [
   {
     key: '/novels',
     icon: <BookOutlined />,
@@ -33,21 +34,6 @@ const menuItems = [
     key: '/models',
     icon: <RobotOutlined />,
     label: '模型与搜索',
-  },
-  {
-    key: '/templates',
-    icon: <AppstoreOutlined />,
-    label: '风格模板',
-  },
-  {
-    key: '/prompts',
-    icon: <MessageOutlined />,
-    label: '提示词',
-  },
-  {
-    key: '/tasks',
-    icon: <ScheduleOutlined />,
-    label: '任务中心',
   },
   {
     key: '/settings',
@@ -61,13 +47,19 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: React.ReactNode }[] = 
   { value: 'light', label: '浅色', icon: <SunOutlined /> },
   { value: 'soft', label: '柔和', icon: <HighlightOutlined /> },
 ]
+const advancedItems = [
+  { key: '/tasks', icon: <ScheduleOutlined />, label: '运行记录' },
+  { key: '/templates', icon: <AppstoreOutlined />, label: '风格模板' },
+  { key: '/prompts', icon: <MessageOutlined />, label: '提示词管理' },
+]
+const menuItems = [...primaryItems, { key: 'advanced', icon: <MoreOutlined />, label: '更多工具', children: advancedItems }]
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { theme, setTheme } = useThemeStore()
 
-  const selectedKey = menuItems.find(item => location.pathname.startsWith(item.key))?.key || '/novels'
+  const selectedKey = [...primaryItems, ...advancedItems].find(item => location.pathname.startsWith(item.key))?.key || '/novels'
   const isNovelWorkspace = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
   const hideAppSidebar = isNovelWorkspace
   const novelWorkspaceResetKey = React.useMemo(() => {
@@ -84,7 +76,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       {!isNovelWorkspace ? (
         <nav className="app-layout__mobile-nav" aria-label="主导航">
-          {menuItems.map((item) => (
+          {primaryItems.map((item) => (
             <button
               key={item.key}
               type="button"
@@ -95,12 +87,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
               <span>{item.label}</span>
             </button>
           ))}
+          <Dropdown trigger={['click']} menu={{ items: advancedItems, onClick: ({ key }) => navigate(key) }}><Button type="text" icon={<MoreOutlined />}>更多工具</Button></Dropdown>
         </nav>
       ) : null}
 
       <Layout className="app-layout__body">
         {!hideAppSidebar ? (
-          <Sider width={256} className="app-layout__sider">
+          <Sider width={208} className="app-layout__sider">
             <Menu
               className="app-layout-menu"
               mode="inline"

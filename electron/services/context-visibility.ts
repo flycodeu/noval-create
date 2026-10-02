@@ -122,7 +122,9 @@ function parseCharacterKnowledge(raw: string | null | undefined, chapterNumById:
       const characterId = parseNumber(record.characterId)
       if (!characterId) return []
       const knownChapterId = parseNumber(record.knownChapterId)
-      return [{ characterId, knownChapterNum: knownChapterId ? chapterNumById.get(knownChapterId) ?? null : null }]
+      return [{ characterId, knownChapterNum: knownChapterId ? chapterNumById.get(knownChapterId) ?? null : null,
+        ...(record.knownFromStart === true && record.knownChapterId === null ? { knownFromStart: true } : {}),
+      }]
     })
   } catch {
     return []

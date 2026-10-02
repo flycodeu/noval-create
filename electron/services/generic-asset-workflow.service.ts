@@ -1,4 +1,4 @@
-import { resolveProsePolicyMaterial } from './prose-operation.service'
+import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -136,11 +136,16 @@ export function assessGenericAssetDraftQuality(params: {
   const reviewFailedOpen = [params.quality.review.summary, ...params.quality.warnings]
     .some((warning) => /审校失败|复检失败/u.test(warning))
   const effectiveModelReview = params.quality.rewrittenReview || params.quality.review
-  checks.push(params.quality.stage === 'rejected'
-    ? { code: 'model_review', status: 'fail', message: `模型审校拒收：${params.quality.review.summary}` }
+  const failureLabel = params.quality.failureStage && { review: '审校请求', rewrite: '修订请求', recheck: '修订后复检' }[params.quality.failureStage]
+  checks.push(failureLabel
+    ? { code: 'model_review', status: 'fail', message: `${failureLabel}未完成：${params.quality.warnings.join('；') || '请重试'}。候选已保留，未应用。` }
     : reviewFailedOpen
-      ? { code: 'model_review', status: 'warn', message: '模型审校未完整执行，必须人工复核。' }
-      : { code: 'model_review', status: 'pass', message: params.quality.review.summary || '模型审校通过。' })
+      ? { code: 'model_review', status: 'fail', message: '模型审校未完整执行，候选已保留，须重新审校。' }
+      : effectiveModelReview.rejectRequired
+        ? { code: 'model_review', status: 'fail', message: `模型审校拒收：${effectiveModelReview.summary}` }
+        : params.quality.stage === 'rejected'
+          ? { code: 'model_review', status: 'fail', message: `质量流程尚未通过：${params.quality.warnings.join('；') || effectiveModelReview.summary}` }
+          : { code: 'model_review', status: 'pass', message: effectiveModelReview.summary || '模型审校通过。' })
 
   checks.push(params.artifactContextVersion === params.currentContextVersion
     ? { code: 'context_freshness', status: 'pass', message: `基于当前上下文版本 v${params.currentContextVersion} 审校。` }
@@ -260,9 +265,8 @@ export async function generateGenericAssetDraft(
     return mapArtifactError(error)
   }
 
-  const narrative = input.assetType === 'chapter' ? resolveProsePolicyMaterial(input.novelId) : undefined
+  const narrative = input.assetType === 'chapter' ? resolveNarrativePolicy(novel.settingsJson, true) : undefined
   const contextSummary = runtime.contextSummary
-    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n\n阅读策略：保留事实、视角和有效表达；未确认计划不当作已经发生的事实。按章节合同生成候选，审校后才可应用。\n${narrative.reference}` : '')
   const contextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
@@ -306,7 +310,7 @@ export async function generateGenericAssetDraft(
   runtime.assertActive?.()
   runtime.onStage?.('reviewing')
   const quality = await runAssetQualityLoop({
-    narrativePolicyVersion: narrative?.policy.policyVersion,
+    narrativePolicyVersion: narrative?.policyVersion,
     targetType: input.assetType,
     novelId: input.novelId,
     modelConfigId: qualityRoute.modelConfigId,

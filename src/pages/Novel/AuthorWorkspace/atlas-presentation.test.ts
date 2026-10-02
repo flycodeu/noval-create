@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { locationCoordinates, locationPath, relatedEntities } from './atlas-presentation'
+import { atlasAttributeValue, atlasDisplayAttributes, locationCoordinates, locationPath, relatedEntities } from './atlas-presentation'
 import { getAuthorWorkspaceKey } from '../../../shared/author-workspace'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], parentId: string | null = null): StoryAtlasEntity => ({ id, kind, parentId, name: id, summary: '', attributes: {}, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
 describe('author atlas navigation', () => {
+  it('shows relationship progress by chapter number without changing stored attributes', () => {
+    const attributes = { lastProgressChapterId: 684, changeEvent: '共同查明客栈账目', currentStatus: 'active' }
+    expect(atlasDisplayAttributes(attributes, [{ id: 684, chapterNum: 3 }])).toEqual({ ...attributes, lastProgressChapterId: '第 3 章' })
+    expect(attributes.lastProgressChapterId).toBe(684)
+    expect(atlasAttributeValue('currentStatus', 'active')).toBe('推进中')
+  })
   it('keeps the region, town and scene hierarchy without inventing geometry', () => {
     const entities = [entity('location:1', 'location'), entity('location:2', 'location', 'location:1'), entity('location:3', 'location', 'location:2')]
     expect(locationPath(entities, 'location:3').map((item) => item.id)).toEqual(['location:1', 'location:2', 'location:3'])

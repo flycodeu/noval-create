@@ -183,7 +183,7 @@ export async function startMcpRuntime(options: {
     if (request.method !== 'POST') { json(405, { error: 'Use MCP POST requests; poll durable runs for progress' }); return }
     const mcp = new Server({ name: 'novelforge', version: options.version }, {
       capabilities: { tools: {}, resources: {} },
-      instructions: 'Read the project and query only relevant assets. Use NovelForge workflows to generate, review, revise and apply changes under the project automation policy. Long workflows return durable run IDs; use run tools to poll, cancel or resume. Do not copy candidates into desktop forms.',
+      instructions: 'Select and read the project first; projects.create creates a new book only when requested. Query relevant assets and atlas records, and inspect context.preview when constraints or budget are unclear. For generation, use workflows.start with the project-configured model, an explicit stage, a bounded count and the intended atChapter. Use autoApply:false for character or prose designs that need discussion. Use chapters.review to review existing prose without changing it. Poll workflows.get and read the returned candidate and review artifacts; preserve atChapter and sourceArtifactId for a targeted revision. Use atlas.apply for explicit factual corrections. Do not copy candidates into desktop forms. Missing facts remain unknown until a generated candidate is accepted.',
     })
     mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: options.registry.list().map(descriptorForMcp) }))
     mcp.setRequestHandler(CallToolRequestSchema, async (call) => {

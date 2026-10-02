@@ -69,6 +69,19 @@ describe('isFactKnownByCharacter', () => {
     const item = projection({ characterKnowledge: [{ characterId: 8, knownChapterNum: null }] })
     expect(isFactKnownByCharacter(item, 8, 1)).toEqual({ known: false, source: 'not_known' })
   })
+  it('grants explicit initial knowledge at chapter one only to the named character', () => {
+    const item = projection({ characterKnowledge: [{ characterId: 8, knownChapterNum: null, knownFromStart: true }] })
+    expect(isFactKnownByCharacter(item, 8, 1, false, { boundary: 'start' })).toEqual({ known: true, source: 'character_knowledge' })
+    expect(isFactKnownByCharacter(item, 9, 1, false, { boundary: 'start' }).known).toBe(false)
+    expect(isFactVisibleToReader(item, 1).known).toBe(false)
+    expect(isFactKnownByCharacter(item, 8, 0).known).toBe(false)
+  })
+  it('does not backdate a conflicting timed record through the initial-knowledge flag', () => {
+    const item = projection({ characterKnowledge: [{ characterId: 8, knownChapterNum: 3, knownFromStart: true }] })
+    expect(isFactKnownByCharacter(item, 8, 1).known).toBe(false)
+    expect(isFactKnownByCharacter(item, 8, 3, false, { boundary: 'start' }).known).toBe(false)
+    expect(isFactKnownByCharacter(item, 8, 3, false, { boundary: 'end' }).known).toBe(true)
+  })
 
   it('gives an explicit character record priority over the protagonist record', () => {
     const item = projection({

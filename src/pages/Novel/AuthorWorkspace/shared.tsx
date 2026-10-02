@@ -30,13 +30,15 @@ const RUN_STEPS: Array<{ key: CreativeRun['step']; label: string }> = [
 export function RunProgress({ run, active, onCancel, onResume, onOpenResult }: {
   run: CreativeRun; active: boolean; onCancel?: () => void; onResume?: () => void; onOpenResult?: () => void
 }) {
-  const current = RUN_STEPS.findIndex((step) => step.key === run.step)
+  const steps = run.operation === 'review' ? RUN_STEPS.filter(step => ['context', 'reviewing'].includes(step.key)) : RUN_STEPS
+  const current = steps.findIndex((step) => step.key === run.step)
   return <section className="author-run" aria-live="polite">
     <div className="author-section-heading"><div><span className="author-eyebrow">当前任务 · {CREATIVE_STAGE_LABELS[run.stage as CreativeStage] || run.stage}</span><h2>{runStatusLabel(run)}</h2></div>
       {active ? <Button size="small" onClick={onCancel}>停止</Button> : run.step === 'needs_attention' || run.status === 'failed' || run.step === 'cancelled' ? <Button size="small" onClick={onResume}>{run.reviewStatus === 'passed' ? '应用候选' : '重试任务'}</Button> : null}
     </div>
     <p className="author-run__request">{run.request}</p>
-    <div className="author-run__steps">{RUN_STEPS.map((step, i) => <span key={step.key} className={run.step === 'completed' || i < current ? 'is-done' : i === current ? 'is-current' : ''}>
+    <p className="author-muted">{run.atChapter != null ? `目标章位：${run.atChapter === 0 ? '初始设定' : `第 ${run.atChapter} 章`}` : ''}{run.count ? ` · 本轮数量 ${run.count}` : ''}</p>
+    <div className="author-run__steps">{steps.map((step, i) => <span key={step.key} className={run.step === 'completed' || i < current ? 'is-done' : i === current ? 'is-current' : ''}>
       <i>{i + 1}</i>{step.label}</span>)}</div>
     <div className="author-run__message">{active && <Spin size="small" />}<span>{run.message || '任务已记录。'}</span></div>
     {run.artifactId && onOpenResult && <Button type="link" onClick={onOpenResult}>查看结果与评审 <ArrowRightOutlined /></Button>}

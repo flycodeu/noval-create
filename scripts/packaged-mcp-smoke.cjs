@@ -20,10 +20,10 @@ const env = { ...process.env, NOVELFORGE_USER_DATA_DIR: testUserData, NOVELFORGE
 delete env.ELECTRON_RUN_AS_NODE
 delete env.ELECTRON_RENDERER_URL
 const expectedTools = [
-  'capabilities.list', 'projects.list', 'projects.get', 'characters.list', 'runs.get',
+  'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.review',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 const bridgePids = new Map()
@@ -139,7 +139,7 @@ async function main() {
     assert(fs.existsSync(lockPath), 'The shared owner must hold the writer lock while alive')
     const health = await (await request('/health')).json()
     assert.equal(health.instanceId, owner.instanceId)
-    assert.equal(health.tools, 18)
+    assert.equal(health.tools, expectedTools.length)
     assert.equal(health.modelConfigured, false)
 
     const second = await connect()
@@ -218,7 +218,7 @@ async function main() {
   } finally {
     await cleanup()
   }
-  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: 18 tools; 2 clients / 1 owner; project + atlas apply/query + model error + workflow start/cancel; owner-first shutdown releases both bridges and Chromium children; maintenance prevents restart${bundled ? '' : '; executable and app.asar exclusive ReadWrite access (no bytes written)'}; isolated profile removed\n`)
+  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: ${expectedTools.length} tools; 2 clients / 1 owner; project + atlas apply/query + model error + workflow start/cancel; owner-first shutdown releases both bridges and Chromium children; maintenance prevents restart${bundled ? '' : '; executable and app.asar exclusive ReadWrite access (no bytes written)'}; isolated profile removed\n`)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

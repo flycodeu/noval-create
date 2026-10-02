@@ -204,6 +204,7 @@ export const storyFacts = sqliteTable('story_facts', {
   characterKnowledgeJson: text('character_knowledge_json').default('[]'),
   forbiddenBeforeVolume: integer('forbidden_before_volume'),
   plannedRevealVolume: integer('planned_reveal_volume'),
+  plannedRevealChapterNum: integer('planned_reveal_chapter_num'),
   targetRevealChapterId: integer('target_reveal_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
   isKeyTruth: integer('is_key_truth').notNull().default(1),
   notes: text('notes'),

@@ -89,5 +89,13 @@ export function useCreativeWorkflow(novelId: number) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '任务操作失败') }
     finally { setSubmitting(false) }
   }, [novelId, refresh, run])
-  return { run, error, submitting, active: isRunActive(run), start, refresh, control }
+  const review = useCallback(async (chapterId: number, request: string) => {
+    setSubmitting(true); setError('')
+    try {
+      const result = await callAuthorTool<{ run: CreativeRun }>('novelforge.chapters.review', { novelId, chapterId, request, idempotencyKey: `author-review:${novelId}:${crypto.randomUUID()}` })
+      if (alive.current) setRun(result.run)
+    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '启动章节评审失败') }
+    finally { if (alive.current) setSubmitting(false) }
+  }, [novelId])
+  return { run, error, submitting, active: isRunActive(run), start, review, refresh, control }
 }

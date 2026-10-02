@@ -23,12 +23,19 @@ async function main() {
     const first = chapter(1, '陈舟知道河水暴涨。\n夜色落在石阶上，他把旧绳收在船舱里。')
     const target = chapter(2)
     const future = chapter(3)
+    db.prepare('UPDATE novels SET world_rules_json=?,theme_voice_json=?,settings_json=? WHERE id=?').run(
+      JSON.stringify({ powerSystems: [{ name: '观灯', limitations: '不能复生', cost: '伤眼' }], writingConstraints: { extraRules: ['渡河需要时间'] }, hidden: '未登记规则秘密不得直接注入' }),
+      JSON.stringify({ pov: 'third_limited', style_rules: '对白克制，不替人物总结道理' }),
+      JSON.stringify({ readerFirst: { schemaVersion: 1, policyVersion: 'reader-first-v1', revision: 1 }, premise: { constraints: '主角保持凡人身份' }, writing_rules: { common_sense_rules: '伤势不能突然痊愈' }, story_design: { main_plot: '未登记全书终局不得注入' } }), novelId)
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('陈舟摸了摸磨白的旧绳，指尖沾着河泥。', target)
+    const sampleId = Number(db.prepare('INSERT INTO style_fingerprints(novel_id,name,source_text,source_type) VALUES(?,?,?,?)').run(novelId, '显式样稿', '账房盗银，失踪的税银藏在井底。\n\n船板慢慢沉下去，他仍握着那根旧绳。', 'pasted').lastInsertRowid)
+    require('../electron/services/style-analysis.service.ts').setActiveStyleFingerprint(novelId, sampleId)
     const known = Number(db.prepare('INSERT INTO story_facts(novel_id,title,summary,protagonist_known_chapter_id) VALUES(?,?,?,?)').run(novelId, '河水暴涨', '上游连日降雨', first).lastInsertRowid)
     const secret = Number(db.prepare('INSERT INTO story_facts(novel_id,title,summary,protagonist_known_chapter_id) VALUES(?,?,?,?)').run(novelId, '账房盗银', '失踪的税银藏在井底', future).lastInsertRowid)
     migrateStoryAtlas(db)
     const { applyStoryAtlasChanges, queryStoryAtlas } = require('../electron/services/story-atlas.service.ts')
     const atlasPerson = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '陈舟')
-    applyStoryAtlasChanges({ novelId, expectedContextVersion: 1, effectiveFromChapter: 3, idempotencyKey: 'future', source: { kind: 'test' }, changes: [
+    applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 3, idempotencyKey: 'future', source: { kind: 'test' }, changes: [
       { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', summary: '未来才成为知府', attributes: { speechPattern: '未来才使用的官话' } },
     ] })
     const input = { novelId, stage: 'chapter', request: '陈舟检查渡口旧绳，继续第二章。', atChapter: 2, idempotencyKey: 'fixture' }
@@ -45,7 +52,17 @@ async function main() {
     assert.ok(result.text.includes('夜色落在石阶上'), 'original ending retained without inventing a knowledge fact')
     for (const hidden of ['账房盗银', '失踪的税银藏在井底', '私有设定不可注入', '未登记终局秘密不得直接注入', '未登记规则秘密不得直接注入', '未来才成为知府', '未来才使用的官话']) assert.ok(!result.text.includes(hidden), hidden)
     assert.ok(result.text.includes('渡口故事。'))
+    for (const required of ['不能复生', '伤眼', '渡河需要时间', '主角保持凡人身份', '伤势不能突然痊愈', '对白克制，不替人物总结道理', '指尖沾着河泥', '船板慢慢沉下去']) assert.ok(result.text.includes(required), required)
+    assert.ok(!result.text.includes('未登记全书终局不得注入'))
+    assert.ok(result.omittedSources.some(source => source.startsWith('author_reference:') && source.includes('pov_forbidden_fact')), 'approved sample still obeys chapter visibility')
     assert.ok(result.estimatedTokens <= limits.maxInputTokens)
+    const reviewContext = await compile({ ...input, operation: 'review' }, limits)
+    assert.ok(!reviewContext.text.includes('指尖沾着河泥'), 'review receives target prose separately, never twice in the prompt')
+    db.prepare('UPDATE chapters SET content=content || ? WHERE id=?').run('账房盗银。', target)
+    const leakingReviewContext = await compile({ ...input, operation: 'review' }, limits)
+    assert.ok(leakingReviewContext.text.includes('review_boundary:fact:'), 'reviewer sees the matching forbidden fact boundary')
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_REQUIRED_SOURCE_HIDDEN')
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('陈舟摸了摸磨白的旧绳，指尖沾着河泥。', target)
     assert.equal(db.prepare('SELECT context_version FROM novels WHERE id=?').get(novelId).context_version, before, 'compile has no writes')
     await assert.rejects(compile(input, { ...limits, maxInputTokens: 10 }), error => error.code === 'CHAPTER_CONTEXT_BUDGET')
     db.prepare('UPDATE scene_contracts SET pov=? WHERE chapter_id=?').run('不存在的视角', target)
@@ -56,9 +73,14 @@ async function main() {
     const revealed = await compile(input, limits)
     assert.ok(revealed.text.includes('场景1揭示'))
     assert.ok(revealed.text.includes('账房盗银'))
+    const revealRequest = { ...input, request: '陈舟通过读信揭示账房盗银，仅在场景1得知。' }
+    const requestedReveal = await compile(revealRequest, limits)
+    assert.ok(requestedReveal.text.includes(revealRequest.request), 'task may refer to the scene-authorized reveal')
+    assert.ok(requestedReveal.text.includes('仅限指定场景，不能作为章首已知事实'))
     db.prepare('UPDATE scene_contracts SET reveal_payload_json=? WHERE chapter_id=?').run('[]', target)
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_REVEAL_SCENE_MISSING')
     db.prepare('UPDATE chapters SET allowed_fact_ids_json=?,revealed_fact_ids_json=? WHERE id=?').run('[]', '[]', target)
+    await assert.rejects(compile(revealRequest, limits), error => error.code === 'CHAPTER_REQUIRED_SOURCE_HIDDEN')
     const content = '陈舟蹲下来检查系船绳。河水暴涨，旧绳磨断，他撑住晃动的船头，却怎么也拉不回缆绳。\n他换上新绳，渡船停稳。风里忽然传来一声呼喊，是谁在对岸等他？'
     const base = { novelId, chapterNum: 2, content, expectedContextVersion: before }
     assert.throws(() => gate({ ...base, content: content + '账房盗银。' }), error => error.code === 'CHAPTER_FORBIDDEN_FACT')

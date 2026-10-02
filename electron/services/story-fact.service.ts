@@ -10,6 +10,9 @@ type StoryFactStatus = 'introduced' | 'partial_reveal' | 'pending_payoff' | 'exp
 interface StoryFactCharacterKnowledge {
   characterId: number
   knownChapterId: number | null
+  knownFromStart?: boolean
+  sourceArtifactId?: string
+  evidenceQuote?: string
 }
 
 interface StoryFactInput {
@@ -24,6 +27,7 @@ interface StoryFactInput {
   characterKnowledgeJson?: string | StoryFactCharacterKnowledge[]
   forbiddenBeforeVolume?: number | null
   plannedRevealVolume?: number | null
+  plannedRevealChapterNum?: number | null
   targetRevealChapterId?: number | null
   isKeyTruth?: number | boolean
   notes?: string
@@ -71,6 +75,9 @@ function parseCharacterKnowledgeArray(raw: unknown): StoryFactCharacterKnowledge
     normalized.push({
       characterId,
       knownChapterId: typeof knownChapterId === 'number' && knownChapterId > 0 ? knownChapterId : null,
+      ...(typeof record.knownFromStart === 'boolean' ? { knownFromStart: record.knownFromStart } : {}),
+      ...(typeof record.sourceArtifactId === 'string' && record.sourceArtifactId.trim() ? { sourceArtifactId: record.sourceArtifactId.trim() } : {}),
+      ...(typeof record.evidenceQuote === 'string' && record.evidenceQuote.trim() ? { evidenceQuote: record.evidenceQuote.trim() } : {}),
     })
   })
   const dedup = new Map<number, StoryFactCharacterKnowledge>()
@@ -109,6 +116,7 @@ function sanitizeStoryFactPayload(
   if ('characterKnowledgeJson' in input) next.characterKnowledgeJson = normalizeCharacterKnowledgeJson(input.characterKnowledgeJson)
   if ('forbiddenBeforeVolume' in input) next.forbiddenBeforeVolume = asNumber(input.forbiddenBeforeVolume)
   if ('plannedRevealVolume' in input) next.plannedRevealVolume = asNumber(input.plannedRevealVolume)
+  if ('plannedRevealChapterNum' in input) next.plannedRevealChapterNum = asNumber(input.plannedRevealChapterNum)
   if ('targetRevealChapterId' in input) next.targetRevealChapterId = asNumber(input.targetRevealChapterId)
   if ('isKeyTruth' in input) next.isKeyTruth = normalizeFlag(input.isKeyTruth, 1)
   if ('notes' in input) next.notes = asText(input.notes)
@@ -158,6 +166,7 @@ export function createStoryFact(
     characterKnowledgeJson: payload.characterKnowledgeJson || '[]',
     forbiddenBeforeVolume: payload.forbiddenBeforeVolume ?? null,
     plannedRevealVolume: payload.plannedRevealVolume ?? null,
+    plannedRevealChapterNum: payload.plannedRevealChapterNum ?? null,
     targetRevealChapterId: payload.targetRevealChapterId ?? null,
     isKeyTruth: normalizeFlag(payload.isKeyTruth, 1),
     notes: payload.notes || '',

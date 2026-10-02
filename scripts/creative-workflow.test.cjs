@@ -20,7 +20,7 @@ process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
 registerProjectTsRuntime(root)
 const replies = []
 const requests = []
-const review = JSON.stringify({ summary: '候选符合需求，引用和剧情一致。', severity: 'low', rewrite_required: false, reject_required: false, top_fixes: [] })
+const review = JSON.stringify({ summary: '候选符合需求，引用和剧情一致。', severity: 'low', rewrite_required: false, reject_required: false, top_fixes: [], issues: [] })
 let heldResponse
 const server = http.createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk
@@ -88,6 +88,42 @@ async function main() {
       await call('workflows.cancel', { runId: run.runId })
       throw new Error('Real model smoke timed out')
     }
+    const creation = { title: '无默认设定', background: '两岸靠渡船往来。', constraints: '主角是凡人。', modelConfigId: modelId, idempotencyKey: 'create-from-author' }
+    const created = await registry.invoke({ toolId: 'novelforge.projects.create', input: creation }, context)
+    assert.equal(created.ok, true, JSON.stringify(created))
+    assert.equal(created.data.source.constraints, '主角是凡人。')
+    assert.deepEqual(JSON.parse(created.data.project.worldRulesJson).powerSystems, [], 'project creation must not confirm a genre template')
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM characters WHERE novel_id=?').get(created.data.project.id).count, 0)
+    assert.equal((await registry.invoke({ toolId: 'novelforge.projects.create', input: creation }, context)).data.project.id, created.data.project.id)
+    sqlite.prepare('UPDATE novels SET world_rules_json=?,settings_json=?,theme_voice_json=?,project_brief_json=? WHERE id=?').run(
+      JSON.stringify({ version: 2, writingConstraints: { extraRules: ['已有规则'], hiddenRule: '保留' }, customWorld: '保留' }),
+      JSON.stringify({ customSetting: '保留', ai_engine: { default_mode: 'balanced', privateFlag: true }, writing_rules: { banned_terms: '禁用系统面板', hiddenRule: '保留' }, story_design: { story_goal: '经营渡口', hiddenStory: '保留' }, premise: { constraints: '不得获得异能' } }),
+      JSON.stringify({ pov: 'third_limited', style_rules: '写具体行动', customStyle: '保留' }), JSON.stringify({ target_reader: '喜欢普通人生计故事的读者', customBrief: '保留' }), novelId)
+    const generationOffset = requests.length
+    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['渡船只能载六人'], sciencePolicy: '遵守常识' } } }), review)
+    const rules = (await call('workflows.start', { stage: 'world_rules', request: '补充渡船限制。', idempotencyKey: 'world-rules-patch' })).run
+    assert.equal((await finish(rules.runId)).status, 'success')
+    const world = JSON.parse(sqlite.prepare('SELECT world_rules_json AS value FROM novels WHERE id=?').get(novelId).value)
+    assert.deepEqual(world.writingConstraints.extraRules, ['已有规则', '渡船只能载六人'])
+    assert.equal(world.writingConstraints.hiddenRule, '保留'); assert.equal(world.customWorld, '保留')
+    replies.push(JSON.stringify({ storyDesign: { coreConflict: '两岸争用渡船' }, writingRules: { commonSenseRules: '行程必须计入渡船停航的时间' }, projectBrief: { readerPromise: '通过人物的选择呈现渡口生计' } }), review)
+    assert.equal((await finish((await call('workflows.start', { stage: 'story', request: '补充主冲突，保留目标。', idempotencyKey: 'story-patch' })).run.runId)).status, 'success')
+    const settings = JSON.parse(sqlite.prepare('SELECT settings_json AS value FROM novels WHERE id=?').get(novelId).value)
+    assert.equal(settings.story_design.story_goal, '经营渡口'); assert.equal(settings.story_design.core_conflict, '两岸争用渡船')
+    assert.equal(settings.story_design.hiddenStory, '保留'); assert.equal(settings.customSetting, '保留'); assert.equal(settings.ai_engine.privateFlag, true)
+    assert.equal(settings.writing_rules.common_sense_rules, '行程必须计入渡船停航的时间')
+    assert.equal(settings.writing_rules.banned_terms, '禁用系统面板'); assert.equal(settings.writing_rules.hiddenRule, '保留')
+    const brief = JSON.parse(sqlite.prepare('SELECT project_brief_json AS value FROM novels WHERE id=?').get(novelId).value)
+    assert.equal(brief.reader_promise, '通过人物的选择呈现渡口生计'); assert.equal(brief.target_reader, '喜欢普通人生计故事的读者'); assert.equal(brief.customBrief, '保留')
+    replies.push(JSON.stringify({ themeVoice: { dialogueRules: '对话简短' } }), review)
+    assert.equal((await finish((await call('workflows.start', { stage: 'style', request: '补充对话要求。', idempotencyKey: 'style-patch' })).run.runId)).status, 'success')
+    const voice = JSON.parse(sqlite.prepare('SELECT theme_voice_json AS value FROM novels WHERE id=?').get(novelId).value)
+    assert.equal(voice.pov, 'third_limited'); assert.equal(voice.style_rules, '写具体行动'); assert.equal(voice.dialogue_rules, '对话简短'); assert.equal(voice.customStyle, '保留')
+    assert.equal(requests.length, generationOffset + 6)
+    replies.push(JSON.stringify({ synopsis: '两人守着一条渡船，在两岸争执中维持渡口。' }), review)
+    assert.equal((await finish((await call('workflows.start', { stage: 'background', request: '只完善面向读者的简介，保留背景和书名。', idempotencyKey: 'synopsis-patch' })).run.runId)).status, 'success')
+    assert.deepEqual(sqlite.prepare('SELECT title,user_background AS background,synopsis FROM novels WHERE id=?').get(novelId), { title: '河谷试验', background: '两个人在河谷经营渡口。', synopsis: '两人守着一条渡船，在两岸争执中维持渡口。' })
+    const beforeCharacters = requests.length
     const candidate = { changes: [{ op: 'upsert_entity', clientId: 'a', kind: 'character', name: '陈舟', summary: '渡口船工', attributes: { personalityTraits: ['遇事先检查绳索'], speechPattern: '短句' } }, { op: 'upsert_entity', clientId: 'b', kind: 'character', name: '林禾', summary: '渡口记账人' }, { op: 'upsert_relation', kind: 'relationship', fromId: 'a', toId: 'b', label: '共同经营渡口' }] }
     replies.push(JSON.stringify(candidate), review)
     const startInput = { stage: 'characters', request: '生成两个人物与合作关系。', count: 2, idempotencyKey: 'characters-first' }
@@ -95,12 +131,16 @@ async function main() {
     assert.equal(started.status, 'pending', 'start must return before model completion')
     const done = await finish(started.runId)
     assert.equal(done.status, 'success', JSON.stringify(done))
-    assert.equal(requests.length, 2, 'generation and review are separate requests')
+    assert.equal(requests.length, beforeCharacters + 2, 'generation and review are separate requests')
     const snapshot = (await call('atlas.query', {})).atlas
     assert.equal(snapshot.entities.filter(x => x.kind === 'character').length, 2)
     assert.equal(snapshot.relations.length, 1)
     assert.equal((await call('workflows.start', startInput)).run.runId, started.runId)
-    assert.equal(requests.length, 2, 'idempotent start does not call model again')
+    assert.equal(requests.length, beforeCharacters + 2, 'idempotent start does not call model again')
+    const characterList = (await call('characters.list', {})).characters
+    assert.equal(characterList[0].id, snapshot.entities.find(entity => entity.name === characterList[0].fullName).id, 'MCP character reads share the atlas stable identity')
+    assert.equal(typeof characterList[0].nativeId, 'number')
+    assert.ok(characterList.find(entity => entity.fullName === '陈舟').attributes.personalityTraits.includes('遇事先检查绳索'))
     await call('workflows.apply', { runId: started.runId })
     assert.equal((await call('atlas.query', {})).atlas.entities.length, 2)
     sqlite.prepare('UPDATE tasks SET status=?, progress_json=json_set(progress_json,\'$.status\',?) WHERE id=?').run('failed', 'failed', started.runId)
@@ -122,6 +162,18 @@ async function main() {
     assert.equal(chapter.content, prose)
     assert.equal(chapter.summary, '陈舟与林禾换上新绳，渡船停稳。', 'content invalidation must not erase the new reviewed summary')
 
+    const firstChapterId = sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId).id
+    const beforeReview = requests.length
+    replies.push(review)
+    const reviewRun = (await call('chapters.review', { chapterId: firstChapterId, idempotencyKey: 'review-existing-chapter' })).run
+    assert.equal(reviewRun.operation, 'review'); assert.equal(reviewRun.atChapter, 1)
+    const reviewed = await finish(reviewRun.runId)
+    assert.equal(reviewed.status, 'success', JSON.stringify(reviewed))
+    assert.equal(reviewed.reviewStatus, 'passed')
+    assert.equal(requests.length, beforeReview + 1, 'review does not regenerate or rewrite')
+    assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content, prose)
+    assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: reviewed.runId } }, context)).ok, false, 'a report is not an applicable prose candidate')
+
     // Complete-looking draft contracts still need automatic review and activation before writing.
     const secondId = Number(sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,outline) VALUES(?,2,?,?)').run(novelId, '加固', '再次检查新绳是否牢固。').lastInsertRowid)
     sqlite.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'draft')").run(novelId, secondId, '陈舟检查并更换系船绳')
@@ -138,6 +190,40 @@ async function main() {
     assert.equal(queriedChapter.chapter.id, secondId)
     assert.equal(queriedChapter.chapterContract.chapterGoal, '陈舟检查并更换系船绳')
     assert.equal(queriedChapter.scenes.length, 1, 'external agents receive the real executable scene contract without the old orphan')
+
+    replies.push(JSON.stringify({ volumes: [{ clientId: 'volume-river', title: '渡河', summary: '渡口的共同行动', parts: [{ clientId: 'part-rope', title: '系船', summary: '从旧绳到新绳' }] }],
+      chapters: [{ chapterNum: 3, volumeId: 'volume-river', partId: 'part-rope', title: '查绳', outline: '陈舟检查并更换系船绳。',
+        chapterContract: { chapterGoal: '陈舟检查并更换系船绳', forbiddenActions: ['不得出现异能'] },
+        scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }] }] }), review)
+    const outlined = await finish((await call('workflows.start', { stage: 'outline', atChapter: 3, count: 1, request: '新建渡河卷及系船单元，安排第3章。', idempotencyKey: 'outline-volumes-parts' })).run.runId)
+    assert.equal(outlined.status, 'success', JSON.stringify(outlined)); assert.equal(outlined.atChapter, 3); assert.equal(outlined.count, 1)
+    const structure = await call('assets.query', {})
+    const plannedThird = structure.chapters.find(row => row.chapterNum === 3)
+    const plannedPart = structure.parts.find(row => row.id === plannedThird.partId)
+    assert.equal(plannedPart.volumeId, plannedThird.volumeId)
+    assert.equal(structure.volumes.find(row => row.id === plannedThird.volumeId).title, '渡河')
+    assert.equal((await call('assets.query', { chapterId: plannedThird.id })).chapterContract.forbiddenActions[0], '不得出现异能')
+
+    // A model can pass semantic review but fail deterministic validation: resume must repair the
+    // saved candidate using that error, not repeat application of an impossible candidate forever.
+    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: '不是数组' } } }), review)
+    const invalidRules = (await call('workflows.start', { stage: 'world_rules', request: '补充载货限制。', idempotencyKey: 'repair-structure-error' })).run
+    const rejectedShape = await finish(invalidRules.runId)
+    assert.equal(rejectedShape.status, 'failed'); assert.equal(rejectedShape.reviewStatus, 'needs_revision')
+    assert.ok(rejectedShape.artifactId)
+    const beforeRepair = requests.length
+    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['木桩不能承担船身重量'] } } }), review)
+    await call('workflows.resume', { runId: invalidRules.runId })
+    assert.equal((await finish(invalidRules.runId)).status, 'success')
+    assert.equal(requests.length, beforeRepair + 2)
+    assert.ok(JSON.stringify(requests[beforeRepair]).includes('上一候选未能应用'))
+    assert.ok(JSON.stringify(requests[beforeRepair]).includes('不是数组'), 'repair receives the prior candidate as a budgeted source')
+    const sourceRules = (await call('workflows.get', { runId: invalidRules.runId })).run
+    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['涨水时停航'] } } }), review)
+    const followUp = (await call('workflows.start', { stage: 'world_rules', request: '保留有效规则并补充涨水停航。', sourceArtifactId: sourceRules.artifactId, autoApply: false, idempotencyKey: 'source-targeted-revision' })).run
+    const revised = await finish(followUp.runId)
+    assert.equal(revised.status, 'paused'); assert.equal(revised.sourceArtifactId, sourceRules.artifactId)
+    await call('workflows.apply', { runId: revised.runId })
 
     // Omitted position means the last written chapter for both preview and persisted generation.
     const inferred = { stage: 'items', request: '新增一只铜铃。', idempotencyKey: 'inferred-position' }
@@ -177,8 +263,89 @@ async function main() {
     replies.push(JSON.stringify({ userBackground: '河谷两岸靠渡船运送货物。' }), review)
     await call('workflows.resume', { runId: cancellation.runId })
     assert.equal((await finish(cancellation.runId)).status, 'success', 'cancelled task can resume with cleared cancellation and a new bounded attempt')
+
+    // A new mystery project: planning a secret never grants knowledge. Only reviewed, quoted
+    // chapter delivery advances that fact to the next chapter, atomically with the prose.
+    const mysteryCreated = await registry.invoke({ toolId: 'novelforge.projects.create', input: { title: '断绳案', background: '沈墨与周荷看守渡口。', modelConfigId: modelId, idempotencyKey: 'mystery-full-flow' } }, context)
+    assert.equal(mysteryCreated.ok, true, JSON.stringify(mysteryCreated))
+    const mysteryId = mysteryCreated.data.project.id
+    const mysteryCall = (name, input = {}) => call(name, { novelId: mysteryId, ...input })
+    const finishMystery = async runId => {
+      for (let i = 0; i < 200; i++) {
+        const { run } = await mysteryCall('workflows.get', { runId })
+        if (!['pending', 'running', 'cancel_requested'].includes(run.status)) return run
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+      throw new Error('mystery workflow timed out')
+    }
+    replies.push(JSON.stringify({ changes: [{ op: 'upsert_entity', kind: 'character', name: '沈墨', summary: '看守渡口的船工', attributes: { roleType: 'protagonist' } }, { op: 'upsert_entity', kind: 'character', name: '周荷', summary: '渡口掌柜' }] }), review)
+    assert.equal((await finishMystery((await mysteryCall('workflows.start', { stage: 'characters', request: '登记沈墨和周荷。', idempotencyKey: 'mystery-characters' })).run.runId)).status, 'success')
+    const mysteryCast = (await mysteryCall('characters.list')).characters
+    const shen = mysteryCast.find(row => row.fullName === '沈墨'), zhou = mysteryCast.find(row => row.fullName === '周荷')
+    const secret = '赵渡亲手割断了旧绳'
+    replies.push(JSON.stringify({ facts: [
+      { clientId: 'cut-rope', title: '割绳者', summary: secret, kind: 'truth', plannedRevealChapterNum: 2, notes: '通过旧信揭示割绳者。' },
+      { clientId: 'initial', title: '掌柜账册', summary: '周荷早就知道账册藏在梁上', kind: 'clue', knownFromStartCharacterIds: [zhou.id] },
+    ] }), review)
+    const factPlan = await finishMystery((await mysteryCall('workflows.start', { stage: 'story', request: '登记两条信息点，割绳者留到第2章，只有周荷开篇就知道账册位置。', idempotencyKey: 'mystery-plan-facts' })).run.runId)
+    assert.equal(factPlan.status, 'success', JSON.stringify(factPlan))
+    const plannedFacts = (await mysteryCall('assets.query')).facts
+    const secretFact = plannedFacts.find(fact => fact.title === '割绳者')
+    assert.equal(secretFact.plannedRevealChapterNum, 2); assert.equal(secretFact.readerKnownChapterId, null); assert.deepEqual(secretFact.characterKnowledge, [])
+    assert.equal(secretFact.notes, '通过旧信揭示割绳者。'); assert.equal(secretFact.sourceArtifactId, factPlan.artifactId)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM chapters WHERE novel_id=?').get(mysteryId).count, 0, 'planning a future reveal never creates a chapter')
+    assert.equal(plannedFacts.find(fact => fact.title === '掌柜账册').characterKnowledge[0].knownFromStart, true)
+    assert.equal(plannedFacts.find(fact => fact.title === '掌柜账册').characterKnowledge[0].knownChapterId, null)
+    const firstProse = '沈墨查看旧绳。河水漫过木桩，他把断绳放在岸上，又把渡船系稳。'
+    const revealProse = `沈墨读信，信被泥水浸湿。他辨出最后一行字：${secret}。沈墨知道割绳者是谁了，把信折好收起。`
+    const planChapter = (chapterNum, title, goal, result, reveal = false) => ({ chapterNum, title, outline: `${goal}。${result}。`, chapterContract: { chapterGoal: goal },
+      scenes: [{ pov: '沈墨', timeLocation: '清晨，渡口', sceneGoal: goal, obstacle: '信被泥水浸湿', resultState: result, revealPayload: reveal ? [`fact:${secretFact.id}`] : [] }],
+      allowedFactIds: reveal ? [secretFact.id] : [], revealedFactIds: reveal ? [secretFact.id] : [] })
+    replies.push(JSON.stringify({ chapters: [planChapter(1, '旧绳', '沈墨查看旧绳', '渡船系稳'), planChapter(2, '旧信', '沈墨读信', '沈墨知道割绳者', true), planChapter(3, '寻人', '沈墨寻找割绳者', '沈墨离开渡口')] }), review)
+    assert.equal((await finishMystery((await mysteryCall('workflows.start', { stage: 'outline', request: '安排前三章，第2章才揭示割绳者。', count: 3, atChapter: 1, idempotencyKey: 'mystery-outline' })).run.runId)).status, 'success')
+    const previewFirst = (await mysteryCall('context.preview', { stage: 'chapter', atChapter: 1, request: '沈墨查看旧绳。' })).context
+    assert.ok(!previewFirst.text.includes(secret), 'planned truth is not visible to the first chapter writer')
+    assert.ok(!previewFirst.text.includes('周荷早就知道账册藏在梁上'), 'one character knownFromStart is not shared with another POV')
+    replies.push(JSON.stringify({ chapterNum: 1, title: '旧绳', content: firstProse, summary: '沈墨查看旧绳并系稳渡船。', changes: [], factReveals: [] }), review)
+    assert.equal((await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 1, request: '只写查看旧绳，不揭示是谁割断。', idempotencyKey: 'mystery-chapter-one' })).run.runId)).status, 'success')
+    const secondPlan = (await mysteryCall('assets.query')).chapters.find(row => row.chapterNum === 2)
+    const foreignFactId = require('../electron/services/story-fact.service.ts').createStoryFact(novelId, { title: '别的小说信息点', summary: secret })
+    const validReveal = { factId: secretFact.id, characterIds: [shen.id], evidenceQuote: `他辨出最后一行字：${secret}。` }
+    const chapterCandidate = factReveals => ({ chapterNum: 2, title: '旧信', content: revealProse, summary: '沈墨读信知道割绳者。', changes: [], factReveals })
+    for (const [label, badReveal] of [
+      ['bad-quote', { ...validReveal, evidenceQuote: '这句话不在正文里面' }],
+      ['bad-character', { ...validReveal, characterIds: ['character:missing'] }],
+      ['foreign-character', { ...validReveal, characterIds: [characterList[0].id] }],
+      ['foreign-fact', { ...validReveal, factId: foreignFactId }],
+    ]) {
+      const requestCount = requests.length
+      replies.push(JSON.stringify(chapterCandidate([badReveal])), review)
+      const failed = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者。', idempotencyKey: `mystery-${label}` })).run.runId)
+      assert.equal(failed.status, 'failed', JSON.stringify(failed))
+      assert.equal(requests.length, requestCount + 2, `${label} must reach reviewed candidate validation`)
+      assert.match(failed.message, /揭示证据|人物图谱ID|信息点ID/, JSON.stringify(failed))
+      assert.equal((await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).readerKnownChapterId, null)
+      assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(secondPlan.id).content || '', '', 'invalid revelation cannot partially commit prose')
+    }
+    replies.push(JSON.stringify(chapterCandidate([validReveal])), review)
+    const accepted = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者，只有沈墨看到。', autoApply: false, idempotencyKey: 'mystery-accepted-reveal' })).run.runId)
+    assert.equal(accepted.status, 'paused', JSON.stringify(accepted))
+    assert.equal((await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).readerKnownChapterId, null, 'reviewed but unapplied candidate never grants knowledge')
+    await mysteryCall('workflows.apply', { runId: accepted.runId })
+    const afterReveal = (await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id)
+    assert.equal(afterReveal.readerKnownChapterId, secondPlan.id)
+    assert.equal(afterReveal.protagonistKnownChapterId, secondPlan.id)
+    assert.deepEqual(afterReveal.characterKnowledge.map(entry => entry.characterId), [shen.id])
+    assert.equal(afterReveal.characterKnowledge[0].knownChapterId, secondPlan.id)
+    assert.equal(afterReveal.characterKnowledge[0].evidenceQuote, validReveal.evidenceQuote)
+    const versionAfterReveal = (await mysteryCall('assets.query')).contextVersion
+    await mysteryCall('workflows.apply', { runId: accepted.runId })
+    assert.equal((await mysteryCall('assets.query')).contextVersion, versionAfterReveal, 'repeated apply is idempotent')
+    const previewThird = (await mysteryCall('context.preview', { stage: 'chapter', atChapter: 3, request: '沈墨依据已知事实寻找割绳者。' })).context
+    assert.ok(previewThird.sources.includes(`fact:${secretFact.id}`), 'the next chapter sees the committed character knowledge')
+    assert.ok(previewThird.text.includes(secret))
     assert.equal(replies.length, 0)
-    process.stdout.write('PASS creative workflow: async model/review/apply, incremental graph, replay, malformed review, stale rejection, cancellation. Loopback fixture only.\n')
+    process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {
     heldResponse?.destroy(); server.closeAllConnections(); server.close(); closeDb()
     if (!path.resolve(temp).startsWith(path.resolve(root, '.tmp-tests') + path.sep)) throw new Error('unsafe cleanup')
