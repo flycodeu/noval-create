@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { DesktopUpdateStatus } from '../src/shared/desktop-update'
+import type { CodexMcpSetupStatus } from '../src/shared/codex-mcp-setup'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
 import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
 import type { StoryThreadBatchGenerateOptions } from '../src/shared/story-thread-generation'
@@ -98,6 +99,8 @@ const api = {
     checkForUpdates: () => invokeIpc<DesktopUpdateStatus>('app:checkForUpdates'),
     installUpdate: () => invokeIpc<boolean>('app:installUpdate'),
     openReleasePage: () => invokeIpc<void>('app:openReleasePage'),
+    getCodexMcpSetupStatus: (cliPath?: string) => invokeIpc<CodexMcpSetupStatus>('app:getCodexMcpSetupStatus', cliPath),
+    configureCodexMcp: (cliPath?: string) => invokeIpc<CodexMcpSetupStatus>('app:configureCodexMcp', cliPath),
   },
 
   agentTools: {

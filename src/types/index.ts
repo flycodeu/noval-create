@@ -5938,6 +5938,8 @@ declare global {
         checkForUpdates: () => Promise<import('../shared/desktop-update').DesktopUpdateStatus>
         installUpdate: () => Promise<boolean>
         openReleasePage: () => Promise<void>
+        getCodexMcpSetupStatus: (cliPath?: string) => Promise<import('../shared/codex-mcp-setup').CodexMcpSetupStatus>
+        configureCodexMcp: (cliPath?: string) => Promise<import('../shared/codex-mcp-setup').CodexMcpSetupStatus>
         getLocalBackendStatus?: () => Promise<{
           isWebPreview: boolean
           status: 'checking' | 'connected' | 'unavailable'

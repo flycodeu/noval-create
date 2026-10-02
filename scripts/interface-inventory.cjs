@@ -18,6 +18,8 @@ const DESKTOP_WEB_PLATFORM_ONLY = new Set([
   'app.getUpdateStatus',
   'app.installUpdate',
   'app.openReleasePage',
+  'app.getCodexMcpSetupStatus',
+  'app.configureCodexMcp',
   'window.close',
   'window.isMaximized',
   'window.minimize',

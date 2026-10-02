@@ -75,6 +75,7 @@ import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
 import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './services/desktop-updater'
+import { configureCodexMcp, getCodexMcpSetupStatus } from './services/codex-mcp-setup.service'
 import { startMcpStdio } from './mcp-stdio'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
@@ -401,6 +402,10 @@ function registerIpcHandlers() {
   handle('app:checkForUpdates', () => checkDesktopUpdates())
   handle('app:installUpdate', () => installDownloadedUpdate())
   handle('app:openReleasePage', () => shell.openExternal('https://github.com/flycodeu/noval-create/releases/latest'))
+  handle('app:getCodexMcpSetupStatus', (_, cliPath?: unknown) =>
+    getCodexMcpSetupStatus(typeof cliPath === 'string' ? cliPath : undefined))
+  handle('app:configureCodexMcp', (_, cliPath?: unknown) =>
+    configureCodexMcp(typeof cliPath === 'string' ? cliPath : undefined))
 
   // Stable agent-tool surface. Caller identity and scopes are supplied here,
   // never accepted from renderer input.

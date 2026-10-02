@@ -4,6 +4,8 @@ NovelForge 提供本地 stdio MCP。Codex 可以读取项目上下文，把指�
 
 ## 连接安装版
 
+在 Windows 安装版或便携版中，也可以打开“应用设置 → Codex MCP 连接”：检查本机 Codex 配置，一键登记当前 NovelForge 可执行文件，或复制页面生成的 PowerShell 命令。若 Codex CLI 不在默认位置，可填入 `codex.exe` 的绝对路径。页面显示“已登记”只表示配置文件中的命令和参数匹配；完全退出 NovelForge、重启 Codex 后，还要实际调用 `novelforge.projects.list` 等工具确认 MCP 会话可用。
+
 先在 NovelForge 建立项目，记住项目名称。完全退出桌面程序后，在 PowerShell 中运行；把路径替换成安装时选择的 `NovelForge.exe` 位置：
 
 ```powershell

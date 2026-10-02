@@ -94,7 +94,9 @@ jobs:
           $silentUpdateNote = if ($version -eq '1.0.2') {
             '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
           } else { $null }
-          $releaseChangesNote = if ($version -eq '1.1.1') {
+          $releaseChangesNote = if ($version -eq '1.1.2') {
+            '1.1.2 在应用设置中新增 Codex MCP 配置入口：检测登记状态、指定 codex.exe 路径、一键配置并复制 PowerShell 命令。完成配置后需退出 NovelForge 并重启 Codex，再调用工具验证连接。'
+          } elseif ($version -eq '1.1.1') {
             '1.1.1 新增“应用设置”页面，可查看当前安装版本、手动检查 GitHub 更新、查看下载进度，并在下载完成后选择重启安装；便携版明确提示不支持应用内更新。'
           } elseif ($version -eq '1.1.0') {
             '1.1.0 新增 Codex 可用的本机 MCP 草稿导入与审阅入口；项目立项 JSON 草稿经确认后可回填表单。修复步骤 AI 助手可能覆盖已有字段的问题，关闭窗口时可选择最小化、退出或取消，并完善窗口图标。'

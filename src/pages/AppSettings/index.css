@@ -75,6 +75,56 @@
   line-height: 1.6;
 }
 
+.app-settings__mcp-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  background: var(--bg-surface);
+}
+
+.app-settings__mcp-status > div,
+.app-settings__mcp-field,
+.app-settings__mcp-command {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-settings__mcp-status strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.app-settings__mcp-field label {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app-settings__mcp-field > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.app-settings__mcp-command {
+  padding: 16px 18px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.app-settings__mcp-command code {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 @media (max-width: 600px) {
   .app-settings__version,
   .app-settings__update {
