@@ -76,7 +76,7 @@ export async function attachToExistingRuntime(directory: string, expectedVersion
   const existing = await probeRuntime(directory, expectedVersion)
   if (!existing) return false
   if (openDesktop) {
-    const response = await runtimeRequest(existing.connection, '/desktop/open', { method: 'POST' })
+    const response = await runtimeRequest(existing.connection, '/desktop/open', { method: 'POST', timeoutMs: 30_000 })
     if (!response.ok) throw new Error('已运行的服务无法打开桌面，请先退出该开发服务。')
   }
   return true

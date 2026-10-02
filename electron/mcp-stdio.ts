@@ -1,7 +1,8 @@
+import fs from 'node:fs'
 import readline from 'node:readline'
 import { spawn } from 'node:child_process'
 import { app } from 'electron'
-import { probeRuntime, runtimeRequest, type RuntimeConnection } from './utils/mcp-runtime'
+import { probeRuntime, readRuntimeConnection, runtimeRequest, type RuntimeConnection } from './utils/mcp-runtime'
 import { assertNotUpdating } from './utils/update-lifecycle'
 
 /** A stdio client never opens storage; every request goes to the existing owner. */
@@ -57,12 +58,31 @@ export async function startMcpStdio(runtimeArgs?: string[]): Promise<void> {
     if (process.platform === 'win32') process.kill(process.pid, 'SIGTERM')
     else app.quit()
   }
+  const assertBoundOwnerExists = () => {
+    const current = readRuntimeConnection(directory)
+    if (stopped || !current || current.instanceId !== connection.instanceId || current.pid !== connection.pid) {
+      throw new Error('NovelForge runtime stopped or changed. Reconnect the MCP client.')
+    }
+    try { process.kill(connection.pid, 0) } catch (error) {
+      // Lack of signal permission does not prove the owner has exited.
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') throw new Error('NovelForge runtime process has exited. Reconnect the MCP client.')
+    }
+  }
   const assertOwner = async () => {
     if (stopped) throw new Error('NovelForge MCP bridge has stopped. Reconnect to use the current application.')
     try {
       assertNotUpdating(directory, version)
+      // Check the bound identity before probing so an old bridge never asks a
+      // replacement owner to serve it.
+      assertBoundOwnerExists()
       const owner = await probeRuntime(directory, version)
-      if (stopped || !owner || owner.connection.instanceId !== connection.instanceId) throw new Error('NovelForge runtime stopped or changed. Reconnect the MCP client.')
+      assertNotUpdating(directory, version)
+      assertBoundOwnerExists()
+      // A cold BrowserWindow can temporarily block the owner's HTTP loop. A
+      // health timeout is not owner loss while its discovery and PID still match.
+      if (owner && (owner.connection.instanceId !== connection.instanceId || owner.connection.pid !== connection.pid)) {
+        throw new Error('NovelForge runtime stopped or changed. Reconnect the MCP client.')
+      }
     } catch (error) {
       shutdown()
       throw error
@@ -94,4 +114,3 @@ export async function startMcpStdio(runtimeArgs?: string[]): Promise<void> {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
 }
-import fs from 'node:fs'

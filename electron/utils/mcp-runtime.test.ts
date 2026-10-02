@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { attachToExistingRuntime, probeRuntime, readRuntimeConnection, runtimeRequest, startMcpRuntime, type RuntimeHandle } from './mcp-runtime'
@@ -35,6 +35,8 @@ beforeEach(async () => {
   })
 })
 afterEach(async () => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   await Promise.allSettled(clients.splice(0).map((client) => client.close()))
   await runtime.close()
   if (!path.resolve(directory).startsWith(path.join(os.tmpdir(), 'novelforge-runtime-test-'))) throw new Error('Unsafe test cleanup path')
@@ -48,6 +50,29 @@ async function connect() {
     requestInit: { headers: { Authorization: `Bearer ${runtime.connection.token}` } },
   }))
   return client
+}
+
+function simulateResponseDelay(healthDelay: number | null, desktopDelay: number | null) {
+  vi.useFakeTimers()
+  // Native AbortSignal timers do not follow fake time; retain their cancellation semantics.
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), delay)
+    return controller.signal
+  })
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => {
+    const health = new URL(String(input)).pathname === '/health'
+    const delay = health ? healthDelay : desktopDelay
+    return new Promise<Response>((resolve, reject) => {
+      const timer = delay === null ? undefined : setTimeout(() => resolve(new Response(JSON.stringify(health
+        ? { instanceId: runtime.connection.instanceId, version: 'test', storage: 'ready' }
+        : { opened: true }))), delay)
+      options?.signal?.addEventListener('abort', () => {
+        clearTimeout(timer)
+        reject(options.signal?.reason)
+      }, { once: true })
+    })
+  })
 }
 
 describe('shared MCP runtime', () => {
@@ -78,6 +103,35 @@ describe('shared MCP runtime', () => {
     expect((await probeRuntime(directory))?.connection.instanceId).toBe(runtime.connection.instanceId)
     expect(await attachToExistingRuntime(directory, 'test', true)).toBe(true)
     expect(opened).toBe(1)
+  })
+
+  it('allows a desktop cold start to finish beyond the health probe deadline', async () => {
+    simulateResponseDelay(0, 4_000)
+    let settled = false
+    const result = attachToExistingRuntime(directory, 'test', true).then(value => { settled = true; return value })
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(result).resolves.toBe(true)
+  })
+
+  it('caps desktop opening at 30 seconds while health probes still stop at 3 seconds', async () => {
+    simulateResponseDelay(0, null)
+    let failure: unknown
+    const result = attachToExistingRuntime(directory, 'test', true).catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(failure).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    await result
+    expect(failure).toMatchObject({ name: 'TimeoutError' })
+
+    simulateResponseDelay(null, null)
+    let settled = false
+    const health = probeRuntime(directory).then(value => { settled = true; return value })
+    await vi.advanceTimersByTimeAsync(2_999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(health).resolves.toBeNull()
   })
 
   it('reports a live version mismatch instead of treating the owner as absent', async () => {

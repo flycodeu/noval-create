@@ -19,9 +19,9 @@ let modelRequestClosed = false
 const discoveryPath = path.join(directory, 'novelforge-runtime.json')
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 function discovery() { return JSON.parse(fs.readFileSync(discoveryPath, 'utf8')) }
-async function request(route, method = 'GET', body) {
+async function request(route, method = 'GET', body, timeoutMs = 3_000) {
   const live = discovery()
-  return fetch(new URL(route, live.url), { method, headers: { Authorization: `Bearer ${live.token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(3000) })
+  return fetch(new URL(route, live.url), { method, headers: { Authorization: `Bearer ${live.token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) })
 }
 async function rpc(service, method, args = []) {
   const result = await (await request('/rpc', 'POST', { service, method, args })).json()
@@ -69,7 +69,7 @@ async function main() {
     await new Promise((resolve) => webProxy.once('exit', resolve))
     webProxy = null
     assert.equal((await (await request('/health')).json()).instanceId, firstOwner.instanceId, 'Stopping Web proxy must preserve the owner')
-    assert.equal((await request('/desktop/open', 'POST')).status, 200)
+    assert.equal((await request('/desktop/open', 'POST', undefined, 30_000)).status, 200)
     assert.equal((await (await request('/health')).json()).desktopOpen, true)
     const withWindow = await first.callTool({ name: 'novelforge.projects.list', arguments: {} })
     assert(!withWindow.isError, 'MCP must keep working while the desktop exists')
