@@ -263,7 +263,7 @@ function createWindow() {
       message: '要最小化窗口，还是退出 NovelForge？',
       detail: '最小化后可从任务栏恢复。退出会中断正在运行的 AI 任务；请先保存正在编辑的内容。',
       buttons: ['最小化', '退出', '取消'],
-      defaultId: 0,
+      defaultId: 1,
       cancelId: 2,
       noLink: true,
     })

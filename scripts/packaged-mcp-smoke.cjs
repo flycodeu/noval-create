@@ -9,7 +9,8 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 const workspaceRoot = path.resolve(__dirname, '..')
 const testRoot = path.resolve(workspaceRoot, '.tmp-tests')
 const testUserData = path.resolve(testRoot, `packaged-mcp-${process.pid}-${randomUUID()}`)
-const executable = path.resolve(workspaceRoot, 'release', 'win-unpacked', 'NovelForge.exe')
+const bundledEntry = process.argv.includes('--bundle') ? path.resolve(workspaceRoot, 'out', 'main', 'main.js') : null
+const executable = bundledEntry ? require('electron') : path.resolve(workspaceRoot, 'release', 'win-unpacked', 'NovelForge.exe')
 
 function verifyTestDirectory(target) {
   const workspace = fs.realpathSync(workspaceRoot)
@@ -50,6 +51,7 @@ async function withTimeout(promise, milliseconds, label) {
 async function main() {
   if (process.platform !== 'win32') throw new Error('Packaged MCP smoke requires Windows.')
   assert(fs.existsSync(executable), `Packaged executable missing: ${executable}`)
+  if (bundledEntry) assert(fs.existsSync(bundledEntry), `Bundled MCP entry missing: ${bundledEntry}`)
   fs.mkdirSync(testUserData, { recursive: true })
   verifyTestDirectory(testUserData)
   const seedEnv = {
@@ -68,7 +70,7 @@ async function main() {
   assert.equal(seed.status, 0, `Failed to seed test project: ${seed.stderr || seed.error || ''}`)
   const transport = new StdioClientTransport({
     command: executable,
-    args: ['--mcp'],
+    args: bundledEntry ? [bundledEntry, '--mcp'] : ['--mcp'],
     cwd: workspaceRoot,
     env: {
       ...process.env,
@@ -78,6 +80,7 @@ async function main() {
     stderr: 'pipe',
   })
   const client = new Client({ name: 'packaged-mcp-smoke', version: '1.0.0' })
+  const lockPath = path.join(testUserData, 'novelforge.single-writer.lock')
   let stderr = ''
   transport.stderr?.on('data', (chunk) => { stderr += String(chunk) })
 
@@ -91,10 +94,23 @@ async function main() {
     const resource = await withTimeout(client.readResource({ uri: 'novelforge://capabilities' }), 15_000, 'resources/read')
     const capabilities = JSON.parse(resource.contents[0].text)
     const packageVersion = require('../package.json').version
-    assert.equal(capabilities.server.version, packageVersion)
+    if (!bundledEntry) assert.equal(capabilities.server.version, packageVersion)
     assert(!capabilities.grantedScopes.includes('canon:write'))
+    assert.equal(fs.existsSync(lockPath), false, 'idle MCP connection must not hold the desktop writer lock')
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      identity: 'desktop-main',
+      startedAt: new Date().toISOString(),
+      hostname: 'packaged-smoke',
+    }))
+    const busy = await client.callTool({ name: 'novelforge.projects.list', arguments: {} })
+    assert.equal(busy.isError, true, 'MCP calls must respect an active desktop writer')
+    assert.match(busy.content[0].text, /桌面端正在使用数据库/)
+    fs.unlinkSync(lockPath)
     const projectsResult = await client.callTool({ name: 'novelforge.projects.list', arguments: {} })
     assert.equal(projectsResult.isError, undefined)
+    await new Promise((resolve) => setTimeout(resolve, 2_500))
+    assert.equal(fs.existsSync(lockPath), false, 'MCP must release the writer lock after its tool call')
     const project = projectsResult.structuredContent.projects[0]
     assert.equal(project.title, '安装版 MCP 验收')
     const output = JSON.stringify({ readerPromise: '围绕边境商路的取舍展开；主角目标待确认。' })
@@ -123,7 +139,7 @@ async function main() {
     const after = await client.callTool({ name: 'novelforge.projects.get', arguments: { novelId: project.id } })
     assert.equal(after.structuredContent.project.contextVersion, project.contextVersion)
     assert(!after.structuredContent.project.availableAssets.includes('project_brief'))
-    process.stdout.write(`PASS packaged MCP ${packageVersion}: tools=${toolIds.length}, draft=${artifactId}\n`)
+    process.stdout.write(`PASS ${bundledEntry ? 'bundled' : 'packaged'} MCP ${packageVersion}: tools=${toolIds.length}, draft=${artifactId}\n`)
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error

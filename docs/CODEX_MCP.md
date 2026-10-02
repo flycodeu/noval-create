@@ -6,7 +6,7 @@ NovelForge 提供本地 stdio MCP。Codex 可以读取项目上下文，把指�
 
 在 Windows 安装版或便携版中，也可以打开“应用设置 → Codex MCP 连接”：检查本机 Codex 配置，一键登记当前 NovelForge 可执行文件，或复制页面生成的 PowerShell 命令。若 Codex CLI 不在默认位置，可填入 `codex.exe` 的绝对路径。页面显示“已登记”只表示配置文件中的命令和参数匹配；完全退出 NovelForge、重启 Codex 后，还要实际调用 `novelforge.projects.list` 等工具确认 MCP 会话可用。
 
-先在 NovelForge 建立项目，记住项目名称。完全退出桌面程序后，在 PowerShell 中运行；把路径替换成安装时选择的 `NovelForge.exe` 位置：
+先在 NovelForge 建立项目，记住项目名称。也可在 PowerShell 中手动配置；把路径替换成安装时选择的 `NovelForge.exe` 位置：
 
 ```powershell
 codex mcp add novelforge -- "D:\Apps\NovelForge\NovelForge.exe" --mcp
@@ -15,7 +15,7 @@ codex mcp get novelforge
 
 也可直接编辑 Codex MCP 配置，`command` 填安装版 EXE 的绝对路径，`args` 填 `['--mcp']`。本入口只使用本机 stdio，不开网络端口。开发仓库可用 `node D:\FlyLabs\noval-create\scripts\run-novelforge-mcp.cjs`，但开发脚本依赖当前仓库和 `node_modules`；安装版用上面的 EXE 入口。
 
-桌面和 MCP 对同一个 SQLite 数据库互斥。**最小化不等于退出**：先在桌面程序选择“退出”，再启动 Codex 的 MCP 会话；导入结束后关闭使用 MCP 的 Codex 会话，再打开桌面程序审查。若看到“另一个 NovelForge 实例正在使用该数据库”，不要复制数据库或手工删除锁文件，先检查并退出占用实例。
+桌面和 MCP 工具调用对同一个 SQLite 数据库互斥。MCP 连接空闲时会释放写锁，因此 Codex 保持连接也可以打开桌面程序；桌面程序打开期间，MCP 工具调用会提示先退出桌面端。**最小化不等于退出**：完成桌面审查后选择“退出”，再重试 MCP 工具调用。若看到“另一个 NovelForge 实例正在使用该数据库”，不要复制数据库或手工删除锁文件，先检查实际占用进程。
 
 ## 一次只做指定阶段
 

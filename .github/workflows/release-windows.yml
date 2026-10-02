@@ -94,7 +94,9 @@ jobs:
           $silentUpdateNote = if ($version -eq '1.0.2') {
             '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
           } else { $null }
-          $releaseChangesNote = if ($version -eq '1.1.2') {
+          $releaseChangesNote = if ($version -eq '1.1.3') {
+            '1.1.3 修复 Codex MCP 连接长期持有数据库锁导致桌面版无法再次打开的问题：MCP 空闲时释放写锁，桌面端打开期间 MCP 工具明确提示占用；存活进程的锁不再因运行超过 24 小时被抢占，关闭窗口对话框默认选择退出。'
+          } elseif ($version -eq '1.1.2') {
             '1.1.2 在应用设置中新增 Codex MCP 配置入口：检测登记状态、指定 codex.exe 路径、一键配置并复制 PowerShell 命令。完成配置后需退出 NovelForge 并重启 Codex，再调用工具验证连接。'
           } elseif ($version -eq '1.1.1') {
             '1.1.1 新增“应用设置”页面，可查看当前安装版本、手动检查 GitHub 更新、查看下载进度，并在下载完成后选择重启安装；便携版明确提示不支持应用内更新。'

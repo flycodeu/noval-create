@@ -82,4 +82,14 @@ describe('single-writer-lock', () => {
       expect(fs.existsSync(lockPath)).toBe(false)
     }
   })
+
+  it('does not steal a lock from a live process merely because it is old', () => {
+    const dir = makeTempDir()
+    fs.writeFileSync(
+      getSingleWriterLockPath(dir),
+      JSON.stringify({ pid: process.pid, identity: 'desktop-main', startedAt: '2020-01-01T00:00:00.000Z', hostname: 'test' }),
+      'utf8',
+    )
+    expect(acquireSingleWriterLock(dir, 'mcp-runtime')).toBeNull()
+  })
 })

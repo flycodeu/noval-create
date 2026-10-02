@@ -3,7 +3,6 @@ import path from 'node:path'
 import os from 'node:os'
 
 const LOCK_FILE_NAME = 'novelforge.single-writer.lock'
-const STALE_LOCK_AGE_MS = 24 * 60 * 60 * 1000
 
 interface LockRecord {
   pid: number
@@ -74,7 +73,7 @@ function tryCreateLock(lockPath: string, identity: string): boolean {
  *
  * - 返回 handle 表示本进程成为写者。
  * - 返回 null 表示已有存活实例持有写锁（调用方应拒绝启动或降级为只读）。
- * - 崩溃遗留的陈旧锁（PID 不存在或超过 24 小时）会被自动清理并重试一次。
+ * - 崩溃遗留的陈旧锁（PID 不存在）会被自动清理并重试一次；存活进程的锁不会因运行时间长而被抢占。
  */
 export function acquireSingleWriterLock(
   lockDir: string,
@@ -88,12 +87,9 @@ export function acquireSingleWriterLock(
   }
 
   const existing = readLockRecord(lockPath)
-  const staleByAge = existing
-    ? Date.now() - new Date(existing.startedAt).getTime() > STALE_LOCK_AGE_MS
-    : false
   const staleByPid = existing ? !isProcessAlive(existing.pid) : true
 
-  if (existing && (staleByAge || staleByPid)) {
+  if (existing && staleByPid) {
     try {
       fs.unlinkSync(lockPath)
     } catch {

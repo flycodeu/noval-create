@@ -323,13 +323,13 @@ Windows 用户可从 [GitHub Releases](https://github.com/flycodeu/noval-create/
 
 ## Codex 与本机 MCP
 
-安装版可用 `NovelForge.exe --mcp` 启动无窗口 MCP 服务。在 NovelForge 中先创建项目，彻底退出桌面端，再把实际安装路径注册到本机 Codex：
+安装版可用 `NovelForge.exe --mcp` 启动无窗口 MCP 服务。在 NovelForge 中先创建项目，再到“应用设置 → Codex MCP 连接”登记本机 Codex；也可在 PowerShell 中运行：
 
 ```powershell
 codex mcp add novelforge -- "C:\你的安装位置\NovelForge.exe" --mcp
 ```
 
-Codex 可读取项目、按指定阶段分析需求并导入候选草稿。重新打开 NovelForge 后，在项目控制台查看“导入草稿”；项目立项的 JSON 草稿可审阅差异、回填表单，再由作者保存。最小化窗口仍占用数据库，无法同时启动 MCP。具体字段、审校与权限说明见 [Codex MCP 使用指南](docs/CODEX_MCP.md)。
+Codex 可读取项目、按指定阶段分析需求并导入候选草稿。MCP 连接空闲时会释放数据库锁，桌面端可以正常打开并审查“导入草稿”；桌面端打开期间，MCP 工具调用会提示数据库正被占用。最小化窗口仍占用数据库；完成审查后选择“退出”，再重试 MCP 工具。具体字段、审校与权限说明见 [Codex MCP 使用指南](docs/CODEX_MCP.md)。
 
 ## 7. 开发环境
 

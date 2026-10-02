@@ -12,7 +12,7 @@ import {
 import { InMemoryTaskStore } from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js'
 import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
 import { closeDb, initDb } from './database/db'
-import { acquireSingleWriterLock } from './utils/single-writer-lock'
+import { McpStorageLease } from './utils/mcp-storage-lease'
 import { AGENT_TOOL_SCOPES, MCP_AGENT_TOOL_DEFAULT_SCOPES } from '../src/shared/tool-contracts'
 import type { AgentToolCallResult, AgentToolDescriptor } from '../src/shared/tool-contracts'
 
@@ -101,21 +101,10 @@ export async function startMcpStdio(): Promise<void> {
   console.warn = (...args) => console.error(...args)
 
   await app.whenReady()
-  const writerLock = acquireSingleWriterLock(app.getPath('userData'), 'mcp-runtime')
-  if (!writerLock) throw new Error('另一个 NovelForge 实例正在使用该数据库。请先退出桌面端；最小化仍会持有写锁。')
-  let initialized = false
-  let closed = false
-  const closeStorage = () => {
-    if (closed) return
-    closed = true
-    if (initialized) closeDb()
-    writerLock.release()
-  }
-  app.once('before-quit', closeStorage)
+  const storage = new McpStorageLease(app.getPath('userData'), () => { initDb() }, closeDb)
+  app.once('before-quit', () => storage.close())
 
   try {
-    initDb()
-    initialized = true
     const scopes = scopesFromEnvironment()
     const descriptors = novelForgeToolRegistry.list()
     const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
@@ -148,23 +137,32 @@ export async function startMcpStdio(): Promise<void> {
       const requestMeta = request.params._meta && typeof request.params._meta === 'object' ? request.params._meta : {}
       const approvalId = approvedSessionId(requestMeta['novelforge/approvalToken'])
       const client = server.getClientVersion()
-      const invoke = () => novelForgeToolRegistry.invoke({
-        toolId: request.params.name,
-        input: request.params.arguments && typeof request.params.arguments === 'object'
-          ? request.params.arguments as Record<string, unknown> : {},
-        ...(approvalId ? { approvalId } : {}),
-      }, {
-        actor: {
-          type: 'api_client',
-          actorId: client?.name ? `${client.name}:${client.version || 'unknown'}` : 'mcp-client',
-          clientId: client?.name || 'mcp-client',
-          sessionId: `stdio-${process.pid}`,
-        },
-        scopes,
-        requestId: `mcp-${randomUUID()}`,
-        locale: Intl.DateTimeFormat().resolvedOptions().locale || 'zh-CN',
-        ...(approvalId ? { approvalId } : {}),
-      })
+      const invoke = async () => {
+        if (!storage.enter()) {
+          throw new Error('NovelForge 桌面端正在使用数据库。请先退出桌面端（最小化仍会占用），再重试 MCP 工具调用。')
+        }
+        try {
+          return await novelForgeToolRegistry.invoke({
+            toolId: request.params.name,
+            input: request.params.arguments && typeof request.params.arguments === 'object'
+              ? request.params.arguments as Record<string, unknown> : {},
+            ...(approvalId ? { approvalId } : {}),
+          }, {
+            actor: {
+              type: 'api_client',
+              actorId: client?.name ? `${client.name}:${client.version || 'unknown'}` : 'mcp-client',
+              clientId: client?.name || 'mcp-client',
+              sessionId: `stdio-${process.pid}`,
+            },
+            scopes,
+            requestId: `mcp-${randomUUID()}`,
+            locale: Intl.DateTimeFormat().resolvedOptions().locale || 'zh-CN',
+            ...(approvalId ? { approvalId } : {}),
+          })
+        } finally {
+          storage.leave()
+        }
+      }
 
       if (taskRequested) {
         if (!extra.taskStore) throw new Error('MCP task store is not available.')
@@ -186,7 +184,11 @@ export async function startMcpStdio(): Promise<void> {
         })
         return { task }
       }
-      return toolResult(await invoke())
+      try {
+        return toolResult(await invoke())
+      } catch (error) {
+        return infrastructureError(error)
+      }
     })
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       resources: [{
@@ -215,7 +217,7 @@ export async function startMcpStdio(): Promise<void> {
     const shutdown = async () => {
       await server.close().catch(() => undefined)
       input.destroy()
-      closeStorage()
+      storage.close()
       app.quit()
     }
     process.once('SIGINT', () => void shutdown())
@@ -224,7 +226,7 @@ export async function startMcpStdio(): Promise<void> {
     await server.connect(new StdioServerTransport(input, process.stdout))
     console.error(`[novelforge-mcp] ready with ${descriptors.length} tools; scopes=${scopes.join(',')}`)
   } catch (error) {
-    closeStorage()
+    storage.close()
     throw error
   }
 }
