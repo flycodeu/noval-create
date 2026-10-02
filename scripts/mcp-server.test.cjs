@@ -107,13 +107,19 @@ async function main() {
     for (let attempt = 0; attempt < 100 && fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')); attempt += 1) await wait(100)
     assert(!fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')), 'Explicit stop must release the writer lock')
     assert(modelRequestClosed, 'Explicit exit must close the in-flight model connection')
-    // Existing bridge reconnects to a restarted owner without replaying an earlier mutation.
-    assert(!(await second.callTool({ name: 'novelforge.projects.list', arguments: {} }, undefined, { timeout: 60_000 })).isError)
+    // Stopping the owner invalidates existing bridges; only an explicit new
+    // client connection may start another owner, without replaying mutations.
+    await assert.rejects(second.callTool({ name: 'novelforge.projects.list', arguments: {} }, undefined, { timeout: 10_000 }))
+    await wait(1_500)
+    assert(!fs.existsSync(discoveryPath), 'A stopped bridge must not restart the owner')
+    assert(!fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')), 'A stopped bridge must not reacquire storage')
+    const fresh = await connect()
+    assert(!(await fresh.callTool({ name: 'novelforge.projects.list', arguments: {} })).isError)
     assert.notEqual(discovery().instanceId, firstOwner.instanceId)
-    const recovered = await second.callTool({ name: 'novelforge.workflows.get', arguments: { novelId, runId } })
+    const recovered = await fresh.callTool({ name: 'novelforge.workflows.get', arguments: { novelId, runId } })
     assert.equal(recovered.structuredContent.run.status, 'cancelled', 'Restart must retain cancellation instead of re-running the model')
     assert.equal((await rpc('novel', 'get', [novelId])).userBackground, '渡口的两名船工。')
-    process.stdout.write(`PASS shared Electron runtime: ${listed.tools.length} tools; desktop + Web proxy + 2 MCP clients + reconnect + stop/restart + model cancellation + key masking\n`)
+    process.stdout.write(`PASS shared Electron runtime: ${listed.tools.length} tools; desktop + Web proxy + 2 MCP clients + reconnect + owner stop invalidates old bridge + fresh-client restart + model cancellation + key masking\n`)
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error
