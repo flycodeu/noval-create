@@ -113,6 +113,14 @@ async function main() {
     console.log(`[web-rpc-smoke] backend ready on http://127.0.0.1:${port}; running smoke checks`)
     smokeCode = await runSmoke(port)
   } finally {
+    const discovery = path.join(testDataRoot, 'novelforge-runtime.json')
+    if (fs.existsSync(discovery)) {
+      const owner = JSON.parse(fs.readFileSync(discovery, 'utf8'))
+      await fetch(new URL('/shutdown', owner.url), { method: 'POST', headers: { Authorization: `Bearer ${owner.token}` } }).catch(() => undefined)
+      for (let attempt = 0; attempt < 100 && fs.existsSync(path.join(testDataRoot, 'novelforge.single-writer.lock')); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    }
     stopProcessTree(backend)
     await waitForExit(backend)
     const tempParent = path.resolve(workspaceRoot, '.tmp-tests')

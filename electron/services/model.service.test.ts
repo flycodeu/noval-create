@@ -25,9 +25,25 @@ import {
   normalizeModelContextTokensForModel,
   normalizeModelExtraParamsJson,
   normalizeModelProvider,
+  normalizeModelMaxTokens,
+  getProviderRuntimeDefaults,
 } from './model.service'
+import { DeepSeekAdapter } from '../adapters/deepseek.adapter'
+import { getProviderMaxOutputTokens } from '../../src/shared/model-token-limits'
 
 describe('model service normalization', () => {
+  it('uses the same exact DeepSeek output maximum in the adapter, editor and persisted model normalization', () => {
+    expect(getProviderMaxOutputTokens('deepseek')).toBe(393216)
+    expect(getProviderMaxOutputTokens(undefined)).toBe(1_000_000)
+    expect(getProviderRuntimeDefaults('deepseek').maxTokens).toBe(393216)
+    expect(new DeepSeekAdapter('test-only').defaultMaxTokens).toBe(393216)
+    expect(normalizeModelMaxTokens(undefined, 'deepseek')).toBe(393216)
+    expect(normalizeModelMaxTokens(393216, 'deepseek')).toBe(393216)
+    expect(normalizeModelMaxTokens(1_000_000, 'deepseek')).toBe(393216)
+    expect(normalizeModelMaxTokens(384000, 'deepseek')).toBe(384000)
+    expect(normalizeModelMaxTokens(1_000_000, 'custom')).toBe(1_000_000)
+  })
+
   it('normalizes provider aliases and rejects unsupported providers', () => {
     expect(normalizeModelProvider('moonshot')).toBe('kimi')
     expect(normalizeModelProvider('claude')).toBe('anthropic')

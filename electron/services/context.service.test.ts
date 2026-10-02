@@ -141,6 +141,7 @@ import type {
 } from './context.service'
 import {
   allocateChapterContext,
+  resolveAutomaticChapterRequestBudget,
   buildStoryProfile,
   buildBackgroundText,
   buildRecallSnapshot,
@@ -177,6 +178,8 @@ import {
   worldMap,
 } from '../database/schema'
 import { resolveModelRuntimeBudget } from './model.service'
+import { estimateRequestBudget } from './request-budget'
+import { allocateStageContextForPipeline } from './chapter-pipeline-context'
 import {
   buildStyleHardGuardPromptSection,
   resolveActiveStyleFingerprint,
@@ -436,6 +439,90 @@ describe('allocateChapterContext', () => {
     const usageSnapshot = buildWritingContextUsageSnapshot(rawData, context)
     expect(usageSnapshot.usedAssets).toContain('步骤接力记忆')
     expect(usageSnapshot.recentStateChanges.some((item) => item.includes('Writer 不得改成新地点'))).toBe(true)
+  })
+
+  it('keeps usable chapter input with the full DeepSeek output limit and passes the final request gate', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 1_000_000, maxTokens: 393216,
+      provider: 'deepseek', tokenSafetyMarginPct: 15,
+    })
+    const totalBudget = resolveAutomaticChapterRequestBudget(11800, {
+      modelConfigId: 7, promptProfile: 'scenePlan', chapterComplexity: 'key',
+    })
+    const context = allocateStageContextForPipeline(
+      createRawData(), { targetWords: 3200 } as never, 'key', 'scenePlan',
+    )
+    const report = context.contextBudgetReport
+    expect(totalBudget).toBe(458752)
+    expect(report.requestedBudget).toBe(totalBudget)
+    expect(report.reservedForOutput).toBe(393216)
+    expect(report.availableContextBudget).toBe(65536 - report.promptFixedOverhead)
+    expect(report.overflowLevel).toBe('none')
+    expect(context.constraintInjectionStatus.droppedConstraintCount).toBe(0)
+    expect(context.hardConstraintEntries.every((entry) => !entry.truncated)).toBe(true)
+    expect(estimateRequestBudget({
+      messages: [{ role: 'user', content: context.hardConstraintContext }],
+      maxTokens: 393216, modelContextTokens: 1_000_000, tokenSafetyMarginPct: 15,
+      stageBudget: report.requestedBudget,
+    }).allowed).toBe(true)
+  })
+
+  it('keeps complete prior-chapter evidence beside a large story core in automatic DeepSeek budgets', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 1_000_000, maxTokens: 393216,
+      provider: 'deepseek', tokenSafetyMarginPct: 15,
+    })
+    const previous = '出口外的追兵还在。\n\n主角说：“把伤员带走，我留下守住补给点。”'
+    const raw = createRawData({
+      contextParts: {
+        storyCore: '故事主线与已确立的人物动机。'.repeat(350),
+        worldRules: '世界规则与地点限制必须保持一致。'.repeat(350),
+      },
+      chapterRows: [{ id: 3, chapterNum: 3, content: previous }],
+    })
+    expect(() => allocateStageContextForPipeline(
+      raw, { targetWords: 3200 } as never, 'standard', 'scenePlan', 403216,
+    )).toThrow(HardConstraintOverflowError)
+    const context = allocateStageContextForPipeline(raw, { targetWords: 3200 } as never, 'standard', 'scenePlan')
+    expect(context.previousChapterContext).toBe(previous)
+    expect(context.previousChapterSampleReport.fullyInjected).toBe(true)
+    expect(context.previousChapterSampleReport.sources?.filter((source) => source.required)
+      .every((source) => source.included)).toBe(true)
+    expect(context.constraintInjectionStatus.droppedConstraintCount).toBe(0)
+    expect(context.contextBudgetReport.overflowLevel).toBe('none')
+  })
+
+  it('preserves other providers automatic input allowances', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 1_000_000, maxTokens: 4096, provider: 'openai', tokenSafetyMarginPct: 15,
+    })
+    expect(resolveAutomaticChapterRequestBudget(11800, { promptProfile: 'scenePlan' })).toBe(15896)
+  })
+
+  it('does not expand an explicit total cap or hide a model window too small for its output', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 1_000_000, maxTokens: 393216,
+      provider: 'deepseek', tokenSafetyMarginPct: 15,
+    })
+    expect(() => allocateStageContextForPipeline(
+      createRawData(), { targetWords: 3200 } as never, 'key', 'scenePlan', 11800,
+    )).toThrow(HardConstraintOverflowError)
+
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 400000, maxTokens: 393216,
+      provider: 'deepseek', tokenSafetyMarginPct: 15,
+    })
+    const totalBudget = resolveAutomaticChapterRequestBudget(11800, { promptProfile: 'scenePlan' })
+    try {
+      allocateChapterContext(createRawData(), { totalBudget, promptProfile: 'scenePlan' })
+      expect.fail('An output reserve larger than the safe model window must be blocked')
+    } catch (error) {
+      expect(error).toBeInstanceOf(HardConstraintOverflowError)
+      const report = (error as HardConstraintOverflowError).contextBudgetReport
+      expect(report.effectiveBudget).toBe(340000)
+      expect(report.reservedForOutput).toBe(393216)
+      expect(report.availableContextBudget).toBe(0)
+    }
   })
 
   it('keeps chapter-level contract summary when the allocator covers it as a hard constraint', () => {

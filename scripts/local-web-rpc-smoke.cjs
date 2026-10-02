@@ -124,38 +124,20 @@ async function main() {
     await expectRpcError('outline', 'generateArcs', [99999999], 'novel.notFound')
     await expectRpcError('outline', 'generateChapterOutlines', [99999999, { batchSize: 4 }], 'storyArc.notFound')
 
-    const request = {
-      toolId: 'novelforge.characters.commit_draft',
-      input: {
-        novelId,
-        draftArtifactId: 'missing-draft',
-        expectedContextVersion: 1,
-        expectedContentHash: `sha256:${'0'.repeat(64)}`,
-        idempotencyKey: `web-rpc-smoke-${stamp}`,
-      },
-    }
-    const beforeApproval = await rpc('agentTools', 'call', [request])
-    assert.equal(beforeApproval.ok, false)
-    assert.equal(beforeApproval.error.code, 'APPROVAL_REQUIRED')
-
-    const approval = await rpc('agentTools', 'approve', [{ request }])
-    assert.equal(approval.approved, true)
-    assert.ok(approval.approvalId)
-
-    const approvedCall = await rpc('agentTools', 'call', [{ ...request, approvalId: approval.approvalId }])
-    assert.equal(approvedCall.ok, false)
-    assert.equal(approvedCall.error.code, 'ARTIFACT_NOT_FOUND')
-
-    const replay = await rpc('agentTools', 'call', [{ ...request, approvalId: approval.approvalId }])
-    assert.equal(replay.ok, false)
-    assert.equal(replay.error.code, 'APPROVAL_REQUIRED')
+    const tools = await rpc('agentTools', 'list', [])
+    assert(tools.some((tool) => tool.id === 'novelforge.workflows.start'))
+    const sharedRead = await rpc('agentTools', 'call', [{ toolId: 'novelforge.projects.list', input: {} }])
+    assert.equal(sharedRead.ok, true)
+    assert(JSON.stringify(sharedRead.data).includes(`Web RPC smoke ${stamp} updated`))
+    await expectRpcError('agentTools', 'approve', [{}], 'runtime.methodNotAllowed')
+    await expectRpcError('app', 'openReleasePage', [], 'runtime.methodNotAllowed')
 
     const deleted = await rpc('novel', 'delete', [novelId])
     assert.equal(deleted ?? null, null)
     novelId = 0
     const missing = await rpc('novel', 'get', [Number(before.id || 0) || Number(after.id || 0) || -1])
     assert.equal(missing ?? null, null)
-    console.log('PASS local web RPC: CRUD/stats, multi-client concurrency, outline handlers, event stream, and single-use agent approval flow')
+    console.log('PASS shared runtime Web RPC: CRUD, concurrent reads, outline handlers, task events, creative tools and native-operation denylist')
   } finally {
     if (novelId > 0) {
       try { await rpc('novel', 'delete', [novelId]) } catch (error) { console.error('[local-web-rpc-smoke] cleanup failed:', error.message) }

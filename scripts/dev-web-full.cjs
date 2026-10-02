@@ -21,6 +21,12 @@ function buildWindowsCommand(command, args) {
 }
 
 function startProcess(name, command, args) {
+  if (name === 'backend') {
+    const proxy = spawn(require('electron'), args, { cwd: workspaceRoot, stdio: 'inherit', windowsHide: true })
+    proxy.isRuntimeProxy = true
+    proxy.on('exit', (code) => { if (!shuttingDown) shutdown(code || 1) })
+    return proxy
+  }
   const isWindows = process.platform === 'win32'
   const child = spawn(
     isWindows ? 'cmd.exe' : command,
@@ -75,7 +81,7 @@ function getWindowsPidOnPort(port) {
 function stopProcessOnPort(port) {
   const pid = getWindowsPidOnPort(port)
   if (!pid) return false
-  spawnSync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' })
+  spawnSync('taskkill.exe', ['/pid', String(pid), '/f'], { stdio: 'ignore' })
   return true
 }
 
@@ -125,6 +131,8 @@ async function waitForPortClosed(port) {
 
 function stopProcessTree(child) {
   if (!child || child.killed) return
+  // The proxy may have started a shared owner used by desktop/MCP clients.
+  if (child.isRuntimeProxy) { child.kill(); return }
   if (process.platform === 'win32') {
     spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
     return

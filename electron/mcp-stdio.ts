@@ -1,232 +1,64 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
+import readline from 'node:readline'
+import { spawn } from 'node:child_process'
 import { app } from 'electron'
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js'
-import { InMemoryTaskStore } from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js'
-import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
-import { closeDb, initDb } from './database/db'
-import { McpStorageLease } from './utils/mcp-storage-lease'
-import { AGENT_TOOL_SCOPES, MCP_AGENT_TOOL_DEFAULT_SCOPES } from '../src/shared/tool-contracts'
-import type { AgentToolCallResult, AgentToolDescriptor } from '../src/shared/tool-contracts'
+import { probeRuntime, runtimeRequest, type RuntimeConnection } from './utils/mcp-runtime'
 
-function scopesFromEnvironment(): string[] {
-  const configured = String(process.env.NOVELFORGE_MCP_SCOPES || '').split(',').map((value) => value.trim()).filter(Boolean)
-  if (configured.length === 0) return [...MCP_AGENT_TOOL_DEFAULT_SCOPES]
-  const known = new Set<string>(Object.values(AGENT_TOOL_SCOPES))
-  const ignored = configured.filter((scope) => !known.has(scope))
-  if (ignored.length) console.error(`[novelforge-mcp] ignored unknown scopes: ${ignored.join(', ')}`)
-  return configured.filter((scope) => known.has(scope))
-}
-
-function approvedSessionId(suppliedToken: unknown): string | undefined {
-  const configuredToken = String(process.env.NOVELFORGE_MCP_APPROVAL_TOKEN || '')
-  if (!configuredToken || typeof suppliedToken !== 'string' || !suppliedToken) return undefined
-  const configured = Buffer.from(configuredToken, 'utf8')
-  const supplied = Buffer.from(suppliedToken, 'utf8')
-  if (configured.length !== supplied.length || !timingSafeEqual(configured, supplied)) return undefined
-  return `mcp_session_${createHash('sha256').update(configuredToken).digest('hex').slice(0, 24)}`
-}
-
-function descriptorForMcp(descriptor: AgentToolDescriptor) {
-  const taskSupport = descriptor.taskMode === 'app_async' || descriptor.taskMode === 'mcp_task_optional'
-    ? 'optional' as const : 'forbidden' as const
-  return {
-    name: descriptor.id,
-    title: descriptor.title,
-    description: descriptor.description,
-    inputSchema: descriptor.inputSchema,
-    outputSchema: descriptor.outputSchema,
-    annotations: {
-      title: descriptor.title,
-      readOnlyHint: descriptor.effect === 'read',
-      destructiveHint: descriptor.effect === 'canonical_write' || descriptor.effect === 'external_effect',
-      idempotentHint: descriptor.idempotent,
-      openWorldHint: descriptor.effect === 'external_effect',
-    },
-    execution: { taskSupport },
-    _meta: {
-      'novelforge/version': descriptor.version,
-      'novelforge/domain': descriptor.domain,
-      'novelforge/effect': descriptor.effect,
-      'novelforge/approval': descriptor.approval,
-      'novelforge/scopes': descriptor.scopes,
-      'novelforge/taskMode': descriptor.taskMode,
-      'novelforge/timeoutClass': descriptor.timeoutClass,
-      'novelforge/tags': descriptor.tags,
-    },
-  }
-}
-
-function toolResult(result: AgentToolCallResult) {
-  if (result.ok) {
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify({ data: result.data, meta: result.meta }, null, 2) }],
-      structuredContent: result.data as Record<string, unknown>,
-      _meta: { 'novelforge/run': result.meta },
-    }
-  }
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: result.error, meta: result.meta }, null, 2) }],
-    isError: true,
-    _meta: { 'novelforge/run': result.meta },
-  }
-}
-
-function infrastructureError(error: unknown) {
-  return {
-    content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }],
-    isError: true,
-  }
-}
-
-function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(maximum, Math.max(minimum, Math.trunc(value))) : fallback
-}
-
-/** The installed GUI executable runs this branch with `--mcp`; fd 0 is the real pipe on Windows. */
-export async function startMcpStdio(): Promise<void> {
-  // JSON-RPC owns stdout. Electron's process.stdin may report EOF immediately
-  // in a Windows GUI executable even while OS file descriptor 0 remains open.
+/** A stdio client never opens storage; every request goes to the existing owner. */
+export async function startMcpStdio(runtimeArgs?: string[]): Promise<void> {
   console.log = (...args) => console.error(...args)
   console.info = (...args) => console.error(...args)
   console.debug = (...args) => console.error(...args)
-  console.warn = (...args) => console.error(...args)
-
   await app.whenReady()
-  const storage = new McpStorageLease(app.getPath('userData'), () => { initDb() }, closeDb)
-  app.once('before-quit', () => storage.close())
-
-  try {
-    const scopes = scopesFromEnvironment()
-    const descriptors = novelForgeToolRegistry.list()
-    const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
-    const server = new Server(
-      { name: 'novelforge', version: app.getVersion() },
-      {
-        capabilities: {
-          tools: { listChanged: false },
-          resources: { listChanged: false, subscribe: false },
-          tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } },
-        },
-        taskStore: new InMemoryTaskStore(),
-        defaultTaskPollInterval: 1000,
-        instructions: [
-          'List projects and read the selected project before writing.',
-          'Analyze the user request, choose one stage, then call novelforge.assets.import_draft with the project contextVersion.',
-          'Imported text is an immutable candidate, not canonical content. Review it and ask the author to confirm application.',
-          'Canonical writes are disabled by default and require scopes plus a matching novelforge/approvalToken metadata value.',
-        ].join(' '),
-      },
-    )
-
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: descriptors.map(descriptorForMcp) }))
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-      const descriptor = descriptorById.get(request.params.name)
-      const taskRequested = Boolean(request.params.task)
-      if (taskRequested && (!descriptor || (descriptor.taskMode !== 'app_async' && descriptor.taskMode !== 'mcp_task_optional'))) {
-        throw new Error(`Tool ${request.params.name} does not support task execution.`)
+  const directory = app.getPath('userData')
+  const version = app.getVersion()
+  let launching: Promise<RuntimeConnection> | null = null
+  const connect = async (): Promise<RuntimeConnection> => {
+    const live = await probeRuntime(directory, version)
+    if (live) return live.connection
+    if (launching) return launching
+    launching = (async () => {
+      const args = runtimeArgs || [...(app.isPackaged ? [] : [app.getAppPath()]), '--runtime']
+      const child = spawn(process.execPath, args, {
+        env: { ...process.env, NOVELFORGE_USER_DATA_DIR: directory },
+        detached: true, stdio: 'ignore', windowsHide: true,
+      })
+      let launchError: Error | undefined
+      child.once('error', (error) => { launchError = error })
+      child.unref()
+      const deadline = Date.now() + 30_000
+      while (Date.now() < deadline) {
+        if (launchError) throw launchError
+        const ready = await probeRuntime(directory, version)
+        if (ready) return ready.connection
+        await new Promise((resolve) => setTimeout(resolve, 150))
       }
-      const requestMeta = request.params._meta && typeof request.params._meta === 'object' ? request.params._meta : {}
-      const approvalId = approvedSessionId(requestMeta['novelforge/approvalToken'])
-      const client = server.getClientVersion()
-      const invoke = async () => {
-        if (!storage.enter()) {
-          throw new Error('NovelForge 桌面端正在使用数据库。请先退出桌面端（最小化仍会占用），再重试 MCP 工具调用。')
-        }
-        try {
-          return await novelForgeToolRegistry.invoke({
-            toolId: request.params.name,
-            input: request.params.arguments && typeof request.params.arguments === 'object'
-              ? request.params.arguments as Record<string, unknown> : {},
-            ...(approvalId ? { approvalId } : {}),
-          }, {
-            actor: {
-              type: 'api_client',
-              actorId: client?.name ? `${client.name}:${client.version || 'unknown'}` : 'mcp-client',
-              clientId: client?.name || 'mcp-client',
-              sessionId: `stdio-${process.pid}`,
-            },
-            scopes,
-            requestId: `mcp-${randomUUID()}`,
-            locale: Intl.DateTimeFormat().resolvedOptions().locale || 'zh-CN',
-            ...(approvalId ? { approvalId } : {}),
-          })
-        } finally {
-          storage.leave()
-        }
-      }
-
-      if (taskRequested) {
-        if (!extra.taskStore) throw new Error('MCP task store is not available.')
-        const taskStore = extra.taskStore
-        const task = await taskStore.createTask({
-          ttl: boundedNumber(request.params.task?.ttl, 30 * 60_000, 60_000, 2 * 60 * 60_000),
-          pollInterval: boundedNumber((request.params.task as { pollInterval?: number } | undefined)?.pollInterval, 1000, 250, 10_000),
-        })
-        void invoke().then(async (result) => {
-          const current = await taskStore.getTask(task.taskId)
-          if (current && current.status !== 'cancelled') {
-            await taskStore.storeTaskResult(task.taskId, 'completed', toolResult(result))
-          }
-        }).catch(async (error: unknown) => {
-          const current = await taskStore.getTask(task.taskId)
-          if (current && current.status !== 'cancelled') {
-            await taskStore.storeTaskResult(task.taskId, 'failed', infrastructureError(error))
-          }
-        })
-        return { task }
-      }
-      try {
-        return toolResult(await invoke())
-      } catch (error) {
-        return infrastructureError(error)
-      }
-    })
-    server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-      resources: [{
-        uri: 'novelforge://capabilities', name: 'NovelForge capability registry',
-        title: 'NovelForge 能力注册表', description: '工具契约、权限、影响级别、版本与 JSON Schema。',
-        mimeType: 'application/json',
-      }],
-    }))
-    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      if (request.params.uri !== 'novelforge://capabilities') {
-        throw new Error(`Unknown NovelForge resource: ${request.params.uri}`)
-      }
-      return {
-        contents: [{
-          uri: request.params.uri,
-          mimeType: 'application/json',
-          text: JSON.stringify({
-            server: { name: 'novelforge', version: app.getVersion() },
-            grantedScopes: scopes, tools: descriptors,
-          }, null, 2),
-        }],
-      }
-    })
-
-    const input = fs.createReadStream('', { fd: 0, autoClose: false })
-    const shutdown = async () => {
-      await server.close().catch(() => undefined)
-      input.destroy()
-      storage.close()
-      app.quit()
-    }
-    process.once('SIGINT', () => void shutdown())
-    process.once('SIGTERM', () => void shutdown())
-    input.once('end', () => void shutdown())
-    await server.connect(new StdioServerTransport(input, process.stdout))
-    console.error(`[novelforge-mcp] ready with ${descriptors.length} tools; scopes=${scopes.join(',')}`)
-  } catch (error) {
-    storage.close()
-    throw error
+      throw new Error('NovelForge runtime did not become ready in 30 seconds. Check the app startup log.')
+    })().finally(() => { launching = null })
+    return launching
   }
+  await connect()
+  const input = fs.createReadStream('', { fd: 0, autoClose: false })
+  const lines = readline.createInterface({ input, crlfDelay: Infinity })
+  lines.on('line', (line) => {
+    if (!line.trim()) return
+    void (async () => {
+      let message: { id?: string | number; method?: string }
+      try { message = JSON.parse(line) } catch { return }
+      try {
+        // Re-discover before sending. Never replay a possibly completed mutation after a network failure.
+        const connection = await connect()
+        const response = await runtimeRequest(connection, '/mcp', { method: 'POST', body: line, timeoutMs: 15 * 60_000 })
+        const result = await response.text()
+        if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${result}`)
+        if (result.trim()) process.stdout.write(`${result.trim()}\n`)
+      } catch (error) {
+        if (message.id !== undefined) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: error instanceof Error ? error.message : String(error) } })}\n`)
+      }
+    })()
+  })
+  const shutdown = () => { lines.close(); input.destroy(); app.quit() }
+  input.once('end', shutdown)
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
 }

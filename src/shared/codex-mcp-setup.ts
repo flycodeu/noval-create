@@ -7,4 +7,12 @@ export interface CodexMcpSetupStatus {
   registeredArgs: string[]
   command: string | null
   message: string
+  runtime?: {
+    reachable: boolean
+    projectReadable: boolean
+    modelConfigured: boolean
+    toolCount: number
+    activeRequests: number
+    message: string
+  }
 }

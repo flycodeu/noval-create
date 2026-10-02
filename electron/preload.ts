@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasQuery, StoryAtlasSnapshot, StoryAtlasValidationResult } from '../src/shared/story-atlas'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { DesktopUpdateStatus } from '../src/shared/desktop-update'
 import type { CodexMcpSetupStatus } from '../src/shared/codex-mcp-setup'
@@ -80,6 +81,11 @@ async function invokeIpc<T = unknown>(channel: string, ...args: unknown[]): Prom
 }
 
 const api = {
+  storyAtlas: {
+    query: (input: StoryAtlasQuery) => invokeIpc<StoryAtlasSnapshot>('storyAtlas:query', input),
+    validate: (input: StoryAtlasApplyInput) => invokeIpc<StoryAtlasValidationResult>('storyAtlas:validate', input),
+    apply: (input: StoryAtlasApplyInput) => invokeIpc<StoryAtlasApplyResult>('storyAtlas:apply', input),
+  },
   windowControls: {
     minimize: () => invokeIpc('window:minimize'),
     toggleMaximize: () => invokeIpc<boolean>('window:toggleMaximize'),

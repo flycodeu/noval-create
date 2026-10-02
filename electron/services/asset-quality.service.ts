@@ -111,6 +111,10 @@ function isQualityBudgetSpent(startedAt: number, budgetMs: number): boolean {
 
 export function parseAssetReviewResult(raw: string, content?: string, policyVersion?: 'legacy' | 'reader-first-v1'): AssetReviewResult {
   const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(raw))
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.summary !== 'string' || !parsed.summary.trim()
+    || typeof parsed.rewrite_required !== 'boolean' || typeof parsed.reject_required !== 'boolean') {
+    throw new Error('审校结果缺少有效摘要或明确的修订、拒收判断。')
+  }
   const issues = policyVersion === 'reader-first-v1' ? validateQualityIssuesForContent(normalizeStoredQualityIssues(
     Array.isArray(parsed.issues) ? parsed.issues.map((issue) => ({ ...issue as Record<string, unknown>, detector: 'model' })) : [],
   ), content || '') : undefined

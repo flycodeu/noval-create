@@ -218,6 +218,12 @@ function cleanReleaseArtifacts() {
 
   for (const entry of fs.readdirSync(releaseDir)) {
     const target = path.resolve(releaseDir, entry)
+    // Only replace artifacts owned by this build; keep separately named backups.
+    const isBuildArtifact = entry === 'win-unpacked'
+      || /^(?:builder-(?:debug|effective-config)\.(?:yml|yaml)|latest\.yml)$/.test(entry)
+      || /^NovelForge-(?:Setup|Portable)-.+\.exe(?:\.blockmap)?$/.test(entry)
+    if (!isBuildArtifact) continue
+    if (path.dirname(target) !== releaseDir) throw new Error('Release artifact escaped output directory')
 
     try {
       fs.rmSync(target, { recursive: true, force: true })

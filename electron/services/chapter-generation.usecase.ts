@@ -22,6 +22,7 @@ import {
   ContinuityState,
   type StoryProfile,
   type HardConstraintSourceLabel,
+  resolveAutomaticChapterRequestBudget,
 } from './context.service'
 import {
   buildChapterWritingPrompt,
@@ -2583,12 +2584,12 @@ function withChapterStageRequestBudget(
 ): ReturnType<typeof buildChatOptionsFromRoute> {
   const stageBudget = typeof explicitBudget === 'number'
     ? explicitBudget
-    : resolveContextBudgetForStage(
+    : resolveAutomaticChapterRequestBudget(resolveContextBudgetForStage(
       stage,
       complexity,
       resolveChapterReferenceWords(chapter.targetWords, novel),
       novel.targetWords || 0,
-    )
+    ), { modelConfigId: novel.modelConfigId, promptProfile: stage, chapterComplexity: complexity })
   return {
     ...chatOptions,
     requestBudget: {
@@ -3074,9 +3075,11 @@ async function resolveGeneratedChapterRewriteContext(input: GeneratedChapterRewr
       totalBudget: typeof options.totalBudget === 'number'
         ? options.totalBudget
         : rewritePolicy.contextBudgetMultiplier > 1
-          ? Math.round(resolveContextBudgetForStage(
+          ? resolveAutomaticChapterRequestBudget(Math.round(resolveContextBudgetForStage(
             'rewrite', complexity, resolveChapterReferenceWords(chapter.targetWords, novel), novel.targetWords || 0,
-          ) * rewritePolicy.contextBudgetMultiplier)
+          ) * rewritePolicy.contextBudgetMultiplier), {
+            modelConfigId: novel.modelConfigId, promptProfile: 'rewrite', chapterComplexity: complexity,
+          })
           : undefined,
       upstreamArtifacts: rewriteUpstreamArtifacts,
       restoredContextPack: session.retrySnapshot?.contextPacks?.rewrite,
@@ -4660,6 +4663,7 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export const __testing = {
+  withChapterStageRequestBudget,
   assertPreviousChapterContentReady,
   buildChapterGenerationIdempotencyKey,
   buildChapterOptimizationFactGuard,

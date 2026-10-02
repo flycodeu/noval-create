@@ -5960,6 +5960,11 @@ declare global {
         call: (request: AgentToolCallRequest) => Promise<AgentToolCallResult>
         approve: (request: AgentToolApprovalRequest) => Promise<AgentToolApprovalResult>
       }
+      storyAtlas: {
+        query: (input: import('../shared/story-atlas').StoryAtlasQuery) => Promise<import('../shared/story-atlas').StoryAtlasSnapshot>
+        validate: (input: import('../shared/story-atlas').StoryAtlasApplyInput) => Promise<import('../shared/story-atlas').StoryAtlasValidationResult>
+        apply: (input: import('../shared/story-atlas').StoryAtlasApplyInput) => Promise<import('../shared/story-atlas').StoryAtlasApplyResult>
+      }
       aiPatch: {
         suggest: (request: AiPatchRequest) => Promise<AiPatchResult>
         apply: (target: AiPatchTarget, patch: Record<string, unknown>) => Promise<unknown>

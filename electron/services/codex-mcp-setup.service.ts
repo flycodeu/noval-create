@@ -3,8 +3,42 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CodexMcpSetupStatus } from '../../src/shared/codex-mcp-setup'
+import { probeRuntime, runtimeRequest } from '../utils/mcp-runtime'
 
 const SERVER_NAME = 'novelforge'
+
+export interface CodexMcpRuntimeStatus {
+  reachable: boolean
+  projectReadable: boolean
+  modelConfigured: boolean
+  toolCount: number
+  activeRequests: number
+  message: string
+}
+
+async function getRuntimeStatus(): Promise<CodexMcpRuntimeStatus> {
+  const live = await probeRuntime(app.getPath('userData'))
+  if (!live) return { reachable: false, projectReadable: false, modelConfigured: false, toolCount: 0, activeRequests: 0, message: '本地创作服务不可达，MCP 桥接将在首次调用时启动服务。' }
+  let projectReadable = false
+  try {
+    const response = await runtimeRequest(live.connection, '/mcp', {
+      method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 'settings-health', method: 'tools/call', params: { name: 'novelforge.projects.list', arguments: {} } }),
+    })
+    const payload = await response.json() as { result?: { isError?: boolean; structuredContent?: unknown } }
+    projectReadable = response.ok && Boolean(payload.result?.structuredContent) && !payload.result?.isError
+  } catch { /* Report the reachable service separately from a failing business read. */ }
+  return {
+    reachable: true, projectReadable, modelConfigured: live.health.modelConfigured,
+    toolCount: live.health.tools, activeRequests: live.health.activeRequests,
+    message: !projectReadable ? '服务已连接，但项目读取失败，请查看运行日志。'
+      : live.health.modelConfigured ? '服务已连接，项目可读，已配置模型。模型生成需要执行实际任务验证。'
+        : '服务已连接，项目可读；请先配置一个默认模型。',
+  }
+}
+
+function getLaunchArgs(): string[] {
+  return app.isPackaged ? ['--mcp'] : [path.join(app.getAppPath(), 'scripts', 'novelforge-mcp.cjs'), '--mcp']
+}
 
 function isFile(filePath: string): boolean {
   try { return fs.statSync(filePath).isFile() } catch { return false }
@@ -43,14 +77,15 @@ function runCodex(cliPath: string, args: string[]): Promise<string> {
   })
 }
 
-export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMcpSetupStatus> {
-  const novelForgePath = app.isPackaged ? app.getPath('exe') : null
+export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMcpSetupStatus & { runtime: CodexMcpRuntimeStatus }> {
+  const novelForgePath = app.getPath('exe')
   const supported = process.platform === 'win32' && Boolean(novelForgePath && isFile(novelForgePath))
   const codexCliPath = findCodexCli(cliInput)
+  const launchArgs = getLaunchArgs()
   const command = supported && novelForgePath
-    ? `${codexCliPath ? `& ${quotePowerShell(codexCliPath)}` : 'codex'} mcp add ${SERVER_NAME} -- ${quotePowerShell(novelForgePath)} --mcp`
+    ? `${codexCliPath ? `& ${quotePowerShell(codexCliPath)}` : 'codex'} mcp add ${SERVER_NAME} -- ${quotePowerShell(novelForgePath)} ${launchArgs.map(quotePowerShell).join(' ')}`
     : null
-  const base: CodexMcpSetupStatus = {
+  const base: CodexMcpSetupStatus & { runtime: CodexMcpRuntimeStatus } = {
     supported,
     codexCliPath,
     novelForgePath,
@@ -59,6 +94,7 @@ export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMc
     registeredArgs: [],
     command,
     message: '',
+    runtime: await getRuntimeStatus(),
   }
   if (!supported) return { ...base, message: '请使用 Windows 安装版或便携版 NovelForge 配置 MCP。' }
   if (!codexCliPath) return { ...base, message: '未找到 Codex CLI，请指定 codex.exe 路径，或复制下方命令手动配置。' }
@@ -73,7 +109,7 @@ export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMc
     const registeredArgs = Array.isArray(value.transport?.args) ? value.transport.args : []
     const configured = value.enabled === true && value.transport?.type === 'stdio'
       && registeredCommand !== null && samePath(registeredCommand, novelForgePath!)
-      && registeredArgs.length === 1 && registeredArgs[0] === '--mcp'
+      && registeredArgs.length === launchArgs.length && registeredArgs.every((value, index) => value === launchArgs[index])
     return {
       ...base,
       registration: configured ? 'configured' : 'different',
@@ -97,7 +133,7 @@ export async function configureCodexMcp(cliInput?: string): Promise<CodexMcpSetu
   if (!before.supported || !before.novelForgePath) throw new Error('请从 Windows 安装版或便携版 NovelForge 执行配置。')
   if (!before.codexCliPath) throw new Error('未找到 Codex CLI，请先指定 codex.exe 路径。')
   if (before.registration === 'configured') return before
-  await runCodex(before.codexCliPath, ['mcp', 'add', SERVER_NAME, '--', before.novelForgePath, '--mcp'])
+  await runCodex(before.codexCliPath, ['mcp', 'add', SERVER_NAME, '--', before.novelForgePath, ...getLaunchArgs()])
   const after = await getCodexMcpSetupStatus(before.codexCliPath)
   if (after.registration !== 'configured') throw new Error(`配置命令已执行，但复核未通过：${after.message}`)
   return after

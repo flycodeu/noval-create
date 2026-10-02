@@ -32,10 +32,10 @@ import type {
 } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import { DEEPSEEK_V4_MAX_OUTPUT_TOKENS, getProviderMaxOutputTokens } from '../../shared/model-token-limits'
 import './index.css'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
-const MAX_MODEL_MAX_TOKENS = 1000000
 const MASKED_KEY = '已设置'
 
 const PROVIDER_OPTIONS = [
@@ -53,7 +53,7 @@ const PROVIDER_OPTIONS = [
 const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number; modelId?: string; baseUrl?: string; maxContextTokens?: number }> = {
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-4o', baseUrl: '' },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'claude-sonnet-4-6' },
-  deepseek: { temperature: 0.7, maxTokens: 384000, modelId: 'deepseek-v4-flash', baseUrl: '' },
+  deepseek: { temperature: 0.7, maxTokens: DEEPSEEK_V4_MAX_OUTPUT_TOKENS, modelId: 'deepseek-v4-flash', baseUrl: '' },
   kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', maxContextTokens: 256000 },
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen3.6-max', maxContextTokens: 128000 },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
@@ -822,10 +822,10 @@ export default function ModelManager() {
               name="maxTokens"
               label="最大输出长度（Max Tokens）"
               extra={selectedProvider === 'deepseek'
-                ? 'DeepSeek V4 当前最大输出长度为 384K。这里控制单次回复最多可生成多少 Token。'
+                ? 'DeepSeek V4 当前最大输出长度为 384K（393216 Token）。这里控制单次回复最多可生成多少 Token。'
                 : '控制单次回复最多可生成多少 Token。实际可用上限仍取决于模型提供方。'}
             >
-              <InputNumber min={512} max={MAX_MODEL_MAX_TOKENS} step={512} placeholder="例如：65536 / 128000 / 1000000" />
+              <InputNumber min={512} max={getProviderMaxOutputTokens(selectedProvider)} step={512} placeholder="例如：65536 / 128000 / 393216" />
             </Form.Item>
 
             <Form.Item

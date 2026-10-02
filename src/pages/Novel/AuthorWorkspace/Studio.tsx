@@ -1,0 +1,94 @@
+import React, { useEffect, useState } from 'react'
+import { Button, Checkbox, Input, InputNumber, Select, message } from 'antd'
+import { ArrowRightOutlined, SendOutlined } from '@ant-design/icons'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNovelStore } from '../../../stores/novel.store'
+import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeStage } from '../../../shared/creative-workflow'
+import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import type { Chapter, ModelConfig, RevisionTask } from '../../../types'
+import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
+import { useCreativeWorkflow } from './workflow-client'
+
+export default function AuthorStudio({ novelId }: { novelId: number }) {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const novel = useNovelStore((state) => state.currentNovel)
+  const setNovel = useNovelStore((state) => state.setCurrentNovel)
+  const stageParam = params.get('stage') as CreativeStage | null
+  const [stage, setStage] = useState<CreativeStage>(stageParam && CREATIVE_STAGES.includes(stageParam) ? stageParam : 'background')
+  const [request, setRequest] = useState(params.get('request') || '')
+  const [autoApply, setAutoApply] = useState(true)
+  const [atChapter, setAtChapter] = useState<number | null>(params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null)
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [issues, setIssues] = useState<RevisionTask[]>([])
+  const [dataError, setDataError] = useState('')
+  const [models, setModels] = useState<ModelConfig[]>([])
+  const [savingModel, setSavingModel] = useState(false)
+  const workflow = useCreativeWorkflow(novelId)
+
+  useEffect(() => {
+    let current = true
+    void window.electron.model.list().then((rows) => { if (current) setModels(rows) }).catch((cause) => { if (current) setDataError(cause instanceof Error ? cause.message : '读取模型配置失败') })
+    return () => { current = false }
+  }, [novelId])
+  const effectiveModel = models.find((model) => model.id === novel?.modelConfigId) || models.find((model) => model.isDefault === 1)
+  const changeModel = async (modelConfigId: number) => {
+    setSavingModel(true)
+    try {
+      await window.electron.novel.update(novelId, { modelConfigId })
+      const updated = await window.electron.novel.get(novelId)
+      if (updated) setNovel(updated)
+      message.success('项目模型已更新，下一轮创作与 Codex 调用会使用此配置')
+    } catch (cause) { setDataError(cause instanceof Error ? cause.message : '保存项目模型失败') }
+    finally { setSavingModel(false) }
+  }
+
+  useEffect(() => {
+    let current = true
+    Promise.all([window.electron.chapter.list(novelId), window.electron.revision.list(novelId)])
+      .then(([nextChapters, nextIssues]) => { if (current) { setChapters(nextChapters); setIssues(nextIssues); setDataError('') } })
+      .catch((cause) => { if (current) setDataError(cause instanceof Error ? cause.message : '读取作品资料失败') })
+    return () => { current = false }
+  }, [novelId, workflow.run?.step])
+
+  useEffect(() => {
+    if (stageParam && CREATIVE_STAGES.includes(stageParam)) setStage(stageParam)
+    if (params.get('request')) setRequest(params.get('request') || '')
+    setAtChapter(params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null)
+  }, [params, stageParam])
+
+  const open = (route: string) => navigate(buildWorkspaceRoute(novelId, route))
+  const drafted = chapters.filter((chapter) => Boolean(chapter.content?.trim()) || chapter.wordCount > 0)
+  const pendingIssues = issues.filter((issue) => issue.status === 'open' || issue.status === 'in_progress')
+  const nextChapter = chapters.find((chapter) => !chapter.content?.trim() && !(chapter.wordCount > 0))
+
+  return <AuthorPage eyebrow={novel?.title || '未命名作品'} title="接下来，写什么？" description="说清这一轮的目标，生成、评审和修订会在同一任务中完成。">
+    <div className="author-model-route"><label htmlFor="author-project-model">本项目使用的模型</label><Select id="author-project-model" aria-label="本项目使用的模型" value={effectiveModel?.id} placeholder="选择已配置的模型" disabled={workflow.active || savingModel || !models.length} loading={savingModel} onChange={(value) => void changeModel(value)} options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} />
+      <span>{workflow.active ? '当前任务的模型已固定' : novel?.modelConfigId ? '已用于本项目及 Codex 调用' : effectiveModel ? '当前跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div>
+    <section className="author-composer">
+      <label htmlFor="author-request" className="author-composer__label">这一轮的要求</label>
+      <Input.TextArea id="author-request" value={request} onChange={(event) => setRequest(event.target.value)} autoSize={{ minRows: 5, maxRows: 12 }}
+        placeholder="例如：结合前三章，把借灯客栈的地点和通行关系补齐，检查人物能否按现有线索完成调查。" />
+      <div className="author-composer__options">
+        <label>创作内容 <Select aria-label="创作内容" value={stage} onChange={setStage} options={CREATIVE_STAGES.map((value) => ({ value, label: CREATIVE_STAGE_LABELS[value] }))} /></label>
+        <label>章位 <InputNumber aria-label="章节位置" min={0} precision={0} value={atChapter} placeholder="当前" title="留空使用当前章位；0 表示初始设定" onChange={setAtChapter} /></label>
+        <Checkbox checked={autoApply} onChange={(event) => setAutoApply(event.target.checked)}>审校通过后应用</Checkbox>
+        <Button type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || savingModel || !request.trim() || !effectiveModel} onClick={() => void workflow.start({ stage, request: request.trim(), autoApply, ...(atChapter != null ? { atChapter } : {}) })}>开始这一轮</Button>
+      </div>
+      <p className="author-composer__hint">{!autoApply ? '本轮先保留候选。人物设计或正文风格可以讨论后再定。' : '通过审校的内容会直接保存；存在冲突或未通过的内容会留待处理。'}</p>
+    </section>
+    {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}
+    {workflow.run && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => open(`revision?artifact=${encodeURIComponent(workflow.run?.artifactId || '')}`)} />}
+    <div className="author-overview-grid">
+      <section className="author-paper"><div className="author-section-heading"><h2>作品进展</h2><Button type="text" onClick={() => open('writing/editor')}>打开正文 <ArrowRightOutlined /></Button></div>
+        <div className="author-book-progress"><strong>{drafted.length}<small> 章已有正文</small></strong><span>{chapters.length} 章安排 · {chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字</span></div>
+        {nextChapter ? <button className="author-next-chapter" onClick={() => { setStage('chapter'); setAtChapter(nextChapter.chapterNum); setRequest(`根据现有设定和前文，生成第 ${nextChapter.chapterNum} 章《${nextChapter.title || '未命名'}》候选，完成连续性与叙事评审。`) }}><span>下一章</span><strong>第 {nextChapter.chapterNum} 章 · {nextChapter.title || '未命名'}</strong><ArrowRightOutlined /></button> : <p className="author-muted">{chapters.length ? '现有章节均已有正文，可继续安排下一阶段。' : '确定故事方向后，开始安排首个单元。'}</p>}
+      </section>
+      <section className="author-paper"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" onClick={() => open('revision')}>查看全部 <ArrowRightOutlined /></Button></div>
+        {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">当前没有记录中的待处理问题。新内容生成后会继续审校。</p>}
+      </section>
+    </div>
+    {dataError && <p className="author-error" role="alert">{dataError}</p>}
+    {!novel?.userBackground?.trim() && !workflow.run && <EmptyWork title="先给故事一个起点" actionLabel="填写背景要求" action={() => { setStage('background'); document.getElementById('author-request')?.focus() }}>可以直接描述时代、主角、想写的冲突和你不希望出现的内容。</EmptyWork>}
+  </AuthorPage>
+}

@@ -7,6 +7,7 @@ vi.mock('../database/db', () => ({
 vi.mock('./context.service', () => ({
   allocateChapterContext: vi.fn(),
   collectChapterContextRawData: vi.fn(),
+  resolveAutomaticChapterRequestBudget: vi.fn((budget: number) => budget),
   ContextOverflowError: class ContextOverflowError extends Error {
     context: Record<string, unknown>
 

@@ -27,6 +27,7 @@ import {
   ContextOverflowError,
   HardConstraintOverflowError,
   resolveMentionedEntityLimits,
+  resolveAutomaticChapterRequestBudget,
   type ChapterContext,
   type HardConstraintSourceLabel,
 } from './context.service'
@@ -507,12 +508,12 @@ export function allocateStageContextForPipeline(
     return allocateChapterContext(rawContext, {
       promptProfile,
       chapterComplexity: complexity,
-      totalBudget: typeof totalBudget === 'number' ? totalBudget : resolveContextBudgetForStage(
+      totalBudget: typeof totalBudget === 'number' ? totalBudget : resolveAutomaticChapterRequestBudget(resolveContextBudgetForStage(
         promptProfile,
         complexity,
         resolveChapterReferenceWords(chapter.targetWords, rawContext.novel),
         rawContext.novel.targetWords || 0,
-      ),
+      ), { modelConfigId: rawContext.novel.modelConfigId, promptProfile, chapterComplexity: complexity }),
       preserveConstraintLabels,
     })
   } catch (error) {

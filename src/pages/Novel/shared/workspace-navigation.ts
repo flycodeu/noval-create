@@ -1,5 +1,6 @@
 import type { PlanningDraftPageKey, RevisionTask, Task } from '../../../types'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { AUTHOR_WORKSPACE_PAGES } from '../../../shared/author-workspace'
 
 function parsePositiveInt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value)
@@ -131,13 +132,11 @@ export interface TaskRecoveryAction {
 
 /** Presentation only: existing routes and stored assets remain available. */
 export function organizeAuthorNavigation(groups: import('../../../shared/workspace-types').WorkspaceNavGroup[]) {
-  const optional = new Set(['map', 'growth-system', 'timeline', 'batch-workbench', 'narrative-board'])
-  const tools = groups.flatMap((group) => group.items.filter((item) => optional.has(item.key)))
-  const main = groups.map((group) => ({ ...group,
-    items: group.items.filter((item) => !optional.has(item.key) && item.key !== 'style-lab')
-      .map((item) => item.key === 'theme-voice' ? { ...item, label: '作品声音' } : item),
-  })).filter((group) => group.items.length)
-  return tools.length ? [...main, { key: 'author-tools', title: '按需资料与任务', items: tools }] : main
+  const existing = groups.flatMap((group) => group.items)
+  return [{ key: 'author-workspace', title: '创作工作区', items: AUTHOR_WORKSPACE_PAGES.map((page) => ({
+    key: page.key, label: page.label, route: page.route, status: 'not_started' as const,
+    hasBlocker: existing.find((item) => item.key === page.key)?.hasBlocker,
+  })) }]
 }
 
 const RESUMABLE_WORKFLOW_TYPES = new Set([

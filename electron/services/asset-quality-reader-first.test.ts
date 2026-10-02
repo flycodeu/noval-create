@@ -5,14 +5,17 @@ import { createQualityIssue } from '../../src/shared/quality-issue'
 describe('RF-13 external chapter review action policy', () => {
   const content = '她已经把信烧掉，随后又拿出了同一封信。'
   it('does not use model booleans or style severity as compulsory rewrite', () => {
-    const raw = JSON.stringify({ severity: 'high', rewrite_required: true, reject_required: true, language_risks: ['文风不喜欢'] })
+    const raw = JSON.stringify({ summary: '文风偏好', severity: 'high', rewrite_required: true, reject_required: true, language_risks: ['文风不喜欢'] })
     expect(parseAssetReviewResult(raw, content, 'reader-first-v1')).toMatchObject({ rewriteRequired: false, rejectRequired: false })
     expect(parseAssetReviewResult(raw)).toMatchObject({ rewriteRequired: true, rejectRequired: true })
   })
   it('preserves grounded repair and invalidates old evidence', () => {
     const issue = createQualityIssue({ ruleId: 'continuity_break', detector: 'model', content, excerpt: content, message: '物品状态矛盾' })
-    const raw = JSON.stringify({ issues: [issue], rewrite_required: false })
+    const raw = JSON.stringify({ summary: '核查物品连续性', issues: [issue], rewrite_required: false, reject_required: false })
     expect(parseAssetReviewResult(raw, content, 'reader-first-v1').rewriteRequired).toBe(true)
     expect(parseAssetReviewResult(raw, content + '新稿', 'reader-first-v1').rewriteRequired).toBe(false)
+  })
+  it('rejects a structurally empty review instead of treating it as approval', () => {
+    expect(() => parseAssetReviewResult('{}')).toThrow('审校结果缺少')
   })
 })

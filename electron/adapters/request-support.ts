@@ -368,13 +368,13 @@ function isAbortError(error: unknown): boolean {
     && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
 }
 
-export function resolveManagedRequestTimeoutMs(timeoutMs?: number): number {
+export function resolveManagedRequestTimeoutMs(timeoutMs?: number, defaultTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): number {
   const configuredDefault = Number(process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS)
   const value = typeof timeoutMs === 'number'
     ? Math.round(timeoutMs)
     : Number.isFinite(configuredDefault)
       ? Math.round(configuredDefault)
-      : DEFAULT_REQUEST_TIMEOUT_MS
+      : defaultTimeoutMs
   return Math.max(5_000, Math.min(300_000, value))
 }
 

@@ -6,6 +6,7 @@ import path from 'path'
 import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 import { selectGenreVoiceSeedInserts } from './genre-voice-seeds'
+import { migrateStoryAtlas } from './story-atlas-store'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
 
@@ -3069,6 +3070,7 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'model_request_attempts', 'output_chars', 'INTEGER NOT NULL DEFAULT 0')
     ensureColumn(sqlite, 'model_request_attempts', 'output_truncated', 'INTEGER NOT NULL DEFAULT 0')
   })
+  runMigrationStep(sqlite, '0070_story_atlas', () => migrateStoryAtlas(sqlite))
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {

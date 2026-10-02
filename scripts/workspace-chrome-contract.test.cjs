@@ -116,9 +116,9 @@ assertPass('Legacy/default pages cannot pass actionContract', invalidLegacyContr
 
 const shell = read('src/pages/Novel/components/WorkspaceShell.tsx')
 const router = read('src/pages/Novel/index.tsx')
-const topbar = read('src/components/novel/layout/ProjectTopbar.tsx')
 assertPass('WorkspacePage exposes runtime chrome markers for acceptance', shell.includes('data-workspace-chrome={chrome}') && shell.includes('data-workspace-information-mounted={usesSharedChrome'))
-assertPass('Portal provider wraps the route shell', router.indexOf('<WorkspaceChromePortalContext.Provider') < router.indexOf('<ProjectTopbar') && router.indexOf('</WorkspaceChromePortalContext.Provider>') > router.indexOf('<ProjectTopbar'))
-assertPass('Topbar owns both portal target callbacks', topbar.includes('onPageActionsTargetChange?:') && topbar.includes('onInformationTargetChange?:') && topbar.includes('ref={onPageActionsTargetChange}') && topbar.includes('ref={onInformationTargetChange}'))
+const headerIndex = router.indexOf('<header className="author-shell-header">')
+assertPass('Portal provider wraps the author workspace header', headerIndex > router.indexOf('<WorkspaceChromePortalContext.Provider') && headerIndex < router.indexOf('</WorkspaceChromePortalContext.Provider>'))
+assertPass('Author header owns both writing portal targets', router.includes('ref={setActionTarget}') && router.includes('ref={setInformationTarget}'))
 
 console.log(`Workspace chrome contract tests passed (${calls.length} WorkspacePage calls; ${sharedCalls.length} shared).`)

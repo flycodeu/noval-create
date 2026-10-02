@@ -68,6 +68,7 @@ import {
   updateChapterWritebackDecision,
 } from './chapter-writeback.service'
 import * as storyThreadService from './story-thread.service'
+import { runChatTask } from './task.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
@@ -101,11 +102,12 @@ function createDbMock(rowsByTable: TableRows) {
       })),
     })),
     insert: vi.fn((table: unknown) => ({
-      values: vi.fn((payload: Record<string, unknown>) => ({
+      values: vi.fn((payload: Record<string, unknown> | Array<Record<string, unknown>>) => ({
         run: vi.fn(() => {
           const rows = rowsByTable.get(table) || []
           const nextId = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1
-          rows.push({ id: nextId, ...payload })
+          const entries = Array.isArray(payload) ? payload : [payload]
+          rows.push(...entries.map((entry, index) => ({ id: nextId + index, ...entry })))
           rowsByTable.set(table, rows)
           return { lastInsertRowid: nextId }
         }),
@@ -519,6 +521,9 @@ describe('prepareChapterWritebackRun', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
     vi.mocked(getSqlite).mockReset()
+    vi.mocked(runChatTask).mockReset()
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({ extracts: [], diffs: [] }))
+    vi.mocked(storyThreadService.listStoryThreads).mockReturnValue([])
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
       prepare: () => ({ run: vi.fn() }),
@@ -544,5 +549,66 @@ describe('prepareChapterWritebackRun', () => {
     expect(status.canonApplied).toBe(true)
     expect(status.blockedGeneration).toBe(false)
     expect(status.readyForNextChapter).toBe(true)
+  })
+
+  it('supplies an object schema and an executable example that remains pending author review', async () => {
+    const rows = createRows()
+    const chapter = rows.get(chapters)![0]
+    Object.assign(chapter, { content: '门上的锁已经换过。' })
+    rows.set(chapterWritebackDiffs, [])
+    rows.set(chapterWritebackRuns, [])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(runChatTask).mockImplementation(async (options) => {
+      const prompt = String(options.messages[0].content)
+      expect(prompt).toContain('fact 和 afterState 必须是 JSON object')
+      expect(prompt).toContain('confidence 必须是 0 到 1 的 JSON number')
+      expect(prompt).toContain('sourceText 必须是本章正文中的原句')
+      expect(prompt).toContain('人物猜测保留是谁的认识，关系推断不是客观事实')
+      for (const assetType of ['character', 'world', 'item', 'relation', 'thread', 'foreshadow', 'puzzle', 'timeline']) {
+        expect(prompt).toContain(`${assetType}：{`)
+      }
+      const exampleLine = prompt.split('\n').find((line) => line.startsWith('合法结构示例'))!
+      const example = JSON.parse(exampleLine.slice(exampleLine.indexOf('{')))
+      expect(example.extracts[0].fact).toEqual(expect.objectContaining({ title: '门锁更换' }))
+      expect(example.diffs[0].afterState).toEqual(expect.objectContaining({ kind: 'clue', status: 'introduced' }))
+      expect(typeof example.diffs[0].confidence).toBe('number')
+      return JSON.stringify(example)
+    })
+
+    const result = await prepareChapterWritebackRun(11, 'schema-example-test')
+
+    expect(result.status).toBe('ready')
+    expect(rows.get(chapterFactExtracts)).toHaveLength(1)
+    expect(rows.get(chapterWritebackDiffs)).toHaveLength(1)
+    expect(rows.get(chapterWritebackDiffs)![0]).toMatchObject({
+      assetType: 'puzzle', entityType: 'story-fact', canonDecision: 'pending', writebackStatus: 'pending',
+    })
+    expect(JSON.parse(String(chapter.writebackStatusJson))).toMatchObject({
+      canonApplied: false, blockedGeneration: true, readyForNextChapter: false,
+    })
+  })
+
+  it.each([
+    ['string fact', { extracts: [{ assetType: 'puzzle', sourceText: '门上的锁已经换过。', confidence: 0.9, fact: '门锁已更换' }], diffs: [] }],
+    ['string afterState', { extracts: [], diffs: [{ assetType: 'puzzle', entityType: 'story-fact', confidence: 0.9, afterState: '门锁已更换' }] }],
+    ['unknown asset type', { extracts: [], diffs: [{ assetType: 'unknown', afterState: { title: '门锁更换' } }] }],
+  ])('keeps %s blocked instead of treating the rejected candidates as no increment', async (_label, response) => {
+    const rows = createRows()
+    const chapter = rows.get(chapters)![0]
+    Object.assign(chapter, { content: '门上的锁已经换过。' })
+    rows.set(chapterWritebackDiffs, [])
+    rows.set(chapterWritebackRuns, [])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify(response))
+
+    const result = await prepareChapterWritebackRun(11, 'invalid-shape-test')
+
+    expect(result.status).toBe('failed')
+    expect(result.errorMessage).toContain('不可识别条目')
+    expect(rows.get(chapterFactExtracts)).toHaveLength(0)
+    expect(rows.get(chapterWritebackDiffs)).toHaveLength(0)
+    expect(JSON.parse(String(chapter.writebackStatusJson))).toMatchObject({
+      canonApplied: false, blockedGeneration: true, readyForNextChapter: false,
+    })
   })
 })

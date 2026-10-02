@@ -1601,6 +1601,34 @@ function resolvePromptOutputReserve(
   return Math.max(1200, baseByProfile[promptProfile] + complexityOffset[chapterComplexity])
 }
 
+/** Automatic stage allowances describe input; explicit totalBudget remains a total request cap. */
+export function resolveAutomaticChapterRequestBudget(
+  inputBudget: number,
+  options: {
+    modelConfigId?: number | null
+    promptProfile?: ChapterContextPromptProfile
+    chapterComplexity?: ChapterContextComplexity
+  } = {},
+): number {
+  const runtime = resolveModelRuntimeBudget(options.modelConfigId)
+  const stageOutputReserve = resolvePromptOutputReserve(
+    options.promptProfile || 'draft', options.chapterComplexity || 'standard', 0,
+  )
+  const outputReserve = Math.max(stageOutputReserve, runtime.maxTokens || 0)
+  const safeModelContextLimit = Math.max(2048, Math.floor(
+    (runtime.maxContextTokens || 32000) * (1 - (runtime.tokenSafetyMarginPct || 0) / 100),
+  ))
+  // Large DeepSeek windows need room for the story core, world rules and the
+  // complete prior-chapter evidence alongside the output reserve. Keep the
+  // original stage allowance for other providers and smaller windows.
+  const automaticInputBudget = (runtime.provider || '').trim().toLowerCase() === 'deepseek'
+    ? Math.max(inputBudget, Math.min(64 * 1024, Math.floor(safeModelContextLimit / 10)))
+    : inputBudget
+  // Both allocation and the actual-message gate retain this model boundary.
+  // An output reserve that exceeds it remains a hard failure.
+  return Math.min(safeModelContextLimit, automaticInputBudget + outputReserve)
+}
+
 function createStagePriorityMap(
   promptProfile: ChapterContextPromptProfile,
   chapterComplexity: ChapterContextComplexity,

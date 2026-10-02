@@ -15,16 +15,16 @@ import { KimiAdapter } from '../adapters/kimi.adapter'
 import { AgentCliAdapter, type NativeAgentProvider } from '../adapters/agent-cli.adapter'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import os from 'os'
+import { DEEPSEEK_V4_MAX_OUTPUT_TOKENS, getProviderMaxOutputTokens } from '../../src/shared/model-token-limits'
 
 const MACHINE_SALT = `novelforge-${os.hostname()}-${os.platform()}`
 const DEFAULT_MODEL_MAX_TOKENS = 65_536
-const MAX_MODEL_MAX_TOKENS = 1_000_000
 const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  deepseek: { temperature: 0.7, maxTokens: 384000 },
+  deepseek: { temperature: 0.7, maxTokens: DEEPSEEK_V4_MAX_OUTPUT_TOKENS },
   kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   codex: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
@@ -90,7 +90,7 @@ export function normalizeModelMaxTokens(value: unknown, provider: string): numbe
   const fallback = getProviderRuntimeDefaults(provider).maxTokens
   const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback
-  return Math.max(512, Math.min(MAX_MODEL_MAX_TOKENS, numeric))
+  return Math.max(512, Math.min(getProviderMaxOutputTokens(provider), numeric))
 }
 
 export function normalizeModelContextTokens(value: unknown): number | null {

@@ -154,7 +154,7 @@ assertPass(
   'workspace chrome migration contract has a dedicated static gate (P0-01)',
   workspaceChromeContract.includes('Approved shared chrome migrations are explicit')
     && workspaceChromeContract.includes('Legacy/default pages cannot pass actionContract')
-    && workspaceChromeContract.includes('Portal provider wraps the route shell'),
+    && workspaceChromeContract.includes('Portal provider wraps the author workspace header'),
 )
 assertPass(
   'quiet workspace surface keeps descriptions in closed disclosures',
@@ -204,7 +204,7 @@ assertPass(
 )
 assertPass(
   'novel workspace status text keeps current location only',
-  read('src/pages/Novel/index.tsx').includes('resolvePageMeta(currentPage).label')
+  read('src/pages/Novel/index.tsx').includes('<span>{page.label}</span>')
     && !read('src/pages/Novel/index.tsx').includes('模块完成 ${workspaceSnapshot.moduleDoneCount}'),
 )
 assertPass(

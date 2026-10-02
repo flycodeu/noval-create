@@ -7,13 +7,7 @@ import type {
   GenericAssetReviewCheck,
   GenericAssetReviewContent,
   GenericAssetQualitySnapshot,
-  ImportGenericAssetDraftInput,
-  ImportGenericAssetDraftResult,
-  ReviewGenericAssetDraftInput,
-  ReviewGenericAssetDraftResult,
 } from '../../src/shared/generic-asset-workflow'
-import type { AgentToolActor } from '../../src/shared/tool-contracts'
-import { asc, desc, eq } from 'drizzle-orm'
 import { GenericAssetWorkflowError } from '../application/generic-asset-workflow-error'
 import { safeParseJson } from '../utils/json'
 import {
@@ -30,150 +24,14 @@ import {
   buildChatOptionsFromRoute,
   resolveAiExecutionMode,
 } from './ai-engine.service'
-import { buildStoryProfile, type StoryProfile } from './context.service'
-import { getDb } from '../database/db'
-import {
-  chapters,
-  characters,
-  factions,
-  resistanceTracks,
-  storyArcs,
-  storyItems,
-  storyThreads,
-  storyVolumes,
-  timelineEvents,
-  volumeDesigns,
-  worldMap,
-} from '../database/schema'
 import * as novelService from './novel.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, updateTask } from './task.service'
 
 const OUTPUT_PREVIEW_LIMIT = 900
-const CONTEXT_SECTION_LIMIT = 3_600
 const PROCESS_LEAK_PATTERN = /(?:作为(?:一个)?AI|我是(?:一个)?(?:AI|人工智能)|下面是(?:我为你|生成的)|希望(?:以上|这些)内容|如果你(?:还)?需要|以下是(?:根据|为你))/iu
-
-function clip(value: string | null | undefined, limit = CONTEXT_SECTION_LIMIT): string {
-  const normalized = (value || '').trim()
-  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}\n…（已按上下文预算截断）`
-}
 
 function uniqueLines(values: Array<string | null | undefined>, limit = 20): string[] {
   return [...new Set(values.map((value) => (value || '').trim()).filter(Boolean))].slice(0, limit)
-}
-
-function inline(value: unknown): string {
-  return typeof value === 'string' ? value.trim().replace(/\s+/gu, ' ') : ''
-}
-
-function formatContextCatalogSection(
-  label: string,
-  lines: string[],
-  limit = 1_800,
-): string {
-  const content = clip(lines.filter(Boolean).join('\n'), limit) || '（当前没有已登记记录）'
-  return `<existing_${label}>\n${content}\n</existing_${label}>`
-}
-
-/**
- * The compact StoryProfile is intentionally stable for the rest of the app,
- * but external coding agents need the concrete records that their draft must
- * inherit. Read a bounded catalog here without calling ensureStoryStructure.
- */
-function buildExistingAssetCatalog(novelId: number): string {
-  const db = getDb()
-  const characterRows = db.select().from(characters)
-    .where(eq(characters.novelId, novelId))
-    .orderBy(asc(characters.sortOrder), asc(characters.id))
-    .all()
-    .slice(0, 12)
-  const factionRows = db.select().from(factions)
-    .where(eq(factions.novelId, novelId))
-    .orderBy(asc(factions.sortOrder), asc(factions.id))
-    .all()
-    .slice(0, 8)
-  const locationRows = db.select().from(worldMap)
-    .where(eq(worldMap.novelId, novelId))
-    .orderBy(asc(worldMap.level), asc(worldMap.sortOrder), asc(worldMap.id))
-    .all()
-    .slice(0, 12)
-  const itemRows = db.select().from(storyItems)
-    .where(eq(storyItems.novelId, novelId))
-    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
-    .all()
-    .slice(0, 12)
-  const resistanceRows = db.select().from(resistanceTracks)
-    .where(eq(resistanceTracks.novelId, novelId))
-    .orderBy(asc(resistanceTracks.id))
-    .all()
-    .slice(0, 8)
-  const threadRows = db.select().from(storyThreads)
-    .where(eq(storyThreads.novelId, novelId))
-    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
-    .all()
-    .slice(0, 12)
-  const timelineRows = db.select().from(timelineEvents)
-    .where(eq(timelineEvents.novelId, novelId))
-    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
-    .all()
-    .slice(0, 16)
-  const arcRows = db.select().from(storyArcs)
-    .where(eq(storyArcs.novelId, novelId))
-    .orderBy(asc(storyArcs.arcOrder), asc(storyArcs.id))
-    .all()
-    .slice(0, 8)
-  const volumeRows = db.select().from(storyVolumes)
-    .where(eq(storyVolumes.novelId, novelId))
-    .orderBy(asc(storyVolumes.volumeNumber), asc(storyVolumes.id))
-    .all()
-    .slice(0, 6)
-  const volumeDesignRows = db.select().from(volumeDesigns)
-    .where(eq(volumeDesigns.novelId, novelId))
-    .orderBy(asc(volumeDesigns.id))
-    .all()
-    .slice(0, 6)
-  const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
-    .all()
-    .slice(0, 8)
-
-  return [
-    formatContextCatalogSection('characters', characterRows.map((row) => (
-      `- #${row.id} ${inline(row.fullName)} | ${inline(row.roleType)} | 目标：${inline(row.goals)} | 戏剧引擎：${inline(row.dramaticEngine)} | 状态：${inline(row.characterArc)}`
-    ))),
-    formatContextCatalogSection('factions', factionRows.map((row) => (
-      `- #${row.id} ${inline(row.name)} | 目标：${inline(row.goal)} | 资源：${inline(row.resources)} | 阶段：${inline(row.currentPhase)}`
-    ))),
-    formatContextCatalogSection('locations', locationRows.map((row) => (
-      `- #${row.id} ${inline(row.name)} | 层级：${row.level} | 类型：${inline(row.locationType || row.nodeType)} | 作用：${inline(row.plotRelevance)} | 描述：${inline(row.description)}`
-    ))),
-    formatContextCatalogSection('items', itemRows.map((row) => (
-      `- #${row.id} ${inline(row.itemName)} | 类型：${inline(row.itemKind)} | 状态：${inline(row.status)} | 剧情功能：${inline(row.plotFunction)} | 限制：${inline(row.limitations)} | 摘要：${inline(row.summary)}`
-    ))),
-    formatContextCatalogSection('resistance_tracks', resistanceRows.map((row) => (
-      `- #${row.id} ${inline(row.title)} | 类型：${inline(row.resistanceKind)} | 目标：${inline(row.goal)} | 当前压力：${inline(row.currentPressureMode)} | 升级：${inline(row.escalationPlan)} | 状态：${inline(row.currentStatus)}`
-    ))),
-    formatContextCatalogSection('story_threads', threadRows.map((row) => (
-      `- #${row.id} ${inline(row.title)} | 类型：${inline(row.threadType)} | 状态：${inline(row.status)} | 当前状态：${inline(row.currentState)} | 回收条件：${inline(row.payoffCondition)} | 目标回收章：${row.targetPayoffChapter ?? '未定'}`
-    ))),
-    formatContextCatalogSection('timeline_events', timelineRows.map((row) => (
-      `- #${row.id} ${inline(row.timeLabel)} ${inline(row.eventTitle)} | ${inline(row.eventType)} | 原因：${inline(row.eventCause)} | 结果：${inline(row.eventResult)} | 摘要：${inline(row.eventSummary)}`
-    ))),
-    formatContextCatalogSection('story_arcs', arcRows.map((row) => (
-      `- #${row.id} ${inline(row.arcName)} | 第${row.chapterStart ?? '?'}-${row.chapterEnd ?? '?'}章 | 目标：${inline(row.arcGoal)} | 摘要：${inline(row.arcSummary)}`
-    ))),
-    formatContextCatalogSection('volume_plan', [
-      ...volumeRows.map((row) => (
-        `- 卷${row.volumeNumber} #${row.id} ${inline(row.title)} | 状态：${inline(row.status)} | 摘要：${inline(row.summary)}`
-      )),
-      ...volumeDesignRows.map((row) => (
-        `- 卷设计 #${row.volumeId} | 主题：${inline(row.volumeTheme)} | 承诺：${inline(row.volumePromise)} | 主冲突：${inline(row.mainConflict)} | 爆点：${inline(row.climaxPlan)} | 末状态：${inline(row.endStateShift)}`
-      )),
-    ]),
-    formatContextCatalogSection('recent_chapters', chapterRows.map((row) => (
-      `- 第${row.chapterNum}章 ${inline(row.title)} | 状态：${inline(row.status)} | 大纲：${inline(row.outline)} | 摘要：${inline(row.summary)} | 下一章种子：${inline(row.nextChapterSeed)}`
-    ))),
-  ].join('\n\n')
 }
 
 function mapArtifactError(error: unknown): never {
@@ -202,22 +60,6 @@ function requireNovel(novelId: number) {
   const novel = novelService.getNovel(novelId)
   if (!novel) throw new GenericAssetWorkflowError('PROJECT_NOT_FOUND', `未找到项目 #${novelId}。`)
   return novel
-}
-
-function buildContextSummary(profile: StoryProfile, existingAssetCatalog = ''): string {
-  return [
-    `项目：${profile.novelTitle}`,
-    `题材：${profile.genre}`,
-    `\n<project_brief>\n${clip(profile.projectBriefSummary)}\n</project_brief>`,
-    `\n<premise>\n${clip(profile.premiseSummary)}\n</premise>`,
-    `\n<story_design>\n${clip(profile.storyDesignSummary)}\n</story_design>`,
-    `\n<endgame>\n${clip(profile.endgameDesignSummary)}\n</endgame>`,
-    `\n<world_rules>\n${clip(profile.worldRulesSummary)}\n</world_rules>`,
-    `\n<active_threads>\n${clip(profile.storyThreadsSummary)}\n</active_threads>`,
-    `\n<theme_voice>\n${clip(profile.themeVoiceSummary)}\n</theme_voice>`,
-    `\n<writing_contract>\n${clip(profile.writingContractSummary)}\n</writing_contract>`,
-    existingAssetCatalog ? `\n${existingAssetCatalog}` : '',
-  ].join('\n')
 }
 
 function outputInstruction(format: GenericAssetOutputFormat, schemaHint: string): string {
@@ -325,7 +167,7 @@ export function assessGenericAssetDraftQuality(params: {
       ? `审校阻断：${hardBlockers.join('；')}`
       : status === 'needs_revision'
         ? `草稿已保存，但仍需复核：${warnings.join('；')}`
-        : '结构检查与独立模型审校均通过，可由作者在界面中确认应用。',
+        : '结构检查与独立模型审校均通过，可按本轮设置应用。',
     hardBlockers,
     warnings,
     checks,
@@ -369,109 +211,6 @@ function outputPreview(output: string): string {
 }
 
 /** Store Codex-authored text as a candidate. Review and canonical application stay separate. */
-export function importGenericAssetDraft(
-  input: ImportGenericAssetDraftInput,
-  actor: AgentToolActor,
-): ImportGenericAssetDraftResult {
-  const title = requireMeaningfulText(input.title, 'VALIDATION_FAILED', '资产标题不能为空。')
-  const userRequest = requireMeaningfulText(input.userRequest, 'VALIDATION_FAILED', '请保留用户原始需求。')
-  const analysis = requireMeaningfulText(input.analysis, 'VALIDATION_FAILED', '请先记录需求分析。')
-  const stageScope = requireMeaningfulText(input.stageScope, 'VALIDATION_FAILED', '请说明本轮只完成哪个阶段。')
-  const output = requireMeaningfulText(input.output, 'VALIDATION_FAILED', '候选正文不能为空。')
-  const idempotencyKey = requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
-  if (output.length > 120_000 || userRequest.length > 4_000 || analysis.length > 8_000 || stageScope.length > 200) {
-    throw new GenericAssetWorkflowError('VALIDATION_FAILED', '需求、分析、阶段范围或候选正文超出长度上限。')
-  }
-  const outputFormat = input.outputFormat || 'markdown'
-  if (outputFormat === 'json' && !isJsonShapeValid(output)) {
-    throw new GenericAssetWorkflowError('OUTPUT_SHAPE_INVALID', 'JSON 候选稿必须是可解析的对象或数组。')
-  }
-  const novel = requireNovel(input.novelId)
-  const currentContextVersion = novel.contextVersion || 1
-  const requirements = uniqueLines(input.requirements || [], 20)
-  const unresolvedQuestions = uniqueLines(input.unresolvedQuestions || [], 12)
-  const fingerprint = hashArtifactContent({
-    novelId: input.novelId,
-    expectedContextVersion: input.expectedContextVersion,
-    assetType: input.assetType,
-    title,
-    userRequest,
-    analysis,
-    stageScope,
-    unresolvedQuestions,
-    requirements,
-    outputFormat,
-    schemaHint: input.schemaHint?.trim() || '',
-    output,
-    parentArtifactId: input.parentArtifactId || null,
-  })
-  const replay = findArtifactByIdempotency<GenericAssetDraftContent>(input.novelId, 'generic_draft', idempotencyKey)
-  if (replay) {
-    if (replay.content.requestFingerprint !== fingerprint || !replay.content.externalSource) {
-      throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产草稿。')
-    }
-    return {
-      draftArtifact: replay,
-      outputPreview: outputPreview(replay.content.output),
-      warnings: [
-        '这是原草稿的幂等重放，未执行独立审校，也未写入正式资料。',
-        ...(replay.contextVersion === currentContextVersion ? [] : ['项目上下文已变化，请重新分析并创建新版本。']),
-      ],
-      idempotentReplay: true,
-    }
-  }
-  if (input.expectedContextVersion !== currentContextVersion) {
-    throw new GenericAssetWorkflowError('CONTEXT_VERSION_CONFLICT', `项目上下文已从 v${input.expectedContextVersion} 变为 v${currentContextVersion}，请重新读取项目后再导入。`)
-  }
-  if (input.parentArtifactId) {
-    const parent = requireArtifact<GenericAssetDraftContent>(input.parentArtifactId)
-    if (parent.novelId !== input.novelId || parent.kind !== 'generic_draft' || parent.content.assetType !== input.assetType) {
-      throw new GenericAssetWorkflowError('ARTIFACT_PARENT_INVALID', '父草稿必须属于同一项目和资产类型。')
-    }
-  }
-  const content: GenericAssetDraftContent = {
-    schemaVersion: 'generic-asset-draft-v1',
-    requestFingerprint: fingerprint,
-    assetType: input.assetType,
-    title,
-    outputFormat,
-    requirements,
-    schemaHint: input.schemaHint?.trim() || '',
-    output,
-    contextSummaryHash: hashArtifactContent({ novelId: input.novelId, contextVersion: currentContextVersion }),
-    taskId: null,
-    externalSource: { userRequest, analysis, stageScope, unresolvedQuestions },
-    createdAt: new Date().toISOString(),
-  }
-  let draftArtifact: ImportGenericAssetDraftResult['draftArtifact']
-  try {
-    draftArtifact = createArtifact({
-      novelId: input.novelId,
-      kind: 'generic_draft',
-      status: 'draft',
-      parentArtifactId: input.parentArtifactId || null,
-      content,
-      contextVersion: currentContextVersion,
-      producerType: 'api_client',
-      producerId: actor.actorId.slice(0, 200),
-      producerClient: actor.clientId.slice(0, 200),
-      idempotencyKey,
-    })
-  } catch (error) {
-    return mapArtifactError(error)
-  }
-  return {
-    draftArtifact,
-    outputPreview: outputPreview(output),
-    warnings: [
-      '候选稿仅已保存，未执行独立审校，也未写入正式资料。',
-      ...(PROCESS_LEAK_PATTERN.test(output) ? ['检测到可能的模型自述或交付套话，请审校时检查。'] : []),
-      ...(unresolvedQuestions.length ? ['仍有待确认问题，审校前不要将其当作既定事实。'] : []),
-    ],
-    idempotentReplay: false,
-  }
-}
-
 function readReplay(
   input: GenerateGenericAssetDraftInput,
   fingerprint: string,
@@ -502,6 +241,13 @@ function readReplay(
 
 export async function generateGenericAssetDraft(
   input: GenerateGenericAssetDraftInput,
+  runtime: {
+    contextSummary: string
+    maxTokens?: number
+    parentTaskId?: number
+    assertActive?: () => void
+    onStage?: (stage: 'reviewing' | 'revising') => void
+  },
 ): Promise<GenerateGenericAssetDraftResult> {
   requireMeaningfulText(input.title, 'VALIDATION_FAILED', '资产标题不能为空。')
   requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
@@ -514,10 +260,9 @@ export async function generateGenericAssetDraft(
     return mapArtifactError(error)
   }
 
-  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
   const narrative = input.assetType === 'chapter' ? resolveProsePolicyMaterial(input.novelId) : undefined
-  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
-    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n\n阅读策略：保留事实、视角和有效表达；未确认计划不当作已经发生的事实。此入口只产出外部候选，没有章节身份，不可直接作为正典。\n${narrative.reference}` : '')
+  const contextSummary = runtime.contextSummary
+    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n\n阅读策略：保留事实、视角和有效表达；未确认计划不当作已经发生的事实。按章节合同生成候选，审校后才可应用。\n${narrative.reference}` : '')
   const contextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
@@ -529,17 +274,18 @@ export async function generateGenericAssetDraft(
     temperatureCap: input.assetType === 'chapter' ? 0.78 : 0.68,
     extraReasons: ['通用资产工具只写版本化草稿，并在返回前执行独立质量审校。'],
   })
-  let taskId = 0
-  const rawOutput = await runChatTask({
+  runtime.assertActive?.()
+  const taskId = await createTask({ type: 'planning_draft', novelId: input.novelId, modelConfigId: route.modelConfigId, parentTaskId: runtime.parentTaskId })
+  if (runtime.parentTaskId) updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  const rawOutput = await executeChatTask(taskId, {
     type: 'planning_draft',
     novelId: input.novelId,
     modelConfigId: route.modelConfigId,
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
     messages: [{ role: 'user', content: buildGenerationPrompt(input, contextSummary) }],
-    chatOpts: buildChatOptionsFromRoute(route),
+    chatOpts: { ...buildChatOptionsFromRoute(route), ...(runtime.maxTokens ? { maxTokens: Math.min(route.maxTokens, runtime.maxTokens) } : {}) },
     retryable: true,
-    onSuccess: (_output, createdTaskId) => { taskId = createdTaskId },
   })
   if (!taskId || !rawOutput.trim()) {
     throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', '模型未返回可用的资产草稿。')
@@ -557,6 +303,8 @@ export async function generateGenericAssetDraft(
     extraReasons: ['独立审校与定向重写使用低波动路由，并保留完整质量任务记录。'],
   })
   const qualityTaskIds: number[] = []
+  runtime.assertActive?.()
+  runtime.onStage?.('reviewing')
   const quality = await runAssetQualityLoop({
     narrativePolicyVersion: narrative?.policy.policyVersion,
     targetType: input.assetType,
@@ -565,7 +313,7 @@ export async function generateGenericAssetDraft(
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
     parentTaskId: taskId,
-    chatOpts: buildChatOptionsFromRoute(qualityRoute),
+    chatOpts: { ...buildChatOptionsFromRoute(qualityRoute), ...(runtime.maxTokens ? { maxTokens: Math.min(qualityRoute.maxTokens, runtime.maxTokens) } : {}) },
     contextSummary,
     generatedOutput: rawOutput,
     schemaHint: input.schemaHint?.trim() || undefined,
@@ -577,8 +325,13 @@ export async function generateGenericAssetDraft(
       `保持 ${input.outputFormat || 'markdown'} 输出格式。`,
       ...(input.requirements || []),
     ]),
-    onQualityTaskCreated: (qualityTaskId) => qualityTaskIds.push(qualityTaskId),
+    onQualityTaskCreated: (qualityTaskId, stage) => {
+      runtime.assertActive?.()
+      qualityTaskIds.push(qualityTaskId)
+      runtime.onStage?.(stage === 'rewrite' ? 'revising' : 'reviewing')
+    },
   })
+  runtime.assertActive?.()
   const currentContextVersion = requireNovel(input.novelId).contextVersion || 1
   const content: GenericAssetDraftContent = {
     schemaVersion: 'generic-asset-draft-v1',
@@ -654,155 +407,6 @@ export async function generateGenericAssetDraft(
     reviewArtifact,
     taskId,
     outputPreview: outputPreview(content.output),
-    review,
-    idempotentReplay: false,
-  }
-}
-
-export async function reviewGenericAssetDraft(
-  input: ReviewGenericAssetDraftInput,
-): Promise<ReviewGenericAssetDraftResult> {
-  requireMeaningfulText(input.draftArtifactId, 'VALIDATION_FAILED', '草稿工件 ID 不能为空。')
-  requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
-  const novel = requireNovel(input.novelId)
-  let sourceArtifact
-  try {
-    sourceArtifact = requireArtifact<GenericAssetDraftContent>(input.draftArtifactId)
-  } catch (error) {
-    return mapArtifactError(error)
-  }
-  if (sourceArtifact.novelId !== input.novelId || sourceArtifact.kind !== 'generic_draft'
-    || sourceArtifact.content.schemaVersion !== 'generic-asset-draft-v1') {
-    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '指定工件不是当前项目的通用资产草稿。')
-  }
-
-  const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
-  const route = buildAiModelRouteReport({
-    taskKind: 'generic_prompt',
-    stageLabel: `Generic Asset Review · ${sourceArtifact.content.assetType}`,
-    executionMode: mode.mode,
-    resolutionSource: mode.source,
-    modelConfigId: input.modelConfigId || sourceArtifact.modelConfigId || novel.modelConfigId || undefined,
-    temperatureCap: 0.32,
-    reviewDepth: 'deep',
-    maxTokensFactor: 1.25,
-    extraReasons: ['复核既有版本化草稿；如果需要优化，生成子版本而不修改原工件。'],
-  })
-  const fingerprint = reviewRequestFingerprint({
-    novelId: input.novelId,
-    draftArtifactId: input.draftArtifactId,
-    executionMode: mode.mode,
-    modelConfigId: route.modelConfigId,
-  })
-  const replay = findArtifactByIdempotency<GenericAssetReviewContent>(input.novelId, 'quality_report', input.idempotencyKey)
-  if (replay) {
-    if (replay.content.schemaVersion !== 'generic-asset-review-v1'
-      || replay.content.draftArtifactId !== input.draftArtifactId
-      || replay.content.requestFingerprint !== fingerprint) {
-      throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产审校请求。')
-    }
-    const effectiveArtifact = requireArtifact<GenericAssetDraftContent>(replay.content.effectiveArtifactId)
-    return {
-      sourceArtifact,
-      effectiveArtifact,
-      reviewArtifact: replay,
-      outputPreview: outputPreview(effectiveArtifact.content.output),
-      review: replay.content,
-      idempotentReplay: true,
-    }
-  }
-
-  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
-  const narrative = sourceArtifact.content.assetType === 'chapter' ? resolveProsePolicyMaterial(input.novelId) : undefined
-  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
-    + (narrative?.policy.policyVersion === 'reader-first-v1' ? `\n${narrative.reference}` : '')
-  let currentContextVersion = novel.contextVersion || 1
-  const qualityTaskIds: number[] = []
-  const quality = await runAssetQualityLoop({
-    narrativePolicyVersion: narrative?.policy.policyVersion,
-    targetType: sourceArtifact.content.assetType,
-    novelId: input.novelId,
-    modelConfigId: route.modelConfigId,
-    relatedEntityType: sourceArtifact.content.assetType,
-    relatedEntityId: input.novelId,
-    chatOpts: buildChatOptionsFromRoute(route),
-    contextSummary,
-    generatedOutput: sourceArtifact.content.output,
-    schemaHint: sourceArtifact.content.schemaHint || undefined,
-    reviewFocus: ['这是独立复核，请重新核对背景、主线、硬规则、语言自然度与输出契约。'],
-    rewriteConstraints: [
-      `保持 ${sourceArtifact.content.outputFormat} 输出格式。`,
-      ...sourceArtifact.content.requirements,
-    ],
-    onQualityTaskCreated: (qualityTaskId) => qualityTaskIds.push(qualityTaskId),
-  })
-  currentContextVersion = requireNovel(input.novelId).contextVersion || 1
-
-  let effectiveArtifact = sourceArtifact
-  if (quality.finalOutput.trim() !== sourceArtifact.content.output.trim()) {
-    const revisedContent: GenericAssetDraftContent = {
-      ...sourceArtifact.content,
-      output: quality.finalOutput.trim(),
-      contextSummaryHash: hashArtifactContent(contextSummary),
-      taskId: qualityTaskIds.at(-1) || sourceArtifact.content.taskId,
-      quality: qualitySnapshot(quality),
-      createdAt: new Date().toISOString(),
-    }
-    effectiveArtifact = createArtifact({
-      novelId: input.novelId,
-      kind: 'generic_draft',
-      status: 'draft',
-      parentArtifactId: sourceArtifact.id,
-      content: revisedContent,
-      contextVersion: currentContextVersion,
-      producerType: 'novelforge_model',
-      producerId: qualityTaskIds.length > 0 ? `task:${qualityTaskIds.at(-1)}` : 'generic-asset-review-rewrite-v1',
-      producerClient: 'novelforge-generic-asset-workflow',
-      modelConfigId: route.modelConfigId,
-      taskId: qualityTaskIds.at(-1) || null,
-      idempotencyKey: `${input.idempotencyKey}:revision`,
-    })
-  }
-  const review = assessGenericAssetDraftQuality({
-    draftArtifactId: sourceArtifact.id,
-    draftContentHash: sourceArtifact.contentHash,
-    effectiveArtifactId: effectiveArtifact.id,
-    effectiveContentHash: effectiveArtifact.contentHash,
-    output: effectiveArtifact.content.output,
-    outputFormat: effectiveArtifact.content.outputFormat,
-    quality,
-    artifactContextVersion: effectiveArtifact.contextVersion,
-    currentContextVersion,
-  })
-  review.requestFingerprint = fingerprint
-  const reviewArtifact = createArtifact({
-    novelId: input.novelId,
-    kind: 'quality_report',
-    status: review.status === 'blocked' ? 'rejected' : 'reviewed',
-    parentArtifactId: effectiveArtifact.id,
-    content: review,
-    contextVersion: currentContextVersion,
-    producerType: 'system',
-    producerId: 'generic-asset-reviewer-v1',
-    producerClient: 'novelforge-generic-asset-workflow',
-    modelConfigId: route.modelConfigId,
-    taskId: qualityTaskIds.at(-1) || effectiveArtifact.taskId,
-    idempotencyKey: input.idempotencyKey,
-  })
-  effectiveArtifact = updateArtifactLifecycle(effectiveArtifact.id, {
-    status: review.status === 'blocked' ? 'rejected' : 'reviewed',
-    reviewArtifactId: reviewArtifact.id,
-  }) as typeof effectiveArtifact
-  if (effectiveArtifact.id !== sourceArtifact.id && review.status !== 'blocked') {
-    updateArtifactLifecycle(sourceArtifact.id, { status: 'superseded', reviewArtifactId: reviewArtifact.id })
-  } else {
-    sourceArtifact = effectiveArtifact
-  }
-  return {
-    sourceArtifact,
-    effectiveArtifact,
-    reviewArtifact,
-    outputPreview: outputPreview(effectiveArtifact.content.output),
     review,
     idempotentReplay: false,
   }

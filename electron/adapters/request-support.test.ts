@@ -38,4 +38,13 @@ describe('managed model request defaults', () => {
     expect(resolveManagedRequestTimeoutMs()).toBe(5000)
     expect(resolveManagedRequestRetryCount()).toBe(5)
   })
+
+  it('allows a provider fallback while keeping explicit options and environment overrides first', () => {
+    delete process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS
+    expect(resolveManagedRequestTimeoutMs()).toBe(90000)
+    expect(resolveManagedRequestTimeoutMs(undefined, 300000)).toBe(300000)
+    process.env.NOVELFORGE_MODEL_REQUEST_TIMEOUT_MS = '12000'
+    expect(resolveManagedRequestTimeoutMs(undefined, 300000)).toBe(12000)
+    expect(resolveManagedRequestTimeoutMs(18000, 300000)).toBe(18000)
+  })
 })

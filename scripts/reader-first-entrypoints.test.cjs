@@ -38,6 +38,46 @@ const server = http.createServer(async (req, res) => {
   res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } })}\n\n`)
   res.end('data: [DONE]\n\n')
 })
+async function stopFixture(backend) {
+  // Stop the proxy first so no late browser request can restart the owner.
+  if (backend && backend.exitCode === null && backend.signalCode === null) {
+    const exited = new Promise((resolve) => backend.once('exit', resolve))
+    backend.kill()
+    await Promise.race([exited, new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('Web proxy did not exit')), 5000)
+      timer.unref()
+      exited.finally(() => clearTimeout(timer))
+    })])
+  }
+  try {
+    const discovery = path.join(isolated, 'novelforge-runtime.json')
+    const lock = path.join(isolated, 'novelforge.single-writer.lock')
+    let owner
+    if (fs.existsSync(discovery)) {
+      owner = JSON.parse(fs.readFileSync(discovery, 'utf8'))
+      const url = new URL(owner.url)
+      assert.equal(url.protocol, 'http:')
+      assert.equal(url.hostname, '127.0.0.1')
+      assert(Number.isInteger(owner.pid) && owner.pid > 0)
+      const response = await fetch(new URL('/shutdown', url), {
+        method: 'POST', headers: { Authorization: `Bearer ${owner.token}` }, signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(response.status, 200, 'Isolated runtime rejected shutdown')
+    }
+    const alive = () => {
+      if (!owner) return false
+      try { process.kill(owner.pid, 0); return true } catch (error) { if (error.code === 'ESRCH') return false; throw error }
+    }
+    const deadline = Date.now() + 15000
+    while (fs.existsSync(discovery) || fs.existsSync(lock) || alive()) {
+      if (Date.now() >= deadline) throw new Error(`Isolated runtime did not stop: ${isolated}`)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  }
+}
 app.whenReady().then(async () => {
   const { initDb, getSqlite, closeDb } = require('../electron/database/db.ts')
   let backend
@@ -120,8 +160,12 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(output, 'requests.json'), JSON.stringify(requests, null, 2))
     console.log(`PASS RF-13 shared service and Web RPC. Fixture novel=${novelId} chapter=${chapterId} backend=${port}`)
     if (process.env.RF13_BROWSER_FIXTURE === '1') { console.log('RF-14 browser fixture ready'); return }
-    backend.kill()
-    server.close()
+    await stopFixture(backend)
     app.quit()
-  } catch (error) { console.error(error); backend?.kill(); closeDb(); server.close(); app.exit(1) }
+  } catch (error) {
+    console.error(error)
+    closeDb()
+    try { await stopFixture(backend) } catch (cleanupError) { console.error(cleanupError) }
+    app.exit(1)
+  }
 })

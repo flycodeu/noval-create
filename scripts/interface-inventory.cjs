@@ -7,6 +7,8 @@ const DEFAULT_SOURCE_FILES = Object.freeze({
   preload: 'electron/preload.ts',
   localWebBackend: 'scripts/local-web-backend.cjs',
   webBridge: 'src/runtime/web-electron-bridge.ts',
+  runtimeRpc: 'electron/utils/runtime-rpc.ts',
+  storyWorkspace: 'electron/application/story-workspace-ipc.ts',
 })
 
 // These are platform capabilities, not business APIs. Window controls have no
@@ -24,6 +26,8 @@ const DESKTOP_WEB_PLATFORM_ONLY = new Set([
   'window.isMaximized',
   'window.minimize',
   'window.toggleMaximize',
+  'agentTools.approve',
+  'novel.export',
 ])
 const LOCAL_WEB_PLATFORM_ONLY = new Set(['app.getCapabilities'])
 
@@ -167,13 +171,24 @@ function buildInterfaceInventory(workspaceRoot = path.resolve(__dirname, '..')) 
     ]),
   )
 
-  const mainChannels = parseMainIpcChannels(sources.mainIpc)
+  const mainChannels = parseMainIpcChannels(sources.mainIpc + '\n' + sources.storyWorkspace)
+    .filter(channel => !LOCAL_WEB_PLATFORM_ONLY.has(channel.replace(':', '.')))
   const preloadChannels = parsePreloadIpcChannels(sources.preload)
-  const backendPairs = parseBackendHandlerPairs(sources.localWebBackend)
-  const bridgePairs = parseWebBridgeHandlerPairs(sources.webBridge, backendPairs)
+  // The Web proxy has no business registry: its target is the very same runtime handlers.
+  const serviceBlock = sources.runtimeRpc.match(/STORY_SERVICES = new Set\(\[([\s\S]*?)\]\)/)?.[1] || ''
+  const allowedServices = new Set([...serviceBlock.matchAll(/'([^']+)'/g)].map(match => match[1]))
+  const appBlock = sources.runtimeRpc.match(/APP_METHODS = new Set\(\[([\s\S]*?)\]\)/)?.[1] || ''
+  const appMethods = new Set([...appBlock.matchAll(/'([^']+)'/g)].map(match => match[1]))
+  const backendPairs = unique(mainChannels.filter(channel => {
+    const [service, method] = channel.split(':')
+    return (service === 'app' ? appMethods.has(method) : allowedServices.has(service))
+      && !DESKTOP_WEB_PLATFORM_ONLY.has(normalizeDesktopWebPair(channel.replace(':', '.')))
+  }).map(channel => normalizeDesktopWebPair(channel.replace(':', '.'))).concat('app.getCapabilities'))
+  const bridgePairs = parseWebBridgeHandlerPairs(sources.webBridge, backendPairs).filter(pair => !DESKTOP_WEB_PLATFORM_ONLY.has(pair))
 
   const inventory = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    sharedRuntime: true,
     sourceFiles: Object.fromEntries(
       Object.entries(DEFAULT_SOURCE_FILES).map(([key, relativePath]) => [key, {
         path: relativePath,

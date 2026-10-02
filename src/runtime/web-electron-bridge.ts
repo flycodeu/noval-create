@@ -1521,6 +1521,11 @@ export function installWebElectronBridge(): void {
       })),
       getLocalBackendStatus,
     }),
+    storyAtlas: createService('storyAtlas', {
+      query: async (input?: unknown) => withLocalBackend('storyAtlas', 'query', [input], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
+      validate: async (input?: unknown) => withLocalBackend('storyAtlas', 'validate', [input], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
+      apply: async (input?: unknown) => withLocalBackend('storyAtlas', 'apply', [input], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
+    }),
     agentTools: createService('agentTools', {
       list: async (query?: unknown) => withLocalBackend('agentTools', 'list', [query], async () => []),
       call: async (request?: unknown) => withLocalBackend('agentTools', 'call', [request], async () => {

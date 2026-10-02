@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
@@ -77,6 +77,9 @@ import { maintenanceWorker } from './services/maintenance-worker.service'
 import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './services/desktop-updater'
 import { configureCodexMcp, getCodexMcpSetupStatus } from './services/codex-mcp-setup.service'
 import { startMcpStdio } from './mcp-stdio'
+import { attachToExistingRuntime, startMcpRuntime, type RuntimeHandle } from './utils/mcp-runtime'
+import { resolveRuntimeRpcChannel } from './utils/runtime-rpc'
+import { registerStoryWorkspaceIpc } from './application/story-workspace-ipc'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
 import * as batchWorkflowService from './services/batch-workflow.service'
@@ -144,11 +147,16 @@ import {
 
 let mainWindow: BrowserWindow | null = null
 let writerLock: SingleWriterLockHandle | null = null
+let runtimeHandle: RuntimeHandle | null = null
+let runtimeTray: Tray | null = null
+let databaseReady = false
+const runtimeRpcHandlers = new Map<string, (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
 
 app.setName('NovelForge')
 if (process.platform === 'win32') app.setAppUserModelId('com.novelforge.app')
 const mcpMode = process.argv.includes('--mcp')
-if (mcpMode && process.env.NOVELFORGE_USER_DATA_DIR) {
+const runtimeMode = process.argv.includes('--runtime')
+if (process.env.NOVELFORGE_USER_DATA_DIR) {
   const userDataDir = path.resolve(process.env.NOVELFORGE_USER_DATA_DIR)
   fs.mkdirSync(userDataDir, { recursive: true })
   app.setPath('userData', userDataDir)
@@ -206,7 +214,7 @@ function createWindow() {
   const winState = loadWindowState()
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, 'icon.ico')
-    : path.join(__dirname, '../../build/icon.ico')
+    : path.join(app.getAppPath(), 'build/icon.ico')
 
   mainWindow = new BrowserWindow({
     x: winState.x,
@@ -222,7 +230,7 @@ function createWindow() {
     titleBarOverlay: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.js'),
+      preload: app.isPackaged ? path.join(__dirname, '../preload/preload.js') : path.join(app.getAppPath(), 'out/preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -233,9 +241,8 @@ function createWindow() {
     mainWindow.maximize()
   }
 
-  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-    const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173'
-    mainWindow.loadURL(devUrl)
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
@@ -261,8 +268,8 @@ function createWindow() {
       type: 'question',
       title: '关闭 NovelForge',
       message: '要最小化窗口，还是退出 NovelForge？',
-      detail: '最小化后可从任务栏恢复。退出会中断正在运行的 AI 任务；请先保存正在编辑的内容。',
-      buttons: ['最小化', '退出', '取消'],
+      detail: '最小化后可从任务栏恢复，Codex 仍可调用。退出会停止本地创作服务并取消正在运行的 AI 请求；请先保存正在编辑的内容。',
+      buttons: ['最小化并继续任务', '退出并停止服务', '取消'],
       defaultId: 1,
       cancelId: 2,
       noLink: true,
@@ -298,16 +305,53 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false)
 }
 
-app.whenReady().then(() => {
+function showDesktop() {
+  if (!mainWindow) createWindow()
+  mainWindow?.show()
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.focus()
+}
+
+function createRuntimeTray() {
+  const icon = app.isPackaged ? path.join(process.resourcesPath, 'icon.ico') : path.join(app.getAppPath(), 'build/icon.ico')
+  if (!fs.existsSync(icon)) return
+  runtimeTray = new Tray(icon)
+  runtimeTray.setToolTip('NovelForge · 本地创作服务运行中')
+  runtimeTray.on('right-click', () => {
+    const running = databaseReady ? getDb().select({ status: tasks.status, parentTaskId: tasks.parentTaskId }).from(tasks).all()
+      .filter((task) => task.parentTaskId == null && ['pending', 'running', 'cancel_requested'].includes(task.status || '')).length : 0
+    runtimeTray?.popUpContextMenu(Menu.buildFromTemplate([
+      { label: `创作服务运行中 · ${running} 个任务`, enabled: false },
+      { label: '打开 NovelForge', click: showDesktop },
+      { label: '退出并停止创作服务', click: () => app.quit() },
+    ]))
+  })
+  runtimeTray.on('double-click', showDesktop)
+}
+
+async function attachToRuntime(): Promise<boolean> {
+  if (!await attachToExistingRuntime(app.getPath('userData'), app.getVersion(), !runtimeMode)) return false
+  shutdownComplete = true
+  app.quit()
+  return true
+}
+
+app.whenReady().then(async () => {
   if (mcpMode) {
-    void startMcpStdio().catch((error) => {
+    void startMcpStdio(app.isPackaged ? undefined : [process.argv[1] || app.getAppPath(), '--runtime']).catch((error) => {
       console.error('[novelforge-mcp] fatal:', error)
       app.quit()
     })
     return
   }
-  const lockHandle = acquireSingleWriterLock(app.getPath('userData'), 'desktop-main')
+  if (await attachToRuntime()) return
+  const lockHandle = acquireSingleWriterLock(app.getPath('userData'), 'novelforge-runtime')
   if (!lockHandle) {
+    // Another launch may hold the lock while initializing storage and publishing discovery.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      if (await attachToRuntime()) return
+    }
     dialog.showErrorBox(
       'NovelForge 已在运行',
       '检测到另一个 NovelForge 实例（桌面端、本地 Web 后端或 MCP 运行时）正在写入同一个数据库。为避免数据损坏，请先关闭其他实例再启动。',
@@ -318,15 +362,37 @@ app.whenReady().then(() => {
   writerLock = lockHandle
 
   initDb()
+  databaseReady = true
   taskService.recoverOrphanedTasks()
-  createWindow()
   registerIpcHandlers()
+  runtimeHandle = await startMcpRuntime({
+    directory: app.getPath('userData'), version: app.getVersion(), registry: novelForgeToolRegistry,
+    modelConfigured: () => { try { return Boolean(modelService.getDefaultModelConfigRecord()) } catch { return false } },
+    openDesktop: showDesktop, isDesktopOpen: () => Boolean(mainWindow && !mainWindow.isDestroyed()), shutdown: () => app.quit(),
+    invokeRpc: async (service, method, args) => {
+      const channel = resolveRuntimeRpcChannel(service, method)
+      const handler = channel ? runtimeRpcHandlers.get(channel) : undefined
+      if (!handler) return { ok: false, error: { code: 'runtime.methodNotAllowed', message: `本地网页未开放 ${service}.${method}` } }
+      const event = { sender: { id: -1, isDestroyed: () => false, send: (name: string, ...values: unknown[]) => runtimeHandle?.publishEvent(name, ...values) } } as unknown as Electron.IpcMainInvokeEvent
+      return handler(event, ...args)
+    },
+  })
+  createRuntimeTray()
+  if (!runtimeMode) createWindow()
   maintenanceWorker.start()
   startDesktopUpdater(() => mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch((error) => {
+  console.error('[novelforge-runtime] startup failed:', error)
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true })
+    fs.appendFileSync(path.join(app.getPath('userData'), 'runtime-startup.log'), `${new Date().toISOString()} ${error instanceof Error ? error.stack : String(error)}\n`)
+  } catch { /* A failed data directory must not prevent process exit. */ }
+  if (!mcpMode && !runtimeMode) dialog.showErrorBox('NovelForge 启动失败', error instanceof Error ? error.message : String(error))
+  app.quit()
 })
 
 let shutdownComplete = false
@@ -334,14 +400,31 @@ let shutdownPromise: Promise<void> | null = null
 
 function shutdownApplication(): Promise<void> {
   if (shutdownPromise) return shutdownPromise
-  shutdownPromise = maintenanceWorker.stop()
-    .catch((error) => console.warn('[main] maintenance worker shutdown failed:', error))
-    .then(() => {
+  shutdownPromise = (async () => {
+    try {
+      await runtimeHandle?.close()
+      runtimeHandle = null
+      if (databaseReady) {
+        const active = getDb().select().from(tasks).all().filter((task) => ['pending', 'running', 'cancel_requested'].includes(task.status || ''))
+        active.forEach((task) => taskService.cancelTask(task.id))
+        const deadline = Date.now() + 2_000
+        while (Date.now() < deadline && active.some((task) => ['running', 'cancel_requested'].includes(taskService.getTaskRecord(task.id)?.status || ''))) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+      }
+      await maintenanceWorker.stop()
+    } catch (error) {
+      console.warn('[main] runtime shutdown failed:', error)
+    } finally {
+      try { closeDb() } catch (error) { console.warn('[main] storage close failed:', error) }
       writerLock?.release()
       writerLock = null
-      closeDb()
+      databaseReady = false
+      runtimeTray?.destroy()
+      runtimeTray = null
       shutdownComplete = true
-    })
+    }
+  })()
   return shutdownPromise
 }
 
@@ -366,7 +449,11 @@ function registerIpcHandlers() {
   const handle: IpcHandle = (
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1],
-  ) => registerHandle(channel, wrapIpcHandler(channel, listener))
+  ) => {
+    const wrapped = wrapIpcHandler(channel, listener)
+    runtimeRpcHandlers.set(channel, wrapped)
+    registerHandle(channel, wrapped)
+  }
 
   handle('window:minimize', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -397,6 +484,7 @@ function registerIpcHandlers() {
   })
 
   handle('app:getDatabasePath', () => getDatabasePath())
+  handle('app:getCapabilities', () => ({ surface: 'shared-runtime', realDatabase: true, writesEnabled: true, generationEnabled: true, eventStreaming: true }))
   handle('app:getMaintenanceStatus', () => maintenanceWorker.getStatus())
   handle('app:getUpdateStatus', () => getDesktopUpdateStatus())
   handle('app:checkForUpdates', () => checkDesktopUpdates())
@@ -467,8 +555,8 @@ function registerIpcHandlers() {
     const request = parseObjectPayload<AgentToolCallRequest>(rawRequest, 'request')
     const actor = {
       type: 'human' as const,
-      actorId: 'desktop-user',
-      clientId: 'novelforge-desktop',
+      actorId: event.sender.id === -1 ? 'web-user' : 'desktop-user',
+      clientId: event.sender.id === -1 ? 'novelforge-local-web' : 'novelforge-desktop',
       sessionId: `web-contents-${event.sender.id}`,
     }
     const trustedApprovalId = request.approvalId && consumeApprovalGrant({
@@ -493,6 +581,7 @@ function registerIpcHandlers() {
   registerHistoryAndModelIpcHandlers(handle)
   registerRuntimeIpcHandlers(handle)
   registerAiIpcHandlers(handle)
+  registerStoryWorkspaceIpc(handle)
 }
 
 function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {

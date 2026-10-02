@@ -13,6 +13,7 @@ import {
   collectChapterContextRawData,
   ContextOverflowError,
   HardConstraintOverflowError,
+  resolveAutomaticChapterRequestBudget,
 } from './context.service'
 
 export interface ChapterRecallRuntimeRecord {
@@ -216,7 +217,10 @@ async function buildBackfilledRecallRuntimeRecord(chapterId: number): Promise<Ch
     const context = allocateChapterContext(rawContext, {
       promptProfile: 'draft',
       chapterComplexity: complexity,
-      totalBudget: budget,
+      totalBudget: resolveAutomaticChapterRequestBudget(budget, {
+        modelConfigId: rawContext.novel.modelConfigId,
+        promptProfile: 'draft', chapterComplexity: complexity,
+      }),
     })
     return {
       chapterId: chapter.id,

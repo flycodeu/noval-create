@@ -535,6 +535,7 @@ function testFreshDbIsIdempotent() {
       '0067_agent_artifact_kind_contract',
       '0068_writeback_source_identity',
       '0069_model_attempt_output',
+      '0070_story_atlas',
     ])
 
     runMigrations(db)
@@ -683,6 +684,7 @@ function testPartialSchemaCanResume() {
       '0067_agent_artifact_kind_contract',
       '0068_writeback_source_identity',
       '0069_model_attempt_output',
+      '0070_story_atlas',
     ])
 
     const configs = db.prepare(`

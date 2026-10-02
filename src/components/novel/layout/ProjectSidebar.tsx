@@ -1,8 +1,7 @@
-import React, { useMemo, useState } from 'react'
-import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
+import React from 'react'
+import { ApartmentOutlined, BookOutlined, EditOutlined, HistoryOutlined, SendOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
-import StatusTag from '../common/StatusTag'
-import { organizeAuthorNavigation } from '../../../pages/Novel/shared/workspace-navigation'
+import { AUTHOR_WORKSPACE_PAGES, getAuthorWorkspaceKey } from '../../../shared/author-workspace'
 import './ProjectSidebar.css'
 
 interface ProjectSidebarProps {
@@ -17,121 +16,27 @@ interface ProjectSidebarProps {
   onNavigate: (route: string) => void
   onPrefetchRoute?: (route: string) => void
 }
+const ICONS = [SendOutlined, BookOutlined, ApartmentOutlined, EditOutlined, HistoryOutlined]
 
-export default function ProjectSidebar({
-  stageLabel,
-  progressText,
-  currentTask,
-  navGroups: originalNavGroups,
-  activeKey,
-  pendingKey,
-  recentKey,
-  onDismissDrawer,
-  onNavigate,
-  onPrefetchRoute,
-}: ProjectSidebarProps) {
-  const navGroups = useMemo(() => organizeAuthorNavigation(originalNavGroups), [originalNavGroups])
-  const visibleActiveKey = activeKey === 'style-lab' ? 'theme-voice' : activeKey
-  const activeGroup = useMemo(
-    () => navGroups.find((group) => group.items.some((item) => item.key === visibleActiveKey))?.key || navGroups[0]?.key,
-    [visibleActiveKey, navGroups],
-  )
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
-
-  const handleNavigate = (route: string) => {
-    onNavigate(route)
-    onDismissDrawer?.()
-  }
-
-  const progressPercent = useMemo(() => {
-    const match = progressText.match(/(\d+)\s*\/\s*(\d+)/)
-    if (match) {
-      const done = parseInt(match[1], 10)
-      const total = parseInt(match[2], 10)
-      return total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-    }
-    return 0
-  }, [progressText])
-
+export default function ProjectSidebar({ activeKey, pendingKey, onDismissDrawer, onNavigate, onPrefetchRoute }: ProjectSidebarProps) {
+  const active = getAuthorWorkspaceKey(activeKey)
+  const pending = pendingKey ? getAuthorWorkspaceKey(pendingKey) : null
   return (
-    <div className="project-sidebar">
-      <div className="project-sidebar__summary">
-        <div className="project-sidebar__summary-header">
-          <span className="project-sidebar__summary-badge">{stageLabel}</span>
-          <span className="project-sidebar__summary-meta">{progressText}</span>
-        </div>
-        <div className="project-sidebar__progress-bar">
-          <div
-            className="project-sidebar__progress-fill"
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-        {currentTask ? (
-          <div className="project-sidebar__current-task" title={currentTask}>
-            <ClockCircleOutlined />
-            <span>{currentTask}</span>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="project-sidebar__groups">
-        {navGroups.map((group, groupIndex) => {
-          const isOpen = group.key === activeGroup || (openGroups[group.key] ?? false)
-          const canCollapse = group.items.length > 0
-
-          return (
-            <section key={group.key} className="project-sidebar__group">
-              <button
-                type="button"
-                onClick={() => canCollapse && group.key !== activeGroup && setOpenGroups((current) => ({ ...current, [group.key]: !isOpen }))}
-                className={`project-sidebar__group-toggle${canCollapse ? '' : ' is-static'}`}
-              >
-                <div className="project-sidebar__group-toggle-main">
-                  <span className="project-sidebar__group-toggle-icon">
-                    {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ClockCircleOutlined />}
-                  </span>
-                  <span className="project-sidebar__group-index">{String(groupIndex + 1).padStart(2, '0')}</span>
-                  <strong className="project-sidebar__group-title">{group.title}</strong>
-                </div>
-                {group.progress ? (
-                  <span className="project-sidebar__group-progress">{`${group.progress.done}/${group.progress.total}`}</span>
-                ) : null}
-              </button>
-
-              {isOpen ? (
-                <div className="project-sidebar__group-items">
-                  {group.items.map((item) => {
-                    const active = item.key === visibleActiveKey
-                    const pending = !active && item.key === pendingKey
-                    const recent = !active && item.key === recentKey
-                    const attention = item.hasBlocker
-
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onMouseEnter={() => !active && onPrefetchRoute?.(item.route)}
-                        onFocus={() => !active && onPrefetchRoute?.(item.route)}
-                        onPointerDown={() => !active && onPrefetchRoute?.(item.route)}
-                        onClick={() => handleNavigate(item.route)}
-                        aria-current={active ? 'page' : undefined}
-                        className={`project-sidebar__group-item${active ? ' is-active' : ''}${pending ? ' is-pending' : ''}${recent ? ' is-recent' : ''}${attention ? ' has-attention' : ''}`}
-                        title={item.label}
-                      >
-                        <span className="project-sidebar__group-item-bar" aria-hidden="true" />
-                        <div className="project-sidebar__group-item-head">
-                          <span className="project-sidebar__group-item-label">{item.label}</span>
-                          <StatusTag status={item.status} size="small" />
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : null}
-            </section>
-          )
+    <nav className="author-navigation" aria-label="小说工作区">
+      <div className="author-navigation__heading"><span>你的作品</span><small>NovelForge</small></div>
+      <div className="author-navigation__pages">
+        {AUTHOR_WORKSPACE_PAGES.map((page, index) => {
+          const Icon = ICONS[index]
+          return <button key={page.key} type="button"
+            className={`author-navigation__page${active === page.key ? ' is-active' : ''}${pending === page.key && active !== page.key ? ' is-pending' : ''}`}
+            aria-current={active === page.key ? 'page' : undefined}
+            onMouseEnter={() => onPrefetchRoute?.(page.route)} onFocus={() => onPrefetchRoute?.(page.route)}
+            onClick={() => { onNavigate(page.route); onDismissDrawer?.() }}>
+            <Icon /><span><strong>{page.label}</strong><small>{page.description}</small></span>
+          </button>
         })}
       </div>
-    </div>
+      <div className="author-navigation__note">从一个想法开始。<br />让每一次生成，接得上前文。</div>
+    </nav>
   )
 }
