@@ -4,19 +4,21 @@ import { creativeProjectSources } from './creative-chapter-context'
 import { queryStoryAtlas } from './story-atlas.service'
 import type { CreativeStage } from '../../src/shared/creative-workflow'
 
-const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, model: { maxTokens: 393216, maxContextTokens: 1048576 } }))
+const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, facts: [] as Array<Record<string, unknown>>, model: { maxTokens: 393216, maxContextTokens: 1048576 } }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ prepare: (sql: string) => ({ all: () => sql.includes('story_volumes') ? [{ id: 11, title: '渡口卷', summary: '卷概要' }] : sql.includes('story_parts') ? [{ id: 12, volumeId: 11, title: '渡船单元', summary: '单元概要' }] : [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }] }) }) }))
 vi.mock('./novel.service', () => ({ getNovel: () => mock.novel }))
 vi.mock('./chapter.service', () => ({ listChapters: () => mock.chapters }))
 vi.mock('./story-atlas.service', () => ({ queryStoryAtlas: vi.fn(() => mock.atlas) }))
 vi.mock('./model.service', () => ({ resolveModelRuntimeBudget: () => mock.model }))
 vi.mock('./artifact.service', () => ({ requireArtifact: () => mock.artifact }))
-vi.mock('./creative-facts', () => ({ queryCreativeFacts: () => [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }] }))
+vi.mock('./endgame-asset.service', () => ({ getChapterContract: () => ({ chapterGoal: '保留的章节目标' }), listSceneContracts: () => [{ sceneGoal: '保留的现场安排' }] }))
+vi.mock('./creative-facts', () => ({ queryCreativeFacts: () => mock.facts }))
 
 describe('creative project context budget and saved constraints', () => {
   beforeEach(() => {
     vi.mocked(queryStoryAtlas).mockClear()
     mock.atlas = { entities: [], relations: [] }; mock.chapters = []
+    mock.facts = [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }]
     mock.model = { maxTokens: 393216, maxContextTokens: 1048576 }
     mock.novel = {
       userBackground: '渡口故事', contextVersion: 1,
@@ -169,6 +171,59 @@ describe('creative project context budget and saved constraints', () => {
     const report = await compileCreativeContext(input('outline'))
     expect(report.text).toContain('"volumeId":11')
     for (const key of ['volume:11:planning', 'part:12:planning', 'fact:13:planning']) expect(report.sources).toContain(key)
+  })
+  it('keeps the previous ending and recent knowledge ahead of oversized optional global plots', async () => {
+    mock.novel.settingsJson = JSON.stringify({ story_design: { main_plot: '远期长线'.repeat(30000) } })
+    mock.chapters = [
+      { id: 23, chapterNum: 3, title: '验绳', summary: '灯未点燃', content: '先前正文'.repeat(3000) + '灯未点燃，试验尚未开始。' },
+      { id: 24, chapterNum: 4, volumeId: 11, partId: 12, title: '夜试', outline: '观察干湿处差异', allowedFactIdsJson: '[14]', revealedFactIdsJson: '[14]' },
+    ]
+    mock.facts = [
+      { id: 13, title: '绳痕', summary: '第三章已经观察到的绳痕', protagonistKnownChapterId: 23, characterKnowledge: [], plannedRevealChapterNum: null },
+      { id: 14, title: '干湿边界', summary: '第四章待验证的计划', characterKnowledge: [], plannedRevealChapterNum: 4 },
+    ]
+    const report = await compileCreativeContext({ ...input('outline'), request: '补齐第 4 章', atChapter: 4 })
+    expect(report.sources).toEqual(expect.arrayContaining(['chapter:24:target', 'chapter:23:handoff', 'fact:13:planning', 'fact:14:planning', 'volume:11:planning', 'part:12:planning']))
+    expect(report.text).toContain('灯未点燃，试验尚未开始。')
+    expect(report.text).not.toContain('先前正文'.repeat(501))
+    expect(report.text).toContain('本章大纲是计划，不能视为已发生')
+    expect(report.omittedSources).toContain('story_design:mainPlot')
+    expect(report.estimatedTokens).toBeLessThanOrEqual(24000)
+  })
+  it('selects explicitly referenced information by exact stable ID and blocks oversized mandatory handoffs', async () => {
+    mock.facts = [{ id: 13, title: '短绳', summary: '要求核验的信息'.repeat(30000) }, { id: 130, title: '远期秘密', summary: '不应误匹配' }]
+    await expect(compileCreativeContext({ ...input('outline'), request: '核验 fact:13', atChapter: 4 })).rejects.toThrow('必要资料 fact:13:planning 超出')
+    mock.facts = []
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.chapters = [{ id: 23, chapterNum: 3, summary: '已写交接'.repeat(30000), content: '结尾' }, { id: 24, chapterNum: 4 }]
+    await expect(compileCreativeContext({ ...input('outline'), request: '补齐第 4 章', atChapter: 4 })).rejects.toThrow('必要资料 chapter:23:handoff 超出')
+  })
+  it('references duplicate participation data but preserves different observations and participant actions', async () => {
+    mock.chapters = [{ id: 24, chapterNum: 4, outline: '陈舟检查旧绳' }]
+    mock.atlas.entities = [
+      { id: 'character:1', kind: 'character', name: '陈舟', attributes: {} },
+      { id: 'event:1', kind: 'event', name: '验绳', summary: '已发生的检查', attributes: { evidenceQuote: '旧绳上有刀口。', eventResult: '刀口仍须核验' } },
+    ]
+    mock.atlas.relations = [{ id: 'witness', kind: 'participation', fromId: 'character:1', toId: 'event:1', attributes: {
+      eventTitle: '验绳', evidenceQuote: '旧绳上有刀口。', eventResult: '证人自称绳子已断', protagonistAction: '保护刀口',
+    } }]
+    const report = await compileCreativeContext({ ...input('outline'), request: '补齐第 4 章', atChapter: 4 })
+    const edge = JSON.parse(report.text.match(/<source id="relation:witness">\n(.*?)\n<\/source>/u)![1])
+    expect(edge.sharedAttributes).toEqual({ sourceId: 'event:1', keys: ['eventTitle', 'evidenceQuote'] })
+    expect(edge.attributes).toEqual({ eventResult: '证人自称绳子已断', protagonistAction: '保护刀口' })
+    expect(report.text.match(/旧绳上有刀口。/gu)).toHaveLength(1)
+  })
+  it('loads scope-selected records and existing arrangements even when the request contains no names', async () => {
+    mock.atlas.entities = [{ id: 'item:1', kind: 'item', name: '铜铃', attributes: { risk: '已有裂纹' } }]
+    const asset = await compileCreativeContext({ ...input('items'), request: '完善已有物品', changeScope: { existingEntityIds: ['item:1'], newEntityCount: 0 } })
+    expect(asset.sources).toContain('item:1')
+    expect(asset.text).toContain('已有裂纹')
+    mock.chapters = [{ id: 24, chapterNum: 4, title: '夜试', outline: '保留旧绳试验' }]
+    const outline = await compileCreativeContext({ ...input('outline'), request: '完善已登记安排', atChapter: 4, changeScope: { chapterIds: [24] } })
+    expect(outline.sources).toContain('chapter:24:arrangement')
+    expect(outline.text).toContain('保留的章节目标')
+    expect(outline.text).toContain('保留的现场安排')
+    await expect(compileCreativeContext({ ...input('outline'), changeScope: { chapterIds: [999] } })).rejects.toThrow('不属于当前项目')
   })
   it('keeps current chapter people, parent geography and route evidence for a request with no names', async () => {
     mock.chapters = [{ id: 21, chapterNum: 1, title: '系绳', outline: '陈舟在河村检查旧绳', content: '既有正文' }]

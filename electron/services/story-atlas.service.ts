@@ -121,7 +121,7 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   return { novelId: input.novelId, contextVersion, atChapter: input.atChapter ?? null, entities, relations, locationChildren, diagnostics }
 }
 
-interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number }
+interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number; resolvedChanges: StoryAtlasValidationResult['resolvedChanges'] }
 function prepare(input: StoryAtlasApplyInput): Prepared {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
@@ -356,12 +356,13 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   }
   const clearedAttributes = new Map(current.filter(item => changedIds.has(item.record.id)).map(item => [item.record.id,
     Object.keys(item.record.attributes).filter(key => !(key in byId.get(item.record.id)!.record.attributes))]))
-  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations) }
+  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations),
+    resolvedChanges: [...changeIds].map(([index, id]) => ({ index, id, isNew: !allIds.has(id) })) }
 }
 
 export function validateStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasValidationResult {
   const prepared = prepare(input)
-  return { valid: true, novelId: input.novelId, contextVersion: prepared.contextVersion, diagnostics: prepared.diagnostics }
+  return { valid: true, novelId: input.novelId, contextVersion: prepared.contextVersion, diagnostics: prepared.diagnostics, resolvedChanges: prepared.resolvedChanges }
 }
 
 const entityTables: Record<StoryAtlasEntityKind, string> = { character: 'characters', location: 'world_map', faction: 'factions', item: 'story_items', event: 'timeline_events' }

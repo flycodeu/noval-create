@@ -186,4 +186,5 @@ export interface StoryAtlasValidationResult {
   novelId: number
   contextVersion: number
   diagnostics: StoryAtlasDiagnostic[]
+  resolvedChanges: Array<{ index: number; id: string; isNew: boolean }>
 }

@@ -390,6 +390,37 @@ async function main() {
     factService.applyCreativeFactReveals(mysteryId, secondPlan.id, openingQuote, [{ factId: openingFactId, characterIds: [shen.id], evidenceQuote: openingQuote }], 'reader-learns-later')
     factService.applyCreativeFactPlans(mysteryId, [{ id: openingFactId, title: '渡口旧约', summary: '沈墨早已知道旧约的日期', knownFromStartCharacterIds: [shen.id] }], 'repeat-after-reader-reveal')
     assert.deepEqual((await mysteryCall('assets.query')).facts.find(fact => fact.id === openingFactId).characterKnowledge, openingKnowledge, 'later reader revelation preserves explicit opening POV knowledge and its source')
+    // A passing model review must not bypass resolved save boundaries, including clientId name reuse.
+    const restrictedScope = { existingEntityIds: [], existingRelationIds: [], newEntityCount: 2, allowNewRelations: false }
+    const scopeSnapshot = (await call('atlas.query', {})).atlas
+    const scopedItems = { changes: [
+      { op: 'upsert_entity', clientId: 'scope-lamp', kind: 'item', name: '范围校验灯', summary: '现场照明器物' },
+      { op: 'upsert_entity', clientId: 'scope-book', kind: 'item', name: '范围校验薄册', summary: '随身记录册' },
+    ] }
+    replies.push(JSON.stringify(scopedItems), review)
+    const scopedRun = (await call('workflows.start', { stage: 'items', request: '只登记两件实物', count: 2, changeScope: restrictedScope, idempotencyKey: 'scope-exact-two' })).run
+    assert.equal((await finish(scopedRun.runId)).status, 'success')
+    const scopeApplied = (await call('atlas.query', {})).atlas
+    assert.equal(scopeApplied.entities.length, scopeSnapshot.entities.length + 2)
+    const attacks = [
+      { changes: [scopedItems.changes[0]] }, // reusing the name with a new clientId is an existing update
+      { changes: [{ ...scopedItems.changes[0], name: '第三件物品' }] }, // incorrect exact new count
+      { changes: [{ ...scopedItems.changes[0], name: '第三件物品' }, { ...scopedItems.changes[1], name: '第四件物品' },
+        { op: 'upsert_relation', kind: 'ownership', fromId: scopeApplied.entities.find(entity => entity.kind === 'character').id, toId: 'scope-lamp', label: '持有' }] },
+    ]
+    for (const [index, attack] of attacks.entries()) {
+      replies.push(JSON.stringify(attack), review)
+      const run = (await call('workflows.start', { stage: 'items', request: '只新增两件物品，不修改已有档案或关系', count: 2, changeScope: restrictedScope, idempotencyKey: `scope-attack-${index}` })).run
+      const rejected = await finish(run.runId)
+      assert.equal(rejected.status, 'failed', JSON.stringify(rejected))
+      assert.match(rejected.message, /超出本次保存范围|实际新增|不允许新增关系/)
+      const forced = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: run.runId } }, context)
+      assert.equal(forced.ok, false, 'manual apply must repeat hard scope validation even after a passing model review')
+      const after = (await call('atlas.query', {})).atlas
+      assert.equal(after.contextVersion, scopeApplied.contextVersion)
+      assert.deepEqual(after.entities, scopeApplied.entities)
+      assert.deepEqual(after.relations, scopeApplied.relations)
+    }
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

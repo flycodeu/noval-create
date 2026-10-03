@@ -8,6 +8,8 @@ import { compileCreativeChapterContext, creativeProjectSources, creativeRevision
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
 import { creativeAtlasCoverage, isCreativeChapterScopedRequest, selectCreativeAssetAtlas, selectCreativePlanningAtlas } from './creative-atlas-context'
+import { validateCreativeChangeScope } from './creative-change-scope'
+import { getChapterContract, listSceneContracts } from './endgame-asset.service'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -18,6 +20,7 @@ export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): nu
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
 export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number): Promise<CreativeContextReport> {
+  validateCreativeChangeScope(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const novel = getNovel(input.novelId)
   if (!novel) throw new Error('项目不存在。')
@@ -35,24 +38,26 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
   if (input.stage === 'chapter') return compileCreativeChapterContext(input, { maxInputTokens, outputReserve })
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: input.atChapter, includePlanned: true })
+  for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(`资料 ${id} 在当前项目章位不存在。`)
+  for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(`关系 ${id} 在当前项目章位不存在。`)
   const chapterRows = listChapters(input.novelId)
   const sources: string[] = []
   const omittedSources: string[] = []
   const pieces: string[] = []
-  const candidates: Array<{ id: string; text: string; required: boolean }> = []
-  const seen = new Map<string, { id: string; text: string; required: boolean }>()
+  const candidates: Array<{ id: string; text: string; required: boolean; priority: number }> = []
+  const seen = new Map<string, typeof candidates[number]>()
   let used = 0
-  const add = (id: string, value: unknown, required = false) => {
+  const add = (id: string, value: unknown, required = false, priority = 50) => {
     const text = typeof value === 'string' ? value.trim() : JSON.stringify(value)
     if (!text || text === 'null') return
     // Equal values under different rule names are different constraints (e.g. two enabled prohibitions).
     const identity = `${id}\u0000${text}`
     const previous = seen.get(identity)
-    if (previous) { previous.required ||= required; return }
-    const candidate = { id, text, required }
+    if (previous) { previous.required ||= required; previous.priority = Math.min(previous.priority, priority); return }
+    const candidate = { id, text, required, priority }
     seen.set(identity, candidate); candidates.push(candidate)
   }
-  add('task', { stage: input.stage, request: input.request, count: input.count, atChapter: input.atChapter }, true)
+  add('task', { stage: input.stage, request: input.request, count: input.count, atChapter: input.atChapter, changeScope: input.changeScope }, true)
   add('background', novel.userBackground, true)
   const assetStage = input.stage === 'map' || input.stage === 'events' ? input.stage : undefined
   for (const source of creativeProjectSources(novel)) {
@@ -67,29 +72,68 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
+  const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
+  const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
+  const previousChapter = chapterRows.filter(chapter => chapter.chapterNum < target && chapter.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
+  const localOutline = input.stage === 'outline' && (isCreativeChapterScopedRequest(input.request) || Boolean(input.changeScope?.chapterIds))
+  const scopedChapters = input.changeScope?.chapterIds?.map(id => {
+    const chapter = chapterRows.find(row => row.id === id)
+    if (!chapter) throw new Error(`章节 ${id} 不属于当前项目。`)
+    return chapter
+  }) || []
+  if (targetChapter) add(`chapter:${targetChapter.id}:target`, {
+    chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary,
+    allowedFactIdsJson: targetChapter.allowedFactIdsJson, revealedFactIdsJson: targetChapter.revealedFactIdsJson,
+  }, localOutline || isCreativeChapterScopedRequest(input.request), 0)
+  for (const chapter of scopedChapters) if (chapter.id !== targetChapter?.id) add(`chapter:${chapter.id}:target`, {
+    chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary,
+    allowedFactIdsJson: chapter.allowedFactIdsJson, revealedFactIdsJson: chapter.revealedFactIdsJson,
+  }, true, 0)
+  const plannedChapters = localOutline ? [...new Map([...(targetChapter ? [targetChapter] : []), ...scopedChapters].map(chapter => [chapter.id, chapter])).values()] : []
+  for (const chapter of plannedChapters) add(`chapter:${chapter.id}:arrangement`, {
+    chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id),
+  }, true, 0)
+  if (localOutline && previousChapter) add(`chapter:${previousChapter.id}:handoff`, {
+    chapterNum: previousChapter.chapterNum, title: previousChapter.title, summary: previousChapter.summary,
+    endingExcerpt: previousChapter.content!.slice(-2000), usage: '前章已发生的交接；本章大纲是计划，不能视为已发生。节选仅覆盖正文结尾。',
+  }, true, 0)
   if (input.stage === 'outline' || input.stage === 'story') {
     const sqlite = getSqlite()
     const catalogs = [
-      ['volume', sqlite.prepare('SELECT id,title,summary FROM story_volumes WHERE novel_id=? ORDER BY volume_number,id').all(input.novelId)],
-      ['part', sqlite.prepare('SELECT id,volume_id AS volumeId,title,summary FROM story_parts WHERE novel_id=? ORDER BY volume_id,part_number,id').all(input.novelId)],
+      ['volume', sqlite.prepare('SELECT id,title,summary FROM story_volumes WHERE novel_id=? ORDER BY volume_number,id').all(input.novelId) as Array<{ id: number; title: string; summary: string }>],
+      ['part', sqlite.prepare('SELECT id,volume_id AS volumeId,title,summary FROM story_parts WHERE novel_id=? ORDER BY volume_id,part_number,id').all(input.novelId) as Array<{ id: number; title: string; summary: string; volumeId: number }>],
       ['fact', queryCreativeFacts(input.novelId)],
     ] as const
-    for (const [kind, rows] of catalogs) for (const row of rows as Array<{ id: number; title: string }>) {
-      add(`${kind}:${row.id}:planning`, row, input.request.includes(row.title))
+    const chapterNumbers = new Map(chapterRows.map(chapter => [chapter.id, chapter.chapterNum]))
+    const ids = (json: string | null | undefined): number[] => {
+      try { const value: unknown = JSON.parse(json || '[]'); return Array.isArray(value) ? value.filter((id): id is number => Number.isInteger(id)) : [] } catch { return [] }
+    }
+    const contractFacts = new Set(plannedChapters.flatMap(chapter => [...ids(chapter.allowedFactIdsJson), ...ids(chapter.revealedFactIdsJson)]))
+    for (const [kind, rows] of catalogs) for (const row of rows) {
+      const explicit = input.request.includes(row.title) || input.request.split(/[^\w:-]+/u).includes(`${kind}:${row.id}`)
+      let related = false
+      if (localOutline) {
+        if (kind === 'volume') related = plannedChapters.some(chapter => row.id === chapter.volumeId)
+        if (kind === 'part') related = plannedChapters.some(chapter => row.id === chapter.partId)
+        if (kind === 'fact' && 'plannedRevealChapterNum' in row) {
+          const knownAt = [row.protagonistKnownChapterId, row.readerKnownChapterId, ...row.characterKnowledge.map(knowledge => knowledge.knownChapterId)]
+            .filter((id): id is number => typeof id === 'number').map(id => chapterNumbers.get(id))
+          related = contractFacts.has(row.id) || row.plannedRevealChapterNum === target
+            || knownAt.some(chapter => chapter !== undefined && chapter >= target - 2 && chapter < target)
+            || Boolean(row.title && `${targetChapter?.outline || ''}\n${previousChapter?.summary || ''}`.includes(row.title))
+        }
+      }
+      add(`${kind}:${row.id}:planning`, row, explicit || related, related ? 0 : 10)
     }
   }
-  const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const stageKinds: Partial<Record<string, string>> = { characters: 'character', map: 'location', factions: 'faction', items: 'item', events: 'event' }
   const stageKind = stageKinds[input.stage]
-  const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
-  const previousChapter = chapterRows.filter(chapter => chapter.chapterNum < target && chapter.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
-  const anchors = [targetChapter?.title, targetChapter?.outline, targetChapter?.summary].filter(Boolean).join('\n')
+  const anchors = [targetChapter?.title, targetChapter?.outline, targetChapter?.summary, ...scopedChapters.flatMap(chapter => [chapter.title, chapter.outline, chapter.summary])].filter(Boolean).join('\n')
   const selectionInput = {
-    request: input.request, anchorText: anchors, fallbackText: previousChapter?.summary || previousChapter?.content?.slice(-2000),
+    request: [input.request, ...(input.changeScope?.existingEntityIds || []), ...(input.changeScope?.existingRelationIds || []), ...(localOutline ? ['当前章'] : [])].join('\n'), anchorText: anchors, fallbackText: previousChapter?.summary || previousChapter?.content?.slice(-2000),
   }
   const selection = assetStage ? selectCreativeAssetAtlas(atlas, { ...selectionInput, stage: assetStage }) : selectCreativePlanningAtlas(atlas, { ...selectionInput, stage: input.stage })
   const { entityIds: relevant, relationIds: relevantEdges } = selection
-  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, isCreativeChapterScopedRequest(input.request))
   add('atlas_coverage', creativeAtlasCoverage(atlas, relevant), true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
   for (const entity of ordered.filter(entity => relevant.has(entity.id))) {
@@ -102,7 +146,20 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
       omittedSources.push(`${entity.id}:non_geographic_fields`)
     } else add(entity.id, entity, true)
   }
-  for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) add(`relation:${edge.id}`, edge, true)
+  for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) {
+    // Legacy participation records copied the whole event into every participant edge.
+    // Reference only byte-equivalent fields already present in this same context; differing
+    // observations and participant-specific actions must remain intact.
+    const event = localOutline && edge.kind === 'participation'
+      ? atlas.entities.find(entity => relevant.has(entity.id) && entity.kind === 'event' && [edge.fromId, edge.toId].includes(entity.id)) : undefined
+    const shared: string[] = []
+    const attributes = Object.fromEntries(Object.entries(edge.attributes || {}).filter(([key, value]) => {
+      const original = key === 'eventTitle' ? event?.name : key === 'eventSummary' ? event?.summary : event?.attributes[key]
+      if (event && original !== undefined && JSON.stringify(value) === JSON.stringify(original)) { shared.push(key); return false }
+      return true
+    }))
+    add(`relation:${edge.id}`, shared.length ? { ...edge, attributes, sharedAttributes: { sourceId: event!.id, keys: shared } } : edge, true)
+  }
   // Compact optional catalog is selected before optional full entities. Large projects can omit names
   // explicitly instead of blocking every local task on an ever-growing mandatory global directory.
   const catalog = assetStage ? ordered.filter(entity => relevant.has(entity.id) || entity.kind === stageKind) : ordered
@@ -114,9 +171,10 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     omittedSources.push(`relation:${edge.id}:outside_${input.stage}_scope`)
   }
   for (const chapter of [...chapterRows].sort((a, b) => Math.abs(a.chapterNum - target) - Math.abs(b.chapterNum - target))) {
-    add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary })
+    if (chapter.id !== targetChapter?.id) add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary }, false, 20 + Math.abs(chapter.chapterNum - target))
   }
-  for (const { id, text, required } of [...candidates.filter(source => source.required), ...candidates.filter(source => !source.required)]) {
+  const ranked = [...candidates].sort((a, b) => Number(b.required) - Number(a.required) || a.priority - b.priority)
+  for (const { id, text, required } of ranked) {
     const section = `<source id="${id}">\n${text}\n</source>`
     const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
     if (used + size > maxInputTokens) {

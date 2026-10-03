@@ -1,3 +1,5 @@
+import type { AgentToolJsonSchema } from './tool-contracts'
+
 export const CREATIVE_STAGES = ['background', 'world_rules', 'story', 'style', 'outline', 'characters', 'map', 'relationships', 'factions', 'items', 'events', 'chapter'] as const
 export type CreativeStage = typeof CREATIVE_STAGES[number]
 export const CREATIVE_STAGE_LABELS: Record<CreativeStage, string> = {
@@ -13,7 +15,25 @@ export interface CreativeWorkflowInput {
   autoApply?: boolean
   sourceArtifactId?: string
   operation?: 'generate' | 'review'
+  changeScope?: CreativeChangeScope
   idempotencyKey: string
+}
+/** Optional hard boundaries; count remains a planning hint for mixed incremental batches. */
+export interface CreativeChangeScope {
+  existingEntityIds?: string[]
+  existingRelationIds?: string[]
+  newEntityCount?: number
+  allowNewRelations?: boolean
+  chapterIds?: number[]
+}
+export const CREATIVE_CHANGE_SCOPE_SCHEMA: AgentToolJsonSchema = {
+  type: 'object', additionalProperties: false, properties: {
+    existingEntityIds: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+    existingRelationIds: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+    newEntityCount: { type: 'integer', minimum: 0, maximum: 50 },
+    allowNewRelations: { type: 'boolean' },
+    chapterIds: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'integer', minimum: 1 } },
+  },
 }
 export interface CreativeContextReport {
   text: string
@@ -32,6 +52,7 @@ export interface CreativeRun {
   count?: number
   sourceArtifactId?: string
   operation?: 'generate' | 'review'
+  changeScope?: CreativeChangeScope
   status: string
   step: 'context' | 'generating' | 'reviewing' | 'revising' | 'applying' | 'completed' | 'needs_attention' | 'cancelled'
   message: string

@@ -1,6 +1,6 @@
 import type { AgentToolDescriptor, AgentToolJsonSchema } from '../../src/shared/tool-contracts'
 import { AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
-import { CREATIVE_STAGES } from '../../src/shared/creative-workflow'
+import { CREATIVE_STAGES, CREATIVE_CHANGE_SCOPE_SCHEMA } from '../../src/shared/creative-workflow'
 import type { CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasApplyInput, StoryAtlasQuery } from '../../src/shared/story-atlas'
 import { AgentToolRegistry, AgentToolInvocationError } from './tool-registry'
@@ -19,7 +19,7 @@ import { getChapterContract, listSceneContracts } from '../services/endgame-asse
 
 const number: AgentToolJsonSchema = { type: 'integer', minimum: 1 }
 const string: AgentToolJsonSchema = { type: 'string', minLength: 1 }
-const requestFields: Record<string, AgentToolJsonSchema> = { novelId: number, stage: { enum: [...CREATIVE_STAGES] }, request: { type: 'string', minLength: 1, maxLength: 12000 }, count: { type: 'integer', minimum: 1, maximum: 50 }, atChapter: { type: 'integer', minimum: 0 }, autoApply: { type: 'boolean' }, sourceArtifactId: string, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 } }
+const requestFields: Record<string, AgentToolJsonSchema> = { novelId: number, stage: { enum: [...CREATIVE_STAGES] }, request: { type: 'string', minLength: 1, maxLength: 12000 }, count: { type: 'integer', minimum: 1, maximum: 50 }, atChapter: { type: 'integer', minimum: 0 }, autoApply: { type: 'boolean' }, changeScope: CREATIVE_CHANGE_SCOPE_SCHEMA, sourceArtifactId: string, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 } }
 export function registerCreativeTools(registry: AgentToolRegistry): AgentToolRegistry {
   function add(id: string, title: string, description: string, properties: Record<string, AgentToolJsonSchema>, required: string[], effect: AgentToolDescriptor['effect'], handler: (input: Record<string, unknown>) => unknown | Promise<unknown>): void {
     registry.register({ descriptor: { id: `novelforge.${id}`, version: '2.0.0', domain: id.split('.')[0], title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: true }, effect, approval: 'policy', scopes: effect === 'read' ? [AGENT_TOOL_SCOPES.novelRead] : [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['creative-workspace'] }, handler: async input => {
@@ -51,7 +51,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       return { project: getNovel(id), source, idempotentReplay: false }
     }).immediate()
   })
-  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。各阶段均可增量扩展。默认自动应用通过审校的结果；失败保留候选。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
+  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元。默认自动应用通过审校的结果；失败保留候选。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
   add('chapters.review', '仅评审已有章节', '根据当前章节、合同与可见资料进行模型评审，生成持久报告工件；不改正文。立即返回run，使用workflows.get查询，result.review包含报告。需要修订时另开chapter任务并明确原章位。', {
     novelId: number, chapterId: number, request: { type: 'string', minLength: 1, maxLength: 12000 }, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   }, ['novelId', 'chapterId', 'idempotencyKey'], 'draft_write', async input => {
