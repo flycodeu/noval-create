@@ -167,6 +167,14 @@ describe('creative project context budget and saved constraints', () => {
     mock.chapters = [{ chapterNum: 1, content: '既有正文'.repeat(30_000) }]
     await expect(compileCreativeContext({ ...input('chapter'), operation: 'review', atChapter: 1 })).rejects.toThrow('窗口不足')
   })
+  it('reserves a formal asset snapshot in the same model window instead of appending it outside the budget', async () => {
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    const base = await compileCreativeContext({ ...input('items'), operation: 'review', atChapter: 0 })
+    const bounded = await compileCreativeContext({ ...input('items'), operation: 'review', atChapter: 0 }, undefined, undefined, 10000)
+    expect(bounded.maxInputTokens).toBeLessThan(base.maxInputTokens)
+    expect(bounded.estimatedTokens + 10000 + bounded.outputReserve + 2000).toBeLessThan(32768)
+    await expect(compileCreativeContext({ ...input('items'), operation: 'review', atChapter: 0 }, undefined, undefined, 30000)).rejects.toThrow('窗口不足')
+  })
   it('gives planning stable volume, part and fact IDs instead of inventing references', async () => {
     const report = await compileCreativeContext(input('outline'))
     expect(report.text).toContain('"volumeId":11')

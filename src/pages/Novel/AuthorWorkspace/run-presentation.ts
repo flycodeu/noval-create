@@ -12,6 +12,13 @@ function candidate(content: unknown): Record<string, unknown> {
   try { return record(JSON.parse(output)) } catch { return {} }
 }
 
+/** Keep execution budgets and hashes in the stored report, not in the reading view. */
+export function formalReviewPresentation(content: unknown): unknown {
+  const report = record(content)
+  if (!['chapter-review-v1', 'atlas-review-v1'].includes(String(report.schemaVersion))) return content
+  return Object.fromEntries(['status', 'summary', 'snapshot', 'review', 'deterministicBlockers'].filter(key => report[key] !== undefined).map(key => [key, report[key]]))
+}
+
 /** A completed step or a passed review alone is not evidence of a writeback. */
 export function hasSavedRunResult(run: CreativeRun): boolean {
   const result = run.result
@@ -56,12 +63,12 @@ export function runResultPresentation(run: CreativeRun, content?: unknown, names
   }) : []
   const displayNames = [...new Set([...savedNames, ...changedNames, ...appliedIds.map(id => names[id]).filter(Boolean)])]
   const nameSummary = displayNames.length ? `${displayNames.slice(0, 3).join('、')}${displayNames.length > 3 ? `等 ${displayNames.length} 项` : ''}` : ''
-  const title = run.operation === 'review' ? `${runChapterLabel(run)} · 正文评审`
+  const title = run.operation === 'review' ? `${runChapterLabel(run)} · ${stage}评审`
     : saved ? `${stage} · ${count ? `${count} 项变更已保存` : '已保存'}`
       : `${stage} · ${runChapterLabel(run)}`
   let summary: string
   if (saved) summary = nameSummary || (count ? `已保存 ${count} 项变更。` : `${stage}结果已保存到项目。`)
-  else if (run.operation === 'review' && run.step === 'completed') summary = run.reviewStatus === 'passed' ? '评审通过，正文未修改。' : '评审发现待处理问题，正文未修改。'
+  else if (run.operation === 'review' && run.step === 'completed') summary = run.reviewStatus === 'passed' ? `评审通过，${run.stage === 'chapter' ? '正文' : '正式资料'}未修改。` : `评审发现待处理问题，${run.stage === 'chapter' ? '正文' : '正式资料'}未修改。`
   else if (runStatusLabel(run) === '候选待确认') summary = nameSummary ? `${nameSummary}。候选已通过评审，等待确认保存。` : '候选已通过评审，等待确认保存。'
   else if (run.step === 'cancelled' || run.status === 'cancelled') summary = '任务已停止。'
   else if (run.status === 'failed') summary = '本轮执行失败，请查看任务详情。'

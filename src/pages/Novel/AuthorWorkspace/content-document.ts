@@ -1,5 +1,6 @@
 import { ATLAS_ATTRIBUTE_LABELS } from './atlas-presentation'
 import { WRITING_CONTRACT_PRESETS } from '../../../shared/writing-contract'
+import { CREATIVE_STAGE_LABELS } from '../../../shared/creative-workflow'
 
 export function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -31,6 +32,7 @@ export function mergeCanonicalDocument(original: unknown, previous: unknown, nex
 }
 
 export const CONTENT_LABELS: Record<string, string> = {
+  stage: '资料类别', atChapter: '复核章位', snapshot: '本次评审的正式资料',
   dynastyName: '朝代或政权', storyStartLabel: '开篇时间', currentTimeLabel: '当前故事时间', currentTimeChapterNum: '时间对应章序', currentTimeEvidence: '时间依据', relativeDay: '距开篇天数', sequenceInDay: '同日先后顺序', timePrecision: '时间精度',
   title: '标题', name: '名称', fullName: '姓名', summary: '摘要', description: '说明', content: '正文', output: '候选内容',
   userBackground: '故事背景', expandedBackground: '补充设定', synopsis: '简介', background: '背景',
@@ -86,7 +88,8 @@ export const DOCUMENT_OPTIONS: Record<string, Record<string, string>> = {
 }
 const DOCUMENT_VALUE_LABELS: Record<string, Record<string, string>> = {
   ...DOCUMENT_OPTIONS,
-  kind: { relationship: '人物关系', route: '通路', presence: '所在地', membership: '成员关系', ownership: '持有关系', participation: '事件参与', puzzle: '疑问', clue: '线索', truth: '真相', red_herring: '误导线索' },
+  stage: CREATIVE_STAGE_LABELS,
+  kind: { character: '人物', location: '地点', faction: '组织', item: '物品', event: '事件', relationship: '人物关系', route: '通路', presence: '所在地', membership: '成员关系', ownership: '持有关系', participation: '事件参与', puzzle: '疑问', clue: '线索', truth: '真相', red_herring: '误导线索' },
   writingContractTags: Object.fromEntries(WRITING_CONTRACT_PRESETS.map(item => [item.value, item.label])),
 }
 export function documentEnumLabel(key: string, value: unknown): unknown {

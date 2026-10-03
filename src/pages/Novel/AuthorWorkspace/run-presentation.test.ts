@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CreativeRun } from '../../../shared/creative-workflow'
 import { RunProgress } from './shared'
-import { hasSavedRunResult, runChapterLabel, runResultPresentation, runStatusLabel } from './run-presentation'
+import { hasSavedRunResult, runChapterLabel, runResultPresentation, runStatusLabel, formalReviewPresentation } from './run-presentation'
+import { ContentDocument } from './ContentDocument'
 
 function run(patch: Partial<CreativeRun> = {}): CreativeRun {
   return {
@@ -40,6 +41,18 @@ describe('creative run result presentation', () => {
     expect(hasSavedRunResult(reviewed)).toBe(false)
     expect(runStatusLabel(run({ result: undefined, status: 'blocked', step: 'needs_attention', reviewStatus: 'needs_revision' }))).toBe('已阻断')
     expect(runStatusLabel(run({ result: undefined, status: 'failed', step: 'needs_attention' }))).toBe('运行失败')
+  })
+  it('renders formal asset reviews with Chinese labels and excludes execution metadata', () => {
+    const reviewed = run({ operation: 'review', result: undefined })
+    expect(runResultPresentation(reviewed).title).toBe('第 1 章 · 物品评审')
+    expect(runResultPresentation(reviewed).summary).toBe('评审通过，正式资料未修改。')
+    const report = { schemaVersion: 'atlas-review-v1', status: 'passed', summary: '用途有据', contentHash: 'private-hash', context: { maxInputTokens: 24000 }, snapshot: { stage: 'items', atChapter: 1, entities: [{ id: 'item:1', kind: 'item', name: '薄册', summary: '记录观察' }] }, review: { summary: '内容符合原文' } }
+    const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: formalReviewPresentation(report) }))
+    expect(html).toContain('本次评审的正式资料')
+    expect(html).toContain('复核章位')
+    expect(html).toContain('物品')
+    expect(html).toContain('薄册')
+    expect(html).not.toMatch(/snapshot|atChapter|items|private-hash|maxInputTokens/)
   })
 
   it('only names applied records and deduplicates repeated result ids', () => {

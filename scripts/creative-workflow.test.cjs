@@ -467,6 +467,19 @@ async function main() {
       replies.push(itemCandidate, review)
       const itemRun = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '只建档一本薄册', autoApply: false, changeScope: originalScope, idempotencyKey: 'item-issue-base' })).run.runId)
       const itemIssueId = recordCreativeReviewIssues({ novelId: isolatedId, stage: 'items', atChapter: 0, count: 1, changeScope: originalScope }, itemRun.runId, itemRun.reviewArtifactId, qualityReview, [], itemRun.artifactId)[0]
+      const beforeBoundChecks = requests.length
+      for (const [index, attack] of [
+        { sourceArtifactId: undefined, changeScope: originalScope },
+        { sourceArtifactId: itemRun.artifactId, changeScope: { ...originalScope, newEntityCount: 2 } },
+        { operation: 'review', changeScope: originalScope },
+      ].entries()) {
+        const denied = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId: isolatedId, stage: 'items', atChapter: 0, request: '不得误关闭另一个对象的问题', revisionIssueIds: [itemIssueId], idempotencyKey: `issue-target-attack-${index}`, ...attack } }, context)
+        assert.equal(denied.ok, false, JSON.stringify(denied))
+        assert.equal(denied.error.code, 'CREATIVE_REVIEW_TARGET_INVALID')
+        assert.match(denied.error.message, /最新候选|保存范围|尚未保存/)
+      }
+      assert.equal(requests.length, beforeBoundChecks, 'wrong lineage, changed scope and unsaved formal recheck fail before model execution')
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).status, 'open')
       replies.push(itemCandidate, review)
       const itemRepair = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '保持薄册并修订说明', sourceArtifactId: itemRun.artifactId, autoApply: false, changeScope: originalScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair' })).run.runId)
       assert.equal(itemRepair.status, 'paused', JSON.stringify(itemRepair))
@@ -475,9 +488,43 @@ async function main() {
       assert.equal(itemMeta.repairArtifactId, itemRepair.artifactId)
       assert.equal(itemMeta.changeScope.newEntityCount, 0)
       assert.ok(itemMeta.changeScope.existingEntityIds.includes(itemSaved.idMap['new-notebook']), 'new entity repair scope transitions to actual persisted ID')
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, revisionIssueIds: [itemIssueId], sourceArtifactId: itemRun.artifactId, changeScope: itemMeta.changeScope }), /最新候选依据/)
+      const formalBefore = (await isolatedCall('atlas.query', { atChapter: 0 })).atlas
+      const routesBeforeRecheck = requests.length
+      replies.push(review)
+      const formalItemRun = await isolatedFinish((await isolatedCall('workflows.start', { operation: 'review', stage: 'items', atChapter: 0, request: '复核已保存薄册用途', changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-formal-recheck' })).run.runId)
+      assert.equal(formalItemRun.reviewStatus, 'passed', JSON.stringify(formalItemRun))
+      assert.deepEqual(requests.slice(routesBeforeRecheck).map(row => row.model), ['review-fixture'], 'formal review calls only selected reviewer')
+      const formalReport = (await isolatedCall('artifacts.get', { artifactId: formalItemRun.artifactId })).artifact.content
+      assert.equal(formalReport.schemaVersion, 'atlas-review-v1')
+      assert.equal(formalReport.snapshot.entities.length, 1)
+      assert.equal(formalReport.snapshot.entities[0].id, itemSaved.idMap['new-notebook'])
+      assert.deepEqual((await isolatedCall('atlas.query', { atChapter: 0 })).atlas, formalBefore, 'formal review never mutates assets or context version')
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).status, 'resolved')
+      const { captureFormalAtlasReview } = require('../electron/services/creative-formal-review.ts')
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'items', atChapter: 0 }), /指定已有资料/)
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'characters', atChapter: 0, changeScope: itemMeta.changeScope }), /不属于本阶段/)
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'items', atChapter: 0, changeScope: { ...itemMeta.changeScope, existingEntityIds: ['item:nonexistent'] } }), /不存在/)
+      const staleIssueId = recordCreativeReviewIssues({ novelId: isolatedId, stage: 'items', atChapter: 0, changeScope: itemMeta.changeScope }, formalItemRun.runId, formalItemRun.artifactId, qualityReview)[0]
+      heldResponse = undefined
+      replies.push('HOLD')
+      const staleReview = (await isolatedCall('workflows.start', { operation: 'review', stage: 'items', atChapter: 0, request: '复核当前用途', changeScope: itemMeta.changeScope, revisionIssueIds: [staleIssueId], idempotencyKey: 'item-stale-recheck' })).run
+      for (let i = 0; i < 100 && !heldResponse; i++) await new Promise(resolve => setTimeout(resolve, 20))
+      assert.ok(heldResponse)
+      await isolatedCall('atlas.apply', { expectedContextVersion: formalBefore.contextVersion, effectiveFromChapter: 0, source: { kind: 'user', id: 'fixture-author' }, idempotencyKey: 'change-during-recheck', changes: [{ op: 'upsert_entity', id: itemSaved.idMap['new-notebook'], kind: 'item', name: '试用薄册', attributes: { usageMethod: '作者在复核中改过的用途' } }] })
+      heldResponse.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: review }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 } }))
+      const staleFinished = await isolatedFinish(staleReview.runId)
+      assert.equal(staleFinished.status, 'failed', JSON.stringify(staleFinished))
+      assert.match(staleFinished.message, /资料已变化/)
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === staleIssueId).status, 'open', 'stale clean review cannot close current issues')
+      assert.equal(staleFinished.reviewArtifactId, undefined, 'stale review produces no accepted formal report')
       replies.push(itemCandidate, review)
       const itemAgain = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '继续修订已有薄册', sourceArtifactId: itemMeta.repairArtifactId, autoApply: false, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair-again' })).run.runId)
       assert.equal(itemAgain.status, 'paused', JSON.stringify(itemAgain))
+      validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, sourceArtifactId: itemAgain.artifactId, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId] })
+      replies.push(itemCandidate, review)
+      const unboundBranch = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '另行试写档案', sourceArtifactId: itemMeta.repairArtifactId, autoApply: false, changeScope: itemMeta.changeScope, idempotencyKey: 'unbound-item-branch' })).run.runId)
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, sourceArtifactId: unboundBranch.artifactId, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId] }), /最新候选依据/, 'unrelated drafts cannot masquerade as issue-bound repairs')
       const { createArtifact } = require('../electron/services/artifact.service.ts')
       for (let index = 0; index < 205; index++) createArtifact({ novelId: isolatedId, kind: 'creative_comparison', status: 'reviewed', parentArtifactId: itemAgain.artifactId, content: { index }, contextVersion: 1, producerType: 'system', producerId: 'history-query-test', producerClient: 'fixture' })
       assert.equal((await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts[0].id, comparison[0].id, 'parent filtering recovers a comparison beyond the newest 200 artifacts')

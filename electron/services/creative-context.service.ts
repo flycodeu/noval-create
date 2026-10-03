@@ -20,7 +20,7 @@ export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): nu
 }
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
-export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number): Promise<CreativeContextReport> {
+export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0): Promise<CreativeContextReport> {
   validateCreativeChangeScope(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const novel = getNovel(input.novelId)
@@ -37,7 +37,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
   // Leave room for the candidate and instructions during the independent review request.
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
-    ? estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '') : 0
+    ? estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '') : formalReviewTokens
   const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve * 2 - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
   if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
   if (input.stage === 'chapter') return compileCreativeChapterContext(input, { maxInputTokens, outputReserve })

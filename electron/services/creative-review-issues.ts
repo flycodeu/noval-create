@@ -6,15 +6,57 @@ import type { GenericAssetReviewContent } from '../../src/shared/generic-asset-w
 import type { AssetReviewResult } from '../../src/types'
 import type { CreativeWorkflowInput, CreativeChangeScope } from '../../src/shared/creative-workflow'
 
+export class CreativeReviewTargetError extends Error {
+  readonly code = 'CREATIVE_REVIEW_TARGET_INVALID'
+}
+function scopeIdentity(scope?: CreativeChangeScope): string {
+  if (!scope) return 'null'
+  return hashArtifactContent(Object.fromEntries(Object.entries(scope).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, Array.isArray(value) ? [...value].sort() : value])))
+}
+function isRepairDescendant(input: CreativeWorkflowInput, issueId: number, sourceId: string): boolean {
+  const candidate = input.sourceArtifactId && getArtifact(input.sourceArtifactId)
+  if (!candidate || candidate.novelId !== input.novelId || candidate.kind !== 'generic_draft') return false
+  // A paused repair can be revised before saving. Only an issue-bound workflow may
+  // extend its lineage; an unrelated draft with the same parent is insufficient.
+  let taskId = candidate.taskId
+  let bound = false
+  for (let depth = 0; taskId && depth < 8; depth++) {
+    const task = getSqlite().prepare('SELECT parent_task_id,input_json,related_entity_type FROM tasks WHERE id=? AND novel_id=?').get(taskId, input.novelId) as { parent_task_id: number | null; input_json: string; related_entity_type: string } | undefined
+    if (!task) break
+    if (task.related_entity_type === 'creative_workflow') {
+      const request = (JSON.parse(task.input_json || '{}') as { request?: CreativeWorkflowInput }).request
+      bound = Boolean(request && request.stage === input.stage && request.atChapter === input.atChapter && request.revisionIssueIds?.includes(issueId) && scopeIdentity(request.changeScope) === scopeIdentity(input.changeScope))
+      break
+    }
+    taskId = task.parent_task_id
+  }
+  if (!bound) return false
+  let parentId = candidate.parentArtifactId
+  const seen = new Set<string>()
+  for (let depth = 0; parentId && depth < 100 && !seen.has(parentId); depth++) {
+    if (parentId === sourceId) return true
+    seen.add(parentId)
+    const parent = getArtifact(parentId)
+    if (!parent || parent.novelId !== input.novelId || parent.kind !== 'generic_draft') return false
+    parentId = parent.parentArtifactId
+  }
+  return false
+}
 export function validateCreativeRevisionTargets(input: CreativeWorkflowInput): void {
   const ids = input.revisionIssueIds
   if (!ids) return
-  if (!Array.isArray(ids) || ids.length > 50 || ids.some(id => !Number.isInteger(id) || id < 1) || new Set(ids).size !== ids.length) throw new Error('修订问题 ID 必须为不重复的正整数，最多50项。')
+  if (!Array.isArray(ids) || ids.length > 50 || ids.some(id => !Number.isInteger(id) || id < 1) || new Set(ids).size !== ids.length) throw new CreativeReviewTargetError('修订问题 ID 必须为不重复的正整数，最多50项。')
   for (const id of ids) {
     const row = getSqlite().prepare('SELECT novel_id,origin_meta_json FROM revision_tasks WHERE id=?').get(id) as { novel_id: number; origin_meta_json: string } | undefined
-    if (!row || row.novel_id !== input.novelId) throw new Error(`修订问题 ${id} 不属于当前项目。`)
+    if (!row || row.novel_id !== input.novelId) throw new CreativeReviewTargetError(`修订问题 ${id} 不属于当前项目。`)
     const meta = JSON.parse(row.origin_meta_json || '{}')
-    if (meta.issueCategory !== 'creative_review' || meta.stage !== input.stage || meta.atChapter !== input.atChapter) throw new Error(`修订问题 ${id} 的阶段或章位与本次任务不同。`)
+    if (meta.issueCategory !== 'creative_review' || meta.stage !== input.stage || meta.atChapter !== input.atChapter) throw new CreativeReviewTargetError(`修订问题 ${id} 的阶段或章位与本次任务不同。`)
+    if (scopeIdentity(meta.changeScope) !== scopeIdentity(input.changeScope)) throw new CreativeReviewTargetError(`修订问题 ${id} 的保存范围与本次任务不同。`)
+    const sourceId = meta.repairArtifactId || meta.candidateArtifactId
+    if (input.operation === 'review') {
+      if (input.sourceArtifactId) throw new CreativeReviewTargetError('正式复核不能将候选作为待评内容。')
+      if (sourceId && getArtifact(sourceId)?.status !== 'committed') throw new CreativeReviewTargetError(`修订问题 ${id} 的候选尚未保存，不能用正式资料将其关闭。`)
+    } else if (sourceId !== input.sourceArtifactId && !(sourceId && isRepairDescendant(input, id, sourceId))) throw new CreativeReviewTargetError(`修订问题 ${id} 必须沿用最新候选依据。`)
   }
 }
 export function advanceCreativeRevisionIssues(input: CreativeWorkflowInput, artifactId: string, cleanFormalReview = false, appliedScope?: CreativeChangeScope): void {

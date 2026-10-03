@@ -27,7 +27,9 @@ import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { CREATIVE_FACT_REVEALS_SCHEMA, applyCreativeFactReveals, validateCreativeFactPlans, validateCreativeFactReveals, type CreativeFactReveal } from './creative-facts'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { captureCreativeHistory } from './creative-history'
-import { recordCreativeReviewIssues, validateCreativeRevisionTargets, advanceCreativeRevisionIssues } from './creative-review-issues'
+import { recordCreativeReviewIssues, validateCreativeRevisionTargets, advanceCreativeRevisionIssues, CreativeReviewTargetError } from './creative-review-issues'
+import { ATLAS_REVIEW_STAGES, captureFormalAtlasReview } from './creative-formal-review'
+import { estimateTokens } from '../../src/shared/token-budget'
 
 interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; reviewModelConfigId?: number; reviewModelFingerprint?: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
 const active = new Set<number>()
@@ -351,12 +353,12 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
     const savedHistory = captureCreativeHistory(frozen.request, data, resolution, (atlasResult.idMap || {}) as Record<string, string>, savedStructureIds)
     for (const [index, change] of history.entries()) change.after = savedHistory[index]?.before ?? change.after
     let appliedScope = frozen.request.changeScope
-    if (frozen.request.revisionIssueIds?.length && appliedScope && changes?.length) {
+    if (frozen.request.revisionIssueIds?.length && changes?.length && atlasStages.has(frozen.request.stage)) {
       const currentAtlas = queryStoryAtlas({ novelId: input.novelId, atChapter: frozen.request.atChapter, includePlanned: true })
       const appliedIds = (atlasResult.appliedIds || []) as string[]
       appliedScope = { ...appliedScope, newEntityCount: 0, allowNewRelations: false,
-        existingEntityIds: [...new Set([...(appliedScope.existingEntityIds || []), ...appliedIds.filter(id => currentAtlas.entities.some(entity => entity.id === id))])],
-        existingRelationIds: [...new Set([...(appliedScope.existingRelationIds || []), ...appliedIds.filter(id => currentAtlas.relations.some(edge => edge.id === id))])] }
+        existingEntityIds: [...new Set([...(appliedScope?.existingEntityIds || []), ...appliedIds.filter(id => currentAtlas.entities.some(entity => entity.id === id))])],
+        existingRelationIds: [...new Set([...(appliedScope?.existingRelationIds || []), ...appliedIds.filter(id => currentAtlas.relations.some(edge => edge.id === id))])] }
     }
     advanceCreativeRevisionIssues(frozen.request, draft.id, false, appliedScope)
     const result = { artifactId: draft.id, chapterIds: ids, ...atlasResult, history, contextVersion: getNovel(input.novelId)?.contextVersion || 1 }
@@ -405,6 +407,38 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   progress(runId, 'completed', summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
 }
 
+async function executeAtlasReview(runId: number, input: StoredRequest): Promise<void> {
+  const { novelId } = input.request
+  const snapshot = captureFormalAtlasReview(input.request)
+  const content = JSON.stringify(snapshot)
+  const contentHash = hashArtifactContent(snapshot)
+  const novel = getNovel(novelId)!
+  const context = await compileCreativeContext(input.request, input.modelConfigId, input.reviewModelConfigId, estimateTokens(content))
+  const { text: _text, ...report } = context
+  const mode = resolveAiExecutionMode({ settingsJson: novel.settingsJson })
+  const route = buildAiModelRouteReport({ taskKind: 'generic_prompt', stageLabel: 'Asset Review', executionMode: mode.mode, resolutionSource: mode.source, modelConfigId: input.reviewModelConfigId || input.modelConfigId, temperatureCap: 0.32 })
+  progress(runId, 'reviewing', '复核指定正式资料，保存报告', { context: report })
+  const review = await reviewGeneratedAsset({
+    targetType: assetTypes[input.request.stage], novelId, modelConfigId: route.modelConfigId, parentTaskId: runId,
+    relatedEntityType: 'atlas_review', relatedEntityId: runId, contextSummary: context.text, generatedOutput: content,
+    narrativePolicyVersion: resolveNarrativePolicy(novel.settingsJson, true).policyVersion,
+    reviewFocus: [input.request.request, '只评审待评对象中指定ID的正式资料；上下文其他对象是依据，不是本次待评对象。不得改写或生成资料。', '逐项检查事实与推断边界；原句存在不代表支持该结论。未定字段不等于错误，不得要求凭空补全。计划不等于已发生。'],
+    chatOpts: { ...buildChatOptionsFromRoute(route), maxTokens: Math.min(route.maxTokens, context.outputReserve) },
+    onQualityTaskCreated: () => { assertActive(runId); assertBase(input) },
+  })
+  assertActive(runId); assertBase(input)
+  if (hashArtifactContent(captureFormalAtlasReview(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
+  const status = review.rejectRequired ? 'blocked' : review.rewriteRequired ? 'needs_revision' : 'passed'
+  const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
+    schemaVersion: 'atlas-review-v1', stage: input.request.stage, atChapter: input.request.atChapter, snapshot, contentHash, review, deterministicBlockers: [], summary: review.summary, status, context: report,
+  }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: route.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
+  const issueIds = recordCreativeReviewIssues(input.request, runId, artifact.id, review)
+  if (status === 'passed' && !review.issues?.length) advanceCreativeRevisionIssues(input.request, artifact.id, true)
+  const result = { artifactId: artifact.id, contentHash, review, summary: review.summary, status, issueIds }
+  updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })
+  progress(runId, 'completed', review.summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
+}
+
 async function execute(runId: number, novelId: number): Promise<void> {
   if (active.has(runId)) return
   active.add(runId)
@@ -414,7 +448,8 @@ async function execute(runId: number, novelId: number): Promise<void> {
     updateTask(runId, { status: 'running', errorMessage: null })
     progress(runId, 'context', '读取本阶段所需资料与章位状态')
     if (input.request.operation === 'review') {
-      await executeChapterReview(runId, input)
+      if (input.request.stage === 'chapter') await executeChapterReview(runId, input)
+      else await executeAtlasReview(runId, input)
       return
     }
     if (input.request.stage === 'chapter') await prepareChapter(runId, input)
@@ -498,7 +533,8 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   text(request.request, '需求'); text(request.idempotencyKey, '幂等键')
   if (request.count !== undefined && (!Number.isInteger(request.count) || request.count < 1 || request.count > 50)) throw new Error('每次生成数量为 1–50。')
   if (request.stage === 'chapter' && request.count !== undefined && request.count !== 1) throw new Error('正文每次推进一章；下一章需基于本章已审校结果继续。')
-  if (request.operation === 'review' && request.stage !== 'chapter') throw new Error('仅评审操作目前面向已有章节。')
+  if (request.operation === 'review' && request.stage !== 'chapter' && !ATLAS_REVIEW_STAGES.includes(request.stage)) throw new CreativeReviewTargetError('仅评审操作支持正文与图谱资料；背景、规则、故事和大纲暂需人工复核。')
+  if (request.operation === 'review' && request.sourceArtifactId) throw new CreativeReviewTargetError('正式复核不能将候选作为待评内容。')
   if (request.atChapter !== undefined && (!Number.isInteger(request.atChapter) || request.atChapter < 0)) throw new Error('章位必须为非负整数。')
   const novel = getNovel(request.novelId)
   if (!novel) throw new Error('项目不存在。')
@@ -520,6 +556,7 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   getModelConfigRecord(reviewModelConfigId)
   const resolvedRequest = { ...request, atChapter: resolveCreativeChapterPosition(request) }
   validateCreativeRevisionTargets(resolvedRequest)
+  if (request.operation === 'review' && request.stage !== 'chapter') captureFormalAtlasReview(resolvedRequest)
   const input: StoredRequest = { request: resolvedRequest, requestFingerprint: hashArtifactContent(request), contextVersion: novel.contextVersion || 1, modelConfigId: model.id, modelFingerprint: modelFingerprint(model.id), reviewModelConfigId, reviewModelFingerprint: modelFingerprint(reviewModelConfigId), attempt: 1 }
   const runId = await createTask({ type: 'planning_draft', novelId: request.novelId, modelConfigId: model.id, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: JSON.stringify(input), idempotencyKey: key, status: 'pending' })
   // Return before model work starts; the persisted run survives MCP disconnection.

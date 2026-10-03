@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CreativeRun } from '../../../shared/creative-workflow'
 import type { Chapter, RevisionTask } from '../../../types'
-import { artifactTarget, issueTarget } from './revision-target'
+import { artifactTarget, issueTarget, formalIssueReviewTarget } from './revision-target'
 
 describe('targeted revisions', () => {
   it('keeps an older issue attached to its chapter rather than the next chapter', () => {
@@ -40,5 +40,18 @@ describe('targeted revisions', () => {
     expect(params.get('request')).toContain('保留其他正文')
     expect(params.get('request')!.length).toBeLessThanOrEqual(6000)
     expect(() => artifactTarget(run, 'report-1', '修正')).toThrow('具体内容')
+  })
+  it('reviews formal item IDs without passing a draft, and carries their latest repair lineage into generation', () => {
+    const scope = { existingEntityIds: ['item:9'], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }
+    const target = formalIssueReviewTarget({ id: 14, originMetaJson: JSON.stringify({ issueCategory: 'creative_review', stage: 'items', atChapter: 1, changeScope: scope, repairArtifactId: 'latest-item-draft' }) } as RevisionTask)
+    expect(target).toEqual({ operation: 'review', stage: 'items', atChapter: 1, changeScope: scope, revisionIssueIds: [14] })
+    expect(target).not.toHaveProperty('sourceArtifactId')
+    const params = new URLSearchParams(artifactTarget({ ...target, sourceArtifactId: 'latest-item-draft' } as CreativeRun, 'formal-report', '只改用途', { summary: '物品用途与原句不符' }).split('?')[1])
+    expect(params.get('stage')).toBe('items')
+    expect(params.get('sourceArtifactId')).toBe('latest-item-draft')
+    expect(JSON.parse(params.get('changeScope')!)).toEqual(scope)
+    expect(JSON.parse(params.get('revisionIssueIds')!)).toEqual([14])
+    expect(params.get('request')).toContain('指定的物品档案')
+    expect(params.get('request')).not.toContain('不生成下一章')
   })
 })
