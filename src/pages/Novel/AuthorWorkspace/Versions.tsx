@@ -5,25 +5,18 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { AgentArtifact } from '../../../shared/agent-artifacts'
 import { CREATIVE_STAGE_LABELS, type CreativeRun } from '../../../shared/creative-workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
-import type { Chapter, Novel, RevisionTask } from '../../../types'
-import type { StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { parseStorySettingsDocument } from '../../../shared/story-settings'
-import { parseThemeVoiceDocument } from '../../../shared/theme-voice'
+import type { Chapter, RevisionTask } from '../../../types'
 import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, isRunActive, runStatusLabel } from './workflow-client'
 import { runChapterLabel, runResultPresentation } from './run-presentation'
 import { ContentDocument } from './ContentDocument'
-import { changedFields, parseDocument, recordOf } from './content-document'
+import { parseDocument, recordOf } from './content-document'
 import { artifactTarget, issueTarget } from './revision-target'
 import { loadDocumentNames } from './document-references'
 
 type ArtifactReference = Omit<AgentArtifact, 'content' | 'idempotencyKey'>
 const STATUS_LABELS: Record<string, string> = { draft: '候选', reviewed: '已评审', approved: '已认可', committed: '已保存', rejected: '未通过', superseded: '旧版本' }
 function candidateValue(content: unknown) { const data = recordOf(content); return parseDocument(data.output ?? content) }
-function patchShape(current: unknown, patch: unknown): unknown {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return current
-  return Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, patchShape(recordOf(current)[key], value)]))
-}
 function artifactListTitle(item: ArtifactReference, runs: CreativeRun[], names: Record<string, string>): string {
   const run = runs.find(candidate => candidate.artifactId === item.id || candidate.reviewArtifactId === item.id)
   if (item.kind.includes('review') || item.kind === 'quality_report') return run ? `${CREATIVE_STAGE_LABELS[run.stage]} · 评审报告` : '评审报告'
@@ -39,8 +32,7 @@ export default function Versions({ novelId }: { novelId: number }) {
   const [artifacts, setArtifacts] = useState<ArtifactReference[]>([])
   const [issues, setIssues] = useState<RevisionTask[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const [novel, setNovel] = useState<Novel | null>(null)
-  const [atlas, setAtlas] = useState<StoryAtlasSnapshot | null>(null)
+  const [history, setHistory] = useState<Array<{ path: string; fieldKey: string; before: unknown; after: unknown }> | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
   const [selectedRun, setSelectedRun] = useState<CreativeRun | null>(null)
   const [artifact, setArtifact] = useState<(ArtifactReference & { content: unknown }) | null>(null)
@@ -57,13 +49,13 @@ export default function Versions({ novelId }: { novelId: number }) {
     setLoading(true)
     let referenceError = ''
     try {
-      const [runResult, artifactResult, nextIssues, rows, project, snapshot, nextNames] = await Promise.all([
+      const [runResult, artifactResult, nextIssues, rows, nextNames] = await Promise.all([
         callAuthorTool<{ runs: CreativeRun[] }>('novelforge.workflows.list', { novelId }),
         callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, limit: 200 }),
-        window.electron.revision.list(novelId), window.electron.chapter.list(novelId), window.electron.novel.get(novelId), window.electron.storyAtlas.query({ novelId, includePlanned: true }),
+        window.electron.revision.list(novelId), window.electron.chapter.list(novelId),
         loadDocumentNames(novelId, value => { referenceError = value }),
       ])
-      setRuns(runResult.runs); setArtifacts(artifactResult.artifacts); setIssues(nextIssues); setChapters(rows); setNovel(project); setAtlas(snapshot); setNames(nextNames); setError(referenceError)
+      setRuns(runResult.runs); setArtifacts(artifactResult.artifacts); setIssues(nextIssues); setChapters(rows); setNames(nextNames); setError(referenceError)
       setSelectedRun(current => runResult.runs.find(run => run.runId === current?.runId) || runResult.runs[0] || null)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '读取版本记录失败') }
     finally { setLoading(false) }
@@ -76,19 +68,25 @@ export default function Versions({ novelId }: { novelId: number }) {
       void callAuthorTool<{ run: CreativeRun | null }>('novelforge.workflows.get', { novelId, runId: selectedRun.runId }).then(({ run }) => {
         if (!alive || !run) return
         setSelectedRun(run); setRuns(current => current.map(item => item.runId === run.runId ? run : item))
-        if (run.step === 'completed') { window.dispatchEvent(new Event('novelforge:creative-completed')); void load() }
+        if (run.step === 'completed' || run.step === 'needs_attention') { window.dispatchEvent(new Event('novelforge:creative-completed')); void load() }
       }).catch(cause => { if (alive) setError(String(cause)) })
     }, 1600)
     return () => { alive = false; window.clearTimeout(timer) }
   }, [novelId, selectedRun, load])
   const openArtifact = useCallback(async (id: string) => {
     const epoch = ++readEpoch.current
-    setReading(true); setReview(null)
+    setReading(true); setReview(null); setHistory(null)
     try {
       const result = await callAuthorTool<{ artifact: ArtifactReference & { content: unknown } }>('novelforge.artifacts.get', { artifactId: id })
       if (epoch !== readEpoch.current) return
       if (result.artifact.novelId !== novelId) throw new Error('这份内容属于另一部作品。')
       setArtifact(result.artifact); setFeedback(''); setError('')
+      const related = await callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, parentArtifactId: id, kind: result.artifact.status === 'committed' ? 'creative_commit' : 'creative_comparison', limit: 200 })
+      const comparison = related.artifacts.find(item => item.parentArtifactId === result.artifact.id)
+      if (comparison) {
+        const saved = await callAuthorTool<{ artifact: { content: { history?: Array<{ path: string; fieldKey: string; before: unknown; after: unknown }> } } }>('novelforge.artifacts.get', { artifactId: comparison.id })
+        if (epoch === readEpoch.current) setHistory(saved.artifact.content.history || null)
+      }
       if (result.artifact.reviewArtifactId) {
         const reviewResult = await callAuthorTool<{ artifact: { content: unknown } }>('novelforge.artifacts.get', { artifactId: result.artifact.reviewArtifactId })
         if (epoch === readEpoch.current) setReview(reviewResult.artifact.content)
@@ -100,20 +98,19 @@ export default function Versions({ novelId }: { novelId: number }) {
   useEffect(() => () => { readEpoch.current += 1 }, [])
   const artifactRun = runs.find(run => run.artifactId === artifact?.id || run.reviewArtifactId === artifact?.id)
   const candidate = candidateValue(artifact?.content)
-  const parsed = recordOf(candidate)
-  const story = parseStorySettingsDocument(novel?.settingsJson)
-  const currentChapter = chapters.find(item => item.chapterNum === (artifactRun?.atChapter || parsed.chapterNum))
-  const currentDocument = { ...story, themeVoice: parseThemeVoiceDocument(novel?.themeVoiceJson), worldRules: parseDocument(novel?.worldRulesJson), background: novel?.userBackground, userBackground: novel?.userBackground, expandedBackground: novel?.expandedBackground, synopsis: novel?.synopsis, title: currentChapter?.title || novel?.title, content: currentChapter?.content, summary: currentChapter?.summary, chapterNum: currentChapter?.chapterNum }
-  const changes = artifactRun?.operation === 'review' ? [] : Array.isArray(parsed.changes) ? parsed.changes.map(change => {
-    const value = recordOf(change)
-    const existing = [...(atlas?.entities || []), ...(atlas?.relations || [])].find(item => item.id === value.id)
-    const after = { ...value }; delete after.op
-    return { path: String(value.name || value.label || '设定变化'), fieldKey: '', before: existing ? patchShape(existing, after) : null, after }
-  }) : Object.keys(parsed).length ? changedFields(patchShape(currentDocument, parsed), parsed) : []
-  const visibleArtifacts = artifacts.filter(item => showHistory || !['superseded', 'rejected'].includes(item.status))
+  const changes = artifactRun?.operation === 'review' ? [] : history || []
+  const visibleArtifacts = artifacts.filter(item => item.kind !== 'creative_comparison' && (showHistory || !['superseded', 'rejected'].includes(item.status)))
   const visibleIssues = issues.filter(issue => showHistory || ['open', 'in_progress'].includes(issue.status))
   const control = async (action: 'cancel' | 'resume', run: CreativeRun) => { try { await callAuthorTool(`novelforge.workflows.${action}`, { novelId, runId: run.runId }); await load() } catch (cause) { setError(String(cause)) } }
   const editIssue = async (issue: RevisionTask, status: RevisionTask['status']) => { try { await window.electron.revision.update(issue.id, { status }); await load() } catch (cause) { setError(String(cause)) } }
+  const recheckIssue = async (issue: RevisionTask) => {
+    if (!issue.chapterId) return
+    try {
+      await callAuthorTool('novelforge.chapters.review', { novelId, chapterId: issue.chapterId, revisionIssueIds: [issue.id],
+        request: `复核正式正文是否仍存在以下问题，并继续完整检查本章：${issue.title}\n${issue.description || ''}`, idempotencyKey: `recheck:${crypto.randomUUID()}` })
+      setView('runs'); await load()
+    } catch (cause) { setError(String(cause)) }
+  }
   const continueRevision = async () => {
     if (!artifact || !artifactRun || !feedback.trim()) return
     setPreparingRevision(true)
@@ -138,11 +135,11 @@ export default function Versions({ novelId }: { novelId: number }) {
         setApplying(true)
         void callAuthorTool('novelforge.workflows.apply', { novelId, runId: artifactRun.runId }).then(async () => { await load(); await openArtifact(artifact.id); window.dispatchEvent(new Event('novelforge:creative-completed')) }).catch(cause => setError(String(cause))).finally(() => setApplying(false))
       }}>应用这一版</Button>}
-      {changes.length > 0 && <section className="author-candidate-diff"><h3>与当前已保存内容的差异</h3><p className="author-muted">仅列出候选涉及的字段；未涉及的内容保留。</p>{changes.map((change, index) => <article className="author-change-card" key={`${change.path}-${index}`}><h4>{change.path}</h4><div className="author-diff-columns"><section><h4>当前已保存</h4><ContentDocument value={change.before} names={names} fieldKey={change.fieldKey} /></section><section><h4>本轮候选</h4><ContentDocument value={change.after} names={names} fieldKey={change.fieldKey} /></section></div></article>)}</section>}
-      <details open={changes.length === 0} className="author-disclosure"><summary>{artifactRun?.operation === 'review' ? '完整评审' : '完整内容'}</summary><ContentDocument value={candidate} names={names} /></details>
+      {changes.length > 0 && <section className="author-candidate-diff"><h3>这一版的变更记录</h3>{changes.map((change, index) => <article className="author-change-card" key={`${change.path}-${index}`}><h4>{change.path}</h4><div className="author-diff-columns"><section><h4>保存前</h4><ContentDocument value={change.before} names={names} fieldKey={change.fieldKey} /></section><section><h4>{artifact.status === 'committed' ? '本次保存' : '本轮候选'}</h4><ContentDocument value={change.after} names={names} fieldKey={change.fieldKey} /></section></div></article>)}</section>}
+      {history === null && artifact.kind === 'generic_draft' && <p className="author-muted">此版本未保存比较快照，仅展示完整内容。</p>}<details open={changes.length === 0} className="author-disclosure"><summary>{artifactRun?.operation === 'review' ? '完整评审' : '完整内容'}</summary><ContentDocument value={candidate} names={names} /></details>
       {review != null && <section className="author-review-result"><h2>这一版的评审</h2><ContentDocument value={review} names={names} /></section>}
       {artifact.parentArtifactId && <Button type="link" onClick={() => setParams({ artifact: artifact.parentArtifactId! })}>查看上一版依据</Button>}
       {artifactRun ? <div className="author-version-discussion"><label htmlFor="version-feedback">针对这一版，接下来怎样调整？</label><Input.TextArea id="version-feedback" value={feedback} onChange={event => setFeedback(event.target.value)} autoSize={{ minRows: 3, maxRows: 8 }} placeholder="说明要保留什么、修改什么。目标章节和候选依据会自动带入。" /><Button disabled={!feedback.trim()} loading={preparingRevision} onClick={() => void continueRevision()}>继续修订原目标 <ArrowRightOutlined /></Button></div> : <p className="author-muted">此历史内容没有可定位的创作任务。请到对应章节或资料提出修订，避免误改目标。</p>}
-    </> : <EmptyWork title="选择一个版本">查看完整内容、差异与评审。</EmptyWork>}</section></div> : <section className="author-paper">{visibleIssues.length ? <div className="author-problem-list">{visibleIssues.map(issue => <article key={issue.id} className={String(issue.id) === params.get('issue') ? 'is-selected' : ''}><div><small>{issue.severity === 'high' ? '优先处理' : '待核对'} · {issue.status === 'resolved' ? '已解决' : issue.status === 'ignored' ? '已忽略' : '待处理'}{issue.chapterId ? ` · 第 ${chapters.find(item => item.id === issue.chapterId)?.chapterNum ?? '?'} 章` : ''}</small><h2>{issue.title}</h2><p>{issue.description || '暂无进一步说明。'}</p>{issue.fixBrief && <p>修订建议：{issue.fixBrief}</p>}</div><div className="author-heading-actions">{issue.chapterId && <Button onClick={() => navigate(buildWorkspaceRoute(novelId, `writing/editor?chapterId=${issue.chapterId}&panel=review`))}>定位章节</Button>}<Button onClick={() => { try { navigate(buildWorkspaceRoute(novelId, issueTarget(issue, chapters))) } catch (cause) { setError(String(cause)) } }}>生成修订候选</Button><Button onClick={() => void editIssue(issue, issue.status === 'resolved' ? 'open' : 'resolved')}>{issue.status === 'resolved' ? '重新打开' : '确认已解决'}</Button></div></article>)}</div> : <EmptyWork title="没有待处理的问题">评审记录与待处理事项会集中显示在这里。</EmptyWork>}</section>}
+    </> : <EmptyWork title="选择一个版本">查看完整内容、差异与评审。</EmptyWork>}</section></div> : <section className="author-paper">{visibleIssues.length ? <div className="author-problem-list">{visibleIssues.map(issue => <article key={issue.id} className={String(issue.id) === params.get('issue') ? 'is-selected' : ''}><div><small>{recordOf(parseDocument(issue.originMetaJson)).issueCategory === 'creative_review' && `${recordOf(parseDocument(issue.originMetaJson)).candidateArtifactId ? '候选评审' : '正式正文评审'} · `}{issue.severity === 'high' ? '优先处理' : '待核对'} · {issue.status === 'resolved' ? '已解决' : issue.status === 'ignored' ? '已忽略' : issue.status === 'in_progress' ? '已修订，待复核' : '待处理'}{issue.chapterId ? ` · 第 ${chapters.find(item => item.id === issue.chapterId)?.chapterNum ?? '?'} 章` : ''}</small><h2>{issue.title}</h2><p>{issue.description || '暂无进一步说明。'}</p>{issue.fixBrief && <p>修订建议：{issue.fixBrief}</p>}</div><div className="author-heading-actions">{typeof recordOf(parseDocument(issue.originMetaJson)).reviewArtifactId === 'string' && <Button onClick={() => setParams({ artifact: String(recordOf(parseDocument(issue.originMetaJson)).reviewArtifactId) })}>评审依据</Button>}{issue.chapterId && recordOf(parseDocument(issue.originMetaJson)).issueCategory === 'creative_review' && <Button onClick={() => void recheckIssue(issue)}>复核正式正文</Button>}{issue.chapterId && <Button onClick={() => navigate(buildWorkspaceRoute(novelId, `writing/editor?chapterId=${issue.chapterId}&panel=review`))}>定位章节</Button>}<Button onClick={() => { try { navigate(buildWorkspaceRoute(novelId, issueTarget(issue, chapters))) } catch (cause) { setError(String(cause)) } }}>生成修订候选</Button><Button onClick={() => void editIssue(issue, issue.status === 'resolved' ? 'open' : 'resolved')}>{issue.status === 'resolved' ? '重新打开' : '确认已解决'}</Button></div></article>)}</div> : <EmptyWork title="没有待处理的问题">评审记录与待处理事项会集中显示在这里。</EmptyWork>}</section>}
   </AuthorPage>
 }

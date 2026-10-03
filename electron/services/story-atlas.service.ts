@@ -4,7 +4,7 @@ import { getSqlite } from '../database/db'
 import { insertAtlasRevision, readAtlasRecords, type AtlasStoredRecord, type AtlasRecord } from '../database/story-atlas-store'
 import { markNovelContextChanged } from './context-impact.service'
 import { atlasBoundariesOverlap, meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
-import { atlasPolygonContainsPoint, atlasPolygonContainsPolygon, resolveAtlasGeography } from '../../src/shared/story-atlas-geography'
+import { atlasPolygonContainsPoint, atlasPolygonContainsPolygon, resolveAtlasGeography, isAtlasInteriorConnection } from '../../src/shared/story-atlas-geography'
 import type {
   StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasEntityKind,
   StoryAtlasGeography, StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
@@ -85,7 +85,7 @@ function diagnose(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[])
   for (const route of relations.filter((record) => record.kind === 'route')) {
     const hours = Number(route.attributes.travelHours)
     const km = Number(route.attributes.distanceKm)
-    if (route.attributes.travelHours === undefined || route.attributes.travelHours === null) result.push({ severity: 'info', code: 'TRAVEL_TIME_UNKNOWN', message: `${route.label || '路线'}尚未登记通行耗时。`, entityIds: [route.fromId, route.toId] })
+    if ((route.attributes.travelHours === undefined || route.attributes.travelHours === null) && !isAtlasInteriorConnection(route, locations)) result.push({ severity: 'info', code: 'TRAVEL_TIME_UNKNOWN', message: `${route.label || '路线'}尚未登记通行耗时。`, entityIds: [route.fromId, route.toId] })
     if (km > 0 && hours > 0 && /步行|foot|walk/i.test(String(route.attributes.travelMode || '')) && km / hours > 8) result.push({ severity: 'warning', code: 'WALKING_SPEED_IMPLAUSIBLE', message: `${route.label || '路线'}的步行速度超过每小时 8 公里，请复核距离、耗时或特殊设定。`, entityIds: [route.fromId, route.toId] })
   }
   return result

@@ -1,4 +1,16 @@
-import type { StoryAtlasEntity, StoryAtlasGeography, StoryAtlasMapPoint } from './story-atlas'
+import type { StoryAtlasEntity, StoryAtlasGeography, StoryAtlasMapPoint, StoryAtlasRelation } from './story-atlas'
+
+/** Indoor connections need connectivity, not fabricated hour-scale travel estimates. */
+export function isAtlasInteriorConnection(route: StoryAtlasRelation, entities: readonly StoryAtlasEntity[]): boolean {
+  const from = entities.find(entity => entity.id === route.fromId)
+  const to = entities.find(entity => entity.id === route.toId)
+  if (!from?.parentId || from.parentId !== to?.parentId) return false
+  const parent = entities.find(entity => entity.id === from.parentId)
+  const interiorTypes = ['interior_space', 'room', 'corridor', 'courtyard']
+  return ['inn', 'house', 'building'].includes(String(parent?.attributes.locationType))
+    && interiorTypes.includes(String(from.attributes.locationType)) && interiorTypes.includes(String(to.attributes.locationType))
+    && !(Number(route.attributes.distanceKm) > 0.1)
+}
 
 type Point = StoryAtlasMapPoint
 type Frame = NonNullable<StoryAtlasGeography['mapFrame']>

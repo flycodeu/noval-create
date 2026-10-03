@@ -16,6 +16,7 @@ export interface CreativeWorkflowInput {
   sourceArtifactId?: string
   operation?: 'generate' | 'review'
   changeScope?: CreativeChangeScope
+  revisionIssueIds?: number[]
   idempotencyKey: string
 }
 /** Optional hard boundaries; count remains a planning hint for mixed incremental batches. */
@@ -53,10 +54,12 @@ export interface CreativeRun {
   sourceArtifactId?: string
   operation?: 'generate' | 'review'
   changeScope?: CreativeChangeScope
+  revisionIssueIds?: number[]
   status: string
   step: 'context' | 'generating' | 'reviewing' | 'revising' | 'applying' | 'completed' | 'needs_attention' | 'cancelled'
   message: string
   modelConfigId: number | null
+  reviewModelConfigId?: number | null
   artifactId?: string
   reviewArtifactId?: string
   reviewStatus?: string

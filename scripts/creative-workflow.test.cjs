@@ -57,7 +57,7 @@ async function main() {
   }
   const novelId = Number(sqlite.prepare('INSERT INTO novels(title,user_background,model_config_id,context_version) VALUES(?,?,?,1)').run('河谷试验', '两个人在河谷经营渡口。', modelId).lastInsertRowid)
   const call = async (name, input) => {
-    const result = await registry.invoke({ toolId: `novelforge.${name}`, input: { novelId, ...input } }, context)
+    const result = await registry.invoke({ toolId: `novelforge.${name}`, input: name === 'artifacts.get' ? { artifactId: input.artifactId } : { novelId, ...input } }, context)
     assert.equal(result.ok, true, JSON.stringify(result)); return result.data
   }
   const finish = async runId => {
@@ -421,6 +421,93 @@ async function main() {
       assert.deepEqual(after.entities, scopeApplied.entities)
       assert.deepEqual(after.relations, scopeApplied.relations)
     }
+    // Frozen comparisons and real writer/reviewer routing through the registered API.
+    if (!realModelSource) {
+      const reviewerId = Number(sqlite.prepare('INSERT INTO model_configs(name,provider,model_id,api_key,base_url,max_tokens,max_context_tokens) VALUES(?,?,?,?,?,?,?)').run('Separate reviewer', 'openai', 'review-fixture', model.encryptApiKey('fixture-only'), `http://127.0.0.1:${server.address().port}/v1`, 4000, 16000).lastInsertRowid)
+      const isolatedId = Number(sqlite.prepare('INSERT INTO novels(title,user_background,synopsis,model_config_id,settings_json,context_version) VALUES(?,?,?,?,?,1)').run('历史记录试验', '渡口生活', '保存前简介', modelId, JSON.stringify({ ai_engine: { review_model_config_id: reviewerId } })).lastInsertRowid)
+      const isolatedCall = (name, args = {}) => call(name, { novelId: isolatedId, ...args })
+      const isolatedFinish = async id => {
+        for (let i = 0; i < 200; i++) {
+          const run = (await isolatedCall('workflows.get', { runId: id })).run
+          if (!['pending', 'running', 'cancel_requested'].includes(run.status)) return run
+          await new Promise(resolve => setTimeout(resolve, 30))
+        }
+        throw new Error('isolated review timeout')
+      }
+      const beforeRoutes = requests.length
+      replies.push(JSON.stringify({ synopsis: '本轮新简介' }), review)
+      const historical = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '只更新简介', autoApply: false, idempotencyKey: 'history-candidate' })).run.runId)
+      assert.equal(historical.status, 'paused', JSON.stringify(historical))
+      assert.equal(historical.reviewModelConfigId, reviewerId)
+      assert.deepEqual(requests.slice(beforeRoutes).map(request => request.model), ['creative-fixture', 'review-fixture'])
+      assert.ok(historical.context.maxInputTokens < 10000, 'smaller reviewer window bounds shared context')
+      const comparison = (await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts
+      assert.equal(comparison.length, 1)
+      const comparisonContent = (await isolatedCall('artifacts.get', { artifactId: comparison[0].id })).artifact.content
+      assert.equal(comparisonContent.history[0].before, '保存前简介')
+      assert.equal(comparisonContent.history[0].after, '本轮新简介')
+      const committed = (await isolatedCall('workflows.apply', { runId: historical.runId })).run.result
+      assert.equal(committed.history[0].before, '保存前简介'); assert.equal(committed.history[0].after, '本轮新简介')
+      sqlite.prepare('UPDATE novels SET synopsis=? WHERE id=?').run('更晚的简介', isolatedId)
+      assert.deepEqual((await isolatedCall('artifacts.get', { artifactId: comparison[0].id })).artifact.content, comparisonContent, 'later edits cannot change a historical comparison')
+      const commitRef = (await isolatedCall('artifacts.list', { kind: 'creative_commit', parentArtifactId: historical.artifactId })).artifacts[0]
+      assert.deepEqual((await isolatedCall('artifacts.get', { artifactId: commitRef.id })).artifact.content.history, committed.history)
+      sqlite.prepare('UPDATE model_configs SET temperature=? WHERE id=?').run(0.3, reviewerId)
+      replies.push(JSON.stringify({ synopsis: '审校模型待变更的候选' }), review)
+      const frozenReviewer = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '更新简介', autoApply: false, idempotencyKey: 'reviewer-frozen' })).run.runId)
+      sqlite.prepare('UPDATE model_configs SET temperature=? WHERE id=?').run(0.4, reviewerId)
+      const rejectedReviewer = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId: isolatedId, runId: frozenReviewer.runId } }, context)
+      assert.equal(rejectedReviewer.ok, false, 'changing reviewer config invalidates an old candidate')
+
+      const { listRevisionTasks } = require('../electron/services/revision-task.service.ts')
+      const { recordCreativeReviewIssues, validateCreativeRevisionTargets } = require('../electron/services/creative-review-issues.ts')
+      const qualityReview = { summary: '需要修订旧绳观察', severity: 'medium', rewriteRequired: true, rejectRequired: false, topFixes: ['写明先检查旧绳'], genreDriftRisks: [], themeDriftRisks: [], backgroundDriftRisks: [], languageRisks: [], humanLanguageRepairs: [], conflictRisks: [] }
+      const itemCandidate = JSON.stringify({ changes: [{ op: 'upsert_entity', clientId: 'new-notebook', kind: 'item', name: '试用薄册', attributes: { usageMethod: '记下观察' } }] })
+      const originalScope = { existingEntityIds: [], existingRelationIds: [], newEntityCount: 1, allowNewRelations: false }
+      replies.push(itemCandidate, review)
+      const itemRun = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '只建档一本薄册', autoApply: false, changeScope: originalScope, idempotencyKey: 'item-issue-base' })).run.runId)
+      const itemIssueId = recordCreativeReviewIssues({ novelId: isolatedId, stage: 'items', atChapter: 0, count: 1, changeScope: originalScope }, itemRun.runId, itemRun.reviewArtifactId, qualityReview, [], itemRun.artifactId)[0]
+      replies.push(itemCandidate, review)
+      const itemRepair = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '保持薄册并修订说明', sourceArtifactId: itemRun.artifactId, autoApply: false, changeScope: originalScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair' })).run.runId)
+      assert.equal(itemRepair.status, 'paused', JSON.stringify(itemRepair))
+      const itemSaved = (await isolatedCall('workflows.apply', { runId: itemRepair.runId })).run.result
+      const itemMeta = JSON.parse(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).originMetaJson)
+      assert.equal(itemMeta.repairArtifactId, itemRepair.artifactId)
+      assert.equal(itemMeta.changeScope.newEntityCount, 0)
+      assert.ok(itemMeta.changeScope.existingEntityIds.includes(itemSaved.idMap['new-notebook']), 'new entity repair scope transitions to actual persisted ID')
+      replies.push(itemCandidate, review)
+      const itemAgain = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '继续修订已有薄册', sourceArtifactId: itemMeta.repairArtifactId, autoApply: false, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair-again' })).run.runId)
+      assert.equal(itemAgain.status, 'paused', JSON.stringify(itemAgain))
+      const { createArtifact } = require('../electron/services/artifact.service.ts')
+      for (let index = 0; index < 205; index++) createArtifact({ novelId: isolatedId, kind: 'creative_comparison', status: 'reviewed', parentArtifactId: itemAgain.artifactId, content: { index }, contextVersion: 1, producerType: 'system', producerId: 'history-query-test', producerClient: 'fixture' })
+      assert.equal((await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts[0].id, comparison[0].id, 'parent filtering recovers a comparison beyond the newest 200 artifacts')
+      const oldIssueId = recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0]
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'open', 'unrelated consistency scan cannot close model findings')
+      assert.equal(recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0], oldIssueId, 'repeated report discovery is idempotent')
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'chapter', atChapter: 1, revisionIssueIds: [oldIssueId] }), /不属于当前项目/)
+      assert.throws(() => validateCreativeRevisionTargets({ novelId, stage: 'items', atChapter: 1, revisionIssueIds: [oldIssueId] }), /阶段或章位/)
+      const oldProse = sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content
+      replies.push(JSON.stringify({ chapterNum: 1, title: '换绳', content: oldProse, summary: '两人检查并换好绳索。', changes: [] }), review)
+      const repairedRun = await finish((await call('workflows.start', { stage: 'chapter', atChapter: 1, count: 1, request: '复核并保持原正文', revisionIssueIds: [oldIssueId], autoApply: false, idempotencyKey: 'issue-repair' })).run.runId)
+      assert.equal(repairedRun.status, 'paused', JSON.stringify(repairedRun))
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'open', 'a candidate does not resolve an issue')
+      await call('workflows.apply', { runId: repairedRun.runId })
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'in_progress', 'saving a repair still requires formal recheck')
+      replies.push(review)
+      const rechecked = await finish((await call('chapters.review', { chapterId: firstChapterId, revisionIssueIds: [oldIssueId], idempotencyKey: 'formal-recheck' })).run.runId)
+      assert.equal(rechecked.reviewStatus, 'passed', JSON.stringify(rechecked))
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'resolved')
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'resolved', 'backfill never reopens resolved findings')
+      assert.ok(listRevisionTasks(novelId).some(issue => JSON.parse(issue.originMetaJson || '{}').ruleId === 'deterministic_gate'), 'deterministic validation errors enter the same board')
+    }
+    const { buildNovelConsistencyReport } = require('../electron/services/consistency.service.ts')
+    const groundedItemId = Number(sqlite.prepare('INSERT INTO story_items(novel_id,item_name,item_kind,usage_method) VALUES(?,?,?,?)').run(novelId, '普通抄册', 'instance', '记录渡口每日账目').lastInsertRowid)
+    const orphanItemId = Number(sqlite.prepare('INSERT INTO story_items(novel_id,item_name,item_kind) VALUES(?,?,?)').run(novelId, '未使用木盒', 'instance').lastInsertRowid)
+    const report = buildNovelConsistencyReport(novelId)
+    assert.equal(report.issues.some(issue => issue.entityId === groundedItemId && issue.title === '物品实例仍然悬空'), false, 'known purpose does not require invented ownership')
+    assert.equal(report.issues.some(issue => issue.entityId === orphanItemId && issue.title === '物品实例仍然悬空'), true, 'genuinely unused records still need attention')
+    sqlite.prepare('UPDATE character_relations SET description=?,interaction_style=NULL,subtext_rule=NULL,intimacy_level=NULL,tension_level=NULL WHERE novel_id=?').run('经营渡口时分担修船和记账，遇账目争议先核对原账。', novelId)
+    assert.equal(buildNovelConsistencyReport(novelId).issues.some(issue => /关系还停留在标签|关键关系缺少具体/.test(issue.title)), false, 'concrete relationships do not require ratings or hidden subtext')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

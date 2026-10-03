@@ -249,6 +249,7 @@ export async function generateGenericAssetDraft(
   runtime: {
     contextSummary: string
     maxTokens?: number
+    reviewModelConfigId?: number
     parentTaskId?: number
     assertActive?: () => void
     onStage?: (stage: 'reviewing' | 'revising') => void
@@ -300,7 +301,7 @@ export async function generateGenericAssetDraft(
     stageLabel: `Generic Asset Quality · ${input.assetType}`,
     executionMode: mode.mode,
     resolutionSource: mode.source,
-    modelConfigId: route.modelConfigId,
+    modelConfigId: runtime.reviewModelConfigId ?? route.modelConfigId,
     temperatureCap: 0.32,
     reviewDepth: 'deep',
     maxTokensFactor: 1.25,
@@ -314,6 +315,8 @@ export async function generateGenericAssetDraft(
     targetType: input.assetType,
     novelId: input.novelId,
     modelConfigId: qualityRoute.modelConfigId,
+    rewriteModelConfigId: route.modelConfigId,
+    rewriteChatOpts: { ...buildChatOptionsFromRoute(route), ...(runtime.maxTokens ? { maxTokens: Math.min(route.maxTokens, runtime.maxTokens) } : {}) },
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
     parentTaskId: taskId,
@@ -404,7 +407,7 @@ export async function generateGenericAssetDraft(
     producerType: 'system',
     producerId: 'generic-asset-reviewer-v1',
     producerClient: 'novelforge-generic-asset-workflow',
-    modelConfigId: route.modelConfigId,
+    modelConfigId: qualityRoute.modelConfigId,
     taskId: qualityTaskIds.at(-1) || taskId,
     idempotencyKey: `${input.idempotencyKey}:review`,
   })

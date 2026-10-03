@@ -124,6 +124,7 @@ export function registerArtifactTools(
       inputSchema: objectSchema({
         novelId: { type: 'integer', minimum: 1 },
         kind: { type: 'string', minLength: 1, maxLength: 100 },
+        parentArtifactId: { type: 'string', minLength: 1, maxLength: 200 },
         status: artifactStatusSchema,
         limit: { type: 'integer', minimum: 1, maximum: 200 },
       }, ['novelId']),

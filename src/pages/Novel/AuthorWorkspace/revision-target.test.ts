@@ -10,6 +10,18 @@ describe('targeted revisions', () => {
     expect(params.get('autoApply')).toBe('false')
     expect(() => issueTarget({ chapterId: 12 } as RevisionTask, [])).toThrow('目标')
   })
+  it('preserves the exact stage, candidate and hard scope of a model issue', () => {
+    const scope = { existingEntityIds: [], newEntityCount: 2, allowNewRelations: false }
+    const params = new URLSearchParams(issueTarget({ id: 9, title: '物品异常原因无据', originMetaJson: JSON.stringify({ issueCategory: 'creative_review', stage: 'items', atChapter: 1, candidateArtifactId: 'draft-item', changeScope: scope, count: 2 }) } as RevisionTask, []).split('?')[1])
+    expect(params.get('stage')).toBe('items')
+    expect(params.get('atChapter')).toBe('1')
+    expect(params.get('sourceArtifactId')).toBe('draft-item')
+    expect(JSON.parse(params.get('changeScope')!)).toEqual(scope)
+    expect(JSON.parse(params.get('revisionIssueIds')!)).toEqual([9])
+    const saved = new URLSearchParams(issueTarget({ id: 9, title: '继续修订', originMetaJson: JSON.stringify({ issueCategory: 'creative_review', stage: 'items', atChapter: 1, candidateArtifactId: 'old-draft', repairArtifactId: 'latest-saved', changeScope: { existingEntityIds: ['item:1'], newEntityCount: 0 } }) } as RevisionTask, []).split('?')[1])
+    expect(saved.get('sourceArtifactId')).toBe('latest-saved')
+    expect(JSON.parse(saved.get('changeScope')!).newEntityCount).toBe(0)
+  })
   it('carries the candidate lineage, chapter and count without replaying a review report as a draft', () => {
     const run = { stage: 'chapter', atChapter: 3, count: 1 } as CreativeRun
     expect(new URLSearchParams(artifactTarget(run, 'draft-1', '保留事件').split('?')[1]).get('sourceArtifactId')).toBe('draft-1')

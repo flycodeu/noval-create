@@ -10,6 +10,7 @@ import { queryCreativeFacts } from './creative-facts'
 import { creativeAtlasCoverage, isCreativeChapterScopedRequest, selectCreativeAssetAtlas, selectCreativePlanningAtlas } from './creative-atlas-context'
 import { validateCreativeChangeScope } from './creative-change-scope'
 import { getChapterContract, listSceneContracts } from './endgame-asset.service'
+import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -19,12 +20,15 @@ export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): nu
 }
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
-export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number): Promise<CreativeContextReport> {
+export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number): Promise<CreativeContextReport> {
   validateCreativeChangeScope(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const novel = getNovel(input.novelId)
   if (!novel) throw new Error('项目不存在。')
-  const budget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
+  const generationBudget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
+  const reviewerId = reviewModelConfigId || parseStorySettingsDocument(novel.settingsJson).aiEngine.reviewModelConfigId
+  const reviewBudget = reviewerId ? resolveModelRuntimeBudget(reviewerId) : generationBudget
+  const budget = { maxTokens: Math.min(generationBudget.maxTokens || 12000, reviewBudget.maxTokens || 12000), maxContextTokens: Math.min(generationBudget.maxContextTokens || 32768, reviewBudget.maxContextTokens || 32768) }
   // Structured batches need both reasoning and the complete JSON. Count is the requested new assets,
   // so the base also covers changes to existing parents, endpoints and supporting records.
   const structuredAssets = ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'outline'].includes(input.stage)

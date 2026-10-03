@@ -23,6 +23,8 @@ export interface AssetQualityLoopOptions {
   targetType: AssetReviewTarget
   novelId: number
   modelConfigId?: number
+  rewriteModelConfigId?: number
+  rewriteChatOpts?: Partial<ChatOptions>
   relatedEntityType?: string
   relatedEntityId?: number
   parentTaskId?: number
@@ -286,7 +288,7 @@ export async function rewriteGeneratedAsset(
   return runNestedReviewTask({
     parentTaskId: options.parentTaskId,
     novelId: options.novelId,
-    modelConfigId: options.modelConfigId,
+    modelConfigId: options.rewriteModelConfigId ?? options.modelConfigId,
     sender: options.sender,
     relatedEntityType: options.relatedEntityType,
     relatedEntityId: options.relatedEntityId,
@@ -300,7 +302,7 @@ export async function rewriteGeneratedAsset(
       schemaHint: options.schemaHint,
       rewriteConstraints: options.rewriteConstraints,
     }),
-    chatOpts: options.chatOpts,
+    chatOpts: options.rewriteChatOpts ?? options.chatOpts,
     stage: 'rewrite',
     onTaskCreated: options.onQualityTaskCreated,
   })

@@ -15,7 +15,7 @@ import { savedCreativeEntities } from './creative-run-result'
 import { generateGenericAssetDraft } from './generic-asset-workflow.service'
 import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { assertCreativeChangeScope, validateCreativeChangeScope } from './creative-change-scope'
-import { applyStoryAtlasChanges, validateStoryAtlasChanges } from './story-atlas.service'
+import { applyStoryAtlasChanges, validateStoryAtlasChanges, queryStoryAtlas } from './story-atlas.service'
 import { getChapterContract, listSceneContracts, upsertChapterContract, upsertSceneContract } from './endgame-asset.service'
 import { createChapterSegment, listChapterSegments, createStoryVolume, updateStoryVolume, createStoryPart, updateStoryPart } from './story-structure.service'
 import { assertCreativeChapterCandidate, inspectCreativeChapterPrerequisites } from './creative-chapter-context'
@@ -25,8 +25,11 @@ import { reviewGeneratedAsset } from './asset-quality.service'
 import { buildAiModelRouteReport, buildChatOptionsFromRoute, resolveAiExecutionMode } from './ai-engine.service'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { CREATIVE_FACT_REVEALS_SCHEMA, applyCreativeFactReveals, validateCreativeFactPlans, validateCreativeFactReveals, type CreativeFactReveal } from './creative-facts'
+import { parseStorySettingsDocument } from '../../src/shared/story-settings'
+import { captureCreativeHistory } from './creative-history'
+import { recordCreativeReviewIssues, validateCreativeRevisionTargets, advanceCreativeRevisionIssues } from './creative-review-issues'
 
-interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
+interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; reviewModelConfigId?: number; reviewModelFingerprint?: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
 const active = new Set<number>()
 const assetTypes: Record<CreativeStage, GenericAssetType> = { background: 'project_brief', world_rules: 'world_rules', story: 'outline', style: 'theme_voice', outline: 'outline', characters: 'character', map: 'map', relationships: 'character', factions: 'faction', items: 'item', events: 'timeline', chapter: 'chapter' }
 const atlasStages = new Set<CreativeStage>(['characters', 'map', 'relationships', 'factions', 'items', 'events'])
@@ -155,7 +158,7 @@ export function getCreativeRun(novelId: number, runId?: number): CreativeRun | n
       state.result = { ...state.result, savedEntities: savedCreativeEntities(state.result, draft.content.output) }
     }
   }
-  return { ...state, runId: task.id, novelId, stage: input.request.stage, request: input.request.request, atChapter: input.request.atChapter ?? 0, count: input.request.count, changeScope: input.request.changeScope, sourceArtifactId: input.request.sourceArtifactId, operation: input.request.operation || 'generate', status: task.status || 'pending', step: state.step || 'context', message: state.message || task.errorMessage || '', modelConfigId: task.modelConfigId, events: state.events || [], createdAt: task.createdAt, updatedAt: task.updatedAt }
+  return { ...state, runId: task.id, novelId, stage: input.request.stage, request: input.request.request, atChapter: input.request.atChapter ?? 0, count: input.request.count, reviewModelConfigId: input.reviewModelConfigId || input.modelConfigId, changeScope: input.request.changeScope, revisionIssueIds: input.request.revisionIssueIds, sourceArtifactId: input.request.sourceArtifactId, operation: input.request.operation || 'generate', status: task.status || 'pending', step: state.step || 'context', message: state.message || task.errorMessage || '', modelConfigId: task.modelConfigId, events: state.events || [], createdAt: task.createdAt, updatedAt: task.updatedAt }
 }
 export function listCreativeRuns(novelId: number): CreativeRun[] {
   return getDb().select({ id: tasks.id }).from(tasks).where(and(eq(tasks.novelId, novelId), eq(tasks.relatedEntityType, 'creative_workflow'))).orderBy(desc(tasks.id)).limit(30).all().map(row => getCreativeRun(novelId, row.id)!)
@@ -167,6 +170,7 @@ function assertActive(runId: number): void {
 function assertBase(input: StoredRequest): void {
   if ((getNovel(input.request.novelId)?.contextVersion || 1) !== input.contextVersion) throw new Error('创作期间资料已变化，请查看候选并基于最新资料重新运行。')
   if (modelFingerprint(input.modelConfigId) !== input.modelFingerprint) throw new Error('本任务使用的模型配置已变更，请新建任务以采用当前配置。')
+  if (input.reviewModelConfigId && modelFingerprint(input.reviewModelConfigId) !== input.reviewModelFingerprint) throw new Error('本任务审校模型配置已变更，请新建任务。')
 }
 
 function validateOutlineForProject(novelId: number, data: Record<string, unknown>, request: CreativeWorkflowInput): void {
@@ -277,8 +281,8 @@ async function prepareChapter(runId: number, input: StoredRequest): Promise<void
   progress(runId, 'context', '自动补齐本章目标、场景和视角，完成审校后继续正文')
   const existingArrangement = chapter ? JSON.stringify({ chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id) }) : ''
   const request: CreativeWorkflowInput = { ...input.request, stage: 'outline', count: 1, ...(chapter ? { changeScope: { chapterIds: [chapter.id] } } : {}), request: `仅补齐第 ${input.request.atChapter} 章的章节目标和场景安排。${chapter ? `已有章节ID ${chapter.id}，章名${chapter.title}，大纲：${chapter.outline || '待补齐'}。现有安排：${existingArrangement}。必须保留有效安排、已锁定约束和全部已有场景，不改变既定事件或事实揭示边界。` : '创建这一章的安排。'}需补齐：${prerequisites.blockers.join('；')}。用户要求：${input.request.request}` }
-  const context = await compileCreativeContext(request, input.modelConfigId)
-  const generated = await generateGenericAssetDraft({ novelId: request.novelId, assetType: 'outline', title: '正文前置安排', requirements: [request.request, '必须包含chapterContract和完整scenes；仅使用已有人物作为POV，至少一个场景。'], outputFormat: 'json', schemaHint: creativeSchemaHint('outline'), modelConfigId: input.modelConfigId, idempotencyKey: `creative:${runId}:prepare:${input.attempt}` }, { contextSummary: context.text, maxTokens: context.outputReserve, parentTaskId: runId, assertActive: () => { assertActive(runId); assertBase(input) }, onStage: step => progress(runId, step, '核对正文前置安排') })
+  const context = await compileCreativeContext(request, input.modelConfigId, input.reviewModelConfigId)
+  const generated = await generateGenericAssetDraft({ novelId: request.novelId, assetType: 'outline', title: '正文前置安排', requirements: [request.request, '必须包含chapterContract和完整scenes；仅使用已有人物作为POV，至少一个场景。'], outputFormat: 'json', schemaHint: creativeSchemaHint('outline'), modelConfigId: input.modelConfigId, idempotencyKey: `creative:${runId}:prepare:${input.attempt}` }, { contextSummary: context.text, maxTokens: context.outputReserve, reviewModelConfigId: input.reviewModelConfigId, parentTaskId: runId, assertActive: () => { assertActive(runId); assertBase(input) }, onStage: step => progress(runId, step, '核对正文前置安排') })
   if (generated.review.status !== 'passed') throw new Error(`正文前置安排未通过审校：${generated.review.summary}`)
   const data = parseCreativeCandidate('outline', generated.effectiveArtifact.content.output)
   assertCreativeChangeScope(request, data)
@@ -320,6 +324,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
     // Validate all cross-entity references before mutating the chapter/background.
     const resolution = changes?.length ? validateStoryAtlasChanges({ novelId: input.novelId, expectedContextVersion: frozen.contextVersion, effectiveFromChapter: frozen.request.atChapter || 0, source: { kind: 'artifact', id: draft.id }, idempotencyKey: key, changes }) : undefined
     assertCreativeChangeScope(frozen.request, data, resolution)
+    const history = captureCreativeHistory(frozen.request, data, resolution)
     if (isProjectAssetStage(frozen.request.stage)) {
       atlasResult = applyCreativeProjectAsset(input.novelId, frozen.request.stage, data, draft.id)
     } else if (frozen.request.stage === 'background') {
@@ -340,7 +345,18 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
       ids.push(chapterId)
     }
     if (changes?.length) atlasResult = { ...atlasResult, ...applyStoryAtlasChanges({ novelId: input.novelId, expectedContextVersion: getNovel(input.novelId)?.contextVersion || 1, effectiveFromChapter: frozen.request.atChapter || 0, source: { kind: 'artifact', id: draft.id }, idempotencyKey: key, changes }) }
-    const result = { artifactId: draft.id, chapterIds: ids, ...atlasResult, contextVersion: getNovel(input.novelId)?.contextVersion || 1 }
+    const savedHistory = captureCreativeHistory(frozen.request, data, resolution, (atlasResult.idMap || {}) as Record<string, string>)
+    for (const [index, change] of history.entries()) change.after = savedHistory[index]?.before ?? change.after
+    let appliedScope = frozen.request.changeScope
+    if (frozen.request.revisionIssueIds?.length && appliedScope && changes?.length) {
+      const currentAtlas = queryStoryAtlas({ novelId: input.novelId, atChapter: frozen.request.atChapter, includePlanned: true })
+      const appliedIds = (atlasResult.appliedIds || []) as string[]
+      appliedScope = { ...appliedScope, newEntityCount: 0, allowNewRelations: false,
+        existingEntityIds: [...new Set([...(appliedScope.existingEntityIds || []), ...appliedIds.filter(id => currentAtlas.entities.some(entity => entity.id === id))])],
+        existingRelationIds: [...new Set([...(appliedScope.existingRelationIds || []), ...appliedIds.filter(id => currentAtlas.relations.some(edge => edge.id === id))])] }
+    }
+    advanceCreativeRevisionIssues(frozen.request, draft.id, false, appliedScope)
+    const result = { artifactId: draft.id, chapterIds: ids, ...atlasResult, history, contextVersion: getNovel(input.novelId)?.contextVersion || 1 }
     createArtifact({ novelId: input.novelId, kind: 'creative_commit', status: 'committed', parentArtifactId: draft.id, content: result, contextVersion: frozen.contextVersion, producerType: 'system', producerId: 'creative-workflow', producerClient: 'novelforge', taskId: input.runId, idempotencyKey: key })
     updateArtifactLifecycle(draft.id, { status: 'committed', committedEntityIds: ids })
     return result
@@ -353,13 +369,13 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   if (!chapter?.content?.trim()) throw new Error('目标章节没有可评审的正文。')
   const content = chapter.content
   const novel = getNovel(novelId)!
-  const context = await compileCreativeContext(input.request, input.modelConfigId)
+  const context = await compileCreativeContext(input.request, input.modelConfigId, input.reviewModelConfigId)
   const { text: _text, ...report } = context
   const mode = resolveAiExecutionMode({ settingsJson: novel.settingsJson })
-  const route = buildAiModelRouteReport({ taskKind: 'chapter_review', stageLabel: 'Chapter Review', executionMode: mode.mode, resolutionSource: mode.source, modelConfigId: input.modelConfigId, temperatureCap: 0.32 })
+  const route = buildAiModelRouteReport({ taskKind: 'chapter_review', stageLabel: 'Chapter Review', executionMode: mode.mode, resolutionSource: mode.source, modelConfigId: input.reviewModelConfigId || input.modelConfigId, temperatureCap: 0.32 })
   progress(runId, 'reviewing', '仅评审现有正文，保存有原文证据的报告', { context: report })
   const review = await reviewGeneratedAsset({
-    targetType: 'chapter', novelId, modelConfigId: input.modelConfigId, parentTaskId: runId,
+    targetType: 'chapter', novelId, modelConfigId: route.modelConfigId, parentTaskId: runId,
     relatedEntityType: 'chapter', relatedEntityId: chapter.id, contextSummary: context.text, generatedOutput: content,
     narrativePolicyVersion: resolveNarrativePolicy(novel.settingsJson, true).policyVersion,
     reviewFocus: [input.request.request, '只指出现有正文的问题与有效表达，不改写正文，不将风格偏好当作硬性错误。'],
@@ -376,8 +392,12 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
     schemaVersion: 'chapter-review-v1', chapterId: chapter.id, chapterNum: chapter.chapterNum,
     contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status, context: report, createdAt: new Date().toISOString(),
-  }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: input.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
-  const result = { artifactId: artifact.id, chapterId: chapter.id, contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status }
+  }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: route.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
+  const issueIds = recordCreativeReviewIssues(input.request, runId, artifact.id, review, deterministicBlockers)
+  assertBase(input)
+  if (getChapter(chapter.id)?.content !== content) throw new Error('评审期间正文已变化，请重新评审。')
+  if (status === 'passed' && !review.issues?.length && !review.rewriteRequired && !review.rejectRequired) advanceCreativeRevisionIssues(input.request, artifact.id, true)
+  const result = { artifactId: artifact.id, chapterId: chapter.id, contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status, issueIds }
   updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })
   progress(runId, 'completed', summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
 }
@@ -397,7 +417,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     if (input.request.stage === 'chapter') await prepareChapter(runId, input)
     const sourceArtifactId = input.retryArtifactId || input.request.sourceArtifactId
     const generationRequest = { ...input.request, ...(sourceArtifactId ? { sourceArtifactId } : {}), request: [input.request.request, input.retryFeedback ? `上一候选未能应用，修订以下具体问题并保留有效内容：${input.retryFeedback}` : ''].filter(Boolean).join('\n') }
-    const context = await compileCreativeContext(generationRequest, input.modelConfigId)
+    const context = await compileCreativeContext(generationRequest, input.modelConfigId, input.reviewModelConfigId)
     const { text: _text, ...report } = context
     progress(runId, 'generating', '使用界面选定的模型生成增量候选', { context: report })
     const requirements = [generationRequest.request,
@@ -413,12 +433,14 @@ async function execute(runId: number, novelId: number): Promise<void> {
       ...(input.request.stage === 'map' ? ['按请求范围分批扩展国家、地区、城市和村庄，已有地点必须使用稳定id增量完善，未设计范围可保留空白。交代地形、水源、生计、通路及行程；南北方位、聚落与水陆通路互相一致。地点attributes.geography保存区域地图：boundary为父地图局部0..100坐标内3至64个不重复顶点组成的简单非零面积多边形（不重复首点），position为该父地图中的点位；每个地点内部地图使用自己的局部坐标。进入地点时，其上级boundary按自身包围盒归一化为内部0..100轮廓；子区域完整边界和城镇position必须在该轮廓内。子地图公里宽高默认从父公里范围乘自身boundary包围盒比例继承，避免另外填写矛盾尺度。x向东、y向南；同级相邻行政区可接边但不能无依据重叠。areaKm2为平方公里面积，mapFrame.widthKm/heightKm为本地点内部地图公里宽高。沿用已有明确面积与尺度；缺失时可以根据用户本轮地理设计需求，结合地形、行政层级、聚落分布和行程提出自洽候选，在本次候选中说明设计依据，不冒充原始事实。保存边界及公里尺度后，系统按多边形面积计算国土面积；areaKm2只是独立的作者设定面积，可省略而采用计算结果。旧x/y示意坐标仍不可换算公里。面积不能超过内部地图宽高乘积，也不能超过已知上级面积。确实尚不能合理设计的数值才省略。development=detailed/outlined/unexplored仅表示资料已展开/仅轮廓/尚未设计，不代表人物已探索或剧情已发生。boundary补丁完整替换边界，省略的geography子字段保留。新增面积、尺度、边界和其他地理设计均先提交候选，经review审校与validate验证后才能apply应用。'] : []),
     ]
     const generated = await generateGenericAssetDraft({ novelId, assetType: assetTypes[input.request.stage], title: `${CREATIVE_STAGE_LABELS[input.request.stage]} · 增量创作`, requirements, outputFormat: 'json', schemaHint: creativeSchemaHint(input.request.stage), modelConfigId: input.modelConfigId, parentArtifactId: sourceArtifactId, idempotencyKey: `creative:${runId}:${input.attempt}` }, {
-      contextSummary: context.text, maxTokens: context.outputReserve, parentTaskId: runId,
+      contextSummary: context.text, maxTokens: context.outputReserve, reviewModelConfigId: input.reviewModelConfigId, parentTaskId: runId,
       assertActive: () => { assertActive(runId); assertBase(input) },
       onStage: (step) => progress(runId, step, step === 'reviewing' ? '独立审校内容、引用与一致性' : '根据审校问题定向修订'),
     })
-    assertActive(runId)
+    assertActive(runId); assertBase(input)
     progress(runId, 'reviewing', generated.review.summary, { artifactId: generated.effectiveArtifact.id, reviewArtifactId: generated.reviewArtifact.id, reviewStatus: generated.review.status === 'passed' ? 'validating' : generated.review.status })
+    const issueIds = recordCreativeReviewIssues(input.request, runId, generated.reviewArtifact.id, generated.review.modelReview.rewrittenReview || generated.review.modelReview.review, generated.review.hardBlockers, generated.effectiveArtifact.id)
+    progress(runId, 'reviewing', generated.review.summary, { result: { issueIds } })
     if (generated.review.status !== 'passed') {
       updateTask(runId, { status: 'blocked' }); progress(runId, 'needs_attention', generated.review.summary); return
     }
@@ -426,6 +448,11 @@ async function execute(runId: number, novelId: number): Promise<void> {
     if (input.request.stage === 'story' && parsed.facts) validateCreativeFactPlans(novelId, parsed.facts)
     const resolution = parsed.changes && (parsed.changes as unknown[]).length ? validateStoryAtlasChanges({ novelId, expectedContextVersion: input.contextVersion, effectiveFromChapter: input.request.atChapter || 0, source: { kind: 'artifact', id: generated.effectiveArtifact.id }, idempotencyKey: `creative:${runId}:validate`, changes: parsed.changes as StoryAtlasChange[] }) : undefined
     assertCreativeChangeScope(input.request, parsed, resolution)
+    assertBase(input)
+    const comparison = createArtifact({ novelId, kind: 'creative_comparison', status: 'reviewed', parentArtifactId: generated.effectiveArtifact.id,
+      content: { history: captureCreativeHistory(input.request, parsed, resolution), candidateArtifactId: generated.effectiveArtifact.id, contextVersion: input.contextVersion }, contextVersion: input.contextVersion,
+      producerType: 'system', producerId: 'creative-history', producerClient: 'novelforge', taskId: runId, idempotencyKey: `creative:${runId}:${input.attempt}:comparison` })
+    progress(runId, 'reviewing', generated.review.summary, { result: { issueIds, comparisonArtifactId: comparison.id } })
     if (input.request.stage === 'outline') validateOutlineForProject(novelId, parsed, input.request)
     if (input.request.stage === 'chapter') {
       if (parsed.chapterNum !== input.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
@@ -444,6 +471,19 @@ async function execute(runId: number, novelId: number): Promise<void> {
   } catch (error) {
     const cancelled = ['cancelled', 'cancel_requested'].includes(getTaskRecord(runId)?.status || '')
     const message = error instanceof Error ? error.message : String(error)
+    const state = getCreativeRun(novelId, runId)
+    if (!cancelled && state?.artifactId && state.reviewArtifactId) {
+      const frozen = stored(runId, novelId).input
+      // A stale project/model is a task conflict, not evidence against the candidate.
+      try {
+        assertBase(frozen)
+        const report = requireArtifact<GenericAssetReviewContent>(state.reviewArtifactId)
+        if (report.content.schemaVersion === 'generic-asset-review-v1') {
+          const issueIds = recordCreativeReviewIssues(frozen.request, runId, report.id, report.content.modelReview.rewrittenReview || report.content.modelReview.review, [message], state.artifactId)
+          progress(runId, 'reviewing', message, { result: { issueIds } })
+        }
+      } catch { /* Preserve the original task failure when its baseline is unavailable. */ }
+    }
     updateTask(runId, { status: cancelled ? 'cancelled' : 'failed', errorMessage: message, currentChildTaskId: null })
     progress(runId, cancelled ? 'cancelled' : 'needs_attention', message, getCreativeRun(novelId, runId)?.artifactId ? { reviewStatus: 'needs_revision' } : {})
   } finally { active.delete(runId) }
@@ -473,8 +513,11 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   const busy = listCreativeRuns(request.novelId).find(run => ['pending', 'running', 'cancel_requested'].includes(run.status))
   if (busy) throw new Error(`当前项目正在执行任务 #${busy.runId}，完成或取消后再启动下一阶段。`)
   const model = novel.modelConfigId ? getModelConfigRecord(novel.modelConfigId) : getDefaultModelConfigRecord()
+  const reviewModelConfigId = parseStorySettingsDocument(novel.settingsJson).aiEngine.reviewModelConfigId || model.id
+  getModelConfigRecord(reviewModelConfigId)
   const resolvedRequest = { ...request, atChapter: resolveCreativeChapterPosition(request) }
-  const input: StoredRequest = { request: resolvedRequest, requestFingerprint: hashArtifactContent(request), contextVersion: novel.contextVersion || 1, modelConfigId: model.id, modelFingerprint: modelFingerprint(model.id), attempt: 1 }
+  validateCreativeRevisionTargets(resolvedRequest)
+  const input: StoredRequest = { request: resolvedRequest, requestFingerprint: hashArtifactContent(request), contextVersion: novel.contextVersion || 1, modelConfigId: model.id, modelFingerprint: modelFingerprint(model.id), reviewModelConfigId, reviewModelFingerprint: modelFingerprint(reviewModelConfigId), attempt: 1 }
   const runId = await createTask({ type: 'planning_draft', novelId: request.novelId, modelConfigId: model.id, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: JSON.stringify(input), idempotencyKey: key, status: 'pending' })
   // Return before model work starts; the persisted run survives MCP disconnection.
   setImmediate(() => { void execute(runId, request.novelId) })

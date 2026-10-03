@@ -11,6 +11,7 @@ import * as mapService from './map.service'
 import * as storyThreadService from './story-thread.service'
 import * as timelineService from './timeline.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { syncCreativeReviewIssues } from './creative-review-issues'
 
 interface RevisionTaskQueryFilters {
   novelId: number
@@ -722,7 +723,7 @@ export function syncSystemRevisionTasks(novelId: number): void {
   })
 
   existingRows
-    .filter((row) => row.issueKey && !activeKeys.has(row.issueKey))
+    .filter((row) => row.issueKey && !row.issueKey.startsWith('creative_review:') && !activeKeys.has(row.issueKey))
     .forEach((row) => {
       const previousStatus = normalizeStatus(row.status)
       if (previousStatus === 'ignored' || previousStatus === 'resolved') return
@@ -735,7 +736,7 @@ export function syncSystemRevisionTasks(novelId: number): void {
 }
 
 function listRevisionRows(novelId: number, sync = true) {
-  if (sync) syncSystemRevisionTasks(novelId)
+  if (sync) { syncCreativeReviewIssues(novelId); syncSystemRevisionTasks(novelId) }
   const db = getDb()
   return db.select().from(revisionTasks)
     .where(eq(revisionTasks.novelId, novelId))

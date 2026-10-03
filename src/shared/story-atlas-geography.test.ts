@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import type { StoryAtlasEntity, StoryAtlasGeography } from './story-atlas'
-import { atlasGeographicCoverage, atlasPolygonContainsPolygon, resolveAtlasGeography } from './story-atlas-geography'
+import type { StoryAtlasEntity, StoryAtlasGeography, StoryAtlasRelation } from './story-atlas'
+import { atlasGeographicCoverage, atlasPolygonContainsPolygon, resolveAtlasGeography, isAtlasInteriorConnection } from './story-atlas-geography'
 
 const rectangle = (left = 0, top = 0, right = 100, bottom = 100) => [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]
 const location = (id: string, parentId: string | null, geography: StoryAtlasGeography): StoryAtlasEntity => ({ id, parentId, kind: 'location', name: id, summary: '', attributes: { geography }, status: 'confirmed', source: { kind: 'test' }, effectiveFromChapter: 0 })
 const country = location('country', null, { boundary: rectangle(10, 20, 90, 80), mapFrame: { widthKm: 1000, heightKm: 600 } })
 const region = location('region', 'country', { boundary: rectangle(0, 0, 50, 100) })
 describe('atlas physical geography', () => {
+  it('distinguishes interior connectivity from town travel without inventing durations', () => {
+    const inn = { ...location('inn', null, {}), attributes: { locationType: 'inn' } }
+    const hall = { ...location('hall', 'inn', {}), attributes: { locationType: 'interior_space' } }
+    const yard = { ...location('yard', 'inn', {}), attributes: { locationType: 'courtyard' } }
+    const route = { fromId: 'hall', toId: 'yard', attributes: {} } as StoryAtlasRelation
+    expect(isAtlasInteriorConnection(route, [inn, hall, yard])).toBe(true)
+    expect(route.attributes.travelHours).toBeUndefined()
+    expect(isAtlasInteriorConnection({ ...route, attributes: { distanceKm: 1 } }, [inn, hall, yard])).toBe(false)
+    expect(isAtlasInteriorConnection(route, [inn, hall, { ...yard, parentId: 'otherInn' }])).toBe(false)
+    expect(isAtlasInteriorConnection(route, [{ ...inn, attributes: { locationType: 'region' } }, hall, yard])).toBe(false)
+    expect(isAtlasInteriorConnection(route, [inn, { ...hall, attributes: { locationType: 'town' } }, yard])).toBe(false)
+  })
   it('calculates areas from scale and carries the same physical frame into nested maps without writing attributes', () => {
     const city = location('city', 'region', { boundary: rectangle(10, 20, 20, 30) })
     const entities = [country, region, city]

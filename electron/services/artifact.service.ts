@@ -234,6 +234,10 @@ export function listArtifacts(query: AgentArtifactListQuery): AgentArtifact[] {
   const limit = Math.max(1, Math.min(query.limit || 50, 200))
   const clauses = ['novel_id = ?']
   const params: Array<string | number> = [query.novelId]
+  if (query.parentArtifactId) {
+    clauses.push('parent_artifact_id = ?')
+    params.push(query.parentArtifactId)
+  }
   if (query.kind) {
     clauses.push('kind = ?')
     params.push(query.kind)

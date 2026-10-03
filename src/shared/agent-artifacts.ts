@@ -54,6 +54,7 @@ export interface CreateAgentArtifactInput<T> {
 
 export interface AgentArtifactListQuery {
   novelId: number
+  parentArtifactId?: string
   kind?: AgentArtifactKind | string
   status?: AgentArtifactStatus
   limit?: number

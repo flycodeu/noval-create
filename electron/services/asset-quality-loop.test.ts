@@ -29,6 +29,12 @@ describe('asset quality loop completion gate', () => {
     mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('修订稿').mockResolvedValueOnce(review())
     expect(await runAssetQualityLoop(base)).toMatchObject({ stage: 'rewritten', finalOutput: '修订稿', warnings: [] })
   })
+  it('uses the selected reviewer for review and recheck, and the writer for repair', async () => {
+    mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('修订稿').mockResolvedValueOnce(review())
+    await runAssetQualityLoop({ ...base, modelConfigId: 2, rewriteModelConfigId: 1, chatOpts: { temperature: 0.2 }, rewriteChatOpts: { temperature: 0.7 } })
+    expect(mock.chat.mock.calls.map(([options]) => options.modelConfigId)).toEqual([2, 1, 2])
+    expect(mock.chat.mock.calls.map(([options]) => options.chatOpts.temperature)).toEqual([0.2, 0.7, 0.2])
+  })
   it('keeps structural conflicts blocked and clean map descriptions unchanged', async () => {
     mock.chat.mockResolvedValueOnce(JSON.stringify({ summary: '父级引用错误', rewrite_required: false, reject_required: true, conflict_risks: ['父级不存在'] }))
     const rejected = await runAssetQualityLoop({ ...base, targetType: 'map' })

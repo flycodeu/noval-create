@@ -40,6 +40,7 @@ export function RunProgress({ run, active, onCancel, onResume, onOpenResult, nam
     {run.artifactId && onOpenResult && <Button type="link" onClick={onOpenResult}>查看结果与评审 <ArrowRightOutlined /></Button>}
     <details className="author-disclosure"><summary>任务详情</summary>
       {run.count != null && <p>请求数量：{run.count}</p>}
+      <p>生成模型：{run.modelConfigId ?? '未知'} · 审校模型：{run.reviewModelConfigId ?? run.modelConfigId ?? '未知'}</p>
       <h3>原始请求</h3><p className="author-run__request">{run.request}</p>
       {run.message && <><h3>运行反馈</h3><p className="author-run__request">{run.message}</p></>}
     </details>
