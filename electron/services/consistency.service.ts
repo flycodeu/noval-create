@@ -210,16 +210,17 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   const protagonistRelationCount = protagonistRelationRows.length
   const protagonistDetailedCount = protagonistRelationRows.filter(hasRelationDetail).length
 
-  if (writingContractTagCount === 0) {
+  const hasWrittenVoiceRules = Boolean(asText(themeVoice.styleRules) && asText(themeVoice.dialogueRules))
+  if (writingContractTagCount === 0 && !hasWrittenVoiceRules) {
     pushIssue(
       issues,
       'medium',
       'voice',
-      '整本书还没有写作类型锚点',
-      '当前 Theme Voice 里还没有“爽文 / 写实 / 言情”等全书级写作类型，后续生成更容易在节奏、情绪兑现和语言边界上漂移。',
-      '先在主题与文风页补上写作类型标签，再继续批量生成故事设计和正文。',
+      '全书文风与对白边界尚未写清',
+      '当前没有足够的全书级文风与对白规则，后续生成容易在语气和节奏上漂移。',
+      '在主题与文风页写明可执行的叙述及对白规则；写作类型标签可按需要补充。',
     )
-  } else if (!asText(themeVoice.styleRules) || !asText(themeVoice.dialogueRules)) {
+  } else if (writingContractTagCount > 0 && !hasWrittenVoiceRules) {
     pushIssue(
       issues,
       'medium',
@@ -450,14 +451,14 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
         )
       }
 
-      if (activeLike && typeof thread.targetPayoffChapter !== 'number') {
+      if (activeLike && typeof thread.targetPayoffChapter !== 'number' && !asText(thread.payoffCondition)) {
         pushIssue(
           issues,
           'medium',
           'thread',
-          '线程缺少回收章位',
-          `${thread.title} 仍在推进中，但没有目标回收章位。`,
-          '补充 targetPayoffChapter 或至少写清回收条件，避免线程悬空。',
+          '线程缺少回收条件',
+          `${thread.title} 仍在推进中，但尚未写明回收条件或目标章位。`,
+          '写清该线何时算解决；有明确章位时再填写目标章，不必为填空预设日期。',
           { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
         )
       }

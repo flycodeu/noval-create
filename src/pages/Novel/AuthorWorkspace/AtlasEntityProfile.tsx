@@ -46,6 +46,5 @@ export function AtlasEntityProfile(props: Props) {
     {entity.kind === 'faction' && <OrganizationStructure {...props} />}
     {entity.kind === 'location' && <>{(['faction', 'character', 'event'] as const).map(kind => <Connections key={kind} title={{ faction: '本区域涉及的组织', character: '本区域的人物', event: '本区域的事件' }[kind]} links={regionLinks.filter(item => item.entity.kind === kind)} empty="当前章位尚无已记录的关联。" onOpen={onOpen} onRelation={onRelation} />)}</>}
     {['item', 'event'].includes(entity.kind) && <Connections title="相关人物与地点" links={links} empty="尚未记录关联资料。" onOpen={onOpen} onRelation={onRelation} />}
-    <details className="author-disclosure"><summary>记录依据</summary><p>从第 {entity.effectiveFromChapter} 章起生效</p><p>{entity.source.note || '来自已有资料记录'}</p></details>
   </article>
 }

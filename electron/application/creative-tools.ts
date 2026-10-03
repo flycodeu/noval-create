@@ -16,6 +16,7 @@ import { parseStorySettingsDocument, buildStorySettingsPayload } from '../../src
 import { queryCreativeFacts } from '../services/creative-facts'
 import { getChapter, listChapters } from '../services/chapter.service'
 import { getChapterContract, listSceneContracts } from '../services/endgame-asset.service'
+import { inspectCreativeChapterPrerequisites } from '../services/creative-chapter-context'
 
 const number: AgentToolJsonSchema = { type: 'integer', minimum: 1 }
 const string: AgentToolJsonSchema = { type: 'string', minLength: 1 }
@@ -51,7 +52,15 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       return { project: getNovel(id), source, idempotentReplay: false }
     }).immediate()
   })
-  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元。默认自动应用通过审校的结果；失败保留候选。operation=review只复核正式正文或图谱资料，不改写；图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
+  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元。正文前先用chapters.readiness检查；如缺章节合同或场景，先以outline阶段生成并应用本章安排，再独立启动chapter阶段，正文任务不会暗中保存大纲。默认自动应用通过审校的结果；失败保留候选。operation=review只复核正式正文或图谱资料，不改写；图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
+  add('chapters.readiness', '检查章节能否生成正文', '只读返回目标章缺失的章节合同与场景要求。ready=false时先运行outline阶段并应用本章安排，再启动chapter；不会生成或保存内容。', {
+    novelId: number, atChapter: { type: 'integer', minimum: 1 },
+  }, ['novelId', 'atChapter'], 'read', input => {
+    const novelId = Number(input.novelId), atChapter = Number(input.atChapter)
+    if (!getNovel(novelId)) throw new Error('项目不存在。')
+    const result = inspectCreativeChapterPrerequisites(novelId, atChapter)
+    return { novelId, atChapter, chapterId: result.chapterId, ready: result.blockers.length === 0, blockers: result.blockers, nextStage: result.blockers.length ? 'outline' : 'chapter' }
+  })
   add('chapters.review', '仅评审已有章节', '根据当前章节、合同与可见资料进行模型评审，生成持久报告工件；不改正文。立即返回run，使用workflows.get查询，result.review包含报告。需要修订时另开chapter任务并明确原章位。', {
     novelId: number, chapterId: number, request: { type: 'string', minLength: 1, maxLength: 12000 }, revisionIssueIds: requestFields.revisionIssueIds, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   }, ['novelId', 'chapterId', 'idempotencyKey'], 'draft_write', async input => {

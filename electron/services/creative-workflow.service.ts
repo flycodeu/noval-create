@@ -16,9 +16,9 @@ import { generateGenericAssetDraft } from './generic-asset-workflow.service'
 import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { assertCreativeChangeScope, validateCreativeChangeScope } from './creative-change-scope'
 import { applyStoryAtlasChanges, validateStoryAtlasChanges, queryStoryAtlas } from './story-atlas.service'
-import { getChapterContract, listSceneContracts, upsertChapterContract, upsertSceneContract } from './endgame-asset.service'
+import { listSceneContracts, upsertChapterContract, upsertSceneContract } from './endgame-asset.service'
 import { createChapterSegment, listChapterSegments, createStoryVolume, updateStoryVolume, createStoryPart, updateStoryPart } from './story-structure.service'
-import { assertCreativeChapterCandidate, inspectCreativeChapterPrerequisites } from './creative-chapter-context'
+import { assertCreativeChapterCandidate, CreativeChapterContextError, inspectCreativeChapterPrerequisites } from './creative-chapter-context'
 import { applyCreativeProjectAsset, isProjectAssetStage, PROJECT_STAGE_SCHEMAS, validateProjectAsset } from './creative-project-assets'
 import { validateJsonSchema, type AgentToolJsonSchema } from '../../src/shared/tool-contracts'
 import { reviewGeneratedAsset } from './asset-quality.service'
@@ -277,36 +277,6 @@ function applyOutlineData(novelId: number, data: Record<string, unknown>, savedS
   return ids
 }
 
-async function prepareChapter(runId: number, input: StoredRequest): Promise<void> {
-  const chapter = listChapters(input.request.novelId).find(row => row.chapterNum === input.request.atChapter)
-  const prerequisites = inspectCreativeChapterPrerequisites(input.request.novelId, input.request.atChapter!)
-  if (!prerequisites.blockers.length) return
-  if (input.request.autoApply === false) throw new Error('本章尚缺章节安排。请先运行大纲阶段并应用，随后可只生成正文候选。')
-  progress(runId, 'context', '自动补齐本章目标、场景和视角，完成审校后继续正文')
-  const existingArrangement = chapter ? JSON.stringify({ chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id) }) : ''
-  const request: CreativeWorkflowInput = { ...input.request, stage: 'outline', count: 1, ...(chapter ? { changeScope: { chapterIds: [chapter.id] } } : {}), request: `仅补齐第 ${input.request.atChapter} 章的章节目标和场景安排。${chapter ? `已有章节ID ${chapter.id}，章名${chapter.title}，大纲：${chapter.outline || '待补齐'}。现有安排：${existingArrangement}。必须保留有效安排、已锁定约束和全部已有场景，不改变既定事件或事实揭示边界。` : '创建这一章的安排。'}需补齐：${prerequisites.blockers.join('；')}。用户要求：${input.request.request}` }
-  const context = await compileCreativeContext(request, input.modelConfigId, input.reviewModelConfigId)
-  const generated = await generateGenericAssetDraft({ novelId: request.novelId, assetType: 'outline', title: '正文前置安排', requirements: [request.request, '必须包含chapterContract和完整scenes；仅使用已有人物作为POV，至少一个场景。'], outputFormat: 'json', schemaHint: creativeSchemaHint('outline'), modelConfigId: input.modelConfigId, idempotencyKey: `creative:${runId}:prepare:${input.attempt}` }, { contextSummary: context.text, maxTokens: context.outputReserve, reviewModelConfigId: input.reviewModelConfigId, parentTaskId: runId, assertActive: () => { assertActive(runId); assertBase(input) }, onStage: step => progress(runId, step, '核对正文前置安排') })
-  if (generated.review.status !== 'passed') throw new Error(`正文前置安排未通过审校：${generated.review.summary}`)
-  const data = parseCreativeCandidate('outline', generated.effectiveArtifact.content.output)
-  assertCreativeChangeScope(request, data)
-  if (Array.isArray(data.volumes) && data.volumes.length) throw new Error('正文前置安排不能修改卷或单元。')
-  const planned = data.chapters as Record<string, unknown>[]
-  if (planned.length !== 1 || planned[0].chapterNum !== input.request.atChapter || !planned[0].chapterContract || !Array.isArray(planned[0].scenes) || !planned[0].scenes.length) throw new Error('正文前置安排未提供目标章节的完整合同与场景。')
-  getSqlite().transaction(() => {
-    assertActive(runId)
-    assertBase(input)
-    validateOutlineForProject(request.novelId, data, request)
-    const ids = applyOutlineData(request.novelId, data)
-    const after = inspectCreativeChapterPrerequisites(request.novelId, input.request.atChapter!)
-    if (after.blockers.length) throw new Error(`正文前置安排仍不完整：${after.blockers.join('；')}`)
-    updateArtifactLifecycle(generated.effectiveArtifact.id, { status: 'committed', committedEntityIds: ids })
-    input.contextVersion = getNovel(request.novelId)?.contextVersion || 1
-    updateTask(runId, { inputJson: JSON.stringify(input), currentChildTaskId: null })
-  }).immediate()
-  progress(runId, 'context', '本章安排已保存，继续编译正文可见资料')
-}
-
 export function applyCreativeDraft(input: { novelId: number; runId: number }): Record<string, unknown> {
   const { input: frozen } = stored(input.runId, input.novelId)
   if (frozen.request.operation === 'review') throw new Error('评审报告不能作为正文应用；请根据报告发起修订。')
@@ -452,7 +422,6 @@ async function execute(runId: number, novelId: number): Promise<void> {
       else await executeAtlasReview(runId, input)
       return
     }
-    if (input.request.stage === 'chapter') await prepareChapter(runId, input)
     const sourceArtifactId = input.retryArtifactId || input.request.sourceArtifactId
     const generationRequest = { ...input.request, ...(sourceArtifactId ? { sourceArtifactId } : {}), request: [input.request.request, input.retryFeedback ? `上一候选未能应用，修订以下具体问题并保留有效内容：${input.retryFeedback}` : ''].filter(Boolean).join('\n') }
     const context = await compileCreativeContext(generationRequest, input.modelConfigId, input.reviewModelConfigId)
@@ -556,6 +525,10 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   getModelConfigRecord(reviewModelConfigId)
   const resolvedRequest = { ...request, atChapter: resolveCreativeChapterPosition(request) }
   validateCreativeRevisionTargets(resolvedRequest)
+  if (resolvedRequest.stage === 'chapter' && resolvedRequest.operation !== 'review') {
+    const readiness = inspectCreativeChapterPrerequisites(resolvedRequest.novelId, resolvedRequest.atChapter)
+    if (readiness.blockers.length) throw new CreativeChapterContextError('CHAPTER_PREREQUISITES_REQUIRED', `第 ${resolvedRequest.atChapter} 章尚不能生成正文：${readiness.blockers.join('；')}。请先生成并应用本章的大纲与场景安排。`)
+  }
   if (request.operation === 'review' && request.stage !== 'chapter') captureFormalAtlasReview(resolvedRequest)
   const input: StoredRequest = { request: resolvedRequest, requestFingerprint: hashArtifactContent(request), contextVersion: novel.contextVersion || 1, modelConfigId: model.id, modelFingerprint: modelFingerprint(model.id), reviewModelConfigId, reviewModelFingerprint: modelFingerprint(reviewModelConfigId), attempt: 1 }
   const runId = await createTask({ type: 'planning_draft', novelId: request.novelId, modelConfigId: model.id, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: JSON.stringify(input), idempotencyKey: key, status: 'pending' })

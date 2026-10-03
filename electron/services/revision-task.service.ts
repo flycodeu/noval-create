@@ -583,6 +583,7 @@ function buildSystemTaskDrafts(novelId: number): SystemRevisionDraft[] {
   const db = getDb()
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
   const chapterNumById = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
+  const writtenChapterIds = new Set(chapterRows.filter(chapter => Boolean(chapter.content?.trim())).map(chapter => chapter.id))
 
   const drafts: SystemRevisionDraft[] = report.issues.map((issue) => {
     const chapterId = issue.entityType === 'chapter' && typeof issue.entityId === 'number'
@@ -616,6 +617,8 @@ function buildSystemTaskDrafts(novelId: number): SystemRevisionDraft[] {
   })
 
   contextStatus.staleChapterIds.forEach((chapterId) => {
+    // A planned chapter has no prose to reconcile; generation compiles a fresh context when it starts.
+    if (!writtenChapterIds.has(chapterId)) return
     const chapterNum = chapterNumById.get(chapterId)
     const title = chapterNum ? `第 ${chapterNum} 章需要同步上下文` : '章节需要同步上下文'
     drafts.push({

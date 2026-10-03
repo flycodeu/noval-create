@@ -157,13 +157,28 @@ async function main() {
     assert.equal((await finish(next.runId)).status, 'success')
     assert.equal((await call('atlas.query', {})).atlas.entities.length, 3)
 
-    // Writing prepares missing contracts itself, then commits prose and its reviewed summary together.
+    // A prose run must never commit a hidden outline before its own result exists.
     const prose = '陈舟解开旧绳，把磨断的一截放在岸上。林禾抱来一捆新绳，两人把船重新系住。河水擦着木桩过去，渡船终于停稳。'
-    replies.push(JSON.stringify({ chapters: [{ chapterNum: 1, title: '换绳', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review,
-      JSON.stringify({ chapterNum: 1, title: '换绳', content: prose, summary: '陈舟与林禾换上新绳，渡船停稳。', changes: [] }), review)
+    const firstReadiness = await call('chapters.readiness', { atChapter: 1 })
+    assert.equal(firstReadiness.ready, false)
+    assert.equal(firstReadiness.nextStage, 'outline')
+    const beforeFirst = requests.length
+    const beforeFirstTasks = sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE related_entity_type='creative_workflow' AND novel_id=?").get(novelId).count
+    const blockedFirst = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'chapter', request: '写换绳的短场景。', atChapter: 1, autoApply: true, idempotencyKey: 'chapter-unprepared' } }, context)
+    assert.equal(blockedFirst.ok, false)
+    assert.match(blockedFirst.error.message, /先生成并应用本章的大纲与场景安排/)
+    assert.equal(requests.length, beforeFirst, 'blocked prose never calls the model')
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM chapters WHERE novel_id=?').get(novelId).count, 0, 'blocked prose never creates an outline')
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE related_entity_type='creative_workflow' AND novel_id=?").get(novelId).count, beforeFirstTasks, 'preflight does not create a failed workflow')
+    replies.push(JSON.stringify({ chapters: [{ chapterNum: 1, title: '换绳', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review)
+    const firstOutline = await finish((await call('workflows.start', { stage: 'outline', request: '安排第1章换绳。', atChapter: 1, count: 1, idempotencyKey: 'chapter-first-outline' })).run.runId)
+    assert.equal(firstOutline.status, 'success', JSON.stringify(firstOutline))
+    assert.equal((await call('chapters.readiness', { atChapter: 1 })).ready, true)
+    replies.push(JSON.stringify({ chapterNum: 1, title: '换绳', content: prose, summary: '陈舟与林禾换上新绳，渡船停稳。', changes: [] }), review)
     const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
+    assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')
     const chapter = sqlite.prepare('SELECT content, summary FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId)
     assert.equal(chapter.content, prose)
     assert.equal(chapter.summary, '陈舟与林禾换上新绳，渡船停稳。', 'content invalidation must not erase the new reviewed summary')
@@ -180,17 +195,25 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content, prose)
     assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: reviewed.runId } }, context)).ok, false, 'a report is not an applicable prose candidate')
 
-    // Complete-looking draft contracts still need automatic review and activation before writing.
+    // Draft contracts require a separate reviewed outline run; the prose run cannot promote them.
     const secondId = Number(sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,outline) VALUES(?,2,?,?)').run(novelId, '加固', '再次检查新绳是否牢固。').lastInsertRowid)
     sqlite.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'draft')").run(novelId, secondId, '陈舟检查并更换系船绳')
     sqlite.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,time_location,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,?,'draft')").run(novelId, secondId, '陈舟', '清晨，渡口', '检查系船绳', '旧绳磨断', '渡船停稳')
     const beforeSecond = requests.length
-    replies.push(JSON.stringify({ chapters: [{ id: secondId, chapterNum: 2, title: '加固', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review,
-      JSON.stringify({ chapterNum: 2, title: '加固', content: prose, summary: '陈舟与林禾检查绳结，渡船停稳。', changes: [] }), review)
+    assert.equal((await call('chapters.readiness', { atChapter: 2 })).ready, false)
+    const blockedSecond = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'chapter', request: '继续检查渡船。', atChapter: 2, autoApply: true, idempotencyKey: 'chapter-draft-contract-blocked' } }, context)
+    assert.equal(blockedSecond.ok, false)
+    assert.equal(requests.length, beforeSecond)
+    assert.equal(sqlite.prepare('SELECT status FROM chapter_contracts WHERE chapter_id=?').get(secondId).status, 'draft')
+    replies.push(JSON.stringify({ chapters: [{ id: secondId, chapterNum: 2, title: '加固', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review)
+    const secondOutline = await finish((await call('workflows.start', { stage: 'outline', request: '仅补齐第2章安排。', atChapter: 2, count: 1, changeScope: { chapterIds: [secondId] }, idempotencyKey: 'chapter-second-outline' })).run.runId)
+    assert.equal(secondOutline.status, 'success', JSON.stringify(secondOutline))
+    assert.equal((await call('chapters.readiness', { atChapter: 2 })).ready, true)
+    replies.push(JSON.stringify({ chapterNum: 2, title: '加固', content: prose, summary: '陈舟与林禾检查绳结，渡船停稳。', changes: [] }), review)
     const second = (await call('workflows.start', { stage: 'chapter', request: '继续检查渡船。', atChapter: 2, idempotencyKey: 'chapter-draft-contract' })).run
     const secondDone = await finish(second.runId)
     assert.equal(secondDone.status, 'success', JSON.stringify(secondDone))
-    assert.equal(requests.length, beforeSecond + 4, 'draft status cannot skip the reviewed prerequisite workflow')
+    assert.equal(requests.length, beforeSecond + 4, 'outline and prose remain separately reviewed')
     assert.equal(sqlite.prepare('SELECT status FROM chapter_contracts WHERE chapter_id=?').get(secondId).status, 'ready')
     const queriedChapter = await call('assets.query', { chapterId: secondId })
     assert.equal(queriedChapter.chapter.id, secondId)
@@ -573,6 +596,16 @@ async function main() {
     assert.equal(report.issues.some(issue => issue.entityId === orphanItemId && issue.title === '物品实例仍然悬空'), true, 'genuinely unused records still need attention')
     sqlite.prepare('UPDATE character_relations SET description=?,interaction_style=NULL,subtext_rule=NULL,intimacy_level=NULL,tension_level=NULL WHERE novel_id=?').run('经营渡口时分担修船和记账，遇账目争议先核对原账。', novelId)
     assert.equal(buildNovelConsistencyReport(novelId).issues.some(issue => /关系还停留在标签|关键关系缺少具体/.test(issue.title)), false, 'concrete relationships do not require ratings or hidden subtext')
+    const boardNovelId = Number(sqlite.prepare('INSERT INTO novels(title,model_config_id,theme_voice_json) VALUES(?,?,?)').run('问题看板试验', modelId, JSON.stringify({ style_rules: '第三人称限知，调查结论不超过证据。', dialogue_rules: '人物对白按身份和当时所知分开。' })).lastInsertRowid)
+    sqlite.prepare('INSERT INTO story_threads(novel_id,title,thread_type,status,start_chapter,payoff_condition) VALUES(?,?,?,?,?,?)').run(boardNovelId, '渡口失踪案', 'main', 'active', 1, '查明失踪者去向并交代责任')
+    sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,content,stale_reason_json) VALUES(?,?,?,?,?)').run(boardNovelId, 1, '第一章', '渡口有人失踪。', '["world_rule_changed"]')
+    sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,stale_reason_json) VALUES(?,?,?,?)').run(boardNovelId, 2, '第二章', '["world_rule_changed"]')
+    const boardReport = buildNovelConsistencyReport(boardNovelId)
+    assert.equal(boardReport.issues.some(issue => issue.category === 'voice'), false, 'concrete prose and dialogue rules suffice without arbitrary genre tags')
+    assert.equal(boardReport.issues.some(issue => issue.title === '线程缺少回收条件'), false, 'an explicit payoff condition does not require an invented chapter number')
+    const boardIssues = require('../electron/services/revision-task.service.ts').listRevisionTasks(boardNovelId)
+    assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 1 章需要同步上下文'), true)
+    assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 2 章需要同步上下文'), false, 'unwritten plans compile fresh context and should not clutter the repair board')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {
