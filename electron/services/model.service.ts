@@ -35,6 +35,7 @@ type KimiThinkingMode = 'enabled' | 'disabled'
 
 interface ModelExtraParams {
   kimiThinking?: KimiThinkingMode
+  deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max'
 }
 
 export function normalizeModelProvider(provider: unknown): string {
@@ -144,12 +145,15 @@ function parseModelExtraParams(raw: unknown): ModelExtraParams {
   const kimiThinking = source.kimiThinking === 'enabled' || source.kimiThinking === 'disabled'
     ? source.kimiThinking
     : undefined
-  return { kimiThinking }
+  const deepseekReasoningEffort = ['none', 'low', 'high', 'max'].includes(String(source.deepseekReasoningEffort))
+    ? source.deepseekReasoningEffort as ModelExtraParams['deepseekReasoningEffort'] : undefined
+  return { kimiThinking, deepseekReasoningEffort }
 }
 
 export function normalizeModelExtraParamsJson(raw: unknown, provider: string): string | null {
   const normalizedProvider = normalizeModelProvider(provider)
   const parsed = parseModelExtraParams(raw)
+  if (normalizedProvider === 'deepseek') return JSON.stringify({ deepseekReasoningEffort: parsed.deepseekReasoningEffort || 'low' })
   if (normalizedProvider !== 'kimi') return null
   const kimiThinking: KimiThinkingMode = parsed.kimiThinking || 'disabled'
   return JSON.stringify({ kimiThinking })
@@ -160,6 +164,7 @@ export function getModelProviderOptions(config: {
   extraParamsJson?: string | null
 }): ChatOptions['providerOptions'] | undefined {
   const provider = normalizeModelProvider(config.provider)
+  if (provider === 'deepseek') return { deepseekReasoningEffort: parseModelExtraParams(config.extraParamsJson).deepseekReasoningEffort || 'low' }
   if (provider !== 'kimi') return undefined
   const extraParams = parseModelExtraParams(config.extraParamsJson)
   return {

@@ -88,6 +88,57 @@ async function main() {
     assert.equal(queryStoryAtlas({ novelId }).contextVersion, beforeRollback)
     assert.ok(!queryStoryAtlas({ novelId }).entities.some((r) => r.name === '外部事务回滚物'))
 
+    const organizationNovel = addNovel()
+    const organizationInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: organizationNovel, expectedContextVersion: queryStoryAtlas({ novelId: organizationNovel }).contextVersion })
+    const organization = applyStoryAtlasChanges(organizationInput([
+      { op: 'upsert_entity', clientId: 'north', kind: 'location', name: '北岸', attributes: { locationType: 'region' } },
+      { op: 'upsert_entity', clientId: 'south', kind: 'location', name: '南岸', attributes: { locationType: 'region' } },
+      { op: 'upsert_entity', clientId: 'branch', kind: 'faction', name: '渡运部', parentId: 'org', attributes: { organizationLevel: 'department', positions: [{ id: 'keeper', title: '掌船', status: 'established', responsibilities: '安排渡船' }, { id: 'scribe', title: '录事', status: 'planned' }] } },
+      { op: 'upsert_entity', clientId: 'org', kind: 'faction', name: '两岸渡行', attributes: { organizationLevel: 'organization', traits: ['按水位排船'], goal: '维持两岸往来', funding: '渡资', resources: '两条船', memberPolicy: '熟悉水路者可入' } },
+      { op: 'upsert_entity', clientId: 'worker', kind: 'character', name: '顾迟', attributes: { occupation: '船工', dailyRoutine: '查验绳索', motivation: '保住渡口生计', personalityTraits: ['谨慎'], abilityLimits: '不能预知水位', abilities: [{ name: '辨水', effect: '根据水痕判断涨落', limits: '暴雨后需重新测量', cost: '需要现场观察' }] } },
+      { op: 'upsert_relation', clientId: 'birth', kind: 'presence', fromId: 'worker', toId: 'north', attributes: { locationRole: 'birthplace' } },
+      { op: 'upsert_relation', clientId: 'home', kind: 'presence', fromId: 'worker', toId: 'south', attributes: { locationRole: 'residence' } },
+      { op: 'upsert_relation', clientId: 'activity-n', kind: 'presence', fromId: 'worker', toId: 'north', attributes: { locationRole: 'activity' } },
+      { op: 'upsert_relation', clientId: 'activity-s', kind: 'presence', fromId: 'worker', toId: 'south', attributes: { locationRole: 'activity' } },
+      { op: 'upsert_relation', clientId: 'current', kind: 'presence', fromId: 'worker', toId: 'north', attributes: { locationRole: 'current' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'north', attributes: { locationRole: 'headquarters' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'branch', toId: 'south', attributes: { locationRole: 'outpost' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'north', attributes: { locationRole: 'jurisdiction' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'south', attributes: { locationRole: 'jurisdiction' } },
+      { op: 'upsert_relation', clientId: 'job', kind: 'membership', fromId: 'worker', toId: 'branch', attributes: { positionId: 'keeper' } },
+    ]))
+    const orgIds = organization.idMap
+    const organizationSnapshot = () => queryStoryAtlas({ novelId: organizationNovel })
+    assert.equal(organizationSnapshot().relations.filter(edge => edge.fromId === orgIds.worker && edge.kind === 'presence').length, 5, 'birthplace, home, activity and current position must coexist')
+    assert.equal(organizationSnapshot().relations.filter(edge => edge.attributes.locationRole === 'jurisdiction').length, 2, 'a faction can cover multiple regions')
+    const focused = queryStoryAtlas({ novelId: organizationNovel, focusEntityId: orgIds.org })
+    assert.ok(focused.entities.some(entity => entity.id === orgIds.branch)); assert.ok(focused.entities.some(entity => entity.id === orgIds.worker), 'organization focus includes department members')
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM characters WHERE novel_id=?').get(organizationNovel).count, 1, 'planned positions never invent people')
+    applyStoryAtlasChanges(organizationInput([
+      { op: 'upsert_entity', id: orgIds.branch, kind: 'faction', name: '渡运部', attributes: { positions: [{ id: 'keeper', requirements: '能辨水痕' }] } },
+      { op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', attributes: { personalityTraits: ['说话克制'], dailyRoutine: '', campFactionIds: [] } },
+      { op: 'upsert_relation', kind: 'presence', fromId: orgIds.worker, toId: orgIds.south, attributes: { locationRole: 'current' } },
+    ], 2))
+    const worker = organizationSnapshot().entities.find(entity => entity.id === orgIds.worker)
+    assert.equal(worker.attributes.dailyRoutine, '查验绳索'); assert.deepEqual(worker.attributes.personalityTraits, ['谨慎', '说话克制'])
+    assert.equal(organizationSnapshot().entities.find(entity => entity.id === orgIds.branch).attributes.positions.length, 2)
+    assert.equal(organizationSnapshot().relations.find(edge => edge.id === orgIds.birth).toId, orgIds.north)
+    assert.equal(organizationSnapshot().relations.find(edge => edge.id === orgIds.current).toId, orgIds.south)
+    assert.equal(queryStoryAtlas({ novelId: organizationNovel, atChapter: 1 }).relations.find(edge => edge.id === orgIds.current).toId, orgIds.north)
+    const guardVersion = organizationSnapshot().contextVersion
+    for (const bad of [
+      { op: 'upsert_relation', kind: 'membership', fromId: orgIds.worker, toId: orgIds.branch, attributes: { positionId: 'missing' } },
+      { op: 'upsert_relation', kind: 'membership', fromId: orgIds.worker, toId: orgIds.branch, attributes: { positionId: 'scribe' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: orgIds.worker, toId: orgIds.south, attributes: { locationRole: 'headquarters' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: orgIds.org, toId: ids.town, attributes: { locationRole: 'outpost' } },
+      { op: 'upsert_entity', id: orgIds.org, kind: 'faction', name: '两岸渡行', parentId: orgIds.branch },
+      { op: 'upsert_entity', id: orgIds.branch, kind: 'faction', name: '渡运部', attributes: { positions: [{ id: 'keeper', reportsToPositionId: 'keeper' }] } },
+    ]) assert.throws(() => applyStoryAtlasChanges(organizationInput([bad], 2)), /岗位|角色|生效|自身的上级|循环/)
+    assert.equal(organizationSnapshot().contextVersion, guardVersion, 'bad organizational references must be atomic')
+    const planJob = applyStoryAtlasChanges(organizationInput([{ op: 'upsert_relation', clientId: 'futureJob', kind: 'membership', fromId: orgIds.worker, toId: orgIds.branch, status: 'planned', attributes: { positionId: 'scribe' } }], 3))
+    assert.ok(!organizationSnapshot().relations.some(edge => edge.id === planJob.idMap.futureJob))
+    assert.ok(queryStoryAtlas({ novelId: organizationNovel, includePlanned: true }).relations.some(edge => edge.id === planJob.idMap.futureJob))
+
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)
     const b = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '乙').lastInsertRowid)

@@ -3,6 +3,7 @@ import type { CreativeRun, CreativeStage, CreativeWorkflowInput } from '../../sr
 import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS } from '../../src/shared/creative-workflow'
 import type { GenericAssetDraftContent, GenericAssetReviewContent, GenericAssetType } from '../../src/shared/generic-asset-workflow'
 import type { StoryAtlasChange } from '../../src/shared/story-atlas'
+import { STORY_ATLAS_ATTRIBUTE_SCHEMAS } from '../../src/shared/story-atlas'
 import { getDb, getSqlite } from '../database/db'
 import { tasks } from '../database/schema'
 import { createTask, getTaskRecord, updateTask, cancelTask } from './task.service'
@@ -28,7 +29,7 @@ const active = new Set<number>()
 const assetTypes: Record<CreativeStage, GenericAssetType> = { background: 'project_brief', world_rules: 'world_rules', story: 'outline', style: 'theme_voice', outline: 'outline', characters: 'character', map: 'map', relationships: 'character', factions: 'faction', items: 'item', events: 'timeline', chapter: 'chapter' }
 const atlasStages = new Set<CreativeStage>(['characters', 'map', 'relationships', 'factions', 'items', 'events'])
 export const ATLAS_SCHEMA_HINT = `{"changes":[{"op":"upsert_entity","clientId":"local-a","kind":"character|location|faction|item|event","name":"名称","summary":"具体内容","parentId":null,"attributes":{},"status":"confirmed"},{"op":"upsert_relation","kind":"relationship|route|presence|membership|ownership|participation","fromId":"local-a 或已有ID","toId":"已有ID","label":"具体关系","attributes":{}}]}
-已有实体修改必须带id；新增使用clientId，其他变更可引用clientId。character属性可用personalityTraits/flaws/speechPattern/goals/roleType；location属性可用locationType/terrain/climate/x/y，parentId必须引用上级地点；route属性travelHours/travelMode/routeOpen；人物位置用presence，阵营成员用membership，物品归属用ownership，事件参与用participation。空间相邻不等于有路线，跨水陆路线必须交代通行方式。不得删除无关资料。`
+已有实体修改必须带id；新增使用clientId，其他变更可引用clientId。character属性可用personalityTraits/flaws/speechPattern/goals/publicSummary/publicGoal/roleType；publicSummary和publicGoal只写公开可观察形象与目标，秘密意图保留作者档案，不混入公开字段。location属性可用locationType/terrain/climate/x/y，parentId引用上级地点；faction.parentId引用上级组织，可表达分部或部门。route属性travelHours/travelMode/routeOpen。人物地点用presence，attributes.locationRole明确birthplace出生/residence常住/activity活动/current当前；组织地点用headquarters总部/outpost据点/jurisdiction涉及区域，可跨区域有多条关系。当前在场不能从出生、居住、活动或组织覆盖区推断。实际成员用membership（人物→组织），attributes.positionId可引用该组织的岗位ID，不能造未登记的人物占空岗位。物品归属用ownership，事件参与用participation。所有端点用图谱ID或本批clientId，不能把campFactionIds/homeLocationId等未校验ID塞到attributes。空项省略，未知资料不得填写“待补充”冒充事实。数组增量合并，岗位按本组织内稳定id合并，未提及资料保留。空间相邻、商旅往来不证明具体道路已建立或可通行；门关闭或尚未进入不等于不可通行，未知routeOpen省略，不把水痕当步行路线。跨水陆路线必须交代通行方式。现场变化使用发生章位，不能把暂态固定为开篇背景。不得删除无关资料。`
 
 const schemaText: AgentToolJsonSchema = { type: 'string', minLength: 1, maxLength: 12000 }
 const schemaId: AgentToolJsonSchema = { type: 'integer', minimum: 1 }
@@ -55,7 +56,10 @@ const outlineSchema = schemaObject({
 })
 
 export function creativeSchemaHint(stage: CreativeStage): string {
-  if (atlasStages.has(stage)) return ATLAS_SCHEMA_HINT
+  if (atlasStages.has(stage)) {
+    const kinds = stage === 'characters' ? ['character', 'presence', 'membership'] as const : stage === 'factions' ? ['faction', 'presence', 'membership'] as const : []
+    return ATLAS_SCHEMA_HINT + kinds.map(kind => `\n${kind}.attributes字段契约：${JSON.stringify(STORY_ATLAS_ATTRIBUTE_SCHEMAS[kind])}`).join('')
+  }
   if (isProjectAssetStage(stage)) return `只输出本次变更的部分字段，不要重写整份资料。数组按稳定id（地图层级按depth，支线按name）合并，字符串数组增量补充；未提及字段保留。${stage === 'story' ? '秘密、线索与知情差必须登记在facts，不能只写进主线文本。新信息点用clientId，已有用数值id；plannedRevealChapterNum是计划章序，不表示已经发生。knownFromStartCharacterIds只写有既定依据、在开书前就知情的人物图谱ID，不填代表未知。普通地图/人物属性不需逐条变为秘密。' : ''}字段必须遵循 JSON Schema：${JSON.stringify(PROJECT_STAGE_SCHEMAS[stage])}`
   if (stage === 'background') return '{"userBackground":"故事发生的世界、时代、处境和初始冲突，纯小说背景","expandedBackground":"展开设定，避免与背景重复","synopsis":"面向读者的作品简介"}。只输出本次需要修改的非空字段，至少一项，未提及字段保留。不要改书名，不要放文件路径、字数目标、工作流程、作者操作指令。'
   if (stage === 'outline') return '{"volumes":[{"clientId":"v1","title":"卷名","summary":"本卷冲突和进展","parts":[{"clientId":"p1","title":"单元名","summary":"本单元完整事件"}]}],"chapters":[{"id":123,"chapterNum":1,"volumeId":"v1","partId":"p1","title":"章名","outline":"本章目的、冲突、事件、人物变化与悬念","chapterContract":{"chapterGoal":"本章应完成的事情","forbiddenActions":[],"acceptanceNotes":[]},"scenes":[{"pov":"现有人物精确全名","timeLocation":"时间地点","sceneGoal":"具体目标","obstacle":"具体阻碍","resultState":"结束状态","revealPayload":[]}],"allowedFactIds":[],"revealedFactIds":[]}]}。volumes和chapters可分别省略，但至少提供一个非空数组。新卷/单元用clientId，既有卷/单元用数值id；章节volumeId/partId引用既有数值ID或本批clientId。新章不带id，既有章必须使用id；每个章节必须有chapterContract及完整scenes，已有场景按既有顺序保留。增量补充，不清空已有卷章。事实ID来自已有资料，不编造。场景POV必须是现有人物唯一全名。'
@@ -110,7 +114,7 @@ export function parseCreativeCandidate(stage: CreativeStage, raw: string): Recor
   }
   if (Array.isArray(data.changes)) {
     const entityKinds: Partial<Record<CreativeStage, string[]>> = { characters: ['character'], map: ['location'], factions: ['faction'], items: ['item'], events: ['event'], relationships: [] }
-    const relationKinds: Partial<Record<CreativeStage, string[]>> = { characters: ['relationship', 'presence', 'membership'], map: ['route'], factions: ['membership'], items: ['ownership'], events: ['participation'], relationships: ['relationship', 'presence', 'membership', 'ownership', 'participation'] }
+    const relationKinds: Partial<Record<CreativeStage, string[]>> = { characters: ['relationship', 'presence', 'membership'], map: ['route', 'presence'], factions: ['membership', 'presence'], items: ['ownership', 'presence'], events: ['participation', 'presence'], relationships: ['relationship', 'presence', 'membership', 'ownership', 'participation'] }
     for (const rawChange of data.changes) {
       const change = object(rawChange)
       if (!['upsert_entity', 'upsert_relation'].includes(String(change.op))) throw new Error('模型生成只允许增量新增或更新；停用资料请使用明确的资料更正操作。')
@@ -390,7 +394,8 @@ async function execute(runId: number, novelId: number): Promise<void> {
       '已有记录通过稳定ID增量更新，不创建同名重复记录，不输出文件路径、流程备注和工作包说明。',
       '关系须有具体含义和方向；地图先设计区域、地形和水系，再安排聚落与路线；说明城镇村庄的水源、生计和对外通路。地形、水系、通行方式和耗时应合理；x/y仅用于示意布局，不能当作真实公里。',
       `剧情章位为 ${input.request.atChapter ?? 0}；计划不得伪装成当前事实。`,
-      ...(input.request.stage === 'characters' ? ['按本次请求区分主要人物与临时配角。主要人物要写清身份与处境、具体目标、性格表现与弱点、说话方式，以及与现有人物的关系。缺乏既定关系可明确无，不强造血缘、创伤或过去纠葛。character.attributes.goals/occupation/speechPattern用文本；personalityTraits/flaws用文本数组。'] : []),
+      ...(input.request.stage === 'characters' ? ['按本次请求区分主要人物与临时配角；只改一项时保留其他资料。新建或整体完善主要人物应交代身份职业与日常、动机与具体目标、性格如何表现与弱点、说话方式、已有能力及代价限制；用关系登记有依据的出生地、常住地、活动区域、组织成员关系。不存在能力可明确普通人的技能边界。地点或组织尚未登记时报告需要先设计的资料，不凭空造引用。缺乏既定关系可明确无，不强造血缘、创伤或过去纠葛。未确认的内容留缺，不为字段齐全编造已发生经历。character.attributes.goals/occupation/dailyRoutine/motivation/speechPattern/abilityLimits/abilityCosts用文本；personalityTraits/flaws/habits用文本数组。'] : []),
+      ...(input.request.stage === 'factions' ? ['组织整体设计须说明特点/目标、资源来源、运作方式和招募原则；总部、据点与涉及区域用presence关联已登记地点，区域覆盖不等于控制一切或成员在场。需要部门/分部时用同kind=faction的子实体及parentId，不为复杂而堆层级。岗位用positions并区分planned尚未设立与established现有编制；岗位不等于人物，未有人任职就留空；已有成员用membership，positionId仅引用该组织岗位。只处理请求范围内的组织资料，不自动制造首领、亲属、仇敌或已发生势力冲突。'] : []),
       ...(input.request.stage === 'map' ? ['按请求范围交代区域层级、地形、水源、生计、通路及行程；坐标未知可省略，示意位置不能冒充真实比例或距离。'] : []),
     ]
     const generated = await generateGenericAssetDraft({ novelId, assetType: assetTypes[input.request.stage], title: `${CREATIVE_STAGE_LABELS[input.request.stage]} · 增量创作`, requirements, outputFormat: 'json', schemaHint: creativeSchemaHint(input.request.stage), modelConfigId: input.modelConfigId, parentArtifactId: sourceArtifactId, idempotencyKey: `creative:${runId}:${input.attempt}` }, {

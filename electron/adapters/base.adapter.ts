@@ -24,6 +24,7 @@ export interface ChatOptions {
   }
   providerOptions?: {
     kimiThinking?: 'enabled' | 'disabled'
+    deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max'
   }
 }
 

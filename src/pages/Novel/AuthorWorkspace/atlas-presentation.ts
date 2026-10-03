@@ -59,6 +59,14 @@ export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
   abilities: '能力与限制', goal: '目标', memberPolicy: '成员规则', currentPhase: '当前阶段',
   category: '类型', plotFunction: '故事作用', limitations: '使用限制', abilitySpec: '作用', cost: '代价', risk: '风险',
   eventType: '事件类型', eventCause: '前因', eventProcess: '经过', eventResult: '结果',
+  campFactionIds: '所属组织', campFactionIdsJson: '所属组织', factionId: '所属组织', factionIds: '关联组织', characterId: '人物', characterIds: '相关人物', memberCharacterIds: '组织成员', locationId: '地点', locationIds: '涉及地点', homeLocationId: '居住地点', currentLocationId: '当前地点', activityLocationIds: '活动区域', birthplaceLocationId: '出生地点',
+  dailyRoutine: '职业日常', motivation: '行动动机', abilityLimits: '能力限制', abilityCosts: '能力代价', abilityCost: '能力代价', beliefs: '信念', values: '价值取向', strengths: '长处', weaknesses: '弱点', secrets: '秘密', arcStage: '变化阶段',
+  publicSummary: '公开表现', publicGoal: '公开目标',
+  entityType: '人物类别', surname: '姓氏', givenName: '名字', birthplace: '出生地', activeRegions: '活动区域', rankLevel: '身份位阶', firstImpression: '第一印象', hiddenSecret: '隐藏的秘密', selfDeception: '自我蒙蔽', trauma: '既有创伤', contradiction: '内在矛盾', resonancePoint: '共鸣点', catchphrases: '惯用说法', vocabularyLevel: '用语特点', dialectFeatures: '方言特征', parentIds: '父母', appearChapter: '首次出场章序', powerSystemRefs: '能力体系关联', contextHooks: '相关设定', sourceContext: '原始依据',
+  type: '类型', territoryMapNodeIds: '涉及区域', leaderCharacterId: '负责人', externalRelations: '对外关系', ownerCharacterId: '持有人', locationMapId: '所在地点', presentCharacterIds: '在场人物', mapNodeId: '关联地点', chapterStartId: '开始章节', chapterEndId: '结束章节',
+  itemKind: '物品类型', subType: '细分类别', acquisitionMethod: '获得方式', usageMethod: '使用与查验方法', rarity: '稀有程度', factionHint: '组织关联说明', linkedCharacterIds: '关联人物', linkedTimelineEventIds: '关联事件', linkedItemIds: '相关物品', affectedCharacterIds: '受影响人物', protagonistAction: '主角行动', protagonistPresent: '主角是否在场', isMajorEvent: '是否重要事件', directConsequences: '直接后果', openThreads: '尚未解决的问题',
+  organizationLevel: '组织层级', ideology: '理念与立场', methods: '行事方式', funding: '资金来源', positions: '组织岗位', positionId: '担任岗位', title: '名称', responsibilities: '职责', requirements: '任职要求', reportsToPositionId: '汇报岗位', hierarchy: '组织结构', leaderId: '负责人', headquartersId: '主要驻地', territoryIds: '涉及区域', structure: '组织结构', memberCount: '人员规模',
+  locationRole: '地域关联', bilateral: '双向关系', strength: '关系强度', isHidden: '隐秘关系', publicLabel: '公开关系', privateReality: '真实关系', startsAt: '开始时间', endsAt: '结束时间', notesJson: '补充说明', x: '示意横坐标', y: '示意纵坐标',
 }
 
 export function atlasDisplayAttributes(attributes: Record<string, unknown>, chapters: Array<{ id: number; chapterNum: number }>) {
@@ -91,7 +99,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 export function atlasAttributeValue(key: string, value: unknown) {
   if (key === 'currentStatus') return ({ active: '推进中', stalled: '暂时停滞', completed: '已完成', resolved: '已解决', planned: '待推进', abandoned: '已放弃' } as Record<string, string>)[String(value)] || value
   if (key === 'roleType') return ({ protagonist: '主角', major: '主要人物', antagonist: '对立人物', supporting: '配角', minor: '次要人物' } as Record<string, string>)[String(value)] || value
-  if (key === 'nodeType' || key === 'locationType') return ({ region: '地域', country: '国家', province: '州郡', city: '城市', town: '城镇', village: '村庄', building: '建筑', room: '屋室', site: '场景地点', location: '地点' } as Record<string, string>)[String(value)] || value
+  if (key === 'nodeType' || key === 'locationType') return ({ region: '地域', country: '国家', province: '州郡', city: '城市', town: '城镇', village: '村庄', building: '建筑', room: '屋室', site: '场景地点', location: '地点', bridge: '桥梁', inn: '客栈', ferry: '渡口', courtyard: '庭院', yard: '院落', well: '井', corridor: '廊道', hall: '厅堂', storeroom: '储物房', storage: '储物处', river: '河流', road: '道路', platform: '台地', landmark: '地标', port: '港口', mountain: '山地', forest: '林地', lake: '湖泊', settlement: '聚落', interior_space: '室内场所', stone_platform: '石台', guest_room_area: '客房区域' } as Record<string, string>)[String(value)] || value
   if (key === 'routeOpen') return value === false || value === 0 ? '关闭' : '可通行'
   return value
 }

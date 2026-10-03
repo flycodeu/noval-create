@@ -2,7 +2,7 @@ import { compileContextPack, stableHash, type ContextPackSource } from '../../sr
 import { hasHardContractValidationBlocker } from '../../src/shared/contract-validation'
 import { estimateTokens } from '../../src/shared/token-budget'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
-import type { StoryAtlasChange } from '../../src/shared/story-atlas'
+import type { StoryAtlasChange, StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
 import type { GenericAssetDraftContent } from '../../src/shared/generic-asset-workflow'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
@@ -14,6 +14,7 @@ import { validateChapterContractDelivery } from './chapter-contract-validator.se
 import { listSceneContracts } from './endgame-asset.service'
 import { requireArtifact } from './artifact.service'
 import { resolveProsePolicyMaterial } from './prose-operation.service'
+import { creativeAtlasCoverage, creativePublicAttributes, selectCreativeAtlas } from './creative-atlas-context'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -44,7 +45,8 @@ function loadChapterBoundary(novelId: number, chapterNum: number) {
   const context = loadChapterContractAuditContext(prerequisites.chapterId)
   // Scene order is narrative segmentOrder, which can differ from insertion IDs after reordering.
   const sceneRows = listSceneContracts(context.chapter.id)
-  const policy = buildContextVisibilityPolicy(loadContextVisibilityPolicyInput(novelId, context.chapter.id, chapterNum, 'writer', { scenes: sceneRows }))
+  const visibilityInput = loadContextVisibilityPolicyInput(novelId, context.chapter.id, chapterNum, 'writer', { scenes: sceneRows })
+  const policy = buildContextVisibilityPolicy(visibilityInput)
   if (policy.unresolvedPovLabels.length || !policy.povCharacterIds.length) fail('CHAPTER_POV_UNRESOLVED', '场景视角必须对应现有人物的唯一姓名。')
   const allowed = new Set(ids(context.chapter.allowedFactIdsJson))
   const revealed = new Set(ids(context.chapter.revealedFactIdsJson))
@@ -54,7 +56,7 @@ function loadChapterBoundary(novelId: number, chapterNum: number) {
     if (!allowed.has(directive.factId) || !revealed.has(directive.factId)) fail('CHAPTER_REVEAL_NOT_AUTHORIZED', `场景揭示 fact:${directive.factId} 未同时登记到本章 allowedFactIds 与 revealedFactIds。`)
   }
   for (const id of revealed) if (!policy.revealDirectives.some(directive => directive.factId === id)) fail('CHAPTER_REVEAL_SCENE_MISSING', `本章揭示 fact:${id} 缺少对应的可执行场景指令。`)
-  return { context, policy }
+  return { context, policy, povNames: visibilityInput.characters.filter(character => policy.povCharacterIds.includes(character.id)).map(character => character.fullName) }
 }
 
 // Reuse the established writer visibility filter; only this one field is populated.
@@ -65,18 +67,52 @@ function visibleText(text: string, policy: ContextVisibilityPolicy): string {
   } as unknown as Parameters<typeof filterChapterContextByVisibility>[0]
   return filterChapterContextByVisibility(empty, policy).storyCore
 }
-const publicAttributes = new Set([
-  'roleType', 'age', 'gender', 'occupation', 'appearance', 'personalityTraits', 'flaws', 'speechPattern',
-  'subtype', 'terrain', 'climate', 'waterSource', 'livelihood', 'access', 'x', 'y',
-  'category', 'function', 'abilities', 'limitations', 'culture', 'publicGoal',
-  'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType',
-])
-function publicFields(attributes: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(attributes).filter(([key]) => publicAttributes.has(key)))
+const chapterWorldFields: Record<string, string[]> = {
+  genreProfile: ['key', 'name', 'subgenre', 'worldviewTone', 'socialFrame', 'narrativeFocus', 'languageAvoidances'],
+  powerSystems: ['id', 'name', 'appliesTo', 'levels', 'advancementRule', 'limitations', 'cost', 'taboo', 'conditions', 'range', 'countermeasures'],
+  speciesSystem: ['id', 'name', 'entityType', 'summary', 'traits', 'commonIdentities', 'relationToHumans', 'conditions', 'limitations', 'cost'],
+  timelineConfig: ['calendarType', 'eraName', 'epochLabel', 'baseYearLabel', 'displayPattern', 'relativeZeroLabel', 'precisionOptions'],
+  writingConstraints: ['antiQuoteEmphasis', 'antiConceptSlogans', 'antiSymmetricLines', 'narrationStyle', 'dialogueStyle', 'forbiddenPhrases', 'extraRules', 'realismLevel', 'sciencePolicy', 'physicsPolicy', 'commonSenseFocus', 'contextAlignmentFocus'],
 }
+const authorRuleField = /^(?:storyUse|contextLink|narrativeFunction|plot|plotUse|plotRole|plotNotes|caseAnswer|caseSolution|culprit|reveal|revealPlan|ending|endgame|resolution|plannedOutcome|futurePlan|authorNotes|secret|hiddenSecret)$/iu
 
+/** World design is not POV knowledge: keep physical constraints, not casting or case applications. */
+function chapterWorldValue(section: string, value: unknown, omitted: string[]): unknown {
+  const drop = (path: string) => omitted.push(`world_rules:${path}:author_planning`)
+  const clean = (input: unknown, path: string): unknown => {
+    if (Array.isArray(input)) return input.map((item, index) => clean(item, `${path}:${index}`)).filter(item => item !== undefined)
+    if (!input || typeof input !== 'object') return input
+    const record = input as Record<string, unknown>
+    if (record.futureOnly === true || record.authorOnly === true || record.status === 'planned') { drop(path); return undefined }
+    return Object.fromEntries(Object.entries(record).flatMap(([key, item]) => {
+      if (authorRuleField.test(key)) { drop(`${path}:${key}`); return [] }
+      const safe = clean(item, `${path}:${key}`)
+      return safe === undefined ? [] : [[key, safe]]
+    }))
+  }
+  const pick = (input: unknown, keys: string[], path: string): unknown => {
+    if (Array.isArray(input)) return input.map((item, index) => pick(item, keys, `${path}:${index}`)).filter(item => item !== undefined)
+    if (!input || typeof input !== 'object') { drop(path); return undefined }
+    return clean(Object.fromEntries(Object.entries(input).filter(([key]) => {
+      if (keys.includes(key)) return true
+      drop(`${path}:${key}`); return false
+    })), path)
+  }
+  if (section === 'worldDynamics' && value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    for (const key of Object.keys(record)) if (!['climateCycles', 'economyLoops'].includes(key)) drop(`${section}:${key}`)
+    return {
+      // travelImpact and volatilityTrigger are author application fields that can state case mechanisms.
+      climateCycles: pick(record.climateCycles || [], ['id', 'region', 'pattern', 'seasonalShift', 'hazardTrigger', 'resourceImpact'], `${section}:climateCycles`),
+      economyLoops: pick(record.economyLoops || [], ['id', 'name', 'coreResource', 'circulationPath', 'controller', 'scarcityTrigger'], `${section}:economyLoops`),
+    }
+  }
+  const keys = chapterWorldFields[section]
+  if (!keys) { drop(section); return undefined }
+  return pick(value, keys, section)
+}
 /** Only saved material is projected: no genre defaults or inferred canon. */
-export function creativeProjectSources(novel: { worldRulesJson?: string | null; settingsJson?: string | null; themeVoiceJson?: string | null }, chapter = false) {
+export function creativeProjectSources(novel: { worldRulesJson?: string | null; settingsJson?: string | null; themeVoiceJson?: string | null }, chapter = false, omitted: string[] = []) {
   const entries: Array<{ key: string; value: unknown; required: boolean }> = []
   const add = (key: string, value: unknown) => {
     if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) return
@@ -95,9 +131,10 @@ export function creativeProjectSources(novel: { worldRulesJson?: string | null; 
     let world: unknown
     try { world = JSON.parse(novel.worldRulesJson) } catch { fail('WORLD_RULES_INVALID', '已保存世界规则不是有效 JSON，请先修复规则资料。') }
     if (!world || typeof world !== 'object' || Array.isArray(world)) fail('WORLD_RULES_INVALID', '已保存世界规则必须为 JSON 对象。')
-    const publicSections = new Set(['genreProfile', 'powerSystems', 'speciesSystem', 'factionSystem', 'characterEcology', 'mapBlueprint', 'worldDynamics', 'timelineConfig', 'writingConstraints'])
-    for (const [section, value] of Object.entries(world)) {
-      if (section === 'version' || (chapter && !publicSections.has(section))) continue
+    for (const [section, raw] of Object.entries(world)) {
+      if (section === 'version') continue
+      const value = chapter ? chapterWorldValue(section, raw, omitted) : raw
+      if (value === undefined) continue
       // Keep each rule intact, but a hidden item must not suppress unrelated public rules.
       if (Array.isArray(value)) value.forEach((item, index) => add(`world_rules:${section}:${index}`, item))
       else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) add(`world_rules:${section}:${key}`, item)
@@ -124,7 +161,7 @@ export async function compileCreativeChapterContext(
 ): Promise<CreativeContextReport> {
   const chapterRows = listChapters(input.novelId)
   const chapterNum = input.atChapter ?? chapterRows.filter(row => row.content?.trim()).reduce((n, row) => Math.max(n, row.chapterNum), 0) + 1
-  const { context, policy } = loadChapterBoundary(input.novelId, chapterNum)
+  const { context, policy, povNames } = loadChapterBoundary(input.novelId, chapterNum)
   const novel = getNovel(input.novelId)
   if (!novel) fail('PROJECT_NOT_FOUND', '项目不存在。')
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: chapterNum - 1, includePlanned: false })
@@ -142,8 +179,8 @@ export async function compileCreativeChapterContext(
   }
   const revealIds = new Set(policy.revealDirectives.map(directive => directive.factId))
   const contractPolicy = { ...policy, deniedFacts: policy.deniedFacts.filter(item => !revealIds.has(item.fact.id)) }
-  add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan', contractPolicy)
-  for (const source of creativeProjectSources(novel, true)) {
+  add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。人物内在目标、动机和自身能力只限本人视角使用，不能移入其他人物视角；其他人物公开目标以 publicGoal 或已知信息点为准。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan', contractPolicy)
+  for (const source of creativeProjectSources(novel, true, omitted)) {
     const text = typeof source.value === 'string' ? source.value : JSON.stringify(source.value)
     if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')
     else omitted.push(`${source.key}:pov_forbidden_fact`)
@@ -154,7 +191,7 @@ export async function compileCreativeChapterContext(
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
   add(`chapter:${context.chapter.id}:contract`, {
-    chapterNum, title: context.chapter.title, ...context.chapterContract,
+    chapterNum, title: context.chapter.title, outline: context.chapter.outline, ...context.chapterContract,
     forbiddenActions: context.chapterContractRow?.forbiddenActionsJson,
     scenes: context.sceneSnapshots,
   }, true, 'plan', contractPolicy)
@@ -174,25 +211,53 @@ export async function compileCreativeChapterContext(
     add(`reveal:${directive.sceneId}:${directive.factId}`, `仅限指定场景，不能作为章首已知事实。${directive.text}`, true, 'plan', contractPolicy)
   }
   const safeEntityIds = new Set<string>()
-  const dependency = `${input.request}\n${JSON.stringify(context.sceneSnapshots)}`
-  const ordered = [...atlas.entities].sort((a, b) => Number(dependency.includes(b.name)) - Number(dependency.includes(a.name)))
+  const dependency = `${input.request}\n${JSON.stringify(context.sceneSnapshots)}\n${JSON.stringify(context.chapterContract)}\n${context.chapter.title}\n${context.chapter.outline || ''}`
+  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
+  const { entityIds: relevant, relationIds: relevantEdges } = selectCreativeAtlas(atlas, {
+    request: input.request, anchorText: dependency, povNames,
+    fallbackText: previous?.summary || previous?.content?.slice(-2000),
+  })
+  const safeEntities: StoryAtlasEntity[] = []
+  const safeRelations: StoryAtlasRelation[] = []
+  const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)))
   for (const entity of ordered) {
+    if (!relevant.has(entity.id)) { omitted.push(`${entity.id}:unrelated_to_chapter`); continue }
     // Identity/public description are filtered too; provenance and arbitrary attribute payloads stay out.
-    const attributes = Object.fromEntries(Object.entries(publicFields(entity.attributes)).filter(([key, value]) => {
+    if (entity.attributes.futureOnly === true || entity.attributes.authorOnly === true) { omitted.push(`${entity.id}:author_only`); continue }
+    const isPov = povNames.includes(entity.name)
+    const isNpc = entity.kind === 'character' && !isPov
+    const publicProjection = creativePublicAttributes(entity.attributes, { kind: entity.kind, isPov })
+    for (const key of Object.keys(entity.attributes)) if (!(key in publicProjection)) omitted.push(`${entity.id}:attributes.${key}:not_public_to_pov`)
+    const attributes = Object.fromEntries(Object.entries(publicProjection).filter(([key, value]) => {
       const allowed = Boolean(visibleText(JSON.stringify(value), policy))
       if (!allowed) omitted.push(`${entity.id}:attributes.${key}:pov_forbidden_fact`)
       return allowed
     }))
-    const summary = visibleText(entity.summary, policy)
-    if (entity.summary && !summary) omitted.push(`${entity.id}:summary:pov_forbidden_fact`)
+    // Legacy character summaries are author dossiers and can reveal a culprit without a registered fact.
+    // Public description is explicit; do not manufacture one from the withheld private dossier.
+    const summarySource = isNpc ? typeof entity.attributes.publicSummary === 'string' ? entity.attributes.publicSummary : '' : entity.summary
+    if (isNpc && entity.summary) omitted.push(`${entity.id}:summary:not_public_to_pov`)
+    const summary = visibleText(summarySource, policy)
+    if (summarySource && !summary) omitted.push(`${entity.id}:summary:pov_forbidden_fact`)
+    delete attributes.publicSummary
     const value = { id: entity.id, kind: entity.kind, name: entity.name, summary, parentId: entity.parentId, attributes }
-    if (visibleText(JSON.stringify(value), policy)) safeEntityIds.add(entity.id)
-    add(entity.id, value, dependency.includes(entity.name))
+    if (visibleText(JSON.stringify(value), policy)) { safeEntityIds.add(entity.id); safeEntities.push({ ...entity, ...value }) }
+    add(entity.id, value, relevant.has(entity.id))
   }
-  for (const edge of atlas.relations) if (safeEntityIds.has(edge.fromId) && safeEntityIds.has(edge.toId)) {
-    add(`relation:${edge.id}`, { id: edge.id, kind: edge.kind, fromId: edge.fromId, toId: edge.toId, label: edge.label, attributes: publicFields(edge.attributes) })
+  for (const edge of atlas.relations) if (relevantEdges.has(edge.id) && safeEntityIds.has(edge.fromId) && safeEntityIds.has(edge.toId)) {
+    if (edge.attributes.futureOnly === true || edge.attributes.authorOnly === true) { omitted.push(`relation:${edge.id}:author_only`); continue }
+    const attributes = creativePublicAttributes(edge.attributes)
+    if (edge.kind === 'membership' && attributes.positionId) {
+      const organization = safeEntities.find(entity => entity.id === edge.toId)
+      const established = organization?.attributes.positions as Array<{ id: string }> | undefined
+      if (!established?.some(position => position.id === attributes.positionId)) { delete attributes.positionId; omitted.push(`relation:${edge.id}:position_not_established`) }
+    }
+    const value = { id: edge.id, kind: edge.kind, fromId: edge.fromId, toId: edge.toId, label: edge.label, attributes }
+    if (!visibleText(JSON.stringify(value), policy)) { omitted.push(`relation:${edge.id}:pov_forbidden_fact`); continue }
+    safeRelations.push({ ...edge, ...value })
+    add(`relation:${edge.id}`, value, relevantEdges.has(edge.id))
   }
-  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
+  add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id)))), true, 'plan')
   if (previous) {
     const projected = projectPreviousChapterSources(previous, policy, dependency)
     // Actual prose is already reader-visible. Preserve paragraphs without forbidden facts even when no

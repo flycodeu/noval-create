@@ -30,6 +30,14 @@ export class DeepSeekAdapter extends OpenAIAdapter {
     return super.stream(messages, this.withGenerationTimeout(opts))
   }
 
+  protected override buildBody(messages: Message[], opts?: ChatOptions, stream = false) {
+    const body = super.buildBody(messages, opts, stream)
+    const effort = opts?.providerOptions?.deepseekReasoningEffort || 'low'
+    body.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' }
+    if (effort !== 'none') body.reasoning_effort = effort
+    return body
+  }
+
   private withGenerationTimeout(opts?: ChatOptions): ChatOptions {
     return { ...opts, timeoutMs: resolveManagedRequestTimeoutMs(opts?.timeoutMs, 300_000) }
   }

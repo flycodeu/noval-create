@@ -71,4 +71,19 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.text).toContain('"volumeId":11')
     for (const key of ['volume:11:planning', 'part:12:planning', 'fact:13:planning']) expect(report.sources).toContain(key)
   })
+  it('keeps current chapter people, parent geography and route evidence for a request with no names', async () => {
+    mock.chapters = [{ id: 21, chapterNum: 1, title: '系绳', outline: '陈舟在河村检查旧绳', content: '既有正文' }]
+    mock.atlas.entities = [
+      { id: 'character:1', kind: 'character', name: '陈舟', parentId: null, attributes: { goals: '修船', roleType: 'protagonist' } },
+      { id: 'location:1', kind: 'location', name: '南岭', parentId: null, attributes: { terrain: '低山' } },
+      { id: 'location:2', kind: 'location', name: '河村', parentId: 'location:1', attributes: { livelihood: '摆渡' } },
+      { id: 'location:3', kind: 'location', name: '东岸', parentId: null, attributes: {} },
+    ]
+    mock.atlas.relations = [{ id: 'home', kind: 'presence', fromId: 'character:1', toId: 'location:2', attributes: { locationRole: 'residence' } }, { id: 'river', kind: 'route', fromId: 'location:2', toId: 'location:3', attributes: { travelHours: 2 } }]
+    const report = await compileCreativeContext({ ...input('map'), request: '完善本章活动地点，保持人物职业和已有行程。', atChapter: 1 })
+    for (const id of ['chapter:21:target', 'character:1', 'location:1', 'relation:river', 'atlas_coverage']) expect(report.sources).toContain(id)
+    expect(report.text).toContain('"travelHours":2')
+    expect(report.text).toContain('"locationRole":"residence"')
+    expect(report.text).toContain('location_current')
+  })
 })

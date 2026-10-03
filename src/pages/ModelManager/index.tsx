@@ -96,15 +96,16 @@ function isNativeAgentProvider(provider?: string): boolean {
   return provider === 'codex' || provider === 'claude_code'
 }
 
-function parseModelExtraParams(raw?: string | null): { kimiThinking?: 'enabled' | 'disabled' } {
+function parseModelExtraParams(raw?: string | null): { kimiThinking?: 'enabled' | 'disabled'; deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max' } {
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     const record = parsed as Record<string, unknown>
-    return record.kimiThinking === 'enabled' || record.kimiThinking === 'disabled'
-      ? { kimiThinking: record.kimiThinking }
-      : {}
+    return {
+      ...(record.kimiThinking === 'enabled' || record.kimiThinking === 'disabled' ? { kimiThinking: record.kimiThinking } : {}),
+      ...(['none', 'low', 'high', 'max'].includes(String(record.deepseekReasoningEffort)) ? { deepseekReasoningEffort: record.deepseekReasoningEffort as 'none' | 'low' | 'high' | 'max' } : {}),
+    }
   } catch {
     return {}
   }
@@ -142,8 +143,9 @@ function buildModelSavePayload(values: Record<string, unknown>): Record<string, 
   const kimiThinking = values.kimiThinking === 'enabled' || values.kimiThinking === 'disabled'
     ? values.kimiThinking
     : 'disabled'
-  const extraParamsJson = provider === 'kimi' ? JSON.stringify({ kimiThinking }) : null
-  const { kimiThinking: _kimiThinking, ...payload } = values
+  const deepseekReasoningEffort = ['none', 'low', 'high', 'max'].includes(String(values.deepseekReasoningEffort)) ? values.deepseekReasoningEffort : 'low'
+  const extraParamsJson = provider === 'kimi' ? JSON.stringify({ kimiThinking }) : provider === 'deepseek' ? JSON.stringify({ deepseekReasoningEffort }) : null
+  const { kimiThinking: _kimiThinking, deepseekReasoningEffort: _deepseekReasoningEffort, ...payload } = values
   return {
     ...payload,
     extraParamsJson,
@@ -247,6 +249,7 @@ export default function ModelManager() {
       maxTokens: defaults.maxTokens,
       maxContextTokens: defaults.maxContextTokens,
       kimiThinking: provider === 'kimi' ? 'disabled' : undefined,
+      deepseekReasoningEffort: provider === 'deepseek' ? 'low' : undefined,
       ...(resetCredentials ? { apiKey: '' } : {}),
     })
   }, [form])
@@ -264,6 +267,7 @@ export default function ModelManager() {
       maxContextTokens: config.maxContextTokens ?? undefined,
       maxConcurrency: config.maxConcurrency,
       kimiThinking: config.provider === 'kimi' ? extraParams.kimiThinking || 'disabled' : undefined,
+      deepseekReasoningEffort: config.provider === 'deepseek' ? extraParams.deepseekReasoningEffort || 'low' : undefined,
     })
   }, [form])
 
@@ -384,6 +388,8 @@ export default function ModelManager() {
       || values.maxTokens !== selected.maxTokens
       || (values.maxContextTokens ?? undefined) !== (selected.maxContextTokens ?? undefined)
       || values.maxConcurrency !== selected.maxConcurrency
+      || (values.provider === 'deepseek' && values.deepseekReasoningEffort !== (parseModelExtraParams(selected.extraParamsJson).deepseekReasoningEffort || 'low'))
+      || (values.provider === 'kimi' && values.kimiThinking !== (parseModelExtraParams(selected.extraParamsJson).kimiThinking || 'disabled'))
       || apiKeyChanged
     )
     if (formChanged) {
@@ -800,6 +806,12 @@ export default function ModelManager() {
             </Form.Item>
           )}
 
+          {selectedProvider === 'deepseek' && (
+            <Form.Item name="deepseekReasoningEffort" label="推理强度" extra="默认低强度。推理和最终文本共用输出额度；较高强度可能让大批资料输出不完整。">
+              <Select options={[{ value: 'none', label: '关闭推理' }, { value: 'low', label: '低' }, { value: 'high', label: '高' }, { value: 'max', label: '最高' }]} />
+            </Form.Item>
+          )}
+
           <div className="admin-form-grid admin-form-grid--three">
             <Form.Item
               name="temperature"
@@ -813,7 +825,7 @@ export default function ModelManager() {
               name="maxTokens"
               label="单次输出上限（Token）"
               extra={selectedProvider === 'deepseek'
-                ? '这是输出额度，不是输入窗口。创作流程会按阶段预留输出，正文最多使用 16000 Token；无需把每次请求都设到模型最大值。'
+                ? '额度包括推理及最终文本。创作流程按阶段预留输出，正文最多使用 16000 Token；资料较多时分批生成。'
                 : '这是输出额度，不是上下文窗口。创作流程会按阶段预留输出，实际额度受模型窗口限制。'}
             >
               <InputNumber min={512} max={getProviderMaxOutputTokens(selectedProvider)} step={512} placeholder="例如：16000" />

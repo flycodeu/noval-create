@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3'
 import { getSqlite } from '../database/db'
 import { insertAtlasRevision, readAtlasRecords, type AtlasStoredRecord, type AtlasRecord } from '../database/story-atlas-store'
 import { markNovelContextChanged } from './context-impact.service'
+import { meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasPositions } from './story-atlas-attributes'
 import type {
   StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasEntityKind,
   StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
@@ -34,7 +35,12 @@ function diagnose(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[])
     result.push({ severity: 'warning', code: 'RELATIONSHIPS_EMPTY', message: '已有人物，但尚未登记人物之间的关系。', entityIds: [] })
   }
   for (const entity of entities.filter((record) => record.kind === 'character')) {
-    if (!entity.attributes.personalityTraits && !entity.attributes.speechPattern) result.push({ severity: 'info', code: 'CHARACTER_VOICE_MISSING', message: `${entity.name}尚未填写性格表现和说话方式。`, entityIds: [entity.id] })
+    if (!meaningfulAtlasValue(entity.attributes.personalityTraits) && !meaningfulAtlasValue(entity.attributes.speechPattern)) result.push({ severity: 'info', code: 'CHARACTER_VOICE_MISSING', message: `${entity.name}尚未填写性格表现和说话方式。`, entityIds: [entity.id] })
+    if (!relations.some(edge => edge.kind === 'presence' && edge.fromId === entity.id)) result.push({ severity: 'info', code: 'CHARACTER_GEOGRAPHY_MISSING', message: `${entity.name}尚未登记出生、常住或活动地点；不会从职业推断位置。`, entityIds: [entity.id] })
+  }
+  for (const entity of entities.filter(record => record.kind === 'faction')) {
+    if (!meaningfulAtlasValue(entity.attributes.goal) && !meaningfulAtlasValue(entity.attributes.traits)) result.push({ severity: 'info', code: 'FACTION_PROFILE_MISSING', message: `${entity.name}尚未登记目标与组织特点。`, entityIds: [entity.id] })
+    if (!relations.some(edge => edge.kind === 'presence' && edge.fromId === entity.id)) result.push({ severity: 'info', code: 'FACTION_GEOGRAPHY_MISSING', message: `${entity.name}尚未登记总部、据点或涉及区域。`, entityIds: [entity.id] })
   }
   for (const route of relations.filter((record) => record.kind === 'route')) {
     const hours = Number(route.attributes.travelHours)
@@ -61,8 +67,15 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   const locationChildren = entities.filter((entity) => entity.kind === 'location' && entity.parentId === (input.locationParentId || null))
   if (input.focusEntityId) {
     if (!ids.has(input.focusEntityId)) fail('ENTITY_NOT_FOUND', '焦点实体不在当前小说或章节中。')
-    relations = relations.filter((edge) => edge.fromId === input.focusEntityId || edge.toId === input.focusEntityId)
-    const focusedIds = new Set([input.focusEntityId, ...relations.flatMap((edge) => [edge.fromId, edge.toId])])
+    const focusedIds = new Set([input.focusEntityId])
+    const focus = entities.find(entity => entity.id === input.focusEntityId)!
+    for (let previousSize = -1; previousSize !== focusedIds.size;) {
+      previousSize = focusedIds.size
+      for (const entity of entities) if (entity.parentId && focusedIds.has(entity.parentId)) focusedIds.add(entity.id)
+    }
+    relations = relations.filter(edge => focusedIds.has(edge.fromId) || focusedIds.has(edge.toId))
+    for (const edge of relations) { focusedIds.add(edge.fromId); focusedIds.add(edge.toId) }
+    if (focus.parentId) focusedIds.add(focus.parentId)
     entities = entities.filter((entity) => focusedIds.has(entity.id))
   }
   return { novelId: input.novelId, contextVersion, atChapter: input.atChapter ?? null, entities, relations, locationChildren, diagnostics }
@@ -111,7 +124,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     let id = change.id
     if (!id && change.op === 'upsert_entity') {
       const same = [...byId.values()].find((item) => !item.retired && isEntity(item.record) && item.record.kind === change.kind && identity(item.record.name) === identity(change.name)
-        && (change.kind !== 'location' || item.record.parentId === (idMap[change.parentId || ''] || change.parentId || null)))
+        && (!['location', 'faction'].includes(change.kind) || item.record.parentId === (idMap[change.parentId || ''] || change.parentId || null)))
       id = same?.record.id
     }
     id ||= `${change.kind}:${randomUUID()}`
@@ -129,7 +142,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes: { ...previous?.attributes, ...change.attributes }, status: change.status || previous?.status || 'confirmed',
+        attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes)), status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -147,7 +160,12 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       const same = [...byId.values()].find((item) => {
         if (item.retired || isEntity(item.record) || item.record.kind !== change.kind) return false
         const edge = item.record
-        if (change.kind === 'presence' && /^(character|item):/.test(fromId)) return edge.fromId === fromId
+        if (change.kind === 'presence') {
+          const role = String(change.attributes?.locationRole || 'current'), previousRole = String(edge.attributes.locationRole || (edge.attributes.bindingType ? 'unspecified' : 'current'))
+          if (role !== previousRole || edge.fromId !== fromId) return false
+          return role === 'current' || role === 'birthplace' ? true : edge.toId === toId
+        }
+        if (change.kind === 'membership') return edge.fromId === fromId && edge.toId === toId && (edge.attributes.positionId || '') === (change.attributes?.positionId || '')
         if (change.kind === 'ownership') return edge.toId === toId
         return edge.fromId === fromId && edge.toId === toId
           || (change.kind === 'relationship' || change.kind === 'route') && change.attributes?.bilateral !== false && edge.attributes.bilateral !== false && edge.fromId === toId && edge.toId === fromId
@@ -166,7 +184,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     const previous = old?.record as StoryAtlasRelation | undefined
     byId.set(id, { recordType: 'relation', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
       id, kind: change.kind, fromId, toId, label: change.label ?? previous?.label ?? '',
-      attributes: { ...previous?.attributes, ...change.attributes }, status: change.status || previous?.status || 'confirmed',
+      attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes)), status: change.status || previous?.status || 'confirmed',
       effectiveFromChapter: input.effectiveFromChapter, source: input.source,
     } })
   }
@@ -194,18 +212,19 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   }
   for (const entity of entities) if (entity.parentId) {
     const parent = entityById.get(entity.parentId)
-    if (entity.kind !== 'location' || parent?.kind !== 'location') fail('INVALID_LOCATION_PARENT', '上级地点必须是当前项目中生效的地点。')
-    if (entity.status === 'confirmed' && parent.status === 'planned') fail('UNCONFIRMED_PARENT', '已生效地点不能隶属尚未确定的上级地点。')
-    const childRank = locationRank(entity), parentRank = locationRank(parent)
+    if (!['location', 'faction'].includes(entity.kind) || parent?.kind !== entity.kind) fail('INVALID_ENTITY_PARENT', '上级必须是当前项目中生效的同类地点或组织。')
+    if (entity.status === 'confirmed' && parent.status === 'planned') fail('UNCONFIRMED_PARENT', '已生效资料不能隶属尚未确定的上级资料。')
+    const childRank = entity.kind === 'location' ? locationRank(entity) : undefined, parentRank = entity.kind === 'location' ? locationRank(parent) : undefined
     if (childRank && parentRank && childRank < parentRank) fail('LOCATION_HIERARCHY_INVERTED', '地区、城镇、村庄、场所的包含层级不能倒置。')
     const seen = new Set([entity.id])
     let ancestor: StoryAtlasEntity | undefined = parent
     while (ancestor) {
-      if (seen.has(ancestor.id)) fail('LOCATION_CYCLE', '地点不能成为自身的上级。')
+      if (seen.has(ancestor.id)) fail('ENTITY_CYCLE', '地点或组织不能成为自身的上级。')
       seen.add(ancestor.id)
       ancestor = ancestor.parentId ? entityById.get(ancestor.parentId) : undefined
     }
   }
+  const positions = new Map(entities.filter(entity => entity.kind === 'faction').map(entity => [entity.id, validateAtlasPositions(entity.attributes.positions)]))
   const relations = live.flatMap((item) => !isEntity(item.record) ? [item.record] : [])
   const endpointKinds: Record<StoryAtlasRelation['kind'], [string[], string[]]> = {
     relationship: [['character'], ['character']], route: [['location'], ['location']], presence: [['character', 'item', 'faction', 'event'], ['location']],
@@ -216,6 +235,16 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     if (!from || !to) fail('INVALID_RELATION_REFERENCE', `关系 ${edge.label || edge.id} 引用了不在该章节生效的实体。`)
     if (from.id === to.id || !endpointKinds[edge.kind][0].includes(from.kind) || !endpointKinds[edge.kind][1].includes(to.kind)) fail('INVALID_RELATION_KIND', `关系 ${edge.kind} 的端点类型不正确。`)
     if (edge.status === 'confirmed' && (from.status === 'planned' || to.status === 'planned')) fail('UNCONFIRMED_ENDPOINT', '已生效关系不能引用尚未确定的实体。')
+    if (edge.kind === 'presence' && from.kind === 'faction' && changedIds.has(edge.id) && !edge.attributes.locationRole) fail('LOCATION_ROLE_REQUIRED', '组织地点关联必须明确是总部、据点还是涉及区域。')
+    if (edge.kind === 'presence' && edge.attributes.locationRole) {
+      const roles = from.kind === 'character' ? ['current', 'birthplace', 'residence', 'activity'] : from.kind === 'faction' ? ['headquarters', 'outpost', 'jurisdiction'] : ['current']
+      if (!roles.includes(String(edge.attributes.locationRole))) fail('INVALID_LOCATION_ROLE', '地点关联角色与来源实体类型不匹配。')
+    }
+    if (edge.kind === 'membership' && edge.attributes.positionId) {
+      const position = positions.get(to.id)?.find(position => position.id === edge.attributes.positionId)
+      if (!position) fail('INVALID_POSITION_REFERENCE', '任职岗位必须是成员所属组织已经登记的岗位ID。')
+      if (edge.status === 'confirmed' && position.status !== 'established') fail('UNCONFIRMED_POSITION', '实际成员不能任职尚未设立的计划岗位；请先确认岗位或将任职关系标为计划。')
+    }
     if (edge.kind === 'route') for (const key of ['travelHours', 'distanceKm']) {
       const value = edge.attributes[key]
       if (value !== undefined && value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) fail('INVALID_TRAVEL_VALUE', `${key} 必须为非负数。`)
@@ -296,7 +325,7 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     const from = records.get(record.fromId)?.record
     if (from?.kind === 'character') {
       item.nativeTable = 'character_location_binding'
-      item.nativeId = writeRow(sqlite, item.nativeTable, item.nativeTable === 'character_location_binding' ? item.nativeId : null, { novel_id: novelId, character_id: fromId, map_node_id: toId, binding_type: 'presence', source_type: record.source.kind, is_canonical: 1, notes: record.label })
+      item.nativeId = writeRow(sqlite, item.nativeTable, item.nativeTable === 'character_location_binding' ? item.nativeId : null, { novel_id: novelId, character_id: fromId, map_node_id: toId, binding_type: String(record.attributes.locationRole || 'presence'), source_type: record.source.kind, is_canonical: 1, notes: record.label })
     } else if (from?.kind === 'item') sqlite.prepare('UPDATE story_items SET location_map_id=? WHERE id=? AND novel_id=?').run(toId, fromId, novelId)
   } else if (record.kind === 'membership') {
     const row = sqlite.prepare('SELECT camp_faction_ids_json FROM characters WHERE id=? AND novel_id=?').get(fromId, novelId) as { camp_faction_ids_json: string } | undefined

@@ -344,6 +344,9 @@ async function main() {
     const previewThird = (await mysteryCall('context.preview', { stage: 'chapter', atChapter: 3, request: '沈墨依据已知事实寻找割绳者。' })).context
     assert.ok(previewThird.sources.includes(`fact:${secretFact.id}`), 'the next chapter sees the committed character knowledge')
     assert.ok(previewThird.text.includes(secret))
+    assert.throws(() => require('../electron/services/creative-facts.ts').validateCreativeFactPlans(mysteryId, [
+      { id: secretFact.id, title: secretFact.title, summary: `${secret}。第三章又发现新的幕后人。` },
+    ]), /已揭示的信息点/, 'a later discovery must not rewrite an earlier-known fact and leak into prior chapters')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

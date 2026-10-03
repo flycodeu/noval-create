@@ -44,13 +44,14 @@ export function snapshotModelPrompt(messages: readonly { role: string; content: 
 export function snapshotModelOptions(options: {
   temperature?: number
   maxTokens?: number
-  providerOptions?: { kimiThinking?: 'enabled' | 'disabled' }
+  providerOptions?: { kimiThinking?: 'enabled' | 'disabled'; deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max' }
 }): string {
   // Whitelist only generation controls. Never serialize headers, keys, or arbitrary provider data.
   return JSON.stringify({
     temperature: Number.isFinite(options.temperature) ? options.temperature : null,
     maxTokens: Number.isSafeInteger(options.maxTokens) ? options.maxTokens : null,
     kimiThinking: options.providerOptions?.kimiThinking || null,
+    deepseekReasoningEffort: options.providerOptions?.deepseekReasoningEffort || null,
   })
 }
 

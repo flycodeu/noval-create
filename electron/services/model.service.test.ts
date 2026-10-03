@@ -81,6 +81,17 @@ describe('model service normalization', () => {
     expect(normalizeModelBaseUrl(' https://deepseek.example/v1 ', 'deepseek')).toBe('https://deepseek.example/v1')
   })
 
+  it('persists DeepSeek reasoning controls and uses a bounded default when none was selected', () => {
+    expect(normalizeModelExtraParamsJson(null, 'deepseek')).toBe(JSON.stringify({ deepseekReasoningEffort: 'low' }))
+    for (const effort of ['none', 'low', 'high', 'max']) {
+      const raw = JSON.stringify({ deepseekReasoningEffort: effort, kimiThinking: 'enabled' })
+      expect(normalizeModelExtraParamsJson(raw, 'deepseek')).toBe(JSON.stringify({ deepseekReasoningEffort: effort }))
+      expect(getModelProviderOptions({ provider: 'deepseek', extraParamsJson: raw })).toEqual({ deepseekReasoningEffort: effort })
+    }
+    expect(getModelProviderOptions({ provider: 'deepseek', extraParamsJson: '{bad' })).toEqual({ deepseekReasoningEffort: 'low' })
+    expect(normalizeModelExtraParamsJson('{"deepseekReasoningEffort":"invalid"}', 'deepseek')).toBe(JSON.stringify({ deepseekReasoningEffort: 'low' }))
+  })
+
   it('requires API keys for every remote provider and keeps custom local models keyless', () => {
     expect(providerRequiresApiKey('custom')).toBe(false)
     expect(providerRequiresApiKey('openai')).toBe(true)

@@ -7,6 +7,7 @@ import { resolveModelRuntimeBudget } from './model.service'
 import { compileCreativeChapterContext, creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
+import { creativeAtlasCoverage, selectCreativeAtlas } from './creative-atlas-context'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -64,10 +65,14 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const stageKinds: Partial<Record<string, string>> = { characters: 'character', map: 'location', factions: 'faction', items: 'item', events: 'event' }
   const stageKind = stageKinds[input.stage]
-  const requested = new Set(atlas.entities.filter(entity => input.request.includes(entity.name)).map(entity => entity.id))
-  const relevant = new Set(requested)
-  const relevantEdges = new Set(atlas.relations.filter(edge => requested.has(edge.fromId) || requested.has(edge.toId)).map(edge => edge.id))
-  for (const edge of atlas.relations) if (relevantEdges.has(edge.id)) { relevant.add(edge.fromId); relevant.add(edge.toId) }
+  const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
+  const previousChapter = chapterRows.filter(chapter => chapter.chapterNum < target && chapter.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
+  const anchors = [targetChapter?.title, targetChapter?.outline, targetChapter?.summary].filter(Boolean).join('\n')
+  const { entityIds: relevant, relationIds: relevantEdges } = selectCreativeAtlas(atlas, {
+    request: input.request, anchorText: anchors, fallbackText: previousChapter?.summary || previousChapter?.content?.slice(-2000),
+  })
+  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, true)
+  add('atlas_coverage', creativeAtlasCoverage(atlas, relevant), true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
   for (const entity of ordered.filter(entity => relevant.has(entity.id))) add(entity.id, entity, true)
   for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) add(`relation:${edge.id}`, edge, true)

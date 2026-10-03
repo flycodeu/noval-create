@@ -19,6 +19,8 @@ async function main() {
   try {
     const novelId = Number(db.prepare('INSERT INTO novels(title,user_background,expanded_background,world_rules_json,context_version) VALUES(?,?,?,?,1)').run('边界测试', '渡口故事。', '未登记终局秘密不得直接注入', '{"hidden":"未登记规则秘密不得直接注入"}').lastInsertRowid)
     const person = Number(db.prepare("INSERT INTO characters(novel_id,full_name,role_type,hidden_secret,speech_pattern) VALUES(?,?,'protagonist',?,?)").run(novelId, '陈舟', '私有设定不可注入', '话短而清楚').lastInsertRowid)
+    db.prepare("INSERT INTO characters(novel_id,full_name,role_type,goals,speech_pattern,background,inner_conflict,flaws_json) VALUES(?,?,'antagonist',?,?,?,?,?)").run(novelId, '邱账房', '保住赃物与账面秘密，把失踪推给阿烛或杨嫂。', '措辞周全，先请人核对', '与影鬼有意勾连，把客人姓名画像与行踪交出，并维护通往旧井的湿路；偷取财物，涂改账册。其动机不能替超自然规则开脱。', '求财与自保使他持续加深共谋', JSON.stringify(['为求财继续杀人']))
+    db.prepare("INSERT INTO characters(novel_id,full_name,role_type,background) VALUES(?,?,'antagonist',?)").run(novelId, '旧井影鬼', '活动依赖连续湿路与旧井水；借邱账房提供的姓名、画像和湿路模仿亡者。无法凭空读透生者记忆，也不能越过断开的干处。')
     const chapter = (n, content = '') => Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title,content,allowed_fact_ids_json,revealed_fact_ids_json) VALUES(?,?,?,?,?,?)').run(novelId, n, '渡口系绳', content, '[]', '[]').lastInsertRowid)
     const first = chapter(1, '陈舟知道河水暴涨。\n夜色落在石阶上，他把旧绳收在船舱里。')
     const target = chapter(2)
@@ -35,7 +37,24 @@ async function main() {
     migrateStoryAtlas(db)
     const { applyStoryAtlasChanges, queryStoryAtlas } = require('../electron/services/story-atlas.service.ts')
     const atlasPerson = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '陈舟')
-    applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 3, idempotencyKey: 'future', source: { kind: 'test' }, changes: [
+    const atlasNpc = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '邱账房')
+    const atlasGhost = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '旧井影鬼')
+    applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 0, idempotencyKey: 'geography-and-work', source: { kind: 'test' }, changes: [
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语' } },
+      { op: 'upsert_entity', id: atlasNpc.id, kind: 'character', name: '邱账房', attributes: { publicSummary: '店中负责客账登记的人', publicGoal: '尽快核对客账', firstImpression: '讲话稳妥', motivation: '灭口保身', abilities: ['暗中催眠'], abilityLimits: '只能催眠熟人', abilityCosts: '损失记忆', habits: ['说话前扶眼镜'] } },
+      { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '对账协助' },
+      { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasGhost.id, label: '调查涉及' },
+      { op: 'upsert_entity', clientId: 'region', kind: 'location', name: '南岭', attributes: { terrain: '低山河谷' } },
+      { op: 'upsert_entity', clientId: 'village', kind: 'location', name: '河村', parentId: 'region', attributes: { livelihood: '摆渡' } },
+      { op: 'upsert_entity', clientId: 'harbor', kind: 'location', name: '远港' },
+      { op: 'upsert_entity', clientId: 'org', kind: 'faction', name: '水务会', attributes: { organizationLevel: 'organization', methods: '轮班巡河', funding: '会费' } },
+      { op: 'upsert_entity', clientId: 'dept', kind: 'faction', name: '巡河部', parentId: 'org', attributes: { organizationLevel: 'department', positions: [{ id: 'watch', title: '值守员', status: 'established', responsibilities: '看护渡口' }, { id: 'future', title: '未来密巡使', status: 'planned', responsibilities: '未实行的扩展工作' }] } },
+      { op: 'upsert_relation', kind: 'presence', fromId: atlasPerson.id, toId: 'village', label: '常住河村', attributes: { locationRole: 'residence' } },
+      { op: 'upsert_relation', kind: 'membership', fromId: atlasPerson.id, toId: 'dept', label: '轮值守渡', attributes: { positionId: 'watch' } },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'village', label: '总部所在地', attributes: { locationRole: 'headquarters' } },
+      { op: 'upsert_relation', kind: 'route', fromId: 'village', toId: 'harbor', label: '顺流航道', attributes: { travelHours: 4, travelMode: '行船', routeOpen: true } },
+    ] })
+    applyStoryAtlasChanges({ novelId, expectedContextVersion: queryStoryAtlas({ novelId }).contextVersion, effectiveFromChapter: 3, idempotencyKey: 'future', source: { kind: 'test' }, changes: [
       { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', summary: '未来才成为知府', attributes: { speechPattern: '未来才使用的官话' } },
     ] })
     const input = { novelId, stage: 'chapter', request: '陈舟检查渡口旧绳，继续第二章。', atChapter: 2, idempotencyKey: 'fixture' }
@@ -49,6 +68,19 @@ async function main() {
     const result = await compile(input, limits)
     assert.ok(result.text.includes('河水暴涨'))
     assert.ok(result.text.includes('话短而清楚'))
+    for (const saved of ['守住渡船', '逐结检查缆绳', '清晨巡视石阶', '履行渡工职责', '久站耗费体力', '无法听清对岸低语', '南岭', '低山河谷', '巡河部', '水务会', '值守员', '看护渡口', '顺流航道', '"travelHours":4', '"locationRole":"residence"']) assert.ok(result.text.includes(saved), saved)
+    for (const planned of ['未来密巡使', '未实行的扩展工作']) assert.ok(!result.text.includes(planned), planned)
+    for (const npcPrivate of ['保住赃物与账面秘密', '灭口保身', '暗中催眠', '只能催眠熟人', '损失记忆']) assert.ok(!result.text.includes(npcPrivate), `unregistered NPC inner material must not leak: ${npcPrivate}`)
+    for (const dossier of ['与影鬼有意勾连', '偷取财物', '求财与自保使他持续加深共谋', '为求财继续杀人', '活动依赖连续湿路与旧井水', '借邱账房提供的姓名', '也不能越过断开的干处', '"roleType":"antagonist"']) assert.ok(!result.text.includes(dossier), `unregistered author dossier must not leak: ${dossier}`)
+    for (const observed of ['邱账房', '尽快核对客账', '说话前扶眼镜', '措辞周全，先请人核对', '店中负责客账登记的人', '讲话稳妥']) assert.ok(result.text.includes(observed), observed)
+    assert.ok(result.omittedSources.includes(`${atlasNpc.id}:attributes.goals:not_public_to_pov`))
+    assert.ok(result.omittedSources.includes(`${atlasNpc.id}:summary:not_public_to_pov`))
+    assert.ok(result.omittedSources.includes(`${atlasGhost.id}:summary:not_public_to_pov`))
+    assert.ok(result.text.includes('public_description'), 'missing NPC public description is visible without exposing the private fallback')
+    assert.ok(result.text.includes('已设岗位不等于有人任职'))
+    assert.ok(result.text.includes('location_current'), 'residence must not silently become present scene location')
+    const unnamed = await compile({ ...input, request: '继续本章，保留活动区域、职业和行程限制。' }, limits)
+    assert.ok(unnamed.text.includes('顺流航道') && unnamed.text.includes('值守员'), 'scene POV anchors the graph when the request mentions no proper names')
     assert.ok(result.text.includes('夜色落在石阶上'), 'original ending retained without inventing a knowledge fact')
     for (const hidden of ['账房盗银', '失踪的税银藏在井底', '私有设定不可注入', '未登记终局秘密不得直接注入', '未登记规则秘密不得直接注入', '未来才成为知府', '未来才使用的官话']) assert.ok(!result.text.includes(hidden), hidden)
     assert.ok(result.text.includes('渡口故事。'))

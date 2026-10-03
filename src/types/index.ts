@@ -2302,6 +2302,7 @@ export interface AiModelRouteReport {
   provider?: string
   providerOptions?: {
     kimiThinking?: 'enabled' | 'disabled'
+    deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max'
   }
   temperature: number
   maxTokens: number

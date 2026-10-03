@@ -62,6 +62,11 @@ export function validateCreativeFactPlans(novelId: number, raw: unknown): assert
   for (const fact of plans) {
     if (!fact.title.trim() || !fact.summary.trim()) throw new Error('信息点标题与内容不能为空。')
     if (fact.id && !existingIds.has(fact.id)) throw new Error('信息点ID不属于当前项目。')
+    const previous = fact.id ? existing.find(row => row.id === fact.id) : undefined
+    if (previous && (previous.readerKnownChapterId || previous.protagonistKnownChapterId || knowledge(previous.characterKnowledgeJson).some(entry => entry.knownFromStart || entry.knownChapterId))
+      && (previous.summary || '').trim() !== fact.summary.trim()) {
+      throw new Error('已揭示的信息点内容不能通过生成改写；后续发现请新增信息点并安排实际揭示章位，资料纠错使用明确的编辑操作。')
+    }
     if (fact.id && seen.has(String(fact.id))) throw new Error('同一批不能重复更新信息点。')
     if (fact.id) seen.add(String(fact.id))
     if (fact.clientId) { if (clients.has(fact.clientId)) throw new Error('信息点clientId重复。'); clients.add(fact.clientId) }

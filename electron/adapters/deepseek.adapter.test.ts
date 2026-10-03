@@ -4,6 +4,29 @@ import { OpenAIAdapter } from './openai.adapter'
 
 const messages = [{ role: 'user' as const, content: '写出本章正文' }]
 
+describe('DeepSeek reasoning request contract', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('sets low reasoning by default and honors the model configuration without expanding its output cap', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{}' }, finish_reason: 'stop' }] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await new DeepSeekAdapter('test-only').chat(messages, { maxTokens: 12000 })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ thinking: { type: 'enabled' }, reasoning_effort: 'low', max_tokens: 12000 })
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '{}' }, finish_reason: 'stop' }] }), { status: 200 }))
+    await new DeepSeekAdapter('test-only').chat(messages, { maxTokens: 12000, providerOptions: { deepseekReasoningEffort: 'high' } })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ reasoning_effort: 'high', max_tokens: 12000 })
+  })
+
+  it('sends the disabled switch in streaming mode when thinking is turned off', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await new DeepSeekAdapter('test-only').stream(messages, { providerOptions: { deepseekReasoningEffort: 'none' } })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(body).not.toHaveProperty('reasoning_effort')
+  })
+})
+
 describe('DeepSeek generation timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers()

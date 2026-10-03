@@ -324,6 +324,13 @@ export async function generateGenericAssetDraft(
     reviewFocus: uniqueLines([
       '核对输出是否完全满足用户给定的资产标题、要求和输出格式。',
       '信息不足时应明确待确认，不得伪造为项目既有事实。',
+      ...(['map', 'faction', 'character'].includes(input.assetType) ? [
+        '简介、特点、日常和岗位职责应是小说资料；检查并移除文件路径、生成操作说明、不虚构等作者指令。未知字段省略，不用重复空值或待补充填满档案。',
+        '区分固定设定与现场变化。未来计划、未查明事项及证言不能变成已发生的事实，具体变化须保持原章位。',
+      ] : []),
+      ...(input.assetType === 'map' ? [
+        '逐条核对路线：相邻或商旅往来不证明具体道路可通行；关闭房门或尚未入内不证明不可通行；水痕不是步行通路。无依据的routeOpen:true/false应删去或修订，不能按任务数量凑路线。',
+      ] : []),
     ]),
     rewriteConstraints: uniqueLines([
       `保持 ${input.outputFormat || 'markdown'} 输出格式。`,

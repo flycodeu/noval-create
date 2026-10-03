@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSource } from '../../src/shared/story-atlas'
+import { STORY_ATLAS_LOCATION_ROLES } from '../../src/shared/story-atlas'
 
 export type AtlasRecord = StoryAtlasEntity | StoryAtlasRelation
 export interface AtlasStoredRecord {
@@ -124,6 +125,17 @@ export function readAtlasRecords(sqlite: Database.Database, novelId: number, atC
   const rows = sqlite.prepare(`SELECT * FROM (SELECT *, ROW_NUMBER() OVER
     (PARTITION BY record_id ORDER BY effective_from_chapter DESC,id DESC) AS rank
     FROM story_atlas_revisions WHERE ${where.join(' AND ')}) WHERE rank=1`).all(...args) as Row[]
-  return rows.map((row) => ({ record: JSON.parse(text(row.snapshot_json)) as AtlasRecord, recordType: row.record_type as AtlasStoredRecord['recordType'],
-    nativeTable: text(row.native_table) || null, nativeId: row.native_id === null ? null : num(row.native_id), retired: row.status === 'retired' }))
+  return rows.map((row) => {
+    const record = JSON.parse(text(row.snapshot_json)) as AtlasRecord
+    if (record.kind === 'presence' && !record.attributes.locationRole) {
+      const binding = text(record.attributes.bindingType)
+      // Explicit stored binding semantics can be named without inventing a new location fact.
+      const role = STORY_ATLAS_LOCATION_ROLES.find(role => role === binding)
+        || (binding === 'presence' && record.attributes.sourceType === 'legacy_json' ? 'activity' : undefined)
+        || ((!binding || binding === 'presence') && /^(character|item):/.test(record.fromId) ? 'current' : undefined)
+      if (role) record.attributes = { ...record.attributes, locationRole: role }
+    }
+    return { record, recordType: row.record_type as AtlasStoredRecord['recordType'],
+      nativeTable: text(row.native_table) || null, nativeId: row.native_id === null ? null : num(row.native_id), retired: row.status === 'retired' }
+  })
 }
