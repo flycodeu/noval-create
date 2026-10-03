@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
-import { creativeAtlasCoverage, creativePublicAttributes, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], name: string, parentId: string | null = null, attributes = {}): StoryAtlasEntity =>
   ({ id, kind, name, parentId, attributes, summary: '', status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
@@ -45,6 +45,38 @@ describe('saved atlas dependencies for creative context', () => {
   it('matches complete stable IDs instead of overlapping numeric prefixes', () => {
     const atlas = fixture(); atlas.entities.push(entity('character:10', 'character', '徐帆'))
     expect(selectCreativeAtlas(atlas, { request: '修改 character:10 的档案' }).seedIds).toEqual(new Set(['character:10']))
+  })
+  it('introduces only explicitly anchored new entities and the necessary parent locations', () => {
+    const before = fixture()
+    const newcomers = [
+      entity('character:3', 'character', '赵砚'), entity('character:4', 'character', '未出场伙计'),
+      entity('location:6', 'location', '石桥镇', 'location:1'), entity('location:7', 'location', '木料铺', 'location:6'),
+    ].map(value => ({ ...value, effectiveFromChapter: 2 }))
+    const current = { entities: [...before.entities.map(value => ({ ...value, summary: '本章末才改变的旧资料', effectiveFromChapter: 2 })), ...newcomers], relations: [] }
+    const selected = selectChapterAtlasIntroductions(before, current, { chapterNum: 2, request: '赵砚初次登场', anchorText: '陈舟走到木料铺', povNames: ['陈舟'] })
+    expect(selected.entities.map(value => value.id)).toEqual(['character:3', 'location:6', 'location:7'])
+    expect(selected.previousParentIds).toEqual(new Set(['location:1']))
+    expect(selected.entities.some(value => value.summary.includes('本章末'))).toBe(false)
+  })
+  it('does not infer introductions from protagonist defaults and rejects future, planned, hidden and event records', () => {
+    const before = fixture()
+    const additions: StoryAtlasEntity[] = [
+      { ...entity('character:new', 'character', '新主角', null, { roleType: 'protagonist' }), effectiveFromChapter: 2 },
+      { ...entity('character:future', 'character', '后续访客'), effectiveFromChapter: 3 },
+      { ...entity('character:planned', 'character', '候选伙计'), effectiveFromChapter: 2, status: 'planned' },
+      { ...entity('character:author', 'character', '幕后访客', null, { authorOnly: true }), effectiveFromChapter: 2 },
+      { ...entity('character:hidden', 'character', '未来访客', null, { futureOnly: true }), effectiveFromChapter: 2 },
+      { ...entity('event:new', 'event', '本章洪水'), effectiveFromChapter: 2 },
+    ]
+    const current = { entities: [...before.entities, ...additions], relations: [] }
+    expect(selectChapterAtlasIntroductions(before, current, { chapterNum: 2, request: '继续主角本章' }).entities).toEqual([])
+    const selected = selectChapterAtlasIntroductions(before, current, { chapterNum: 2, request: '后续访客、候选伙计、幕后访客、未来访客、本章洪水', anchorText: '新主角初次到场' })
+    expect(selected.entities.map(value => value.id)).toEqual(['character:new'])
+  })
+  it('uses an explicit one-character POV or complete stable ID for a new introduction', () => {
+    const current = { entities: [entity('character:1', 'character', '何'), entity('character:10', 'character', '赵砚')].map(value => ({ ...value, effectiveFromChapter: 1 })), relations: [] }
+    expect(selectChapterAtlasIntroductions({ entities: [], relations: [] }, current, { chapterNum: 1, request: '人物 character:10 出场' }).entities.map(value => value.id)).toEqual(['character:10'])
+    expect(selectChapterAtlasIntroductions({ entities: [], relations: [] }, current, { chapterNum: 1, request: '继续', povNames: ['何'] }).entities.map(value => value.id)).toEqual(['character:1'])
   })
   it('projects routine and ability costs but excludes private payloads and planned organization positions', () => {
     const attributes = creativePublicAttributes({ goals: '修船', habits: ['核查旧绳'], dailyRoutine: '清晨巡河', motivation: '履行承诺', abilityLimits: '不能跨岸听见', abilityCosts: '耗费体力', hiddenSecret: '幕后主使', futureOnly: false,

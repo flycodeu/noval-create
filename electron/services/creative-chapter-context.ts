@@ -14,7 +14,7 @@ import { validateChapterContractDelivery } from './chapter-contract-validator.se
 import { listSceneContracts } from './endgame-asset.service'
 import { requireArtifact } from './artifact.service'
 import { resolveProsePolicyMaterial } from './prose-operation.service'
-import { creativeAtlasCoverage, creativePublicAttributes, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -217,9 +217,18 @@ export async function compileCreativeChapterContext(
     request: input.request, anchorText: dependency, povNames,
     fallbackText: previous?.summary || previous?.content?.slice(-2000),
   })
+  const introductions = selectChapterAtlasIntroductions(atlas, queryStoryAtlas({ novelId: input.novelId, atChapter: chapterNum, includePlanned: false }), {
+    chapterNum, request: input.request, anchorText: dependency, povNames,
+  })
+  const introductionIds = new Set(introductions.entities.map(entity => entity.id))
+  for (const id of [...introductionIds, ...introductions.previousParentIds]) relevant.add(id)
+  if (introductionIds.size) add('chapter_introductions', {
+    chapterNum, entityIds: [...introductionIds],
+    instruction: '以下资料是本章引入计划，仅用于本章合同或请求明确安排的人物、地点等首次登场，以及必要的父地点。它们不是章首已知事实，也不表示登场、相识、到达或事件已经发生；必须在本章相应场景中建立。只能使用公开资料与本人视角允许的信息，不得据此补造关系、行程或提前揭示秘密。',
+  }, true, 'plan')
   const safeEntities: StoryAtlasEntity[] = []
   const safeRelations: StoryAtlasRelation[] = []
-  const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)))
+  const ordered = [...atlas.entities, ...introductions.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)))
   for (const entity of ordered) {
     if (!relevant.has(entity.id)) { omitted.push(`${entity.id}:unrelated_to_chapter`); continue }
     // Identity/public description are filtered too; provenance and arbitrary attribute payloads stay out.
@@ -242,7 +251,8 @@ export async function compileCreativeChapterContext(
     delete attributes.publicSummary
     const value = { id: entity.id, kind: entity.kind, name: entity.name, summary, parentId: entity.parentId, attributes }
     if (visibleText(JSON.stringify(value), policy)) { safeEntityIds.add(entity.id); safeEntities.push({ ...entity, ...value }) }
-    add(entity.id, value, relevant.has(entity.id))
+    if (introductionIds.has(entity.id)) add(`chapter_introduction:${entity.id}`, value, true, 'plan')
+    else add(entity.id, value, relevant.has(entity.id))
   }
   for (const edge of atlas.relations) if (relevantEdges.has(edge.id) && safeEntityIds.has(edge.fromId) && safeEntityIds.has(edge.toId)) {
     if (edge.attributes.futureOnly === true || edge.attributes.authorOnly === true) { omitted.push(`relation:${edge.id}:author_only`); continue }

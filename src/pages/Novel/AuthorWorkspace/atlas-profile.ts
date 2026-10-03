@@ -1,5 +1,5 @@
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { ATLAS_ATTRIBUTE_LABELS, atlasAttributeValue } from './atlas-presentation'
+import { ATLAS_ATTRIBUTE_LABELS, atlasAttributeValue, locationPath } from './atlas-presentation'
 
 export const ATLAS_KIND_LABELS = { location: '地点', character: '人物', faction: '组织势力', item: '物品', event: '事件' }
 export const ATLAS_TABS = [
@@ -18,6 +18,12 @@ export function atlasTabFor(entity: StoryAtlasEntity): AtlasTab { return ATLAS_T
 export function atlasEntitySummary(entity: StoryAtlasEntity): string {
   const publicSummary = entity.kind === 'character' ? entity.attributes.publicSummary : undefined
   return typeof publicSummary === 'string' && publicSummary.trim() ? publicSummary.trim() : entity.summary
+}
+export function atlasEntityMatchesSearch(entity: StoryAtlasEntity, keyword: string): boolean {
+  return `${entity.name} ${atlasEntitySummary(entity)} ${entity.summary}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase())
+}
+export function atlasLocationScope(snapshot: StoryAtlasSnapshot, locationId: string | null | undefined): string | null {
+  return snapshot.entities.find(entity => entity.kind === 'location' && entity.id === locationId)?.id ?? null
 }
 export function hasAtlasValue(value: unknown): boolean {
   if (value == null || value === '') return false
@@ -96,4 +102,26 @@ export function atlasLinks(snapshot: StoryAtlasSnapshot, entity: StoryAtlasEntit
     result.push({ entity: other, relation, label: locationLabel || VALUE_LABELS[String(relation.attributes.locationRole)] || VALUE_LABELS[relation.label] || relation.label || VALUE_LABELS[relation.kind], planned: relation.status === 'planned' || other.status === 'planned' })
   }
   return result
+}
+export function atlasRegionLinks(snapshot: StoryAtlasSnapshot, region: StoryAtlasEntity): AtlasLink[] {
+  if (region.kind !== 'location') return []
+  const result: AtlasLink[] = []
+  const seen = new Set<string>()
+  const locations = snapshot.entities.filter(entity => entity.kind === 'location' && locationPath(snapshot.entities, entity.id).some(parent => parent.id === region.id))
+  for (const location of locations) {
+    for (const link of atlasLinks(snapshot, location)) {
+      if (!['character', 'faction', 'event'].includes(link.entity.kind)) continue
+      const identity = JSON.stringify([link.entity.id, location.id, link.relation?.kind, link.relation?.attributes.locationRole || link.label, link.planned])
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      result.push({ ...link, label: location.id === region.id ? link.label : `${link.label} · ${location.name}` })
+    }
+  }
+  return result
+}
+
+/** An explicit edit replaces changed fields; untouched migration references never become new input. */
+export function atlasEditedAttributes(previous: Record<string, unknown>, next: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(next).filter(([key, value]) => !ATLAS_INTERNAL_FIELDS.has(key) && !/(?:Id|Ids|Refs)(?:Json)?$/.test(key)
+    && JSON.stringify(previous[key]) !== JSON.stringify(value)))
 }

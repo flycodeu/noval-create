@@ -20,6 +20,7 @@ async function main() {
   const { initDb, closeDb, getSqlite } = require('../electron/database/db.ts')
   const { migrateStoryAtlas } = require('../electron/database/story-atlas-store.ts')
   const { queryStoryAtlas, validateStoryAtlasChanges, applyStoryAtlasChanges } = require('../electron/services/story-atlas.service.ts')
+  const { parseCreativeCandidate } = require('../electron/services/creative-workflow.service.ts')
   initDb()
   try {
     const db = getSqlite()
@@ -139,6 +140,83 @@ async function main() {
     assert.ok(!organizationSnapshot().relations.some(edge => edge.id === planJob.idMap.futureJob))
     assert.ok(queryStoryAtlas({ novelId: organizationNovel, includePlanned: true }).relations.some(edge => edge.id === planJob.idMap.futureJob))
 
+    applyStoryAtlasChanges(organizationInput([
+      { op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', attributes: { age: 22, goals: '守住渡口', appearance: { clothing: '旧衫', hair: '黑' } } },
+      { op: 'upsert_relation', id: orgIds.job, kind: 'membership', fromId: orgIds.worker, toId: orgIds.branch, attributes: { roleTitle: '掌船', responsibilities: '检查船只' } },
+    ], 3))
+    const editWorkerBefore = organizationSnapshot().entities.find(entity => entity.id === orgIds.worker)
+    const editInput = organizationInput([
+      { op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', attributeMode: 'replace', attributes: { age: null, goals: '', personalityTraits: ['直言'], appearance: { clothing: '短衫', hair: '' } } },
+      { op: 'upsert_relation', id: orgIds.job, kind: 'membership', fromId: orgIds.worker, toId: orgIds.branch, attributeMode: 'replace', attributes: { roleTitle: '', responsibilities: '检查绳索' } },
+    ], 3)
+    const beforeEditing = organizationSnapshot().contextVersion
+    assert.equal(validateStoryAtlasChanges(editInput).valid, true)
+    assert.equal(organizationSnapshot().contextVersion, beforeEditing, 'replacement validation must not write')
+    applyStoryAtlasChanges(editInput)
+    const editWorker = organizationSnapshot().entities.find(entity => entity.id === orgIds.worker)
+    assert.equal(editWorker.attributes.goals, undefined); assert.equal(editWorker.attributes.age, undefined)
+    assert.deepEqual(editWorker.attributes.personalityTraits, ['直言'], 'manual replacement must not union old values')
+    assert.deepEqual(editWorker.attributes.appearance, { clothing: '短衫' }, 'nested optional fields can be cleared')
+    for (const key of ['occupation', 'dailyRoutine', 'motivation', 'abilityLimits', 'abilities']) assert.deepEqual(editWorker.attributes[key], editWorkerBefore.attributes[key], `omitted ${key} must stay unchanged`)
+    const nativeEditedWorker = db.prepare('SELECT age,goals,personality_traits_json,appearance_json,occupation FROM characters WHERE novel_id=? AND full_name=?').get(organizationNovel, '顾迟')
+    assert.equal(nativeEditedWorker.age, null); assert.equal(nativeEditedWorker.goals, null)
+    assert.deepEqual(JSON.parse(nativeEditedWorker.personality_traits_json), ['直言']); assert.deepEqual(JSON.parse(nativeEditedWorker.appearance_json), { clothing: '短衫' })
+    assert.equal(nativeEditedWorker.occupation, '船工', 'native projection preserves unrelated fields')
+    const editedJob = organizationSnapshot().relations.find(edge => edge.id === orgIds.job)
+    assert.equal(editedJob.attributes.roleTitle, undefined); assert.equal(editedJob.attributes.responsibilities, '检查绳索'); assert.equal(editedJob.attributes.positionId, 'keeper')
+    const beforePositionEdit = organizationSnapshot().entities.find(entity => entity.id === orgIds.branch)
+    applyStoryAtlasChanges(organizationInput([{ op: 'upsert_entity', id: orgIds.branch, kind: 'faction', name: '渡运部', attributes: { positions: [{ id: 'unused', title: '待增岗位', status: 'planned' }] } }], 3))
+    applyStoryAtlasChanges(organizationInput([{ op: 'upsert_entity', id: orgIds.branch, kind: 'faction', name: '渡运部', attributeMode: 'replace', attributes: { positions: beforePositionEdit.attributes.positions.map(position => position.id === 'keeper' ? { ...position, responsibilities: '' } : position) } }], 3))
+    const editedOrganization = organizationSnapshot().entities.find(entity => entity.id === orgIds.branch)
+    assert.equal(editedOrganization.attributes.positions.length, 2, 'an unoccupied organization slot can be removed')
+    assert.equal(editedOrganization.attributes.positions.find(position => position.id === 'keeper').responsibilities, undefined, 'optional slot text can be cleared')
+    assert.equal(editedOrganization.attributes.organizationLevel, beforePositionEdit.attributes.organizationLevel)
+    const stableSnapshot = organizationSnapshot()
+    const stableRevisionCount = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
+    const establishedPositions = stableSnapshot.entities.find(entity => entity.id === orgIds.branch).attributes.positions
+    for (const positions of [[], establishedPositions.filter(position => position.id !== 'keeper'), establishedPositions.map(position => position.id === 'keeper' ? { ...position, status: 'planned' } : position)]) {
+      assert.throws(() => applyStoryAtlasChanges(organizationInput([
+        { op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', summary: '应当一起回滚' },
+        { op: 'upsert_entity', id: orgIds.branch, kind: 'faction', name: '渡运部', attributeMode: 'replace', attributes: { positions } },
+      ], 3)), /岗位/)
+    }
+    assert.deepEqual(organizationSnapshot(), stableSnapshot, 'invalid occupied position edits must be atomic')
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, stableRevisionCount)
+    assert.deepEqual(db.prepare('SELECT age,goals,personality_traits_json,appearance_json,occupation FROM characters WHERE novel_id=? AND full_name=?').get(organizationNovel, '顾迟'), nativeEditedWorker)
+    assert.throws(() => applyStoryAtlasChanges(organizationInput([{ op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', attributeMode: 'invalid' }], 3)), /更新方式/)
+    assert.throws(() => parseCreativeCandidate('characters', JSON.stringify({ changes: [{ op: 'upsert_entity', id: orgIds.worker, kind: 'character', name: '顾迟', attributeMode: 'replace', attributes: { personalityTraits: [] } }] })), /增量合并/)
+
+    const futureMembershipNovel = addNovel()
+    const futureInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: futureMembershipNovel, expectedContextVersion: queryStoryAtlas({ novelId: futureMembershipNovel }).contextVersion })
+    const futureIds = applyStoryAtlasChanges(futureInput([
+      { op: 'upsert_entity', clientId: 'organization', kind: 'faction', name: '后续任职组织', attributes: { positions: [{ id: 'later', title: '录事', status: 'established' }] } },
+      { op: 'upsert_entity', clientId: 'member', kind: 'character', name: '后续成员' },
+    ])).idMap
+    const futureRole = applyStoryAtlasChanges(futureInput([{ op: 'upsert_relation', clientId: 'job', kind: 'membership', fromId: futureIds.member, toId: futureIds.organization, attributes: { positionId: 'later' } }], 3)).idMap.job
+    applyStoryAtlasChanges(futureInput([{ op: 'retire', id: futureRole }], 5))
+    const futureVersion = queryStoryAtlas({ novelId: futureMembershipNovel }).contextVersion
+    assert.throws(() => applyStoryAtlasChanges(futureInput([{ op: 'upsert_entity', id: futureIds.organization, kind: 'faction', name: '后续任职组织', attributeMode: 'replace', attributes: { positions: [] } }])), /第 3 章.*岗位/, 'retirement in chapter five must not erase the chapter-three job reference')
+    assert.throws(() => applyStoryAtlasChanges(futureInput([{ op: 'upsert_entity', id: futureIds.organization, kind: 'faction', name: '后续任职组织', attributeMode: 'replace', attributes: { positions: [{ id: 'later', title: '录事', status: 'planned' }] } }])), /第 3 章.*岗位/)
+    assert.equal(queryStoryAtlas({ novelId: futureMembershipNovel }).contextVersion, futureVersion, 'future job guards must leave canon unchanged')
+    applyStoryAtlasChanges(futureInput([{ op: 'upsert_entity', id: futureIds.organization, kind: 'faction', name: '后续任职组织', summary: '只更正组织简介' }]))
+    applyStoryAtlasChanges(futureInput([{ op: 'upsert_entity', id: futureIds.organization, kind: 'faction', name: '后续任职组织', attributeMode: 'replace', attributes: { positions: [] } }], 5))
+    assert.equal(queryStoryAtlas({ novelId: futureMembershipNovel, atChapter: 3 }).relations.find(edge => edge.id === futureRole).attributes.positionId, 'later', 'removing an unoccupied slot later preserves past assignments')
+
+    const migratedEditNovel = addNovel()
+    const oldFaction = Number(db.prepare('INSERT INTO factions(novel_id,name) VALUES (?,?)').run(migratedEditNovel, '旧行会').lastInsertRowid)
+    const oldCharacter = Number(db.prepare('INSERT INTO characters(novel_id,full_name,camp_faction_ids_json,occupation,personality_traits_json) VALUES (?,?,?,?,?)').run(migratedEditNovel, '旧人物', JSON.stringify([oldFaction]), '船工', JSON.stringify(['谨慎'])).lastInsertRowid)
+    migrateStoryAtlas(db)
+    const migratedInput = (changes) => ({ ...input(changes), novelId: migratedEditNovel, expectedContextVersion: queryStoryAtlas({ novelId: migratedEditNovel }).contextVersion })
+    const migratedEntity = queryStoryAtlas({ novelId: migratedEditNovel }).entities.find(entity => entity.id === `character:${oldCharacter}`)
+    assert.deepEqual(migratedEntity.attributes.campFactionIds, [oldFaction])
+    applyStoryAtlasChanges(migratedInput([{ op: 'upsert_entity', id: migratedEntity.id, kind: 'character', name: migratedEntity.name, summary: '仅更正简介', attributeMode: 'replace', attributes: migratedEntity.attributes }]))
+    const migratedAfter = queryStoryAtlas({ novelId: migratedEditNovel })
+    assert.equal(migratedAfter.entities.find(entity => entity.id === migratedEntity.id).summary, '仅更正简介', 'full old editor payload must save without rejecting unchanged migrated references')
+    assert.deepEqual(migratedAfter.entities.find(entity => entity.id === migratedEntity.id).attributes.campFactionIds, [oldFaction])
+    assert.equal(migratedAfter.relations.filter(edge => edge.kind === 'membership').length, 1)
+    for (const campFactionIds of [[oldFaction + 1], [], null]) assert.throws(() => applyStoryAtlasChanges(migratedInput([{ op: 'upsert_entity', id: migratedEntity.id, kind: 'character', name: migratedEntity.name, attributeMode: 'replace', attributes: { campFactionIds } }])), /membership/)
+    assert.deepEqual(queryStoryAtlas({ novelId: migratedEditNovel }), migratedAfter, 'reference edits must not bypass graph validation')
+
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)
     const b = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '乙').lastInsertRowid)
@@ -153,7 +231,7 @@ async function main() {
     const migrationCount = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
     migrateStoryAtlas(db)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, migrationCount, 'migration is idempotent')
-    process.stdout.write('PASS story atlas: hierarchy, native projections, shared graph, validation without writes, chapter history, future filtering, version/idempotency, cross-project protection, cycle/travel validation, outer transaction rollback, source migration\n')
+    process.stdout.write('PASS story atlas: hierarchy, native projections, shared graph, validation without writes, chapter history, future filtering, version/idempotency, cross-project protection, cycle/travel validation, outer transaction rollback, source migration, manual replacement and clearing, migrated reference preservation, current/future position guards\n')
   } finally { closeDb(); fs.rmSync(tempRoot, { recursive: true, force: true }) }
   app.exit(0)
 }

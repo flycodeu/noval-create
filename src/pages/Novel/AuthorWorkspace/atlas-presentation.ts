@@ -97,6 +97,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 }
 
 export function atlasAttributeValue(key: string, value: unknown) {
+  if (key === 'entityType') return ({ human: '人类', nonhuman: '异类', undead: '亡灵', monster: '妖异', spirit: '精怪', ghost: '鬼魂' } as Record<string, string>)[String(value)] || value
   if (key === 'currentStatus') return ({ active: '推进中', stalled: '暂时停滞', completed: '已完成', resolved: '已解决', planned: '待推进', abandoned: '已放弃' } as Record<string, string>)[String(value)] || value
   if (key === 'roleType') return ({ protagonist: '主角', major: '主要人物', antagonist: '对立人物', supporting: '配角', minor: '次要人物' } as Record<string, string>)[String(value)] || value
   if (key === 'nodeType' || key === 'locationType') return ({ region: '地域', country: '国家', province: '州郡', city: '城市', town: '城镇', village: '村庄', building: '建筑', room: '屋室', site: '场景地点', location: '地点', bridge: '桥梁', inn: '客栈', ferry: '渡口', courtyard: '庭院', yard: '院落', well: '井', corridor: '廊道', hall: '厅堂', storeroom: '储物房', storage: '储物处', river: '河流', road: '道路', platform: '台地', landmark: '地标', port: '港口', mountain: '山地', forest: '林地', lake: '湖泊', settlement: '聚落', interior_space: '室内场所', stone_platform: '石台', guest_room_area: '客房区域' } as Record<string, string>)[String(value)] || value

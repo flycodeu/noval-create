@@ -1,4 +1,5 @@
-import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasEntityKind, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
+import { isDeepStrictEqual } from 'node:util'
+import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasAttributeMode, type StoryAtlasEntityKind, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
 import { validateJsonSchema } from '../../src/shared/tool-contracts'
 
 export function meaningfulAtlasValue(value: unknown): boolean {
@@ -8,14 +9,30 @@ export function meaningfulAtlasValue(value: unknown): boolean {
   return true
 }
 
-export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryAtlasRelationKind, raw: Record<string, unknown> = {}): Record<string, unknown> {
-  const patch = Object.fromEntries(Object.entries(raw).filter(([, value]) => meaningfulAtlasValue(value)))
-  for (const key of ['campFactionIds', 'birthLocationId', 'homeLocationId', 'activityLocationIds', 'headquartersLocationId', 'baseLocationIds', 'territoryLocationIds']) {
-    if (key in patch) throw new Error(`${key} 请改用明确的 presence 或 membership 关系与图谱ID，不能把未校验ID放在属性中。`)
+const referenceAttributes = new Set(['campFactionIds', 'birthLocationId', 'homeLocationId', 'activityLocationIds', 'headquartersLocationId', 'baseLocationIds', 'territoryLocationIds'])
+
+function replacementValue(value: unknown): unknown {
+  if (!meaningfulAtlasValue(value)) return null
+  if (Array.isArray(value)) return value.map(replacementValue).filter(item => item !== null)
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => [key, replacementValue(item)]).filter(([, item]) => item !== null))
+  return value
+}
+
+export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryAtlasRelationKind, raw: Record<string, unknown> = {}, current: Record<string, unknown> = {}, mode: StoryAtlasAttributeMode = 'merge'): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (referenceAttributes.has(key)) {
+      // Old native snapshots contain these references. Echoing them is harmless, but all changes must use validated graph edges.
+      if (isDeepStrictEqual(value, current[key]) || !meaningfulAtlasValue(value) && !meaningfulAtlasValue(current[key])) continue
+      throw new Error(`${key} 请改用明确的 presence 或 membership 关系与图谱ID，不能把未校验ID放在属性中。`)
+    }
+    if (mode === 'replace') patch[key] = replacementValue(value)
+    else if (meaningfulAtlasValue(value)) patch[key] = value
   }
   const schema = STORY_ATLAS_ATTRIBUTE_SCHEMAS[kind]
   if (schema) {
-    const result = validateJsonSchema(patch, schema)
+    const result = validateJsonSchema(Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null)), schema)
     if (!result.valid) throw new Error(`${kind} 属性结构错误：${result.issues.join('；')}`)
   }
   if (kind === 'faction' && Array.isArray(patch.positions)) {
@@ -25,9 +42,13 @@ export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryA
   return patch
 }
 
-/** Absent/empty fields preserve canon; lists add items and organization slots merge by local id. */
-export function mergeAtlasAttributes(current: Record<string, unknown> = {}, patch: Record<string, unknown>): Record<string, unknown> {
+/** Merge preserves empty fields and adds list entries; replace changes only supplied top-level fields. */
+export function mergeAtlasAttributes(current: Record<string, unknown> = {}, patch: Record<string, unknown>, mode: StoryAtlasAttributeMode = 'merge'): Record<string, unknown> {
   const next = { ...current, ...patch }
+  if (mode === 'replace') {
+    for (const [key, value] of Object.entries(patch)) if (value === null) delete next[key]
+    return next
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (!Array.isArray(value)) continue
     const previous = Array.isArray(current[key]) ? current[key] as unknown[] : []

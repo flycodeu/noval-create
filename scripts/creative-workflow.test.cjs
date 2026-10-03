@@ -347,6 +347,43 @@ async function main() {
     assert.throws(() => require('../electron/services/creative-facts.ts').validateCreativeFactPlans(mysteryId, [
       { id: secretFact.id, title: secretFact.title, summary: `${secret}。第三章又发现新的幕后人。` },
     ]), /已揭示的信息点/, 'a later discovery must not rewrite an earlier-known fact and leak into prior chapters')
+    const factService = require('../electron/services/creative-facts.ts')
+    assert.throws(() => factService.validateCreativeFactPlans(mysteryId, [
+      { id: secretFact.id, title: secretFact.title, summary: secret, knownFromStartCharacterIds: [shen.id] },
+    ]), /不能通过生成回填为开篇已知/, 'unchanged fact text must not bypass knowledge chronology')
+    const initialFact = (await mysteryCall('assets.query')).facts.find(fact => fact.title === '掌柜账册')
+    factService.applyCreativeFactPlans(mysteryId, [{ id: initialFact.id, title: initialFact.title, summary: initialFact.summary, knownFromStartCharacterIds: [zhou.id] }], 'repeat-initial-knowledge')
+    assert.deepEqual((await mysteryCall('assets.query')).facts.find(fact => fact.id === initialFact.id).characterKnowledge, initialFact.characterKnowledge, 'repeated opening knowledge keeps its original evidence source')
+
+    // A character introduced in this chapter can learn through actual prose; a future/planned one cannot.
+    const atlasService = require('../electron/services/story-atlas.service.ts')
+    for (const [name, atChapter, status] of [['程棠', 2, 'confirmed'], ['未来客', 3, 'confirmed'], ['待定客', 2, 'planned']]) {
+      atlasService.applyStoryAtlasChanges({ novelId: mysteryId, expectedContextVersion: atlasService.queryStoryAtlas({ novelId: mysteryId }).contextVersion,
+        effectiveFromChapter: atChapter, source: { kind: 'test' }, idempotencyKey: `introduced-${name}`,
+        changes: [{ op: 'upsert_entity', kind: 'character', name, status }] })
+    }
+    const introduced = atlasService.queryStoryAtlas({ novelId: mysteryId, includePlanned: true }).entities
+    const newcomer = introduced.find(entity => entity.name === '程棠')
+    const newQuote = `程棠读信后说：“原来${secret}。”`
+    const newReveal = { ...validReveal, characterIds: [newcomer.id], evidenceQuote: newQuote }
+    factService.applyCreativeFactReveals(mysteryId, secondPlan.id, `${revealProse}\n${newQuote}`, [newReveal], 'newcomer-reveal')
+    const newcomerKnowledge = (await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).characterKnowledge.find(entry => entry.characterId === newcomer.id)
+    assert.equal(newcomerKnowledge.knownChapterId, secondPlan.id)
+    assert.equal(newcomerKnowledge.evidenceQuote, newQuote)
+    assert.throws(() => factService.validateCreativeFactPlans(mysteryId, [{ id: secretFact.id, title: secretFact.title, summary: secret, knownFromStartCharacterIds: [newcomer.id] }]), /不能通过生成回填为开篇已知/, 'later-known non-POV knowledge cannot be backdated either')
+    for (const name of ['未来客', '待定客']) {
+      const quote = `${name}读信后说：“原来${secret}。”`
+      assert.throws(() => factService.validateCreativeFactReveals(mysteryId, 2, quote, [{ ...validReveal, characterIds: [introduced.find(entity => entity.name === name).id], evidenceQuote: quote }]), /人物图谱ID/)
+    }
+    assert.throws(() => factService.validateCreativeFactReveals(mysteryId, 2, revealProse, [{ ...validReveal, characterIds: [newcomer.id] }]), /在场获知依据/, 'introduction alone is not evidence of learning')
+    const openingFactId = factService.applyCreativeFactPlans(mysteryId, [{ title: '渡口旧约', summary: '沈墨早已知道旧约的日期', knownFromStartCharacterIds: [shen.id] }], 'opening-knowledge-source').factIds[0]
+    const openingKnowledge = (await mysteryCall('assets.query')).facts.find(fact => fact.id === openingFactId).characterKnowledge
+    sqlite.prepare('UPDATE chapters SET allowed_fact_ids_json=?,revealed_fact_ids_json=? WHERE id=?').run(JSON.stringify([openingFactId]), JSON.stringify([openingFactId]), secondPlan.id)
+    sqlite.prepare('UPDATE scene_contracts SET reveal_payload_json=? WHERE chapter_id=?').run(JSON.stringify([`fact:${openingFactId}`]), secondPlan.id)
+    const openingQuote = '沈墨说：“我早已知道旧约的日期。”'
+    factService.applyCreativeFactReveals(mysteryId, secondPlan.id, openingQuote, [{ factId: openingFactId, characterIds: [shen.id], evidenceQuote: openingQuote }], 'reader-learns-later')
+    factService.applyCreativeFactPlans(mysteryId, [{ id: openingFactId, title: '渡口旧约', summary: '沈墨早已知道旧约的日期', knownFromStartCharacterIds: [shen.id] }], 'repeat-after-reader-reveal')
+    assert.deepEqual((await mysteryCall('assets.query')).facts.find(fact => fact.id === openingFactId).characterKnowledge, openingKnowledge, 'later reader revelation preserves explicit opening POV knowledge and its source')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

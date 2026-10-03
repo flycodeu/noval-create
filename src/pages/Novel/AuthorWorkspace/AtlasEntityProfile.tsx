@@ -2,8 +2,7 @@ import React from 'react'
 import { Button } from 'antd'
 import { ArrowRightOutlined, EditOutlined } from '@ant-design/icons'
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { ATLAS_KIND_LABELS, atlasEntitySummary, atlasLinks, profileFieldGroups, type AtlasLink } from './atlas-profile'
-import { locationPath } from './atlas-presentation'
+import { ATLAS_KIND_LABELS, atlasEntitySummary, atlasLinks, atlasRegionLinks, profileFieldGroups, type AtlasLink } from './atlas-profile'
 import { recordOf } from './content-document'
 import { AtlasFields } from './AtlasFields'
 
@@ -33,12 +32,7 @@ export function AtlasEntityProfile(props: Props) {
   const parent = snapshot.entities.find(item => item.id === entity.parentId)
   const groups = profileFieldGroups(entity)
   const summary = atlasEntitySummary(entity)
-  const regionIds = entity.kind === 'location' ? new Set(snapshot.entities.filter(item => item.kind === 'location' && locationPath(snapshot.entities, item.id).some(parent => parent.id === entity.id)).map(item => item.id)) : new Set<string>()
-  const regionLinks: AtlasLink[] = []
-  if (entity.kind === 'location') for (const locationId of regionIds) {
-    const location = snapshot.entities.find(item => item.id === locationId)!
-    for (const link of atlasLinks(snapshot, location)) if (['character', 'faction', 'event'].includes(link.entity.kind) && !regionLinks.some(item => item.entity.id === link.entity.id && item.label === link.label)) regionLinks.push({ ...link, label: locationId === entity.id ? link.label : `${link.label} · ${location.name}` })
-  }
+  const regionLinks = atlasRegionLinks(snapshot, entity)
   return <article className="atlas-profile" aria-label={`${entity.name}资料`}>
     <header className="atlas-profile-header"><div><span className="author-eyebrow">{ATLAS_KIND_LABELS[entity.kind]} · {entity.status === 'planned' ? '计划设定' : '已记录'}</span><h2>{entity.name}</h2></div><Button icon={<EditOutlined />} onClick={onEdit}>编辑</Button></header>
     {parent && <button type="button" className="atlas-text-link atlas-parent-link" onClick={() => onOpen(parent)}>{entity.kind === 'faction' ? '上级组织' : '所属地点'}：{parent.name}</button>}

@@ -4,6 +4,7 @@ import type { AgentToolJsonSchema } from './tool-contracts'
 export type StoryAtlasEntityKind = 'location' | 'character' | 'faction' | 'item' | 'event'
 export type StoryAtlasRelationKind = 'relationship' | 'route' | 'presence' | 'ownership' | 'membership' | 'participation'
 export type StoryAtlasStatus = 'confirmed' | 'planned'
+export type StoryAtlasAttributeMode = 'merge' | 'replace'
 export const STORY_ATLAS_LOCATION_ROLES = ['current', 'birthplace', 'residence', 'activity', 'headquarters', 'outpost', 'jurisdiction'] as const
 export type StoryAtlasLocationRole = typeof STORY_ATLAS_LOCATION_ROLES[number]
 export interface StoryAtlasPosition {
@@ -116,6 +117,8 @@ export type StoryAtlasChange = {
   summary?: string
   parentId?: string | null
   attributes?: Record<string, unknown>
+  /** Default merge adds values; replace replaces only supplied top-level fields and deletes empty fields. */
+  attributeMode?: StoryAtlasAttributeMode
   status?: StoryAtlasStatus
 } | {
   op: 'upsert_relation'
@@ -126,6 +129,7 @@ export type StoryAtlasChange = {
   toId: string
   label?: string
   attributes?: Record<string, unknown>
+  attributeMode?: StoryAtlasAttributeMode
   status?: StoryAtlasStatus
 } | { op: 'retire'; id: string }
 export interface StoryAtlasApplyInput {

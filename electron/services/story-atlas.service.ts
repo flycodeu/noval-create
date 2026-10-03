@@ -81,7 +81,7 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   return { novelId: input.novelId, contextVersion, atChapter: input.atChapter ?? null, entities, relations, locationChildren, diagnostics }
 }
 
-interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number }
+interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number }
 function prepare(input: StoryAtlasApplyInput): Prepared {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
@@ -100,7 +100,8 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   for (const [index, change] of input.changes.entries()) {
     if (!change || !['upsert_entity', 'upsert_relation', 'retire'].includes(change.op)) fail('INVALID_INPUT', '未知的图谱变更操作。')
     if (change.op === 'retire') continue
-    if (change.attributes && (typeof change.attributes !== 'object' || Array.isArray(change.attributes) || JSON.stringify(change.attributes).length > 32000)) fail('INVALID_INPUT', 'attributes 必须为不超过 32KB 的对象。')
+    if (change.attributes !== undefined && (!change.attributes || typeof change.attributes !== 'object' || Array.isArray(change.attributes) || JSON.stringify(change.attributes).length > 32000)) fail('INVALID_INPUT', 'attributes 必须为不超过 32KB 的对象。')
+    if (change.attributeMode !== undefined && !['merge', 'replace'].includes(change.attributeMode)) fail('INVALID_INPUT', '属性更新方式只能为 merge 或 replace。')
     if (change.status && !['confirmed', 'planned'].includes(change.status)) fail('INVALID_INPUT', '不支持的资料状态。')
     if (change.clientId !== undefined && (typeof change.clientId !== 'string' || !change.clientId.trim() || change.clientId.length > 200)) fail('INVALID_INPUT', '临时 ID 须为 1 至 200 字符。')
     if (!(change.op === 'upsert_entity' ? entityKinds : relationKinds).has(change.kind)) fail('INVALID_INPUT', '不支持的图谱类型。')
@@ -110,7 +111,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       if (change.parentId !== undefined && change.parentId !== null && typeof change.parentId !== 'string') fail('INVALID_INPUT', '上级地点 ID 格式不正确。')
       for (const [attribute, column] of Object.entries(fields[change.kind])) {
         const value = change.attributes?.[attribute]
-        if (value === undefined || value === null) continue
+        if (value === undefined || value === null || change.attributeMode === 'replace' && !meaningfulAtlasValue(value)) continue
         if (attribute === 'age' && (typeof value !== 'number' || !Number.isInteger(value) || value < 0)) fail('INVALID_ATTRIBUTE', '人物年龄必须为非负整数。')
         if (attribute === 'timeSortValue' && (typeof value !== 'number' || !Number.isFinite(value))) fail('INVALID_ATTRIBUTE', '事件时间排序值必须为有限数字。')
         if (!column.endsWith('_json') && !['age', 'timeSortValue'].includes(attribute) && typeof value !== 'string') fail('INVALID_ATTRIBUTE', `${attribute} 必须为文本。`)
@@ -142,7 +143,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes)), status: change.status || previous?.status || 'confirmed',
+        attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -184,7 +185,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     const previous = old?.record as StoryAtlasRelation | undefined
     byId.set(id, { recordType: 'relation', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
       id, kind: change.kind, fromId, toId, label: change.label ?? previous?.label ?? '',
-      attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes)), status: change.status || previous?.status || 'confirmed',
+      attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
       effectiveFromChapter: input.effectiveFromChapter, source: input.source,
     } })
   }
@@ -254,7 +255,27 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     const future = allIds.get(id)
     if (future && future.record.effectiveFromChapter > input.effectiveFromChapter) fail('ATLAS_HISTORY_CONFLICT', `记录 ${id} 在后续章节已有变化，请从最新状态修改，或先明确后续变化如何调整。`)
   }
-  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), idMap, contextVersion, diagnostics: diagnose(entities, relations) }
+  const changedPositionIds = new Set(entities.filter(entity => entity.kind === 'faction' && changedIds.has(entity.id)
+    && JSON.stringify(entity.attributes.positions) !== JSON.stringify(current.find(item => item.record.id === entity.id)?.record.attributes.positions)).map(entity => entity.id))
+  if (changedPositionIds.size) {
+    // A background correction also remains in force at later chapters. Check the final revision at each later chapter, including plans.
+    // Later revisions of the organization itself have already been rejected by the history guard above.
+    const futureMemberships = sqlite.prepare(`SELECT snapshot_json,status FROM (SELECT snapshot_json,status,
+      ROW_NUMBER() OVER (PARTITION BY effective_from_chapter ORDER BY id DESC) AS rank FROM story_atlas_revisions
+      WHERE novel_id=? AND record_id=? AND effective_from_chapter>?) WHERE rank=1 AND status<>'retired'`)
+    for (const item of allIds.values()) {
+      if (isEntity(item.record) || item.record.kind !== 'membership') continue
+      for (const row of futureMemberships.all(input.novelId, item.record.id, input.effectiveFromChapter) as Array<{ snapshot_json: string; status: string }>) {
+        const edge = JSON.parse(row.snapshot_json) as StoryAtlasRelation
+        if (!edge.attributes.positionId || !changedPositionIds.has(edge.toId)) continue
+        const position = positions.get(edge.toId)?.find(position => position.id === edge.attributes.positionId)
+        if (!position || row.status === 'confirmed' && position.status !== 'established') fail('FUTURE_POSITION_REFERENCE', `第 ${edge.effectiveFromChapter} 章的任职仍引用该岗位，请从对应章位调整任职关系后再更正岗位。`)
+      }
+    }
+  }
+  const clearedAttributes = new Map(current.filter(item => changedIds.has(item.record.id)).map(item => [item.record.id,
+    Object.keys(item.record.attributes).filter(key => !(key in byId.get(item.record.id)!.record.attributes))]))
+  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations) }
 }
 
 export function validateStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasValidationResult {
@@ -278,7 +299,7 @@ function writeRow(sqlite: Database.Database, table: string, nativeId: number | n
   }
   return Number(sqlite.prepare(`INSERT INTO ${table} (${entries.map(([key]) => key).join(',')}) VALUES (${entries.map(() => '?').join(',')})`).run(...entries.map(([, value]) => value)).lastInsertRowid)
 }
-function projectNative(sqlite: Database.Database, novelId: number, item: AtlasStoredRecord, records: Map<string, AtlasStoredRecord>): void {
+function projectNative(sqlite: Database.Database, novelId: number, item: AtlasStoredRecord, records: Map<string, AtlasStoredRecord>, clearedAttributes: string[] = []): void {
   // Planned records stay in the plan layer until a confirmed revision is applied.
   if (item.retired || item.record.status !== 'confirmed') return
   const record = item.record
@@ -289,9 +310,11 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     const summaryField = { character: 'background', location: 'description', faction: 'notes', item: 'summary', event: 'event_summary' }[record.kind]
     values[nameField] = record.name
     values[summaryField] = record.summary
-    for (const [attribute, column] of Object.entries(fields[record.kind])) if (record.attributes[attribute] !== undefined) {
-      const value = record.attributes[attribute]
-      values[column] = column.endsWith('_json') ? JSON.stringify(value) : typeof value === 'object' ? JSON.stringify(value) : value
+    for (const [attribute, column] of Object.entries(fields[record.kind])) {
+      if (record.attributes[attribute] !== undefined) {
+        const value = record.attributes[attribute]
+        values[column] = column.endsWith('_json') ? JSON.stringify(value) : typeof value === 'object' ? JSON.stringify(value) : value
+      } else if (clearedAttributes.includes(attribute)) values[column] = null
     }
     if (record.kind === 'location') {
       values.parent_id = record.parentId ? native(record.parentId) : null
@@ -389,7 +412,7 @@ export function applyStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasA
       if (saved.has(item.record.id)) return
       const record = item.record as StoryAtlasEntity
       if (record.parentId) { const parent = pendingEntities.find((candidate) => candidate.record.id === record.parentId); if (parent) saveEntity(parent) }
-      projectNative(sqlite, input.novelId, item, records)
+      projectNative(sqlite, input.novelId, item, records, prepared.clearedAttributes.get(item.record.id))
       saved.add(item.record.id)
     }
     pendingEntities.forEach(saveEntity)

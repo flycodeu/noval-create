@@ -31,6 +31,12 @@ function characters(novelId: number, atChapter?: number) {
   return readAtlasRecords(getSqlite(), novelId, atChapter, false).filter(item => !item.retired && item.record.kind === 'character' && item.nativeId)
     .map(item => ({ id: item.record.id, nativeId: item.nativeId!, name: 'name' in item.record ? item.record.name : '', roleType: item.record.attributes.roleType }))
 }
+// Keep existing identities at the opening state while admitting confirmed first appearances.
+function chapterCharacters(novelId: number, chapterNum: number) {
+  const cast = new Map(characters(novelId, chapterNum - 1).map(character => [character.id, character]))
+  for (const character of characters(novelId, chapterNum)) if (!cast.has(character.id)) cast.set(character.id, character)
+  return cast
+}
 function schema(value: unknown, expected: Schema): void {
   const result = validateJsonSchema(value, expected)
   if (!result.valid) throw new Error(`信息点结构错误：${result.issues.join('；')}`)
@@ -57,7 +63,7 @@ export function validateCreativeFactPlans(novelId: number, raw: unknown): assert
   const plans = raw as FactPlan[]
   const existing = listStoryFacts(novelId)
   const existingIds = new Set(existing.map(fact => fact.id))
-  const castIds = new Set(characters(novelId).map(character => character.id))
+  const cast = new Map(characters(novelId).map(character => [character.id, character]))
   const seen = new Set<string>(), clients = new Set<string>(), names = new Set<string>()
   for (const fact of plans) {
     if (!fact.title.trim() || !fact.summary.trim()) throw new Error('信息点标题与内容不能为空。')
@@ -72,7 +78,15 @@ export function validateCreativeFactPlans(novelId: number, raw: unknown): assert
     if (fact.clientId) { if (clients.has(fact.clientId)) throw new Error('信息点clientId重复。'); clients.add(fact.clientId) }
     if (names.has(fact.title.trim()) || existing.some(row => row.title.trim() === fact.title.trim() && row.id !== fact.id)) throw new Error('同名信息点已存在，请用原ID更新，不要重复创建。')
     names.add(fact.title.trim())
-    for (const characterId of fact.knownFromStartCharacterIds || []) if (!castIds.has(characterId)) throw new Error('开篇知情人物必须是当前项目已确认人物的图谱ID。')
+    for (const characterId of fact.knownFromStartCharacterIds || []) {
+      const character = cast.get(characterId)
+      if (!character) throw new Error('开篇知情人物必须是当前项目已确认人物的图谱ID。')
+      const priorKnowledge = knowledge(previous?.characterKnowledgeJson).find(entry => entry.characterId === character.nativeId)
+      if (priorKnowledge?.knownFromStart === true && priorKnowledge.knownChapterId === null) continue
+      if (priorKnowledge?.knownChapterId || previous?.protagonistKnownChapterId && character.roleType === 'protagonist') {
+        throw new Error('人物已在后续章节获知的信息不能通过生成回填为开篇已知；知情章位纠错请使用明确的编辑操作。')
+      }
+    }
   }
   for (const fact of plans) if (fact.relatedPuzzleId !== undefined) {
     if (typeof fact.relatedPuzzleId === 'number' ? !existingIds.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.id : !clients.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.clientId) throw new Error('关联谜题必须是本项目其他信息点或本批clientId。')
@@ -91,6 +105,7 @@ export function applyCreativeFactPlans(novelId: number, raw: unknown, sourceArti
     const known = new Map(knowledge(previous?.characterKnowledgeJson).map(entry => [entry.characterId, entry]))
     for (const characterId of plan.knownFromStartCharacterIds || []) {
       const character = cast.get(characterId)!
+      if (known.get(character.nativeId)?.knownFromStart === true) continue
       known.set(character.nativeId, { characterId: character.nativeId, knownChapterId: null, knownFromStart: true, sourceArtifactId })
     }
     const patch = { title: plan.title.trim(), summary: plan.summary.trim(), ...(plan.kind ? { kind: plan.kind } : {}),
@@ -115,7 +130,7 @@ export function validateCreativeFactReveals(novelId: number, chapterNum: number,
   if (!chapter) throw new Error('揭示信息点前必须建立目标章节安排。')
   const allowed = new Set(ids(chapter.allowedFactIdsJson)), required = new Set(ids(chapter.revealedFactIdsJson))
   const facts = new Map(listStoryFacts(novelId).map(fact => [fact.id, fact]))
-  const cast = new Map(characters(novelId, chapterNum - 1).map(character => [character.id, character]))
+  const cast = chapterCharacters(novelId, chapterNum)
   const scenes = listSceneContracts(chapter.id)
   const seen = new Set<number>()
   for (const reveal of raw as CreativeFactReveal[]) {
@@ -130,7 +145,7 @@ export function validateCreativeFactReveals(novelId: number, chapterNum: number,
     if (!authorizedScenes.length) throw new Error(`fact:${fact.id} 缺少场景揭示安排。`)
     for (const characterId of reveal.characterIds) {
       const character = cast.get(characterId)
-      if (!character) throw new Error('获知人物必须是当前项目在本章开始前已确认的人物图谱ID。')
+      if (!character) throw new Error('获知人物必须是当前项目截至本章已确认的人物图谱ID。')
       if (!authorizedScenes.some(scene => scene.pov === character.name) && !quote.includes(character.name)) throw new Error(`人物“${character.name}”不是揭示场景视角，证据中也没有其在场获知依据。`)
     }
   }
@@ -143,7 +158,7 @@ export function applyCreativeFactReveals(novelId: number, chapterId: number, con
   validateCreativeFactReveals(novelId, chapter.chapterNum, content, reveals)
   const rows = listChapters(novelId), numbers = new Map(rows.map(row => [row.id, row.chapterNum]))
   const earlier = (old: number | null) => old && (numbers.get(old) ?? Infinity) <= chapter.chapterNum ? old : chapterId
-  const cast = new Map(characters(novelId, chapter.chapterNum - 1).map(character => [character.id, character]))
+  const cast = chapterCharacters(novelId, chapter.chapterNum)
   const facts = new Map(listStoryFacts(novelId).map(fact => [fact.id, fact]))
   for (const reveal of reveals) {
     const fact = facts.get(reveal.factId)!

@@ -6,10 +6,14 @@ import 'reactflow/dist/style.css'
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { atlasAttributeValue, displayValue, locationCoordinates, locationPath } from './atlas-presentation'
 import { EmptyWork } from './shared'
-import { atlasEntitySummary } from './atlas-profile'
+import { atlasEntityMatchesSearch, atlasEntitySummary, atlasLocationScope } from './atlas-profile'
 
 type Props = { mode: 'map' | 'relationships'; snapshot: StoryAtlasSnapshot; parentId: string | null; selectedId: string | null; onSelect: (entity: StoryAtlasEntity) => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity | null) => void; onGenerate: () => void }
-export function WorldAtlasGraph({ mode, snapshot, parentId, selectedId, onSelect, onRelation, onDrill, onGenerate }: Props) {
+export function WorldAtlasGraph(props: Props) {
+  const parentId = atlasLocationScope(props.snapshot, props.parentId)
+  return <WorldAtlasGraphContent key={`${props.snapshot.novelId}:${props.mode}:${parentId}:${props.snapshot.atChapter}`} {...props} parentId={parentId} />
+}
+function WorldAtlasGraphContent({ mode, snapshot, parentId, selectedId, onSelect, onRelation, onDrill, onGenerate }: Props) {
   const [keyword, setKeyword] = useState('')
   const [limit, setLimit] = useState(80)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -17,7 +21,7 @@ export function WorldAtlasGraph({ mode, snapshot, parentId, selectedId, onSelect
   const entities = snapshot.entities
   const parent = entities.find(item => item.id === parentId)
   const path = locationPath(entities, parentId)
-  const shown = entities.filter(item => (mode === 'relationships' ? item.kind === 'character' : item.kind === 'location' && item.parentId === parentId) && `${item.name} ${item.summary}`.includes(keyword.trim()))
+  const shown = entities.filter(item => (mode === 'relationships' ? item.kind === 'character' : item.kind === 'location' && item.parentId === parentId) && atlasEntityMatchesSearch(item, keyword))
   const visible = shown.slice(0, limit)
   const graph = useMemo(() => {
     const coordinates = mode === 'map' ? locationCoordinates(visible) : new Map<string, { x: number; y: number }>()
@@ -52,7 +56,7 @@ export function WorldAtlasGraph({ mode, snapshot, parentId, selectedId, onSelect
   const relations = snapshot.relations.filter(item => item.kind === (mode === 'map' ? 'route' : 'relationship') && visible.some(entity => entity.id === item.fromId || entity.id === item.toId))
   return <section className="atlas-graph-panel">
     <nav className="author-atlas-path" aria-label="地域路径">{mode === 'map' ? <><button type="button" onClick={() => onDrill(null)}><HomeOutlined /> 全部地域</button>{path.map(item => <React.Fragment key={item.id}><span>/</span><button type="button" onClick={() => onDrill(item)}>{item.name}</button></React.Fragment>)}</> : <span>人物关系网络 · 点击人物或关系查看资料</span>}</nav>
-    <div className="author-atlas-actions"><Input.Search aria-label="查找图谱内容" value={keyword} onChange={event => setKeyword(event.target.value)} placeholder={mode === 'map' ? '查找本层地点' : '查找人物'} allowClear /><Button onClick={onGenerate}>{mode === 'map' ? '完善此处' : '完善关系'}</Button></div>
+    <div className="author-atlas-actions"><Input.Search aria-label="查找图谱内容" value={keyword} onChange={event => { setKeyword(event.target.value); setLimit(80) }} placeholder={mode === 'map' ? '查找本层地点' : '查找人物'} allowClear /><Button onClick={onGenerate}>{mode === 'map' ? '完善此处' : '完善关系'}</Button></div>
     {visible.length ? <><div className="author-atlas-canvas" ref={canvasRef}><ReactFlow key={`${mode}:${parentId}:${snapshot.atChapter}:${keyword}:${limit}`} onInit={instance => { flowRef.current = instance }} nodes={graph.nodes} edges={graph.edges} onNodeClick={(_, node) => { const entity = entities.find(item => item.id === node.id); if (entity) onSelect(entity) }} onNodeDoubleClick={(_, node) => { if (mode === 'map') { const entity = entities.find(item => item.id === node.id); if (entity) onDrill(entity) } }} onEdgeClick={(_, edge) => { const relation = snapshot.relations.find(item => item.id === edge.id); if (relation) onRelation(relation) }} fitView fitViewOptions={{ padding: .22, maxZoom: 1.15 }} minZoom={.2} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false}><Background color="#9ca99c" gap={26} size={.6} /><Controls showInteractive={false} /></ReactFlow></div><p className="author-atlas-caption">{mode === 'relationships' ? '连线展示当前章位已记录的人物关系；计划关系使用虚线。' : graph.hasCoordinates ? '按已保存的相对方位展示。连线区分层级与通路，示意布局不代表实际里程。' : '地点层级与通路示意，排列不代表距离或方位。'}</p></> : <EmptyWork title={keyword ? '没有匹配资料' : mode === 'map' ? parent ? `${parent.name}尚无下级地点` : '尚未建立地图' : '尚未建立人物关系'} action={onGenerate}>可结合现有背景生成；已确定的事实会保留。</EmptyWork>}
     {shown.length > limit && <Button onClick={() => setLimit(value => value + 80)}>继续显示（{limit}/{shown.length}）</Button>}
     {mode === 'map' && visible.length > 0 && <div className="atlas-map-location-list">{visible.map(entity => <button type="button" key={entity.id} onClick={() => onSelect(entity)}>{entity.name}</button>)}</div>}

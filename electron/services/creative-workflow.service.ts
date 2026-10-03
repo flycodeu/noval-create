@@ -118,6 +118,7 @@ export function parseCreativeCandidate(stage: CreativeStage, raw: string): Recor
     for (const rawChange of data.changes) {
       const change = object(rawChange)
       if (!['upsert_entity', 'upsert_relation'].includes(String(change.op))) throw new Error('模型生成只允许增量新增或更新；停用资料请使用明确的资料更正操作。')
+      if (change.attributeMode !== undefined && change.attributeMode !== 'merge') throw new Error('模型生成只允许增量合并属性；删除或替换资料请使用明确的资料更正操作。')
       const allowed = change.op === 'upsert_entity' ? entityKinds[stage] : relationKinds[stage]
       if (allowed && !allowed.includes(String(change.kind))) throw new Error(`生成结果修改了当前${CREATIVE_STAGE_LABELS[stage]}阶段之外的资料。`)
     }

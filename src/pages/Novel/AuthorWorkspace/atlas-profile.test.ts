@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { AtlasFields } from './AtlasFields'
-import { atlasEntitySummary, atlasFieldLabel, atlasLinks, atlasScalarText, profileFieldGroups, resolveAtlasTab } from './atlas-profile'
+import { atlasEntityMatchesSearch, atlasEntitySummary, atlasFieldLabel, atlasLinks, atlasLocationScope, atlasRegionLinks, atlasScalarText, profileFieldGroups, resolveAtlasTab } from './atlas-profile'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], name: string, attributes: Record<string, unknown> = {}): StoryAtlasEntity => ({ id, kind, name, attributes, summary: '', parentId: null, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
 describe('atlas dossiers', () => {
@@ -12,6 +12,41 @@ describe('atlas dossiers', () => {
     expect(atlasEntitySummary(character)).toBe('寄居旧灯的灯蛾。')
     expect(character.summary).toBe('首案不得提前揭露旧案。')
     expect(profileFieldGroups(character).some(group => 'publicSummary' in group.values || 'authorOnly' in group.values)).toBe(false)
+  })
+  it('finds the description shown on character cards while keeping names and author notes searchable', () => {
+    const character = { ...entity('character:1', 'character', '阿烛', { publicSummary: '寄居旧灯的灯蛾，别称 Azhu。' }), summary: '首案不得提前揭露旧案。' }
+    expect(atlasEntityMatchesSearch(character, '  灯蛾  ')).toBe(true)
+    expect(atlasEntityMatchesSearch(character, 'AZHU')).toBe(true)
+    expect(atlasEntityMatchesSearch(character, '阿烛')).toBe(true)
+    expect(atlasEntityMatchesSearch(character, '旧案')).toBe(true)
+    expect(atlasEntityMatchesSearch(character, '魏铎')).toBe(false)
+    expect(atlasEntityMatchesSearch({ ...entity('location:1', 'location', '客栈'), summary: '临水建成' }, '临水')).toBe(true)
+  })
+  it('does not keep a region filter that is absent at the selected chapter', () => {
+    const region = entity('location:1', 'location', '白茅镇')
+    const character = entity('character:1', 'character', '陆闻')
+    const snapshot: StoryAtlasSnapshot = { novelId: 1, contextVersion: 1, atChapter: 3, locationChildren: [], diagnostics: [], entities: [region, character], relations: [] }
+    expect(atlasLocationScope(snapshot, region.id)).toBe(region.id)
+    expect(atlasLocationScope({ ...snapshot, atChapter: 1, entities: [character] }, region.id)).toBeNull()
+    expect(atlasLocationScope(snapshot, character.id)).toBeNull()
+    expect(atlasLocationScope(snapshot, null)).toBeNull()
+  })
+  it('keeps distinct area roles and descendant locations without duplicate region links', () => {
+    const region = entity('location:1', 'location', '白茅镇')
+    const inn = { ...entity('location:2', 'location', '借灯客栈'), parentId: region.id }
+    const unrelated = entity('location:3', 'location', '芦渡')
+    const character = entity('character:1', 'character', '陆闻')
+    const snapshot: StoryAtlasSnapshot = { novelId: 1, contextVersion: 1, atChapter: 3, locationChildren: [], diagnostics: [], entities: [region, inn, unrelated, character], relations: [
+      { id: 'presence:1', kind: 'presence', fromId: character.id, toId: region.id, label: '活动', attributes: { locationRole: 'activity' }, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } },
+      { id: 'presence:2', kind: 'presence', fromId: character.id, toId: inn.id, label: '活动', attributes: { locationRole: 'activity' }, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } },
+      { id: 'presence:3', kind: 'presence', fromId: character.id, toId: inn.id, label: '活动区域', attributes: { locationRole: 'activity' }, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } },
+      { id: 'presence:4', kind: 'presence', fromId: character.id, toId: inn.id, label: '住宿', attributes: { locationRole: 'residence' }, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } },
+      { id: 'presence:5', kind: 'presence', fromId: character.id, toId: unrelated.id, label: '活动', attributes: { locationRole: 'activity' }, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } },
+    ] }
+    const links = atlasRegionLinks(snapshot, region)
+    expect(links.map(link => link.label)).toEqual(['活动区域', '活动区域 · 借灯客栈', '居住地 · 借灯客栈'])
+    expect(links.map(link => link.relation?.id)).toEqual(['presence:1', 'presence:2', 'presence:4'])
+    expect(atlasRegionLinks({ ...snapshot, entities: [inn, region, unrelated, character] }, region).map(link => link.label).sort()).toEqual(links.map(link => link.label).sort())
   })
   it('keeps old links in the relevant new section', () => {
     expect(resolveAtlasTab(new URLSearchParams('view=characters&kind=character'))).toBe('characters')

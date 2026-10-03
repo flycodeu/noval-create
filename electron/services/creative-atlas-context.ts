@@ -1,17 +1,46 @@
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../src/shared/story-atlas'
 
 type Atlas = Pick<StoryAtlasSnapshot, 'entities' | 'relations'>
+const namedAtlasEntity = (text: string, entity: StoryAtlasEntity) => text.split(/[^\w:-]+/u).includes(entity.id)
+  || (entity.name.trim().length > 1 && text.includes(entity.name))
+
+/** New chapter participants are introduction plans, never replacements for the preceding chapter's state. */
+export function selectChapterAtlasIntroductions(before: Atlas, current: Atlas, input: {
+  chapterNum: number; request: string; anchorText?: string; povNames?: string[]
+}) {
+  const previous = new Map(before.entities.map(entity => [entity.id, entity]))
+  const eligible = new Map(current.entities.filter(entity => !previous.has(entity.id) && entity.effectiveFromChapter === input.chapterNum
+    && entity.status === 'confirmed' && entity.kind !== 'event' && entity.attributes.authorOnly !== true && entity.attributes.futureOnly !== true)
+    .map(entity => [entity.id, entity]))
+  const selected = new Set([...eligible.values()].filter(entity => namedAtlasEntity(`${input.request}\n${input.anchorText || ''}`, entity)
+    || input.povNames?.includes(entity.name)).map(entity => entity.id))
+  const previousParentIds = new Set<string>()
+  for (const id of [...selected]) {
+    const child = eligible.get(id)!
+    if (child.kind !== 'location') continue
+    const visited = new Set([id])
+    let parentId = child.parentId
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId)
+      // Prefer the old parent even if its current-chapter terrain or description has already changed.
+      const parent = previous.get(parentId) || eligible.get(parentId)
+      if (!parent || parent.kind !== 'location' || parent.attributes.authorOnly === true || parent.attributes.futureOnly === true) break
+      if (previous.has(parentId)) previousParentIds.add(parentId)
+      else selected.add(parentId)
+      parentId = parent.parentId
+    }
+  }
+  return { entities: [...eligible.values()].filter(entity => selected.has(entity.id)), previousParentIds }
+}
 
 /** Select saved dependencies only. Each graph expansion is bounded to one pass, except parent chains. */
 export function selectCreativeAtlas(atlas: Atlas, input: {
   request: string; anchorText?: string; fallbackText?: string; povNames?: string[]
 }) {
-  const named = (text: string, entity: StoryAtlasEntity) => text.split(/[^\w:-]+/u).includes(entity.id)
-    || (entity.name.trim().length > 1 && text.includes(entity.name))
-  const seeds = new Set(atlas.entities.filter(entity => named(`${input.request}\n${input.anchorText || ''}`, entity)
+  const seeds = new Set(atlas.entities.filter(entity => namedAtlasEntity(`${input.request}\n${input.anchorText || ''}`, entity)
     || input.povNames?.includes(entity.name)).map(entity => entity.id))
-  const explicit = atlas.entities.some(entity => named(input.request, entity))
-  if (!seeds.size && input.fallbackText) for (const entity of atlas.entities) if (named(input.fallbackText, entity)) seeds.add(entity.id)
+  const explicit = atlas.entities.some(entity => namedAtlasEntity(input.request, entity))
+  if (!seeds.size && input.fallbackText) for (const entity of atlas.entities) if (namedAtlasEntity(input.fallbackText, entity)) seeds.add(entity.id)
   if ((!explicit && /主角|主人公|主要人物|核心人物/u.test(input.request)) || !seeds.size) {
     for (const entity of atlas.entities) if (entity.kind === 'character' && entity.attributes.roleType === 'protagonist') seeds.add(entity.id)
   }

@@ -54,8 +54,27 @@ async function main() {
       { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'village', label: '总部所在地', attributes: { locationRole: 'headquarters' } },
       { op: 'upsert_relation', kind: 'route', fromId: 'village', toId: 'harbor', label: '顺流航道', attributes: { travelHours: 4, travelMode: '行船', routeOpen: true } },
     ] })
+    const beforeCurrentChapter = queryStoryAtlas({ novelId })
+    const region = beforeCurrentChapter.entities.find(entity => entity.name === '南岭')
+    const existingBond = beforeCurrentChapter.relations.find(edge => edge.kind === 'relationship' && edge.toId === atlasNpc.id)
+    const introductions = applyStoryAtlasChanges({ novelId, expectedContextVersion: beforeCurrentChapter.contextVersion, effectiveFromChapter: 2, idempotencyKey: 'chapter-two-introductions', source: { kind: 'test' }, changes: [
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '第二章末才决定辞去渡工' } },
+      { op: 'upsert_entity', id: region.id, kind: 'location', name: '南岭', attributes: { terrain: '第二章末才发生山崩' } },
+      { op: 'upsert_relation', id: existingBond.id, kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '第二章末才结成同盟' },
+      { op: 'upsert_entity', clientId: 'newcomer', kind: 'character', name: '赵砚', summary: '首次登场的私有秘密不能注入', attributes: { publicSummary: '拎着补船木料的伙计', speechPattern: '先报来路，再问渡船', motivation: '初登场幕后动机不能注入', goals: '初登场秘密目标不能注入', hiddenSecret: '初登场隐情不能注入' } },
+      { op: 'upsert_entity', clientId: 'town', kind: 'location', name: '石桥镇', parentId: region.id, attributes: { livelihood: '河岸木料交易' } },
+      { op: 'upsert_entity', clientId: 'shop', kind: 'location', name: '木料铺', parentId: 'town', summary: '门旁堆着待运木料' },
+      { op: 'upsert_entity', clientId: 'unmentioned', kind: 'character', name: '旁客', attributes: { publicSummary: '未被安排出场的旁客资料' } },
+      { op: 'upsert_entity', clientId: 'planned', kind: 'character', name: '石榆', status: 'planned', attributes: { publicSummary: '尚未确认的候选人物档案' } },
+      { op: 'upsert_entity', clientId: 'authorOnly', kind: 'character', name: '秦岑', attributes: { authorOnly: true, publicSummary: '仅作者可见的本章人物档案' } },
+      { op: 'upsert_entity', clientId: 'futureOnly', kind: 'character', name: '未期者', attributes: { futureOnly: true, publicSummary: '标记未来专用的本章人物档案' } },
+      { op: 'upsert_entity', clientId: 'event', kind: 'event', name: '木料失窃', summary: '本章末事件结果不可先作事实' },
+      { op: 'upsert_relation', kind: 'presence', fromId: 'newcomer', toId: 'shop', label: '本章末才来到木料铺', attributes: { locationRole: 'current' } },
+      { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: 'newcomer', label: '本章末才初次认识' },
+    ] })
     applyStoryAtlasChanges({ novelId, expectedContextVersion: queryStoryAtlas({ novelId }).contextVersion, effectiveFromChapter: 3, idempotencyKey: 'future', source: { kind: 'test' }, changes: [
       { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', summary: '未来才成为知府', attributes: { speechPattern: '未来才使用的官话' } },
+      { op: 'upsert_entity', kind: 'character', name: '段青', attributes: { publicSummary: '第三章才准许使用的人物档案' } },
     ] })
     const input = { novelId, stage: 'chapter', request: '陈舟检查渡口旧绳，继续第二章。', atChapter: 2, idempotencyKey: 'fixture' }
     const limits = { maxInputTokens: 6000, outputReserve: 3000 }
@@ -79,6 +98,19 @@ async function main() {
     assert.ok(result.text.includes('public_description'), 'missing NPC public description is visible without exposing the private fallback')
     assert.ok(result.text.includes('已设岗位不等于有人任职'))
     assert.ok(result.text.includes('location_current'), 'residence must not silently become present scene location')
+    assert.ok(!result.sources.some(key => key.startsWith('chapter_introduction:')), 'unrequested first appearances do not expand the chapter cast')
+    const introductionContext = await compile({ ...input, request: '陈舟在木料铺初次遇到赵砚。石榆、秦岑、未期者、段青与木料失窃只作为待核对的名字，不据此扩写。' }, { ...limits, maxInputTokens: 12000 })
+    for (const id of [introductions.idMap.newcomer, introductions.idMap.town, introductions.idMap.shop]) {
+      assert.ok(introductionContext.sources.includes(`chapter_introduction:${id}`), `new chapter entity must be available as an introduction plan: ${id}`)
+      assert.ok(!introductionContext.sources.includes(id), 'introduction must not be promoted to chapter-opening canon')
+    }
+    for (const saved of ['本章引入计划', '不是章首已知事实', '拎着补船木料的伙计', '先报来路，再问渡船', '河岸木料交易', '门旁堆着待运木料', '低山河谷', '守住渡船', '对账协助']) assert.ok(introductionContext.text.includes(saved), saved)
+    for (const denied of ['第二章末才决定辞去渡工', '第二章末才发生山崩', '第二章末才结成同盟', '本章末才来到木料铺', '本章末才初次认识', '本章末事件结果不可先作事实', '首次登场的私有秘密不能注入', '初登场幕后动机不能注入', '初登场秘密目标不能注入', '初登场隐情不能注入', '未被安排出场的旁客资料', '尚未确认的候选人物档案', '仅作者可见的本章人物档案', '标记未来专用的本章人物档案', '第三章才准许使用的人物档案']) assert.ok(!introductionContext.text.includes(denied), `introduction must not expose existing end-state updates or withheld material: ${denied}`)
+    assert.ok(!introductionContext.sources.includes(`chapter_introduction:${introductions.idMap.event}`), 'current chapter events are not introductory entity records')
+    db.prepare('UPDATE chapter_contracts SET chapter_goal=? WHERE chapter_id=?').run('检查系船绳，赵砚首次到访木料铺', target)
+    const contractedIntroduction = await compile({ ...input, request: '按本章合同继续' }, { ...limits, maxInputTokens: 12000 })
+    assert.ok(contractedIntroduction.sources.includes(`chapter_introduction:${introductions.idMap.newcomer}`), 'chapter contract alone can authorize an introduction')
+    db.prepare('UPDATE chapter_contracts SET chapter_goal=? WHERE chapter_id=?').run('检查系船绳', target)
     const unnamed = await compile({ ...input, request: '继续本章，保留活动区域、职业和行程限制。' }, limits)
     assert.ok(unnamed.text.includes('顺流航道') && unnamed.text.includes('值守员'), 'scene POV anchors the graph when the request mentions no proper names')
     assert.ok(result.text.includes('夜色落在石阶上'), 'original ending retained without inventing a knowledge fact')
@@ -122,7 +154,7 @@ async function main() {
     assert.throws(() => gate({ ...base, expectedContextVersion: before + 1 }), error => error.code === 'CHAPTER_CONTEXT_STALE')
     assert.equal(gate({ ...base, changes: [{ op: 'upsert_entity', kind: 'item', name: '新绳', attributes: { evidenceQuote: '他换上新绳，渡船停稳' } }] }).chapterId, target)
     assert.ok(known > 0)
-    process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
+    process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, chapter introduction plans without current end-state leakage, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
   } finally { closeDb(); fs.rmSync(temp, { recursive: true, force: true }) }
   app.exit(0)
 }
