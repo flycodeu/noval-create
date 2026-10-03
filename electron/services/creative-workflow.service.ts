@@ -224,15 +224,17 @@ function validateOutlineForProject(novelId: number, data: Record<string, unknown
   }
 }
 
-function applyOutlineData(novelId: number, data: Record<string, unknown>): number[] {
+function applyOutlineData(novelId: number, data: Record<string, unknown>, savedStructureIds?: Map<object, number>): number[] {
   const current = listChapters(novelId)
   const volumeIds = new Map<string, number>(), partIds = new Map<string, number>()
   for (const volume of (data.volumes || []) as Record<string, unknown>[]) {
     const id = volume.id ? Number(volume.id) : createStoryVolume(novelId, volume)
+    savedStructureIds?.set(volume, id)
     if (volume.id) updateStoryVolume(id, volume)
     if (volume.clientId) volumeIds.set(String(volume.clientId), id)
     for (const part of (volume.parts || []) as Record<string, unknown>[]) {
       const partId = part.id ? Number(part.id) : createStoryPart(id, part)
+      savedStructureIds?.set(part, partId)
       if (part.id) updateStoryPart(partId, part)
       if (part.clientId) partIds.set(String(part.clientId), partId)
     }
@@ -319,6 +321,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
   return sqlite.transaction(() => {
     assertBase(frozen)
     const ids: number[] = []
+    const savedStructureIds = new Map<object, number>()
     let atlasResult: Record<string, unknown> = {}
     const changes = data.changes as StoryAtlasChange[] | undefined
     // Validate all cross-entity references before mutating the chapter/background.
@@ -331,7 +334,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
       updateNovel(input.novelId, Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])))
     } else if (frozen.request.stage === 'outline') {
       validateOutlineForProject(input.novelId, data, frozen.request)
-      ids.push(...applyOutlineData(input.novelId, data))
+      ids.push(...applyOutlineData(input.novelId, data, savedStructureIds))
     } else if (frozen.request.stage === 'chapter') {
       if (frozen.request.atChapter && data.chapterNum !== frozen.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
       assertCreativeChapterCandidate({ novelId: input.novelId, chapterNum: Number(data.chapterNum), content: String(data.content), expectedContextVersion: frozen.contextVersion, changes })
@@ -345,7 +348,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
       ids.push(chapterId)
     }
     if (changes?.length) atlasResult = { ...atlasResult, ...applyStoryAtlasChanges({ novelId: input.novelId, expectedContextVersion: getNovel(input.novelId)?.contextVersion || 1, effectiveFromChapter: frozen.request.atChapter || 0, source: { kind: 'artifact', id: draft.id }, idempotencyKey: key, changes }) }
-    const savedHistory = captureCreativeHistory(frozen.request, data, resolution, (atlasResult.idMap || {}) as Record<string, string>)
+    const savedHistory = captureCreativeHistory(frozen.request, data, resolution, (atlasResult.idMap || {}) as Record<string, string>, savedStructureIds)
     for (const [index, change] of history.entries()) change.after = savedHistory[index]?.before ?? change.after
     let appliedScope = frozen.request.changeScope
     if (frozen.request.revisionIssueIds?.length && appliedScope && changes?.length) {

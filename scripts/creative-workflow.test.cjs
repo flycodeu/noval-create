@@ -481,6 +481,24 @@ async function main() {
       const { createArtifact } = require('../electron/services/artifact.service.ts')
       for (let index = 0; index < 205; index++) createArtifact({ novelId: isolatedId, kind: 'creative_comparison', status: 'reviewed', parentArtifactId: itemAgain.artifactId, content: { index }, contextVersion: 1, producerType: 'system', producerId: 'history-query-test', producerClient: 'fixture' })
       assert.equal((await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts[0].id, comparison[0].id, 'parent filtering recovers a comparison beyond the newest 200 artifacts')
+      replies.push(JSON.stringify({ volumes: [
+        { clientId: 'volume-a', title: '上卷', summary: '上卷安排', parts: [{ clientId: 'part-a', title: '启程', summary: '上卷的第一次启程' }, { clientId: 'part-a2', title: '启程', summary: '上卷的第二次启程' }] },
+        { clientId: 'volume-b', title: '下卷', summary: '下卷安排', parts: [{ clientId: 'part-b', title: '启程', summary: '下卷的启程' }] },
+      ] }), review)
+      const sameName = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'outline', atChapter: 0, request: '建立两卷，各含同名启程单元，保存各自摘要', idempotencyKey: 'same-name-structure-history' })).run.runId)
+      assert.equal(sameName.status, 'success', JSON.stringify(sameName))
+      const partHistory = sameName.result.history.filter(change => change.path === '启程')
+      assert.deepEqual(partHistory.map(change => change.before), [null, null, null])
+      assert.deepEqual(partHistory.map(change => change.after.summary), ['上卷的第一次启程', '上卷的第二次启程', '下卷的启程'], 'same-named parts retain their actual saved identities')
+      sqlite.prepare('UPDATE novels SET project_brief_json=? WHERE id=?').run(JSON.stringify({ reader_promise: '旧阅读承诺', target_reader: '旧读者' }), isolatedId)
+      replies.push(JSON.stringify({ projectBrief: { readerPromise: '新阅读承诺' }, facts: [{ title: '渡口旧记', summary: '账房留有旧账。' }] }), review)
+      const briefSaved = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'story', atChapter: 0, request: '补充阅读承诺与旧账资料', idempotencyKey: 'brief-fact-history' })).run.runId)
+      assert.equal(briefSaved.status, 'success', JSON.stringify(briefSaved))
+      assert.equal(briefSaved.result.history.find(change => change.path === 'projectBrief').before.readerPromise, '旧阅读承诺')
+      assert.equal(briefSaved.result.history.find(change => change.path === 'projectBrief').after.readerPromise, '新阅读承诺')
+      const factsSaved = briefSaved.result.history.find(change => change.path === 'facts')
+      assert.deepEqual(factsSaved.before, [])
+      assert.ok(factsSaved.after[0].id > 0, 'new fact history contains actual saved identity')
       const oldIssueId = recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0]
       assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'open', 'unrelated consistency scan cannot close model findings')
       assert.equal(recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0], oldIssueId, 'repeated report discovery is idempotent')

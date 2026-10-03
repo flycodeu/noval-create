@@ -5,6 +5,8 @@ import { queryStoryAtlas } from './story-atlas.service'
 import { getSqlite } from '../database/db'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { parseProjectBriefDocument } from '../../src/shared/project-brief'
+import { queryCreativeFacts } from './creative-facts'
 import type { CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasValidationResult } from '../../src/shared/story-atlas'
 
@@ -16,7 +18,7 @@ export function projectPatch(current: unknown, patch: unknown): unknown {
 }
 const json = (raw: string | null | undefined) => { try { return JSON.parse(raw || '{}') } catch { return null } }
 /** Freeze only fields touched by this candidate while the generation context is still current. */
-export function captureCreativeHistory(input: CreativeWorkflowInput, data: Record<string, unknown>, resolution?: StoryAtlasValidationResult, savedIds?: Record<string, string>): CreativeHistoryChange[] {
+export function captureCreativeHistory(input: CreativeWorkflowInput, data: Record<string, unknown>, resolution?: StoryAtlasValidationResult, savedIds?: Record<string, string>, savedStructureIds?: Map<object, number>): CreativeHistoryChange[] {
   const novel = getNovel(input.novelId)!
   let atlasChanges: CreativeHistoryChange[] = []
   if (Array.isArray(data.changes) && data.changes.length) {
@@ -43,13 +45,13 @@ export function captureCreativeHistory(input: CreativeWorkflowInput, data: Recor
     const changes: CreativeHistoryChange[] = []
     for (const value of (data.volumes || []) as Array<Record<string, unknown>>) {
       const { parts, clientId: _clientId, ...patch } = value
-      const before = value.id ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_volumes WHERE novel_id=? AND id=?').get(input.novelId, value.id)
-        : savedIds ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_volumes WHERE novel_id=? AND title=?').get(input.novelId, value.title) : null
+      const volumeId = value.id || savedStructureIds?.get(value)
+      const before = volumeId ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_volumes WHERE novel_id=? AND id=?').get(input.novelId, volumeId) : null
       changes.push({ path: String(value.title), fieldKey: '', before: before ? projectPatch(before, patch) : null, after: patch })
       for (const part of (parts || []) as Array<Record<string, unknown>>) {
         const { clientId: _partClient, ...partPatch } = part
-        const original = part.id ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_parts WHERE novel_id=? AND id=?').get(input.novelId, part.id)
-          : savedIds && before ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_parts WHERE novel_id=? AND volume_id=? AND title=?').get(input.novelId, (before as { id: number }).id, part.title) : null
+        const partId = part.id || savedStructureIds?.get(part)
+        const original = partId ? getSqlite().prepare('SELECT id,title,summary,target_words AS targetWords FROM story_parts WHERE novel_id=? AND id=?').get(input.novelId, partId) : null
         changes.push({ path: String(part.title), fieldKey: '', before: original ? projectPatch(original, partPatch) : null, after: partPatch })
       }
     }
@@ -62,6 +64,6 @@ export function captureCreativeHistory(input: CreativeWorkflowInput, data: Recor
   }
   const chapter = listChapters(input.novelId).find(row => row.chapterNum === data.chapterNum)
   const story = parseStorySettingsDocument(novel.settingsJson)
-  const current = { ...story, themeVoice: parseThemeVoiceDocument(novel.themeVoiceJson), worldRules: json(novel.worldRulesJson), projectBrief: json(novel.projectBriefJson), userBackground: novel.userBackground, expandedBackground: novel.expandedBackground, synopsis: novel.synopsis, title: chapter?.title, content: chapter?.content, summary: chapter?.summary, chapterNum: chapter?.chapterNum }
+  const current = { ...story, themeVoice: parseThemeVoiceDocument(novel.themeVoiceJson), worldRules: json(novel.worldRulesJson), projectBrief: parseProjectBriefDocument(novel.projectBriefJson), facts: data.facts ? queryCreativeFacts(input.novelId) : undefined, userBackground: novel.userBackground, expandedBackground: novel.expandedBackground, synopsis: novel.synopsis, title: chapter?.title, content: chapter?.content, summary: chapter?.summary, chapterNum: chapter?.chapterNum }
   return [...Object.entries(data).filter(([key]) => !['changes', 'factReveals'].includes(key)).map(([key, after]) => ({ path: key, fieldKey: key, before: projectPatch((current as Record<string, unknown>)[key], after), after })), ...atlasChanges]
 }
