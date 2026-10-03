@@ -6034,7 +6034,7 @@ declare global {
         applyBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchApplyResult>
       }
       endgameAsset: {
-        listCommitments: (novelId: number) => Promise<EndgameCommitment[]>
+        listCommitments: (novelId: number, options?: { readOnly?: boolean }) => Promise<EndgameCommitment[]>
         getSummary: (novelId: number) => Promise<EndgameAssetSummary>
         syncFromSettings: (novelId: number, settingsJson?: string | null) => Promise<{
           commitments: EndgameCommitment[]
@@ -6043,7 +6043,7 @@ declare global {
         updateCommitment: (id: number, data: Partial<Pick<EndgameCommitment, 'title' | 'description' | 'status' | 'targetResolutionChapter' | 'fulfilledChapter' | 'notes'>>) => Promise<EndgameCommitment | null>
       }
       foreshadow: {
-        listLedger: (novelId: number) => Promise<ForeshadowLedgerEntry[]>
+        listLedger: (novelId: number, options?: { readOnly?: boolean }) => Promise<ForeshadowLedgerEntry[]>
         upsertLedger: (novelId: number, data: Partial<ForeshadowLedgerEntry>) => Promise<ForeshadowLedgerEntry[]>
         deleteLedger: (novelId: number, id: number) => Promise<ForeshadowLedgerEntry[]>
       }

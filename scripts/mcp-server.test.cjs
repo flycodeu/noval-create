@@ -96,6 +96,24 @@ async function main() {
     assert.equal(listedModels.find((model) => model.id === modelId).apiKey, '已设置')
     assert(!JSON.stringify(listedModels).includes('fixture-secret-only'), 'RPC must mask configured provider keys')
     const novelId = await rpc('novel', 'create', [{ title: 'Exit cancellation fixture', userBackground: '渡口的两名船工。', modelConfigId: modelId, launchMode: 'fast_launch' }])
+    const atlasBefore = (await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas
+    const savedGeography = { boundary: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 100 }, { x: 0, y: 100 }], areaKm2: 40, development: 'outlined' }
+    const mapChange = { novelId, expectedContextVersion: atlasBefore.contextVersion, idempotencyKey: 'runtime-geography-roundtrip', effectiveFromChapter: 0, source: { kind: 'test', id: 'mcp-map-fixture' }, changes: [
+      { op: 'upsert_entity', clientId: 'country', kind: 'location', name: '接口测试国', attributes: { locationType: 'country', geography: { areaKm2: 100, mapFrame: { widthKm: 10, heightKm: 10 } } } },
+      { op: 'upsert_entity', clientId: 'west', kind: 'location', name: '接口测试西郡', parentId: 'country', attributes: { locationType: 'region', geography: savedGeography } },
+    ] }
+    const validatedMap = await second.callTool({ name: 'novelforge.atlas.validate', arguments: mapChange })
+    assert(!validatedMap.isError, JSON.stringify(validatedMap))
+    assert.equal((await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas.contextVersion, atlasBefore.contextVersion, 'MCP map validation must not write')
+    const appliedMap = await second.callTool({ name: 'novelforge.atlas.apply', arguments: mapChange })
+    assert(!appliedMap.isError, JSON.stringify(appliedMap))
+    const mapIds = appliedMap.structuredContent.result.idMap
+    const savedMap = (await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId, locationParentId: mapIds.country } })).structuredContent.atlas
+    assert.equal(savedMap.locationChildren.length, 1)
+    assert.deepEqual(savedMap.locationChildren[0].attributes.geography, savedGeography, 'MCP must preserve exact saved geometry, area and development status')
+    const invalidMap = await second.callTool({ name: 'novelforge.atlas.apply', arguments: { ...mapChange, expectedContextVersion: savedMap.contextVersion, idempotencyKey: 'runtime-invalid-geography', changes: [{ op: 'upsert_entity', id: mapIds.west, kind: 'location', name: '接口测试西郡', attributes: { geography: { areaKm2: 101 } } }] } })
+    assert(invalidMap.isError, 'MCP must reject child area exceeding its parent')
+    assert.equal((await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas.contextVersion, savedMap.contextVersion, 'invalid MCP map changes must be atomic')
     const running = await second.callTool({ name: 'novelforge.workflows.start', arguments: { novelId, stage: 'background', request: '整理现有背景。', idempotencyKey: 'explicit-exit-test' } })
     assert(!running.isError)
     const runId = running.structuredContent.run.runId
@@ -119,7 +137,9 @@ async function main() {
     const recovered = await fresh.callTool({ name: 'novelforge.workflows.get', arguments: { novelId, runId } })
     assert.equal(recovered.structuredContent.run.status, 'cancelled', 'Restart must retain cancellation instead of re-running the model')
     assert.equal((await rpc('novel', 'get', [novelId])).userBackground, '渡口的两名船工。')
-    process.stdout.write(`PASS shared Electron runtime: ${listed.tools.length} tools; desktop + Web proxy + 2 MCP clients + reconnect + owner stop invalidates old bridge + fresh-client restart + model cancellation + key masking\n`)
+    const recoveredMap = await fresh.callTool({ name: 'novelforge.atlas.query', arguments: { novelId, locationParentId: mapIds.country } })
+    assert.deepEqual(recoveredMap.structuredContent.atlas.locationChildren[0].attributes.geography, savedGeography, 'map geometry survives a full owner restart and MCP reconnect')
+    process.stdout.write(`PASS shared Electron runtime: ${listed.tools.length} tools; desktop + Web proxy + 2 MCP clients + reconnect + owner stop invalidates old bridge + fresh-client restart + model cancellation + key masking + map geometry validation/write/read/restart\n`)
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error

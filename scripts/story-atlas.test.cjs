@@ -217,6 +217,43 @@ async function main() {
     for (const campFactionIds of [[oldFaction + 1], [], null]) assert.throws(() => applyStoryAtlasChanges(migratedInput([{ op: 'upsert_entity', id: migratedEntity.id, kind: 'character', name: migratedEntity.name, attributeMode: 'replace', attributes: { campFactionIds } }])), /membership/)
     assert.deepEqual(queryStoryAtlas({ novelId: migratedEditNovel }), migratedAfter, 'reference edits must not bypass graph validation')
 
+    const geographyNovel = addNovel()
+    const geographyInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: geographyNovel, expectedContextVersion: queryStoryAtlas({ novelId: geographyNovel }).contextVersion })
+    const boundary = (left, top, right, bottom) => [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]
+    const geographyIds = applyStoryAtlasChanges(geographyInput([
+      { op: 'upsert_entity', clientId: 'country', kind: 'location', name: '图测国', attributes: { locationType: 'country', geography: { areaKm2: 1000, mapFrame: { widthKm: 50, heightKm: 40 } } } },
+      { op: 'upsert_entity', clientId: 'west', kind: 'location', name: '西郡', parentId: 'country', attributes: { locationType: 'region', geography: { boundary: boundary(0, 0, 50, 100), areaKm2: 400, development: 'outlined' } } },
+      { op: 'upsert_entity', clientId: 'east', kind: 'location', name: '东郡', parentId: 'country', attributes: { locationType: 'region', geography: { boundary: boundary(50, 0, 100, 100), development: 'unexplored' } } },
+    ])).idMap
+    const geographySnapshot = () => queryStoryAtlas({ novelId: geographyNovel })
+    assert.ok(!geographySnapshot().diagnostics.some(item => item.code === 'MAP_BOUNDARIES_OVERLAP'), 'shared borders must be allowed')
+    const overlap = geographyInput([{ op: 'upsert_entity', id: geographyIds.east, kind: 'location', name: '东郡', attributes: { geography: { boundary: boundary(40, 0, 100, 100) } } }], 2)
+    const beforeMapValidation = geographySnapshot()
+    assert.ok(validateStoryAtlasChanges(overlap).diagnostics.some(item => item.code === 'MAP_BOUNDARIES_OVERLAP'), 'the same validation surface used by MCP reports overlapping borders')
+    assert.deepEqual(geographySnapshot(), beforeMapValidation, 'map validation must not save a candidate')
+    applyStoryAtlasChanges(overlap)
+    const eastGeography = geographySnapshot().entities.find(entity => entity.id === geographyIds.east).attributes.geography
+    assert.equal(eastGeography.development, 'unexplored', 'incremental border adjustment preserves the development flag')
+    assert.equal(eastGeography.areaKm2, undefined, 'drawn coordinates never invent physical area')
+    assert.deepEqual(queryStoryAtlas({ novelId: geographyNovel, atChapter: 1 }).entities.find(entity => entity.id === geographyIds.east).attributes.geography.boundary, boundary(50, 0, 100, 100), 'earlier map boundaries are preserved')
+    const validMapSnapshot = geographySnapshot()
+    for (const [bad, expected] of [
+      [{ op: 'upsert_entity', id: geographyIds.west, kind: 'location', name: '西郡', attributes: { geography: { areaKm2: 1001 } } }, { code: 'LOCATION_AREA_EXCEEDS_PARENT' }],
+      [{ op: 'upsert_entity', id: geographyIds.country, kind: 'location', name: '图测国', attributes: { geography: { areaKm2: 300 } } }, { code: 'LOCATION_AREA_EXCEEDS_PARENT' }],
+      [{ op: 'upsert_entity', id: geographyIds.country, kind: 'location', name: '图测国', attributes: { geography: { areaKm2: 2001 } } }, { message: /不能超过内部地图/ }],
+      [{ op: 'upsert_entity', id: geographyIds.country, kind: 'location', name: '图测国', attributes: { geography: { mapFrame: { widthKm: 10, heightKm: 10 } } } }, { message: /不能超过内部地图/ }],
+      [{ op: 'upsert_entity', id: geographyIds.west, kind: 'location', name: '西郡', attributes: { geography: { position: { x: -1, y: 30 } } } }, { message: /location 属性结构错误/ }],
+      // Separate inverted hierarchy from ancestry cycles so random stable-ID traversal cannot change the expected guard.
+      [{ op: 'upsert_entity', kind: 'location', name: '误置小国', parentId: geographyIds.west, attributes: { locationType: 'country' } }, { code: 'LOCATION_HIERARCHY_INVERTED' }],
+      [{ op: 'upsert_entity', id: geographyIds.country, kind: 'location', name: '图测国', parentId: geographyIds.west, attributes: { locationType: 'region' } }, { code: 'ENTITY_CYCLE' }],
+    ]) assert.throws(() => applyStoryAtlasChanges(geographyInput([bad], 2)), expected)
+    assert.deepEqual(geographySnapshot(), validMapSnapshot, 'invalid geometry and hierarchy changes are atomic')
+    applyStoryAtlasChanges(geographyInput([{ op: 'upsert_entity', id: geographyIds.west, kind: 'location', name: '西郡', attributes: { geography: { areaKm2: 900 } } }], 4))
+    assert.throws(() => applyStoryAtlasChanges(geographyInput([{ op: 'upsert_entity', id: geographyIds.country, kind: 'location', name: '图测国', attributes: { geography: { areaKm2: 800 } } }])), /第 4 章.*面积/, 'background corrections cannot invalidate later area facts')
+    assert.throws(() => applyStoryAtlasChanges(geographyInput([{ op: 'upsert_entity', id: geographyIds.east, kind: 'location', name: '东郡', attributes: { geography: { development: 'detailed' } } }])), /后续章节已有变化/, 'map changes respect existing chapter revision guards')
+    const { creativePublicAttributes } = require('../electron/services/creative-atlas-context.ts')
+    assert.deepEqual(creativePublicAttributes({ geography: { ...eastGeography, areaKm2: 450 } }, { kind: 'location', isPov: false }), { geography: { areaKm2: 450 } }, 'prose context excludes drawing coordinates and author development status')
+
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)
     const b = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '乙').lastInsertRowid)

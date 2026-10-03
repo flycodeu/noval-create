@@ -73,7 +73,7 @@ export const PROFILE_GROUPS: Record<StoryAtlasEntity['kind'], AtlasProfileGroup[
     { title: '运行与资源', fields: ['resources', 'funding', 'memberPolicy', 'structure', 'hierarchy', 'currentPhase'], empty: '组织运行、资源与成员规则尚未补充' },
   ],
   location: [
-    { title: '地理与环境', fields: ['nodeType', 'locationType', 'terrain', 'waterSystem', 'waterSource', 'climate', 'atmosphere', 'dangerLevel'], empty: '地形、水源与环境尚未补充' },
+    { title: '地理与环境', fields: ['geography', 'nodeType', 'locationType', 'terrain', 'waterSystem', 'waterSource', 'climate', 'atmosphere', 'dangerLevel'], empty: '地形、水源与环境尚未补充' },
     { title: '生计与通行', fields: ['livelihood', 'livelihoods', 'economy', 'resources', 'access', 'routes', 'transport', 'plotRelevance', 'structureRole'], empty: '生计、产业与通路尚未补充' },
   ],
   item: [{ title: '用途与限制', fields: ['itemKind', 'category', 'subType', 'status', 'plotFunction', 'abilitySpec', 'abilities', 'usageMethod', 'acquisitionMethod', 'limitations', 'cost', 'risk', 'background', 'linkedCharacterIds', 'linkedTimelineEventIds'], empty: '物品用途、代价与使用边界尚未补充' }],

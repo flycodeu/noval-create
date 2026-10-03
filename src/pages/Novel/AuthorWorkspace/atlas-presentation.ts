@@ -42,6 +42,7 @@ export function relatedEntities(snapshot: StoryAtlasSnapshot, locationId: string
 }
 
 export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
+  geography: '地理范围', areaKm2: '面积（平方公里）', development: '资料展开', widthKm: '东西跨度（公里）', heightKm: '南北跨度（公里）', mapFrame: '地图范围', boundary: '区域边界', position: '地图位置',
   roleType: '角色定位', role_type: '角色定位', age: '年龄', gender: '性别', species: '种属',
   occupation: '职业', socialIdentity: '社会身份', social_identity: '社会身份',
   personalityTraits: '性格特点', personalityTraitsJson: '性格特点', personality_traits: '性格特点',
@@ -97,6 +98,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 }
 
 export function atlasAttributeValue(key: string, value: unknown) {
+  if (key === 'development') return ({ detailed: '已展开', outlined: '已有轮廓', unexplored: '待拓展' } as Record<string, string>)[String(value)] || value
   if (key === 'entityType') return ({ human: '人类', nonhuman: '异类', undead: '亡灵', monster: '妖异', spirit: '精怪', ghost: '鬼魂' } as Record<string, string>)[String(value)] || value
   if (key === 'currentStatus') return ({ active: '推进中', stalled: '暂时停滞', completed: '已完成', resolved: '已解决', planned: '待推进', abandoned: '已放弃' } as Record<string, string>)[String(value)] || value
   if (key === 'roleType') return ({ protagonist: '主角', major: '主要人物', antagonist: '对立人物', supporting: '配角', minor: '次要人物' } as Record<string, string>)[String(value)] || value

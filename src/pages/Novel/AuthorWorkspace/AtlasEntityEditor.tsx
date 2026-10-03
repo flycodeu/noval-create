@@ -17,6 +17,10 @@ const fieldOptions: Record<string, Array<{ value: string; label: string }>> = {
 
 type EditValueProps = { value: unknown; originalValue?: unknown; onChange: (value: unknown) => void; name: string; field: string; snapshot: StoryAtlasSnapshot; positions?: Array<{ id: string; title: string }>; positionId?: string }
 export function AtlasEditValue({ value, originalValue, onChange, name, field, snapshot, positions = [], positionId }: EditValueProps): React.ReactElement {
+  if (field === 'geography') {
+    const geography = recordOf(value)
+    return <div className="atlas-editor-fields"><label>面积（平方公里）<InputNumber aria-label="面积（平方公里）" min={0.000001} value={typeof geography.areaKm2 === 'number' ? geography.areaKm2 : null} onChange={next => onChange({ ...geography, areaKm2: next })} /></label><label>资料展开<Select aria-label="资料展开" allowClear value={geography.development || undefined} options={[{ value: 'detailed', label: '已展开' }, { value: 'outlined', label: '已有轮廓' }, { value: 'unexplored', label: '待拓展' }]} onChange={next => onChange({ ...geography, development: next || '' })} /></label></div>
+  }
   if (field === 'reportsToPositionId') return <Select aria-label={name} value={value == null ? undefined : String(value)} allowClear placeholder="无上级岗位" options={positions.filter(position => position.id !== positionId).map(position => ({ value: position.id, label: position.title }))} onChange={next => onChange(next ?? null)} />
   if (referenceField(field)) return <div><AtlasFields values={{ [field]: value }} entities={snapshot.entities} chapters={[]} /><p className="atlas-empty-note">关联资料可通过“讨论与完善”调整。</p></div>
   if (numericFields.has(field)) return <InputNumber aria-label={name} value={typeof value === 'number' ? value : null} min={['x', 'y'].includes(field) ? undefined : 0} precision={['x', 'y', 'distanceKm', 'travelHours'].includes(field) ? undefined : 0} onChange={onChange} />

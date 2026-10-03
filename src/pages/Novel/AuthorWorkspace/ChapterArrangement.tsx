@@ -5,6 +5,7 @@ import type { Chapter, ChapterContractAsset, SceneContractAsset } from '../../..
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { LoadFailure } from './shared'
+import { loadDocumentNames } from './document-references'
 
 export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: { chapter: Chapter; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
   const navigate = useNavigate()
@@ -12,6 +13,7 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: 
   const [scenes, setScenes] = useState<SceneContractAsset[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [names, setNames] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState<'outline' | 'contract' | 'scene' | null>(null)
   const [draft, setDraft] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
@@ -21,12 +23,13 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: 
   const edit = (kind: 'outline' | 'contract' | 'scene', value: unknown) => { setInitialDraft(value); setDraft(value); setEditing(kind) }
   const load = useCallback(async () => {
     setLoading(true)
+    let referenceError = ''
     try {
-      const [nextContract, nextScenes] = await Promise.all([window.electron.contract.getChapter(chapter.id), window.electron.contract.listScenes(chapter.id)])
-      setContract(nextContract); setScenes(nextScenes); setError('')
+      const [nextContract, nextScenes, nextNames] = await Promise.all([window.electron.contract.getChapter(chapter.id), window.electron.contract.listScenes(chapter.id), loadDocumentNames(chapter.novelId, value => { referenceError = value })])
+      setContract(nextContract); setScenes(nextScenes); setNames(nextNames); setError(referenceError)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '读取章节安排失败') }
     finally { setLoading(false) }
-  }, [chapter.id])
+  }, [chapter.id, chapter.novelId])
   useEffect(() => { void load() }, [load])
   const save = async () => {
     setSaving(true)
@@ -46,9 +49,9 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: 
     {error && <LoadFailure message={error} retry={() => void load()} />}
     <section><div className="author-section-heading"><h3>完整大纲</h3><Button size="small" onClick={() => edit('outline', chapter.outline || '')}>编辑</Button></div><ContentDocument value={chapter.outline} /></section>
     {loading ? <Spin /> : <>
-      <section><div className="author-section-heading"><h3>章节目标与边界</h3><Button size="small" onClick={() => edit('contract', contract)}>编辑</Button></div><ContentDocument value={contract} showEmpty /></section>
-      <section><h3>场景安排 · {scenes.length}</h3>{scenes.length ? scenes.map((scene, index) => <details open key={scene.id ?? index} className="author-disclosure"><summary>{scene.segmentTitle || `场景 ${scene.segmentOrder || index + 1}`}</summary><ContentDocument value={scene} showEmpty /><Button onClick={() => edit('scene', scene)}>编辑本场</Button></details>) : <p className="author-missing">尚未安排场景。可由 AI 根据本章目标补齐。</p>}</section>
+      <section><div className="author-section-heading"><h3>章节目标与边界</h3><Button size="small" onClick={() => edit('contract', contract)}>编辑</Button></div><ContentDocument value={contract} names={names} /></section>
+      <section><h3>场景安排 · {scenes.length}</h3>{scenes.length ? scenes.map((scene, index) => <details open key={scene.id ?? index} className="author-disclosure"><summary>{scene.segmentTitle || `场景 ${scene.segmentOrder || index + 1}`}</summary><ContentDocument value={scene} names={names} /><Button onClick={() => edit('scene', scene)}>编辑本场</Button></details>) : <p className="author-missing">尚未安排场景。可由 AI 根据本章目标补齐。</p>}</section>
     </>}
-    <Modal width={780} title="编辑章节安排" open={editing !== null} confirmLoading={saving} onCancel={() => { if (!dirty) setEditing(null); else Modal.confirm({ title: '放弃安排修改？', okText: '放弃', cancelText: '继续编辑', onOk: () => setEditing(null) }) }} onOk={() => void save()} okText="保存" cancelText="取消">{editing === 'outline' ? <Input.TextArea value={String(draft || '')} onChange={event => setDraft(event.target.value)} autoSize={{ minRows: 10, maxRows: 24 }} /> : <DocumentEditor value={draft} onChange={setDraft} />}</Modal>
+    <Modal width={780} title="编辑章节安排" open={editing !== null} confirmLoading={saving} onCancel={() => { if (!dirty) setEditing(null); else Modal.confirm({ title: '放弃安排修改？', okText: '放弃', cancelText: '继续编辑', onOk: () => setEditing(null) }) }} onOk={() => void save()} okText="保存" cancelText="取消">{editing === 'outline' ? <Input.TextArea value={String(draft || '')} onChange={event => setDraft(event.target.value)} autoSize={{ minRows: 10, maxRows: 24 }} /> : <DocumentEditor value={draft} onChange={setDraft} names={names} />}</Modal>
   </div>
 }

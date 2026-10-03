@@ -6,12 +6,12 @@ import { CREATIVE_STAGE_LABELS } from '../../../shared/creative-workflow'
 import { runStatusLabel } from './workflow-client'
 import './author-workspace.css'
 
-export function AuthorPage({ eyebrow, title, description, actions, children }: {
-  eyebrow?: string; title: string; description?: string; actions?: React.ReactNode; children: React.ReactNode
+export function AuthorPage({ eyebrow, title, description, actions, children, compact = false }: {
+  eyebrow?: string; title: string; description?: string; actions?: React.ReactNode; children: React.ReactNode; compact?: boolean
 }) {
-  return <div className="author-workspace"><header className="author-page-heading"><div>
+  return <div className="author-workspace">{compact ? <h1 className="author-visually-hidden">{title}</h1> : <header className="author-page-heading"><div>
     {eyebrow && <span className="author-eyebrow">{eyebrow}</span>}<h1>{title}</h1>{description && <p>{description}</p>}
-  </div>{actions && <div className="author-heading-actions">{actions}</div>}</header>{children}</div>
+  </div>{actions && <div className="author-heading-actions">{actions}</div>}</header>}{children}</div>
 }
 
 export function EmptyWork({ title, children, action, actionLabel }: { title: string; children: React.ReactNode; action?: () => void; actionLabel?: string }) {

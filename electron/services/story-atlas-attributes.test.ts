@@ -1,7 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasPositions } from './story-atlas-attributes'
+import { atlasBoundariesOverlap, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 
 describe('story atlas attributes', () => {
+  const rectangle = (left = 0, top = 0, right = 50, bottom = 50) => [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]
+  it('accepts bounded regional geometry and preserves omitted map settings during incremental generation', () => {
+    const geography = { boundary: rectangle(), position: { x: 20, y: 20 }, areaKm2: 400, mapFrame: { widthKm: 30, heightKm: 20 }, development: 'outlined' }
+    expect(validateAtlasGeography(geography)).toEqual(geography)
+    const patch = normalizeAtlasAttributePatch('location', { geography: { boundary: rectangle(5, 5, 60, 60), development: 'detailed' } })
+    expect(mergeAtlasAttributes({ geography }, patch)).toEqual({ geography: { ...geography, boundary: rectangle(5, 5, 60, 60), development: 'detailed' } })
+    expect(mergeAtlasAttributes({ geography }, normalizeAtlasAttributePatch('location', { geography: null }, { geography }, 'replace'), 'replace')).toEqual({})
+    expect(validateAtlasGeography(undefined)).toBeUndefined()
+  })
+  it('rejects invalid coordinates, physical measurements, crossed and degenerate borders', () => {
+    for (const geography of [
+      { position: { x: Number.NaN, y: 2 } }, { position: { x: Infinity, y: 2 } }, { position: { x: -1, y: 2 } }, { position: { x: 2, y: 101 } },
+      { areaKm2: 0 }, { areaKm2: Infinity }, { mapFrame: { widthKm: 10, heightKm: 0 } }, { development: 'visited' },
+      { boundary: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }, { boundary: [...rectangle(), { x: 0, y: 0 }] },
+      { boundary: [{ x: 0, y: 0 }, { x: 60, y: 50 }, { x: 0, y: 50 }, { x: 50, y: 0 }] },
+    ]) expect(() => validateAtlasGeography(geography)).toThrow()
+  })
+  it('requires a known area to fit its own map frame while allowing unknown or exactly matching area', () => {
+    const mapFrame = { widthKm: 30, heightKm: 20 }
+    expect(validateAtlasGeography({ mapFrame })).toEqual({ mapFrame })
+    expect(validateAtlasGeography({ areaKm2: 600, mapFrame })).toEqual({ areaKm2: 600, mapFrame })
+    expect(() => validateAtlasGeography({ areaKm2: 600.01, mapFrame })).toThrow('不能超过内部地图')
+    const updated = mergeAtlasAttributes({ geography: { areaKm2: 600, mapFrame } }, normalizeAtlasAttributePatch('location', { geography: { mapFrame: { widthKm: 20, heightKm: 20 } } }))
+    expect(() => validateAtlasGeography(updated.geography)).toThrow('不能超过内部地图')
+  })
+  it('diagnoses overlap and containment without treating shared borders or isolated corners as overlap', () => {
+    expect(atlasBoundariesOverlap(rectangle(), rectangle(50, 0, 100, 50))).toBe(false)
+    expect(atlasBoundariesOverlap(rectangle(), rectangle(50, 50, 100, 100))).toBe(false)
+    expect(atlasBoundariesOverlap(rectangle(), rectangle(40, 20, 80, 70))).toBe(true)
+    expect(atlasBoundariesOverlap(rectangle(), rectangle(10, 10, 20, 20))).toBe(true)
+    expect(atlasBoundariesOverlap(rectangle(), rectangle().reverse())).toBe(true)
+    expect(atlasBoundariesOverlap(rectangle(), rectangle(25, 0, 75, 50))).toBe(true)
+  })
   it('does not turn empty drafts into character facts or overwrite saved traits', () => {
     const patch = normalizeAtlasAttributePatch('character', { personalityTraits: [], motivation: ' ', campFactionIds: [], dailyRoutine: '清点渡船和绳索' })
     expect(patch).toEqual({ dailyRoutine: '清点渡船和绳索' })

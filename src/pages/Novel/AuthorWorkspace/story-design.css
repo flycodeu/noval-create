@@ -1,0 +1,13 @@
+.story-design-tabs { margin-bottom: 14px; }
+.story-design-topics { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; }
+.story-design-topics > button { padding: 8px 14px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer; }
+.story-design-topics > button:hover { color: var(--text-primary); background: var(--bg-hover); }
+.story-design-topics > button[aria-selected="true"] { color: var(--text-primary); background: var(--bg-surface); border-color: var(--border-default); font-weight: 600; }
+.story-design-topics > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.story-design-topics > button:disabled { opacity: .6; cursor: default; }
+#story-design-panel { min-width: 0; }
+@media (max-width: 600px) {
+  .story-design-tabs > button { padding: 11px 10px; }
+  .story-design-topics { gap: 4px; }
+  .story-design-topics > button { padding: 8px 10px; }
+}

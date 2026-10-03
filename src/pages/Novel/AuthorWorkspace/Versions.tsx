@@ -14,6 +14,7 @@ import { callAuthorTool, isRunActive, runStatusLabel } from './workflow-client'
 import { ContentDocument } from './ContentDocument'
 import { changedFields, parseDocument, recordOf } from './content-document'
 import { artifactTarget, issueTarget } from './revision-target'
+import { loadDocumentNames } from './document-references'
 
 type ArtifactReference = Omit<AgentArtifact, 'content' | 'idempotencyKey'>
 const STATUS_LABELS: Record<string, string> = { draft: '候选', reviewed: '已评审', approved: '已认可', committed: '已应用', rejected: '未通过', superseded: '旧版本' }
@@ -33,6 +34,7 @@ export default function Versions({ novelId }: { novelId: number }) {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [novel, setNovel] = useState<Novel | null>(null)
   const [atlas, setAtlas] = useState<StoryAtlasSnapshot | null>(null)
+  const [names, setNames] = useState<Record<string, string>>({})
   const [selectedRun, setSelectedRun] = useState<CreativeRun | null>(null)
   const [artifact, setArtifact] = useState<(ArtifactReference & { content: unknown }) | null>(null)
   const [review, setReview] = useState<unknown>(null)
@@ -46,13 +48,15 @@ export default function Versions({ novelId }: { novelId: number }) {
   const readEpoch = useRef(0)
   const load = useCallback(async () => {
     setLoading(true)
+    let referenceError = ''
     try {
-      const [runResult, artifactResult, nextIssues, rows, project, snapshot] = await Promise.all([
+      const [runResult, artifactResult, nextIssues, rows, project, snapshot, nextNames] = await Promise.all([
         callAuthorTool<{ runs: CreativeRun[] }>('novelforge.workflows.list', { novelId }),
         callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, limit: 200 }),
         window.electron.revision.list(novelId), window.electron.chapter.list(novelId), window.electron.novel.get(novelId), window.electron.storyAtlas.query({ novelId, includePlanned: true }),
+        loadDocumentNames(novelId, value => { referenceError = value }),
       ])
-      setRuns(runResult.runs); setArtifacts(artifactResult.artifacts); setIssues(nextIssues); setChapters(rows); setNovel(project); setAtlas(snapshot); setError('')
+      setRuns(runResult.runs); setArtifacts(artifactResult.artifacts); setIssues(nextIssues); setChapters(rows); setNovel(project); setAtlas(snapshot); setNames(nextNames); setError(referenceError)
       setSelectedRun(current => runResult.runs.find(run => run.runId === current?.runId) || runResult.runs[0] || null)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '读取版本记录失败') }
     finally { setLoading(false) }
@@ -88,7 +92,6 @@ export default function Versions({ novelId }: { novelId: number }) {
   useEffect(() => { const id = params.get('artifact'); if (id) { setView('versions'); void openArtifact(id) } else if (params.get('issue')) setView('issues') }, [params, openArtifact])
   useEffect(() => () => { readEpoch.current += 1 }, [])
   const artifactRun = runs.find(run => run.artifactId === artifact?.id || run.reviewArtifactId === artifact?.id)
-  const names = Object.fromEntries((atlas?.entities || []).map(item => [item.id, item.name]))
   const candidate = candidateValue(artifact?.content)
   const parsed = recordOf(candidate)
   const story = parseStorySettingsDocument(novel?.settingsJson)
@@ -98,7 +101,7 @@ export default function Versions({ novelId }: { novelId: number }) {
     const value = recordOf(change)
     const existing = [...(atlas?.entities || []), ...(atlas?.relations || [])].find(item => item.id === value.id)
     const after = { ...value }; delete after.op
-    return { path: String(value.name || value.label || '设定变化'), before: existing ? patchShape(existing, after) : null, after }
+    return { path: String(value.name || value.label || '设定变化'), fieldKey: '', before: existing ? patchShape(existing, after) : null, after }
   }) : Object.keys(parsed).length ? changedFields(patchShape(currentDocument, parsed), parsed) : []
   const visibleArtifacts = artifacts.filter(item => showHistory || !['superseded', 'rejected'].includes(item.status))
   const visibleIssues = issues.filter(issue => showHistory || ['open', 'in_progress'].includes(issue.status))
@@ -128,7 +131,7 @@ export default function Versions({ novelId }: { novelId: number }) {
         setApplying(true)
         void callAuthorTool('novelforge.workflows.apply', { novelId, runId: artifactRun.runId }).then(async () => { await load(); await openArtifact(artifact.id); window.dispatchEvent(new Event('novelforge:creative-completed')) }).catch(cause => setError(String(cause))).finally(() => setApplying(false))
       }}>应用这一版</Button>}
-      {changes.length > 0 && <section className="author-candidate-diff"><h3>与当前已保存内容的差异</h3><p className="author-muted">仅列出候选涉及的字段；未涉及的内容保留。</p>{changes.map((change, index) => <article className="author-change-card" key={`${change.path}-${index}`}><h4>{change.path}</h4><div className="author-diff-columns"><section><h4>当前已保存</h4><ContentDocument value={change.before} names={names} /></section><section><h4>本轮候选</h4><ContentDocument value={change.after} names={names} /></section></div></article>)}</section>}
+      {changes.length > 0 && <section className="author-candidate-diff"><h3>与当前已保存内容的差异</h3><p className="author-muted">仅列出候选涉及的字段；未涉及的内容保留。</p>{changes.map((change, index) => <article className="author-change-card" key={`${change.path}-${index}`}><h4>{change.path}</h4><div className="author-diff-columns"><section><h4>当前已保存</h4><ContentDocument value={change.before} names={names} fieldKey={change.fieldKey} /></section><section><h4>本轮候选</h4><ContentDocument value={change.after} names={names} fieldKey={change.fieldKey} /></section></div></article>)}</section>}
       <details open={changes.length === 0} className="author-disclosure"><summary>{artifactRun?.operation === 'review' ? '完整评审' : '完整内容'}</summary><ContentDocument value={candidate} names={names} /></details>
       {review != null && <section className="author-review-result"><h2>这一版的评审</h2><ContentDocument value={review} names={names} /></section>}
       {artifact.parentArtifactId && <Button type="link" onClick={() => setParams({ artifact: artifact.parentArtifactId! })}>查看上一版依据</Button>}

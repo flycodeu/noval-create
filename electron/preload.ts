@@ -185,14 +185,14 @@ const api = {
   },
 
   endgameAsset: {
-    listCommitments: (novelId: number) => invokeIpc('endgameAsset:listCommitments', novelId),
+    listCommitments: (novelId: number, options?: { readOnly?: boolean }) => invokeIpc('endgameAsset:listCommitments', novelId, options),
     getSummary: (novelId: number) => invokeIpc('endgameAsset:getSummary', novelId),
     syncFromSettings: (novelId: number, settingsJson?: string | null) => invokeIpc('endgameAsset:syncFromSettings', novelId, settingsJson),
     updateCommitment: (id: number, data: unknown) => invokeIpc('endgameAsset:updateCommitment', id, data),
   },
 
   foreshadow: {
-    listLedger: (novelId: number) => invokeIpc('foreshadow:listLedger', novelId),
+    listLedger: (novelId: number, options?: { readOnly?: boolean }) => invokeIpc('foreshadow:listLedger', novelId, options),
     upsertLedger: (novelId: number, data: unknown) => invokeIpc('foreshadow:upsertLedger', novelId, data),
     deleteLedger: (novelId: number, id: number) => invokeIpc('foreshadow:deleteLedger', novelId, id),
   },

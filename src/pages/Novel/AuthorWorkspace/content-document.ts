@@ -1,4 +1,5 @@
 import { ATLAS_ATTRIBUTE_LABELS } from './atlas-presentation'
+import { WRITING_CONTRACT_PRESETS } from '../../../shared/writing-contract'
 
 export function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -43,20 +44,58 @@ export const CONTENT_LABELS: Record<string, string> = {
   climateCycles: '气候变化', economyLoops: '资源流转', region: '地域', pattern: '规律', seasonalShift: '季节变化', hazardTrigger: '危险触发', travelImpact: '通行影响', resourceImpact: '资源影响', coreResource: '核心资源', circulationPath: '流转路径', controller: '控制方', scarcityTrigger: '稀缺原因', volatilityTrigger: '波动原因', calendarType: '历法类型', eraName: '纪年', epochLabel: '纪元', baseYearLabel: '基准年', displayPattern: '日期格式', relativeZeroLabel: '时间起点', recommendedEventTypes: '事件类型', precisionOptions: '时间精度',
   antiQuoteEmphasis: '避免金句式强调', antiConceptSlogans: '避免概念口号', antiSymmetricLines: '避免整齐对仗', narrationStyle: '叙述风格', dialogueStyle: '对话风格', extraRules: '补充规则', realismLevel: '现实程度', sciencePolicy: '科学边界', physicsPolicy: '物理边界', commonSenseFocus: '常识重点', contextAlignmentFocus: '上下文一致性',
   chapterGoal: '本章目标', chapterNum: '章序', chapterNumber: '章序', chapterTitle: '章名', outline: '章节安排', chapters: '章节', volumes: '卷', parts: '单元', scenes: '场景', chapterContract: '章节约束', sceneGoal: '场景目标', timeLocation: '时间地点', obstacle: '阻碍', resultState: '结束状态', revealPayload: '本场揭示', forbiddenActions: '禁止发生', acceptanceNotes: '验收要求', openingStyleHint: '开场', endingStyle: '结束方式', expositionMode: '信息呈现', emotionFocus: '情感重点', hookType: '悬念类型', requiredArcProgress: '人物变化要求', requiredResistanceActions: '阻力要求', requiredAssetRefs: '必须出现的设定', conflictType: '冲突类型', emotionShift: '情感变化', linkageMode: '承接方式', segmentTitle: '场景名', segmentOrder: '场景序号',
-  attributes: '特点与设定', entities: '资料', relations: '关系', changes: '修改', fromId: '起点/人物', toId: '终点/关联人物', parentId: '所属地域', effectiveFromChapter: '生效章位', source: '依据', note: '依据说明', evidenceQuote: '正文证据', kind: '类别', status: '状态', reason: '原因', evidence: '依据', suggestion: '建议', issues: '问题', hardBlockers: '阻塞问题', deterministicBlockers: '合同与事实边界阻断', warnings: '提示', requirements: '要求', checks: '核对结果', message: '说明', score: '评分', review: '模型评审证据', modelReview: '模型评审', rewrittenReview: '修订后评审', facts: '信息点与秘密', factReveals: '本章实际揭示', factId: '信息点编号', characterIds: '知情人物', plannedRevealChapterNum: '计划揭示章序', knownFromStartCharacterIds: '开书前已知人物',
+  attributes: '特点与设定', entities: '资料', relations: '关系', changes: '修改', fromId: '起点/人物', toId: '终点/关联人物', parentId: '所属地域', effectiveFromChapter: '生效章位', source: '依据', note: '依据说明', evidenceQuote: '正文证据', kind: '类别', status: '状态', reason: '原因', evidence: '依据', suggestion: '建议', issues: '问题', hardBlockers: '阻塞问题', deterministicBlockers: '合同与事实边界阻断', warnings: '提示', requirements: '要求', checks: '核对结果', message: '说明', score: '评分', review: '模型评审证据', modelReview: '模型评审', rewrittenReview: '修订后评审', facts: '信息点与秘密', factReveals: '本章实际揭示', factId: '信息点', characterIds: '知情人物', plannedRevealChapterNum: '计划揭示章序', knownFromStartCharacterIds: '开书前已知人物',
+  servedThreadIds: '推进的故事线', requiredCharacterArcIds: '推进的人物变化', requiredRelationshipArcIds: '推进的关系变化', requiredResistanceTrackIds: '必须回应的阻力', requiredEndgameCommitmentIds: '必须兑现的承诺', requiredForeshadowIds: '必须处理的伏笔', allowedFactIds: '允许使用的信息', revealedFactIds: '本章揭示的信息', readerKnownChapterId: '读者获知章节', protagonistKnownChapterId: '主角获知章节', knownChapterId: '获知章节', knownFromStart: '开书前已知', characterKnowledge: '人物知情情况', plannedRevealVolume: '计划揭示卷序', forbiddenBeforeVolume: '最早可揭示卷序', characters: '涉及人物', conflict: '矛盾', mainlineLink: '与主线的关系', endChapter: '收束章序',
 }
 
-export const INTERNAL_FIELDS = new Set(['key', 'schemaVersion', 'requestFingerprint', 'contextSummaryHash', 'createdAt', 'updatedAt', 'taskId', 'schemaHint', 'novelId', 'chapterId', 'id', 'clientId', 'artifactId', 'contentHash', 'outputFormat', 'draftContentHash', 'effectiveContentHash', 'code'])
+export const INTERNAL_FIELDS = new Set(['key', 'schemaVersion', 'requestFingerprint', 'contextSummaryHash', 'createdAt', 'updatedAt', 'taskId', 'schemaHint', 'novelId', 'chapterId', 'segmentId', 'nativeId', 'id', 'clientId', 'artifactId', 'contentHash', 'outputFormat', 'draftContentHash', 'effectiveContentHash', 'code'])
 export function fieldLabel(key: string) {
-  const camel = key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+  const camel = documentFieldKey(key)
   return CONTENT_LABELS[key] || CONTENT_LABELS[camel] || ATLAS_ATTRIBUTE_LABELS[key] || ATLAS_ATTRIBUTE_LABELS[camel] || key
 }
-export const VALUE_LABELS: Record<string, string> = { third_limited: '第三人称限知', third_omniscient: '第三人称全知', first_person: '第一人称', multi_pov: '多视角', past: '过去时', present: '现在时', mixed: '混合', single: '单主角', dual: '双主角', ensemble: '群像', fixed: '固定', rotating: '轮换', free_switch: '自由切换', none: '无', light: '轻度', heavy: '多线', forbidden: '禁止', limited: '有限使用', allowed: '允许', confirmed: '已确定', planned: '计划', relationship: '人物关系', route: '通路', presence: '所在地', membership: '成员关系', ownership: '持有关系', participation: '事件参与', passed: '通过', blocked: '未通过', pending: '待处理', accepted: '已接受', rejected: '已拒绝', applied: '已应用' }
+export function documentFieldKey(key: string) {
+  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()).replace(/Json$/, '')
+}
 
-export function changedFields(before: unknown, after: unknown, prefix = ''): Array<{ path: string; before: unknown; after: unknown }> {
+export function documentHasContent(value: unknown): boolean {
+  const parsed = parseDocument(value)
+  if (parsed !== value) return documentHasContent(parsed)
+  if (value == null || typeof value === 'string' && value.trim() === '') return false
+  if (Array.isArray(value)) return value.some(documentHasContent)
+  if (typeof value === 'object') return Object.entries(value).some(([key, item]) => !INTERNAL_FIELDS.has(documentFieldKey(key)) && documentHasContent(item))
+  return true
+}
+
+export const DOCUMENT_OPTIONS: Record<string, Record<string, string>> = {
+  pov: { third_limited: '第三人称限知', third_omniscient: '第三人称全知', first_person: '第一人称', multi_pov: '多视角' },
+  tense: { past: '过去时', present: '现在时', mixed: '混合时态' },
+  protagonistCount: { single: '单主角', dual: '双主角', ensemble: '群像' },
+  viewpointMode: { fixed: '固定视角', rotating: '轮换视角', free_switch: '自由切换' },
+  parallelTimelines: { none: '单线推进', light: '轻度多线', heavy: '重度多线' },
+  flashbackPolicy: { forbidden: '禁止插叙与倒叙', limited: '有限使用', allowed: '允许使用' },
+  endingType: { HE: '圆满结局', BE: '悲剧结局', open: '开放结局', multi: '多种结局', HE_BE: '悲喜交织' },
+  endingMode: { victory: '胜利收束', hard_won: '艰难获胜', costly_victory: '付出代价的胜利', tragic: '悲剧收束', ironic: '反讽收束', open: '开放收束', multi_line: '多线收束' },
+  platformMode: { general: '通用', web_serial: '网络连载', publishing: '出版', fanqie: '番茄小说', feilu: '飞卢小说' },
+  openingStyle: { hook: '悬念直入', daily: '日常切入', incident: '事件起手', flashback: '倒叙开场' },
+  endingStyle: { hook: '留下悬念', reversal: '反转收尾', aftershock: '余波未平', stillness: '画面定格', arrival: '第三人入场' },
+  expositionMode: { embedded_action: '动作带出', dialogue_reveal: '对白带出', experience_filter: '角色经历带出', minimal: '只给必要说明', brief_direct: '简短直述' },
+  calendarType: { gregorian: '公历', regnal: '年号纪年', 'relative-disaster': '灾变纪年', 'custom-era': '自定义纪元', 'future-date': '未来纪年' },
+  realismLevel: { 'strict-realism': '严格写实', 'rule-realism': '遵循世界规则', 'stylized-fantasy': '风格化幻想' },
+  status: { ready: '已就绪', confirmed: '已确定', planned: '计划中', planning: '规划中', draft: '草稿', active: '进行中', locked: '已定稿', written: '已写定', passed: '通过', blocked: '未通过', pending: '待处理', accepted: '已接受', rejected: '已拒绝', applied: '已应用', introduced: '已引入', partial_reveal: '部分揭示', pending_payoff: '待回收', explained: '已解释', needs_revision: '需要修订' },
+}
+const DOCUMENT_VALUE_LABELS: Record<string, Record<string, string>> = {
+  ...DOCUMENT_OPTIONS,
+  kind: { relationship: '人物关系', route: '通路', presence: '所在地', membership: '成员关系', ownership: '持有关系', participation: '事件参与', puzzle: '疑问', clue: '线索', truth: '真相', red_herring: '误导线索' },
+  writingContractTags: Object.fromEntries(WRITING_CONTRACT_PRESETS.map(item => [item.value, item.label])),
+}
+export function documentEnumLabel(key: string, value: unknown): unknown {
+  return DOCUMENT_VALUE_LABELS[documentFieldKey(key)]?.[String(value)] ?? value
+}
+
+export function changedFields(before: unknown, after: unknown, prefix = '', fieldKey = ''): Array<{ path: string; fieldKey: string; before: unknown; after: unknown }> {
   if (JSON.stringify(before) === JSON.stringify(after)) return []
   if (before && after && typeof before === 'object' && typeof after === 'object' && !Array.isArray(before) && !Array.isArray(after)) {
-    return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(key => !INTERNAL_FIELDS.has(key)).flatMap(key => changedFields(recordOf(before)[key], recordOf(after)[key], prefix ? `${prefix} / ${fieldLabel(key)}` : fieldLabel(key)))
+    return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(key => !INTERNAL_FIELDS.has(key)).flatMap(key => changedFields(recordOf(before)[key], recordOf(after)[key], prefix ? `${prefix} / ${fieldLabel(key)}` : fieldLabel(key), key))
   }
-  return [{ path: prefix || '内容', before, after }]
+  return [{ path: prefix || '内容', fieldKey, before, after }]
 }

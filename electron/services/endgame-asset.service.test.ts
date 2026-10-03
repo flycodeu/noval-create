@@ -25,10 +25,12 @@ import {
   chapters,
   endgameCommitments,
   foreshadowLedger,
+  novels,
   sceneContracts,
 } from '../database/schema'
 import {
   getChapterContractContext,
+  listEndgameCommitments,
   listEndgameCommitmentsByIds,
   listForeshadowLedger,
   listForeshadowLedgerByIds,
@@ -69,6 +71,21 @@ describe('foreshadow ledger query scope', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
     vi.mocked(ensureStoryStructure).mockReset()
+  })
+
+  it('reads reference names without repairing structure or persisting derived commitment state', () => {
+    const update = vi.fn(() => { throw new Error('A reference read must not write') })
+    const commitment = { id: 31, novelId: 1, title: '查清旧案', status: 'served', lastServedChapter: 4 }
+    vi.mocked(getDb).mockReturnValue({ ...createQueryDb(new Map<unknown, unknown[]>([
+      [novels, [{ id: 1, targetWords: 10000, totalWords: 2000 }]],
+      [endgameCommitments, [commitment]],
+      [foreshadowLedger, [{ id: 8, novelId: 1, title: '旧钥匙' }]],
+    ]), []), update } as never)
+    expect(listEndgameCommitments(1, { readOnly: true })).toMatchObject([{ title: '查清旧案', status: 'served', derivedStatus: 'active' }])
+    expect(listForeshadowLedger(1, { readOnly: true })).toMatchObject([{ title: '旧钥匙' }])
+    expect(ensureStoryStructure).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+    expect(commitment.status).toBe('served')
   })
 
   it('loads only referenced chapter and commitment labels', () => {

@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasAttributeMode, type StoryAtlasEntityKind, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
+import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasAttributeMode, type StoryAtlasEntityKind, type StoryAtlasGeography, type StoryAtlasMapPoint, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
 import { validateJsonSchema } from '../../src/shared/tool-contracts'
 
 export function meaningfulAtlasValue(value: unknown): boolean {
@@ -39,6 +39,7 @@ export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryA
     const ids = patch.positions.map(position => (position as StoryAtlasPosition).id)
     if (new Set(ids).size !== ids.length) throw new Error('同一批岗位补丁不能重复使用岗位ID。')
   }
+  if (kind === 'location' && patch.geography) validateAtlasGeography(patch.geography)
   return patch
 }
 
@@ -48,6 +49,10 @@ export function mergeAtlasAttributes(current: Record<string, unknown> = {}, patc
   if (mode === 'replace') {
     for (const [key, value] of Object.entries(patch)) if (value === null) delete next[key]
     return next
+  }
+  if (patch.geography && typeof patch.geography === 'object' && !Array.isArray(patch.geography)) {
+    // Geometry is one coherent drawing; a new boundary replaces all points while omitted geography fields survive.
+    next.geography = { ...(current.geography as StoryAtlasGeography | undefined), ...patch.geography }
   }
   for (const [key, value] of Object.entries(patch)) {
     if (!Array.isArray(value)) continue
@@ -60,6 +65,81 @@ export function mergeAtlasAttributes(current: Record<string, unknown> = {}, patc
     }
   }
   return next
+}
+
+const geometryEpsilon = 1e-8
+const cross = (a: StoryAtlasMapPoint, b: StoryAtlasMapPoint, c: StoryAtlasMapPoint) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+function onSegment(point: StoryAtlasMapPoint, a: StoryAtlasMapPoint, b: StoryAtlasMapPoint): boolean {
+  return Math.abs(cross(a, b, point)) < geometryEpsilon && point.x >= Math.min(a.x, b.x) - geometryEpsilon
+    && point.x <= Math.max(a.x, b.x) + geometryEpsilon && point.y >= Math.min(a.y, b.y) - geometryEpsilon && point.y <= Math.max(a.y, b.y) + geometryEpsilon
+}
+function segmentsCross(a: StoryAtlasMapPoint, b: StoryAtlasMapPoint, c: StoryAtlasMapPoint, d: StoryAtlasMapPoint, includeTouch: boolean): boolean {
+  const abC = cross(a, b, c), abD = cross(a, b, d), cdA = cross(c, d, a), cdB = cross(c, d, b)
+  if (((abC > geometryEpsilon && abD < -geometryEpsilon) || (abC < -geometryEpsilon && abD > geometryEpsilon))
+    && ((cdA > geometryEpsilon && cdB < -geometryEpsilon) || (cdA < -geometryEpsilon && cdB > geometryEpsilon))) return true
+  return includeTouch && (onSegment(c, a, b) || onSegment(d, a, b) || onSegment(a, c, d) || onSegment(b, c, d))
+}
+function polygonAreaTwice(points: StoryAtlasMapPoint[]): number {
+  return points.reduce((sum, point, index) => { const next = points[(index + 1) % points.length]; return sum + point.x * next.y - next.x * point.y }, 0)
+}
+function strictlyInside(point: StoryAtlasMapPoint, polygon: StoryAtlasMapPoint[]): boolean {
+  let inside = false
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index], b = polygon[(index + 1) % polygon.length]
+    if (onSegment(point, a, b)) return false
+    if ((a.y > point.y) !== (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+
+/** Reject corrupt geometry before it enters the revision store. Coordinates have no implied physical scale. */
+export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | undefined {
+  if (raw === undefined) return undefined
+  const result = validateJsonSchema({ geography: raw }, STORY_ATLAS_ATTRIBUTE_SCHEMAS.location!)
+  if (!result.valid) throw new Error(`地图地理属性结构错误：${result.issues.join('；')}`)
+  const geography = raw as StoryAtlasGeography
+  for (const value of [geography.areaKm2, geography.mapFrame?.widthKm, geography.mapFrame?.heightKm]) {
+    if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('地图面积与比例范围必须为大于零的有限数字；未知数值请省略。')
+  }
+  if (geography.areaKm2 && geography.mapFrame && geography.areaKm2 > geography.mapFrame.widthKm * geography.mapFrame.heightKm) {
+    throw new Error('地图设定面积不能超过内部地图宽度与高度围成的范围，请校正面积或公里尺度。')
+  }
+  for (const point of [...(geography.boundary || []), ...(geography.position ? [geography.position] : [])]) {
+    if (![point.x, point.y].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) throw new Error('地图坐标必须为 0 到 100 之间的有限数字。')
+  }
+  const points = geography.boundary
+  if (!points) return geography
+  if (new Set(points.map(point => `${point.x},${point.y}`)).size !== points.length) throw new Error('区域边界不能重复顶点，闭合线由系统连接。')
+  if (Math.abs(polygonAreaTwice(points)) < geometryEpsilon) throw new Error('区域边界须围成非零面积，不能全部落在直线上。')
+  for (let index = 0; index < points.length; index++) {
+    const a = points[index], b = points[(index + 1) % points.length], previous = points[(index + points.length - 1) % points.length]
+    if (Math.abs(cross(previous, a, b)) < geometryEpsilon && (onSegment(b, previous, a) || onSegment(previous, a, b))) throw new Error('区域边界不能沿相邻边折返重叠。')
+    for (let other = index + 1; other < points.length; other++) {
+      if (other === index + 1 || index === 0 && other === points.length - 1) continue
+      if (segmentsCross(a, b, points[other], points[(other + 1) % points.length], true)) throw new Error('区域边界不能自相交。')
+    }
+  }
+  return geography
+}
+
+/** Shared borders are allowed; overlap is a diagnostic because different geographic layers can overlap intentionally. */
+export function atlasBoundariesOverlap(first: StoryAtlasMapPoint[], second: StoryAtlasMapPoint[]): boolean {
+  for (let index = 0; index < first.length; index++) {
+    const a = first[index], b = first[(index + 1) % first.length]
+    for (let other = 0; other < second.length; other++) if (segmentsCross(a, b, second[other], second[(other + 1) % second.length], false)) return true
+  }
+  const hasInterior = (polygon: StoryAtlasMapPoint[], other: StoryAtlasMapPoint[]) => {
+    const orientation = Math.sign(polygonAreaTwice(polygon))
+    return polygon.some((point, index) => {
+      if (strictlyInside(point, other)) return true
+      const next = polygon[(index + 1) % polygon.length], dx = next.x - point.x, dy = next.y - point.y
+      const length = Math.hypot(dx, dy)
+      if (!length) return false
+      const probe = { x: (point.x + next.x) / 2 - orientation * dy / length * 0.00001, y: (point.y + next.y) / 2 + orientation * dx / length * 0.00001 }
+      return strictlyInside(probe, polygon) && strictlyInside(probe, other)
+    })
+  }
+  return hasInterior(first, second) || hasInterior(second, first)
 }
 
 export function validateAtlasPositions(raw: unknown): StoryAtlasPosition[] {

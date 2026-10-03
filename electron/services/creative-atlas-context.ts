@@ -101,6 +101,11 @@ export function creativePublicAttributes(attributes: Record<string, unknown>, sc
     .map(([key, value]) => [key, publicValue(value)]).filter(([, value]) => value !== undefined))
   if (Array.isArray(attributes.positions)) projected.positions = attributes.positions.filter(position => position && typeof position === 'object' && position.status === 'established')
     .map(position => Object.fromEntries(Object.entries(position).filter(([key]) => ['id', 'title', 'status', 'responsibilities', 'requirements', 'reportsToPositionId'].includes(key)).map(([key, value]) => [key, publicValue(value)])))
+  // Polygon drawing coordinates and author development flags do not establish character knowledge or travel distance.
+  if (scope?.kind === 'location' && attributes.geography && typeof attributes.geography === 'object') {
+    const geography = attributes.geography as Record<string, unknown>
+    if (typeof geography.areaKm2 === 'number' && Number.isFinite(geography.areaKm2) && geography.areaKm2 > 0) projected.geography = { areaKm2: geography.areaKm2 }
+  }
   return projected
 }
 

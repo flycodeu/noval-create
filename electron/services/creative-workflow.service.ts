@@ -57,7 +57,7 @@ const outlineSchema = schemaObject({
 
 export function creativeSchemaHint(stage: CreativeStage): string {
   if (atlasStages.has(stage)) {
-    const kinds = stage === 'characters' ? ['character', 'presence', 'membership'] as const : stage === 'factions' ? ['faction', 'presence', 'membership'] as const : []
+    const kinds = stage === 'characters' ? ['character', 'presence', 'membership'] as const : stage === 'factions' ? ['faction', 'presence', 'membership'] as const : stage === 'map' ? ['location'] as const : []
     return ATLAS_SCHEMA_HINT + kinds.map(kind => `\n${kind}.attributes字段契约：${JSON.stringify(STORY_ATLAS_ATTRIBUTE_SCHEMAS[kind])}`).join('')
   }
   if (isProjectAssetStage(stage)) return `只输出本次变更的部分字段，不要重写整份资料。数组按稳定id（地图层级按depth，支线按name）合并，字符串数组增量补充；未提及字段保留。${stage === 'story' ? '秘密、线索与知情差必须登记在facts，不能只写进主线文本。新信息点用clientId，已有用数值id；plannedRevealChapterNum是计划章序，不表示已经发生。knownFromStartCharacterIds只写有既定依据、在开书前就知情的人物图谱ID，不填代表未知。普通地图/人物属性不需逐条变为秘密。' : ''}字段必须遵循 JSON Schema：${JSON.stringify(PROJECT_STAGE_SCHEMAS[stage])}`
@@ -397,7 +397,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
       `剧情章位为 ${input.request.atChapter ?? 0}；计划不得伪装成当前事实。`,
       ...(input.request.stage === 'characters' ? ['按本次请求区分主要人物与临时配角；只改一项时保留其他资料。新建或整体完善主要人物应交代身份职业与日常、动机与具体目标、性格如何表现与弱点、说话方式、已有能力及代价限制；用关系登记有依据的出生地、常住地、活动区域、组织成员关系。不存在能力可明确普通人的技能边界。地点或组织尚未登记时报告需要先设计的资料，不凭空造引用。缺乏既定关系可明确无，不强造血缘、创伤或过去纠葛。未确认的内容留缺，不为字段齐全编造已发生经历。character.attributes.goals/occupation/dailyRoutine/motivation/speechPattern/abilityLimits/abilityCosts用文本；personalityTraits/flaws/habits用文本数组。'] : []),
       ...(input.request.stage === 'factions' ? ['组织整体设计须说明特点/目标、资源来源、运作方式和招募原则；总部、据点与涉及区域用presence关联已登记地点，区域覆盖不等于控制一切或成员在场。需要部门/分部时用同kind=faction的子实体及parentId，不为复杂而堆层级。岗位用positions并区分planned尚未设立与established现有编制；岗位不等于人物，未有人任职就留空；已有成员用membership，positionId仅引用该组织岗位。只处理请求范围内的组织资料，不自动制造首领、亲属、仇敌或已发生势力冲突。'] : []),
-      ...(input.request.stage === 'map' ? ['按请求范围交代区域层级、地形、水源、生计、通路及行程；坐标未知可省略，示意位置不能冒充真实比例或距离。'] : []),
+      ...(input.request.stage === 'map' ? ['按请求范围分批扩展国家、地区、城市和村庄，已有地点必须使用稳定id增量完善，未设计范围可保留空白。交代地形、水源、生计、通路及行程；南北方位、聚落与水陆通路互相一致。地点attributes.geography保存区域地图：boundary为父地图局部0..100坐标内3至64个不重复顶点组成的简单非零面积多边形（不重复首点），position为该父地图中的点位；每个地点内部地图使用自己的局部坐标，不与上一级坐标混算。x向东、y向南；同级相邻行政区可接边但不能无依据重叠。areaKm2为平方公里面积，mapFrame.widthKm/heightKm为本地点内部地图公里宽高。沿用已有明确面积与尺度；缺失时可以根据用户本轮地理设计需求，结合地形、行政层级、聚落分布和行程提出自洽候选，在本次候选中说明设计依据，不冒充原始事实，不仅从示意像素推算面积或距离。面积不能超过内部地图宽高乘积，也不能超过已知上级面积。确实尚不能合理设计的数值才省略。development=detailed/outlined/unexplored仅表示资料已展开/仅轮廓/尚未设计，不代表人物已探索或剧情已发生。boundary补丁完整替换边界，省略的geography子字段保留。新增面积、尺度、边界和其他地理设计均先提交候选，经review审校与validate验证后才能apply应用。'] : []),
     ]
     const generated = await generateGenericAssetDraft({ novelId, assetType: assetTypes[input.request.stage], title: `${CREATIVE_STAGE_LABELS[input.request.stage]} · 增量创作`, requirements, outputFormat: 'json', schemaHint: creativeSchemaHint(input.request.stage), modelConfigId: input.modelConfigId, parentArtifactId: sourceArtifactId, idempotencyKey: `creative:${runId}:${input.attempt}` }, {
       contextSummary: context.text, maxTokens: context.outputReserve, parentTaskId: runId,

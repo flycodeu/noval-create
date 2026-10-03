@@ -3,10 +3,10 @@ import type Database from 'better-sqlite3'
 import { getSqlite } from '../database/db'
 import { insertAtlasRevision, readAtlasRecords, type AtlasStoredRecord, type AtlasRecord } from '../database/story-atlas-store'
 import { markNovelContextChanged } from './context-impact.service'
-import { meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasPositions } from './story-atlas-attributes'
+import { atlasBoundariesOverlap, meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 import type {
   StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasEntityKind,
-  StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
+  StoryAtlasGeography, StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
 } from '../../src/shared/story-atlas'
 
 export class StoryAtlasError extends Error {
@@ -30,6 +30,26 @@ function chapter(value: unknown): number {
 function diagnose(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[]): StoryAtlasDiagnostic[] {
   const result: StoryAtlasDiagnostic[] = []
   const locations = entities.filter((entity) => entity.kind === 'location')
+  const geography = new Map<string, StoryAtlasGeography>()
+  for (const location of locations) {
+    try {
+      const value = validateAtlasGeography(location.attributes.geography)
+      if (value) geography.set(location.id, value)
+    } catch {
+      result.push({ severity: 'warning', code: 'MAP_GEOMETRY_INVALID', message: `${location.name}的地图边界、面积或比例需要校正。`, entityIds: [location.id] })
+    }
+  }
+  for (const [index, location] of locations.entries()) {
+    const geometry = geography.get(location.id)
+    if (!geometry) continue
+    if (!geometry.boundary) continue
+    for (const other of locations.slice(index + 1)) {
+      const otherBoundary = geography.get(other.id)?.boundary
+      if (other.parentId === location.parentId && otherBoundary && atlasBoundariesOverlap(geometry.boundary, otherBoundary)) {
+        result.push({ severity: 'warning', code: 'MAP_BOUNDARIES_OVERLAP', message: `${location.name}与${other.name}的同层区域边界重叠，请确认是否有意叠加。`, entityIds: [location.id, other.id] })
+      }
+    }
+  }
   if (!locations.length) result.push({ severity: 'warning', code: 'LOCATIONS_EMPTY', message: '尚未登记地点，无法校验行程与空间关系。', entityIds: [] })
   if (entities.some((entity) => entity.kind === 'character') && !relations.some((relation) => relation.kind === 'relationship')) {
     result.push({ severity: 'warning', code: 'RELATIONSHIPS_EMPTY', message: '已有人物，但尚未登记人物之间的关系。', entityIds: [] })
@@ -209,20 +229,28 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   const entityById = new Map(entities.map((entity) => [entity.id, entity]))
   const locationRank = (entity: StoryAtlasEntity) => {
     const type = String(entity.attributes.locationType || entity.attributes.nodeType || '').toLowerCase()
-    return ({ region: 1, province: 1, 区域: 1, 地区: 1, 省: 1, city: 2, town: 2, 城市: 2, 城镇: 2, 镇: 2, village: 3, 村庄: 3, 村: 3, site: 4, location: 4, 地点: 4, 场所: 4, room: 5, 房间: 5 } as Record<string, number>)[type]
+    return ({ world: 1, 世界: 1, continent: 2, 大陆: 2, country: 3, nation: 3, 国家: 3, region: 4, province: 4, 区域: 4, 地区: 4, 省: 4, city: 5, town: 5, 城市: 5, 城镇: 5, 镇: 5, village: 6, 村庄: 6, 村: 6, site: 7, location: 7, 地点: 7, 场所: 7, room: 8, 房间: 8 } as Record<string, number>)[type]
   }
   for (const entity of entities) if (entity.parentId) {
     const parent = entityById.get(entity.parentId)
     if (!['location', 'faction'].includes(entity.kind) || parent?.kind !== entity.kind) fail('INVALID_ENTITY_PARENT', '上级必须是当前项目中生效的同类地点或组织。')
     if (entity.status === 'confirmed' && parent.status === 'planned') fail('UNCONFIRMED_PARENT', '已生效资料不能隶属尚未确定的上级资料。')
     const childRank = entity.kind === 'location' ? locationRank(entity) : undefined, parentRank = entity.kind === 'location' ? locationRank(parent) : undefined
-    if (childRank && parentRank && childRank < parentRank) fail('LOCATION_HIERARCHY_INVERTED', '地区、城镇、村庄、场所的包含层级不能倒置。')
+    if (childRank && parentRank && childRank < parentRank) fail('LOCATION_HIERARCHY_INVERTED', '国家、地区、城镇、村庄、场所的包含层级不能倒置。')
     const seen = new Set([entity.id])
     let ancestor: StoryAtlasEntity | undefined = parent
     while (ancestor) {
       if (seen.has(ancestor.id)) fail('ENTITY_CYCLE', '地点或组织不能成为自身的上级。')
       seen.add(ancestor.id)
       ancestor = ancestor.parentId ? entityById.get(ancestor.parentId) : undefined
+    }
+  }
+  for (const entity of entities.filter(item => item.kind === 'location')) {
+    const geography = validateAtlasGeography(entity.attributes.geography)
+    const parent = entity.parentId ? entityById.get(entity.parentId) : undefined
+    const parentGeography = parent ? validateAtlasGeography(parent.attributes.geography) : undefined
+    if (geography?.areaKm2 && parentGeography?.areaKm2 && geography.areaKm2 > parentGeography.areaKm2) {
+      fail('LOCATION_AREA_EXCEEDS_PARENT', `${entity.name}的设定面积不能超过上级${parent!.name}的设定面积。`)
     }
   }
   const positions = new Map(entities.filter(entity => entity.kind === 'faction').map(entity => [entity.id, validateAtlasPositions(entity.attributes.positions)]))
@@ -254,6 +282,24 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   for (const id of changedIds) {
     const future = allIds.get(id)
     if (future && future.record.effectiveFromChapter > input.effectiveFromChapter) fail('ATLAS_HISTORY_CONFLICT', `记录 ${id} 在后续章节已有变化，请从最新状态修改，或先明确后续变化如何调整。`)
+  }
+  const changedAreas = new Map(entities.filter(entity => entity.kind === 'location' && changedIds.has(entity.id))
+    .flatMap(entity => {
+      const area = (entity.attributes.geography as StoryAtlasGeography | undefined)?.areaKm2
+      return area ? [[entity.id, { name: entity.name, area }] as const] : []
+    }))
+  if (changedAreas.size) {
+    const futureLocations = sqlite.prepare(`SELECT snapshot_json FROM (SELECT snapshot_json,status,
+      ROW_NUMBER() OVER (PARTITION BY record_id,effective_from_chapter ORDER BY id DESC) AS rank FROM story_atlas_revisions
+      WHERE novel_id=? AND record_type='entity' AND effective_from_chapter>?) WHERE rank=1 AND status<>'retired'`)
+    for (const row of futureLocations.all(input.novelId, input.effectiveFromChapter) as Array<{ snapshot_json: string }>) {
+      const location = JSON.parse(row.snapshot_json) as StoryAtlasEntity
+      const parent = location.parentId ? changedAreas.get(location.parentId) : undefined
+      const area = (location.attributes.geography as StoryAtlasGeography | undefined)?.areaKm2
+      if (location.kind === 'location' && parent && typeof area === 'number' && area > parent.area) {
+        fail('FUTURE_LOCATION_AREA_CONFLICT', `第 ${location.effectiveFromChapter} 章${location.name}的面积将超过上级${parent.name}，请先明确后续边界与面积如何调整。`)
+      }
+    }
   }
   const changedPositionIds = new Set(entities.filter(entity => entity.kind === 'faction' && changedIds.has(entity.id)
     && JSON.stringify(entity.attributes.positions) !== JSON.stringify(current.find(item => item.record.id === entity.id)?.record.attributes.positions)).map(entity => entity.id))
