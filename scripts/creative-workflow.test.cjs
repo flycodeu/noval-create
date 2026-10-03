@@ -138,7 +138,8 @@ async function main() {
     const snapshot = (await call('atlas.query', {})).atlas
     assert.equal(snapshot.entities.filter(x => x.kind === 'character').length, 2)
     assert.equal(snapshot.relations.length, 1)
-    assert.deepEqual(done.result.savedEntities, snapshot.entities.map(entity => ({ id: entity.id, kind: entity.kind, name: entity.name })), 'completed runs show committed entity names, not their technical request')
+    const savedEntityIndex = entities => Object.fromEntries(entities.map(({ id, kind, name }) => [id, { kind, name }]))
+    assert.deepEqual(savedEntityIndex(done.result.savedEntities), savedEntityIndex(snapshot.entities), 'completed runs show committed entity names, independent of query ordering')
     assert.equal(done.result.savedEntities.length, 2, 'a saved relationship must not inflate the entity name list')
     assert.equal((await call('workflows.start', startInput)).run.runId, started.runId)
     assert.equal(requests.length, beforeCharacters + 2, 'idempotent start does not call model again')
