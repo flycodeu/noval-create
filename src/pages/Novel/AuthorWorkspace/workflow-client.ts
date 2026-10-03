@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CreativeRun, CreativeWorkflowInput } from '../../../shared/creative-workflow'
 
-export function runStatusLabel(run: CreativeRun) {
-  if (run.step === 'completed') return '已完成'
-  if (run.step === 'needs_attention') return '待处理'
-  if (run.step === 'cancelled') return '已停止'
-  if (run.status === 'failed') return '运行失败'
-  return ({ context: '读取依据', generating: '生成', reviewing: '评审', revising: '修订', applying: '保存结果' } as Record<string, string>)[run.step] || run.status
-}
+export { runStatusLabel } from './run-presentation'
 
 export async function callAuthorTool<T>(toolId: string, input: Record<string, unknown>): Promise<T> {
   const response = await window.electron.agentTools.call({ toolId, input })

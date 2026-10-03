@@ -1,9 +1,8 @@
 import React from 'react'
 import { Button, Spin } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
-import type { CreativeRun, CreativeStage } from '../../../shared/creative-workflow'
-import { CREATIVE_STAGE_LABELS } from '../../../shared/creative-workflow'
-import { runStatusLabel } from './workflow-client'
+import type { CreativeRun } from '../../../shared/creative-workflow'
+import { runChapterLabel, runResultPresentation, runStatusLabel } from './run-presentation'
 import './author-workspace.css'
 
 export function AuthorPage({ title, actions, children }: {
@@ -25,21 +24,25 @@ const RUN_STEPS: Array<{ key: CreativeRun['step']; label: string }> = [
   { key: 'reviewing', label: '评审' }, { key: 'revising', label: '修订' }, { key: 'applying', label: '保存结果' },
 ]
 
-export function RunProgress({ run, active, onCancel, onResume, onOpenResult }: {
-  run: CreativeRun; active: boolean; onCancel?: () => void; onResume?: () => void; onOpenResult?: () => void
+export function RunProgress({ run, active, onCancel, onResume, onOpenResult, names }: {
+  run: CreativeRun; active: boolean; onCancel?: () => void; onResume?: () => void; onOpenResult?: () => void; names?: Record<string, string>
 }) {
+  const presentation = runResultPresentation(run, undefined, names)
   const steps = run.operation === 'review' ? RUN_STEPS.filter(step => ['context', 'reviewing'].includes(step.key)) : RUN_STEPS
   const current = steps.findIndex((step) => step.key === run.step)
   return <section className="author-run" aria-live="polite">
-    <div className="author-section-heading"><div><span className="author-eyebrow">当前任务 · {CREATIVE_STAGE_LABELS[run.stage as CreativeStage] || run.stage}</span><h2>{runStatusLabel(run)}</h2></div>
-      {active ? <Button size="small" onClick={onCancel}>停止</Button> : run.step === 'needs_attention' || run.status === 'failed' || run.step === 'cancelled' ? <Button size="small" onClick={onResume}>{run.reviewStatus === 'passed' ? '应用候选' : '重试任务'}</Button> : null}
+    <div className="author-section-heading"><div><span className="author-eyebrow">{runStatusLabel(run)} · {runChapterLabel(run)}</span><h2>{presentation.title}</h2></div>
+      {active && onCancel ? <Button size="small" onClick={onCancel}>停止</Button> : !presentation.saved && onResume && (run.step === 'needs_attention' || run.status === 'failed' || run.step === 'cancelled') ? <Button size="small" onClick={onResume}>{runStatusLabel(run) === '候选待确认' ? '确认保存候选' : '重试任务'}</Button> : null}
     </div>
-    <p className="author-run__request">{run.request}</p>
-    <p className="author-muted">{run.atChapter != null ? `目标章位：${run.atChapter === 0 ? '初始设定' : `第 ${run.atChapter} 章`}` : ''}{run.count ? ` · 本轮数量 ${run.count}` : ''}</p>
-    <div className="author-run__steps">{steps.map((step, i) => <span key={step.key} className={run.step === 'completed' || i < current ? 'is-done' : i === current ? 'is-current' : ''}>
-      <i>{i + 1}</i>{step.label}</span>)}</div>
-    <div className="author-run__message">{active && <Spin size="small" />}<span>{run.message || '任务已记录。'}</span></div>
+    {active && <div className="author-run__steps">{steps.map((step, i) => <span key={step.key} className={i < current ? 'is-done' : i === current ? 'is-current' : ''}>
+      <i>{i + 1}</i>{step.label}</span>)}</div>}
+    <div className="author-run__message">{active && <Spin size="small" />}<span>{presentation.summary}</span></div>
     {run.artifactId && onOpenResult && <Button type="link" onClick={onOpenResult}>查看结果与评审 <ArrowRightOutlined /></Button>}
+    <details className="author-disclosure"><summary>任务详情</summary>
+      {run.count != null && <p>请求数量：{run.count}</p>}
+      <h3>原始请求</h3><p className="author-run__request">{run.request}</p>
+      {run.message && <><h3>运行反馈</h3><p className="author-run__request">{run.message}</p></>}
+    </details>
     {run.context && <details className="author-disclosure"><summary>本次使用的上下文</summary><p>预计输入 {run.context.estimatedTokens.toLocaleString()} tokens · 为输出预留 {run.context.outputReserve.toLocaleString()} tokens</p>
       <ul>{run.context.sources.map((source) => <li key={source}>{source}</li>)}</ul>
       {run.context.omittedSources.length > 0 && <p>本轮未加入：{run.context.omittedSources.join('、')}</p>}

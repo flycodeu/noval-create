@@ -11,17 +11,24 @@ import { parseStorySettingsDocument } from '../../../shared/story-settings'
 import { parseThemeVoiceDocument } from '../../../shared/theme-voice'
 import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, isRunActive, runStatusLabel } from './workflow-client'
+import { runChapterLabel, runResultPresentation } from './run-presentation'
 import { ContentDocument } from './ContentDocument'
 import { changedFields, parseDocument, recordOf } from './content-document'
 import { artifactTarget, issueTarget } from './revision-target'
 import { loadDocumentNames } from './document-references'
 
 type ArtifactReference = Omit<AgentArtifact, 'content' | 'idempotencyKey'>
-const STATUS_LABELS: Record<string, string> = { draft: '候选', reviewed: '已评审', approved: '已认可', committed: '已应用', rejected: '未通过', superseded: '旧版本' }
+const STATUS_LABELS: Record<string, string> = { draft: '候选', reviewed: '已评审', approved: '已认可', committed: '已保存', rejected: '未通过', superseded: '旧版本' }
 function candidateValue(content: unknown) { const data = recordOf(content); return parseDocument(data.output ?? content) }
 function patchShape(current: unknown, patch: unknown): unknown {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return current
   return Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, patchShape(recordOf(current)[key], value)]))
+}
+function artifactListTitle(item: ArtifactReference, runs: CreativeRun[], names: Record<string, string>): string {
+  const run = runs.find(candidate => candidate.artifactId === item.id || candidate.reviewArtifactId === item.id)
+  if (item.kind.includes('review') || item.kind === 'quality_report') return run ? `${CREATIVE_STAGE_LABELS[run.stage]} · 评审报告` : '评审报告'
+  if (run) return runResultPresentation(run, undefined, names).title
+  return item.kind === 'creative_commit' ? '保存记录' : '创作内容'
 }
 
 export default function Versions({ novelId }: { novelId: number }) {
@@ -125,8 +132,8 @@ export default function Versions({ novelId }: { novelId: number }) {
   return <AuthorPage title="版本与问题" actions={<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>}>
     <div className="author-atlas-toolbar"><div className="author-tabs" role="tablist">{[{ key: 'runs', label: '创作记录' }, { key: 'versions', label: '内容版本' }, { key: 'issues', label: '待处理问题' }].map(tab => <button key={tab.key} role="tab" aria-selected={view === tab.key} onClick={() => setView(tab.key)}>{tab.label}</button>)}</div><Checkbox checked={showHistory} onChange={event => setShowHistory(event.target.checked)}>显示历史与已处理</Checkbox></div>
     {error && <LoadFailure message={error} retry={() => void load()} />}
-    {loading && !runs.length && !artifacts.length ? <Spin /> : view === 'runs' ? runs.length ? <div className="author-history-layout"><div className="author-history-list">{runs.map(run => <button key={run.runId} className={selectedRun?.runId === run.runId ? 'is-selected' : ''} onClick={() => setSelectedRun(run)}><small>{run.operation === 'review' ? '仅评审' : CREATIVE_STAGE_LABELS[run.stage]} · {runStatusLabel(run)} · 第 {run.atChapter} 章</small><strong>{run.request}</strong><time>{run.createdAt ? new Date(run.createdAt).toLocaleString() : ''}</time></button>)}</div><div>{selectedRun && <RunProgress run={selectedRun} active={isRunActive(selectedRun)} onCancel={() => void control('cancel', selectedRun)} onResume={() => void control('resume', selectedRun)} onOpenResult={() => setParams({ artifact: selectedRun.artifactId || '' })} />}</div></div> : <EmptyWork title="还没有创作记录">创作与独立评审的过程会保存在这里。</EmptyWork> : view === 'versions' ? <div className="author-history-layout"><div className="author-history-list">{visibleArtifacts.map(item => <button key={item.id} className={artifact?.id === item.id ? 'is-selected' : ''} onClick={() => setParams({ artifact: item.id })}><small>{STATUS_LABELS[item.status]} · 版本 {item.version}</small><strong>{runs.find(run => run.artifactId === item.id)?.request || (item.kind.includes('review') || item.kind === 'quality_report' ? '评审报告' : '创作内容')}</strong><time>{new Date(item.createdAt).toLocaleString()}</time></button>)}{artifacts.length >= 200 && <p className="author-muted">当前列出最近 200 份内容。旧内容可从对应创作记录进入。</p>}</div><section className="author-paper author-version-detail">{reading ? <Spin /> : artifact ? <>
-      <div className="author-section-heading"><h2>{artifactRun?.operation === 'review' ? '章节评审报告' : `${STATUS_LABELS[artifact.status]} · 版本 ${artifact.version}`}</h2><small>{artifactRun ? `第 ${artifactRun.atChapter} 章 · ${CREATIVE_STAGE_LABELS[artifactRun.stage]}` : ''}</small></div>
+    {loading && !runs.length && !artifacts.length ? <Spin /> : view === 'runs' ? runs.length ? <div className="author-history-layout"><div className="author-history-list">{runs.map(run => <button key={run.runId} className={selectedRun?.runId === run.runId ? 'is-selected' : ''} onClick={() => setSelectedRun(run)}><small>{run.operation === 'review' ? '仅评审' : CREATIVE_STAGE_LABELS[run.stage]} · {runStatusLabel(run)} · {runChapterLabel(run)}</small><strong>{runResultPresentation(run, undefined, names).title}</strong><time>{run.createdAt ? new Date(run.createdAt).toLocaleString() : ''}</time></button>)}</div><div>{selectedRun && <RunProgress run={selectedRun} names={names} active={isRunActive(selectedRun)} onCancel={() => void control('cancel', selectedRun)} onResume={() => void control('resume', selectedRun)} onOpenResult={() => setParams({ artifact: selectedRun.artifactId || '' })} />}</div></div> : <EmptyWork title="还没有创作记录">创作与独立评审的过程会保存在这里。</EmptyWork> : view === 'versions' ? <div className="author-history-layout"><div className="author-history-list">{visibleArtifacts.map(item => <button key={item.id} className={artifact?.id === item.id ? 'is-selected' : ''} onClick={() => setParams({ artifact: item.id })}><small>{STATUS_LABELS[item.status]} · 版本 {item.version}</small><strong>{artifactListTitle(item, runs, names)}</strong><time>{new Date(item.createdAt).toLocaleString()}</time></button>)}{artifacts.length >= 200 && <p className="author-muted">当前列出最近 200 份内容。旧内容可从对应创作记录进入。</p>}</div><section className="author-paper author-version-detail">{reading ? <Spin /> : artifact ? <>
+      <div className="author-section-heading"><h2>{artifactRun?.operation === 'review' ? '章节评审报告' : `${STATUS_LABELS[artifact.status]} · 版本 ${artifact.version}`}</h2><small>{artifactRun ? `${runChapterLabel(artifactRun)} · ${CREATIVE_STAGE_LABELS[artifactRun.stage]}` : ''}</small></div>
       {artifactRun?.operation !== 'review' && artifact.status !== 'committed' && artifactRun?.reviewStatus === 'passed' && <Button type="primary" loading={applying} onClick={() => {
         setApplying(true)
         void callAuthorTool('novelforge.workflows.apply', { novelId, runId: artifactRun.runId }).then(async () => { await load(); await openArtifact(artifact.id); window.dispatchEvent(new Event('novelforge:creative-completed')) }).catch(cause => setError(String(cause))).finally(() => setApplying(false))

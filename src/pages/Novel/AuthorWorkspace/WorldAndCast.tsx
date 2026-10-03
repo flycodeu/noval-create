@@ -13,19 +13,20 @@ import { AtlasEntityEditor } from './AtlasEntityEditor'
 import { AtlasRelationDetails } from './AtlasRelationDetails'
 import { WorldAtlasGraph } from './WorldAtlasGraph'
 import { GeographicAtlas } from './GeographicAtlas'
+import { atlasIncludesPlanned, atlasMapScope } from './atlas-view-options'
 
 const STAGES: Record<StoryAtlasEntity['kind'], CreativeStage> = { location: 'map', character: 'characters', faction: 'factions', item: 'items', event: 'events' }
 export default function WorldAndCast({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const tab = resolveAtlasTab(params)
-  const parentId = params.get('location') || null
   const geographic = tab === 'map' && params.get('mapView') !== 'hierarchy'
   const atChapter = params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null
   const selectedId = params.get('entity')
   const [snapshot, setSnapshot] = useState<StoryAtlasSnapshot | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const includePlanned = params.get('includePlanned') === 'true'
+  const parentId = atlasMapScope(params, snapshot, geographic)
+  const includePlanned = atlasIncludesPlanned(params, tab === 'map')
   const [relation, setRelation] = useState<StoryAtlasRelation | null>(null)
   const [editing, setEditing] = useState<StoryAtlasEntity | null>(null)
   const [loading, setLoading] = useState(true)
@@ -50,7 +51,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const select = (entity: StoryAtlasEntity) => updateParams(next => next.set('entity', entity.id))
   const openEntity = (entity: StoryAtlasEntity) => updateParams(next => { next.set('tab', atlasTabFor(entity)); next.set('entity', entity.id); if (entity.kind === 'location') { if (entity.parentId) next.set('location', entity.parentId); else next.delete('location') } })
   const switchTab = (nextTab: AtlasTab) => { setRelation(null); updateParams(next => { next.set('tab', nextTab); next.delete('kind'); next.delete('view'); next.delete('entity') }) }
-  const drill = (entity: StoryAtlasEntity | null) => updateParams(next => { next.set('tab', 'map'); if (entity) { next.set('location', entity.id); next.set('entity', entity.id) } else { next.delete('location'); next.delete('entity') } })
+  const drill = (entity: StoryAtlasEntity | null) => updateParams(next => { next.set('tab', 'map'); if (entity) { next.set('location', entity.id); next.set('entity', entity.id); next.delete('mapScope') } else { next.delete('location'); next.delete('entity'); next.set('mapScope', 'world') } })
   const generate = (stage: CreativeStage, request: string) => navigate(buildWorkspaceRoute(novelId, `guide?${new URLSearchParams({ stage, request, autoApply: 'false', ...(atChapter != null ? { atChapter: String(atChapter) } : {}) })}`))
   const generateTab = () => {
     if (tab === 'relationships') return generate('relationships', '结合现有人物与已写正文，补充有具体依据的人物关系、相处方式、关系张力及变化。现有关系按稳定 ID 更新，不虚构过去纠葛。')
@@ -65,7 +66,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   }
   return <AuthorPage title="地点、人物与他们的联系">
     <div className="atlas-workspace-toolbar"><nav className="author-tabs atlas-primary-tabs" aria-label="世界与人物分区">{ATLAS_TABS.map(item => <button type="button" key={item.key} className={tab === item.key ? 'is-selected' : ''} aria-current={tab === item.key ? 'page' : undefined} onClick={() => switchTab(item.key)}>{item.label}</button>)}</nav><Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design?section=world'))}>世界规则</Button></div>
-    <div className="atlas-context-toolbar"><Select<number | 'all'> aria-label="故事章位" value={atChapter ?? 'all'} onChange={value => { setRelation(null); updateParams(next => { if (value === 'all') next.delete('atChapter'); else next.set('atChapter', String(value)) }) }} options={[{ value: 'all', label: '全部已知设定' }, { value: 0, label: '初始设定 · 第 0 章' }, ...chapters.map(chapter => ({ value: chapter.chapterNum, label: `第 ${chapter.chapterNum} 章 · ${chapter.title || ''}` }))]} /><Checkbox checked={includePlanned} onChange={event => { setRelation(null); updateParams(next => { if (event.target.checked) next.set('includePlanned', 'true'); else next.delete('includePlanned') }) }}>包含计划</Checkbox><span aria-live="polite">{loading && snapshot ? <Spin size="small" /> : null}</span>{tab === 'map' && <nav className="atlas-map-modes" aria-label="地图视图">{[{ key: 'geography', label: '区域地图' }, { key: 'hierarchy', label: '层级图' }].map(mode => <button type="button" key={mode.key} className={(geographic ? 'geography' : 'hierarchy') === mode.key ? 'is-selected' : ''} aria-pressed={(geographic ? 'geography' : 'hierarchy') === mode.key} onClick={() => updateParams(next => next.set('mapView', mode.key))}>{mode.label}</button>)}</nav>}</div>
+    <div className="atlas-context-toolbar"><Select<number | 'all'> aria-label="故事章位" value={atChapter ?? 'all'} onChange={value => { setRelation(null); updateParams(next => { if (value === 'all') next.delete('atChapter'); else next.set('atChapter', String(value)) }) }} options={[{ value: 'all', label: '全部已知设定' }, { value: 0, label: '初始设定 · 第 0 章' }, ...chapters.map(chapter => ({ value: chapter.chapterNum, label: `第 ${chapter.chapterNum} 章 · ${chapter.title || ''}` }))]} /><Checkbox checked={includePlanned} onChange={event => { setRelation(null); updateParams(next => { next.set('includePlanned', String(event.target.checked)) }) }}>{tab === 'map' ? '显示规划地域' : '包含计划'}</Checkbox><span aria-live="polite">{loading && snapshot ? <Spin size="small" /> : null}</span>{tab === 'map' && <nav className="atlas-map-modes" aria-label="地图视图">{[{ key: 'geography', label: '区域地图' }, { key: 'hierarchy', label: '层级图' }].map(mode => <button type="button" key={mode.key} className={(geographic ? 'geography' : 'hierarchy') === mode.key ? 'is-selected' : ''} aria-pressed={(geographic ? 'geography' : 'hierarchy') === mode.key} onClick={() => updateParams(next => next.set('mapView', mode.key))}>{mode.label}</button>)}</nav>}</div>
     {error && <LoadFailure message={error} retry={() => void load()} />}
     {!snapshot ? loading ? <div className="author-loading"><Spin /></div> : <EmptyWork title="资料暂未读到">请重试读取。</EmptyWork> : <>
       <div className={`atlas-workbench ${geographic ? 'atlas-workbench--geography' : isGraph ? 'atlas-workbench--graph' : 'atlas-workbench--library'}`}>

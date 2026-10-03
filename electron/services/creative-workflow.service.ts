@@ -10,7 +10,8 @@ import { createTask, getTaskRecord, updateTask, cancelTask } from './task.servic
 import { getNovel, updateNovel } from './novel.service'
 import { getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
 import { createChapter, getChapter, listChapters, updateChapter } from './chapter.service'
-import { createArtifact, requireArtifact, hashArtifactContent, findArtifactByIdempotency, updateArtifactLifecycle } from './artifact.service'
+import { createArtifact, getArtifact, requireArtifact, hashArtifactContent, findArtifactByIdempotency, updateArtifactLifecycle } from './artifact.service'
+import { savedCreativeEntities } from './creative-run-result'
 import { generateGenericAssetDraft } from './generic-asset-workflow.service'
 import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { applyStoryAtlasChanges, validateStoryAtlasChanges } from './story-atlas.service'
@@ -147,6 +148,12 @@ export function getCreativeRun(novelId: number, runId?: number): CreativeRun | n
   if (!task) return null
   const input = JSON.parse(task.inputJson || '{}') as StoredRequest
   const state = JSON.parse(task.progressJson || '{}') as Partial<CreativeRun>
+  if (task.status === 'success' && state.result && typeof state.result.artifactId === 'string' && Array.isArray(state.result.appliedIds)) {
+    const draft = getArtifact<GenericAssetDraftContent>(state.result.artifactId)
+    if (draft?.novelId === novelId && draft.status === 'committed') {
+      state.result = { ...state.result, savedEntities: savedCreativeEntities(state.result, draft.content.output) }
+    }
+  }
   return { ...state, runId: task.id, novelId, stage: input.request.stage, request: input.request.request, atChapter: input.request.atChapter ?? 0, count: input.request.count, sourceArtifactId: input.request.sourceArtifactId, operation: input.request.operation || 'generate', status: task.status || 'pending', step: state.step || 'context', message: state.message || task.errorMessage || '', modelConfigId: task.modelConfigId, events: state.events || [], createdAt: task.createdAt, updatedAt: task.updatedAt }
 }
 export function listCreativeRuns(novelId: number): CreativeRun[] {
