@@ -4,7 +4,8 @@ import { atlasBoundariesOverlap, mergeAtlasAttributes, normalizeAtlasAttributePa
 describe('story atlas attributes', () => {
   it('validates explicit story days separately from narrative chapter anchors', () => {
     expect(normalizeAtlasAttributePatch('event', { relativeDay: -2, sequenceInDay: 0, timeLabel: '开篇前两日' })).toMatchObject({ relativeDay: -2, sequenceInDay: 0 })
-    for (const attributes of [{ relativeDay: '前两日' }, { sequenceInDay: -1 }, { sequenceInDay: 0.5 }]) {
+    expect(normalizeAtlasAttributePatch('event', { chronologyOrder: 2, timeLabel: '前夜后半夜' })).toEqual({ chronologyOrder: 2, timeLabel: '前夜后半夜' })
+    for (const attributes of [{ relativeDay: '前两日' }, { sequenceInDay: -1 }, { sequenceInDay: 0.5 }, { chronologyOrder: '2' }, { chronologyOrder: 0 }, { chronologyOrder: 1.5 }]) {
       expect(() => normalizeAtlasAttributePatch('event', attributes)).toThrow('属性结构')
     }
   })

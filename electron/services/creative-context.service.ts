@@ -7,7 +7,7 @@ import { resolveModelRuntimeBudget } from './model.service'
 import { compileCreativeChapterContext, creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
-import { creativeAtlasCoverage, selectCreativeAssetAtlas, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, isCreativeChapterScopedRequest, selectCreativeAssetAtlas, selectCreativePlanningAtlas } from './creative-atlas-context'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -87,13 +87,13 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const selectionInput = {
     request: input.request, anchorText: anchors, fallbackText: previousChapter?.summary || previousChapter?.content?.slice(-2000),
   }
-  const assetSelection = assetStage ? selectCreativeAssetAtlas(atlas, { ...selectionInput, stage: assetStage }) : undefined
-  const { entityIds: relevant, relationIds: relevantEdges } = assetSelection || selectCreativeAtlas(atlas, selectionInput)
-  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, !assetStage || /本章|当前章|这一章|现场/u.test(input.request))
+  const selection = assetStage ? selectCreativeAssetAtlas(atlas, { ...selectionInput, stage: assetStage }) : selectCreativePlanningAtlas(atlas, { ...selectionInput, stage: input.stage })
+  const { entityIds: relevant, relationIds: relevantEdges } = selection
+  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, isCreativeChapterScopedRequest(input.request))
   add('atlas_coverage', creativeAtlasCoverage(atlas, relevant), true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
   for (const entity of ordered.filter(entity => relevant.has(entity.id))) {
-    if (assetSelection?.constraintEntityIds.has(entity.id)) {
+    if (selection.constraintEntityIds.has(entity.id)) {
       add(`${entity.id}:boundary_constraint`, {
         id: entity.id, kind: entity.kind, name: entity.name, parentId: entity.parentId, status: entity.status,
         effectiveFromChapter: entity.effectiveFromChapter, usage: '仅作为既有相邻区域的边界约束，不能覆盖未提供的档案字段。',
@@ -108,12 +108,10 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const catalog = assetStage ? ordered.filter(entity => relevant.has(entity.id) || entity.kind === stageKind) : ordered
   for (let index = 0; index < catalog.length; index += 40) add(`identities:${index / 40}`, catalog.slice(index, index + 40).map(entity => `${entity.id}|${entity.kind}|${entity.name}`).join('\n'))
   for (const entity of ordered.filter(entity => !relevant.has(entity.id))) {
-    if (assetStage) omittedSources.push(`${entity.id}:outside_${assetStage}_scope`)
-    else add(entity.id, entity)
+    omittedSources.push(`${entity.id}:outside_${input.stage}_scope`)
   }
   for (const edge of atlas.relations.filter(edge => !relevantEdges.has(edge.id))) {
-    if (assetStage) omittedSources.push(`relation:${edge.id}:outside_${assetStage}_scope`)
-    else add(`relation:${edge.id}`, edge)
+    omittedSources.push(`relation:${edge.id}:outside_${input.stage}_scope`)
   }
   for (const chapter of [...chapterRows].sort((a, b) => Math.abs(a.chapterNum - target) - Math.abs(b.chapterNum - target))) {
     add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary })

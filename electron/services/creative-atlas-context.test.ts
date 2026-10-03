@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
-import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAssetAtlas, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAssetAtlas, selectCreativeAtlas, selectCreativePlanningAtlas } from './creative-atlas-context'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], name: string, parentId: string | null = null, attributes = {}): StoryAtlasEntity =>
   ({ id, kind, name, parentId, attributes, summary: '', status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
@@ -22,6 +22,41 @@ const fixture = () => ({ entities: [
 ] })
 
 describe('saved atlas dependencies for creative context', () => {
+  it.each(['background', 'world_rules', 'style', 'story'] as const)('does not turn a global %s edit into the current scene or protagonist graph', stage => {
+    const atlas = fixture()
+    const selected = selectCreativePlanningAtlas(atlas, { stage, request: '完善全书的时间表达', anchorText: '陈舟与周河在河村交谈', fallbackText: '陈舟曾到远港' })
+    expect(selected.entityIds.size).toBe(0)
+    expect(selected.relationIds.size).toBe(0)
+    const local = selectCreativePlanningAtlas(atlas, { stage, request: '完善南岭的时间表达', anchorText: '陈舟与周河在河村交谈' })
+    expect(local.entityIds).toEqual(new Set(['location:1']))
+    expect(local.relationIds.size).toBe(0)
+  })
+  it('retains a named character and direct social, membership and geographic facts without following their neighbour graph', () => {
+    const atlas = fixture()
+    atlas.relations.push(edge('bond', 'relationship', 'character:1', 'character:2'), edge('other-home', 'presence', 'character:2', 'location:5'))
+    const selected = selectCreativePlanningAtlas(atlas, { stage: 'characters', request: '完善陈舟的性格', anchorText: '周河去远港' })
+    expect(selected.entityIds).toEqual(new Set(['character:1', 'character:2', 'location:1', 'location:2', 'faction:1', 'faction:2']))
+    expect(selected.relationIds).toEqual(new Set(['home', 'job', 'bond']))
+  })
+  it('resolves an exact relationship ID to both endpoints and the saved relationship without importing unrelated bonds', () => {
+    const atlas = fixture()
+    atlas.entities.push(entity('character:3', 'character', '赵平'))
+    atlas.relations.push(edge('relationship:21', 'relationship', 'character:1', 'character:2'), edge('relationship:210', 'relationship', 'character:1', 'character:3'))
+    const selected = selectCreativePlanningAtlas(atlas, { stage: 'relationships', request: '完善 relationship:21 的名称' })
+    expect(selected.relationIds.has('relationship:21')).toBe(true)
+    expect(selected.entityIds.has('character:1')).toBe(true)
+    expect(selected.entityIds.has('character:2')).toBe(true)
+    expect(selected.entityIds.has('character:3')).toBe(false)
+    expect(selected.relationIds.has('relationship:210')).toBe(false)
+  })
+  it('retains the existing item holder and place without importing the holders social network', () => {
+    const atlas = fixture()
+    atlas.entities.push(entity('item:1', 'item', '旧登记册'))
+    atlas.relations.push(edge('holder', 'ownership', 'character:1', 'item:1'), edge('item-place', 'presence', 'item:1', 'location:2'), edge('bond', 'relationship', 'character:1', 'character:2'))
+    const selected = selectCreativePlanningAtlas(atlas, { stage: 'items', request: '完善旧登记册的用途' })
+    expect(selected.entityIds).toEqual(new Set(['item:1', 'character:1', 'location:1', 'location:2']))
+    expect(selected.relationIds).toEqual(new Set(['holder', 'item-place']))
+  })
   it('includes sibling borders as map constraints without expanding their residents or applying that rule to events', () => {
     const atlas = fixture()
     atlas.entities.push(entity('location:6', 'location', '北城', 'location:1', { geography: { boundary: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] } }))

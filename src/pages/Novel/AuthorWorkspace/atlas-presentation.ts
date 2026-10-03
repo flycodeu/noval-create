@@ -60,6 +60,7 @@ export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
   abilities: '能力与限制', goal: '目标', memberPolicy: '成员规则', currentPhase: '当前阶段',
   category: '类型', plotFunction: '故事作用', limitations: '使用限制', abilitySpec: '作用', cost: '代价', risk: '风险',
   eventType: '事件类型', eventCause: '前因', eventProcess: '经过', eventResult: '结果',
+  chronologyOrder: '事件先后', relativeDay: '相对开篇天数', sequenceInDay: '同日顺序', timePrecision: '时间精度', evidenceQuote: '正文依据',
   campFactionIds: '所属组织', campFactionIdsJson: '所属组织', factionId: '所属组织', factionIds: '关联组织', characterId: '人物', characterIds: '相关人物', memberCharacterIds: '组织成员', locationId: '地点', locationIds: '涉及地点', homeLocationId: '居住地点', currentLocationId: '当前地点', activityLocationIds: '活动区域', birthplaceLocationId: '出生地点',
   dailyRoutine: '职业日常', motivation: '行动动机', abilityLimits: '能力限制', abilityCosts: '能力代价', abilityCost: '能力代价', beliefs: '信念', values: '价值取向', strengths: '长处', weaknesses: '弱点', secrets: '秘密', arcStage: '变化阶段',
   publicSummary: '公开表现', publicGoal: '公开目标',

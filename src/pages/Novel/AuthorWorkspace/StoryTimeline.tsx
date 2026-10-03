@@ -49,10 +49,10 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
     && (chapterFilter == null || entry.chapterNum === chapterFilter)
     && `${entry.entity.name} ${entry.entity.summary} ${entry.timeLabel} ${entry.links.map(link => link.entity.name).join(' ')}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()))
   const groups = storyTimelineGroups(filtered, chapterFilter == null ? chapters : chapters.filter(chapter => chapter.chapterNum === chapterFilter), mode, status === 'all' && !keyword.trim())
-  const selected = filtered.find(entry => entry.entity.id === params.get('event')) || filtered[0]
+  const selected = filtered.find(entry => entry.entity.id === params.get('event')) || groups.find(group => group.entries.length)?.entries[0]
   const open = (route: string) => navigate(buildWorkspaceRoute(novelId, route))
   const discuss = (entry?: StoryTimelineEntry) => open(`guide?${new URLSearchParams({ stage: entry ? 'events' : 'world_rules', autoApply: 'false', request: entry
-    ? `结合现有正文检查事件“${entry.entity.name}”（${entry.entity.id}）的发生时间、章节锚点、因果顺序、参与人物和地点。区分已经写定与计划；仅在有依据时细化日期，保留原有事实和正文。`
+    ? `结合现有正文检查事件“${entry.entity.name}”（${entry.entity.id}）的发生时间、章节锚点、因果顺序、参与人物和地点。区分已经写定与计划；仅在有依据时细化日期。只有先后证据时使用chronologyOrder表达项目内事件先后，不猜日期，也不把列表sortOrder当时间证据；保留原有事实和正文。`
     : '结合已有正文和世界设定梳理小说时间：朝代、纪年、开篇时间、当前故事时间及对应已写章序。使用 worldRules.timelineConfig 的 dynastyName、storyStartLabel、currentTimeLabel、currentTimeChapterNum、currentTimeEvidence 保存；当前时间必须有原文或作者设定依据，不能取历史事件时间、电脑日期或数据库记录时间。时间不足先输出候选和缺口，不改正文。' })}`)
   const selectEvent = (entry: StoryTimelineEntry) => {
     updateParams('event', entry.entity.id)

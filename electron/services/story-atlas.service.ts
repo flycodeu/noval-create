@@ -180,10 +180,28 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       const old = byId.get(id)
       if (old && (old.recordType !== 'entity' || old.record.kind !== change.kind)) fail('KIND_MISMATCH', '更新不能改变实体类型。')
       const previous = old?.record as StoryAtlasEntity | undefined
+      const attributes = mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode)
+      if (change.kind === 'event') {
+        const clearedChapter = change.attributeMode === 'replace' && Object.hasOwn(change.attributes || {}, 'chapterStartId') && !meaningfulAtlasValue(change.attributes?.chapterStartId)
+        if (clearedChapter) attributes.chapterStartId = null
+        const chapterStartId = attributes.chapterStartId
+        if (chapterStartId !== undefined && chapterStartId !== null) {
+          if (typeof chapterStartId !== 'number' || !Number.isInteger(chapterStartId) || chapterStartId <= 0
+            || !sqlite.prepare('SELECT 1 FROM chapters WHERE novel_id=? AND id=?').get(input.novelId, chapterStartId)) {
+            fail('INVALID_EVENT_CHAPTER', '事件起始章节必须是当前小说中的有效章节。')
+          }
+        } else if (chapterStartId === undefined) {
+          // An edit's effective chapter is a revision boundary, not the event's first appearance.
+          const native = old?.nativeId ? sqlite.prepare('SELECT chapter_start_id FROM timeline_events WHERE novel_id=? AND id=?').get(input.novelId, old.nativeId) as { chapter_start_id: number | null } | undefined : undefined
+          const originalChapter = previous?.effectiveFromChapter ?? input.effectiveFromChapter
+          const originalId = native ? native.chapter_start_id : (sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=?').get(input.novelId, originalChapter) as { id: number } | undefined)?.id
+          attributes.chapterStartId = originalId ?? null
+        }
+      }
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
+        attributes, status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -388,7 +406,7 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     if (record.kind === 'event') {
       values.time_label ||= record.effectiveFromChapter ? `第 ${record.effectiveFromChapter} 章` : '背景事件'
       values.status = 'confirmed'
-      values.chapter_start_id = (sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=?').get(novelId, record.effectiveFromChapter) as { id: number } | undefined)?.id || null
+      values.chapter_start_id = record.attributes.chapterStartId ?? null
     }
     if (record.kind === 'character' || record.kind === 'item') values.record_status = 'confirmed'
     item.nativeTable = entityTables[record.kind]

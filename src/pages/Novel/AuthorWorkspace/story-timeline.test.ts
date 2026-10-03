@@ -7,7 +7,7 @@ function chapter(number: number, words = 0): Chapter {
   return { id: number + 100, novelId: 1, chapterNum: number, title: `章 ${number}`, wordCount: words, targetWords: 3000, status: words ? 'draft' : 'outline', createdAt: '2026-01-01', updatedAt: '2026-01-01' }
 }
 function event(id: string, chapterNum: number, attributes: Record<string, unknown> = {}, status: 'confirmed' | 'planned' = 'confirmed'): StoryAtlasEntity {
-  return { id, kind: 'event', name: id, summary: '', parentId: null, attributes, status, effectiveFromChapter: chapterNum, source: { kind: 'test' } }
+  return { id, kind: 'event', name: id, summary: '', parentId: null, attributes: { chapterNum, ...attributes }, status, effectiveFromChapter: chapterNum, source: { kind: 'test' } }
 }
 function atlas(entities: StoryAtlasEntity[], relations: StoryAtlasSnapshot['relations'] = []): StoryAtlasSnapshot {
   return { novelId: 1, contextVersion: 1, atChapter: null, entities, relations, locationChildren: [], diagnostics: [] }
@@ -52,6 +52,17 @@ describe('story timeline evidence boundaries', () => {
     const entries = buildStoryTimelineEntries(snapshot, [chapter(1, 1000), chapter(2)])
     expect(entries.map(item => item.state)).toEqual(['occurred', 'planned', 'planned', 'planned', 'unplaced', 'unplaced'])
     expect(entries.at(-1)?.chapterNum).toBeNull()
+  })
+  it('never treats the chapter of an enrichment or cleared anchor as an event occurrence', () => {
+    const unanchored = event('event:background', 3, { timeLabel: '十八年前' })
+    delete unanchored.attributes.chapterNum
+    const entries = buildStoryTimelineEntries(atlas([
+      unanchored,
+      event('event:cleared', 3, { chapterStartId: null, chapterNum: 2, timeLabel: '前夜' }),
+      event('event:background-updated', 3, { chapterNum: 0, timeLabel: '旧朝某年' }),
+    ]), [chapter(2, 1000), chapter(3, 1000)])
+    expect(entries.map(entry => [entry.chapterNum, entry.state])).toEqual([[null, 'unplaced'], [null, 'unplaced'], [0, 'unplaced']])
+    expect(storyTimelineGroups(entries, [], 'chapter').map(group => group.title)).toEqual(['背景事件', '章节待定位'])
   })
   it('reads explicit event links and deduplicates migrated character references', () => {
     const character = { ...event('character:7', 0), name: '陆闻', kind: 'character' as const }
@@ -103,6 +114,61 @@ describe('story timeline evidence boundaries', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].title).toBe('时间已描述 · 顺序待定')
     expect(storyTimelineGroups(entries, [chapter(3, 1000)], 'chapter')[0].entries.map(entry => entry.entity.id)).toEqual(['event:80', 'event:81'])
+  })
+  it('keeps an uncertain preceding night between known earlier and later events without inventing a date', () => {
+    const chapters = [chapter(1, 1000), chapter(2, 1000), chapter(3, 1000)]
+    const entries = buildStoryTimelineEntries(atlas([
+      event('event:77', 1, { timeLabel: '到店前夜后半夜（证言）', chronologyOrder: 2, sortOrder: 1 }),
+      event('event:78', 1, { timeLabel: '到店前两日', relativeDay: -2, chronologyOrder: 1, sortOrder: 2 }),
+      event('event:79', 2, { timeLabel: '到店当日白天，问询后', relativeDay: 0, sequenceInDay: 1, chronologyOrder: 3 }),
+      event('event:80', 3, { timeLabel: '到店当日白天，回堂对账', relativeDay: 0, sequenceInDay: 3, chronologyOrder: 5, sortOrder: 4 }),
+      event('event:81', 3, { timeLabel: '到店当日白天，后院走查', relativeDay: 0, sequenceInDay: 2, chronologyOrder: 4, sortOrder: 5 }),
+      event('event:82', 3, { timeLabel: '到店当日白天，对账后准备', relativeDay: 0, sequenceInDay: 4, chronologyOrder: 6 }),
+    ]), chapters)
+    const groups = storyTimelineGroups(entries, chapters, 'time')
+    expect(groups.map(group => group.title)).toEqual(['已知事件先后'])
+    expect(groups[0].entries.map(entry => entry.entity.id)).toEqual(['event:78', 'event:77', 'event:79', 'event:81', 'event:80', 'event:82'])
+    expect(groups[0].entries[1]).toMatchObject({ timeLabel: '到店前夜后半夜（证言）', timeSort: null, timeBasis: null, sequenceInDay: null })
+    expect(storyTimelineGroups(entries, chapters, 'chapter').map(group => group.entries.map(entry => entry.entity.id))).toEqual([
+      ['event:78', 'event:77'], ['event:79'], ['event:81', 'event:80', 'event:82'],
+    ])
+    expect(entries.map(entry => entry.entity.id)).toEqual(['event:77', 'event:78', 'event:79', 'event:80', 'event:81', 'event:82'])
+  })
+  it('uses same-day evidence before list order in a chapter and never upgrades list order into chronology', () => {
+    const entries = buildStoryTimelineEntries(atlas([
+      event('event:80', 3, { timeLabel: '回堂对账', relativeDay: 0, sequenceInDay: 3, sortOrder: 4 }),
+      event('event:81', 3, { timeLabel: '后院走查', relativeDay: 0, sequenceInDay: 2, sortOrder: 5 }),
+    ]), [chapter(3, 1000)])
+    expect(storyTimelineGroups(entries, [], 'chapter')[0].entries.map(entry => entry.entity.id)).toEqual(['event:81', 'event:80'])
+    const legacy = buildStoryTimelineEntries(atlas([
+      event('event:b', 3, { timeLabel: '某次目击', sortOrder: 2, timeSortValue: 3 }),
+      event('event:a', 3, { timeLabel: '另一场谈话', sortOrder: 1, timeSortValue: 3 }),
+    ]), [chapter(3, 1000)])
+    expect(storyTimelineGroups(legacy, [], 'chapter')[0].entries.map(entry => entry.entity.id)).toEqual(['event:a', 'event:b'])
+    expect(storyTimelineGroups(legacy, [], 'time')[0].title).toBe('时间已描述 · 顺序待定')
+    expect(legacy.every(entry => entry.chronologyOrder == null && entry.timeSort == null)).toBe(true)
+  })
+  it('orders mixed story days transitively for every input permutation', () => {
+    const source = [
+      event('event:A', 3, { relativeDay: 0, sequenceInDay: 1, sortOrder: 3 }),
+      event('event:B', 3, { relativeDay: 0, sequenceInDay: 2, sortOrder: 1 }),
+      event('event:C', 3, { relativeDay: 1, sequenceInDay: 1, sortOrder: 2 }),
+    ]
+    for (const indexes of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+      const entries = buildStoryTimelineEntries(atlas(indexes.map(index => source[index])), [chapter(3, 1000)])
+      expect(storyTimelineGroups(entries, [], 'chapter')[0].entries.map(entry => entry.entity.id)).toEqual(['event:A', 'event:B', 'event:C'])
+    }
+  })
+  it('keeps entries without chronology evidence outside the known sequence', () => {
+    const entries = buildStoryTimelineEntries(atlas([
+      event('event:ordered', 1, { chronologyOrder: 2, timeLabel: '后半夜' }),
+      event('event:date-only', 1, { relativeDay: -5, timeLabel: '五天前' }),
+      event('event:invalid-order', 1, { chronologyOrder: '1', timeSortValue: 1, timeLabel: '十年前' }),
+    ]), [chapter(1, 1000)])
+    const groups = storyTimelineGroups(entries, [], 'time')
+    expect(groups.find(group => group.key === 'chronology')?.entries.map(entry => entry.entity.id)).toEqual(['event:ordered'])
+    expect(groups.find(group => group.key === 'relative:-5:unordered')?.entries[0].entity.id).toBe('event:date-only')
+    expect(groups.find(group => group.key === 'unordered')?.entries[0].entity.id).toBe('event:invalid-order')
   })
   it('sorts complete valid dates but refuses year-only, impossible dates and arbitrary date guessing', () => {
     const entries = buildStoryTimelineEntries(atlas([

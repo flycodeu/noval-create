@@ -89,6 +89,45 @@ async function main() {
     assert.equal(queryStoryAtlas({ novelId }).contextVersion, beforeRollback)
     assert.ok(!queryStoryAtlas({ novelId }).entities.some((r) => r.name === '外部事务回滚物'))
 
+    const eventNovel = addNovel()
+    const eventChapters = [1, 2, 3].map(number => Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title) VALUES (?,?,?)').run(eventNovel, number, `第${number}章`).lastInsertRowid))
+    const eventInput = (changes, effectiveFromChapter = 3) => ({ ...input(changes, effectiveFromChapter), novelId: eventNovel, expectedContextVersion: queryStoryAtlas({ novelId: eventNovel }).contextVersion })
+    const eventId = applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', clientId: 'observed', kind: 'event', name: '前夜目击', attributes: { timeLabel: '到店前夜' } }], 1)).idMap.observed
+    const eventRecord = () => queryStoryAtlas({ novelId: eventNovel }).entities.find(entity => entity.id === eventId)
+    const nativeEvent = () => db.prepare('SELECT id,chapter_start_id,event_result FROM timeline_events WHERE novel_id=? AND event_title=?').get(eventNovel, '前夜目击')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[0], 'new events store their narrative anchor independently of revision chapter')
+    // Earlier versions created atlas events without chapterStartId while projecting a native chapter anchor.
+    const legacyEvent = eventRecord()
+    delete legacyEvent.attributes.chapterStartId
+    db.prepare('UPDATE story_atlas_revisions SET snapshot_json=? WHERE novel_id=? AND record_id=?').run(JSON.stringify(legacyEvent), eventNovel, eventId)
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { eventResult: '身份仍待核实', relativeDay: -1 } }]))
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[0], 'later enrichment must preserve the event chapter already projected by older versions')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[0], 'atlas and native projection must agree on the preserved anchor')
+    assert.equal(eventRecord().effectiveFromChapter, 3, 'newly learned details still take effect at their own revision chapter')
+    assert.equal(queryStoryAtlas({ novelId: eventNovel, atChapter: 1 }).entities.find(entity => entity.id === eventId).attributes.eventResult, undefined, 'later details must not leak into earlier snapshots')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { chapterStartId: eventChapters[1] } }]))
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[1], 'an explicit valid anchor correction must reach the native timeline')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[1])
+    const foreignChapter = Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title) VALUES (?,1,?)').run(another, '其他小说首章').lastInsertRowid)
+    const beforeEventRejection = queryStoryAtlas({ novelId: eventNovel })
+    for (const chapterStartId of [foreignChapter, 99999999, 0, String(eventChapters[0])]) {
+      assert.throws(() => validateStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { chapterStartId } }])), { code: 'INVALID_EVENT_CHAPTER' })
+    }
+    assert.deepEqual(queryStoryAtlas({ novelId: eventNovel }), beforeEventRejection)
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[1], 'invalid anchor references must not change native data')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributeMode: 'replace', attributes: { chapterStartId: null } }]))
+    assert.equal(nativeEvent().chapter_start_id, null, 'an explicit manual clearing remains possible')
+    assert.equal(eventRecord().attributes.chapterStartId, null, 'a cleared anchor remains explicit in the atlas instead of disappearing')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', summary: '仅整理证言' }]))
+    assert.equal(nativeEvent().chapter_start_id, null, 'later text edits do not assign a new anchor to an unanchored event')
+    assert.equal(eventRecord().attributes.chapterStartId, null)
+    const backgroundEventId = applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', clientId: 'history', kind: 'event', name: '旧年水灾', attributes: { timeLabel: '十八年前' } }], 0)).idMap.history
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: backgroundEventId, kind: 'event', name: '旧年水灾', attributes: { eventResult: '补充历史依据' } }]))
+    const backgroundEvent = queryStoryAtlas({ novelId: eventNovel }).entities.find(entity => entity.id === backgroundEventId)
+    assert.equal(backgroundEvent.effectiveFromChapter, 3)
+    assert.equal(backgroundEvent.attributes.chapterStartId, null, 'background evidence added at chapter three must stay unanchored')
+    assert.equal(db.prepare('SELECT chapter_start_id FROM timeline_events WHERE novel_id=? AND event_title=?').get(eventNovel, '旧年水灾').chapter_start_id, null)
+
     const organizationNovel = addNovel()
     const organizationInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: organizationNovel, expectedContextVersion: queryStoryAtlas({ novelId: organizationNovel }).contextVersion })
     const organization = applyStoryAtlasChanges(organizationInput([
