@@ -23,7 +23,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.review',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.readiness', 'chapters.review',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 const bridgePids = new Map()
@@ -146,6 +146,8 @@ async function main() {
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')
     assert.equal(discovery().pid, owner.pid)
     const { novelId, title, background } = await seedPackagedMcpSmoke(rpc)
+    const readiness = await call(first, 'chapters.readiness', { novelId, atChapter: 1 })
+    assert.equal(readiness.ready, false, 'a new project cannot start prose without an explicit chapter plan')
     const projectLists = await Promise.all([first, second].map((client) => call(client, 'projects.list', {})))
     assert(projectLists.every((result) => result.projects.some((project) => project.id === novelId && project.title === title)))
     const project = (await call(first, 'projects.get', { novelId })).project
