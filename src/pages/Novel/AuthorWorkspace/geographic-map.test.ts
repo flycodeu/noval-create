@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { atlasGeography, geographicLayer, mapArea } from './geographic-map'
+import { atlasGeography, geographicLayer, geographicSettlements, geographicDescendants, geographicLabelPositions, mapArea } from './geographic-map'
 
 const entity = (id: string, parentId: string | null, attributes: Record<string, unknown> = {}): StoryAtlasEntity => ({ id, parentId, attributes, kind: 'location', name: id, summary: '', status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
 const snapshot = (entities: StoryAtlasEntity[]): StoryAtlasSnapshot => ({ novelId: 1, contextVersion: 1, atChapter: 0, entities, relations: [], locationChildren: [], diagnostics: [] })
@@ -47,5 +47,36 @@ describe('geographic atlas display', () => {
       expect(atlasGeography(entity('bad', null, { geography: { mapFrame: { widthKm: 10, heightKm: dimension } } })).frame).toBeUndefined()
     }
     expect(atlasGeography(entity('valid', null, { geography: { mapFrame: { widthKm: 40, heightKm: 20 } } })).frame).toEqual({ widthKm: 40, heightKm: 20 })
+  })
+  it('projects towns through their own region extent, preserving local north and west', () => {
+    const region = entity('west', 'country', { nodeType: 'region', geography: { boundary: [{ x: 10, y: 20 }, { x: 50, y: 20 }, { x: 50, y: 80 }, { x: 10, y: 80 }] } })
+    const city = entity('city', 'west', { nodeType: 'city', geography: { position: { x: 25, y: 50 } } })
+    const legacy = entity('legacy-village', 'west', { nodeType: 'village', x: 15, y: 35 })
+    const foreign = entity('foreign-town', 'elsewhere', { nodeType: 'town', geography: { position: { x: 25, y: 50 } } })
+    expect(geographicSettlements(snapshot([region, city, legacy, foreign]), 'country')).toEqual([{ entity: city, center: { x: 20, y: 50 }, regionId: 'west' }])
+  })
+  it('does not draw a town in a concave region opening outside its territory', () => {
+    const region = entity('horseshoe', null, { geography: { boundary: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 70, y: 100 }, { x: 70, y: 30 }, { x: 30, y: 30 }, { x: 30, y: 100 }, { x: 0, y: 100 }] } })
+    const city = entity('outside', 'horseshoe', { nodeType: 'city', geography: { position: { x: 50, y: 70 } } })
+    expect(geographicSettlements(snapshot([region, city]), null)).toEqual([])
+  })
+  it('retains the country-region-town hierarchy without requiring coordinates and stops at cycles', () => {
+    const country = entity('country', 'town'), region = entity('region', 'country'), town = entity('town', 'region')
+    expect(geographicDescendants(snapshot([country, region, town, entity('other', null)]), 'country').map(place => place.id)).toEqual(['region', 'town'])
+    expect(geographicDescendants(snapshot([entity('country', null), region, town]), null).map(place => place.id)).toEqual(['country', 'region', 'town'])
+  })
+  it('keeps nearby text labels from piling over each other without moving markers', () => {
+    const crowded = Array.from({ length: 8 }, () => ({ x: 50, y: 50, text: '临河城' }))
+    const offsets = geographicLabelPositions(crowded)
+    const rendered = offsets.filter(value => value !== undefined)
+    expect(rendered.length).toBeGreaterThan(0)
+    expect(rendered.length).toBeLessThan(crowded.length)
+    expect(new Set(rendered).size).toBe(rendered.length)
+    for (let index = 1; index < rendered.length; index++) expect(Math.abs(rendered[index]! - rendered[index - 1]!)).toBeGreaterThanOrEqual(22)
+  })
+  it('keeps a region name clear of a town marker at the region centre', () => {
+    const [offset] = geographicLabelPositions([{ x: 50, y: 50, text: '北岭州', primary: true }], [{ x: 50, y: 50 }])
+    expect(offset).toBeDefined()
+    expect(Math.abs(offset!)).toBeGreaterThan(26)
   })
 })

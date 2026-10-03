@@ -17,7 +17,7 @@ export const STORY_DESIGN_TOPICS: Record<string, Array<{ key: string; label: str
     { key: 'world:genreProfile', label: '世界基调' }, { key: 'world:powerSystems', label: '能力与限制' },
     { key: 'world:speciesSystem', label: '种属规则' }, { key: 'world:factionSystem', label: '组织与社会' },
     { key: 'world:characterEcology', label: '人物生态' }, { key: 'world:mapBlueprint', label: '地域层级' },
-    { key: 'world:worldDynamics', label: '环境与生计' }, { key: 'world:timelineConfig', label: '历法与时间' },
+    { key: 'world:worldDynamics', label: '环境与生计' }, { key: 'world:timelineConfig', label: '朝代与时间' },
   ],
   constraints: [{ key: 'writingRules', label: '写作边界' }, { key: 'world:writingConstraints', label: '世界与常识' }],
   style: [{ key: 'style:theme', label: '主题与情感' }, { key: 'style:viewpoint', label: '视角与叙述' }, { key: 'style:sequence', label: '时间与开篇' }, { key: 'style:voice', label: '语言与对话' }, { key: 'style:samples', label: '文风参考' }],

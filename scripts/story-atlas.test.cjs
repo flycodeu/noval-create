@@ -254,6 +254,30 @@ async function main() {
     const { creativePublicAttributes } = require('../electron/services/creative-atlas-context.ts')
     assert.deepEqual(creativePublicAttributes({ geography: { ...eastGeography, areaKm2: 450 } }, { kind: 'location', isPov: false }), { geography: { areaKm2: 450 } }, 'prose context excludes drawing coordinates and author development status')
 
+    const containmentNovel = addNovel()
+    const containmentInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: containmentNovel, expectedContextVersion: queryStoryAtlas({ novelId: containmentNovel }).contextVersion })
+    const concave = [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 70 }, { x: 70, y: 70 }, { x: 70, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }]
+    const containmentIds = applyStoryAtlasChanges(containmentInput([
+      { op: 'upsert_entity', clientId: 'country', kind: 'location', name: '凹形国', attributes: { geography: { boundary: concave, mapFrame: { widthKm: 1000, heightKm: 600 } } } },
+      { op: 'upsert_entity', clientId: 'south', kind: 'location', name: '南部', parentId: 'country', attributes: { geography: { boundary: boundary(0, 70, 100, 100), areaKm2: 100000, mapFrame: { widthKm: 800, heightKm: 180 } } } },
+    ])).idMap
+    const containmentSnapshot = () => queryStoryAtlas({ novelId: containmentNovel })
+    assert.ok(containmentSnapshot().diagnostics.some(item => item.code === 'MAP_AREA_MISMATCH'), 'declared and measured areas are reviewed independently')
+    assert.ok(containmentSnapshot().diagnostics.some(item => item.code === 'MAP_SCALE_MISMATCH'), 'explicit child scale cannot silently contradict the parent scale')
+    const containmentBefore = containmentSnapshot()
+    for (const geography of [{ position: { x: 50, y: 20 } }, { boundary: boundary(10, 10, 90, 90) }]) {
+      assert.throws(() => applyStoryAtlasChanges(containmentInput([{ op: 'upsert_entity', kind: 'location', name: '越界地点', parentId: containmentIds.country, attributes: { geography } }])), { code: 'LOCATION_OUTSIDE_PARENT' })
+    }
+    assert.deepEqual(containmentSnapshot(), containmentBefore, 'containment failures are atomic and catch concave edge excursions')
+
+    const futureBorderNovel = addNovel()
+    const futureBorderInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: futureBorderNovel, expectedContextVersion: queryStoryAtlas({ novelId: futureBorderNovel }).contextVersion })
+    const futureCountry = applyStoryAtlasChanges(futureBorderInput([{ op: 'upsert_entity', clientId: 'country', kind: 'location', name: '旧疆国', attributes: { geography: { boundary: boundary(0, 0, 100, 100) } } }])).idMap.country
+    applyStoryAtlasChanges(futureBorderInput([{ op: 'upsert_entity', kind: 'location', name: '后续北郡', parentId: futureCountry, attributes: { geography: { boundary: boundary(40, 10, 60, 30) } } }], 4))
+    const beforeBorderCorrection = queryStoryAtlas({ novelId: futureBorderNovel })
+    assert.throws(() => applyStoryAtlasChanges(futureBorderInput([{ op: 'upsert_entity', id: futureCountry, kind: 'location', name: '旧疆国', attributes: { geography: { boundary: concave } } }])), /第 4 章.*超出上级/, 'background corrections must keep later regions within their parent borders')
+    assert.deepEqual(queryStoryAtlas({ novelId: futureBorderNovel }), beforeBorderCorrection)
+
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)
     const b = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '乙').lastInsertRowid)

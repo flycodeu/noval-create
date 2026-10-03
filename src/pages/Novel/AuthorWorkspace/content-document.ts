@@ -31,6 +31,7 @@ export function mergeCanonicalDocument(original: unknown, previous: unknown, nex
 }
 
 export const CONTENT_LABELS: Record<string, string> = {
+  dynastyName: '朝代或政权', storyStartLabel: '开篇时间', currentTimeLabel: '当前故事时间', currentTimeChapterNum: '时间对应章序', currentTimeEvidence: '时间依据', relativeDay: '距开篇天数', sequenceInDay: '同日先后顺序', timePrecision: '时间精度',
   title: '标题', name: '名称', fullName: '姓名', summary: '摘要', description: '说明', content: '正文', output: '候选内容',
   userBackground: '故事背景', expandedBackground: '补充设定', synopsis: '简介', background: '背景',
   projectBrief: '作品定位', premise: '故事起点', storyDesign: '故事方向', endgameDesign: '结局与兑现', writingRules: '写作约束', themeVoice: '叙事与文风', worldRules: '世界规则',

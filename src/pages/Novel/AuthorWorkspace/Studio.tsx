@@ -68,7 +68,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
   const nextChapter = chapters.find((chapter) => !chapter.content?.trim() && !(chapter.wordCount > 0))
   const changeStage = (value: CreativeStage) => { setStage(value); setSourceArtifactId(null); setAutoApply(!['characters', 'chapter', 'style'].includes(value)); if (value === 'chapter' && atChapter === 0) setAtChapter(null) }
 
-  return <AuthorPage eyebrow={novel?.title || '未命名作品'} title="接下来，写什么？" description="说清这一轮的目标，生成、评审和修订会在同一任务中完成。">
+  return <AuthorPage title="创作台">
     <nav className="author-stage-path" aria-label="创作内容">{CREATIVE_STAGES.map(value => <button key={value} className={stage === value ? 'is-selected' : ''} onClick={() => changeStage(value)}>{CREATIVE_STAGE_LABELS[value]}</button>)}</nav>
     <div className="author-model-route"><label htmlFor="author-project-model">本项目使用的模型</label><Select id="author-project-model" aria-label="本项目使用的模型" value={effectiveModel?.id} placeholder="选择已配置的模型" disabled={workflow.active || savingModel || !models.length} loading={savingModel} onChange={(value) => void changeModel(value)} options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} />
       <span>{workflow.active ? '当前任务的模型已固定' : novel?.modelConfigId && !effectiveModel ? '原项目模型已不可用，请重新选择' : novel?.modelConfigId ? '已用于本项目及 Codex 调用' : effectiveModel ? '当前跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div>
@@ -83,8 +83,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
         <Checkbox checked={autoApply} onChange={(event) => setAutoApply(event.target.checked)}>审校通过后应用</Checkbox>
         <Button type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || savingModel || !request.trim() || !effectiveModel} onClick={() => void workflow.start({ stage, request: request.trim(), autoApply, count, ...(atChapter != null && !(stage === 'chapter' && atChapter === 0) ? { atChapter } : {}), ...(sourceArtifactId ? { sourceArtifactId } : {}) })}>开始这一轮</Button>
       </div>
-      <p className="author-composer__hint">{!autoApply ? '本轮先保留候选。人物设计或正文风格可以讨论后再定。' : '通过审校的内容会直接保存；存在冲突或未通过的内容会留待处理。'}</p>
-      <p className="author-composer__hint">目标：{CREATIVE_STAGE_LABELS[stage]} · {atChapter == null || stage === 'chapter' && atChapter === 0 ? stage === 'chapter' ? '下一章' : '当前已写章位' : atChapter === 0 ? '初始设定' : `第 ${atChapter} 章`}{sourceArtifactId ? ' · 基于所选候选继续修订' : ''}</p>
+      {sourceArtifactId && <p className="author-composer__hint">正在修订所选候选</p>}
     </section>
     {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}
     {workflow.run && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => open(`revision?artifact=${encodeURIComponent(workflow.run?.artifactId || '')}`)} />}

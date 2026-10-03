@@ -1,6 +1,7 @@
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { recordOf } from './content-document'
 import { locationCoordinates } from './atlas-presentation'
+import { atlasPolygonContainsPoint, resolveAtlasGeography } from '../../../shared/story-atlas-geography'
 
 export type MapPoint = { x: number; y: number }
 export function atlasGeography(entity?: StoryAtlasEntity) {
@@ -71,6 +72,63 @@ export function geographicLayer(snapshot: StoryAtlasSnapshot, parentId: string |
     const centroid = polygonAnchor(boundary)
     const old = legacy.get(entity.id)
     const preview = !geography.position && !centroid && old ? points.length === 1 ? { x: 50, y: 50 } : { x: 15 + old.x / maxX * 70, y: 15 + old.y / maxY * 70 } : undefined
-    return { entity, geography, center: geography.position || centroid || preview, preview: Boolean(preview) }
+    return { entity, geography, metrics: resolveAtlasGeography(entity, snapshot.entities), center: geography.position || centroid || preview, preview: Boolean(preview) }
+  })
+}
+
+export function locationCategory(entity: StoryAtlasEntity): 'country' | 'region' | 'settlement' | 'site' {
+  const type = String(entity.attributes.nodeType || entity.attributes.locationType || '')
+  if (['country', 'nation', 'kingdom', 'empire'].includes(type)) return 'country'
+  if (['region', 'province', 'state', 'prefecture', 'district', 'continent'].includes(type)) return 'region'
+  if (['city', 'town', 'village', 'settlement', 'capital'].includes(type)) return 'settlement'
+  return 'site'
+}
+
+/** Descendant information remains visible even when older records have no cartographic geometry. */
+export function geographicDescendants(snapshot: StoryAtlasSnapshot, parentId: string | null) {
+  const result: StoryAtlasEntity[] = []
+  const seen = new Set<string>(parentId ? [parentId] : [])
+  const queue: Array<string | null> = [parentId]
+  while (queue.length) {
+    const id = queue.shift()
+    for (const entity of snapshot.entities) if (entity.kind === 'location' && entity.parentId === id && !seen.has(entity.id)) {
+      result.push(entity); seen.add(entity.id); queue.push(entity.id)
+    }
+  }
+  return result
+}
+
+/** Draw a child's saved local position in its parent's boundary extent. No legacy schematic positions participate. */
+export function geographicSettlements(snapshot: StoryAtlasSnapshot, parentId: string | null) {
+  const result: Array<{ entity: StoryAtlasEntity; center: MapPoint; regionId: string }> = []
+  for (const region of geographicLayer(snapshot, parentId)) {
+    const boundary = region.geography.boundary
+    if (!boundary.length) continue
+    const minX = Math.min(...boundary.map(p => p.x)), maxX = Math.max(...boundary.map(p => p.x))
+    const minY = Math.min(...boundary.map(p => p.y)), maxY = Math.max(...boundary.map(p => p.y))
+    for (const child of geographicLayer(snapshot, region.entity.id)) {
+      if (locationCategory(child.entity) !== 'settlement' || child.preview || !child.center) continue
+      const center = { x: minX + child.center.x / 100 * (maxX - minX), y: minY + child.center.y / 100 * (maxY - minY) }
+      if (atlasPolygonContainsPoint(boundary, center)) result.push({ entity: child.entity, center, regionId: region.entity.id })
+    }
+  }
+  return result
+}
+
+export type MapLabel = { x: number; y: number; text: string; primary?: boolean; scale?: number }
+/** Preserve marker positions while choosing a nearby readable label; crowded labels remain in the place index. */
+export function geographicLabelPositions(labels: MapLabel[], markers: MapPoint[] = []) {
+  const occupied = markers.map(point => ({ left: point.x - 10, right: point.x + 10, top: point.y - 10, bottom: point.y + 10 }))
+  return labels.map(label => {
+    const scale = label.scale || 1
+    const width = Math.max(34, label.text.length * (label.primary ? 22 : 15)) * scale, height = (label.primary ? 46 : 22) * scale
+    for (const rawOffset of label.primary ? [0, -26, 26, -52, 52] : [-16, 27, -36, 47]) {
+      const offset = rawOffset * scale
+      const box = { left: label.x - width / 2 - 5, right: label.x + width / 2 + 5, top: label.y + offset - 18 * scale, bottom: label.y + offset - 18 * scale + height }
+      if (occupied.some(other => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)) continue
+      occupied.push(box)
+      return offset
+    }
+    return undefined
   })
 }

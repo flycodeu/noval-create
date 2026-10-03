@@ -274,6 +274,7 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
   const record = asRecord(raw)
   const writing = asRecord(record.writingConstraints)
   const ecology = asRecord(record.characterEcology)
+  const timeline = asRecord(record.timelineConfig)
   const realismLevelText = asText(writing.realismLevel)
   const realismLevel = (['strict-realism', 'rule-realism', 'stylized-fantasy'] as RealismLevel[]).includes(realismLevelText as RealismLevel)
     ? realismLevelText as RealismLevel
@@ -321,14 +322,19 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
       economyLoops: normalizeEconomyLoops(asRecord(record.worldDynamics).economyLoops ?? asRecord(record.worldDynamics).economicSystems),
     },
     timelineConfig: {
-      calendarType: (asText(asRecord(record.timelineConfig).calendarType) || base.timelineConfig.calendarType) as TimelineCalendarType,
-      eraName: asText(asRecord(record.timelineConfig).eraName),
-      epochLabel: asText(asRecord(record.timelineConfig).epochLabel),
-      baseYearLabel: asText(asRecord(record.timelineConfig).baseYearLabel),
-      displayPattern: asText(asRecord(record.timelineConfig).displayPattern),
-      relativeZeroLabel: asText(asRecord(record.timelineConfig).relativeZeroLabel),
-      recommendedEventTypes: dedupe(toStringArray(asRecord(record.timelineConfig).recommendedEventTypes)),
-      precisionOptions: dedupe(toStringArray(asRecord(record.timelineConfig).precisionOptions)),
+      ...(asText(timeline.dynastyName) ? { dynastyName: asText(timeline.dynastyName) } : {}),
+      ...(asText(timeline.storyStartLabel) ? { storyStartLabel: asText(timeline.storyStartLabel) } : {}),
+      ...(asText(timeline.currentTimeLabel) ? { currentTimeLabel: asText(timeline.currentTimeLabel) } : {}),
+      ...(typeof timeline.currentTimeChapterNum === 'number' && Number.isSafeInteger(timeline.currentTimeChapterNum) && timeline.currentTimeChapterNum >= 0 ? { currentTimeChapterNum: timeline.currentTimeChapterNum } : {}),
+      ...(asText(timeline.currentTimeEvidence) ? { currentTimeEvidence: asText(timeline.currentTimeEvidence) } : {}),
+      calendarType: (asText(timeline.calendarType) || base.timelineConfig.calendarType) as TimelineCalendarType,
+      eraName: asText(timeline.eraName),
+      epochLabel: asText(timeline.epochLabel),
+      baseYearLabel: asText(timeline.baseYearLabel),
+      displayPattern: asText(timeline.displayPattern),
+      relativeZeroLabel: asText(timeline.relativeZeroLabel),
+      recommendedEventTypes: dedupe(toStringArray(timeline.recommendedEventTypes)),
+      precisionOptions: dedupe(toStringArray(timeline.precisionOptions)),
     },
     writingConstraints: {
       antiQuoteEmphasis: typeof writing.antiQuoteEmphasis === 'boolean' ? writing.antiQuoteEmphasis : base.writingConstraints.antiQuoteEmphasis,

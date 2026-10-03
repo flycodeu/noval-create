@@ -26,7 +26,7 @@ const worldRulesSchema = object({
     climateCycles: array(textFields('id', 'region', 'pattern', 'seasonalShift', 'hazardTrigger', 'travelImpact', 'resourceImpact'), ['id', 'region']),
     economyLoops: array(textFields('id', 'name', 'coreResource', 'circulationPath', 'controller', 'scarcityTrigger', 'volatilityTrigger', 'storyUse'), ['id', 'name']),
   }),
-  timelineConfig: object({ ...textFields('eraName', 'epochLabel', 'baseYearLabel', 'displayPattern', 'relativeZeroLabel'), calendarType: { enum: ['gregorian', 'regnal', 'relative-disaster', 'custom-era', 'future-date'] }, recommendedEventTypes: strings, precisionOptions: strings }),
+  timelineConfig: object({ ...textFields('dynastyName', 'eraName', 'epochLabel', 'baseYearLabel', 'displayPattern', 'relativeZeroLabel', 'storyStartLabel', 'currentTimeLabel', 'currentTimeEvidence'), currentTimeChapterNum: { type: 'integer', minimum: 0 }, calendarType: { enum: ['gregorian', 'regnal', 'relative-disaster', 'custom-era', 'future-date'] }, recommendedEventTypes: strings, precisionOptions: strings }),
   writingConstraints: object({
     ...textFields('narrationStyle', 'dialogueStyle', 'sciencePolicy', 'physicsPolicy'),
     antiQuoteEmphasis: { type: 'boolean' }, antiConceptSlogans: { type: 'boolean' }, antiSymmetricLines: { type: 'boolean' },
@@ -66,6 +66,12 @@ export function validateProjectAsset(stage: ProjectAssetStage, data: unknown): v
   const containsValue = (value: unknown): boolean => value !== null && typeof value === 'object'
     ? Object.values(value).some(containsValue) : typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string' && Boolean(value.trim())
   if (!containsValue(data)) throw new Error('阶段输出没有实际变更。')
+  if (stage === 'world_rules') {
+    const clock = (data as { worldRules?: { timelineConfig?: Record<string, unknown> } }).worldRules?.timelineConfig
+    if (clock?.currentTimeLabel && (clock.currentTimeChapterNum == null || typeof clock.currentTimeEvidence !== 'string' || !clock.currentTimeEvidence.trim())) {
+      throw new Error('当前故事时间必须同时提供对应章序和时间依据。')
+    }
+  }
 }
 function json(raw: string | null | undefined): Record<string, unknown> { try { const value = JSON.parse(raw || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {} } catch { return {} } }
 

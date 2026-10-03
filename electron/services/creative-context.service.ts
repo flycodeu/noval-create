@@ -7,7 +7,7 @@ import { resolveModelRuntimeBudget } from './model.service'
 import { compileCreativeChapterContext, creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
-import { creativeAtlasCoverage, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, selectCreativeAssetAtlas, selectCreativeAtlas } from './creative-atlas-context'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -22,7 +22,12 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const novel = getNovel(input.novelId)
   if (!novel) throw new Error('项目不存在。')
   const budget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
-  const outputReserve = Math.min(budget.maxTokens || 12_000, input.stage === 'chapter' ? 16_000 : 12_000, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
+  // Structured batches need both reasoning and the complete JSON. Count is the requested new assets,
+  // so the base also covers changes to existing parents, endpoints and supporting records.
+  const structuredAssets = ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'outline'].includes(input.stage)
+  const assetCount = Number.isFinite(input.count) ? Math.max(1, Math.min(12, Math.floor(input.count!))) : 3
+  const stageOutputLimit = input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
+  const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
   // Leave room for the candidate and instructions during the independent review request.
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
     ? estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '') : 0
@@ -40,14 +45,25 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const add = (id: string, value: unknown, required = false) => {
     const text = typeof value === 'string' ? value.trim() : JSON.stringify(value)
     if (!text || text === 'null') return
-    const previous = seen.get(text)
+    // Equal values under different rule names are different constraints (e.g. two enabled prohibitions).
+    const identity = `${id}\u0000${text}`
+    const previous = seen.get(identity)
     if (previous) { previous.required ||= required; return }
     const candidate = { id, text, required }
-    seen.set(text, candidate); candidates.push(candidate)
+    seen.set(identity, candidate); candidates.push(candidate)
   }
   add('task', { stage: input.stage, request: input.request, count: input.count, atChapter: input.atChapter }, true)
   add('background', novel.userBackground, true)
-  for (const source of creativeProjectSources(novel)) add(source.key, source.value, source.required)
+  const assetStage = input.stage === 'map' || input.stage === 'events' ? input.stage : undefined
+  for (const source of creativeProjectSources(novel)) {
+    if (assetStage && source.key.startsWith('voice:')) {
+      omittedSources.push(`${source.key}:outside_${assetStage}_scope`)
+      continue
+    }
+    // Geography and chronology are binding for asset planning even when they were optional for prose.
+    const assetConstraint = assetStage && /^world_rules:(?:foundation|geography|mapBlueprint|worldDynamics|environment|environmentRules|naturalRules|timelineConfig)(?::|$)/u.test(source.key)
+    add(source.key, source.value, source.required || Boolean(assetConstraint))
+  }
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
@@ -68,19 +84,37 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
   const previousChapter = chapterRows.filter(chapter => chapter.chapterNum < target && chapter.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
   const anchors = [targetChapter?.title, targetChapter?.outline, targetChapter?.summary].filter(Boolean).join('\n')
-  const { entityIds: relevant, relationIds: relevantEdges } = selectCreativeAtlas(atlas, {
+  const selectionInput = {
     request: input.request, anchorText: anchors, fallbackText: previousChapter?.summary || previousChapter?.content?.slice(-2000),
-  })
-  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, true)
+  }
+  const assetSelection = assetStage ? selectCreativeAssetAtlas(atlas, { ...selectionInput, stage: assetStage }) : undefined
+  const { entityIds: relevant, relationIds: relevantEdges } = assetSelection || selectCreativeAtlas(atlas, selectionInput)
+  if (targetChapter) add(`chapter:${targetChapter.id}:target`, { chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary }, !assetStage || /本章|当前章|这一章|现场/u.test(input.request))
   add('atlas_coverage', creativeAtlasCoverage(atlas, relevant), true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
-  for (const entity of ordered.filter(entity => relevant.has(entity.id))) add(entity.id, entity, true)
+  for (const entity of ordered.filter(entity => relevant.has(entity.id))) {
+    if (assetSelection?.constraintEntityIds.has(entity.id)) {
+      add(`${entity.id}:boundary_constraint`, {
+        id: entity.id, kind: entity.kind, name: entity.name, parentId: entity.parentId, status: entity.status,
+        effectiveFromChapter: entity.effectiveFromChapter, usage: '仅作为既有相邻区域的边界约束，不能覆盖未提供的档案字段。',
+        attributes: Object.fromEntries(Object.entries(entity.attributes).filter(([key]) => ['geography', 'locationType', 'nodeType'].includes(key))),
+      }, true)
+      omittedSources.push(`${entity.id}:non_geographic_fields`)
+    } else add(entity.id, entity, true)
+  }
   for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) add(`relation:${edge.id}`, edge, true)
   // Compact optional catalog is selected before optional full entities. Large projects can omit names
   // explicitly instead of blocking every local task on an ever-growing mandatory global directory.
-  for (let index = 0; index < ordered.length; index += 40) add(`identities:${index / 40}`, ordered.slice(index, index + 40).map(entity => `${entity.id}|${entity.kind}|${entity.name}`).join('\n'))
-  for (const entity of ordered.filter(entity => !relevant.has(entity.id))) add(entity.id, entity)
-  for (const edge of atlas.relations.filter(edge => !relevantEdges.has(edge.id))) add(`relation:${edge.id}`, edge)
+  const catalog = assetStage ? ordered.filter(entity => relevant.has(entity.id) || entity.kind === stageKind) : ordered
+  for (let index = 0; index < catalog.length; index += 40) add(`identities:${index / 40}`, catalog.slice(index, index + 40).map(entity => `${entity.id}|${entity.kind}|${entity.name}`).join('\n'))
+  for (const entity of ordered.filter(entity => !relevant.has(entity.id))) {
+    if (assetStage) omittedSources.push(`${entity.id}:outside_${assetStage}_scope`)
+    else add(entity.id, entity)
+  }
+  for (const edge of atlas.relations.filter(edge => !relevantEdges.has(edge.id))) {
+    if (assetStage) omittedSources.push(`relation:${edge.id}:outside_${assetStage}_scope`)
+    else add(`relation:${edge.id}`, edge)
+  }
   for (const chapter of [...chapterRows].sort((a, b) => Math.abs(a.chapterNum - target) - Math.abs(b.chapterNum - target))) {
     add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary })
   }

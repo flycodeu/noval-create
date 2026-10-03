@@ -137,7 +137,7 @@ function DiagnosticCards({ model, actions }: Pick<Props, 'model' | 'actions'>) {
   )
 }
 
-export default function EditorRoute({ model, actions, title = '本章焦点', subtitle = '合同、场景、约束与承接信息' }: Props) {
+export default function EditorRoute({ model, actions, title = '本章焦点', subtitle }: Props) {
   return (
     <section className="writing-route-view writing-route-view--editor" data-route="editor">
       <header className="writing-route-view__header">

@@ -83,7 +83,7 @@ export default function NovelList() {
     return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
   })
   return <div className="novel-list-page"><div className="novel-list-page__shell">
-    <header className="novel-list-page__header"><div className="novel-list-page__copy"><span className="novel-library-eyebrow">NOVELFORGE / 作品书架</span><h1 className="novel-list-page__title">我的小说</h1><p>从一个故事起点，逐步写成一部作品。</p></div><Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreating(true)}>新建小说</Button></header>
+    <header className="novel-list-page__header"><div className="novel-list-page__copy"><span className="novel-library-eyebrow">NOVELFORGE / 作品书架</span><h1 className="novel-list-page__title">我的小说</h1></div><Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreating(true)}>新建小说</Button></header>
     <div className="novel-list-page__toolbar">
       <Input className="novel-list-page__toolbar-field--search" prefix={<SearchOutlined />} aria-label="搜索作品" placeholder="搜索书名或简介" value={search} onChange={event => setSearch(event.target.value)} allowClear />
       <Select aria-label="作品状态" value={status} onChange={setStatus} options={STATUS} />

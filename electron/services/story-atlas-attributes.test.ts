@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { atlasBoundariesOverlap, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 
 describe('story atlas attributes', () => {
+  it('validates explicit story days separately from narrative chapter anchors', () => {
+    expect(normalizeAtlasAttributePatch('event', { relativeDay: -2, sequenceInDay: 0, timeLabel: '开篇前两日' })).toMatchObject({ relativeDay: -2, sequenceInDay: 0 })
+    for (const attributes of [{ relativeDay: '前两日' }, { sequenceInDay: -1 }, { sequenceInDay: 0.5 }]) {
+      expect(() => normalizeAtlasAttributePatch('event', attributes)).toThrow('属性结构')
+    }
+  })
   const rectangle = (left = 0, top = 0, right = 50, bottom = 50) => [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]
   it('accepts bounded regional geometry and preserves omitted map settings during incremental generation', () => {
     const geography = { boundary: rectangle(), position: { x: 20, y: 20 }, areaKm2: 400, mapFrame: { widthKm: 30, heightKm: 20 }, development: 'outlined' }
@@ -14,7 +20,7 @@ describe('story atlas attributes', () => {
   it('rejects invalid coordinates, physical measurements, crossed and degenerate borders', () => {
     for (const geography of [
       { position: { x: Number.NaN, y: 2 } }, { position: { x: Infinity, y: 2 } }, { position: { x: -1, y: 2 } }, { position: { x: 2, y: 101 } },
-      { areaKm2: 0 }, { areaKm2: Infinity }, { mapFrame: { widthKm: 10, heightKm: 0 } }, { development: 'visited' },
+      { areaKm2: 0 }, { areaKm2: Infinity }, { mapFrame: { widthKm: 10, heightKm: 0 } }, { mapFrame: { widthKm: 1e200, heightKm: 1e200 } }, { development: 'visited' },
       { boundary: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }, { boundary: [...rectangle(), { x: 0, y: 0 }] },
       { boundary: [{ x: 0, y: 0 }, { x: 60, y: 50 }, { x: 0, y: 50 }, { x: 50, y: 0 }] },
     ]) expect(() => validateAtlasGeography(geography)).toThrow()

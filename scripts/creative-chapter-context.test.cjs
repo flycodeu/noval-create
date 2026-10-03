@@ -26,7 +26,7 @@ async function main() {
     const target = chapter(2)
     const future = chapter(3)
     db.prepare('UPDATE novels SET world_rules_json=?,theme_voice_json=?,settings_json=? WHERE id=?').run(
-      JSON.stringify({ powerSystems: [{ name: '观灯', limitations: '不能复生', cost: '伤眼' }], writingConstraints: { extraRules: ['渡河需要时间'] }, hidden: '未登记规则秘密不得直接注入' }),
+      JSON.stringify({ powerSystems: [{ name: '观灯', limitations: '不能复生', cost: '伤眼' }], writingConstraints: { extraRules: ['渡河需要时间'] }, timelineConfig: { dynastyName: '景朝', storyStartLabel: '开篇日', currentTimeLabel: '第八日夜晚', currentTimeChapterNum: 8, currentTimeEvidence: '未来第八章的时间依据' }, hidden: '未登记规则秘密不得直接注入' }),
       JSON.stringify({ pov: 'third_limited', style_rules: '对白克制，不替人物总结道理' }),
       JSON.stringify({ readerFirst: { schemaVersion: 1, policyVersion: 'reader-first-v1', revision: 1 }, premise: { constraints: '主角保持凡人身份' }, writing_rules: { common_sense_rules: '伤势不能突然痊愈' }, story_design: { main_plot: '未登记全书终局不得注入' } }), novelId)
     db.prepare('UPDATE chapters SET content=? WHERE id=?').run('陈舟摸了摸磨白的旧绳，指尖沾着河泥。', target)
@@ -87,6 +87,9 @@ async function main() {
     const result = await compile(input, limits)
     assert.ok(result.text.includes('河水暴涨'))
     assert.ok(result.text.includes('话短而清楚'))
+    assert.ok(result.text.includes('景朝'))
+    assert.ok(!result.text.includes('第八日夜晚'), 'future story clock must not enter an earlier chapter')
+    assert.ok(!result.text.includes('未来第八章的时间依据'))
     for (const saved of ['守住渡船', '逐结检查缆绳', '清晨巡视石阶', '履行渡工职责', '久站耗费体力', '无法听清对岸低语', '南岭', '低山河谷', '巡河部', '水务会', '值守员', '看护渡口', '顺流航道', '"travelHours":4', '"locationRole":"residence"']) assert.ok(result.text.includes(saved), saved)
     for (const planned of ['未来密巡使', '未实行的扩展工作']) assert.ok(!result.text.includes(planned), planned)
     for (const npcPrivate of ['保住赃物与账面秘密', '灭口保身', '暗中催眠', '只能催眠熟人', '损失记忆']) assert.ok(!result.text.includes(npcPrivate), `unregistered NPC inner material must not leak: ${npcPrivate}`)

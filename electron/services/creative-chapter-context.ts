@@ -71,7 +71,7 @@ const chapterWorldFields: Record<string, string[]> = {
   genreProfile: ['key', 'name', 'subgenre', 'worldviewTone', 'socialFrame', 'narrativeFocus', 'languageAvoidances'],
   powerSystems: ['id', 'name', 'appliesTo', 'levels', 'advancementRule', 'limitations', 'cost', 'taboo', 'conditions', 'range', 'countermeasures'],
   speciesSystem: ['id', 'name', 'entityType', 'summary', 'traits', 'commonIdentities', 'relationToHumans', 'conditions', 'limitations', 'cost'],
-  timelineConfig: ['calendarType', 'eraName', 'epochLabel', 'baseYearLabel', 'displayPattern', 'relativeZeroLabel', 'precisionOptions'],
+  timelineConfig: ['dynastyName', 'storyStartLabel', 'calendarType', 'eraName', 'epochLabel', 'baseYearLabel', 'displayPattern', 'relativeZeroLabel', 'precisionOptions'],
   writingConstraints: ['antiQuoteEmphasis', 'antiConceptSlogans', 'antiSymmetricLines', 'narrationStyle', 'dialogueStyle', 'forbiddenPhrases', 'extraRules', 'realismLevel', 'sciencePolicy', 'physicsPolicy', 'commonSenseFocus', 'contextAlignmentFocus'],
 }
 const authorRuleField = /^(?:storyUse|contextLink|narrativeFunction|plot|plotUse|plotRole|plotNotes|caseAnswer|caseSolution|culprit|reveal|revealPlan|ending|endgame|resolution|plannedOutcome|futurePlan|authorNotes|secret|hiddenSecret)$/iu

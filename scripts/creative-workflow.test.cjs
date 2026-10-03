@@ -69,6 +69,9 @@ async function main() {
     throw new Error('workflow timed out')
   }
   try {
+    const { validateProjectAsset } = require('../electron/services/creative-project-assets.ts')
+    assert.throws(() => validateProjectAsset('world_rules', { worldRules: { timelineConfig: { currentTimeLabel: '第一日夜晚' } } }), /对应章序和时间依据/)
+    validateProjectAsset('world_rules', { worldRules: { timelineConfig: { currentTimeLabel: '第一日夜晚', currentTimeChapterNum: 1, currentTimeEvidence: '第一章天色已暗。' } } })
     if (realModelSource) {
       const { run } = await call('workflows.start', { stage: 'map', request: '为河谷渡口故事新增一处河谷区域及其下属一个渡口村庄，区域为根，村庄parentId引用区域clientId。给出合理的地形、水源、生计、相对坐标；只需2个地点，不生成人物和其他资料。', count: 2, idempotencyKey: 'real-map-smoke' })
       let lastStep = ''

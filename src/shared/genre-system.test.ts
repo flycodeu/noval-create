@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { assessHistoricalGrounding, getBuiltinGenreRules, parseWorldRulesJson } from './genre-system'
+import { assessHistoricalGrounding, buildTimelineConfigSummary, getBuiltinGenreRules, parseWorldRulesJson } from './genre-system'
 
 describe('genre-system historical packs', () => {
+  it('preserves explicit story clock without leaking the latest clock into earlier chapter rules', () => {
+    const rules = parseWorldRulesJson(JSON.stringify({ timelineConfig: {
+      dynastyName: '景朝', storyStartLabel: '陆闻到镇之日', currentTimeLabel: '第三日傍晚',
+      currentTimeChapterNum: 8, currentTimeEvidence: '第八章日落时抵达渡口。',
+    } }), '架空历史')
+    expect(rules.timelineConfig).toMatchObject({ dynastyName: '景朝', currentTimeChapterNum: 8, currentTimeEvidence: '第八章日落时抵达渡口。' })
+    expect(buildTimelineConfigSummary(rules)).toContain('陆闻到镇之日')
+    expect(buildTimelineConfigSummary(rules)).not.toContain('第三日傍晚')
+    expect(parseWorldRulesJson('{}', '架空历史').timelineConfig.currentTimeLabel).toBeUndefined()
+    expect(parseWorldRulesJson('{"timelineConfig":{"currentTimeChapterNum":-1}}', '架空历史').timelineConfig.currentTimeChapterNum).toBeUndefined()
+  })
   it('maps historical aliases to the historical capability pack', () => {
     expect(getBuiltinGenreRules('历史正剧').genreProfile.key).toBe('historical')
     expect(getBuiltinGenreRules('架空历史').genreProfile.key).toBe('historical')

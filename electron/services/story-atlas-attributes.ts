@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasAttributeMode, type StoryAtlasEntityKind, type StoryAtlasGeography, type StoryAtlasMapPoint, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
 import { validateJsonSchema } from '../../src/shared/tool-contracts'
+export { atlasBoundariesOverlap } from '../../src/shared/story-atlas-geography'
 
 export function meaningfulAtlasValue(value: unknown): boolean {
   if (value === null || value === undefined) return false
@@ -82,15 +83,6 @@ function segmentsCross(a: StoryAtlasMapPoint, b: StoryAtlasMapPoint, c: StoryAtl
 function polygonAreaTwice(points: StoryAtlasMapPoint[]): number {
   return points.reduce((sum, point, index) => { const next = points[(index + 1) % points.length]; return sum + point.x * next.y - next.x * point.y }, 0)
 }
-function strictlyInside(point: StoryAtlasMapPoint, polygon: StoryAtlasMapPoint[]): boolean {
-  let inside = false
-  for (let index = 0; index < polygon.length; index++) {
-    const a = polygon[index], b = polygon[(index + 1) % polygon.length]
-    if (onSegment(point, a, b)) return false
-    if ((a.y > point.y) !== (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside
-  }
-  return inside
-}
 
 /** Reject corrupt geometry before it enters the revision store. Coordinates have no implied physical scale. */
 export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | undefined {
@@ -101,6 +93,7 @@ export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | unde
   for (const value of [geography.areaKm2, geography.mapFrame?.widthKm, geography.mapFrame?.heightKm]) {
     if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('地图面积与比例范围必须为大于零的有限数字；未知数值请省略。')
   }
+  if (geography.mapFrame && !Number.isFinite(geography.mapFrame.widthKm * geography.mapFrame.heightKm)) throw new Error('地图公里尺度超出可计算范围，请缩小宽度或高度。')
   if (geography.areaKm2 && geography.mapFrame && geography.areaKm2 > geography.mapFrame.widthKm * geography.mapFrame.heightKm) {
     throw new Error('地图设定面积不能超过内部地图宽度与高度围成的范围，请校正面积或公里尺度。')
   }
@@ -120,26 +113,6 @@ export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | unde
     }
   }
   return geography
-}
-
-/** Shared borders are allowed; overlap is a diagnostic because different geographic layers can overlap intentionally. */
-export function atlasBoundariesOverlap(first: StoryAtlasMapPoint[], second: StoryAtlasMapPoint[]): boolean {
-  for (let index = 0; index < first.length; index++) {
-    const a = first[index], b = first[(index + 1) % first.length]
-    for (let other = 0; other < second.length; other++) if (segmentsCross(a, b, second[other], second[(other + 1) % second.length], false)) return true
-  }
-  const hasInterior = (polygon: StoryAtlasMapPoint[], other: StoryAtlasMapPoint[]) => {
-    const orientation = Math.sign(polygonAreaTwice(polygon))
-    return polygon.some((point, index) => {
-      if (strictlyInside(point, other)) return true
-      const next = polygon[(index + 1) % polygon.length], dx = next.x - point.x, dy = next.y - point.y
-      const length = Math.hypot(dx, dy)
-      if (!length) return false
-      const probe = { x: (point.x + next.x) / 2 - orientation * dy / length * 0.00001, y: (point.y + next.y) / 2 + orientation * dx / length * 0.00001 }
-      return strictlyInside(probe, polygon) && strictlyInside(probe, other)
-    })
-  }
-  return hasInterior(first, second) || hasInterior(second, first)
 }
 
 export function validateAtlasPositions(raw: unknown): StoryAtlasPosition[] {

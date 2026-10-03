@@ -27,9 +27,66 @@ describe('creative project context budget and saved constraints', () => {
   const input = (stage: CreativeStage = 'map') => ({ novelId: 1, stage, request: '补充已有资料', idempotencyKey: 'fixture' })
   it.each(['world_rules', 'story', 'style', 'characters', 'map', 'outline'] as CreativeStage[])('includes saved rules, story and voice in %s', async stage => {
     const report = await compileCreativeContext(input(stage))
-    for (const text of ['不能复生', '主角是凡人', '伤势不能突然痊愈', '对白克制']) expect(report.text).toContain(text)
-    expect(report).toMatchObject({ maxInputTokens: 24000, outputReserve: 12000 })
+    for (const text of ['不能复生', '主角是凡人', '伤势不能突然痊愈', ...(stage === 'map' ? [] : ['对白克制'])]) expect(report.text).toContain(text)
+    expect(report).toMatchObject({ maxInputTokens: 24000, outputReserve: ['characters', 'map', 'outline'].includes(stage) ? 28000 : 12000 })
     expect(report.estimatedTokens).toBeLessThanOrEqual(report.maxInputTokens)
+  })
+  it('reserves reasoning and complete structured output by batch size while bounding large batches', async () => {
+    const single = await compileCreativeContext({ ...input(), count: 1 })
+    const batch = await compileCreativeContext({ ...input(), count: 4 })
+    const large = await compileCreativeContext({ ...input('events'), count: 1000 })
+    expect(single.outputReserve).toBe(20000)
+    expect(batch.outputReserve).toBe(32000)
+    expect(large.outputReserve).toBe(64000)
+    expect((await compileCreativeContext({ ...input('style'), count: 1000 })).outputReserve).toBe(12000)
+  })
+  it('honors user output limits and keeps input plus candidate and review inside a small model window', async () => {
+    mock.model = { maxTokens: 4000, maxContextTokens: 1000000 }
+    expect((await compileCreativeContext({ ...input(), count: 4 })).outputReserve).toBe(4000)
+    mock.model = { maxTokens: 393216, maxContextTokens: 32768 }
+    const report = await compileCreativeContext({ ...input(), count: 1000 })
+    expect(report.outputReserve).toBe(Math.floor(32768 * 0.22))
+    expect(report.maxInputTokens + report.outputReserve * 2 + 2000).toBeLessThanOrEqual(Math.floor(32768 * 0.85))
+  })
+  it('compiles a local map task inside a small model budget despite large unrelated voices and resident profiles', async () => {
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.novel.themeVoiceJson = JSON.stringify({ dialogue_rules: '无关对白文风'.repeat(3000) })
+    mock.atlas.entities = [
+      { id: 'location:1', kind: 'location', name: '南岭', parentId: null, attributes: { geography: { mapFrame: { widthKm: 1000, heightKm: 800 } } } },
+      { id: 'location:2', kind: 'location', name: '河村', parentId: 'location:1', attributes: { terrain: '既有水网', savedConstraint: '旧桥不可移动' } },
+      { id: 'character:1', kind: 'character', name: '陈舟', attributes: { privateHistory: '住民长档案'.repeat(6000) } },
+    ]
+    mock.atlas.relations = [{ id: 'home', kind: 'presence', fromId: 'character:1', toId: 'location:2', attributes: { locationRole: 'residence' } }]
+    const report = await compileCreativeContext({ ...input(), request: '完善南岭下辖地区的地图' })
+    expect(report.text).toContain('旧桥不可移动')
+    expect(report.text).not.toContain('住民长档案')
+    expect(report.text).not.toContain('无关对白文风')
+    for (const source of ['character:1:outside_map_scope', 'relation:home:outside_map_scope', 'voice:dialogueRules:outside_map_scope']) expect(report.omittedSources).toContain(source)
+    expect(report.estimatedTokens).toBeLessThan(report.maxInputTokens)
+  })
+  it('never omits a required map target, geographic constraints or revision just to make an asset request fit', async () => {
+    mock.atlas.entities = [{ id: 'location:1', kind: 'location', name: '南岭', parentId: null, attributes: { terrain: '原地区事实'.repeat(30000) } }]
+    await expect(compileCreativeContext({ ...input(), request: '完善南岭' })).rejects.toThrow('必要资料 location:1 超出')
+    mock.atlas.entities = []
+    mock.novel.worldRulesJson = JSON.stringify({ mapBlueprint: { constraints: '已有边界不可改变'.repeat(30000) } })
+    await expect(compileCreativeContext(input())).rejects.toThrow('必要资料 world_rules:mapBlueprint:constraints 超出')
+  })
+  it('keeps sibling geometry mandatory while excluding its unrelated long dossier from a local boundary edit', async () => {
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.atlas.entities = [
+      { id: 'country', kind: 'location', name: '江国', parentId: null, attributes: {} },
+      { id: 'west', kind: 'location', name: '西郡', parentId: 'country', attributes: {} },
+      { id: 'east', kind: 'location', name: '东郡', parentId: 'country', summary: '无关地方长史'.repeat(10000), attributes: { geography: { boundary: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 50, y: 100 }] }, history: '无关地方档案'.repeat(10000) } },
+    ]
+    const report = await compileCreativeContext({ ...input(), request: '调整西郡的边界' })
+    expect(report.sources).toContain('east:boundary_constraint')
+    expect(report.text).toContain('"x":50')
+    expect(report.text).not.toContain('无关地方长史')
+    expect(report.text).not.toContain('无关地方档案')
+    expect(report.omittedSources).toContain('east:non_geographic_fields')
+    const neighbour = mock.atlas.entities[2]
+    mock.atlas.entities.push(...Array.from({ length: 150 }, (_, index) => ({ ...neighbour, id: `east:${index}`, name: `相邻地区${index}` })))
+    await expect(compileCreativeContext({ ...input(), request: '调整西郡的边界' })).rejects.toThrow(/必要资料 east:\d+:boundary_constraint 超出/u)
   })
   it('excludes unscoped secrets and future plot from chapter project material', () => {
     const sources = JSON.stringify(creativeProjectSources(mock.novel, true))
@@ -51,6 +108,12 @@ describe('creative project context budget and saved constraints', () => {
     expect(creativeProjectSources({})).toEqual([])
     mock.novel.worldRulesJson = JSON.stringify({ writingConstraints: { extraRules: ['硬规则'.repeat(30_000)] } })
     await expect(compileCreativeContext(input())).rejects.toThrow('必要资料 world_rules:writingConstraints:extraRules 超出')
+  })
+  it('keeps distinct constraint names even when their saved values are identical', async () => {
+    mock.novel.worldRulesJson = JSON.stringify({ writingConstraints: { antiConceptSlogans: true, antiSymmetricLines: true } })
+    const report = await compileCreativeContext(input())
+    expect(report.sources).toContain('world_rules:writingConstraints:antiConceptSlogans')
+    expect(report.sources).toContain('world_rules:writingConstraints:antiSymmetricLines')
   })
   it('keeps direct relation facts while a large optional name catalog can be omitted', async () => {
     mock.atlas.entities = Array.from({ length: 3000 }, (_, i) => ({ id: `character:${i}`, kind: 'character', name: i === 0 ? '陈舟' : `路人${i}${'长名字'.repeat(50)}`, attributes: {}, summary: '档案描述', parentId: null }))

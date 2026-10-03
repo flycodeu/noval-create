@@ -4,6 +4,51 @@ type Atlas = Pick<StoryAtlasSnapshot, 'entities' | 'relations'>
 const namedAtlasEntity = (text: string, entity: StoryAtlasEntity) => text.split(/[^\w:-]+/u).includes(entity.id)
   || (entity.name.trim().length > 1 && text.includes(entity.name))
 
+/** Asset design has narrower dependencies than a scene: a country does not require every resident's social graph. */
+export function selectCreativeAssetAtlas(atlas: Atlas, input: {
+  stage: 'map' | 'events'; request: string; anchorText?: string; fallbackText?: string
+}) {
+  const explicit = atlas.entities.filter(entity => namedAtlasEntity(input.request, entity))
+  const anchor = input.anchorText || input.fallbackText || ''
+  const seeds = new Set((explicit.length ? explicit : atlas.entities.filter(entity => namedAtlasEntity(anchor, entity))).map(entity => entity.id))
+  if (!seeds.size) for (const entity of atlas.entities) {
+    if (input.stage === 'map' ? entity.kind === 'location' && !entity.parentId : entity.kind === 'event') seeds.add(entity.id)
+  }
+  const entityIds = new Set(seeds), relationIds = new Set<string>()
+  const byId = new Map(atlas.entities.map(entity => [entity.id, entity]))
+  const include = (edge: StoryAtlasRelation) => { relationIds.add(edge.id); entityIds.add(edge.fromId); entityIds.add(edge.toId) }
+  // Preserve the existing child directory when changing a parent's subdivision. Do not recursively load every room.
+  if (input.stage === 'map') for (const entity of atlas.entities) if (entity.kind === 'location' && entity.parentId && seeds.has(entity.parentId)) entityIds.add(entity.id)
+  if (input.stage === 'events') for (const edge of atlas.relations) {
+    if (edge.kind === 'participation' && (seeds.has(edge.fromId) || seeds.has(edge.toId))) include(edge)
+    if (edge.kind === 'presence' && seeds.has(edge.toId) && byId.get(edge.fromId)?.kind === 'event') include(edge)
+  }
+  const participants = new Set([...entityIds].filter(id => byId.get(id)?.kind !== 'location'))
+  for (const edge of atlas.relations) if (edge.kind === 'presence' && participants.has(edge.fromId)) include(edge)
+  const places = new Set([...entityIds].filter(id => byId.get(id)?.kind === 'location'))
+  for (const edge of atlas.relations) if (edge.kind === 'route' && (places.has(edge.fromId) || places.has(edge.toId))) include(edge)
+  for (const id of [...entityIds]) {
+    const visited = new Set([id])
+    let parent = byId.get(id)?.parentId
+    while (parent && byId.has(parent) && !visited.has(parent)) {
+      entityIds.add(parent); visited.add(parent); parent = byId.get(parent)?.parentId
+    }
+  }
+  const constraintEntityIds = new Set<string>()
+  if (input.stage === 'map') {
+    // A local redraw must know its neighbours' occupied territory, but their biographies and social edges are irrelevant.
+    const parentIds = new Set([...places].map(id => byId.get(id)?.parentId))
+    for (const entity of atlas.entities) {
+      const geography = entity.attributes.geography as { boundary?: unknown } | undefined
+      if (entity.kind === 'location' && !entityIds.has(entity.id) && parentIds.has(entity.parentId)
+        && Array.isArray(geography?.boundary) && geography.boundary.length >= 3) {
+        constraintEntityIds.add(entity.id); entityIds.add(entity.id)
+      }
+    }
+  }
+  return { seedIds: seeds, entityIds, relationIds, constraintEntityIds }
+}
+
 /** New chapter participants are introduction plans, never replacements for the preceding chapter's state. */
 export function selectChapterAtlasIntroductions(before: Atlas, current: Atlas, input: {
   chapterNum: number; request: string; anchorText?: string; povNames?: string[]

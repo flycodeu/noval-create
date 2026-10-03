@@ -16,7 +16,7 @@ export interface StoryAtlasGeography {
   areaKm2?: number
   /** How far the author has developed the place, not whether characters have explored it. */
   development?: 'detailed' | 'outlined' | 'unexplored'
-  /** Explicit setting or reviewed design candidate for this place's own internal map. */
+  /** Kilometres across this boundary's bounding box; internal coordinates normalize that box to 0..100. */
   mapFrame?: { widthKm: number; heightKm: number }
 }
 export interface StoryAtlasPosition {
@@ -61,12 +61,18 @@ const mapPoint: AgentToolJsonSchema = { type: 'object', required: ['x', 'y'], ad
 } }
 /** Optional fields: absent or empty input does not establish a story fact. */
 export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind | StoryAtlasRelationKind, AgentToolJsonSchema>> = {
+  event: { type: 'object', properties: {
+    ...textFields('timeLabel', 'timeMode', 'timePrecision', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'evidenceQuote'),
+    relativeDay: { type: 'number', description: '相对开篇零点的天数；负数为开篇前，不等于章序。缺乏依据时省略。' },
+    sequenceInDay: { type: 'integer', minimum: 0, description: '同日已知先后顺序；仅有明确先后依据时填写。' },
+    timeSortValue: { type: 'number' },
+  }, additionalProperties: true },
   location: { type: 'object', properties: {
     geography: { type: 'object', additionalProperties: false, properties: {
-      boundary: { type: 'array', minItems: 3, maxItems: 64, items: mapPoint }, position: mapPoint,
+      boundary: { type: 'array', minItems: 3, maxItems: 64, items: mapPoint, description: '在上级内部地图的 0..100 坐标内绘制非自交轮廓，须位于上级边界以内。进入本地点后以轮廓的包围框归一化至 0..100，所有下级位置与边界使用此坐标系。' }, position: mapPoint,
       areaKm2: { type: 'number', minimum: 0, description: '严格大于零；沿用已有明确面积，缺失时可按用户地理设计需求提出自洽候选并说明依据，经审校后应用。不仅从示意像素推算，不能超过内部地图宽高范围或已知上级面积。' },
       development: { enum: ['detailed', 'outlined', 'unexplored'], description: '资料展开程度，不是人物探索进度。' },
-      mapFrame: { type: 'object', description: '本地点内部地图的公里宽高。沿用既定尺度；尚未设定时可提出自洽设计候选，经审校后应用。', required: ['widthKm', 'heightKm'], additionalProperties: false, properties: {
+      mapFrame: { type: 'object', description: '本地点边界包围框的公里宽高；内部坐标以此包围框归一化。缺失时可按上级尺度与边界包围框推导，显式设定须与该推导一致。无尺度时不从示意坐标杜撰面积。', required: ['widthKm', 'heightKm'], additionalProperties: false, properties: {
         widthKm: { type: 'number', minimum: 0 }, heightKm: { type: 'number', minimum: 0 },
       } },
     } },

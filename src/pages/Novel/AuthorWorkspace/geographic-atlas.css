@@ -2,9 +2,19 @@
 .geographic-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 22px 24px 12px; }
 .geographic-heading h2 { margin: 0 0 7px; font: 500 25px/1.5 "STSong", "Songti SC", serif; overflow-wrap: anywhere; }
 .geographic-heading span { color: var(--text-muted); font-size: 11px; }
+.geographic-overview { padding: 0 24px 18px; }
+.geographic-counts { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 12px; color: var(--text-secondary); }
+.geographic-counts b { font-weight: 500; color: var(--text-primary); font-size: 17px; font-variant-numeric: tabular-nums; }
+.geographic-measures { display: flex; flex-wrap: wrap; gap: 12px 30px; margin: 14px 0 0; }
+.geographic-measures dt { color: var(--text-muted); font-size: 10px; margin-bottom: 5px; }
+.geographic-measures dd { color: var(--text-primary); font-size: 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.geographic-data-status { display: inline-block; margin-top: 12px; font-size: 11px; color: #996727; }
+.geographic-countries { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 14px; }
+.geographic-countries button { display: inline-flex; align-items: center; gap: 12px; color: var(--text-primary); border: 0; border-bottom: 1px solid var(--border-default); background: none; padding: 5px 0; cursor: pointer; }
+.geographic-countries button:hover { color: var(--accent); }
 .geographic-search { padding: 0 24px 20px; }
-.geographic-canvas { position: relative; background: #e6eae3; overflow: hidden; border-block: 1px solid #d6dccf; }
-.geographic-canvas > svg { display: block; width: 100%; height: auto; aspect-ratio: 10 / 7; min-height: 300px; max-height: 630px; touch-action: none; cursor: grab; }
+.geographic-canvas { position: relative; background: #dce4df; overflow: hidden; border-block: 1px solid #c8d2c9; }
+.geographic-canvas > svg { display: block; width: 100%; height: auto; aspect-ratio: 10 / 7; min-height: 360px; max-height: 720px; touch-action: none; cursor: grab; }
 .geographic-canvas > svg:active { cursor: grabbing; }
 .geographic-region, .geographic-pin, .geographic-route { cursor: pointer; outline: none; }
 .geographic-region:focus polygon, .geographic-region:hover polygon { stroke: #344d37; stroke-width: 3px; }
@@ -21,24 +31,37 @@
 .geographic-map-key > span { display: inline-flex; align-items: center; gap: 5px; }
 .geographic-map-key i { display: inline-block; width: 11px; height: 9px; border: 1px solid #85927a; background: #c7d5bd; }
 .geographic-map-key i.is-unknown { background: repeating-linear-gradient(45deg, #dce3cf, #dce3cf 2px, #a9b899 2px, #a9b899 3px); }
+.geographic-map-key i.is-border { border: 2px solid #4f644f; background: transparent; }
 .geographic-scale { position: absolute; right: 20px; bottom: 48px; border: 1px solid #58684c; border-top: 0; height: 5px; text-align: center; max-width: 70%; pointer-events: none; }
 .geographic-scale span { display: block; color: #58684c; font-size: 10px; transform: translateY(-19px); white-space: nowrap; }
 .geographic-selection { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 16px 24px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-default); }
 .geographic-selection strong, .geographic-selection span { display: block; overflow-wrap: anywhere; }
 .geographic-selection strong { font-weight: 500; font-size: 15px; margin-bottom: 5px; }
 .geographic-selection span { color: var(--text-muted); font-size: 11px; }
-.geographic-location-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 24px 24px; gap: 0 20px; }
-.geographic-location-index > div { display: flex; border-bottom: 1px solid var(--border-default); }
-.geographic-location-index button { display: block; min-width: 0; flex: 1; padding: 16px 0; border: 0; background: none; color: var(--text-primary); text-align: left; cursor: pointer; }
-.geographic-location-index button > span, .geographic-location-index small { display: block; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
-.geographic-location-index strong { display: block; font-size: 14px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.geographic-index-heading { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 24px 8px; gap: 16px; }
+.geographic-index-heading h3 { margin: 0; font-size: 14px; font-weight: 500; }
+.geographic-index-heading > span { color: var(--text-muted); font-size: 11px; }
+.geographic-location-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 8px 24px 24px; gap: 20px; }
+.geographic-location-index > article { min-width: 0; border-top: 3px solid var(--region-color); border-bottom: 1px solid var(--border-default); padding-bottom: 12px; }
+.geographic-index-title { display: flex; align-items: center; }
+.geographic-index-title > button { display: block; min-width: 0; flex: 1; padding: 12px 0 8px; border: 0; background: none; color: var(--text-primary); text-align: left; cursor: pointer; }
+.geographic-index-title button > span, .geographic-location-index small { display: block; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
+.geographic-location-index strong { display: block; font-size: 16px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.geographic-location-index strong i { margin-right: 10px; font: normal 11px Georgia, serif; color: var(--text-muted); }
+.geographic-location-index p { font-size: 12px; line-height: 1.9; color: var(--text-secondary); margin: 2px 0 12px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.geographic-child-index { display: flex; flex-wrap: wrap; gap: 7px 12px; padding: 8px 0; }
+.geographic-child-index button { display: inline-flex; gap: 6px; align-items: baseline; border: 0; background: none; padding: 3px 0; font-size: 12px; color: var(--text-primary); cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.geographic-child-index button:hover { color: var(--accent); }
+.geographic-child-index span { color: var(--text-muted); font-size: 10px; }
+.geographic-development { display: block; color: var(--text-muted); font-size: 10px; padding-top: 4px; }
 .geographic-location-index .geographic-enter { flex: 0 0 30px; text-align: right; color: var(--text-muted); }
 .geographic-location-index .is-selected strong { color: var(--accent); }
 .geographic-no-results { padding: 0 24px 24px; color: var(--text-muted); font-size: 12px; }
 .atlas-map-modes { display: flex; gap: 4px; margin-left: auto; }
 .atlas-map-modes button { padding: 5px 12px; background: none; border: 1px solid transparent; border-radius: 4px; color: var(--text-muted); cursor: pointer; font-size: 12px; }
 .atlas-map-modes button.is-selected { border-color: var(--border-default); color: var(--text-primary); background: var(--bg-surface); }
-.atlas-workbench--geography { grid-template-columns: minmax(0, 1.85fr) minmax(300px, 1fr); }
+.atlas-workbench--geography { grid-template-columns: minmax(0, 1fr); }
+.atlas-workbench--geography .atlas-profile-panel { border-left: 0; border-top: 1px solid var(--border-default); }
 .atlas-workbench--geography:has(> .geographic-atlas:only-child) { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1100px) { .atlas-workbench--geography { grid-template-columns: minmax(0, 1fr); } .atlas-workbench--geography .atlas-profile-panel { border-left: 0; border-top: 1px solid var(--border-default); } }
-@media (max-width: 680px) { .geographic-heading { padding: 18px 16px 12px; } .geographic-search { padding: 0 16px 16px; } .geographic-location-index { padding: 8px 16px 16px; gap: 0 12px; } .geographic-selection { padding: 14px 16px; flex-wrap: wrap; } .atlas-map-modes { margin-left: 0; } }
+@media (max-width: 680px) { .geographic-heading { padding: 18px 16px 12px; } .geographic-overview { padding: 0 16px 14px; } .geographic-search { padding: 0 16px 16px; } .geographic-index-heading { padding: 18px 16px 8px; } .geographic-location-index { grid-template-columns: minmax(0, 1fr); padding: 8px 16px 16px; gap: 18px; } .geographic-selection { padding: 14px 16px; flex-wrap: wrap; } .atlas-map-modes { margin-left: 0; } .geographic-canvas > svg { min-height: 320px; } .geographic-map-key { right: 8px; left: 8px; gap: 8px; } }

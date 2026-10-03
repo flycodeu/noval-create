@@ -113,6 +113,11 @@ export type TimelineCalendarType =
   | 'future-date'
 
 export interface TimelineConfig {
+  dynastyName?: string
+  storyStartLabel?: string
+  currentTimeLabel?: string
+  currentTimeChapterNum?: number
+  currentTimeEvidence?: string
   calendarType: TimelineCalendarType
   eraName: string
   epochLabel: string
@@ -2554,6 +2559,11 @@ function normalizeTimelineConfig(
     : {}
 
   return {
+    ...(asText(record.dynastyName) ? { dynastyName: asText(record.dynastyName) } : {}),
+    ...(asText(record.storyStartLabel) ? { storyStartLabel: asText(record.storyStartLabel) } : {}),
+    ...(asText(record.currentTimeLabel) ? { currentTimeLabel: asText(record.currentTimeLabel) } : {}),
+    ...(typeof record.currentTimeChapterNum === 'number' && Number.isSafeInteger(record.currentTimeChapterNum) && record.currentTimeChapterNum >= 0 ? { currentTimeChapterNum: record.currentTimeChapterNum } : {}),
+    ...(asText(record.currentTimeEvidence) ? { currentTimeEvidence: asText(record.currentTimeEvidence) } : {}),
     calendarType: (asText(record.calendarType) as TimelineCalendarType) || fallback.calendarType,
     eraName: asText(record.eraName) || fallback.eraName,
     epochLabel: asText(record.epochLabel) || fallback.epochLabel,
@@ -2770,6 +2780,8 @@ export function buildWorldDynamicsSummary(rules: GenreWorldRules): string {
 export function buildTimelineConfigSummary(rules: GenreWorldRules): string {
   const config = rules.timelineConfig
   const lines = [
+    config.dynastyName ? `朝代或政权=${config.dynastyName}` : '',
+    config.storyStartLabel ? `开篇时间=${config.storyStartLabel}` : '',
     config.calendarType ? `时间制=${config.calendarType}` : '',
     config.eraName ? `纪年体系=${config.eraName}` : '',
     config.epochLabel ? `时代标签=${config.epochLabel}` : '',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
-import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
+import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAssetAtlas, selectCreativeAtlas } from './creative-atlas-context'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], name: string, parentId: string | null = null, attributes = {}): StoryAtlasEntity =>
   ({ id, kind, name, parentId, attributes, summary: '', status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
@@ -22,6 +22,42 @@ const fixture = () => ({ entities: [
 ] })
 
 describe('saved atlas dependencies for creative context', () => {
+  it('includes sibling borders as map constraints without expanding their residents or applying that rule to events', () => {
+    const atlas = fixture()
+    atlas.entities.push(entity('location:6', 'location', '北城', 'location:1', { geography: { boundary: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] } }))
+    atlas.relations.push(edge('north-resident', 'presence', 'character:2', 'location:6'))
+    const selected = selectCreativeAssetAtlas(atlas, { stage: 'map', request: '重新设计河村的边界' })
+    expect(selected.entityIds.has('location:6')).toBe(true)
+    expect(selected.constraintEntityIds).toEqual(new Set(['location:6']))
+    expect(selected.entityIds.has('character:2')).toBe(false)
+    expect(selected.relationIds.has('north-resident')).toBe(false)
+    expect(selectCreativeAssetAtlas(atlas, { stage: 'events', request: '梳理河村的事件' }).entityIds.has('location:6')).toBe(false)
+  })
+  it('keeps named map targets, immediate subdivisions and routes without importing resident relationships or chapter people', () => {
+    const atlas = fixture()
+    atlas.relations.push(edge('bond', 'relationship', 'character:1', 'character:2'))
+    const selected = selectCreativeAssetAtlas(atlas, { stage: 'map', request: '划分南岭的地区', anchorText: '陈舟和周河在远港交谈' })
+    for (const id of ['location:1', 'location:2', 'location:3', 'location:4']) expect(selected.entityIds.has(id)).toBe(true)
+    for (const id of ['character:1', 'character:2', 'faction:1', 'faction:2', 'location:5']) expect(selected.entityIds.has(id)).toBe(false)
+    expect(selected.relationIds).toEqual(new Set(['cross-region']))
+  })
+  it('keeps a named participant and their place for an asset task without following their whole organization', () => {
+    const selected = selectCreativeAssetAtlas(fixture(), { stage: 'map', request: '完善陈舟常住地区的地图' })
+    for (const id of ['character:1', 'location:1', 'location:2', 'location:3', 'location:4']) expect(selected.entityIds.has(id)).toBe(true)
+    expect(selected.entityIds.has('faction:2')).toBe(false)
+    expect(selected.relationIds).toEqual(new Set(['home', 'cross-region']))
+  })
+  it('keeps actual event participants and places but does not expand character bonds during timeline design', () => {
+    const atlas = fixture()
+    atlas.entities.push(entity('event:1', 'event', '渡口火情'))
+    atlas.relations.push(edge('attend', 'participation', 'character:1', 'event:1'), edge('site', 'presence', 'event:1', 'location:2'), edge('bond', 'relationship', 'character:1', 'character:2'))
+    const selected = selectCreativeAssetAtlas(atlas, { stage: 'events', request: '梳理渡口火情的时间' })
+    for (const id of ['event:1', 'character:1', 'location:1', 'location:2', 'location:3', 'location:4']) expect(selected.entityIds.has(id)).toBe(true)
+    expect(selected.entityIds.has('character:2')).toBe(false)
+    expect(selected.relationIds.has('attend')).toBe(true)
+    expect(selected.relationIds.has('job')).toBe(false)
+    expect(selected.relationIds.has('bond')).toBe(false)
+  })
   it('resolves a real protagonist, home, organization ancestors and one route hop without expanding the whole roster or world', () => {
     const selected = selectCreativeAtlas(fixture(), { request: '继续主角本章，遵守活动地域和职业。' })
     for (const id of ['character:1', 'location:1', 'location:2', 'location:3', 'location:4', 'faction:1', 'faction:2']) expect(selected.entityIds.has(id)).toBe(true)

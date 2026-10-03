@@ -45,6 +45,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const voice = parseThemeVoiceDocument(novel?.themeVoiceJson)
   // Normalizing world rules supplies genre defaults. Only stored rules are author facts.
   const world = recordOf(parseDocument(novel?.worldRulesJson))
+  const chronology = { dynastyName: '', storyStartLabel: '', currentTimeLabel: '', currentTimeChapterNum: null, currentTimeEvidence: '', ...recordOf(world.timelineConfig) }
   const load = useCallback(async () => {
     setLoading(true)
     let referenceError = ''
@@ -80,7 +81,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   ] : tab === 'style' ? topics.map(item => ({ key: item.key, title: item.label, value: Object.fromEntries(STORY_VOICE_FIELDS[item.key].map(field => [field, voice[field]])), stage: 'style' as const })) : tab === 'constraints' ? [
     { key: 'writingRules', title: '写作边界', value: story.writingRules, stage: 'story' },
     { key: 'world:writingConstraints', title: '世界与常识约束', value: world.writingConstraints, stage: 'world_rules' },
-  ] : ['genreProfile', 'powerSystems', 'speciesSystem', 'factionSystem', 'characterEcology', 'mapBlueprint', 'worldDynamics', 'timelineConfig'].map(key => ({ key: `world:${key}`, title: ({ genreProfile: '世界基调', powerSystems: '能力、限制与代价', speciesSystem: '种属规则', factionSystem: '组织与社会', characterEcology: '人物生态', mapBlueprint: '地域层级', worldDynamics: '环境、生计与资源', timelineConfig: '历法与时间' } as Record<string, string>)[key], value: world[key], stage: 'world_rules' as const }))
+  ] : ['genreProfile', 'powerSystems', 'speciesSystem', 'factionSystem', 'characterEcology', 'mapBlueprint', 'worldDynamics', 'timelineConfig'].map(key => ({ key: `world:${key}`, title: ({ genreProfile: '世界基调', powerSystems: '能力、限制与代价', speciesSystem: '种属规则', factionSystem: '组织与社会', characterEcology: '人物生态', mapBlueprint: '地域层级', worldDynamics: '环境、生计与资源', timelineConfig: '朝代与时间' } as Record<string, string>)[key], value: key === 'timelineConfig' ? chronology : world[key], stage: 'world_rules' as const }))
   const section = sections.find(item => item.key === topic)
   const save = async () => {
     if (!novel || !editing) return
@@ -98,7 +99,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const chapter = chapters.find(item => item.id === selectedChapter)
   const assigned = new Set(tree?.volumes.flatMap(volume => volume.parts.flatMap(part => part.chapters.map(item => item.id))) || [])
   const chapterButton = (item: Chapter) => <button key={item.id} className={selectedChapter === item.id ? 'is-selected' : ''} onClick={() => { if (selectedChapter !== item.id) changeView(() => { const next = new URLSearchParams(params); next.set('chapterId', String(item.id)); setParams(next) }) }}>第 {item.chapterNum} 章 · {item.title || '未命名'}<small>{item.wordCount ? `${item.wordCount.toLocaleString()} 字` : '待写'}</small></button>
-  return <AuthorPage compact eyebrow="故事设计" title={novel?.title || '故事设计'}>
+  return <AuthorPage title="故事设计">
     <div className="author-tabs author-section-tabs story-design-tabs" role="tablist" aria-label="故事设计分类">{STORY_DESIGN_TABS.map(item => <button key={item.key} role="tab" aria-selected={tab === item.key} disabled={saving} onClick={() => { if (tab !== item.key) changeView(() => setParams(storyDesignParams(params, item.key))) }}>{item.label}</button>)}</div>
     {topics.length > 0 && <div className="story-design-topics" role="tablist" aria-label={`${STORY_DESIGN_TABS.find(item => item.key === tab)?.label}主题`}>{topics.map(item => <button key={item.key} id={`story-topic-${item.key}`} role="tab" aria-selected={topic === item.key} aria-controls="story-design-panel" disabled={saving} onClick={() => { if (topic !== item.key) changeView(() => setParams(storyDesignParams(params, tab, item.key))) }}>{item.label}</button>)}</div>}
     {error && <LoadFailure message={error} retry={() => void load()} />}

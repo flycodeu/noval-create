@@ -19,6 +19,7 @@ export function ContentDocument({ value, names = {}, showEmpty = false, fieldKey
 
 export function DocumentEditor({ value, onChange, path = '', fieldKey = '', names = {} }: { value: unknown; onChange: (value: unknown) => void; path?: string; fieldKey?: string; names?: Record<string, string> }): React.ReactElement {
   const key = documentFieldKey(fieldKey)
+  if (key === 'currentTimeChapterNum') return <InputNumber aria-label={path} min={0} precision={0} value={typeof value === 'number' ? value : null} onChange={onChange} />
   if (documentReferenceType(key) && (!value || typeof value !== 'object' || Array.isArray(value))) {
     const values = Array.isArray(value) ? value : value == null || value === '' ? [] : [value]
     const freeText = key === 'revealPayload' || key === 'requiredAssetRefs'

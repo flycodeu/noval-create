@@ -21,12 +21,12 @@ describe('RF-15 author launch navigation', () => {
     expect(getStudioNextStep(chapters, [], false).targetPage).toBe('writing/editor?chapterId=1')
     expect(getStudioSceneLabel(chapters[2])).toContain('第 1 章')
   })
-  it('presents five author destinations without fabricated completion states', () => {
+  it('presents six author destinations without fabricated completion states', () => {
     const items = ['theme-voice', 'style-lab', 'map', 'growth-system', 'timeline', 'batch-workbench', 'writing'].map((key) => ({ key, label: key, route: `/novels/1/${key}`, status: 'ready' as const }))
     const input = [{ key: 'original', title: '原组', items }]
     const result = organizeAuthorNavigation(input)
     expect(result).toHaveLength(1)
-    expect(result[0].items.map((item) => item.label)).toEqual(['创作台', '故事设计', '世界与人物', '正文', '版本与问题'])
+    expect(result[0].items.map((item) => item.label)).toEqual(['创作台', '故事设计', '世界与人物', '时间轴', '正文', '版本与问题'])
     expect(result[0].items.every((item) => item.status === 'not_started')).toBe(true)
     expect(input[0].items).toHaveLength(7)
   })
