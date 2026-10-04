@@ -179,7 +179,7 @@ async function main() {
     assert.equal(firstOutline.status, 'success', JSON.stringify(firstOutline))
     assert.equal((await call('chapters.readiness', { atChapter: 1 })).ready, true)
     replies.push(JSON.stringify({ chapterNum: 1, title: '换绳', content: prose, summary: '陈舟与林禾换上新绳，渡船停稳。', changes: [] }), review)
-    const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, idempotencyKey: 'chapter-first' })).run
+    const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
     assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')

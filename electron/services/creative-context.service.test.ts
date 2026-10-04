@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
-import { creativeProjectSources } from './creative-chapter-context'
+import { creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
 import { queryStoryAtlas } from './story-atlas.service'
 import type { CreativeStage } from '../../src/shared/creative-workflow'
 
@@ -28,6 +28,13 @@ describe('creative project context budget and saved constraints', () => {
       themeVoiceJson: JSON.stringify({ pov: 'third_limited', style_rules: '对白克制' }),
     }
     mock.artifact = { novelId: 1, kind: 'generic_draft', content: { schemaVersion: 'generic-asset-draft-v1', output: '需要保留的修订原稿' } }
+  })
+  it('compacts structured prose revision metadata without changing any original paragraph', () => {
+    const data = { chapterNum: 4, title: '夜试', content: '  第一段原文。\n\n第二段仍保留空行。  ', summary: '原摘要', changes: [], factReveals: [] }
+    mock.artifact.content = { schemaVersion: 'generic-asset-draft-v1', output: JSON.stringify(data, null, 4) }
+    const source = creativeRevisionSource({ ...input('chapter'), sourceArtifactId: 'art_prose' })!
+    expect(JSON.parse(source)).toEqual(data)
+    expect(source.length).toBeLessThan((mock.artifact.content as { output: string }).output.length)
   })
   it.each(['world_rules', 'style', 'story'] as const)('compiles global %s at the real chapter without requiring oversized current-scene people or edges', async stage => {
     mock.chapters = [{ id: 21, chapterNum: 3, title: '系绳', outline: '陈舟与周河在河村检查旧绳', content: '已写正文' }]

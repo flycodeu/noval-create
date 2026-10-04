@@ -28,7 +28,7 @@ export function validateCreativeChangeScope(input: CreativeWorkflowInput): void 
   }
   if (input.changeScope.preserveChapterFields && (!input.changeScope.chapterIds || new Set(input.changeScope.preserveChapterFields).size !== input.changeScope.preserveChapterFields.length)) throw new Error('保留章节字段必须指定章节，且字段不得重复。')
   const allowed = input.stage === 'outline' ? ['chapterIds', 'preserveChapterFields']
-    : ['characters', 'map', 'relationships', 'factions', 'items', 'events'].includes(input.stage)
+    : ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'chapter'].includes(input.stage)
       ? ['existingEntityIds', 'existingRelationIds', 'newEntityCount', 'allowNewRelations'] : []
   if (fields.some(field => !allowed.includes(field))) throw new Error('保存范围包含当前阶段不支持的限制。')
 }

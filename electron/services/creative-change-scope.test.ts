@@ -37,6 +37,16 @@ describe('creative save scope', () => {
   it('requires complete resolved identities before checking asset changes', () => {
     expect(() => assertCreativeChangeScope(input(scope), { changes })).toThrow('缺少完整')
   })
+  it('enforces a prose-only scope against both new and existing atlas mutations', () => {
+    const request = { ...input({ existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }), stage: 'chapter' as const }
+    expect(() => assertCreativeChangeScope(request, { changes: [] })).not.toThrow()
+    expect(() => assertCreativeChangeScope(request, { changes }, resolved())).toThrow('须新增 0 项')
+    expect(() => assertCreativeChangeScope(request, { changes }, resolved(false))).toThrow('超出')
+    const relation = { changes: [{ op: 'upsert_relation', kind: 'ownership', fromId: 'character:1', toId: 'item:1' }] }
+    for (const isNew of [true, false]) {
+      expect(() => assertCreativeChangeScope(request, relation, { ...resolved(), resolvedChanges: [{ index: 0, id: 'ownership:1', isNew }] })).toThrow(/新增关系|超出/)
+    }
+  })
   it('limits outline edits to existing chapter IDs and forbids volumes and new chapters', () => {
     const request = { ...input({ chapterIds: [4] }), stage: 'outline' as const }
     expect(() => assertCreativeChangeScope(request, { chapters: [{ id: 4 }] })).not.toThrow()
@@ -68,6 +78,6 @@ describe('creative save scope', () => {
     for (const value of [{}, { newEntityCount: -1 }, { newEntityCount: 1.5 }, { existingEntityIds: ['same', 'same'] }, { existingEntityIds: [' padded '] }, { chapterIds: [4] }, { unknown: true }]) {
       expect(() => validateCreativeChangeScope(input(value as CreativeChangeScope))).toThrow()
     }
-    expect(() => validateCreativeChangeScope({ ...input(scope), stage: 'chapter' })).toThrow('当前阶段不支持')
+    expect(() => validateCreativeChangeScope({ ...input(scope), stage: 'background' })).toThrow('当前阶段不支持')
   })
 })
