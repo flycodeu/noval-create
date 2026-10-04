@@ -38,6 +38,10 @@ async function main() {
   initDb()
   const sqlite = getSqlite()
   const model = require('../electron/services/model.service.ts')
+  const embedding = require('../electron/services/embedding.service.ts')
+  // This fixture exercises immediate write-after-save indexing, not remote vector providers.
+  // Keep optional vector traffic out of the generation/review reply queue.
+  if (!realModelSource) embedding.scheduleChapterEmbeddingRefresh = embedding.indexChapterForKeywordRecall
   const { novelForgeToolRegistry: registry } = require('../electron/application/novelforge-tool-registry.ts')
   const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
   const context = { actor: { type: 'api_client', actorId: 'fixture', clientId: 'fixture' }, scopes: [...DESKTOP_AGENT_TOOL_SCOPES] }
@@ -184,6 +188,7 @@ async function main() {
     assert.equal(chapter.summary, '陈舟与林禾换上新绳，渡船停稳。', 'content invalidation must not erase the new reviewed summary')
 
     const firstChapterId = sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId).id
+    assert.ok(sqlite.prepare("SELECT count(*) AS n FROM chapter_embeddings WHERE chapter_id=? AND fragment_type='content_excerpt'").get(firstChapterId).n > 0, 'MCP prose apply must save a searchable prose index')
     const beforeReview = requests.length
     replies.push(review)
     const reviewRun = (await call('chapters.review', { chapterId: firstChapterId, idempotencyKey: 'review-existing-chapter' })).run
@@ -751,6 +756,32 @@ async function main() {
     assert.equal(stalePlanningResult.status, 'failed')
     assert.equal(stalePlanningResult.artifactId, undefined, 'stale formal snapshot cannot produce an accepted review')
     sqlite.prepare('UPDATE novels SET user_background=? WHERE id=?').run(oldBackground, novelId)
+    // Simulate process restart with a completed generation response and no completed reviewer.
+    // A restored workflow must make exactly the missing reviewer call, not regenerate.
+    replies.push(JSON.stringify({ synopsis: '渡口两岸共同检修船只。' }), review)
+    const checkpointSource = await finish((await call('workflows.start', { stage: 'background', request: '只整理简介。', autoApply: false, idempotencyKey: 'checkpoint-source' })).run.runId)
+    assert.equal(checkpointSource.status, 'paused')
+    const sourceInput = sqlite.prepare('SELECT input_json FROM tasks WHERE id=?').get(checkpointSource.runId).input_json
+    const recoveredId = await taskService.createTask({ type: 'planning_draft', novelId, modelConfigId: modelId, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: sourceInput, status: 'running' })
+    const artifacts = require('../electron/services/artifact.service.ts')
+    const checkpointRows = sqlite.prepare("SELECT id FROM artifacts WHERE novel_id=? AND kind='creative_model_checkpoint' AND idempotency_key LIKE ?").all(novelId, `creative:${checkpointSource.runId}:1:checkpoint:%`)
+    const sourceCheckpoint = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate')
+    assert.ok(sourceCheckpoint)
+    const checkpointCopy = artifacts.createArtifact({ novelId, kind: 'creative_model_checkpoint', status: 'draft', content: sourceCheckpoint.content, contextVersion: sourceCheckpoint.contextVersion, modelConfigId: sourceCheckpoint.modelConfigId, taskId: sourceCheckpoint.taskId, producerType: 'system', producerId: 'restart-fixture', producerClient: 'fixture', idempotencyKey: `creative:${recoveredId}:1:checkpoint:${sourceCheckpoint.content.requestHash}` })
+    taskService.updateTask(recoveredId, { progressJson: JSON.stringify({ step: 'reviewing', modelCheckpoint: { schemaVersion: 'creative-model-checkpoint-v1', artifactId: checkpointCopy.id, attempt: 1, identityHash: sourceCheckpoint.content.identityHash } }) })
+    taskService.recoverOrphanedTasks()
+    assert.equal(taskService.getTaskRecord(recoveredId).status, 'paused')
+    assert.equal((await call('workflows.get', { runId: recoveredId })).run.recoveryPending, true)
+    const beforeRecoveryCalls = requests.length
+    replies.push(review)
+    await call('workflows.resume', { runId: recoveredId })
+    const recoveredRun = await finish(recoveredId)
+    assert.equal(recoveredRun.status, 'paused', JSON.stringify(recoveredRun))
+    assert.equal(recoveredRun.reviewStatus, 'passed')
+    assert.equal(requests.length, beforeRecoveryCalls + 1, 'completed generation is reused; only missing reviewer runs')
+    assert.equal(JSON.parse(taskService.getTaskRecord(recoveredId).inputJson).attempt, 1)
+    assert.equal(artifacts.listArtifacts({ novelId, limit: 200 }).some(artifact => artifact.kind === 'creative_model_checkpoint'), false, 'internal checkpoints must not crowd the content version list')
+    assert.ok(artifacts.listArtifacts({ novelId, kind: 'creative_model_checkpoint' }).length > 0, 'technical checkpoint lookup remains available')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

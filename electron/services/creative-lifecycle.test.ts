@@ -5,6 +5,12 @@ const candidate = { status: 'paused', cancelRequested: false, draftStatus: 'revi
 const resume = { status: 'paused', active: false, committed: false, explicitApply: false, reviewPassed: true, reviewOnly: false, cancelRequested: false }
 
 describe('creative candidate lifecycle', () => {
+  it('continues a recovered checkpoint without treating a normal paused candidate as a restart', () => {
+    expect(resolveCreativeResumeAction({ ...resume, recoverable: true })).toBe('resume_checkpoint')
+    expect(resolveCreativeResumeAction({ ...resume, recoverable: true, active: true })).toBe('noop')
+    expect(resolveCreativeResumeAction({ ...resume, recoverable: true, status: 'cancelled' })).toBe('retry')
+    expect(resolveCreativeResumeAction({ ...resume, recoverable: true, cancelRequested: true })).toBe('noop')
+  })
   it('preserves a paused candidate on Resume and requires an explicit Apply', () => {
     expect(resolveCreativeResumeAction(resume)).toBe('noop')
     expect(resolveCreativeResumeAction({ ...resume, explicitApply: true })).toBe('apply')

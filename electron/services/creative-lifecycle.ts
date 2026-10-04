@@ -18,7 +18,8 @@ export function resolveCreativeResumeAction(input: {
   reviewPassed: boolean
   reviewOnly: boolean
   cancelRequested: boolean
-}): 'restore_commit' | 'noop' | 'apply' | 'retry' {
+  recoverable?: boolean
+}): 'restore_commit' | 'noop' | 'apply' | 'retry' | 'resume_checkpoint' {
   if (input.committed) return 'restore_commit'
   if (input.explicitApply) {
     if (input.cancelRequested || ['cancelled', 'cancel_requested'].includes(input.status)) throw new Error('创作任务已取消，不能应用原候选；请重新运行后复核新候选。')
@@ -26,7 +27,9 @@ export function resolveCreativeResumeAction(input: {
     if (input.reviewOnly || !input.reviewPassed) throw new Error('候选尚未通过审校，不能应用。')
     return 'apply'
   }
-  if (input.active || ['pending', 'running', 'success', 'paused'].includes(input.status)) return 'noop'
+  if (input.active || ['pending', 'running', 'success'].includes(input.status)) return 'noop'
+  if (!input.cancelRequested && input.recoverable && ['paused', 'failed', 'blocked'].includes(input.status)) return 'resume_checkpoint'
+  if (input.status === 'paused') return 'noop'
   if (input.status === 'cancel_requested') throw new Error('任务正在取消，请等待取消完成后重试。')
   if (!['failed', 'blocked', 'cancelled'].includes(input.status)) throw new Error('当前任务状态不能继续。')
   return 'retry'

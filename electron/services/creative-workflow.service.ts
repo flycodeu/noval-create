@@ -32,6 +32,9 @@ import { ATLAS_REVIEW_STAGES, captureFormalAtlasReview, captureFormalPlanningRev
 import { estimateTokens } from '../../src/shared/token-budget'
 import { assertCreativeCandidateApplicable, resolveCreativeResumeAction } from './creative-lifecycle'
 import { findAcceptedCreativeSuccessor, supersedeCreativeDraftAncestors } from './creative-candidate-lineage'
+import { scheduleChapterEmbeddingRefresh } from './embedding.service'
+import { createCreativeModelCheckpoint } from './creative-model-checkpoint'
+import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 
 interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; reviewModelConfigId?: number; reviewModelFingerprint?: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
 const active = new Set<number>()
@@ -299,7 +302,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
   if (state.reviewStatus !== 'passed' || draft.novelId !== input.novelId || review.novelId !== input.novelId || review.content.status !== 'passed' || review.content.effectiveContentHash !== draft.contentHash || review.content.effectiveArtifactId !== draft.id) throw new Error('当前候选未通过审校，不能应用。')
   const data = parseCreativeCandidate(frozen.request.stage, draft.content.output)
   const sqlite = getSqlite()
-  return sqlite.transaction(() => {
+  const committed = sqlite.transaction(() => {
     assertBase(frozen)
     const ids: number[] = []
     const savedStructureIds = new Map<object, number>()
@@ -345,6 +348,27 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
     updateArtifactLifecycle(draft.id, { status: 'committed', committedEntityIds: ids })
     return result
   }).immediate()
+  if (frozen.request.stage === 'chapter') {
+    for (const chapterId of committed.chapterIds) {
+      try { scheduleChapterEmbeddingRefresh(input.novelId, chapterId, frozen.modelConfigId) }
+      catch (error) { console.warn('[creative-workflow] 正文已保存，章节检索索引更新失败:', error) }
+    }
+  }
+  return committed
+}
+
+function modelCheckpoint(runId: number, input: StoredRequest) {
+  const identityHash = hashArtifactContent({ request: input.request, requestFingerprint: input.requestFingerprint,
+    contextVersion: input.contextVersion, modelFingerprint: input.modelFingerprint, reviewModelFingerprint: input.reviewModelFingerprint,
+    attempt: input.attempt, retryFeedback: input.retryFeedback, retryArtifactId: input.retryArtifactId })
+  return createCreativeModelCheckpoint({ novelId: input.request.novelId, runId, attempt: input.attempt,
+    contextVersion: input.contextVersion, identityHash,
+    assertCurrent: () => { assertActive(runId); assertBase(input) },
+    onSaved: checkpoint => {
+      const state = JSON.parse(getTaskRecord(runId)?.progressJson || '{}')
+      updateTask(runId, { progressJson: JSON.stringify({ ...state, modelCheckpoint: checkpoint, recoveryPending: false }) })
+    },
+  })
 }
 
 async function executeChapterReview(runId: number, input: StoredRequest): Promise<void> {
@@ -365,6 +389,7 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
     reviewFocus: [input.request.request, '只指出现有正文的问题与有效表达，不改写正文，不将风格偏好当作硬性错误。'],
     chatOpts: { ...buildChatOptionsFromRoute(route), maxTokens: Math.min(route.maxTokens, context.outputReserve) },
     onQualityTaskCreated: () => { assertActive(runId); assertBase(input) },
+    modelCheckpoint: modelCheckpoint(runId, input),
   })
   assertActive(runId); assertBase(input)
   if (getChapter(chapter.id)?.content !== content) throw new Error('评审期间正文已变化，请对当前版本重新评审。')
@@ -405,6 +430,7 @@ async function executeAssetReview(runId: number, input: StoredRequest): Promise<
     reviewFocus: [input.request.request, '只评审待评对象中指定ID的正式资料；上下文其他对象是依据，不是本次待评对象。不得改写或生成资料。', '逐项检查事实与推断边界；原句存在不代表支持该结论。未定字段不等于错误，不得要求凭空补全。计划不等于已发生。'],
     chatOpts: { ...buildChatOptionsFromRoute(route), maxTokens: Math.min(route.maxTokens, context.outputReserve) },
     onQualityTaskCreated: () => { assertActive(runId); assertBase(input) },
+    modelCheckpoint: modelCheckpoint(runId, input),
   })
   assertActive(runId); assertBase(input)
   if (hashArtifactContent(capture(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
@@ -451,6 +477,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     ]
     const generated = await generateGenericAssetDraft({ novelId, assetType: assetTypes[input.request.stage], title: `${CREATIVE_STAGE_LABELS[input.request.stage]} · 增量创作`, requirements, outputFormat: 'json', schemaHint: creativeSchemaHint(input.request.stage), modelConfigId: input.modelConfigId, parentArtifactId: sourceArtifactId, idempotencyKey: `creative:${runId}:${input.attempt}` }, {
       contextSummary: context.text, maxTokens: context.outputReserve, reviewModelConfigId: input.reviewModelConfigId, parentTaskId: runId,
+      modelCheckpoint: modelCheckpoint(runId, input),
       assertActive: () => { assertActive(runId); assertBase(input) },
       validateOutput: output => {
         assertActive(runId); assertBase(input)
@@ -580,7 +607,9 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
   const { task, input } = stored(runId, novelId)
   const committed = findArtifactByIdempotency(novelId, 'creative_commit', `creative:${runId}:apply`)
   const state = getCreativeRun(novelId, runId)!
-  const action = resolveCreativeResumeAction({ status: task.status || 'pending', active: active.has(runId), committed: Boolean(committed), explicitApply: options.applyReviewedCandidate === true, reviewPassed: state.reviewStatus === 'passed', reviewOnly: input.request.operation === 'review', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested) })
+  const recoverable = hasResumableWorkflowCheckpoint(task) && (state.recoveryPending === true
+    || ['review', 'rewrite', 'recheck'].includes(String(state.result?.reviewFailureStage || '')))
+  const action = resolveCreativeResumeAction({ status: task.status || 'pending', active: active.has(runId), committed: Boolean(committed), explicitApply: options.applyReviewedCandidate === true, reviewPassed: state.reviewStatus === 'passed', reviewOnly: input.request.operation === 'review', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested), recoverable })
   if (action === 'restore_commit' && committed) {
     updateTask(runId, { status: 'success', outputText: JSON.stringify(committed.content) })
     progress(runId, 'completed', '已恢复完成状态，未重复应用。', { result: committed.content as Record<string, unknown> })
@@ -593,6 +622,12 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
     updateTask(runId, { status: 'success', outputText: JSON.stringify(result) })
     progress(runId, 'completed', '已应用通过审校的候选。', { result })
   } else {
+    if (action === 'resume_checkpoint') {
+      updateTask(runId, { status: 'pending', controlJson: '{}', errorMessage: null })
+      progress(runId, 'context', '继续未完成步骤，复用已保存的模型响应。', { recoveryPending: false })
+      setImmediate(() => { void execute(runId, novelId) })
+      return getCreativeRun(novelId, runId)!
+    }
     input.retryFeedback = state.message || task.errorMessage || undefined
     input.retryArtifactId = state.artifactId
     input.attempt += 1

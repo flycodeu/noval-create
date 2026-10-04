@@ -45,7 +45,8 @@ export function canApplyRunCandidate(run: CreativeRun | null | undefined, artifa
     && artifact.reviewArtifactId && artifact.reviewArtifactId === run.reviewArtifactId
     && run.reviewStatus === 'passed' && run.status === 'paused' && run.step === 'needs_attention')
 }
-export function runRecoveryAction(run: CreativeRun): 'inspect' | 'retry' | null {
+export function runRecoveryAction(run: CreativeRun): 'inspect' | 'retry' | 'resume' | null {
+  if (run.recoveryPending && ['paused', 'failed'].includes(run.status)) return 'resume'
   if (hasSavedRunResult(run) || !['needs_attention', 'cancelled'].includes(run.step) && run.status !== 'failed') return null
   if (run.status === 'paused' && run.artifactId && run.reviewStatus === 'passed' && run.operation !== 'review') return 'inspect'
   return 'retry'
@@ -53,6 +54,7 @@ export function runRecoveryAction(run: CreativeRun): 'inspect' | 'retry' | null 
 
 export function runStatusLabel(run: CreativeRun): string {
   if (hasSavedRunResult(run)) return '已保存'
+  if (run.recoveryPending && ['paused', 'failed'].includes(run.status)) return '已暂停 · 可继续'
   if (run.result?.supersededByArtifactId) return '已有修订版'
   if (run.step === 'cancelled' || run.status === 'cancelled') return '已停止'
   if (run.result?.reviewFailureStage === 'contract') return '结构校验未通过'

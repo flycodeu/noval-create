@@ -1576,6 +1576,7 @@ export function recoverOrphanedTasks(): number {
         progressJson: JSON.stringify({
           ...progress,
           status: recoveredStatus,
+          ...(task.relatedEntityType === 'creative_workflow' ? { recoveryPending: resumable } : {}),
           message,
         }),
         errorMessage: recoveredStatus === 'paused' ? '应用重启后后台流程已暂停' : message,

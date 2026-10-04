@@ -33,7 +33,7 @@ export function RunProgress({ run, active, onCancel, onResume, onOpenResult, nam
   const current = steps.findIndex((step) => step.key === run.step)
   return <section className="author-run" aria-live="polite">
     <div className="author-section-heading"><div><span className="author-eyebrow">{runStatusLabel(run)} · {runChapterLabel(run)}</span><h2>{presentation.title}</h2></div>
-      <div className="author-heading-actions">{active && onCancel ? <Button size="small" onClick={onCancel}>停止</Button> : <>{run.status === 'paused' && !presentation.saved && onCancel && <Button size="small" onClick={onCancel}>停止候选</Button>}{recovery === 'inspect' && onOpenResult ? <Button size="small" onClick={onOpenResult}>查看候选</Button> : recovery === 'retry' && onResume ? <Button size="small" onClick={onResume}>重试任务</Button> : null}</>}</div>
+      <div className="author-heading-actions">{active && onCancel ? <Button size="small" onClick={onCancel}>停止</Button> : <>{run.status === 'paused' && !presentation.saved && onCancel && <Button size="small" onClick={onCancel}>{run.recoveryPending ? '停止任务' : '停止候选'}</Button>}{recovery === 'inspect' && onOpenResult ? <Button size="small" onClick={onOpenResult}>查看候选</Button> : (recovery === 'retry' || recovery === 'resume') && onResume ? <Button size="small" onClick={onResume}>{recovery === 'resume' ? '继续任务' : '重试任务'}</Button> : null}</>}</div>
     </div>
     {active && <div className="author-run__steps">{steps.map((step, i) => <span key={step.key} className={i < current ? 'is-done' : i === current ? 'is-current' : ''}>
       <i>{i + 1}</i>{step.label}</span>)}</div>}

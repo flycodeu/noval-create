@@ -62,7 +62,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const discussRelation = (item: StoryAtlasRelation) => {
     const subjectKind = snapshot?.entities.find(entity => entity.id === item.fromId)?.kind
     const stage = item.kind === 'route' ? 'map' : item.kind === 'membership' ? 'factions' : item.kind === 'presence' && subjectKind ? STAGES[subjectKind] : 'relationships'
-    generate(stage, `讨论并优化“${item.label}”关联（${item.id}），保留当前章位的已定事实，说明调整的具体依据。`)
+    generate(stage, `讨论并优化“${item.label}”关联（${item.id}），保留当前章位的已定事实，说明调整的具体依据。${item.kind === 'route' ? '只补这条已有通路的distanceKm、travelHours、travelMode，保留端点与通行状态。不把直线距离当道路里程，不把同日顺序当小时；结合已保存公里尺度、地形与交通提出合理行程设计。无可靠依据保持未知，新增数值先为候选，不改地图布局或人物事件。' : ''}`)
   }
   return <AuthorPage title="地点、人物与他们的联系">
     <div className="atlas-workspace-toolbar"><nav className="author-tabs atlas-primary-tabs" aria-label="世界与人物分区">{ATLAS_TABS.map(item => <button type="button" key={item.key} className={tab === item.key ? 'is-selected' : ''} aria-current={tab === item.key ? 'page' : undefined} onClick={() => switchTab(item.key)}>{item.label}</button>)}</nav><Button type="link" onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design?section=world'))}>世界规则</Button></div>
@@ -73,7 +73,11 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
         {geographic ? <GeographicAtlas snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : isGraph ? <WorldAtlasGraph key={tab} mode={tab} snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : <AtlasEntityLibrary key={tab} kind={activeKind} snapshot={snapshot} selectedId={selectedId} onSelect={select} onGenerate={generateTab} />}
         {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={selected.id} entity={selected} snapshot={snapshot} chapters={chapters} onOpen={openEntity} onEdit={() => setEditing(selected)} onDiscuss={() => discuss(selected)} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`}>{selectedId ? '资料可能尚未生效，或属于计划；可调整章位及“包含计划”后查看。' : '查看相关地点、人物与组织。'}</EmptyWork>}</section>}
       </div>
-      {snapshot.diagnostics.length > 0 && <details className="author-disclosure"><summary>资料提示 · {snapshot.diagnostics.length}</summary><ul>{snapshot.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.message}</li>)}</ul></details>}
+      {snapshot.diagnostics.length > 0 && <details className="author-disclosure"><summary>资料提示 · {snapshot.diagnostics.length}</summary><ul>{snapshot.diagnostics.map((item, index) => {
+        const edge = snapshot.relations.find(relation => item.entityIds.includes(relation.id))
+        const entity = snapshot.entities.find(entity => item.entityIds.includes(entity.id))
+        return <li key={`${item.code}:${index}`}>{item.message}{(edge || entity) && <Button type="link" size="small" onClick={() => edge ? setRelation(edge) : openEntity(entity!)}>查看资料</Button>}</li>
+      })}</ul></details>}
       <AtlasRelationDetails relation={relation} snapshot={snapshot} chapters={chapters} onClose={() => setRelation(null)} onOpen={openEntity} onDiscuss={discussRelation} />
       {editing && <AtlasEntityEditor key={editing.id} entity={editing} snapshot={snapshot} atChapter={atChapter} onClose={() => setEditing(null)} onSaved={() => void load()} />}
     </>}

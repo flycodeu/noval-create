@@ -65,6 +65,7 @@ export interface CreativeRun {
   artifactId?: string
   reviewArtifactId?: string
   reviewStatus?: string
+  recoveryPending?: boolean
   result?: Record<string, unknown>
   context?: Omit<CreativeContextReport, 'text'>
   events: Array<{ at: string; step: CreativeRun['step']; message: string }>

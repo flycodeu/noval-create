@@ -65,6 +65,7 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
     ...textFields('timeLabel', 'timeMode', 'timePrecision', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'evidenceQuote'),
     relativeDay: { type: 'number', description: '相对开篇零点的天数；负数为开篇前，不等于章序。缺乏依据时省略。' },
     sequenceInDay: { type: 'integer', minimum: 0, description: '同日已知先后顺序；仅有明确先后依据时填写。' },
+    timeOfDayMinutes: { type: 'integer', minimum: 0, maximum: 1439, description: '原文明示精确时分或作者已定时分时才填写距当日零时的分钟数，须保留evidenceQuote依据。早晨、前夜等模糊时间及sequenceInDay不可换算；未知省略。' },
     chronologyOrder: { type: 'integer', minimum: 1, description: '当前小说中有依据的事件发生先后序号，可跨日期和章位；只表示先后，不表示天数、具体日期或叙述顺序。未知时省略，不从旧sortOrder或timeSortValue推断。' },
     timeSortValue: { type: 'number' },
   }, additionalProperties: true },

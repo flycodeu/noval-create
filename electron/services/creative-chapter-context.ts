@@ -14,6 +14,7 @@ import { validateChapterContractDelivery } from './chapter-contract-validator.se
 import { listSceneContracts } from './endgame-asset.service'
 import { requireArtifact } from './artifact.service'
 import { resolveProsePolicyMaterial } from './prose-operation.service'
+import { creativeChapterRecallQuery, recallCreativeChapterSources } from './creative-chapter-recall'
 import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
@@ -288,6 +289,12 @@ export async function compileCreativeChapterContext(
       else omitted.push(`${source.key}:${source.reason}`)
     }
   }
+  const recalled = await recallCreativeChapterSources({ novelId: input.novelId, chapterNum, previousChapterId: previous?.id,
+    queryText: creativeChapterRecallQuery([context.chapter.title || '', context.chapter.outline || '',
+      ...context.sceneSnapshots.flatMap(scene => [scene.sceneGoal, scene.obstacle, scene.timeLocation]), input.request]),
+    chapters: chapterRows, policy, maxInputTokens: limits.maxInputTokens, modelConfigId: novel.modelConfigId || undefined })
+  sources.push(...recalled.sources)
+  omitted.push(...recalled.omitted)
   // Samples and chapter-scoped feedback pass through the same visibility and token selection as prose.
   const narrative = resolveProsePolicyMaterial(input.novelId, context.chapter.id)
   if (narrative.policy.policyVersion === 'reader-first-v1') {

@@ -391,20 +391,7 @@ function buildContinuityFragmentText(raw?: string | null): string {
   }
 }
 
-export async function generateChapterEmbeddings(
-  novelId: number,
-  chapterId: number,
-  modelConfigId?: number,
-): Promise<void> {
-  const db = getDb()
-  const chapter = db.select().from(chapters)
-    .where(eq(chapters.id, chapterId))
-    .all()[0]
-  if (!chapter) return
-  if (chapter.novelId !== novelId) {
-    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
-  }
-
+function chapterEmbeddingFragments(chapter: typeof chapters.$inferSelect) {
   const fragments: Array<{ type: string; text: string }> = []
 
   if (chapter.summary) {
@@ -430,6 +417,53 @@ export async function generateChapterEmbeddings(
   if (contentExcerpt) {
     fragments.push({ type: 'content_excerpt', text: contentExcerpt })
   }
+  return fragments
+}
+
+/** Save keyword recall before optional vector work; a restart cannot lose the readable index. */
+export function indexChapterForKeywordRecall(novelId: number, chapterId: number, modelConfigId?: number): void {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return
+  if (chapter.novelId !== novelId) throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  const fragments = chapterEmbeddingFragments(chapter)
+  const sourceHash = hashEmbeddingSource(chapterId, chapter.contextVersion || 1, fragments, resolveEmbeddingConfigCacheKey(modelConfigId))
+  const existing = new Map(db.select().from(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).all().map(row => [row.fragmentType, row]))
+  db.transaction(tx => {
+    tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
+    for (const fragment of fragments) {
+      const cached = existing.get(fragment.type)
+      const reusable = cached?.sourceHash === sourceHash ? cached : undefined
+      tx.insert(chapterEmbeddings).values({
+        novelId, chapterId, fragmentType: fragment.type, fragmentText: fragment.text, sourceHash,
+        contextVersion: chapter.contextVersion || 1, visibility: 'canon',
+        embeddingJson: reusable?.embeddingJson || null, modelId: reusable?.modelId || null,
+        dimensions: reusable?.dimensions || null, embeddingProfile: reusable?.embeddingProfile || null,
+      }).run()
+    }
+  })
+}
+
+export function scheduleChapterEmbeddingRefresh(novelId: number, chapterId: number, modelConfigId?: number): void {
+  indexChapterForKeywordRecall(novelId, chapterId, modelConfigId)
+  setImmediate(() => {
+    void generateChapterEmbeddings(novelId, chapterId, modelConfigId)
+      .catch(error => console.warn('[embedding] 章节向量更新失败，保留文字检索索引:', error))
+  })
+}
+
+export async function generateChapterEmbeddings(
+  novelId: number,
+  chapterId: number,
+  modelConfigId?: number,
+): Promise<void> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return
+  if (chapter.novelId !== novelId) {
+    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  }
+  const fragments = chapterEmbeddingFragments(chapter)
 
   if (fragments.length === 0) {
     db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
@@ -475,6 +509,11 @@ export async function generateChapterEmbeddings(
   ]))
 
   db.transaction((tx) => {
+    // Vector generation can outlive an edit or deletion. Re-read the source inside the commit.
+    const current = tx.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    if (!current || current.novelId !== novelId || sourceHash !== hashEmbeddingSource(
+      chapterId, current.contextVersion || 1, chapterEmbeddingFragments(current), resolveEmbeddingConfigCacheKey(modelConfigId),
+    )) return
     tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
     fragments.forEach((fragment) => {
       const reusable = reusableByFragmentType.get(fragment.type)

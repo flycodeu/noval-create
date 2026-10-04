@@ -18,6 +18,14 @@ function run(patch: Partial<CreativeRun> = {}): CreativeRun {
 }
 
 describe('creative run result presentation', () => {
+  it('shows an interrupted workflow as resumable rather than as a saved or rejected candidate', () => {
+    const recovered = run({ status: 'paused', step: 'reviewing', recoveryPending: true, artifactId: undefined, result: undefined })
+    expect(runRecoveryAction(recovered)).toBe('resume')
+    expect(runStatusLabel(recovered)).toBe('已暂停 · 可继续')
+    const html = renderToStaticMarkup(React.createElement(RunProgress, { run: recovered, active: false, onResume: () => {} }))
+    expect(html).toContain('继续任务')
+    expect(html).not.toContain('重试任务')
+  })
   it('uses confirmed writeback ids, not requested count, to describe what was saved', () => {
     const item = run({ count: 99 })
     expect(runStatusLabel(item)).toBe('已保存')

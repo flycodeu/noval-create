@@ -2,6 +2,7 @@ import { classifyQualityIssueLevels } from './quality-issue-policy'
 import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
+import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray } from '../../src/utils/text'
 import { safeParseJson } from '../utils/json'
@@ -40,6 +41,7 @@ export interface AssetQualityLoopOptions {
   maxRewritePasses?: number
   chatOpts?: Partial<ChatOptions>
   onQualityTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
+  modelCheckpoint?: ModelOutputCheckpoint
 }
 
 export interface AssetQualityLoopResult {
@@ -229,8 +231,15 @@ async function runNestedReviewTask(params: {
   chatOpts?: Partial<ChatOptions>
   stage: 'review' | 'rewrite'
   onTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
+  modelCheckpoint?: ModelOutputCheckpoint
 }): Promise<string> {
   const messages = [{ role: 'user' as const, content: params.prompt }]
+  const checkpointRequest: ModelOutputRequest = { phase: params.stage, prompt: params.prompt, modelConfigId: params.modelConfigId, chatOpts: params.chatOpts }
+  const cached = params.modelCheckpoint?.read(checkpointRequest)
+  if (cached) {
+    params.onTaskCreated?.(cached.taskId, params.stage)
+    return cached.output
+  }
 
   if (typeof params.parentTaskId !== 'number') {
     return runChatTask({
@@ -242,7 +251,10 @@ async function runNestedReviewTask(params: {
       messages,
       sender: params.sender,
       chatOpts: params.chatOpts,
-      onSuccess: (_output, taskId) => params.onTaskCreated?.(taskId, params.stage),
+      onSuccess: (output, taskId) => {
+        params.modelCheckpoint?.save(checkpointRequest, output, taskId)
+        params.onTaskCreated?.(taskId, params.stage)
+      },
     })
   }
 
@@ -261,7 +273,7 @@ async function runNestedReviewTask(params: {
   updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
 
   try {
-    return await executeChatTask(childTaskId, {
+    const output = await executeChatTask(childTaskId, {
       type: 'review',
       novelId: params.novelId,
       modelConfigId: params.modelConfigId,
@@ -272,6 +284,8 @@ async function runNestedReviewTask(params: {
       chatOpts: params.chatOpts,
       sender: params.sender,
     })
+    params.modelCheckpoint?.save(checkpointRequest, output, childTaskId)
+    return output
   } finally {
     updateTask(params.parentTaskId, { currentChildTaskId: null })
   }
@@ -299,6 +313,7 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
     chatOpts: options.chatOpts,
     stage: 'review',
     onTaskCreated: options.onQualityTaskCreated,
+    modelCheckpoint: options.modelCheckpoint,
   })
 
   return parseAssetReviewResult(raw, options.generatedOutput, options.narrativePolicyVersion)
@@ -331,6 +346,7 @@ export async function rewriteGeneratedAsset(
     chatOpts: options.rewriteChatOpts ?? options.chatOpts,
     stage: 'rewrite',
     onTaskCreated: options.onQualityTaskCreated,
+    modelCheckpoint: options.modelCheckpoint,
   })
 }
 

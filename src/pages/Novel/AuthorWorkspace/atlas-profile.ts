@@ -50,6 +50,7 @@ export function resolveAtlasReference(key: string, value: unknown, entities: Sto
   return entities.find(item => item.id === id || kind && item.id === `${kind}:${id}`)
 }
 export function atlasScalarText(key: string, value: unknown, entities: StoryAtlasEntity[], chapters: Array<{ id: number; chapterNum: number }>, positions: Array<{ id: string; title: string }> = []): string {
+  if (key === 'timeOfDayMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 1440) return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
   if (['lastProgressChapterId', 'chapterStartId', 'chapterEndId'].includes(key)) return chapters.find(item => item.id === Number(value)) ? `第 ${chapters.find(item => item.id === Number(value))!.chapterNum} 章` : '关联章节不可用'
   if (key === 'positionId' || key === 'reportsToPositionId') return positions.find(item => item.id === String(value))?.title || '关联岗位尚未明确'
   const reference = resolveAtlasReference(key, value, entities)

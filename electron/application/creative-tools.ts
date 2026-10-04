@@ -73,7 +73,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   add('workflows.get', '读取创作进度', '返回步骤、模型ID、阶段事件、候选和评审引用、应用结果；省略runId返回最近任务。MCP断开不会停止任务。', { novelId: number, runId: number }, ['novelId'], 'read', input => ({ run: workflow.getCreativeRun(Number(input.novelId), input.runId as number | undefined) }))
   add('workflows.list', '创作历史', '最近30次创作任务。草稿与历史存数据库，不自动导出文件。', { novelId: number }, ['novelId'], 'read', input => ({ runs: workflow.listCreativeRuns(Number(input.novelId)) }))
   add('workflows.cancel', '取消创作', '取消模型请求和后续应用，保留已保存成果。', { novelId: number, runId: number }, ['novelId', 'runId'], 'draft_write', input => ({ run: workflow.cancelCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
-  add('workflows.resume', '继续创作', '失败任务在资料未变化时有限重试；已通过审校、等待确认的候选保持暂停，不自动保存。应用候选须明确调用workflows.apply。输入变化请新建任务。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => ({ run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
+  add('workflows.resume', '继续创作', '中断任务在资料与模型未变化时复用已完成响应，继续未完成步骤；未通过候选有限重试。等待确认的候选保持暂停。应用须调用workflows.apply。输入变化请新建任务。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => ({ run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
   add('workflows.apply', '应用已审校版本', '应用本任务通过审校的候选，不再调用模型；重复调用返回已完成结果。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => {
     const run = workflow.getCreativeRun(Number(input.novelId), Number(input.runId))
     if (run?.operation === 'review') throw new Error('仅评审报告不能作为正文应用。请根据报告另开修订任务。')

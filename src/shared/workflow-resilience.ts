@@ -1,4 +1,5 @@
 export const RESUMABLE_WORKFLOW_TYPES = [
+  'planning_draft',
   'map_auto_generate',
   'world_rules_auto_generate',
   'faction_auto_generate',
@@ -62,6 +63,14 @@ export function hasResumableWorkflowCheckpoint(task: WorkflowResumeTaskLike): bo
   const progress = parseProgressRecord(task.progressJson)
   if (progress.completed === true) {
     return false
+  }
+
+  if (task.type === 'planning_draft') {
+    const checkpoint = progress.modelCheckpoint as Record<string, unknown> | undefined
+    return Boolean(checkpoint && checkpoint.schemaVersion === 'creative-model-checkpoint-v1'
+      && typeof checkpoint.artifactId === 'string' && checkpoint.artifactId.startsWith('art_')
+      && Number.isInteger(checkpoint.attempt) && Number(checkpoint.attempt) > 0
+      && typeof checkpoint.identityHash === 'string' && checkpoint.identityHash.length > 0)
   }
 
   if (task.type === 'world_rules_auto_generate') {
