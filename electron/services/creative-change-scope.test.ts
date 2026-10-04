@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { assertCreativeChangeScope, validateCreativeChangeScope } from './creative-change-scope'
 import type { CreativeChangeScope, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasValidationResult } from '../../src/shared/story-atlas'
+
+vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 4, chapterNum: 4, title: '夜试', outline: '只验证已有湿痕' }] }))
 
 const input = (changeScope?: CreativeChangeScope): CreativeWorkflowInput => ({ novelId: 1, stage: 'items', request: '整理两件已有实物', count: 2, idempotencyKey: 'fixture-scope', changeScope })
 const changes = [
@@ -41,6 +43,15 @@ describe('creative save scope', () => {
     for (const data of [{ chapters: [{ id: 3 }] }, { chapters: [{}] }, { chapters: [{ id: 4 }], volumes: [{}] }]) {
       expect(() => assertCreativeChangeScope(request, data)).toThrow(/超出|不能修改卷/u)
     }
+  })
+  it('locks the saved title and outline during chapter preparation, even after model review', () => {
+    const request = { ...input({ chapterIds: [4], preserveChapterFields: ['title', 'outline'] }), stage: 'outline' as const }
+    const original = { id: 4, title: '夜试', outline: '只验证已有湿痕' }
+    expect(() => assertCreativeChangeScope(request, { chapters: [original] })).not.toThrow()
+    expect(() => assertCreativeChangeScope(request, { chapters: [{ ...original, outline: '干断已证实有效' }] })).toThrow('原大纲必须保持不变')
+    expect(() => assertCreativeChangeScope(request, { chapters: [{ ...original, title: '已破案' }] })).toThrow('标题必须保持不变')
+    expect(() => validateCreativeChangeScope(input({ preserveChapterFields: ['outline'] }))).toThrow('必须指定章节')
+    expect(() => validateCreativeChangeScope(input({ chapterIds: [4], preserveChapterFields: ['outline', 'outline'] }))).toThrow('字段不得重复')
   })
   it('rejects malformed, duplicate and stage-inapplicable constraints before generation', () => {
     for (const value of [{}, { newEntityCount: -1 }, { newEntityCount: 1.5 }, { existingEntityIds: ['same', 'same'] }, { existingEntityIds: [' padded '] }, { chapterIds: [4] }, { unknown: true }]) {

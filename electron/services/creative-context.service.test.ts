@@ -194,6 +194,8 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.sources).toEqual(expect.arrayContaining(['chapter:24:target', 'chapter:23:handoff', 'fact:13:planning', 'fact:14:planning', 'volume:11:planning', 'part:12:planning']))
     expect(report.text).toContain('灯未点燃，试验尚未开始。')
     expect(report.text).not.toContain('先前正文'.repeat(501))
+    const handoff = JSON.parse(report.text.match(/<source id="chapter:23:handoff">\n(.*?)\n<\/source>/u)![1])
+    expect(handoff.endingExcerpt.length).toBeLessThanOrEqual(1000)
     expect(report.text).toContain('本章大纲是计划，不能视为已发生')
     expect(report.omittedSources).toContain('story_design:mainPlot')
     expect(report.estimatedTokens).toBeLessThanOrEqual(24000)
@@ -220,6 +222,24 @@ describe('creative project context budget and saved constraints', () => {
     expect(edge.sharedAttributes).toEqual({ sourceId: 'event:1', keys: ['eventTitle', 'evidenceQuote'] })
     expect(edge.attributes).toEqual({ eventResult: '证人自称绳子已断', protagonistAction: '保护刀口' })
     expect(report.text.match(/旧绳上有刀口。/gu)).toHaveLength(1)
+  })
+  it('does not repeat stale native event snapshots for every local-outline participant', async () => {
+    mock.chapters = [{ id: 24, chapterNum: 4, outline: '陈舟核对渡口账目' }]
+    mock.atlas.entities = [
+      { id: 'character:1', kind: 'character', name: '陈舟', attributes: {} },
+      { id: 'event:7', kind: 'event', name: '核对账目', summary: '现行记录', attributes: { eventResult: '账目仍须核查' } },
+    ]
+    mock.atlas.relations = [{
+      id: 'participation:timeline_events:7:1', kind: 'participation', fromId: 'character:1', toId: 'event:7', label: '参与',
+      attributes: { eventTitle: '旧标题', eventResult: '过时结论'.repeat(2000), notes: '整份旧事件快照'.repeat(2000) },
+    }]
+    const report = await compileCreativeContext({ ...input('outline'), request: '补齐第 4 章陈舟的场景安排', atChapter: 4 })
+    const edge = JSON.parse(report.text.match(/<source id="relation:participation:timeline_events:7:1">\n(.*?)\n<\/source>/u)![1])
+    expect(edge).toMatchObject({ fromId: 'character:1', toId: 'event:7', label: '参与' })
+    expect(edge.attributes).toBeUndefined()
+    expect(report.text).toContain('账目仍须核查')
+    expect(report.text).not.toContain('过时结论')
+    expect(report.omittedSources).toContain('participation:timeline_events:7:1:duplicated_event_snapshot')
   })
   it('loads scope-selected records and existing arrangements even when the request contains no names', async () => {
     mock.atlas.entities = [{ id: 'item:1', kind: 'item', name: '铜铃', attributes: { risk: '已有裂纹' } }]

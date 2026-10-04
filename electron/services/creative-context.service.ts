@@ -99,7 +99,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   }, true, 0)
   if (localOutline && previousChapter) add(`chapter:${previousChapter.id}:handoff`, {
     chapterNum: previousChapter.chapterNum, title: previousChapter.title, summary: previousChapter.summary,
-    endingExcerpt: previousChapter.content!.slice(-2000), usage: '前章已发生的交接；本章大纲是计划，不能视为已发生。节选仅覆盖正文结尾。',
+    endingExcerpt: previousChapter.content!.slice(-1000), usage: '前章已发生的交接；本章大纲是计划，不能视为已发生。节选仅覆盖正文结尾。',
   }, true, 0)
   if (input.stage === 'outline' || input.stage === 'story') {
     const sqlite = getSqlite()
@@ -150,7 +150,23 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
       omittedSources.push(`${entity.id}:non_geographic_fields`)
     } else add(entity.id, entity, true)
   }
+  const relevantEventIds = new Set(atlas.entities.filter(entity => relevant.has(entity.id) && entity.kind === 'event').map(entity => entity.id))
   for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) {
+    // The native timeline adapter gives every participant a synthetic edge whose attributes
+    // are a full copy of the event row. Later atlas edits can make that copy stale. The
+    // event itself is already a required source for a local outline, so retain only the
+    // participant identity/label here; explicit atlas participation edges are untouched.
+    const copiedEvent = localOutline && edge.kind === 'participation'
+      && /^participation:timeline_events:\d+:\d+$/u.test(edge.id)
+      && (relevantEventIds.has(edge.fromId) || relevantEventIds.has(edge.toId))
+    if (copiedEvent) {
+      add(`relation:${edge.id}`, {
+        id: edge.id, kind: edge.kind, fromId: edge.fromId, toId: edge.toId,
+        label: edge.label, status: edge.status, effectiveFromChapter: edge.effectiveFromChapter,
+      }, true)
+      omittedSources.push(`${edge.id}:duplicated_event_snapshot`)
+      continue
+    }
     // Legacy participation records copied the whole event into every participant edge.
     // Reference only byte-equivalent fields already present in this same context; differing
     // observations and participant-specific actions must remain intact.
