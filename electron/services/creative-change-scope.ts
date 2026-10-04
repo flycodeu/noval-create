@@ -3,6 +3,20 @@ import { validateJsonSchema } from '../../src/shared/tool-contracts'
 import type { StoryAtlasChange, StoryAtlasValidationResult } from '../../src/shared/story-atlas'
 import { listChapters } from './chapter.service'
 
+const chapterFieldLabels = {
+  title: '标题', outline: '原大纲', volumeId: '所属卷', partId: '所属单元', targetWords: '目标字数',
+  allowedFactIds: '可用信息点', revealedFactIds: '本章揭示信息点',
+} as const
+
+function savedChapterField(chapter: ReturnType<typeof listChapters>[number], field: keyof typeof chapterFieldLabels): unknown {
+  if (field === 'allowedFactIds' || field === 'revealedFactIds') {
+    const value = JSON.parse(chapter[field === 'allowedFactIds' ? 'allowedFactIdsJson' : 'revealedFactIdsJson'] || '[]') as unknown
+    if (!Array.isArray(value)) throw new Error('已有章节的信息点数据格式错误。')
+    return value
+  }
+  return chapter[field]
+}
+
 export function validateCreativeChangeScope(input: CreativeWorkflowInput): void {
   if (input.changeScope === undefined) return
   const result = validateJsonSchema(input.changeScope, CREATIVE_CHANGE_SCOPE_SCHEMA)
@@ -31,7 +45,10 @@ export function assertCreativeChangeScope(input: CreativeWorkflowInput, data: Re
       if (chapter.id === undefined || !scope.chapterIds.includes(chapter.id)) throw new Error(`章节 ${chapter.id ?? '新增章节'} 超出本次保存范围。`)
       for (const field of scope.preserveChapterFields || []) {
         const current = existing?.get(chapter.id)
-        if (!current || (chapter as Record<string, unknown>)[field] !== current[field]) throw new Error(`第 ${current?.chapterNum || chapter.id} 章的${field === 'title' ? '标题' : '原大纲'}必须保持不变。`)
+        const proposed = (chapter as Record<string, unknown>)[field]
+        if (!current || (proposed !== undefined && JSON.stringify(proposed) !== JSON.stringify(savedChapterField(current, field)))) {
+          throw new Error(`第 ${current?.chapterNum || chapter.id} 章的${chapterFieldLabels[field]}必须保持不变。`)
+        }
       }
     }
     return

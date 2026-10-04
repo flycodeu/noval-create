@@ -148,7 +148,9 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
         attributes: Object.fromEntries(Object.entries(entity.attributes).filter(([key]) => ['geography', 'locationType', 'nodeType'].includes(key))),
       }, true)
       omittedSources.push(`${entity.id}:non_geographic_fields`)
-    } else add(entity.id, entity, true)
+    // Provenance is kept on the saved record for audit. It is not a narrative fact and can
+    // contain long workflow notes that consume the local planning window without helping a scene.
+    } else add(entity.id, { ...entity, source: undefined }, true)
   }
   const relevantEventIds = new Set(atlas.entities.filter(entity => relevant.has(entity.id) && entity.kind === 'event').map(entity => entity.id))
   for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) {
@@ -178,7 +180,9 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
       if (event && original !== undefined && JSON.stringify(value) === JSON.stringify(original)) { shared.push(key); return false }
       return true
     }))
-    add(`relation:${edge.id}`, shared.length ? { ...edge, attributes, sharedAttributes: { sourceId: event!.id, keys: shared } } : edge, true)
+    add(`relation:${edge.id}`, shared.length
+      ? { ...edge, source: undefined, attributes, sharedAttributes: { sourceId: event!.id, keys: shared } }
+      : { ...edge, source: undefined }, true)
   }
   // Compact optional catalog is selected before optional full entities. Large projects can omit names
   // explicitly instead of blocking every local task on an ever-growing mandatory global directory.

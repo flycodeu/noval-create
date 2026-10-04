@@ -26,7 +26,7 @@ export interface CreativeChangeScope {
   newEntityCount?: number
   allowNewRelations?: boolean
   chapterIds?: number[]
-  preserveChapterFields?: Array<'title' | 'outline'>
+  preserveChapterFields?: Array<'title' | 'outline' | 'volumeId' | 'partId' | 'targetWords' | 'allowedFactIds' | 'revealedFactIds'>
 }
 export const CREATIVE_CHANGE_SCOPE_SCHEMA: AgentToolJsonSchema = {
   type: 'object', additionalProperties: false, properties: {
@@ -35,7 +35,7 @@ export const CREATIVE_CHANGE_SCOPE_SCHEMA: AgentToolJsonSchema = {
     newEntityCount: { type: 'integer', minimum: 0, maximum: 50 },
     allowNewRelations: { type: 'boolean' },
     chapterIds: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'integer', minimum: 1 } },
-    preserveChapterFields: { type: 'array', minItems: 1, maxItems: 2, items: { enum: ['title', 'outline'] } },
+    preserveChapterFields: { type: 'array', minItems: 1, maxItems: 7, items: { enum: ['title', 'outline', 'volumeId', 'partId', 'targetWords', 'allowedFactIds', 'revealedFactIds'] } },
   },
 }
 export interface CreativeContextReport {

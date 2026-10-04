@@ -95,7 +95,8 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
       setAtChapter(nextChapter.chapterNum)
       if (readiness.ready) setRequest(`根据现有设定和前文，生成第 ${nextChapter.chapterNum} 章《${nextChapter.title || '未命名'}》候选，完成连续性与叙事评审。`)
       else {
-        if (readiness.chapterId) setChapterScope({ chapterIds: [readiness.chapterId], preserveChapterFields: ['title', 'outline'] })
+        setAutoApply(false)
+        if (readiness.chapterId) setChapterScope({ chapterIds: [readiness.chapterId], preserveChapterFields: ['title', 'outline', 'volumeId', 'partId', 'targetWords', 'allowedFactIds', 'revealedFactIds'] })
         setRequest(`仅补齐第 ${nextChapter.chapterNum} 章《${nextChapter.title || '未命名'}》的章节目标与完整场景安排；保留已有大纲、事实揭示边界和有效场景。需解决：${readiness.blockers.join('；')}。`)
       }
     } catch (cause) { setDataError(cause instanceof Error ? cause.message : '检查下一章准备情况失败') }
@@ -124,7 +125,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
           } catch { setDataError('修订目标格式不正确，请重新打开问题。') }
         }}>开始这一轮</Button>
       </div>
-      {chapterScope?.chapterIds?.length && <p className="author-composer__hint">本轮只修改第 {atChapter} 章的章节安排{chapterScope.preserveChapterFields?.length ? '，保留原章名与大纲' : ''}。</p>}
+      {chapterScope?.chapterIds?.length && <p className="author-composer__hint">本轮只修改第 {atChapter} 章的章节安排{chapterScope.preserveChapterFields?.length ? '，保留原章名、大纲、卷章位置与信息揭示' : ''}。</p>}
       {sourceArtifactId && <p className="author-composer__hint">正在修订所选候选</p>}
     </section>
     {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}

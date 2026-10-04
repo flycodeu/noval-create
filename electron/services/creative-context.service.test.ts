@@ -162,6 +162,17 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.omittedSources.some(source => source.startsWith('identities:'))).toBe(true)
     expect(report.estimatedTokens).toBeLessThanOrEqual(report.maxInputTokens)
   })
+  it('keeps narrative facts while excluding verbose import and review provenance from model context', async () => {
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', summary: '住在河边', attributes: {}, source: { kind: 'reviewed_model_canon', note: '候选SHA256与流程备注'.repeat(2000) } }]
+    mock.atlas.relations = [{ id: 'home', kind: 'presence', fromId: 'character:1', toId: 'location:1', label: '陈舟住在河边', attributes: { locationRole: 'residence' }, source: { kind: 'reviewed_model_canon', note: '来源文件和模型流程'.repeat(2000) } }]
+    mock.atlas.entities.push({ id: 'location:1', kind: 'location', name: '河边', attributes: {} })
+    const report = await compileCreativeContext({ ...input('outline'), request: '补齐第 4 章陈舟的场景安排', atChapter: 4 })
+    expect(report.sources).toContain('relation:home')
+    expect(report.text).toContain('陈舟住在河边')
+    expect(report.text).toContain('"locationRole":"residence"')
+    expect(report.text).not.toContain('候选SHA256与流程备注')
+    expect(report.text).not.toContain('来源文件和模型流程')
+  })
   it('reserves the actual existing prose size for a review and fails before exceeding a small model window', async () => {
     mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
     mock.chapters = [{ chapterNum: 1, content: '既有正文'.repeat(30_000) }]

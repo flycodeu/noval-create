@@ -3,7 +3,7 @@ import { assertCreativeChangeScope, validateCreativeChangeScope } from './creati
 import type { CreativeChangeScope, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasValidationResult } from '../../src/shared/story-atlas'
 
-vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 4, chapterNum: 4, title: '夜试', outline: '只验证已有湿痕' }] }))
+vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 4, chapterNum: 4, title: '夜试', outline: '只验证已有湿痕', volumeId: 11, partId: 12, targetWords: 3200, allowedFactIdsJson: '[28,29]', revealedFactIdsJson: '[]' }] }))
 
 const input = (changeScope?: CreativeChangeScope): CreativeWorkflowInput => ({ novelId: 1, stage: 'items', request: '整理两件已有实物', count: 2, idempotencyKey: 'fixture-scope', changeScope })
 const changes = [
@@ -52,6 +52,17 @@ describe('creative save scope', () => {
     expect(() => assertCreativeChangeScope(request, { chapters: [{ ...original, title: '已破案' }] })).toThrow('标题必须保持不变')
     expect(() => validateCreativeChangeScope(input({ preserveChapterFields: ['outline'] }))).toThrow('必须指定章节')
     expect(() => validateCreativeChangeScope(input({ chapterIds: [4], preserveChapterFields: ['outline', 'outline'] }))).toThrow('字段不得重复')
+  })
+  it('prevents a reviewed scene plan from silently moving the chapter or changing its fact boundary', () => {
+    const request = { ...input({ chapterIds: [4], preserveChapterFields: ['title', 'outline', 'volumeId', 'partId', 'targetWords', 'allowedFactIds', 'revealedFactIds'] }), stage: 'outline' as const }
+    const base = { id: 4, title: '夜试', outline: '只验证已有湿痕', volumeId: 11, partId: 12, targetWords: 3200, allowedFactIds: [28, 29], revealedFactIds: [] }
+    expect(() => assertCreativeChangeScope(request, { chapters: [base] })).not.toThrow()
+    for (const [field, changed] of [
+      ['volumeId', 14], ['partId', 15], ['targetWords', 3800], ['allowedFactIds', [28, 29, 30]], ['revealedFactIds', [30]],
+    ] as const) {
+      expect(() => assertCreativeChangeScope(request, { chapters: [{ ...base, [field]: changed }] })).toThrow('必须保持不变')
+    }
+    expect(() => assertCreativeChangeScope(request, { chapters: [{ id: 4, title: base.title, outline: base.outline }] })).not.toThrow()
   })
   it('rejects malformed, duplicate and stage-inapplicable constraints before generation', () => {
     for (const value of [{}, { newEntityCount: -1 }, { newEntityCount: 1.5 }, { existingEntityIds: ['same', 'same'] }, { existingEntityIds: [' padded '] }, { chapterIds: [4] }, { unknown: true }]) {
