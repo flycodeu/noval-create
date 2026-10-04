@@ -12,7 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { AssetReviewObservability, ModelAttempt, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
-import { hasResumableWorkflowCheckpoint } from '../../shared/workflow-resilience'
+import { hasPendingCreativeWorkflowCheckpoint, hasResumableWorkflowCheckpoint } from '../../shared/workflow-resilience'
 import { formatFailure } from '../../shared/task-labels'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
@@ -220,6 +220,7 @@ function isTaskRetryable(task: Task): boolean {
 }
 
 function isWorkflowResumable(task: Task): boolean {
+  if (task.type === 'planning_draft') return hasPendingCreativeWorkflowCheckpoint(task)
   return hasResumableWorkflowCheckpoint(task)
 }
 

@@ -2,6 +2,7 @@ import type { ProgressSink } from '../utils/progress-sink'
 import { desc, eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
+  hasPendingCreativeWorkflowCheckpoint,
   hasResumableWorkflowCheckpoint,
   RESUMABLE_WORKFLOW_TYPES as SHARED_RESUMABLE_WORKFLOW_TYPES,
 } from '../../src/shared/workflow-resilience'
@@ -1015,6 +1016,15 @@ export async function resumeWorkflowTask(taskId: number, sender?: ProgressSink) 
     throwUserFacingError('workflow.resumeUnsupported')
   }
 
+  if (task.type === 'planning_draft') {
+    if (!task.novelId || task.relatedEntityType !== 'creative_workflow' || !hasPendingCreativeWorkflowCheckpoint(task)) {
+      throwUserFacingError('workflow.resumeUnsupported')
+    }
+    const { resumeCreativeWorkflow } = await import('./creative-workflow.service')
+    resumeCreativeWorkflow(task.novelId, taskId)
+    return taskId
+  }
+
   if (task.type === 'map_auto_generate') {
     const progress = toMapStatus(taskId, task)
     updateTask(taskId, {
@@ -1053,4 +1063,3 @@ export async function resumeWorkflowTask(taskId: number, sender?: ProgressSink) 
 export const __testing = {
   runWorldRulesAutoGenerateWorkflow,
 }
-

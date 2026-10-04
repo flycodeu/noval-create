@@ -109,3 +109,11 @@ export function hasResumableWorkflowCheckpoint(task: WorkflowResumeTaskLike): bo
   return hasNumericCheckpoint(progress, 'resumeCursor', 'totalBatches', 'requestedCount', 'generatedCount')
     || hasArrayCheckpoint(progress, 'acceptedIds', 'warnings')
 }
+
+export function hasPendingCreativeWorkflowCheckpoint(task: WorkflowResumeTaskLike): boolean {
+  if (task.type !== 'planning_draft' || !hasResumableWorkflowCheckpoint(task)) return false
+  const progress = parseProgressRecord(task.progressJson)
+  const result = progress.result as Record<string, unknown> | undefined
+  return progress.recoveryPending === true
+    || ['review', 'rewrite', 'recheck'].includes(String(result?.reviewFailureStage || ''))
+}

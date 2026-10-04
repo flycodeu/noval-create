@@ -34,7 +34,7 @@ import { assertCreativeCandidateApplicable, resolveCreativeResumeAction } from '
 import { findAcceptedCreativeSuccessor, supersedeCreativeDraftAncestors } from './creative-candidate-lineage'
 import { scheduleChapterEmbeddingRefresh } from './embedding.service'
 import { createCreativeModelCheckpoint } from './creative-model-checkpoint'
-import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
+import { hasPendingCreativeWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 
 interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; reviewModelConfigId?: number; reviewModelFingerprint?: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
 const active = new Set<number>()
@@ -607,8 +607,7 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
   const { task, input } = stored(runId, novelId)
   const committed = findArtifactByIdempotency(novelId, 'creative_commit', `creative:${runId}:apply`)
   const state = getCreativeRun(novelId, runId)!
-  const recoverable = hasResumableWorkflowCheckpoint(task) && (state.recoveryPending === true
-    || ['review', 'rewrite', 'recheck'].includes(String(state.result?.reviewFailureStage || '')))
+  const recoverable = hasPendingCreativeWorkflowCheckpoint(task)
   const action = resolveCreativeResumeAction({ status: task.status || 'pending', active: active.has(runId), committed: Boolean(committed), explicitApply: options.applyReviewedCandidate === true, reviewPassed: state.reviewStatus === 'passed', reviewOnly: input.request.operation === 'review', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested), recoverable })
   if (action === 'restore_commit' && committed) {
     updateTask(runId, { status: 'success', outputText: JSON.stringify(committed.content) })
