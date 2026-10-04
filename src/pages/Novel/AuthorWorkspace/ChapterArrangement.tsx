@@ -6,6 +6,7 @@ import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { LoadFailure } from './shared'
 import { loadDocumentNames } from './document-references'
+import { chapterArrangementTarget } from './revision-target'
 
 export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: { chapter: Chapter; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
   const navigate = useNavigate()
@@ -45,7 +46,7 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: 
     finally { setSaving(false) }
   }
   return <div className="author-arrangement">
-    <div className="author-section-heading"><h2>第 {chapter.chapterNum} 章 · 写作安排</h2><Button onClick={() => navigate(buildWorkspaceRoute(chapter.novelId, `guide?${new URLSearchParams({ stage: 'outline', atChapter: String(chapter.chapterNum), count: '1', request: `只检查并完善第 ${chapter.chapterNum} 章（ID ${chapter.id}）的安排与场景，保留已定事实、有效场景和约束。` })}`))}>让 AI 完善本章安排</Button></div>
+    <div className="author-section-heading"><h2>第 {chapter.chapterNum} 章 · 写作安排</h2><Button disabled={dirty || saving} onClick={() => navigate(buildWorkspaceRoute(chapter.novelId, chapterArrangementTarget(chapter)))}>让 AI 完善本章安排</Button></div>
     {error && <LoadFailure message={error} retry={() => void load()} />}
     <section><div className="author-section-heading"><h3>完整大纲</h3><Button size="small" onClick={() => edit('outline', chapter.outline || '')}>编辑</Button></div><ContentDocument value={chapter.outline} /></section>
     {loading ? <Spin /> : <>

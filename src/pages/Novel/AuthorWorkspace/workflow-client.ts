@@ -20,10 +20,12 @@ export function useCreativeWorkflow(novelId: number) {
   const [submitting, setSubmitting] = useState(false)
   const alive = useRef(true)
   const requestEpoch = useRef(0)
+  const mutationEpoch = useRef(0)
+  const mutationInProgress = useRef(false)
   const refreshInProgress = useRef(false)
   const notifiedRun = useRef<string | null>(null)
   const refresh = useCallback(async (runId?: number) => {
-    if (refreshInProgress.current) return null
+    if (refreshInProgress.current || mutationInProgress.current) return null
     refreshInProgress.current = true
     const epoch = ++requestEpoch.current
     try {
@@ -39,6 +41,9 @@ export function useCreativeWorkflow(novelId: number) {
 
   useEffect(() => {
     alive.current = true
+    mutationInProgress.current = false
+    setSubmitting(false)
+    setError('')
     setRun(null)
     let stopped = false
     let timer: number | undefined
@@ -47,7 +52,7 @@ export function useCreativeWorkflow(novelId: number) {
       if (!stopped) timer = window.setTimeout(() => { void poll() }, isRunActive(next) ? 1600 : 5000)
     }
     void poll()
-    return () => { stopped = true; alive.current = false; requestEpoch.current += 1; window.clearTimeout(timer) }
+    return () => { stopped = true; alive.current = false; requestEpoch.current += 1; mutationEpoch.current += 1; mutationInProgress.current = false; window.clearTimeout(timer) }
   }, [refresh])
 
   useEffect(() => {
@@ -59,6 +64,10 @@ export function useCreativeWorkflow(novelId: number) {
   }, [run])
 
   const start = useCallback(async (input: Omit<CreativeWorkflowInput, 'novelId' | 'idempotencyKey'>) => {
+    if (mutationInProgress.current) return null
+    const epoch = ++mutationEpoch.current
+    mutationInProgress.current = true
+    requestEpoch.current += 1
     setSubmitting(true)
     setError('')
     try {
@@ -66,30 +75,38 @@ export function useCreativeWorkflow(novelId: number) {
         ...input, novelId, idempotencyKey: `author:${novelId}:${crypto.randomUUID()}`,
       })
       const next = result.run
-      if (alive.current) setRun(next)
+      if (alive.current && epoch === mutationEpoch.current) setRun(next)
       return next
     } catch (cause) {
-      if (alive.current) setError(cause instanceof Error ? cause.message : '启动创作任务失败')
+      if (alive.current && epoch === mutationEpoch.current) setError(cause instanceof Error ? cause.message : '启动创作任务失败')
       return null
-    } finally { if (alive.current) setSubmitting(false) }
+    } finally { if (alive.current && epoch === mutationEpoch.current) { mutationInProgress.current = false; setSubmitting(false) } }
   }, [novelId])
 
   const control = useCallback(async (action: 'cancel' | 'resume') => {
-    if (!run) return
+    if (!run || mutationInProgress.current) return
+    const epoch = ++mutationEpoch.current
+    mutationInProgress.current = true
+    requestEpoch.current += 1
     setSubmitting(true)
     try {
-      await callAuthorTool(`novelforge.workflows.${action}`, { novelId, runId: run.runId })
-      await refresh(run.runId)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '任务操作失败') }
-    finally { setSubmitting(false) }
-  }, [novelId, refresh, run])
+      const result = await callAuthorTool<{ run: CreativeRun }>(`novelforge.workflows.${action}`, { novelId, runId: run.runId })
+      if (!alive.current || epoch !== mutationEpoch.current) return
+      setRun(result.run); setError('')
+    } catch (cause) { if (alive.current && epoch === mutationEpoch.current) setError(cause instanceof Error ? cause.message : '任务操作失败') }
+    finally { if (alive.current && epoch === mutationEpoch.current) { mutationInProgress.current = false; setSubmitting(false) } }
+  }, [novelId, run])
   const review = useCallback(async (chapterId: number, request: string) => {
+    if (mutationInProgress.current) return
+    const epoch = ++mutationEpoch.current
+    mutationInProgress.current = true
+    requestEpoch.current += 1
     setSubmitting(true); setError('')
     try {
       const result = await callAuthorTool<{ run: CreativeRun }>('novelforge.chapters.review', { novelId, chapterId, request, idempotencyKey: `author-review:${novelId}:${crypto.randomUUID()}` })
-      if (alive.current) setRun(result.run)
-    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '启动章节评审失败') }
-    finally { if (alive.current) setSubmitting(false) }
+      if (alive.current && epoch === mutationEpoch.current) setRun(result.run)
+    } catch (cause) { if (alive.current && epoch === mutationEpoch.current) setError(cause instanceof Error ? cause.message : '启动章节评审失败') }
+    finally { if (alive.current && epoch === mutationEpoch.current) { mutationInProgress.current = false; setSubmitting(false) } }
   }, [novelId])
   return { run, error, submitting, active: isRunActive(run), start, review, refresh, control }
 }

@@ -63,6 +63,12 @@ export function selectCreativePlanningAtlas(atlas: Atlas, input: {
   const seeds = new Set(atlas.entities.filter(entity => namedAtlasEntity(input.request, entity)).map(entity => entity.id))
   for (const edge of namedEdges) { seeds.add(edge.fromId); seeds.add(edge.toId) }
   const chapterScoped = isCreativeChapterScopedRequest(input.request)
+  if (input.stage === 'outline' && chapterScoped) {
+    // A correction can name only one participant. The saved chapter and preceding handoff
+    // still establish its other participants and physical scene; explicit names do not replace them.
+    const scene = `${input.anchorText || ''}\n${input.fallbackText || ''}`
+    for (const entity of atlas.entities) if (namedAtlasEntity(scene, entity)) seeds.add(entity.id)
+  }
   if (!seeds.size && !globalStage) {
     const kind = ({ characters: 'character', relationships: 'character', items: 'item', factions: 'faction' } as Record<string, string>)[input.stage]
     const anchor = input.anchorText || input.fallbackText || ''

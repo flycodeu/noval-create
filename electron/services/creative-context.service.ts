@@ -15,12 +15,59 @@ import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
   if (input.atChapter !== undefined && !(input.stage === 'chapter' && input.atChapter === 0)) return input.atChapter
-  const writtenThrough = listChapters(input.novelId).filter(chapter => chapter.content?.trim()).reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0)
+  const chapters = listChapters(input.novelId)
+  if (input.stage === 'outline' && input.changeScope?.chapterIds?.length === 1) {
+    const chapter = chapters.find(row => row.id === input.changeScope!.chapterIds![0])
+    if (!chapter) throw new Error(`章节 ${input.changeScope.chapterIds[0]} 不属于当前项目。`)
+    return chapter.chapterNum
+  }
+  const writtenThrough = chapters.filter(chapter => chapter.content?.trim()).reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0)
   return input.stage === 'chapter' ? writtenThrough + 1 : writtenThrough
 }
 
+/** A handoff is an excerpt, not a newly composed summary. Never cut through its last complete sentence. */
+function endingEvidence(content: string, preferredCharacters = 1000) {
+  const text = content.trimEnd()
+  if (text.length <= preferredCharacters) return { endingExcerpt: text, excerptStart: 0, omittedCharacters: 0 }
+  // Prefer complete paragraphs. A very long paragraph can use sentence boundaries, but an
+  // unbroken passage stays intact and is subject to the normal mandatory-source budget gate.
+  const paragraphStarts = [0, ...[...text.matchAll(/\r?\n+/gu)].map(match => match.index! + match[0].length)]
+  let start = paragraphStarts.find(index => text.length - index <= preferredCharacters)
+  if (start === undefined) start = [...text.matchAll(/[。！？.!?][”’"']*(?:\s*)/gu)]
+    .map(match => match.index! + match[0].length).find(index => index < text.length && text.length - index <= preferredCharacters)
+  start ??= 0
+  return { endingExcerpt: text.slice(start), excerptStart: start, omittedCharacters: start }
+}
+
+// These are adapter/storage bookkeeping fields. Business attributes, evidence, empty authored
+// values, chronology and planned-reveal constraints remain available in their original form.
+const atlasBookkeeping = new Set(['sortOrder', 'recordStatus'])
+function narrativeAttributes(attributes: Record<string, unknown> = {}) {
+  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))
+}
+
+/** A blank stored field is not a constraint or an instruction to erase a field on apply. */
+function populatedPlanningFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(populatedPlanningFields)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== null && field !== undefined && field !== '')
+    .map(([key, field]) => [key, populatedPlanningFields(field)]))
+}
+
+/** The independently reviewed formal snapshot is already budgeted; refer to identical whole values. */
+function formalSnapshotValues(snapshot: unknown) {
+  const values = new Map<string, string>()
+  const visit = (value: unknown, path: string) => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value)
+    if (text && estimateTokens(text) >= 100 && !values.has(text)) values.set(text, path)
+    if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) visit(item, `${path}[${JSON.stringify(key)}]`)
+  }
+  if (snapshot !== undefined) visit(snapshot, '$')
+  return values
+}
+
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
-export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0): Promise<CreativeContextReport> {
+export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0, formalReviewSnapshot?: unknown): Promise<CreativeContextReport> {
   validateCreativeChangeScope(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const novel = getNovel(input.novelId)
@@ -36,8 +83,9 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const stageOutputLimit = input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
   const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
   // Leave room for the candidate and instructions during the independent review request.
+  const formalSnapshotTokens = input.operation === 'review' && formalReviewSnapshot !== undefined ? estimateTokens(JSON.stringify(formalReviewSnapshot)) : 0
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
-    ? estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '') : formalReviewTokens
+    ? Math.max(formalSnapshotTokens, estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '')) : Math.max(formalReviewTokens, formalSnapshotTokens)
   const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve * 2 - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
   if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
   if (input.stage === 'chapter') return compileCreativeChapterContext(input, { maxInputTokens, outputReserve })
@@ -48,11 +96,21 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const sources: string[] = []
   const omittedSources: string[] = []
   const pieces: string[] = []
+  const snapshotValues = input.operation === 'review' ? formalSnapshotValues(formalReviewSnapshot) : new Map<string, string>()
   const candidates: Array<{ id: string; text: string; required: boolean; priority: number }> = []
   const seen = new Map<string, typeof candidates[number]>()
   let used = 0
+  const reviewedValue = (value: unknown): unknown => {
+    const original = typeof value === 'string' ? value : JSON.stringify(value)
+    const reference = snapshotValues.get(original)
+    if (reference) return { reviewSnapshotReference: reference, usage: '与本次审校对象中该路径的正式资料逐字相同；约束及证据以该值为准。' }
+    if (Array.isArray(value)) return value.map(reviewedValue)
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, reviewedValue(item)]))
+    return value
+  }
   const add = (id: string, value: unknown, required = false, priority = 50) => {
-    const text = typeof value === 'string' ? value.trim() : JSON.stringify(value)
+    const projected = snapshotValues.size ? reviewedValue(value) : value
+    const text = typeof projected === 'string' ? projected.trim() : JSON.stringify(projected)
     if (!text || text === 'null') return
     // Equal values under different rule names are different constraints (e.g. two enabled prohibitions).
     const identity = `${id}\u0000${text}`
@@ -87,19 +145,21 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   }) || []
   if (targetChapter) add(`chapter:${targetChapter.id}:target`, {
     chapterNum: target, title: targetChapter.title, outline: targetChapter.outline, summary: targetChapter.summary,
+    volumeId: targetChapter.volumeId, partId: targetChapter.partId, targetWords: targetChapter.targetWords,
     allowedFactIdsJson: targetChapter.allowedFactIdsJson, revealedFactIdsJson: targetChapter.revealedFactIdsJson,
   }, localOutline || isCreativeChapterScopedRequest(input.request), 0)
   for (const chapter of scopedChapters) if (chapter.id !== targetChapter?.id) add(`chapter:${chapter.id}:target`, {
     chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary,
+    volumeId: chapter.volumeId, partId: chapter.partId, targetWords: chapter.targetWords,
     allowedFactIdsJson: chapter.allowedFactIdsJson, revealedFactIdsJson: chapter.revealedFactIdsJson,
   }, true, 0)
   const plannedChapters = localOutline ? [...new Map([...(targetChapter ? [targetChapter] : []), ...scopedChapters].map(chapter => [chapter.id, chapter])).values()] : []
-  for (const chapter of plannedChapters) add(`chapter:${chapter.id}:arrangement`, {
+  for (const chapter of plannedChapters) add(`chapter:${chapter.id}:arrangement`, populatedPlanningFields({
     chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id),
-  }, true, 0)
+  }), true, 0)
   if (localOutline && previousChapter) add(`chapter:${previousChapter.id}:handoff`, {
     chapterNum: previousChapter.chapterNum, title: previousChapter.title, summary: previousChapter.summary,
-    endingExcerpt: previousChapter.content!.slice(-1000), usage: '前章已发生的交接；本章大纲是计划，不能视为已发生。节选仅覆盖正文结尾。',
+    ...endingEvidence(previousChapter.content!), usage: '前章已发生的交接；本章大纲是计划，不能视为已发生。节选仅覆盖正文结尾，省略范围不表示此前没有发生其他事情。',
   }, true, 0)
   if (input.stage === 'outline' || input.stage === 'story') {
     const sqlite = getSqlite()
@@ -127,7 +187,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
             || Boolean(row.title && `${targetChapter?.outline || ''}\n${previousChapter?.summary || ''}`.includes(row.title))
         }
       }
-      add(`${kind}:${row.id}:planning`, row, explicit || related, related ? 0 : 10)
+      add(`${kind}:${row.id}:planning`, kind === 'fact' ? populatedPlanningFields(row) : row, explicit || related, related ? 0 : 10)
     }
   }
   const stageKinds: Partial<Record<string, string>> = { characters: 'character', map: 'location', factions: 'faction', items: 'item', events: 'event' }
@@ -138,7 +198,8 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   }
   const selection = assetStage ? selectCreativeAssetAtlas(atlas, { ...selectionInput, stage: assetStage }) : selectCreativePlanningAtlas(atlas, { ...selectionInput, stage: input.stage })
   const { entityIds: relevant, relationIds: relevantEdges } = selection
-  add('atlas_coverage', creativeAtlasCoverage(atlas, relevant), true)
+  const coverage = creativeAtlasCoverage(atlas, relevant)
+  add('atlas_coverage', { ...coverage, selectedEntityIds: undefined }, true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
   for (const entity of ordered.filter(entity => relevant.has(entity.id))) {
     if (selection.constraintEntityIds.has(entity.id)) {
@@ -150,7 +211,10 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
       omittedSources.push(`${entity.id}:non_geographic_fields`)
     // Provenance is kept on the saved record for audit. It is not a narrative fact and can
     // contain long workflow notes that consume the local planning window without helping a scene.
-    } else add(entity.id, { ...entity, source: undefined }, true)
+    } else {
+      add(entity.id, { ...entity, source: undefined, attributes: narrativeAttributes(entity.attributes) }, true)
+      for (const key of Object.keys(entity.attributes || {})) if (atlasBookkeeping.has(key)) omittedSources.push(`${entity.id}:${key}:storage_metadata`)
+    }
   }
   const relevantEventIds = new Set(atlas.entities.filter(entity => relevant.has(entity.id) && entity.kind === 'event').map(entity => entity.id))
   for (const edge of atlas.relations.filter(edge => relevantEdges.has(edge.id))) {
@@ -175,14 +239,14 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     const event = localOutline && edge.kind === 'participation'
       ? atlas.entities.find(entity => relevant.has(entity.id) && entity.kind === 'event' && [edge.fromId, edge.toId].includes(entity.id)) : undefined
     const shared: string[] = []
-    const attributes = Object.fromEntries(Object.entries(edge.attributes || {}).filter(([key, value]) => {
+    const attributes = Object.fromEntries(Object.entries(narrativeAttributes(edge.attributes)).filter(([key, value]) => {
       const original = key === 'eventTitle' ? event?.name : key === 'eventSummary' ? event?.summary : event?.attributes[key]
       if (event && original !== undefined && JSON.stringify(value) === JSON.stringify(original)) { shared.push(key); return false }
       return true
     }))
     add(`relation:${edge.id}`, shared.length
       ? { ...edge, source: undefined, attributes, sharedAttributes: { sourceId: event!.id, keys: shared } }
-      : { ...edge, source: undefined }, true)
+      : { ...edge, source: undefined, attributes }, true)
   }
   // Compact optional catalog is selected before optional full entities. Large projects can omit names
   // explicitly instead of blocking every local task on an ever-growing mandatory global directory.
@@ -195,7 +259,9 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     omittedSources.push(`relation:${edge.id}:outside_${input.stage}_scope`)
   }
   for (const chapter of [...chapterRows].sort((a, b) => Math.abs(a.chapterNum - target) - Math.abs(b.chapterNum - target))) {
-    if (chapter.id !== targetChapter?.id) add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary }, false, 20 + Math.abs(chapter.chapterNum - target))
+    if (chapter.id === targetChapter?.id || scopedChapters.some(row => row.id === chapter.id)) continue
+    if (localOutline && chapter.id === previousChapter?.id) { omittedSources.push(`chapter:${chapter.id}:plan:superseded_by_written_handoff`); continue }
+    add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary }, false, 20 + Math.abs(chapter.chapterNum - target))
   }
   const ranked = [...candidates].sort((a, b) => Number(b.required) - Number(a.required) || a.priority - b.priority)
   for (const { id, text, required } of ranked) {

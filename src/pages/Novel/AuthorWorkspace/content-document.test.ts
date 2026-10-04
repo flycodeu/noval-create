@@ -26,6 +26,18 @@ describe('author document edits', () => {
     expect(html).toContain('已就绪')
     expect(html.match(/costly_victory/g)).toHaveLength(1)
   })
+  it('translates chapter placement and quality report fields seen in version comparisons', () => {
+    const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: {
+      volumeId: 148, partId: 162, targetWords: 3200, checks: [{ status: 'pass', message: '字段完整' }],
+      modelReview: { stage: 'accepted', review: { humanLanguageRepairs: ['删去重复对白'], languageRisks: ['形容重复'], rejectRequired: false, rewriteRequired: true, severity: 'low', topFixes: ['收紧结尾'] } },
+    } }))
+    for (const text of ['所属卷', '所属单元', '目标字数', '通过', '审校结果', '已通过', '表达修改建议', '语言风险', '需要退回', '需要修订', '严重程度', '低', '优先修改建议']) expect(html).toContain(text)
+    for (const text of ['volumeId', 'partId', 'targetWords', 'humanLanguageRepairs', 'languageRisks', 'rejectRequired', 'rewriteRequired', 'topFixes', '>pass<', '>low<', '资料类别']) expect(html).not.toContain(text)
+    const assetStage = renderToStaticMarkup(React.createElement(ContentDocument, { value: { stage: 'outline' } }))
+    expect(assetStage).toContain('资料类别')
+    expect(assetStage).toContain('卷章大纲')
+    expect(assetStage).not.toContain('审校结果')
+  })
   it('resolves structured references by type and retains full reveal instructions', () => {
     const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: { revealPayload: ['fact:28', '#29', '看见门锁后只能提出怀疑'], requiredForeshadowIds: [28], allowedFactIds: [28], characterIds: ['character:28'], knownChapterId: 28 }, names: { 'fact:28': '失踪者的去处', 'foreshadow:28': '桌上的旧钥匙', 'character:28': '陆闻', 'chapter:28': '第 4 章 · 干处走不得' } }))
     for (const text of ['失踪者的去处', '桌上的旧钥匙', '陆闻', '第 4 章 · 干处走不得', '看见门锁后只能提出怀疑', '关联信息点不可用']) expect(html).toContain(text)

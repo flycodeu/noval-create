@@ -2,7 +2,7 @@ import React from 'react'
 import { Button, Spin } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { CreativeRun } from '../../../shared/creative-workflow'
-import { runChapterLabel, runResultPresentation, runStatusLabel } from './run-presentation'
+import { runChapterLabel, runRecoveryAction, runResultPresentation, runStatusLabel } from './run-presentation'
 import './author-workspace.css'
 
 export function AuthorPage({ title, actions, children }: {
@@ -28,11 +28,12 @@ export function RunProgress({ run, active, onCancel, onResume, onOpenResult, nam
   run: CreativeRun; active: boolean; onCancel?: () => void; onResume?: () => void; onOpenResult?: () => void; names?: Record<string, string>
 }) {
   const presentation = runResultPresentation(run, undefined, names)
+  const recovery = runRecoveryAction(run)
   const steps = run.operation === 'review' ? RUN_STEPS.filter(step => ['context', 'reviewing'].includes(step.key)) : RUN_STEPS
   const current = steps.findIndex((step) => step.key === run.step)
   return <section className="author-run" aria-live="polite">
     <div className="author-section-heading"><div><span className="author-eyebrow">{runStatusLabel(run)} · {runChapterLabel(run)}</span><h2>{presentation.title}</h2></div>
-      {active && onCancel ? <Button size="small" onClick={onCancel}>停止</Button> : !presentation.saved && onResume && (run.step === 'needs_attention' || run.status === 'failed' || run.step === 'cancelled') ? <Button size="small" onClick={onResume}>{runStatusLabel(run) === '候选待确认' ? '确认保存候选' : '重试任务'}</Button> : null}
+      <div className="author-heading-actions">{active && onCancel ? <Button size="small" onClick={onCancel}>停止</Button> : <>{run.status === 'paused' && !presentation.saved && onCancel && <Button size="small" onClick={onCancel}>停止候选</Button>}{recovery === 'inspect' && onOpenResult ? <Button size="small" onClick={onOpenResult}>查看候选</Button> : recovery === 'retry' && onResume ? <Button size="small" onClick={onResume}>重试任务</Button> : null}</>}</div>
     </div>
     {active && <div className="author-run__steps">{steps.map((step, i) => <span key={step.key} className={i < current ? 'is-done' : i === current ? 'is-current' : ''}>
       <i>{i + 1}</i>{step.label}</span>)}</div>}

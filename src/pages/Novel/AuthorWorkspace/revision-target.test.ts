@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { CreativeRun } from '../../../shared/creative-workflow'
 import type { Chapter, RevisionTask } from '../../../types'
-import { artifactTarget, issueTarget, formalIssueReviewTarget } from './revision-target'
+import { artifactTarget, issueTarget, formalIssueReviewTarget, chapterArrangementTarget } from './revision-target'
 
 describe('targeted revisions', () => {
+  it('uses the same hard chapter protection when improving arrangements from the manuscript page', () => {
+    const params = new URLSearchParams(chapterArrangementTarget({ id: 685, chapterNum: 4, title: '干处走不得' }).split('?')[1])
+    expect(params.get('atChapter')).toBe('4')
+    expect(params.get('autoApply')).toBe('false')
+    expect(JSON.parse(params.get('changeScope')!)).toEqual({ chapterIds: [685], preserveChapterFields: ['title', 'outline', 'volumeId', 'partId', 'targetWords', 'allowedFactIds', 'revealedFactIds'] })
+    expect(params.get('request')).toContain('干处走不得')
+  })
   it('keeps an older issue attached to its chapter rather than the next chapter', () => {
     const params = new URLSearchParams(issueTarget({ id: 7, taskType: 'continuity', chapterId: 12, title: '旧章问题' } as RevisionTask, [{ id: 12, chapterNum: 2 }] as Chapter[]).split('?')[1])
     expect(params.get('atChapter')).toBe('2')
@@ -26,6 +33,9 @@ describe('targeted revisions', () => {
     const run = { stage: 'chapter', atChapter: 3, count: 1 } as CreativeRun
     expect(new URLSearchParams(artifactTarget(run, 'draft-1', '保留事件').split('?')[1]).get('sourceArtifactId')).toBe('draft-1')
     expect(new URLSearchParams(artifactTarget({ ...run, operation: 'review' }, 'report-1', '修正视角', { summary: '视角越界' }).split('?')[1]).get('sourceArtifactId')).toBeNull()
+    const fromCandidateReview = new URLSearchParams(artifactTarget({ ...run, artifactId: 'draft-1', reviewArtifactId: 'review-1' }, 'review-1', '修正视角').split('?')[1])
+    expect(fromCandidateReview.get('sourceArtifactId')).toBe('draft-1')
+    expect(fromCandidateReview.get('request')).not.toContain('根据候选及其评审 review-1')
   })
   it('hands real review evidence to the same chapter with a bounded request and refuses an unread report', () => {
     const run = { stage: 'chapter', atChapter: 3, count: 1, operation: 'review' } as CreativeRun

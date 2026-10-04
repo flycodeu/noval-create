@@ -10,6 +10,9 @@ export interface GenericAssetQualitySnapshot {
   review: AssetReviewResult
   rewrittenReview?: AssetReviewResult
   warnings: string[]
+  failureStage?: 'contract' | 'review' | 'rewrite' | 'recheck'
+  contractValidation?: { initialIssues: string[]; finalIssues: string[] }
+  initialModelReviewSkipped?: boolean
 }
 
 export interface GenericAssetDraftContent {
@@ -58,7 +61,7 @@ export interface ImportGenericAssetDraftResult {
 }
 
 export interface GenericAssetReviewCheck {
-  code: 'non_empty' | 'output_shape' | 'process_leak' | 'model_review' | 'context_freshness'
+  code: 'non_empty' | 'output_shape' | 'output_contract' | 'process_leak' | 'model_review' | 'context_freshness'
   status: 'pass' | 'warn' | 'fail'
   message: string
 }

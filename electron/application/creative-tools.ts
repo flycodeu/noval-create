@@ -52,7 +52,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       return { project: getNovel(id), source, idempotentReplay: false }
     }).immediate()
   })
-  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元；仅补章节安排时设置preserveChapterFields:["title","outline","volumeId","partId","targetWords","allowedFactIds","revealedFactIds"]锁定章名、大纲、卷章位置与信息揭示。正文前先用chapters.readiness检查；如缺章节合同或场景，先以outline阶段生成并复核本章安排，重要剧情建议autoApply=false并检查候选，再应用后独立启动chapter阶段，正文任务不会暗中保存大纲。默认自动应用通过审校的结果；失败保留候选。operation=review只复核正式正文或图谱资料，不改写；图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
+  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元；仅补章节安排时设置preserveChapterFields:["title","outline","volumeId","partId","targetWords","allowedFactIds","revealedFactIds"]锁定章名、大纲、卷章位置与信息揭示。正文前先用chapters.readiness检查；如缺章节合同或场景，先以outline阶段生成并复核本章安排，重要剧情建议autoApply=false并检查候选，再应用后独立启动chapter阶段，正文任务不会暗中保存大纲。默认自动应用通过审校的结果；失败保留候选。operation=review支持复核各阶段的正式资料，不改写；大纲复核必须用changeScope.chapterIds指定已有章节。图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
   add('chapters.readiness', '检查章节能否生成正文', '只读返回目标章缺失的章节合同与场景要求。ready=false时先运行outline阶段并应用本章安排，再启动chapter；不会生成或保存内容。', {
     novelId: number, atChapter: { type: 'integer', minimum: 1 },
   }, ['novelId', 'atChapter'], 'read', input => {
@@ -73,12 +73,12 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   add('workflows.get', '读取创作进度', '返回步骤、模型ID、阶段事件、候选和评审引用、应用结果；省略runId返回最近任务。MCP断开不会停止任务。', { novelId: number, runId: number }, ['novelId'], 'read', input => ({ run: workflow.getCreativeRun(Number(input.novelId), input.runId as number | undefined) }))
   add('workflows.list', '创作历史', '最近30次创作任务。草稿与历史存数据库，不自动导出文件。', { novelId: number }, ['novelId'], 'read', input => ({ runs: workflow.listCreativeRuns(Number(input.novelId)) }))
   add('workflows.cancel', '取消创作', '取消模型请求和后续应用，保留已保存成果。', { novelId: number, runId: number }, ['novelId', 'runId'], 'draft_write', input => ({ run: workflow.cancelCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
-  add('workflows.resume', '继续创作', '通过审校的候选直接应用；失败任务在资料未变化时有限重试。输入变化请新建任务。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => ({ run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
+  add('workflows.resume', '继续创作', '失败任务在资料未变化时有限重试；已通过审校、等待确认的候选保持暂停，不自动保存。应用候选须明确调用workflows.apply。输入变化请新建任务。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => ({ run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId)) }))
   add('workflows.apply', '应用已审校版本', '应用本任务通过审校的候选，不再调用模型；重复调用返回已完成结果。', { novelId: number, runId: number }, ['novelId', 'runId'], 'canonical_write', input => {
     const run = workflow.getCreativeRun(Number(input.novelId), Number(input.runId))
     if (run?.operation === 'review') throw new Error('仅评审报告不能作为正文应用。请根据报告另开修订任务。')
     if (run?.reviewStatus !== 'passed') throw new Error('候选尚未通过审校。')
-    return { run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId)) }
+    return { run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId), { applyReviewedCandidate: true }) }
   })
   add('context.preview', '预览上下文', '读取本次取用的事实、来源、省略项和预算，与创作共用编译器。', requestFields, ['novelId', 'stage', 'request'], 'read', async input => ({ context: await compileCreativeContext(input as unknown as CreativeWorkflowInput) }))
   add('atlas.query', '故事地图与人物关系', '按章位查询区域层级、人物特征、路线、关系、阵营、物品和事件。locationParentId用于下钻，默认排除未来计划。稳定ID用于增量扩展。', { novelId: number, atChapter: { type: 'integer', minimum: 0 }, locationParentId: { type: ['string', 'null'] }, focusEntityId: string, includePlanned: { type: 'boolean' } }, ['novelId'], 'read', input => ({ atlas: atlas.queryStoryAtlas(input as unknown as StoryAtlasQuery) }))

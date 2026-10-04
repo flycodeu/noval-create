@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { compileCreativeContext } from './creative-context.service'
+import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { creativeProjectSources } from './creative-chapter-context'
 import { queryStoryAtlas } from './story-atlas.service'
 import type { CreativeStage } from '../../src/shared/creative-workflow'
 
-const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, facts: [] as Array<Record<string, unknown>>, model: { maxTokens: 393216, maxContextTokens: 1048576 } }))
+const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, facts: [] as Array<Record<string, unknown>>, contract: {} as Record<string, unknown>, model: { maxTokens: 393216, maxContextTokens: 1048576 } }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ prepare: (sql: string) => ({ all: () => sql.includes('story_volumes') ? [{ id: 11, title: '渡口卷', summary: '卷概要' }] : sql.includes('story_parts') ? [{ id: 12, volumeId: 11, title: '渡船单元', summary: '单元概要' }] : [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }] }) }) }))
 vi.mock('./novel.service', () => ({ getNovel: () => mock.novel }))
 vi.mock('./chapter.service', () => ({ listChapters: () => mock.chapters }))
 vi.mock('./story-atlas.service', () => ({ queryStoryAtlas: vi.fn(() => mock.atlas) }))
 vi.mock('./model.service', () => ({ resolveModelRuntimeBudget: () => mock.model }))
 vi.mock('./artifact.service', () => ({ requireArtifact: () => mock.artifact }))
-vi.mock('./endgame-asset.service', () => ({ getChapterContract: () => ({ chapterGoal: '保留的章节目标' }), listSceneContracts: () => [{ sceneGoal: '保留的现场安排' }] }))
+vi.mock('./endgame-asset.service', () => ({ getChapterContract: () => ({ chapterGoal: '保留的章节目标', ...mock.contract }), listSceneContracts: () => [{ sceneGoal: '保留的现场安排' }] }))
 vi.mock('./creative-facts', () => ({ queryCreativeFacts: () => mock.facts }))
 
 describe('creative project context budget and saved constraints', () => {
@@ -20,6 +20,7 @@ describe('creative project context budget and saved constraints', () => {
     mock.atlas = { entities: [], relations: [] }; mock.chapters = []
     mock.facts = [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }]
     mock.model = { maxTokens: 393216, maxContextTokens: 1048576 }
+    mock.contract = {}
     mock.novel = {
       userBackground: '渡口故事', contextVersion: 1,
       worldRulesJson: JSON.stringify({ powerSystems: [{ name: '观灯', cost: '伤眼', limitations: '不能复生' }], writingConstraints: { extraRules: ['旅途需要时间'] }, hidden: '未登记秘密' }),
@@ -194,7 +195,7 @@ describe('creative project context budget and saved constraints', () => {
   it('keeps the previous ending and recent knowledge ahead of oversized optional global plots', async () => {
     mock.novel.settingsJson = JSON.stringify({ story_design: { main_plot: '远期长线'.repeat(30000) } })
     mock.chapters = [
-      { id: 23, chapterNum: 3, title: '验绳', summary: '灯未点燃', content: '先前正文'.repeat(3000) + '灯未点燃，试验尚未开始。' },
+      { id: 23, chapterNum: 3, title: '验绳', summary: '灯未点燃', content: '先前正文。\n'.repeat(3000) + '灯未点燃，试验尚未开始。' },
       { id: 24, chapterNum: 4, volumeId: 11, partId: 12, title: '夜试', outline: '观察干湿处差异', allowedFactIdsJson: '[14]', revealedFactIdsJson: '[14]' },
     ]
     mock.facts = [
@@ -207,6 +208,8 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.text).not.toContain('先前正文'.repeat(501))
     const handoff = JSON.parse(report.text.match(/<source id="chapter:23:handoff">\n(.*?)\n<\/source>/u)![1])
     expect(handoff.endingExcerpt.length).toBeLessThanOrEqual(1000)
+    expect(handoff.endingExcerpt.startsWith('先前正文。')).toBe(true)
+    expect(handoff.omittedCharacters).toBeGreaterThan(0)
     expect(report.text).toContain('本章大纲是计划，不能视为已发生')
     expect(report.omittedSources).toContain('story_design:mainPlot')
     expect(report.estimatedTokens).toBeLessThanOrEqual(24000)
@@ -278,5 +281,72 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.text).toContain('"travelHours":2')
     expect(report.text).toContain('"locationRole":"residence"')
     expect(report.text).toContain('location_current')
+  })
+  it('derives an omitted outline position from its single scoped chapter and preserves explicit global position zero', async () => {
+    mock.chapters = [
+      { id: 23, chapterNum: 3, content: '第三章实际交接。', summary: '试验尚未开始' },
+      { id: 24, chapterNum: 4, volumeId: 11, partId: 12, targetWords: 3200, outline: '试验' },
+    ]
+    const params = { ...input('outline'), request: '完善已有安排', changeScope: { chapterIds: [24] } }
+    const report = await compileCreativeContext(params)
+    expect(queryStoryAtlas).toHaveBeenCalledWith({ novelId: 1, atChapter: 4, includePlanned: true })
+    expect(report.sources).toContain('chapter:23:handoff')
+    expect(report.text).toContain('第三章实际交接。')
+    expect(report.text).toContain('"targetWords":3200')
+    expect(report.text).toContain('"partId":12')
+    expect(report.sources).not.toContain('chapter:23:plan')
+    expect(resolveCreativeChapterPosition({ ...params, atChapter: 0 })).toBe(0)
+    await expect(compileCreativeContext({ ...params, changeScope: { chapterIds: [999] } })).rejects.toThrow('不属于当前项目')
+  })
+  it('uses whole final paragraphs and preserves an unbroken mandatory passage instead of cutting evidence in half', async () => {
+    const ending = '完整的最后观察：灯仍未点燃。\n干布尚未落下，住客未经过湿处。'
+    mock.chapters = [
+      { id: 23, chapterNum: 3, content: '此前长段。'.repeat(1000) + '\n' + ending },
+      { id: 24, chapterNum: 4, outline: '做试验' },
+    ]
+    const params = { ...input('outline'), request: '补齐第4章', atChapter: 4 }
+    const report = await compileCreativeContext(params)
+    const handoff = JSON.parse(report.text.match(/<source id="chapter:23:handoff">\n(.*?)\n<\/source>/u)![1])
+    expect(handoff.endingExcerpt).toBe(ending)
+    expect(String(mock.chapters[0].content).slice(handoff.excerptStart)).toBe(ending)
+    mock.chapters[0].content = '不能截断的一条现场原句'.repeat(3000)
+    await expect(compileCreativeContext(params)).rejects.toThrow('必要资料 chapter:23:handoff 超出')
+  })
+  it('keeps all structured revision evidence while normalizing only JSON formatting', async () => {
+    const draft = { chapters: [{ id: 24, outline: '未点燃不等于不能点燃。\n试验必须有对照。', scenes: [{ resultState: '只记录可见观察，不确认成因。' }] }] }
+    mock.artifact.content = { schemaVersion: 'generic-asset-draft-v1', output: JSON.stringify(draft, null, 40) }
+    const report = await compileCreativeContext({ ...input('outline'), sourceArtifactId: 'candidate' })
+    const source = report.text.match(/<source id="revision:candidate">\n(.*?)\n<\/source>/u)![1]
+    expect(JSON.parse(source)).toEqual(draft)
+    expect(source).toBe(JSON.stringify(draft))
+  })
+  it('removes adapter bookkeeping and blank arrangement fields without dropping evidence or authored prohibitions', async () => {
+    mock.chapters = [{ id: 24, chapterNum: 4, outline: '陈舟查验现场' }]
+    mock.contract = { chapterGoal: null, forbiddenActionsJson: '["不可点燃"]', targetCharacterArcIdsJson: '[]' }
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', attributes: { sortOrder: 3, recordStatus: 'confirmed', evidenceQuote: '他没有点燃旧灯。', limitations: '不可凭光影确认成因。', customConstraint: { sortOrder: '作者指定顺序，须保留' } } }]
+    const report = await compileCreativeContext({ ...input('outline'), request: '补齐第4章陈舟的场景安排', atChapter: 4 })
+    expect(report.text).toContain('他没有点燃旧灯。')
+    expect(report.text).toContain('不可凭光影确认成因。')
+    expect(report.text).toContain('作者指定顺序，须保留')
+    expect(report.text).toContain('不可点燃')
+    expect(report.text).not.toContain('"chapterGoal":null')
+    expect(report.text).not.toContain('"recordStatus":"confirmed"')
+    expect(report.omittedSources).toContain('character:1:sortOrder:storage_metadata')
+  })
+  it('references identical formal-review values inside the budgeted snapshot and retains differing evidence', async () => {
+    const rule = '原有能力限制：不可以复生，借感会付出代价。'.repeat(80)
+    mock.novel.worldRulesJson = JSON.stringify({ powerSystems: [{ name: '观灯', limitations: rule }] })
+    const snapshot = { stage: 'world_rules', assets: { worldRules: { powerSystems: [{ name: '观灯', limitations: rule }] } } }
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', attributes: { abilityLimits: rule + '另有个人约束。' } }]
+    const params = { ...input('world_rules'), operation: 'review' as const, request: '核对陈舟的限制与世界规则' }
+    const report = await compileCreativeContext(params, undefined, undefined, 0, snapshot)
+    expect(report.sources).toContain('world_rules:powerSystems:0')
+    expect(report.text).toContain('reviewSnapshotReference')
+    expect(report.text).toContain('另有个人约束。')
+    const source = JSON.parse(report.text.match(/<source id="world_rules:powerSystems:0">\n(.*?)\n<\/source>/u)![1])
+    expect(source.reviewSnapshotReference).toBe('$["assets"]["worldRules"]["powerSystems"]["0"]')
+    expect(report.text.match(/原有能力限制/g)).toHaveLength(80)
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    await expect(compileCreativeContext(params, undefined, undefined, 0, { huge: rule.repeat(100) })).rejects.toThrow('窗口不足')
   })
 })

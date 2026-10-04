@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CreativeRun } from '../../../shared/creative-workflow'
 import { RunProgress } from './shared'
-import { hasSavedRunResult, runChapterLabel, runResultPresentation, runStatusLabel, formalReviewPresentation } from './run-presentation'
+import { canApplyRunCandidate, hasSavedRunResult, runChapterLabel, runRecoveryAction, runResultPresentation, runStatusLabel, formalReviewPresentation, reviewReportTitle } from './run-presentation'
 import { ContentDocument } from './ContentDocument'
 
 function run(patch: Partial<CreativeRun> = {}): CreativeRun {
@@ -45,7 +45,7 @@ describe('creative run result presentation', () => {
   it('renders formal asset reviews with Chinese labels and excludes execution metadata', () => {
     const reviewed = run({ operation: 'review', result: undefined })
     expect(runResultPresentation(reviewed).title).toBe('第 1 章 · 物品评审')
-    expect(runResultPresentation(reviewed).summary).toBe('评审通过，正式资料未修改。')
+    expect(runResultPresentation(reviewed).summary).toBe('模型评审通过，正式资料未修改。')
     const report = { schemaVersion: 'atlas-review-v1', status: 'passed', summary: '用途有据', contentHash: 'private-hash', context: { maxInputTokens: 24000 }, snapshot: { stage: 'items', atChapter: 1, entities: [{ id: 'item:1', kind: 'item', name: '薄册', summary: '记录观察' }] }, review: { summary: '内容符合原文' } }
     const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: formalReviewPresentation(report) }))
     expect(html).toContain('本次评审的正式资料')
@@ -53,6 +53,74 @@ describe('creative run result presentation', () => {
     expect(html).toContain('物品')
     expect(html).toContain('薄册')
     expect(html).not.toMatch(/snapshot|atChapter|items|private-hash|maxInputTokens/)
+  })
+
+  it('only offers apply for the current draft awaiting confirmation, never its report or a discarded version', () => {
+    const pending = run({ status: 'paused', step: 'needs_attention', result: undefined })
+    const draft = { id: 'draft-items', kind: 'generic_draft', status: 'reviewed' as const, reviewArtifactId: 'review-items' }
+    expect(canApplyRunCandidate(pending, draft)).toBe(true)
+    for (const artifact of [
+      { ...draft, id: 'review-items', kind: 'quality_report' },
+      { ...draft, id: 'older-draft' },
+      { ...draft, status: 'rejected' as const },
+      { ...draft, status: 'superseded' as const },
+      { ...draft, status: 'committed' as const },
+      { ...draft, reviewArtifactId: 'older-review' },
+    ]) expect(canApplyRunCandidate(pending, artifact)).toBe(false)
+    expect(canApplyRunCandidate(run(), draft)).toBe(false)
+    expect(canApplyRunCandidate({ ...pending, status: 'failed' }, draft)).toBe(false)
+    expect(canApplyRunCandidate({ ...pending, operation: 'review' }, draft)).toBe(false)
+    expect(canApplyRunCandidate({ ...pending, result: { supersededByArtifactId: 'newer-source-revision' } }, draft)).toBe(false)
+  })
+
+  it('routes a pending candidate to inspection, while stopped and failed tasks can retry', () => {
+    const pending = run({ status: 'paused', step: 'needs_attention', result: undefined })
+    expect(runRecoveryAction(pending)).toBe('inspect')
+    expect(runRecoveryAction({ ...pending, status: 'failed' })).toBe('retry')
+    expect(runRecoveryAction({ ...pending, status: 'cancelled', step: 'cancelled' })).toBe('retry')
+    expect(runRecoveryAction({ ...pending, status: 'failed', reviewStatus: 'needs_revision' })).toBe('retry')
+    expect(runRecoveryAction(run())).toBeNull()
+    const html = renderToStaticMarkup(React.createElement(RunProgress, { run: pending, active: false, onCancel: () => {}, onResume: () => {}, onOpenResult: () => {} }))
+    expect(html).toContain('查看候选')
+    expect(html).toContain('停止候选')
+    expect(html).toContain('模型评审通过')
+    expect(html).not.toContain('确认保存候选')
+    expect(html).not.toContain('重试任务')
+  })
+
+  it('does not present synthetic skipped review content as an actual model review', () => {
+    const report = { schemaVersion: 'generic-asset-review-v1', status: 'blocked', summary: '结构校验未通过', modelReview: {
+      stage: 'rejected', failureStage: 'contract', initialModelReviewSkipped: true,
+      review: { summary: '这不是实际模型返回的审校' }, contractValidation: { initialIssues: ['changes 缺失'], finalIssues: ['changes 仍缺失'] }, warnings: [],
+    } }
+    expect(reviewReportTitle(report)).toBe('结构校验未通过')
+    const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: formalReviewPresentation(report) }))
+    expect(html).toContain('首次结构问题')
+    expect(html).toContain('初次模型审校未执行')
+    expect(html).not.toContain('这不是实际模型返回的审校')
+    expect(html).not.toMatch(/failureStage|contractValidation|initialModelReviewSkipped/)
+    const blocked = run({ status: 'blocked', step: 'needs_attention', reviewStatus: 'needs_revision', result: { reviewFailureStage: 'contract' } })
+    expect(runStatusLabel(blocked)).toBe('结构校验未通过')
+    expect(runResultPresentation(blocked).title).toBe('物品 · 结构校验未通过')
+    expect(runResultPresentation(blocked).summary).not.toContain('模型评审通过')
+  })
+
+  it('renders formal background, rule and outline reports without provider metadata', () => {
+    const report = { schemaVersion: 'creative-assets-review-v1', status: 'passed', summary: '规则与已有正文一致', stage: 'world_rules', atChapter: 3,
+      snapshot: { stage: 'world_rules', atChapter: 3, worldRules: { commonSenseRules: ['干处阻断湿路'] } },
+      review: { summary: '本轮模型评审完成' }, contentHash: 'internal-hash', context: { maxInputTokens: 24000 } }
+    const html = renderToStaticMarkup(React.createElement(ContentDocument, { value: formalReviewPresentation(report) }))
+    expect(html).toContain('本次评审的正式资料')
+    expect(html).toContain('规则与限制')
+    expect(html).toContain('干处阻断湿路')
+    expect(html).not.toMatch(/creative-assets-review-v1|internal-hash|maxInputTokens|world_rules/)
+  })
+
+  it('labels a revised ancestor as historical even when its legacy status still says passed', () => {
+    const ancestor = run({ status: 'paused', step: 'needs_attention', result: { supersededByArtifactId: 'new-candidate' } })
+    expect(runStatusLabel(ancestor)).toBe('已有修订版')
+    expect(runResultPresentation(ancestor).summary).toContain('后续修订版')
+    expect(runResultPresentation(ancestor).summary).not.toContain('待确认保存')
   })
 
   it('only names applied records and deduplicates repeated result ids', () => {

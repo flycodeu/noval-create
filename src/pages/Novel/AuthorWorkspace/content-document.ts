@@ -32,7 +32,8 @@ export function mergeCanonicalDocument(original: unknown, previous: unknown, nex
 }
 
 export const CONTENT_LABELS: Record<string, string> = {
-  stage: '资料类别', atChapter: '复核章位', snapshot: '本次评审的正式资料',
+  stage: '资料类别', atChapter: '复核章位', snapshot: '本次评审的正式资料', failureStage: '未通过的环节', contractValidation: '结构校验', initialIssues: '首次结构问题', finalIssues: '修订后仍存在的结构问题', initialModelReviewSkipped: '初次模型审校未执行',
+  volumeId: '所属卷', partId: '所属单元', targetWords: '目标字数', humanLanguageRepairs: '表达修改建议', languageRisks: '语言风险', rejectRequired: '需要退回', rewriteRequired: '需要修订', severity: '严重程度', topFixes: '优先修改建议',
   dynastyName: '朝代或政权', storyStartLabel: '开篇时间', currentTimeLabel: '当前故事时间', currentTimeChapterNum: '时间对应章序', currentTimeEvidence: '时间依据', relativeDay: '距开篇天数', sequenceInDay: '同日先后顺序', timePrecision: '时间精度',
   title: '标题', name: '名称', fullName: '姓名', summary: '摘要', description: '说明', content: '正文', output: '候选内容',
   userBackground: '故事背景', expandedBackground: '补充设定', synopsis: '简介', background: '背景',
@@ -52,8 +53,9 @@ export const CONTENT_LABELS: Record<string, string> = {
 }
 
 export const INTERNAL_FIELDS = new Set(['key', 'schemaVersion', 'requestFingerprint', 'contextSummaryHash', 'createdAt', 'updatedAt', 'taskId', 'schemaHint', 'novelId', 'chapterId', 'segmentId', 'nativeId', 'id', 'clientId', 'artifactId', 'contentHash', 'outputFormat', 'draftContentHash', 'effectiveContentHash', 'code'])
-export function fieldLabel(key: string) {
+export function fieldLabel(key: string, value?: unknown) {
   const camel = documentFieldKey(key)
+  if (camel === 'stage' && ['accepted', 'rewritten', 'rejected'].includes(String(value))) return '审校结果'
   return CONTENT_LABELS[key] || CONTENT_LABELS[camel] || ATLAS_ATTRIBUTE_LABELS[key] || ATLAS_ATTRIBUTE_LABELS[camel] || key
 }
 export function documentFieldKey(key: string) {
@@ -84,11 +86,13 @@ export const DOCUMENT_OPTIONS: Record<string, Record<string, string>> = {
   expositionMode: { embedded_action: '动作带出', dialogue_reveal: '对白带出', experience_filter: '角色经历带出', minimal: '只给必要说明', brief_direct: '简短直述' },
   calendarType: { gregorian: '公历', regnal: '年号纪年', 'relative-disaster': '灾变纪年', 'custom-era': '自定义纪元', 'future-date': '未来纪年' },
   realismLevel: { 'strict-realism': '严格写实', 'rule-realism': '遵循世界规则', 'stylized-fantasy': '风格化幻想' },
-  status: { ready: '已就绪', confirmed: '已确定', planned: '计划中', planning: '规划中', draft: '草稿', active: '进行中', locked: '已定稿', written: '已写定', passed: '通过', blocked: '未通过', pending: '待处理', accepted: '已接受', rejected: '已拒绝', applied: '已应用', introduced: '已引入', partial_reveal: '部分揭示', pending_payoff: '待回收', explained: '已解释', needs_revision: '需要修订' },
+  status: { ready: '已就绪', confirmed: '已确定', planned: '计划中', planning: '规划中', draft: '草稿', active: '进行中', locked: '已定稿', written: '已写定', passed: '通过', pass: '通过', warn: '需留意', fail: '未通过', blocked: '未通过', pending: '待处理', accepted: '已接受', rejected: '已拒绝', applied: '已应用', introduced: '已引入', partial_reveal: '部分揭示', pending_payoff: '待回收', explained: '已解释', needs_revision: '需要修订' },
 }
 const DOCUMENT_VALUE_LABELS: Record<string, Record<string, string>> = {
   ...DOCUMENT_OPTIONS,
-  stage: CREATIVE_STAGE_LABELS,
+  stage: { ...CREATIVE_STAGE_LABELS, accepted: '已通过', rewritten: '已定向修订', rejected: '未通过' },
+  failureStage: { contract: '结构校验', review: '模型审校请求', rewrite: '模型修订请求', recheck: '修订后复检' },
+  severity: { low: '低', medium: '中', high: '高' },
   kind: { character: '人物', location: '地点', faction: '组织', item: '物品', event: '事件', relationship: '人物关系', route: '通路', presence: '所在地', membership: '成员关系', ownership: '持有关系', participation: '事件参与', puzzle: '疑问', clue: '线索', truth: '真相', red_herring: '误导线索' },
   writingContractTags: Object.fromEntries(WRITING_CONTRACT_PRESETS.map(item => [item.value, item.label])),
 }

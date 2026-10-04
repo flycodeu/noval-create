@@ -81,6 +81,25 @@ describe('generic asset quality gate', () => {
     expect(result.hardBlockers).toContain('模型审校拒收：修订后路线端点不存在')
   })
 
+  it('blocks machine contract errors even when a model reports an accepted candidate', () => {
+    const result = assess({ quality: quality({ contractValidation: { initialIssues: [], finalIssues: ['chapters[0].scenes[0].limitedResult：不支持的字段'] } }) })
+    expect(result).toMatchObject({ status: 'blocked', readyForHumanApply: false })
+    expect(result.checks).toContainEqual(expect.objectContaining({ code: 'output_contract', status: 'fail' }))
+    expect(result.hardBlockers).toContain('结构契约未通过：chapters[0].scenes[0].limitedResult：不支持的字段')
+  })
+
+  it('records initial machine failure separately and accepts only the valid repaired output with a real recheck', () => {
+    const repaired = quality({ stage: 'rewritten', initialModelReviewSkipped: true, contractValidation: { initialIssues: ['unsupported action'], finalIssues: [] }, rewrittenReview: quality().review })
+    expect(assess({ quality: repaired })).toMatchObject({ status: 'passed', readyForHumanApply: true, modelReview: { initialModelReviewSkipped: true, contractValidation: repaired.contractValidation } })
+    expect(assess({ quality: { ...repaired, rewrittenReview: undefined } })).toMatchObject({ status: 'blocked', readyForHumanApply: false })
+  })
+
+  it('distinguishes the real failing operation from the initial machine contract finding', () => {
+    const result = assess({ quality: quality({ stage: 'rejected', failureStage: 'rewrite', initialModelReviewSkipped: true, contractValidation: { initialIssues: ['unsupported action'], finalIssues: ['unsupported action'] }, warnings: ['provider timeout'] }) })
+    expect(result.hardBlockers).toContain('修订请求未完成：provider timeout。候选已保留，未应用。')
+    expect(result.modelReview.failureStage).toBe('rewrite')
+  })
+
   it('marks a clean current-context asset ready for author application', () => {
     const result = assess({ output: '{"rule":"能力必有代价"}', outputFormat: 'json' })
     expect(result).toMatchObject({ status: 'passed', score: 100, readyForHumanApply: true })

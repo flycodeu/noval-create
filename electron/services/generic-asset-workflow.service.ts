@@ -53,6 +53,9 @@ function qualitySnapshot(result: AssetQualityLoopResult): GenericAssetQualitySna
     review: result.review,
     ...(result.rewrittenReview ? { rewrittenReview: result.rewrittenReview } : {}),
     warnings: [...result.warnings],
+    ...(result.failureStage ? { failureStage: result.failureStage } : {}),
+    ...(result.contractValidation ? { contractValidation: result.contractValidation } : {}),
+    ...(result.initialModelReviewSkipped !== undefined ? { initialModelReviewSkipped: result.initialModelReviewSkipped } : {}),
   }
 }
 
@@ -128,6 +131,12 @@ export function assessGenericAssetDraftQuality(params: {
   } else {
     checks.push({ code: 'output_shape', status: 'pass', message: `输出符合 ${params.outputFormat} 文本契约。` })
   }
+  if (params.quality.contractValidation) {
+    const { initialIssues, finalIssues } = params.quality.contractValidation
+    checks.push(finalIssues.length > 0
+      ? { code: 'output_contract', status: 'fail', message: `结构契约未通过：${finalIssues.join('；')}` }
+      : { code: 'output_contract', status: 'pass', message: initialIssues.length > 0 ? '初稿结构错误已修复，最终候选通过机器契约校验。' : '最终候选通过机器契约校验。' })
+  }
 
   checks.push(PROCESS_LEAK_PATTERN.test(params.output)
     ? { code: 'process_leak', status: 'warn', message: '正文可能包含模型自述或交付套话，需要人工确认。' }
@@ -136,10 +145,14 @@ export function assessGenericAssetDraftQuality(params: {
   const reviewFailedOpen = [params.quality.review.summary, ...params.quality.warnings]
     .some((warning) => /审校失败|复检失败/u.test(warning))
   const effectiveModelReview = params.quality.rewrittenReview || params.quality.review
-  const failureLabel = params.quality.failureStage && { review: '审校请求', rewrite: '修订请求', recheck: '修订后复检' }[params.quality.failureStage]
-  checks.push(failureLabel
+  const failureLabel = params.quality.failureStage && { contract: '机器结构校验', review: '审校请求', rewrite: '修订请求', recheck: '修订后复检' }[params.quality.failureStage]
+  checks.push(params.quality.failureStage === 'contract'
+    ? { code: 'model_review', status: 'fail', message: '结构契约不合格，候选已保留；模型审校通过不能替代机器校验。' }
+    : failureLabel
     ? { code: 'model_review', status: 'fail', message: `${failureLabel}未完成：${params.quality.warnings.join('；') || '请重试'}。候选已保留，未应用。` }
-    : reviewFailedOpen
+    : params.quality.initialModelReviewSkipped && !params.quality.rewrittenReview
+      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，独立模型复检尚未完成。' }
+      : reviewFailedOpen
       ? { code: 'model_review', status: 'fail', message: '模型审校未完整执行，候选已保留，须重新审校。' }
       : effectiveModelReview.rejectRequired
         ? { code: 'model_review', status: 'fail', message: `模型审校拒收：${effectiveModelReview.summary}` }
@@ -253,6 +266,7 @@ export async function generateGenericAssetDraft(
     parentTaskId?: number
     assertActive?: () => void
     onStage?: (stage: 'reviewing' | 'revising') => void
+    validateOutput?: (output: string) => string[]
   },
 ): Promise<GenerateGenericAssetDraftResult> {
   requireMeaningfulText(input.title, 'VALIDATION_FAILED', '资产标题不能为空。')
@@ -324,6 +338,11 @@ export async function generateGenericAssetDraft(
     contextSummary,
     generatedOutput: rawOutput,
     schemaHint: input.schemaHint?.trim() || undefined,
+    validateOutput: (output) => {
+      if (!output.trim()) return ['资产正文为空。']
+      if ((input.outputFormat || 'markdown') === 'json' && !isJsonShapeValid(output)) return ['JSON 输出无法解析为对象或数组。']
+      return runtime.validateOutput?.(output) || []
+    },
     reviewFocus: uniqueLines([
       '核对输出是否完全满足用户给定的资产标题、要求和输出格式。',
       '信息不足时应明确待确认，不得伪造为项目既有事实。',

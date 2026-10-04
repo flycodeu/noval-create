@@ -151,6 +151,14 @@ export function creativeRevisionSource(input: CreativeWorkflowInput): string | u
     || typeof artifact.content.output !== 'string' || !artifact.content.output.trim()) {
     fail('REVISION_SOURCE_INVALID', '修订来源必须是当前项目的有效创作候选。')
   }
+  // Structured revision evidence must stay complete. Formatting whitespace outside strings
+  // is not story evidence and can otherwise consume the entire local planning margin.
+  if (input.stage !== 'chapter') {
+    try {
+      const value: unknown = JSON.parse(artifact.content.output)
+      if (value && typeof value === 'object') return JSON.stringify(value)
+    } catch { /* A textual candidate remains intact, including a malformed JSON draft to repair. */ }
+  }
   return artifact.content.output
 }
 

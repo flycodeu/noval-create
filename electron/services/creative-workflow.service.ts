@@ -28,8 +28,10 @@ import { CREATIVE_FACT_REVEALS_SCHEMA, applyCreativeFactReveals, validateCreativ
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { captureCreativeHistory } from './creative-history'
 import { recordCreativeReviewIssues, validateCreativeRevisionTargets, advanceCreativeRevisionIssues, CreativeReviewTargetError } from './creative-review-issues'
-import { ATLAS_REVIEW_STAGES, captureFormalAtlasReview } from './creative-formal-review'
+import { ATLAS_REVIEW_STAGES, captureFormalAtlasReview, captureFormalPlanningReview } from './creative-formal-review'
 import { estimateTokens } from '../../src/shared/token-budget'
+import { assertCreativeCandidateApplicable, resolveCreativeResumeAction } from './creative-lifecycle'
+import { findAcceptedCreativeSuccessor, supersedeCreativeDraftAncestors } from './creative-candidate-lineage'
 
 interface StoredRequest { request: CreativeWorkflowInput; requestFingerprint: string; contextVersion: number; modelConfigId: number; modelFingerprint: string; reviewModelConfigId?: number; reviewModelFingerprint?: string; attempt: number; retryFeedback?: string; retryArtifactId?: string }
 const active = new Set<number>()
@@ -69,7 +71,7 @@ export function creativeSchemaHint(stage: CreativeStage): string {
   }
   if (isProjectAssetStage(stage)) return `只输出本次变更的部分字段，不要重写整份资料。数组按稳定id（地图层级按depth，支线按name）合并，字符串数组增量补充；未提及字段保留。${stage === 'story' ? '秘密、线索与知情差必须登记在facts，不能只写进主线文本。新信息点用clientId，已有用数值id；plannedRevealChapterNum是计划章序，不表示已经发生。knownFromStartCharacterIds只写有既定依据、在开书前就知情的人物图谱ID，不填代表未知。普通地图/人物属性不需逐条变为秘密。' : ''}字段必须遵循 JSON Schema：${JSON.stringify(PROJECT_STAGE_SCHEMAS[stage])}`
   if (stage === 'background') return '{"userBackground":"故事发生的世界、时代、处境和初始冲突，纯小说背景","expandedBackground":"展开设定，避免与背景重复","synopsis":"面向读者的作品简介"}。只输出本次需要修改的非空字段，至少一项，未提及字段保留。不要改书名，不要放文件路径、字数目标、工作流程、作者操作指令。'
-  if (stage === 'outline') return '{"volumes":[{"clientId":"v1","title":"卷名","summary":"本卷冲突和进展","parts":[{"clientId":"p1","title":"单元名","summary":"本单元完整事件"}]}],"chapters":[{"id":123,"chapterNum":1,"volumeId":"v1","partId":"p1","title":"章名","outline":"本章目的、冲突、事件、人物变化与悬念","chapterContract":{"chapterGoal":"本章应完成的事情","forbiddenActions":[],"acceptanceNotes":[]},"scenes":[{"pov":"现有人物精确全名","timeLocation":"时间地点","sceneGoal":"具体目标","obstacle":"具体阻碍","resultState":"结束状态","revealPayload":[]}],"allowedFactIds":[],"revealedFactIds":[]}]}。volumes和chapters可分别省略，但至少提供一个非空数组。新卷/单元用clientId，既有卷/单元用数值id；章节volumeId/partId引用既有数值ID或本批clientId。新章不带id，既有章必须使用id；每个章节必须有chapterContract及完整scenes，已有场景按既有顺序保留。增量补充，不清空已有卷章。事实ID来自已有资料，不编造。场景POV必须是现有人物唯一全名。'
+  if (stage === 'outline') return '{"volumes":[{"clientId":"v1","title":"卷名","summary":"本卷冲突和进展","parts":[{"clientId":"p1","title":"单元名","summary":"本单元完整事件"}]}],"chapters":[{"id":123,"chapterNum":1,"volumeId":"v1","partId":"p1","title":"章名","outline":"本章目的、冲突、事件、人物变化与悬念","chapterContract":{"chapterGoal":"本章应完成的事情","forbiddenActions":[],"acceptanceNotes":[]},"scenes":[{"pov":"现有人物精确全名","timeLocation":"时间地点","sceneGoal":"具体目标","obstacle":"具体阻碍","resultState":"结束状态","revealPayload":[]}],"allowedFactIds":[],"revealedFactIds":[]}]}。volumes和chapters可分别省略，但至少提供一个非空数组。新卷/单元用clientId，既有卷/单元用数值id；章节volumeId/partId引用既有数值ID或本批clientId。新章不带id，既有章必须使用id；每个章节必须有chapterContract及完整scenes，已有场景按既有顺序保留。增量补充，不清空已有卷章。事实ID来自已有资料，不编造。场景POV必须是现有人物唯一全名。' + `完整字段契约（不得增添字段）：${JSON.stringify(outlineSchema)}`
   return '{"chapterNum":4,"title":"章名","content":"完整正文","summary":"本章实际发生事件的摘要","changes":[],"factReveals":[{"factId":1,"characterIds":["现有人物图谱ID"],"evidenceQuote":"本章真实揭示且人物获知的逐字原句"}]}。factReveals逐项兑现本章revealedFactIds，人物ID不是姓名也不是nativeId；没有新揭示时为空数组。characterIds只包括原文证明确实获知者，读者获知不代表所有人物知情。不能把计划、猜测、被否认的说法当作已获知真相。changes仅记录正文已发生的变化；每项attributes.evidenceQuote必须是正文中至少4字的精确原句，不写计划或推测。结构如下：' + ATLAS_SCHEMA_HINT
 }
 
@@ -154,6 +156,10 @@ export function getCreativeRun(novelId: number, runId?: number): CreativeRun | n
   if (!task) return null
   const input = JSON.parse(task.inputJson || '{}') as StoredRequest
   const state = JSON.parse(task.progressJson || '{}') as Partial<CreativeRun>
+  if (state.artifactId) {
+    const successor = findAcceptedCreativeSuccessor(novelId, state.artifactId)
+    if (successor) state.result = { ...state.result, supersededByArtifactId: successor.artifactId, supersededByRunId: successor.runId }
+  }
   if (task.status === 'success' && state.result && typeof state.result.artifactId === 'string' && Array.isArray(state.result.appliedIds)) {
     const draft = getArtifact<GenericAssetDraftContent>(state.result.artifactId)
     if (draft?.novelId === novelId && draft.status === 'committed') {
@@ -278,7 +284,7 @@ function applyOutlineData(novelId: number, data: Record<string, unknown>, savedS
 }
 
 export function applyCreativeDraft(input: { novelId: number; runId: number }): Record<string, unknown> {
-  const { input: frozen } = stored(input.runId, input.novelId)
+  const { input: frozen, task } = stored(input.runId, input.novelId)
   if (frozen.request.operation === 'review') throw new Error('评审报告不能作为正文应用；请根据报告发起修订。')
   const state = getCreativeRun(input.novelId, input.runId)!
   const key = `creative:${input.runId}:apply`
@@ -287,7 +293,10 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
   if (!state.artifactId || !state.reviewArtifactId) throw new Error('任务尚无已审校候选。')
   const draft = requireArtifact<GenericAssetDraftContent>(state.artifactId)
   const review = requireArtifact<GenericAssetReviewContent>(state.reviewArtifactId)
-  if (draft.novelId !== input.novelId || review.novelId !== input.novelId || review.content.status !== 'passed' || review.content.effectiveContentHash !== draft.contentHash || review.content.effectiveArtifactId !== draft.id) throw new Error('当前候选未通过审校，不能应用。')
+  const successor = findAcceptedCreativeSuccessor(input.novelId, draft.id)
+  if (successor) throw new Error(`候选已由任务 #${successor.runId} 的修订版本替代，请查看并应用新版候选。`)
+  assertCreativeCandidateApplicable({ status: task.status || 'pending', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested), draftStatus: draft.status, reviewStatus: review.status })
+  if (state.reviewStatus !== 'passed' || draft.novelId !== input.novelId || review.novelId !== input.novelId || review.content.status !== 'passed' || review.content.effectiveContentHash !== draft.contentHash || review.content.effectiveArtifactId !== draft.id) throw new Error('当前候选未通过审校，不能应用。')
   const data = parseCreativeCandidate(frozen.request.stage, draft.content.output)
   const sqlite = getSqlite()
   return sqlite.transaction(() => {
@@ -377,30 +386,31 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   progress(runId, 'completed', summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
 }
 
-async function executeAtlasReview(runId: number, input: StoredRequest): Promise<void> {
+async function executeAssetReview(runId: number, input: StoredRequest): Promise<void> {
   const { novelId } = input.request
-  const snapshot = captureFormalAtlasReview(input.request)
+  const capture = ATLAS_REVIEW_STAGES.includes(input.request.stage) ? captureFormalAtlasReview : captureFormalPlanningReview
+  const snapshot = capture(input.request)
   const content = JSON.stringify(snapshot)
   const contentHash = hashArtifactContent(snapshot)
   const novel = getNovel(novelId)!
-  const context = await compileCreativeContext(input.request, input.modelConfigId, input.reviewModelConfigId, estimateTokens(content))
+  const context = await compileCreativeContext(input.request, input.modelConfigId, input.reviewModelConfigId, estimateTokens(content), snapshot)
   const { text: _text, ...report } = context
   const mode = resolveAiExecutionMode({ settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({ taskKind: 'generic_prompt', stageLabel: 'Asset Review', executionMode: mode.mode, resolutionSource: mode.source, modelConfigId: input.reviewModelConfigId || input.modelConfigId, temperatureCap: 0.32 })
   progress(runId, 'reviewing', '复核指定正式资料，保存报告', { context: report })
   const review = await reviewGeneratedAsset({
     targetType: assetTypes[input.request.stage], novelId, modelConfigId: route.modelConfigId, parentTaskId: runId,
-    relatedEntityType: 'atlas_review', relatedEntityId: runId, contextSummary: context.text, generatedOutput: content,
+    relatedEntityType: 'creative_asset_review', relatedEntityId: runId, contextSummary: context.text, generatedOutput: content,
     narrativePolicyVersion: resolveNarrativePolicy(novel.settingsJson, true).policyVersion,
     reviewFocus: [input.request.request, '只评审待评对象中指定ID的正式资料；上下文其他对象是依据，不是本次待评对象。不得改写或生成资料。', '逐项检查事实与推断边界；原句存在不代表支持该结论。未定字段不等于错误，不得要求凭空补全。计划不等于已发生。'],
     chatOpts: { ...buildChatOptionsFromRoute(route), maxTokens: Math.min(route.maxTokens, context.outputReserve) },
     onQualityTaskCreated: () => { assertActive(runId); assertBase(input) },
   })
   assertActive(runId); assertBase(input)
-  if (hashArtifactContent(captureFormalAtlasReview(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
+  if (hashArtifactContent(capture(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
   const status = review.rejectRequired ? 'blocked' : review.rewriteRequired ? 'needs_revision' : 'passed'
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
-    schemaVersion: 'atlas-review-v1', stage: input.request.stage, atChapter: input.request.atChapter, snapshot, contentHash, review, deterministicBlockers: [], summary: review.summary, status, context: report,
+    schemaVersion: ATLAS_REVIEW_STAGES.includes(input.request.stage) ? 'atlas-review-v1' : 'creative-assets-review-v1', stage: input.request.stage, atChapter: input.request.atChapter, snapshot, contentHash, review, deterministicBlockers: [], summary: review.summary, status, context: report,
   }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: route.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
   const issueIds = recordCreativeReviewIssues(input.request, runId, artifact.id, review)
   if (status === 'passed' && !review.issues?.length) advanceCreativeRevisionIssues(input.request, artifact.id, true)
@@ -419,7 +429,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     progress(runId, 'context', '读取本阶段所需资料与章位状态')
     if (input.request.operation === 'review') {
       if (input.request.stage === 'chapter') await executeChapterReview(runId, input)
-      else await executeAtlasReview(runId, input)
+      else await executeAssetReview(runId, input)
       return
     }
     const sourceArtifactId = input.retryArtifactId || input.request.sourceArtifactId
@@ -442,12 +452,29 @@ async function execute(runId: number, novelId: number): Promise<void> {
     const generated = await generateGenericAssetDraft({ novelId, assetType: assetTypes[input.request.stage], title: `${CREATIVE_STAGE_LABELS[input.request.stage]} · 增量创作`, requirements, outputFormat: 'json', schemaHint: creativeSchemaHint(input.request.stage), modelConfigId: input.modelConfigId, parentArtifactId: sourceArtifactId, idempotencyKey: `creative:${runId}:${input.attempt}` }, {
       contextSummary: context.text, maxTokens: context.outputReserve, reviewModelConfigId: input.reviewModelConfigId, parentTaskId: runId,
       assertActive: () => { assertActive(runId); assertBase(input) },
+      validateOutput: output => {
+        assertActive(runId); assertBase(input)
+        try {
+          const candidate = parseCreativeCandidate(input.request.stage, output)
+          if (input.request.stage === 'story' && candidate.facts) validateCreativeFactPlans(novelId, candidate.facts)
+          const resolution = Array.isArray(candidate.changes) && candidate.changes.length ? validateStoryAtlasChanges({ novelId, expectedContextVersion: input.contextVersion, effectiveFromChapter: input.request.atChapter || 0,
+            source: { kind: 'task', id: String(runId) }, idempotencyKey: `creative:${runId}:contract`, changes: candidate.changes as StoryAtlasChange[] }) : undefined
+          assertCreativeChangeScope(input.request, candidate, resolution)
+          if (input.request.stage === 'outline') validateOutlineForProject(novelId, candidate, input.request)
+          if (input.request.stage === 'chapter') {
+            if (candidate.chapterNum !== input.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
+            assertCreativeChapterCandidate({ novelId, chapterNum: Number(candidate.chapterNum), content: String(candidate.content), expectedContextVersion: input.contextVersion, changes: candidate.changes as StoryAtlasChange[] | undefined })
+            validateCreativeFactReveals(novelId, Number(candidate.chapterNum), String(candidate.content), candidate.factReveals || [])
+          }
+          return []
+        } catch (error) { return [error instanceof Error ? error.message : String(error)] }
+      },
       onStage: (step) => progress(runId, step, step === 'reviewing' ? '独立审校内容、引用与一致性' : '根据审校问题定向修订'),
     })
     assertActive(runId); assertBase(input)
     progress(runId, 'reviewing', generated.review.summary, { artifactId: generated.effectiveArtifact.id, reviewArtifactId: generated.reviewArtifact.id, reviewStatus: generated.review.status === 'passed' ? 'validating' : generated.review.status })
     const issueIds = recordCreativeReviewIssues(input.request, runId, generated.reviewArtifact.id, generated.review.modelReview.rewrittenReview || generated.review.modelReview.review, generated.review.hardBlockers, generated.effectiveArtifact.id)
-    progress(runId, 'reviewing', generated.review.summary, { result: { issueIds } })
+    progress(runId, 'reviewing', generated.review.summary, { result: { issueIds, reviewFailureStage: generated.review.modelReview.failureStage, initialModelReviewSkipped: generated.review.modelReview.initialModelReviewSkipped } })
     if (generated.review.status !== 'passed') {
       updateTask(runId, { status: 'blocked' }); progress(runId, 'needs_attention', generated.review.summary); return
     }
@@ -467,6 +494,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
       validateCreativeFactReveals(novelId, Number(parsed.chapterNum), String(parsed.content), parsed.factReveals || [])
     }
     progress(runId, 'reviewing', generated.review.summary, { reviewStatus: 'passed' })
+    supersedeCreativeDraftAncestors(novelId, generated.effectiveArtifact.id)
     if (input.request.autoApply === false) {
       updateTask(runId, { status: 'paused' }); progress(runId, 'needs_attention', '候选已通过审校，等待应用。'); return
     }
@@ -502,7 +530,6 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   text(request.request, '需求'); text(request.idempotencyKey, '幂等键')
   if (request.count !== undefined && (!Number.isInteger(request.count) || request.count < 1 || request.count > 50)) throw new Error('每次生成数量为 1–50。')
   if (request.stage === 'chapter' && request.count !== undefined && request.count !== 1) throw new Error('正文每次推进一章；下一章需基于本章已审校结果继续。')
-  if (request.operation === 'review' && request.stage !== 'chapter' && !ATLAS_REVIEW_STAGES.includes(request.stage)) throw new CreativeReviewTargetError('仅评审操作支持正文与图谱资料；背景、规则、故事和大纲暂需人工复核。')
   if (request.operation === 'review' && request.sourceArtifactId) throw new CreativeReviewTargetError('正式复核不能将候选作为待评内容。')
   if (request.atChapter !== undefined && (!Number.isInteger(request.atChapter) || request.atChapter < 0)) throw new Error('章位必须为非负整数。')
   const novel = getNovel(request.novelId)
@@ -529,7 +556,12 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
     const readiness = inspectCreativeChapterPrerequisites(resolvedRequest.novelId, resolvedRequest.atChapter)
     if (readiness.blockers.length) throw new CreativeChapterContextError('CHAPTER_PREREQUISITES_REQUIRED', `第 ${resolvedRequest.atChapter} 章尚不能生成正文：${readiness.blockers.join('；')}。请先生成并应用本章的大纲与场景安排。`)
   }
-  if (request.operation === 'review' && request.stage !== 'chapter') captureFormalAtlasReview(resolvedRequest)
+  if (request.operation === 'review') {
+    if (request.stage === 'chapter') {
+      if (!listChapters(request.novelId).find(chapter => chapter.chapterNum === resolvedRequest.atChapter)?.content?.trim()) throw new CreativeReviewTargetError('目标章节没有可评审的正文。')
+    } else if (ATLAS_REVIEW_STAGES.includes(request.stage)) captureFormalAtlasReview(resolvedRequest)
+    else captureFormalPlanningReview(resolvedRequest)
+  }
   const input: StoredRequest = { request: resolvedRequest, requestFingerprint: hashArtifactContent(request), contextVersion: novel.contextVersion || 1, modelConfigId: model.id, modelFingerprint: modelFingerprint(model.id), reviewModelConfigId, reviewModelFingerprint: modelFingerprint(reviewModelConfigId), attempt: 1 }
   const runId = await createTask({ type: 'planning_draft', novelId: request.novelId, modelConfigId: model.id, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: JSON.stringify(input), idempotencyKey: key, status: 'pending' })
   // Return before model work starts; the persisted run survives MCP disconnection.
@@ -538,27 +570,31 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
 }
 export function cancelCreativeWorkflow(novelId: number, runId: number): CreativeRun {
   const { task } = stored(runId, novelId)
-  if (['success', 'failed', 'cancelled', 'blocked', 'paused'].includes(task.status || '')) return getCreativeRun(novelId, runId)!
+  if (['success', 'cancelled'].includes(task.status || '')) return getCreativeRun(novelId, runId)!
   cancelTask(runId)
+  if (!active.has(runId)) updateTask(runId, { status: 'cancelled', currentChildTaskId: null })
+  progress(runId, getTaskRecord(runId)?.status === 'cancelled' ? 'cancelled' : 'needs_attention', '已取消创作，保留候选并停止后续应用。')
   return getCreativeRun(novelId, runId)!
 }
-export function resumeCreativeWorkflow(novelId: number, runId: number): CreativeRun {
+export function resumeCreativeWorkflow(novelId: number, runId: number, options: { applyReviewedCandidate?: boolean } = {}): CreativeRun {
   const { task, input } = stored(runId, novelId)
-  if (active.has(runId) || ['pending', 'running', 'success'].includes(task.status || '')) return getCreativeRun(novelId, runId)!
   const committed = findArtifactByIdempotency(novelId, 'creative_commit', `creative:${runId}:apply`)
-  if (committed) {
+  const state = getCreativeRun(novelId, runId)!
+  const action = resolveCreativeResumeAction({ status: task.status || 'pending', active: active.has(runId), committed: Boolean(committed), explicitApply: options.applyReviewedCandidate === true, reviewPassed: state.reviewStatus === 'passed', reviewOnly: input.request.operation === 'review', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested) })
+  if (action === 'restore_commit' && committed) {
     updateTask(runId, { status: 'success', outputText: JSON.stringify(committed.content) })
     progress(runId, 'completed', '已恢复完成状态，未重复应用。', { result: committed.content as Record<string, unknown> })
     return getCreativeRun(novelId, runId)!
   }
+  if (action === 'noop') return state
   assertBase(input)
-  if (input.request.operation !== 'review' && getCreativeRun(novelId, runId)?.reviewStatus === 'passed') {
+  if (action === 'apply') {
     const result = applyCreativeDraft({ novelId, runId })
     updateTask(runId, { status: 'success', outputText: JSON.stringify(result) })
     progress(runId, 'completed', '已应用通过审校的候选。', { result })
   } else {
-    input.retryFeedback = getCreativeRun(novelId, runId)?.message || task.errorMessage || undefined
-    input.retryArtifactId = getCreativeRun(novelId, runId)?.artifactId
+    input.retryFeedback = state.message || task.errorMessage || undefined
+    input.retryArtifactId = state.artifactId
     input.attempt += 1
     if (input.attempt > 3) throw new Error('本任务已达到重试上限，请调整需求后创建新任务。')
     updateTask(runId, { status: 'pending', inputJson: JSON.stringify(input), controlJson: '{}', errorMessage: null })

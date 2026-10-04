@@ -38,6 +38,16 @@ describe('saved atlas dependencies for creative context', () => {
     expect(selected.entityIds).toEqual(new Set(['character:1', 'character:2', 'location:1', 'location:2', 'faction:1', 'faction:2']))
     expect(selected.relationIds).toEqual(new Set(['home', 'job', 'bond']))
   })
+  it('retains the saved scene and handoff places when a local outline correction names just one character', () => {
+    const selected = selectCreativePlanningAtlas(fixture(), {
+      stage: 'outline', request: '仅修改第4章周河的回应', anchorText: '陈舟在河村调查', fallbackText: '上一章在南岭查验旧路',
+    })
+    expect(selected.seedIds).toEqual(new Set(['character:1', 'character:2', 'location:1', 'location:2']))
+    expect(selected.relationIds).toContain('cross-region')
+    expect(selected.entityIds).toContain('location:4')
+    expect(selected.entityIds).not.toContain('location:5')
+    expect(selected.relationIds).not.toContain('distant-route')
+  })
   it('resolves an exact relationship ID to both endpoints and the saved relationship without importing unrelated bonds', () => {
     const atlas = fixture()
     atlas.entities.push(entity('character:3', 'character', '赵平'))

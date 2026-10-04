@@ -73,7 +73,8 @@ export function advanceCreativeRevisionIssues(input: CreativeWorkflowInput, arti
 /** Model findings keep their own lifecycle; consistency scans cannot resolve them. */
 export function recordCreativeReviewIssues(input: CreativeWorkflowInput, runId: number, artifactId: string, review: AssetReviewResult, blockers: string[] = [], candidateId?: string): number[] {
   const db = getSqlite(), now = new Date().toISOString()
-  const chapter = input.stage === 'chapter' ? listChapters(input.novelId).find(row => row.chapterNum === input.atChapter) : undefined
+  const chapter = input.stage === 'chapter' ? listChapters(input.novelId).find(row => row.chapterNum === input.atChapter)
+    : input.stage === 'outline' && input.changeScope?.chapterIds?.length === 1 ? listChapters(input.novelId).find(row => row.id === input.changeScope!.chapterIds![0]) : undefined
   const findings = [...(review.issues || []).map(issue => ({ title: issue.message, severity: issue.level === 'blocker' ? 'high' : issue.level === 'advice' ? 'low' : 'medium', evidence: issue.evidence, ruleId: issue.ruleId })),
     ...blockers.map(title => ({ title, severity: 'high', evidence: [], ruleId: 'deterministic_gate' }))]
   if (!findings.length && (review.rejectRequired || review.rewriteRequired)) findings.push({ title: review.summary, severity: review.severity, evidence: [], ruleId: 'model_summary' })

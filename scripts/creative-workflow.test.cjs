@@ -233,13 +233,17 @@ async function main() {
     assert.equal(structure.volumes.find(row => row.id === plannedThird.volumeId).title, '渡河')
     assert.equal((await call('assets.query', { chapterId: plannedThird.id })).chapterContract.forbiddenActions[0], '不得出现异能')
 
-    // A model can pass semantic review but fail deterministic validation: resume must repair the
-    // saved candidate using that error, not repeat application of an impossible candidate forever.
-    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: '不是数组' } } }), review)
+    // Machine contract failures are repaired before semantic review; a still-invalid repair
+    // stays blocked and a later Resume must generate a new reviewed candidate.
+    const malformedRules = JSON.stringify({ worldRules: { writingConstraints: { extraRules: '不是数组' } } })
+    replies.push(malformedRules, malformedRules)
     const invalidRules = (await call('workflows.start', { stage: 'world_rules', request: '补充载货限制。', idempotencyKey: 'repair-structure-error' })).run
     const rejectedShape = await finish(invalidRules.runId)
-    assert.equal(rejectedShape.status, 'failed'); assert.equal(rejectedShape.reviewStatus, 'needs_revision')
+    assert.equal(rejectedShape.status, 'blocked'); assert.equal(rejectedShape.reviewStatus, 'blocked')
     assert.ok(rejectedShape.artifactId)
+    const blockedReport = (await call('artifacts.get', { artifactId: rejectedShape.reviewArtifactId })).artifact.content
+    assert.equal(blockedReport.modelReview.failureStage, 'contract')
+    assert.equal(blockedReport.modelReview.initialModelReviewSkipped, true)
     const beforeRepair = requests.length
     replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['木桩不能承担船身重量'] } } }), review)
     await call('workflows.resume', { runId: invalidRules.runId })
@@ -248,10 +252,35 @@ async function main() {
     assert.ok(JSON.stringify(requests[beforeRepair]).includes('上一候选未能应用'))
     assert.ok(JSON.stringify(requests[beforeRepair]).includes('不是数组'), 'repair receives the prior candidate as a budgeted source')
     const sourceRules = (await call('workflows.get', { runId: invalidRules.runId })).run
+    // Reproduce the real fourth-chapter unsupported-field failure: the valid repair is
+    // checked by the strict creative schema before the independent model recheck.
+    const repairedOutline = { chapters: [{ id: plannedThird.id, chapterNum: 3, title: '查绳', outline: '陈舟检查并更换系船绳。',
+      chapterContract: { chapterGoal: '陈舟检查并更换系船绳' },
+      scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳' }] }] }
+    const invalidOutline = structuredClone(repairedOutline)
+    invalidOutline.chapters[0].chapterContract.targetWords = 3200
+    invalidOutline.chapters[0].scenes[0].action = '检查并换绳'
+    invalidOutline.chapters[0].scenes[0].limitedResult = '渡船停稳'
+    const beforeSchemaRepair = requests.length
+    replies.push(JSON.stringify(invalidOutline), JSON.stringify(repairedOutline), review)
+    const repairedSchemaRun = await finish((await call('workflows.start', { stage: 'outline', request: '只修订第三章场景安排，保留章名和大纲。', atChapter: 3, autoApply: false, changeScope: { chapterIds: [plannedThird.id] }, idempotencyKey: 'outline-machine-field-repair' })).run.runId)
+    assert.equal(repairedSchemaRun.status, 'paused', JSON.stringify(repairedSchemaRun))
+    assert.equal(requests.length, beforeSchemaRepair + 3, 'invalid initial schema skips model review, then repairs and rechecks')
+    assert.ok(JSON.stringify(requests[beforeSchemaRepair + 1]).includes('targetWords'))
+    const repairedSchemaReport = (await call('artifacts.get', { artifactId: repairedSchemaRun.reviewArtifactId })).artifact.content
+    assert.equal(repairedSchemaReport.modelReview.initialModelReviewSkipped, true)
+    assert.ok(repairedSchemaReport.modelReview.contractValidation.initialIssues.length)
+    assert.deepEqual(repairedSchemaReport.modelReview.contractValidation.finalIssues, [])
+    await call('workflows.apply', { runId: repairedSchemaRun.runId })
     replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['涨水时停航'] } } }), review)
     const followUp = (await call('workflows.start', { stage: 'world_rules', request: '保留有效规则并补充涨水停航。', sourceArtifactId: sourceRules.artifactId, autoApply: false, idempotencyKey: 'source-targeted-revision' })).run
     const revised = await finish(followUp.runId)
     assert.equal(revised.status, 'paused'); assert.equal(revised.sourceArtifactId, sourceRules.artifactId)
+    const beforePausedResume = requests.length
+    const versionBeforePausedResume = sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version
+    assert.equal((await call('workflows.resume', { runId: revised.runId })).run.status, 'paused', 'Resume must not implicitly apply an author-review candidate')
+    assert.equal(requests.length, beforePausedResume)
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, versionBeforePausedResume)
     await call('workflows.apply', { runId: revised.runId })
 
     // Omitted position means the last written chapter for both preview and persisted generation.
@@ -292,6 +321,83 @@ async function main() {
     replies.push(JSON.stringify({ userBackground: '河谷两岸靠渡船运送货物。' }), review)
     await call('workflows.resume', { runId: cancellation.runId })
     assert.equal((await finish(cancellation.runId)).status, 'success', 'cancelled task can resume with cleared cancellation and a new bounded attempt')
+
+    // A passed author-review candidate can be cancelled; neither Resume nor direct service
+    // access may silently save that cancelled candidate. Resume obtains a new reviewed draft.
+    const lifecycleService = require('../electron/services/creative-workflow.service.ts')
+    const taskService = require('../electron/services/task.service.ts')
+    const artifactService = require('../electron/services/artifact.service.ts')
+    const lifecycleBase = sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId)
+    replies.push(JSON.stringify({ synopsis: '取消的候选简介' }), review)
+    const cancelPaused = await finish((await call('workflows.start', { stage: 'background', request: '生成简介候选供作者复核。', autoApply: false, idempotencyKey: 'cancel-paused-candidate' })).run.runId)
+    assert.equal(cancelPaused.status, 'paused')
+    const resumePausedRequests = requests.length
+    assert.equal((await call('workflows.resume', { runId: cancelPaused.runId })).run.status, 'paused')
+    assert.equal(requests.length, resumePausedRequests, 'resume of paused candidate neither calls models nor writes canon')
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lifecycleBase)
+    for (const status of ['failed', 'blocked', 'pending', 'success']) {
+      taskService.updateTask(cancelPaused.runId, { status })
+      assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: cancelPaused.runId }), /当前任务状态/, `direct apply must honor ${status} state`)
+    }
+    taskService.updateTask(cancelPaused.runId, { status: 'paused' })
+    assert.equal((await call('workflows.cancel', { runId: cancelPaused.runId })).run.status, 'cancelled')
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: cancelPaused.runId }), /已取消/)
+    const forcedCancelled = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: cancelPaused.runId } }, context)
+    assert.equal(forcedCancelled.ok, false, 'passed review cannot override cancellation')
+    replies.push(JSON.stringify({ synopsis: '重新生成且复核的新简介' }), review)
+    await call('workflows.resume', { runId: cancelPaused.runId })
+    const retriedCancelled = await finish(cancelPaused.runId)
+    assert.equal(retriedCancelled.status, 'paused')
+    assert.notEqual(retriedCancelled.artifactId, cancelPaused.artifactId)
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lifecycleBase)
+    await call('workflows.apply', { runId: retriedCancelled.runId })
+    assert.equal(sqlite.prepare('SELECT synopsis FROM novels WHERE id=?').get(novelId).synopsis, '重新生成且复核的新简介')
+    const lifecycleVersion = sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version
+    taskService.updateTask(retriedCancelled.runId, { status: 'cancelled', controlJson: '{"cancelRequested":true}' })
+    lifecycleService.applyCreativeDraft({ novelId, runId: retriedCancelled.runId })
+    await call('workflows.apply', { runId: retriedCancelled.runId })
+    assert.equal((await call('workflows.get', { runId: retriedCancelled.runId })).run.status, 'success', 'a persisted commit restores success without repeating application')
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, lifecycleVersion)
+    replies.push(JSON.stringify({ synopsis: '已停用的候选简介' }), review)
+    const inactiveDraft = await finish((await call('workflows.start', { stage: 'background', request: '生成另一份简介候选。', autoApply: false, idempotencyKey: 'superseded-candidate' })).run.runId)
+    artifactService.updateArtifactLifecycle(inactiveDraft.artifactId, { status: 'superseded' })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: inactiveDraft.runId }), /已停用/)
+    const forcedSuperseded = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: inactiveDraft.runId } }, context)
+    assert.equal(forcedSuperseded.ok, false, 'passed review cannot revive a superseded candidate')
+    await call('workflows.cancel', { runId: inactiveDraft.runId })
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, lifecycleVersion)
+
+    // Only a successful, explicitly linked revision supersedes its ancestors. Model PASS
+    // before hard validation and an unrelated new draft must not retire the original.
+    const lineageService = require('../electron/services/creative-candidate-lineage.ts')
+    replies.push(JSON.stringify({ synopsis: '来源链原候选' }), review)
+    const lineageOriginal = await finish((await call('workflows.start', { stage: 'background', request: '生成简介候选。', autoApply: false, idempotencyKey: 'lineage-original' })).run.runId)
+    const lineageBase = sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId)
+    const invalidLineage = JSON.stringify({ synopsis: 42 })
+    replies.push(invalidLineage, invalidLineage)
+    const failedRevision = await finish((await call('workflows.start', { stage: 'background', request: '修订旧简介候选。', sourceArtifactId: lineageOriginal.artifactId, autoApply: false, idempotencyKey: 'lineage-failed-revision' })).run.runId)
+    assert.equal(failedRevision.status, 'blocked')
+    assert.equal(artifactService.getArtifact(lineageOriginal.artifactId).status, 'reviewed', 'failed revision preserves a usable original candidate')
+    assert.equal(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), null)
+    replies.push(JSON.stringify({ synopsis: '无关独立候选' }), review)
+    const unrelatedLineage = await finish((await call('workflows.start', { stage: 'background', request: '独立试写另一份简介。', autoApply: false, idempotencyKey: 'lineage-unrelated' })).run.runId)
+    assert.equal(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), null, 'a later task without an explicit source cannot retire an unrelated candidate')
+    await call('workflows.cancel', { runId: unrelatedLineage.runId })
+    replies.push(JSON.stringify({ synopsis: '来源链当前修订候选' }), review)
+    const acceptedRevision = await finish((await call('workflows.start', { stage: 'background', request: '修订来源链原简介。', sourceArtifactId: lineageOriginal.artifactId, autoApply: false, idempotencyKey: 'lineage-accepted-revision' })).run.runId)
+    assert.equal(acceptedRevision.status, 'paused')
+    assert.equal(artifactService.getArtifact(lineageOriginal.artifactId).status, 'superseded')
+    assert.deepEqual(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), { artifactId: acceptedRevision.artifactId, runId: acceptedRevision.runId })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: lineageOriginal.runId }), /修订版本替代/)
+    // Simulate old-release records: the read-only lineage guard must block Apply even if
+    // the ancestor was never marked superseded by that release.
+    artifactService.updateArtifactLifecycle(lineageOriginal.artifactId, { status: 'reviewed' })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: lineageOriginal.runId }), /修订版本替代/)
+    const legacyApply = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: lineageOriginal.runId } }, context)
+    assert.equal(legacyApply.ok, false)
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lineageBase)
+    await call('workflows.apply', { runId: acceptedRevision.runId })
+    assert.equal(sqlite.prepare('SELECT synopsis FROM novels WHERE id=?').get(novelId).synopsis, '来源链当前修订候选', 'the latest accepted revision remains applicable')
 
     // A new mystery project: planning a secret never grants knowledge. Only reviewed, quoted
     // chapter delivery advances that fact to the next chapter, atomically with the prose.
@@ -348,10 +454,10 @@ async function main() {
       ['foreign-fact', { ...validReveal, factId: foreignFactId }],
     ]) {
       const requestCount = requests.length
-      replies.push(JSON.stringify(chapterCandidate([badReveal])), review)
+      replies.push(JSON.stringify(chapterCandidate([badReveal])), JSON.stringify(chapterCandidate([badReveal])))
       const failed = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者。', idempotencyKey: `mystery-${label}` })).run.runId)
-      assert.equal(failed.status, 'failed', JSON.stringify(failed))
-      assert.equal(requests.length, requestCount + 2, `${label} must reach reviewed candidate validation`)
+      assert.equal(failed.status, 'blocked', JSON.stringify(failed))
+      assert.equal(requests.length, requestCount + 2, `${label} must be rejected by machine validation after one repair attempt`)
       assert.match(failed.message, /揭示证据|人物图谱ID|信息点ID/, JSON.stringify(failed))
       assert.equal((await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).readerKnownChapterId, null)
       assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(secondPlan.id).content || '', '', 'invalid revelation cannot partially commit prose')
@@ -432,10 +538,10 @@ async function main() {
         { op: 'upsert_relation', kind: 'ownership', fromId: scopeApplied.entities.find(entity => entity.kind === 'character').id, toId: 'scope-lamp', label: '持有' }] },
     ]
     for (const [index, attack] of attacks.entries()) {
-      replies.push(JSON.stringify(attack), review)
+      replies.push(JSON.stringify(attack), JSON.stringify(attack))
       const run = (await call('workflows.start', { stage: 'items', request: '只新增两件物品，不修改已有档案或关系', count: 2, changeScope: restrictedScope, idempotencyKey: `scope-attack-${index}` })).run
       const rejected = await finish(run.runId)
-      assert.equal(rejected.status, 'failed', JSON.stringify(rejected))
+      assert.equal(rejected.status, 'blocked', JSON.stringify(rejected))
       assert.match(rejected.message, /超出本次保存范围|实际新增|不允许新增关系/)
       const forced = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: run.runId } }, context)
       assert.equal(forced.ok, false, 'manual apply must repeat hard scope validation even after a passing model review')
@@ -606,6 +712,45 @@ async function main() {
     const boardIssues = require('../electron/services/revision-task.service.ts').listRevisionTasks(boardNovelId)
     assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 1 章需要同步上下文'), true)
     assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 2 章需要同步上下文'), false, 'unwritten plans compile fresh context and should not clutter the repair board')
+    // Every planning stage can review frozen formal data with the selected reviewer,
+    // without regenerating, changing Canon or treating its report as a draft.
+    const { captureFormalPlanningReview } = require('../electron/services/creative-formal-review.ts')
+    const safeSnapshot = captureFormalPlanningReview({ novelId, stage: 'story', atChapter: 0, request: '检查故事', idempotencyKey: 'snapshot-check' })
+    assert.equal('aiEngine' in safeSnapshot.assets, false)
+    assert.equal('settingsJson' in safeSnapshot.assets, false)
+    const noScope = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'outline', operation: 'review', request: '检查大纲', idempotencyKey: 'outline-review-missing-target' } }, context)
+    assert.equal(noScope.ok, false, 'outline review must name existing chapters')
+    for (const stage of ['background', 'world_rules', 'story', 'style', 'outline']) {
+      const target = { novelId, stage, atChapter: 0, operation: 'review', request: '复核正式资料的事实、因果和限制，不补造未知设定。', idempotencyKey: `formal-planning-${stage}`, ...(stage === 'outline' ? { changeScope: { chapterIds: [firstChapterId] } } : {}) }
+      const before = captureFormalPlanningReview(target)
+      const version = require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion
+      const n = requests.length
+      replies.push(review)
+      const checked = await finish((await call('workflows.start', target)).run.runId)
+      assert.equal(checked.status, 'success', JSON.stringify(checked))
+      assert.equal(checked.reviewStatus, 'passed')
+      assert.equal(requests.length, n + 1, `${stage} formal review calls only reviewer`)
+      const report = (await call('artifacts.get', { artifactId: checked.artifactId })).artifact.content
+      assert.equal(report.schemaVersion, 'creative-assets-review-v1')
+      assert.deepEqual(report.snapshot, JSON.parse(JSON.stringify(before)))
+      assert.deepEqual(captureFormalPlanningReview(target), before)
+      assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, version)
+      assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: checked.runId } }, context)).ok, false)
+    }
+    const stalePlanningTarget = { stage: 'background', atChapter: 0, operation: 'review', request: '检查本次正式背景', idempotencyKey: 'formal-background-stale' }
+    replies.push('HOLD')
+    heldResponse = undefined
+    const stalePlanning = (await call('workflows.start', stalePlanningTarget)).run
+    for (let i = 0; i < 100 && !heldResponse; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    assert.ok(heldResponse)
+    // Simulate a legacy writer that changed the target without updating the CAS version.
+    const oldBackground = sqlite.prepare('SELECT user_background FROM novels WHERE id=?').get(novelId).user_background
+    sqlite.prepare('UPDATE novels SET user_background=? WHERE id=?').run('两岸洪水正在上涨。', novelId)
+    heldResponse.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: review }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 } }))
+    const stalePlanningResult = await finish(stalePlanning.runId)
+    assert.equal(stalePlanningResult.status, 'failed')
+    assert.equal(stalePlanningResult.artifactId, undefined, 'stale formal snapshot cannot produce an accepted review')
+    sqlite.prepare('UPDATE novels SET user_background=? WHERE id=?').run(oldBackground, novelId)
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {
