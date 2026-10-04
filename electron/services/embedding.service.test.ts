@@ -23,6 +23,8 @@ import {
   hashEmbeddingSource,
   resolveEmbeddingConfigCacheKey,
   searchSimilarFragments,
+  savedProseEmbeddingFragments,
+  isProseEmbeddingFragment,
 } from './embedding.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -197,6 +199,18 @@ describe('embedding fallback retrieval', () => {
       type: 'summary',
       text: '内容已变化',
     }]))
+  })
+
+  it('indexes every saved prose paragraph including the middle without plans', () => {
+    const content = `${'首段'.repeat(810)}\n\n唯一中段线索，铜牌藏在书箱底。\n\n${'尾段'.repeat(810)}`
+    const fragments = savedProseEmbeddingFragments(content)
+    expect(fragments.every(fragment => fragment.text.length <= 1600)).toBe(true)
+    expect(fragments.map(fragment => fragment.text).join('\n\n')).toContain('唯一中段线索')
+    expect(fragments.every(fragment => isProseEmbeddingFragment(fragment.type))).toBe(true)
+    expect(isProseEmbeddingFragment('seed')).toBe(false)
+    const edited = content.replace('铜牌', '玉牌')
+    expect(hashEmbeddingSource(3, 7, fragments)).not.toBe(hashEmbeddingSource(3, 7, savedProseEmbeddingFragments(edited)))
+    expect(savedProseEmbeddingFragments(' \n\n ')).toEqual([])
   })
 
   it('rejects a chapter that belongs to another novel before replacing its index', async () => {

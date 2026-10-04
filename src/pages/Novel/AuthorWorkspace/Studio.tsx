@@ -3,12 +3,13 @@ import { Button, Checkbox, Input, InputNumber, Select, message } from 'antd'
 import { ArrowRightOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
-import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeStage, type CreativeChangeScope } from '../../../shared/creative-workflow'
+import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeStage, type CreativeChangeScope, type CreativeChapterRevision } from '../../../shared/creative-workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type { Chapter, ModelConfig, RevisionTask } from '../../../types'
 import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, useCreativeWorkflow } from './workflow-client'
 import { buildStorySettingsPayload, parseStorySettingsDocument } from '../../../shared/story-settings'
+import ChapterIndexStatus from './ChapterIndexStatus'
 
 export default function AuthorStudio({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
@@ -135,7 +136,8 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
           try {
             const changeScope = chapterScope || (repairTargetActive && params.get('changeScope') ? JSON.parse(params.get('changeScope')!) as CreativeChangeScope : undefined)
             const revisionIssueIds = repairTargetActive && params.get('revisionIssueIds') ? JSON.parse(params.get('revisionIssueIds')!) as number[] : undefined
-            void workflow.start({ stage, request: request.trim(), autoApply, count, changeScope, revisionIssueIds, ...(atChapter != null && !(stage === 'chapter' && atChapter === 0) ? { atChapter } : {}), ...(sourceArtifactId ? { sourceArtifactId } : {}) })
+            const chapterRevision = stage === 'chapter' && repairTargetActive && params.get('chapterRevision') ? JSON.parse(params.get('chapterRevision')!) as CreativeChapterRevision : undefined
+            void workflow.start({ stage, request: request.trim(), autoApply, count, changeScope, revisionIssueIds, chapterRevision, ...(atChapter != null && !(stage === 'chapter' && atChapter === 0) ? { atChapter } : {}), ...(sourceArtifactId ? { sourceArtifactId } : {}) })
           } catch { setDataError('修订目标格式不正确，请重新打开问题。') }
         }}>开始这一轮</Button>
       </div>
@@ -147,6 +149,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
     <div className="author-overview-grid">
       <section className="author-paper"><div className="author-section-heading"><h2>作品进展</h2><Button type="text" onClick={() => open('writing/editor')}>打开正文 <ArrowRightOutlined /></Button></div>
         <div className="author-book-progress"><strong>{drafted.length}<small> 章已有正文</small></strong><span>{chapters.length} 章安排 · {chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字</span></div>
+        <ChapterIndexStatus novelId={novelId} />
         {nextChapter ? <button className="author-next-chapter" disabled={checkingNextChapter || workflow.active || workflow.submitting || savingModel} onClick={() => { void planNextChapter() }}><span>{checkingNextChapter ? '检查章节安排' : '下一章'}</span><strong>第 {nextChapter.chapterNum} 章 · {nextChapter.title || '未命名'}</strong><ArrowRightOutlined /></button> : <p className="author-muted">{chapters.length ? '现有章节均已有正文，可继续安排下一阶段。' : '确定故事方向后，开始安排首个单元。'}</p>}
       </section>
       <section className="author-paper"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" onClick={() => open('revision')}>查看全部 <ArrowRightOutlined /></Button></div>

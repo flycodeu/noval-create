@@ -263,7 +263,9 @@ export async function generateGenericAssetDraft(
   input: GenerateGenericAssetDraftInput,
   runtime: {
     contextSummary: string
+    reviewContextSummary?: (output: string) => string
     maxTokens?: number
+    reviewMaxTokens?: number
     reviewModelConfigId?: number
     parentTaskId?: number
     assertActive?: () => void
@@ -304,6 +306,7 @@ export async function generateGenericAssetDraft(
   const cached = runtime.modelCheckpoint?.read(checkpointRequest)
   const taskId = cached?.taskId || await createTask({ type: 'planning_draft', novelId: input.novelId, modelConfigId: route.modelConfigId, parentTaskId: runtime.parentTaskId })
   if (runtime.parentTaskId) updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  if (!cached) runtime.modelCheckpoint?.begin?.(checkpointRequest, taskId)
   const rawOutput = cached?.output || await executeChatTask(taskId, {
     type: 'planning_draft',
     novelId: input.novelId,
@@ -343,9 +346,10 @@ export async function generateGenericAssetDraft(
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
     parentTaskId: taskId,
-    chatOpts: { ...buildChatOptionsFromRoute(qualityRoute), ...(runtime.maxTokens ? { maxTokens: Math.min(qualityRoute.maxTokens, runtime.maxTokens) } : {}) },
+    chatOpts: { ...buildChatOptionsFromRoute(qualityRoute), ...((runtime.reviewMaxTokens ?? runtime.maxTokens) ? { maxTokens: Math.min(qualityRoute.maxTokens, (runtime.reviewMaxTokens ?? runtime.maxTokens)!) } : {}) },
     contextSummary,
     generatedOutput: rawOutput,
+    reviewContextSummary: runtime.reviewContextSummary,
     modelCheckpoint: runtime.modelCheckpoint,
     schemaHint: input.schemaHint?.trim() || undefined,
     validateOutput: (output) => {

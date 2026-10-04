@@ -11,6 +11,7 @@ import { creativeAtlasCoverage, isCreativeChapterScopedRequest, selectCreativeAs
 import { validateCreativeChangeScope } from './creative-change-scope'
 import { getChapterContract, listSceneContracts } from './endgame-asset.service'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
+import { captureChapterRevisionBase, chapterRevisionGenerationMaterial, validateChapterRevision, type ChapterRevisionBase } from './creative-chapter-revision'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -67,9 +68,11 @@ function formalSnapshotValues(snapshot: unknown) {
 }
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
-export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0, formalReviewSnapshot?: unknown): Promise<CreativeContextReport> {
+export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0, formalReviewSnapshot?: unknown, frozenRevisionBase?: ChapterRevisionBase): Promise<CreativeContextReport> {
   validateCreativeChangeScope(input)
+  validateChapterRevision(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
+  const revisionBase = input.chapterRevision ? frozenRevisionBase || captureChapterRevisionBase(input) : undefined
   const novel = getNovel(input.novelId)
   if (!novel) throw new Error('项目不存在。')
   const generationBudget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
@@ -80,15 +83,26 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   // so the base also covers changes to existing parents, endpoints and supporting records.
   const structuredAssets = ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'outline'].includes(input.stage)
   const assetCount = Number.isFinite(input.count) ? Math.max(1, Math.min(12, Math.floor(input.count!))) : 3
-  const stageOutputLimit = input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
+  const stageOutputLimit = revisionBase ? revisionBase.revision.target === 'summary' ? 2_000
+    : Math.min(8_000, Math.max(2_000, Math.ceil(estimateTokens(JSON.stringify(chapterRevisionGenerationMaterial(revisionBase))) * 1.6) + 1_000))
+    : input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
   const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
+  const reviewOutputReserve = revisionBase
+    ? Math.min(reviewBudget.maxTokens || 12_000, 6_000, Math.floor((reviewBudget.maxContextTokens || 32_768) * 0.22))
+    : outputReserve
   // Leave room for the candidate and instructions during the independent review request.
   const formalSnapshotTokens = input.operation === 'review' && formalReviewSnapshot !== undefined ? estimateTokens(JSON.stringify(formalReviewSnapshot)) : 0
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
     ? Math.max(formalSnapshotTokens, estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '')) : Math.max(formalReviewTokens, formalSnapshotTokens)
-  const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve * 2 - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
+  const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
   if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
-  if (input.stage === 'chapter') return compileCreativeChapterContext(input, { maxInputTokens, outputReserve })
+  if (input.stage === 'chapter') {
+    // Review sees the complete merged chapter; generation only needs the selected ranges.
+    const reviewReserve = revisionBase && revisionBase.revision.target !== 'summary' ? estimateTokens(JSON.stringify(revisionBase.chapter)) + outputReserve + 500 : 0
+    if (maxInputTokens - reviewReserve < 1000) throw new Error('局部修订的合并章评审依据超过当前预算，请降低输出上限或切换模型。')
+    const result = await compileCreativeChapterContext(input, { maxInputTokens: maxInputTokens - reviewReserve, outputReserve }, revisionBase)
+    return { ...result, maxInputTokens, reviewOutputReserve }
+  }
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: input.atChapter, includePlanned: true })
   for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(`资料 ${id} 在当前项目章位不存在。`)
   for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(`关系 ${id} 在当前项目章位不存在。`)
@@ -273,6 +287,6 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     }
     used += size; sources.push(id); pieces.push(section)
   }
-  return { text: pieces.join('\n\n'), estimatedTokens: used, maxInputTokens, outputReserve, sources, omittedSources }
+  return { text: pieces.join('\n\n'), estimatedTokens: used, maxInputTokens, outputReserve, reviewOutputReserve, sources, omittedSources }
 }
 

@@ -73,6 +73,7 @@ export function useCreativeWorkflow(novelId: number) {
     try {
       const result = await callAuthorTool<{ run: CreativeRun | null }>('novelforge.workflows.start', {
         ...input, novelId, idempotencyKey: `author:${novelId}:${crypto.randomUUID()}`,
+        ...(input.stage === 'chapter' ? { changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false, ...input.changeScope } } : {}),
       })
       const next = result.run
       if (alive.current && epoch === mutationEpoch.current) setRun(next)

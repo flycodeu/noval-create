@@ -67,7 +67,7 @@ export function hasResumableWorkflowCheckpoint(task: WorkflowResumeTaskLike): bo
 
   if (task.type === 'planning_draft') {
     const checkpoint = progress.modelCheckpoint as Record<string, unknown> | undefined
-    return Boolean(checkpoint && checkpoint.schemaVersion === 'creative-model-checkpoint-v1'
+    return Boolean(checkpoint && ['creative-model-checkpoint-v1', 'creative-model-request-v1'].includes(String(checkpoint.schemaVersion))
       && typeof checkpoint.artifactId === 'string' && checkpoint.artifactId.startsWith('art_')
       && Number.isInteger(checkpoint.attempt) && Number(checkpoint.attempt) > 0
       && typeof checkpoint.identityHash === 'string' && checkpoint.identityHash.length > 0)
@@ -115,5 +115,6 @@ export function hasPendingCreativeWorkflowCheckpoint(task: WorkflowResumeTaskLik
   const progress = parseProgressRecord(task.progressJson)
   const result = progress.result as Record<string, unknown> | undefined
   return progress.recoveryPending === true
+    || (progress.modelCheckpoint as Record<string, unknown> | undefined)?.schemaVersion === 'creative-model-request-v1'
     || ['review', 'rewrite', 'recheck'].includes(String(result?.reviewFailureStage || ''))
 }

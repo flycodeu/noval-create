@@ -17,7 +17,20 @@ export interface CreativeWorkflowInput {
   operation?: 'generate' | 'review'
   changeScope?: CreativeChangeScope
   revisionIssueIds?: number[]
+  chapterRevision?: CreativeChapterRevision
   idempotencyKey: string
+}
+/** Paragraphs are numbered from one; blank-line separators stay outside every editable range. */
+export type CreativeChapterRevision =
+  | { target: 'summary' }
+  | { target: 'paragraphs'; paragraphIndexes: number[] }
+  | { target: 'scene'; sceneId: number; paragraphIndexes?: number[] }
+export const CREATIVE_CHAPTER_REVISION_SCHEMA: AgentToolJsonSchema = {
+  anyOf: [
+    { type: 'object', additionalProperties: false, properties: { target: { const: 'summary' } }, required: ['target'] },
+    { type: 'object', additionalProperties: false, properties: { target: { const: 'paragraphs' }, paragraphIndexes: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'integer', minimum: 1 } } }, required: ['target', 'paragraphIndexes'] },
+    { type: 'object', additionalProperties: false, properties: { target: { const: 'scene' }, sceneId: { type: 'integer', minimum: 1 }, paragraphIndexes: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'integer', minimum: 1 } } }, required: ['target', 'sceneId'] },
+  ],
 }
 /** Optional hard boundaries; count remains a planning hint for mixed incremental batches. */
 export interface CreativeChangeScope {
@@ -28,6 +41,7 @@ export interface CreativeChangeScope {
   chapterIds?: number[]
   preserveChapterFields?: Array<'title' | 'outline' | 'volumeId' | 'partId' | 'targetWords' | 'allowedFactIds' | 'revealedFactIds'>
 }
+export const PROSE_ONLY_CHANGE_SCOPE: CreativeChangeScope = { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }
 export const CREATIVE_CHANGE_SCOPE_SCHEMA: AgentToolJsonSchema = {
   type: 'object', additionalProperties: false, properties: {
     existingEntityIds: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
@@ -43,6 +57,8 @@ export interface CreativeContextReport {
   estimatedTokens: number
   maxInputTokens: number
   outputReserve: number
+  /** Independent review may require more reasoning than a small revision patch. */
+  reviewOutputReserve?: number
   sources: string[]
   omittedSources: string[]
 }
@@ -57,6 +73,7 @@ export interface CreativeRun {
   operation?: 'generate' | 'review'
   changeScope?: CreativeChangeScope
   revisionIssueIds?: number[]
+  chapterRevision?: CreativeChapterRevision
   status: string
   step: 'context' | 'generating' | 'reviewing' | 'revising' | 'applying' | 'completed' | 'needs_attention' | 'cancelled'
   message: string

@@ -1,6 +1,6 @@
 import type { AgentToolDescriptor, AgentToolJsonSchema } from '../../src/shared/tool-contracts'
 import { AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
-import { CREATIVE_STAGES, CREATIVE_CHANGE_SCOPE_SCHEMA } from '../../src/shared/creative-workflow'
+import { CREATIVE_STAGES, CREATIVE_CHANGE_SCOPE_SCHEMA, CREATIVE_CHAPTER_REVISION_SCHEMA } from '../../src/shared/creative-workflow'
 import type { CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasApplyInput, StoryAtlasQuery } from '../../src/shared/story-atlas'
 import { AgentToolRegistry, AgentToolInvocationError } from './tool-registry'
@@ -17,10 +17,13 @@ import { queryCreativeFacts } from '../services/creative-facts'
 import { getChapter, listChapters } from '../services/chapter.service'
 import { getChapterContract, listSceneContracts } from '../services/endgame-asset.service'
 import { inspectCreativeChapterPrerequisites } from '../services/creative-chapter-context'
+import { chapterRevisionParagraphs } from '../../src/shared/chapter-revision'
+import { registerChapterIndexTools } from './chapter-index-tools'
+import { registerAtlasJourneyTools } from './atlas-journey-tools'
 
 const number: AgentToolJsonSchema = { type: 'integer', minimum: 1 }
 const string: AgentToolJsonSchema = { type: 'string', minLength: 1 }
-const requestFields: Record<string, AgentToolJsonSchema> = { novelId: number, stage: { enum: [...CREATIVE_STAGES] }, operation: { enum: ['generate', 'review'] }, request: { type: 'string', minLength: 1, maxLength: 12000 }, count: { type: 'integer', minimum: 1, maximum: 50 }, atChapter: { type: 'integer', minimum: 0 }, autoApply: { type: 'boolean' }, changeScope: CREATIVE_CHANGE_SCOPE_SCHEMA, revisionIssueIds: { type: 'array', maxItems: 50, items: number }, sourceArtifactId: string, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 } }
+const requestFields: Record<string, AgentToolJsonSchema> = { novelId: number, stage: { enum: [...CREATIVE_STAGES] }, operation: { enum: ['generate', 'review'] }, request: { type: 'string', minLength: 1, maxLength: 12000 }, count: { type: 'integer', minimum: 1, maximum: 50 }, atChapter: { type: 'integer', minimum: 0 }, autoApply: { type: 'boolean' }, changeScope: CREATIVE_CHANGE_SCOPE_SCHEMA, chapterRevision: CREATIVE_CHAPTER_REVISION_SCHEMA, revisionIssueIds: { type: 'array', maxItems: 50, items: number }, sourceArtifactId: string, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 } }
 export function registerCreativeTools(registry: AgentToolRegistry): AgentToolRegistry {
   function add(id: string, title: string, description: string, properties: Record<string, AgentToolJsonSchema>, required: string[], effect: AgentToolDescriptor['effect'], handler: (input: Record<string, unknown>) => unknown | Promise<unknown>): void {
     registry.register({ descriptor: { id: `novelforge.${id}`, version: '2.0.0', domain: id.split('.')[0], title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: true }, effect, approval: 'policy', scopes: effect === 'read' ? [AGENT_TOOL_SCOPES.novelRead] : [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['creative-workspace'] }, handler: async input => {
@@ -52,7 +55,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       return { project: getNovel(id), source, idempotentReplay: false }
     }).immediate()
   })
-  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。大纲用chapterIds限定已有章节并禁止修改卷单元；仅补章节安排时设置preserveChapterFields:["title","outline","volumeId","partId","targetWords","allowedFactIds","revealedFactIds"]锁定章名、大纲、卷章位置与信息揭示。正文前先用chapters.readiness检查；如缺章节合同或场景，先以outline阶段生成并复核本章安排，重要剧情建议autoApply=false并检查候选，再应用后独立启动chapter阶段，正文任务不会暗中保存大纲。默认自动应用通过审校的结果；失败保留候选。operation=review支持复核各阶段的正式资料，不改写；大纲复核必须用changeScope.chapterIds指定已有章节。图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
+  add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。count是规划数量；硬限制使用changeScope的newEntityCount、existingEntityIds、existingRelationIds、allowNewRelations，空ID列表禁止修改已有对象。chapter默认只写正文，禁止新增或修改图谱；changeScope为{}仍沿用该限制，要修改图谱必须显式允许对应对象或数量。chapterRevision可局部修订：target:summary只输出摘要；target:paragraphs用1起paragraphIndexes指定待改段落，编号与assets.query返回的revisionParagraphs一致；target:scene用sceneId，场景须能唯一对应已存正文，否则需明确paragraphIndexes。服务端锁定其它字段与未选段落，模型只输出补丁；sourceArtifactId可使用未采纳候选，来源候选的局部修订始终autoApply=false，复核后再显式apply。大纲用chapterIds限定已有章节并禁止修改卷单元；仅补章节安排时设置preserveChapterFields:["title","outline","volumeId","partId","targetWords","allowedFactIds","revealedFactIds"]锁定章名、大纲、卷章位置与信息揭示。正文前先用chapters.readiness检查；如缺章节合同或场景，先以outline阶段生成并复核本章安排，重要剧情建议autoApply=false并检查候选，再应用后独立启动chapter阶段，正文任务不会暗中保存大纲。默认自动应用通过审校的结果；失败保留候选。operation=review支持复核各阶段的正式资料，不改写；大纲复核必须用changeScope.chapterIds指定已有章节。图谱复核须给两个已有ID数组（可一个为空）、newEntityCount=0、allowNewRelations=false，不能带sourceArtifactId。修订问题须保持最新候选和原保存范围；未保存候选不能用正式复核关闭。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
   add('chapters.readiness', '检查章节能否生成正文', '只读返回目标章缺失的章节合同与场景要求。ready=false时先运行outline阶段并应用本章安排，再启动chapter；不会生成或保存内容。', {
     novelId: number, atChapter: { type: 'integer', minimum: 1 },
   }, ['novelId', 'atChapter'], 'read', input => {
@@ -97,7 +100,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
     if (input.chapterId) {
       const chapter = getChapter(Number(input.chapterId))
       if (!chapter || chapter.novelId !== novel.id) throw new Error('章节不属于当前项目。')
-      return { chapter, chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id) }
+      return { chapter, chapterContract: getChapterContract(chapter.id), scenes: listSceneContracts(chapter.id), revisionParagraphs: chapterRevisionParagraphs(chapter.content || '') }
     }
     const rows = listChapters(novel.id), offset = Number(input.offset || 0), limit = Number(input.limit || 20)
     return { novelId: novel.id, contextVersion: novel.contextVersion, modelConfigId: novel.modelConfigId, background: novel.userBackground, expandedBackground: novel.expandedBackground, worldRules: novel.worldRulesJson, voice: novel.themeVoiceJson,
@@ -108,5 +111,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       facts: queryCreativeFacts(novel.id),
       chapterCount: rows.length, chapters: rows.slice(offset, offset + limit).map(row => ({ id: row.id, chapterNum: row.chapterNum, volumeId: row.volumeId, partId: row.partId, title: row.title, outline: row.outline, summary: row.summary, status: row.status, wordCount: row.wordCount })), nextOffset: offset + limit < rows.length ? offset + limit : null }
   })
+  registerChapterIndexTools(registry)
+  registerAtlasJourneyTools(registry)
   return registry
 }

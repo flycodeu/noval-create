@@ -74,6 +74,17 @@
 .geographic-location-index .geographic-enter { flex: 0 0 30px; text-align: right; color: var(--text-muted); }
 .geographic-location-index .is-selected strong { color: var(--accent); }
 .geographic-no-results { padding: 0 24px 24px; color: var(--text-muted); font-size: 12px; }
+.atlas-journey-planner { margin: 16px 24px; }
+.atlas-relation-detail .atlas-journey-planner { margin: 16px 0; }
+.atlas-journey-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; }
+.atlas-journey-controls .ant-select { min-width: 150px; max-width: 100%; flex: 1 1 150px; }
+.atlas-journey-controls .ant-checkbox-wrapper { white-space: normal; }
+.atlas-journey-result { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.atlas-journey-result ol, .atlas-journey-result ul { padding-left: 20px; }
+.atlas-journey-result li { margin: 6px 0; }
+.atlas-journey-result button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.atlas-journey-result li span { margin-left: 10px; color: var(--text-secondary); }
+.atlas-journey-result small { color: var(--text-muted); }
 .atlas-map-modes { display: flex; gap: 4px; margin-left: auto; }
 .atlas-map-modes button { padding: 5px 12px; background: none; border: 1px solid transparent; border-radius: 4px; color: var(--text-muted); cursor: pointer; font-size: 12px; }
 .atlas-map-modes button.is-selected { border-color: var(--border-default); color: var(--text-primary); background: var(--bg-surface); }

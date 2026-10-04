@@ -29,6 +29,19 @@ describe('creative project context budget and saved constraints', () => {
     }
     mock.artifact = { novelId: 1, kind: 'generic_draft', content: { schemaVersion: 'generic-asset-draft-v1', output: '需要保留的修订原稿' } }
   })
+  it('reserves a small summary patch independently from reasoning review and rejects tiny windows', async () => {
+    const base = { schemaVersion: 'creative-chapter-revision-base-v1' as const, chapterId: 21, chapterNum: 4, formalHash: 'fixture',
+      chapter: { chapterNum: 4, title: '夜试', content: '杨嫂点亮灯，陆闻看守湿缝。', summary: '陆闻点灯', changes: [], factReveals: [] }, revision: { target: 'summary' as const } }
+    const request = { ...input('chapter'), atChapter: 4, chapterRevision: { target: 'summary' as const }, request: '只纠正摘要中的点灯者' }
+    mock.model = { maxTokens: 8000, maxContextTokens: 32000 }
+    const report = await compileCreativeContext(request, undefined, undefined, 0, undefined, base)
+    expect(report.outputReserve).toBe(2000)
+    expect(report.reviewOutputReserve).toBe(6000)
+    expect(report.maxInputTokens).toBe(17200)
+    expect(report.text).not.toContain('future')
+    mock.model = { maxTokens: 8000, maxContextTokens: 6400 }
+    await expect(compileCreativeContext(request, undefined, undefined, 0, undefined, base)).rejects.toThrow('窗口不足')
+  })
   it('compacts structured prose revision metadata without changing any original paragraph', () => {
     const data = { chapterNum: 4, title: '夜试', content: '  第一段原文。\n\n第二段仍保留空行。  ', summary: '原摘要', changes: [], factReveals: [] }
     mock.artifact.content = { schemaVersion: 'generic-asset-draft-v1', output: JSON.stringify(data, null, 4) }

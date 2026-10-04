@@ -541,6 +541,7 @@ function testFreshDbIsIdempotent() {
       '0069_model_attempt_output',
       '0070_story_atlas',
       '0071_fact_reveal_plan',
+      '0072_chapter_index_outbox',
     ])
 
     runMigrations(db)
@@ -691,6 +692,7 @@ function testPartialSchemaCanResume() {
       '0069_model_attempt_output',
       '0070_story_atlas',
       '0071_fact_reveal_plan',
+      '0072_chapter_index_outbox',
     ])
 
     const configs = db.prepare(`

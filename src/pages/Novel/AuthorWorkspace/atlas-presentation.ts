@@ -52,6 +52,7 @@ export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
   locationType: '地点类型', nodeType: '地点层级', atmosphere: '氛围', plotRelevance: '故事作用', dangerLevel: '危险程度',
   level: '层级', structureRole: '地点作用', tags: '标签', description: '描述',
   travelHours: '行程耗时（小时）', distanceKm: '路线里程（公里）', travelMode: '交通方式', routeOpen: '是否通行',
+  transfers: '换乘安排', fromMode: '原交通方式', toMode: '接续交通方式', minutes: '换乘分钟', seasonAccess: '季节通行', spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季',
   terrain: '地形', waterSystem: '水系', waterSource: '水源', climate: '气候', livelihood: '生计', livelihoods: '生计',
   economy: '当地产业', access: '出入通路', routes: '通行路线', transport: '交通', resources: '资源',
   intimacyLevel: '亲近程度', tensionLevel: '紧张程度', interactionStyle: '相处方式', subtextRule: '潜台词',
@@ -99,6 +100,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 }
 
 export function atlasAttributeValue(key: string, value: unknown) {
+  if (['spring', 'summer', 'autumn', 'winter'].includes(key)) return ({ open: '可通行', closed: '不通行', unknown: '未确认' } as Record<string, string>)[String(value)] || value
   if (key === 'development') return ({ detailed: '已展开', outlined: '已有轮廓', unexplored: '待拓展' } as Record<string, string>)[String(value)] || value
   if (key === 'entityType') return ({ human: '人类', nonhuman: '异类', undead: '亡灵', monster: '妖异', spirit: '精怪', ghost: '鬼魂' } as Record<string, string>)[String(value)] || value
   if (key === 'currentStatus') return ({ active: '推进中', stalled: '暂时停滞', completed: '已完成', resolved: '已解决', planned: '待推进', abandoned: '已放弃' } as Record<string, string>)[String(value)] || value

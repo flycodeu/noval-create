@@ -70,6 +70,9 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
     timeSortValue: { type: 'number' },
   }, additionalProperties: true },
   location: { type: 'object', properties: {
+    transfers: { type: 'array', maxItems: 50, description: '在本地点已有依据的换乘安排；逐项登记方向、交通方式与等待办理分钟数。缺项不代表可自由换乘。', items: { type: 'object', required: ['fromMode', 'toMode', 'minutes'], additionalProperties: false, properties: {
+      fromMode: atlasText, toMode: atlasText, minutes: { type: 'number', minimum: 0 },
+    } } },
     geography: { type: 'object', additionalProperties: false, properties: {
       boundary: { type: 'array', minItems: 3, maxItems: 64, items: mapPoint, description: '在上级内部地图的 0..100 坐标内绘制非自交轮廓，须位于上级边界以内。进入本地点后以轮廓的包围框归一化至 0..100，所有下级位置与边界使用此坐标系。' }, position: mapPoint,
       areaKm2: { type: 'number', minimum: 0, description: '严格大于零；沿用已有明确面积，缺失时可按用户地理设计需求提出自洽候选并说明依据，经审校后应用。不仅从示意像素推算，不能超过内部地图宽高范围或已知上级面积。' },
@@ -92,6 +95,9 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
   }, additionalProperties: true },
   presence: { type: 'object', properties: { locationRole: { enum: [...STORY_ATLAS_LOCATION_ROLES] } }, additionalProperties: true },
   membership: { type: 'object', properties: textFields('positionId', 'roleTitle', 'responsibilities'), additionalProperties: true },
+  route: { type: 'object', properties: {
+    seasonAccess: { type: 'object', description: '明确保存的季节通行条件；不得从地形或雨季描述自动推断。查询指定季节时，缺项保持未知。', additionalProperties: false, properties: Object.fromEntries(['spring', 'summer', 'autumn', 'winter'].map(season => [season, { enum: ['open', 'closed', 'unknown'] }])) },
+  }, additionalProperties: true },
 }
 export interface StoryAtlasSource { kind: string; id?: string; note?: string }
 export interface StoryAtlasEntity {

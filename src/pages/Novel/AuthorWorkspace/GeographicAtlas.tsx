@@ -6,6 +6,7 @@ import { locationPath, atlasAttributeValue } from './atlas-presentation'
 import { atlasEntityMatchesSearch, atlasLocationScope } from './atlas-profile'
 import { atlasGeography, geographicLayer, geographicDescendants, geographicSettlements, geographicLabelPositions, geographicAppearance, geographicUnmappedAnchor, locationCategory, mapArea, DEVELOPMENT_LABELS } from './geographic-map'
 import { resolveAtlasGeography, atlasGeographicCoverage } from '../../../shared/story-atlas-geography'
+import { AtlasJourneyPlanner } from './AtlasJourneyPlanner'
 import './geographic-atlas.css'
 
 type Props = { snapshot: StoryAtlasSnapshot; parentId: string | null; selectedId: string | null; onSelect: (entity: StoryAtlasEntity) => void; onDrill: (entity: StoryAtlasEntity | null) => void; onRelation: (relation: StoryAtlasRelation) => void; onGenerate: () => void }
@@ -136,6 +137,7 @@ function GeographicLayer({ snapshot, parentId, selectedId, onSelect, onDrill, on
       {frame && pixelScale > 0 && <div className="geographic-scale" style={{ width: scaleLength * pixelScale }}><span>{(frame.widthKm * scaleLength / width).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 公里</span></div>}
     </div>
     {selected && <div className="geographic-selection"><div><strong>{selected.entity.name}</strong><span>{mapArea(selected.metrics.calculatedAreaKm2 ?? selected.geography.areaKm2)}{selected.geography.development && ` · ${DEVELOPMENT_LABELS[selected.geography.development]}`}</span></div><Button onClick={() => onDrill(selected.entity)}>进入地域 <ArrowRightOutlined /></Button></div>}
+    <AtlasJourneyPlanner key={snapshot.novelId} snapshot={snapshot} initialFromId={selectedId || ''} onRelation={onRelation} />
     <div className="geographic-index-heading"><h3>{parent ? `${parent.name} · 地域一览` : '国家与地域'}</h3><span>{matched.length} 处</span></div>
     <div className="geographic-location-index" aria-label="本层地点">{matched.map((item, index) => {
       const children = snapshot.entities.filter(child => child.kind === 'location' && child.parentId === item.entity.id)

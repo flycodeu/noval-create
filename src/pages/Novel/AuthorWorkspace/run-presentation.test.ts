@@ -21,6 +21,9 @@ describe('creative run result presentation', () => {
   it('shows an interrupted workflow as resumable rather than as a saved or rejected candidate', () => {
     const recovered = run({ status: 'paused', step: 'reviewing', recoveryPending: true, artifactId: undefined, result: undefined })
     expect(runRecoveryAction(recovered)).toBe('resume')
+    expect(runRecoveryAction({ ...recovered, status: 'blocked' })).toBe('resume')
+    expect(runStatusLabel({ ...recovered, status: 'blocked' })).toBe('已暂停 · 可继续')
+    expect(runRecoveryAction({ ...recovered, status: 'cancelled', step: 'cancelled' })).toBe('retry')
     expect(runStatusLabel(recovered)).toBe('已暂停 · 可继续')
     const html = renderToStaticMarkup(React.createElement(RunProgress, { run: recovered, active: false, onResume: () => {} }))
     expect(html).toContain('继续任务')

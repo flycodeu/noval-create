@@ -110,7 +110,7 @@ export function createMaintenanceWorker(options: MaintenanceWorkerOptions = {}) 
     status.lastError = undefined
     try {
       const before = dependencies.getOutboxStatus()
-      if (before.pendingCount + before.retryingCount > 0) {
+      if (before.pendingCount + before.retryingCount + before.processingCount > 0) {
         status.lastOutboxResult = await dependencies.processOutbox({
           limit: outboxBatchSize,
           allowRemoteEmbeddings,

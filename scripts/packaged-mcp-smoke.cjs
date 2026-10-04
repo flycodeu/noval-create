@@ -23,7 +23,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.readiness', 'chapters.review',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 const bridgePids = new Map()
@@ -172,6 +172,12 @@ async function main() {
     assert.equal(village.parentId, applied.idMap.valley)
     assert.equal((await call(second, 'atlas.query', { novelId, locationParentId: applied.idMap.valley })).atlas.locationChildren[0].id, village.id)
     assert.equal((await call(first, 'atlas.apply', changes)).result.idempotentReplay, true)
+    const journey = await call(first, 'atlas.journey', { novelId, fromId: applied.idMap.valley, toId: village.id })
+    assert.equal(journey.journey.status, 'unknown', 'geographical parent is not a travel route')
+    const indexStatus = await call(first, 'chapters.index_status', { novelId })
+    assert.equal(indexStatus.savedChapterCount, 0)
+    assert.equal((await call(second, 'chapters.index_rebuild', { novelId })).savedChapterCount, 0)
+    assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, applied.contextVersion, 'read-only journey and index work do not alter story canon')
 
     const missingModel = await first.callTool({ name: 'novelforge.workflows.start', arguments: { novelId, stage: 'background', request: '整理现有背景。', idempotencyKey: 'packaged-no-model' } })
     assert.equal(missingModel.isError, true)

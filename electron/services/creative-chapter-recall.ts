@@ -1,7 +1,7 @@
 import { stableHash, type ContextPackSource } from '../../src/shared/context-pack'
 import { estimateTokens } from '../../src/shared/token-budget'
 import { projectPreviousChapterSources, type ContextVisibilityPolicy } from './context-visibility'
-import { extractEmbeddingKeywords, fallbackKeywordSearch, searchSimilarFragments, type SimilarFragmentHit } from './embedding.service'
+import { extractEmbeddingKeywords, fallbackKeywordSearch, isProseEmbeddingFragment, searchSimilarFragments, type SimilarFragmentHit } from './embedding.service'
 
 const MAX_SEARCH_HITS = 24
 const MAX_RECALLED_PARAGRAPHS = 6
@@ -48,7 +48,7 @@ export async function recallCreativeChapterSources(input: {
     if (result.fallbackReason) omitted.push(`chapter_recall:vector_unavailable:${result.fallbackReason}`)
     // A vector shortlist can be dominated by planning fragments. The existing bounded SQL
     // fallback also reads saved prose when embedding rows have not been generated yet.
-    if (!hits.some(hit => hit.fragmentType === 'content_excerpt' && eligible.has(hit.chapterId))) {
+    if (!hits.some(hit => isProseEmbeddingFragment(hit.fragmentType) && eligible.has(hit.chapterId))) {
       hits = fallbackKeywordSearch(input.novelId, input.queryText, MAX_SEARCH_HITS, { beforeChapterNum })
     }
   } catch {
@@ -60,7 +60,7 @@ export async function recallCreativeChapterSources(input: {
   const seenSources = new Set<string>()
   for (const hit of hits) {
     const chapter = eligible.get(hit.chapterId)
-    if (!chapter || hit.chapterNum !== chapter.chapterNum || hit.chapterNum >= beforeChapterNum || hit.fragmentType !== 'content_excerpt'
+    if (!chapter || hit.chapterNum !== chapter.chapterNum || hit.chapterNum >= beforeChapterNum || !isProseEmbeddingFragment(hit.fragmentType)
       || hit.similarity <= 0 || hit.searchMode === 'vector' && hit.similarity < 0.25) continue
     const excerpt = normalize(hit.fragmentText)
     for (const projected of projectPreviousChapterSources(chapter, input.policy, input.queryText, keywords)) {

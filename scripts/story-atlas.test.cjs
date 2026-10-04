@@ -53,6 +53,21 @@ async function main() {
     assert.equal(snapshot.entities.length, 8)
     assert.equal(snapshot.relations.length, 6)
     assert.equal(snapshot.locationChildren[0].id, ids.inn)
+    const { AgentToolRegistry } = require('../electron/application/tool-registry.ts')
+    const { registerAtlasJourneyTools } = require('../electron/application/atlas-journey-tools.ts')
+    const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
+    const journeyRegistry = new AgentToolRegistry()
+    registerAtlasJourneyTools(journeyRegistry)
+    const journeyContext = { actor: { type: 'api_client', actorId: 'journey-test', clientId: 'journey-test' }, scopes: [...DESKTOP_AGENT_TOOL_SCOPES] }
+    const journeyCall = async input => {
+      const result = await journeyRegistry.invoke({ toolId: 'novelforge.atlas.journey', input: { novelId, ...input } }, journeyContext)
+      assert.equal(result.ok, true, JSON.stringify(result.error))
+      return result.data
+    }
+    const beforeJourney = queryStoryAtlas({ novelId }).contextVersion
+    const unknownJourney = await journeyCall({ fromId: ids.town, toId: ids.inn })
+    assert.equal(unknownJourney.journey.status, 'unknown', 'unconfirmed route openness is not invented')
+    assert.equal(queryStoryAtlas({ novelId }).contextVersion, beforeJourney, 'journey is read only')
     assert.equal(db.prepare('SELECT COUNT(*) n FROM world_map WHERE novel_id=?').get(novelId).n, 3)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM character_relations WHERE novel_id=?').get(novelId).n, 1)
     assert.equal(applyStoryAtlasChanges(create).idempotentReplay, true)
@@ -316,6 +331,26 @@ async function main() {
     const beforeBorderCorrection = queryStoryAtlas({ novelId: futureBorderNovel })
     assert.throws(() => applyStoryAtlasChanges(futureBorderInput([{ op: 'upsert_entity', id: futureCountry, kind: 'location', name: '旧疆国', attributes: { geography: { boundary: concave } } }])), /第 4 章.*超出上级/, 'background corrections must keep later regions within their parent borders')
     assert.deepEqual(queryStoryAtlas({ novelId: futureBorderNovel }), beforeBorderCorrection)
+
+    const journeyNovel = addNovel()
+    const journeyInput = changes => ({ ...input(changes, 6), novelId: journeyNovel, expectedContextVersion: queryStoryAtlas({ novelId: journeyNovel }).contextVersion })
+    const journeyIds = applyStoryAtlasChanges(journeyInput([
+      { op: 'upsert_entity', kind: 'location', clientId: 'start', name: '起点镇' },
+      { op: 'upsert_entity', kind: 'location', clientId: 'middle', name: '中途镇' },
+      { op: 'upsert_entity', kind: 'location', clientId: 'end', name: '终点镇' },
+      { op: 'upsert_relation', kind: 'route', clientId: 'first', fromId: 'start', toId: 'middle', attributes: { routeOpen: true, travelMode: 'foot', travelHours: 2, bilateral: false } },
+      { op: 'upsert_relation', kind: 'route', clientId: 'second', fromId: 'middle', toId: 'end', attributes: { routeOpen: true, travelMode: 'foot', travelHours: 3, bilateral: false } },
+    ])).idMap
+    const journeyInvoke = async atChapter => {
+      const result = await journeyRegistry.invoke({ toolId: 'novelforge.atlas.journey', input: { novelId: journeyNovel, fromId: journeyIds.start, toId: journeyIds.end, atChapter } }, journeyContext)
+      assert.equal(result.ok, true)
+      return result.data.journey
+    }
+    assert.equal((await journeyInvoke(5)).status, 'unknown', 'future routes are not visible in earlier chapters')
+    const multiLeg = await journeyInvoke(6)
+    assert.equal(multiLeg.totalHours, 5)
+    assert.deepEqual(multiLeg.steps.map(step => step.routeId), [journeyIds.first, journeyIds.second])
+    assert.equal(multiLeg.totalDistanceKm, undefined, 'known hours do not imply invented kilometres')
 
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)

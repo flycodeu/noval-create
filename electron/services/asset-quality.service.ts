@@ -31,6 +31,8 @@ export interface AssetQualityLoopOptions {
   parentTaskId?: number
   sender?: ProgressSink
   contextSummary: string
+  /** Review a merged local patch in context without requiring the model to regenerate untouched content. */
+  reviewContextSummary?: (output: string) => string
   generatedOutput: string
   schemaHint?: string
   /** Machine checks for the exact output contract; model approval cannot override these errors. */
@@ -271,6 +273,7 @@ async function runNestedReviewTask(params: {
   params.onTaskCreated?.(childTaskId, params.stage)
 
   updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
+  params.modelCheckpoint?.begin?.(checkpointRequest, childTaskId)
 
   try {
     const output = await executeChatTask(childTaskId, {
@@ -301,7 +304,7 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
     relatedEntityId: options.relatedEntityId,
     prompt: assetReviewPrompt({
       targetType: options.targetType,
-      contextSummary: options.contextSummary,
+      contextSummary: options.reviewContextSummary?.(options.generatedOutput) ?? options.contextSummary,
       generatedOutput: options.generatedOutput,
       schemaHint: options.schemaHint,
       reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [

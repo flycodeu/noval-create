@@ -31,6 +31,27 @@ describe('completed creative model checkpoints', () => {
     expect(createCreativeModelCheckpoint({ ...input, attempt: 2 }).read(request)).toBeNull()
     expect(checkpoint.read({ ...request, prompt: '另一任务' })).toBeNull()
   })
+  it('keeps interrupted first requests resumable without exposing them as completed output', () => {
+    const checkpoint = createCreativeModelCheckpoint(input)
+    checkpoint.begin?.(request, 2)
+    const reference = input.onSaved.mock.lastCall?.[0]
+    expect(reference.schemaVersion).toBe('creative-model-request-v1')
+    const task = { runnerType: 'workflow', type: 'planning_draft', progressJson: JSON.stringify({ modelCheckpoint: reference }) }
+    expect(hasResumableWorkflowCheckpoint(task)).toBe(true)
+    expect(createCreativeModelCheckpoint(input).read(request)).toBeNull()
+    createCreativeModelCheckpoint(input).begin?.(request, 3)
+    expect(rows.size).toBe(1)
+    createCreativeModelCheckpoint(input).save(request, '{"name":"旧灯"}', 3)
+    expect(createCreativeModelCheckpoint(input).read(request)).toEqual({ output: '{"name":"旧灯"}', taskId: 3 })
+    expect(input.onSaved.mock.lastCall?.[0].schemaVersion).toBe('creative-model-checkpoint-v1')
+  })
+  it('refuses stale or corrupted pending request records before issuing replacement requests', () => {
+    createCreativeModelCheckpoint(input).begin?.(request, 2)
+    expect(() => createCreativeModelCheckpoint({ ...input, contextVersion: 4 }).begin?.(request, 3)).toThrow('不一致')
+    const artifact = [...rows.values()][0]
+    artifact.content.identityHash = 'changed'
+    expect(() => createCreativeModelCheckpoint(input).begin?.(request, 3)).toThrow('不一致')
+  })
   it('refuses stale, corrupted or cancelled checkpoints', () => {
     createCreativeModelCheckpoint(input).save(request, '{}', 2)
     expect(() => createCreativeModelCheckpoint({ ...input, contextVersion: 4 }).read(request)).toThrow('不一致')

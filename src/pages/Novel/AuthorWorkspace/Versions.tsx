@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Checkbox, Input, Spin } from 'antd'
+import { Button, Checkbox, Input, Select, Spin } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { AgentArtifact } from '../../../shared/agent-artifacts'
@@ -42,6 +42,7 @@ export default function Versions({ novelId }: { novelId: number }) {
   const [error, setError] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [revisionTarget, setRevisionTarget] = useState<'chapter' | 'summary'>('chapter')
   const [applying, setApplying] = useState(false)
   const [preparingRevision, setPreparingRevision] = useState(false)
   const [recheckingIssueId, setRecheckingIssueId] = useState<number | null>(null)
@@ -81,7 +82,7 @@ export default function Versions({ novelId }: { novelId: number }) {
       const result = await callAuthorTool<{ artifact: ArtifactReference & { content: unknown } }>('novelforge.artifacts.get', { artifactId: id })
       if (epoch !== readEpoch.current) return
       if (result.artifact.novelId !== novelId) throw new Error('这份内容属于另一部作品。')
-      setArtifact(result.artifact); setFeedback(''); setError('')
+      setArtifact(result.artifact); setFeedback(''); setRevisionTarget('chapter'); setError('')
       const related = await callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, parentArtifactId: id, kind: result.artifact.status === 'committed' ? 'creative_commit' : 'creative_comparison', limit: 200 })
       const comparison = related.artifacts.find(item => item.parentArtifactId === result.artifact.id)
       if (comparison) {
@@ -134,7 +135,8 @@ export default function Versions({ novelId }: { novelId: number }) {
       if (sources.length > 1) throw new Error('这些问题属于不同候选，请分别修订。')
       const targetArtifactId = artifactRun.operation === 'review' ? artifact.id : artifactRun.artifactId
       if (!targetArtifactId) throw new Error('未能定位本次评审对应的候选，请重新打开创作记录。')
-      navigate(buildWorkspaceRoute(novelId, artifactTarget({ ...artifactRun, ...(typeof sources[0] === 'string' ? { sourceArtifactId: sources[0] } : {}) }, targetArtifactId, feedback.trim(), reportContent)))
+      const target = artifactTarget({ ...artifactRun, ...(typeof sources[0] === 'string' ? { sourceArtifactId: sources[0] } : {}) }, targetArtifactId, feedback.trim(), reportContent)
+      navigate(buildWorkspaceRoute(novelId, target + (artifactRun.stage === 'chapter' && revisionTarget === 'summary' ? `&chapterRevision=${encodeURIComponent(JSON.stringify({ target: 'summary' }))}` : '')))
     } catch (cause) { setError(cause instanceof Error ? cause.message : '读取评审意见失败') }
     finally { setPreparingRevision(false) }
   }
@@ -153,7 +155,7 @@ export default function Versions({ novelId }: { novelId: number }) {
       {history === null && artifact.kind === 'generic_draft' && <p className="author-muted">此版本未保存比较快照，仅展示完整内容。</p>}<details open={changes.length === 0} className="author-disclosure"><summary>{artifactRun?.operation === 'review' ? '完整评审' : '完整内容'}</summary><ContentDocument value={candidate} names={names} /></details>
       {review != null && <section className="author-review-result"><h2>{reviewReportTitle(review)}</h2><ContentDocument value={formalReviewPresentation(review)} names={names} /></section>}
       {artifact.parentArtifactId && <Button type="link" onClick={() => setParams({ artifact: artifact.parentArtifactId! })}>查看上一版依据</Button>}
-      {artifactRun ? <div className="author-version-discussion"><label htmlFor="version-feedback">针对这一版，接下来怎样调整？</label><Input.TextArea id="version-feedback" value={feedback} onChange={event => setFeedback(event.target.value)} autoSize={{ minRows: 3, maxRows: 8 }} placeholder="说明要保留什么、修改什么。目标章节和候选依据会自动带入。" /><Button disabled={!feedback.trim()} loading={preparingRevision} onClick={() => void continueRevision()}>继续修订原目标 <ArrowRightOutlined /></Button></div> : <p className="author-muted">此历史内容没有可定位的创作任务。请到对应章节或资料提出修订，避免误改目标。</p>}
+      {artifactRun ? <div className="author-version-discussion"><label htmlFor="version-feedback">针对这一版，接下来怎样调整？</label><Input.TextArea id="version-feedback" value={feedback} onChange={event => setFeedback(event.target.value)} autoSize={{ minRows: 3, maxRows: 8 }} placeholder="说明要保留什么、修改什么。目标章节和候选依据会自动带入。" />{artifactRun.stage === 'chapter' && artifactRun.operation !== 'review' && <Select aria-label="候选修订范围" value={revisionTarget} onChange={setRevisionTarget} options={[{ value: 'chapter', label: '整章' }, { value: 'summary', label: '仅摘要' }]} />}<Button disabled={!feedback.trim()} loading={preparingRevision} onClick={() => void continueRevision()}>继续修订原目标 <ArrowRightOutlined /></Button></div> : <p className="author-muted">此历史内容没有可定位的创作任务。请到对应章节或资料提出修订，避免误改目标。</p>}
     </> : <EmptyWork title="选择一个版本">查看完整内容、差异与评审。</EmptyWork>}</section></div> : <section className="author-paper">{visibleIssues.length ? <div className="author-problem-list">{visibleIssues.map(issue => {
       const meta = recordOf(parseDocument(issue.originMetaJson))
       const modelIssue = meta.issueCategory === 'creative_review'

@@ -52,6 +52,12 @@ describe('story atlas attributes', () => {
     expect(() => normalizeAtlasAttributePatch('character', { homeLocationId: 'location:other-project' })).toThrow('presence')
     expect(() => normalizeAtlasAttributePatch('presence', { locationRole: 'headquarter-misspelled' })).toThrow('属性结构')
   })
+  it('requires explicit structured seasonal states and directional transfer times', () => {
+    expect(normalizeAtlasAttributePatch('route', { seasonAccess: { summer: 'closed', winter: 'unknown' } })).toEqual({ seasonAccess: { summer: 'closed', winter: 'unknown' } })
+    expect(normalizeAtlasAttributePatch('location', { transfers: [{ fromMode: '步行', toMode: '舟船', minutes: 30 }] })).toEqual({ transfers: [{ fromMode: '步行', toMode: '舟船', minutes: 30 }] })
+    for (const seasonAccess of ['夏季封路', { summer: true }, { rainy: 'closed' }]) expect(() => normalizeAtlasAttributePatch('route', { seasonAccess })).toThrow('属性结构')
+    for (const transfers of [[{ fromMode: '步行', toMode: '舟船' }], [{ fromMode: '步行', toMode: '舟船', minutes: -1 }], [{ fromMode: '步行', toMode: '舟船', minutes: '30' }]]) expect(() => normalizeAtlasAttributePatch('location', { transfers })).toThrow('属性结构')
+  })
   it('allows unchanged migrated references but rejects adding, changing or clearing them', () => {
     const current = { campFactionIds: [4], homeLocationId: 'location:old' }
     expect(normalizeAtlasAttributePatch('character', { ...current, occupation: '船工' }, current, 'replace')).toEqual({ occupation: '船工' })

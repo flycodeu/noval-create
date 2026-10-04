@@ -178,7 +178,7 @@ const publicAttributes = new Set([
   'subtype', 'locationType', 'nodeType', 'terrain', 'climate', 'waterSource', 'livelihood', 'access', 'x', 'y',
   'category', 'function', 'abilities', 'limitations', 'culture', 'publicGoal', 'organizationLevel', 'traits', 'ideology', 'methods', 'funding',
   'type', 'goal', 'resources', 'memberPolicy', 'currentPhase', 'roleTitle',
-  'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral',
+  'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral', 'transfers', 'seasonAccess',
   'locationRole', 'positionId', 'responsibilities',
 ])
 const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./embedding.service', () => ({
   extractEmbeddingKeywords: (text: string, limit = 24) => text.split(/\s+/).filter(Boolean).slice(0, limit),
   searchSimilarFragments: vi.fn(), fallbackKeywordSearch: vi.fn(),
+  isProseEmbeddingFragment: (type: string) => type === 'content_excerpt' || /^content_excerpt:\d+$/u.test(type),
 }))
 import { fallbackKeywordSearch, searchSimilarFragments } from './embedding.service'
 import { recallCreativeChapterSources } from './creative-chapter-recall'
@@ -36,5 +37,11 @@ describe('bounded old chapter recall', () => {
     const result = await recallCreativeChapterSources({ ...args, maxInputTokens: 10 })
     expect(result.sources).toHaveLength(0)
     expect(result.omitted.some(key => key.includes('recall_budget'))).toBe(true)
+  })
+  it('accepts a later saved prose chunk as a vector locator', async () => {
+    vi.mocked(searchSimilarFragments).mockResolvedValue({ hits: [{ ...hit(1, 1, '陆闻将旧铜灯放在石台。', 'content_excerpt:2'), searchMode: 'vector' }] })
+    const result = await recallCreativeChapterSources(args)
+    expect(result.sources[0]?.text).toBe('陆闻将旧铜灯放在石台。')
+    expect(fallbackKeywordSearch).not.toHaveBeenCalled()
   })
 })

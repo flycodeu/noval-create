@@ -1,14 +1,15 @@
-import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeRun, type CreativeStage, type CreativeChangeScope } from '../../../shared/creative-workflow'
+import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeRun, type CreativeStage, type CreativeChangeScope, type CreativeChapterRevision } from '../../../shared/creative-workflow'
 import type { Chapter, RevisionTask } from '../../../types'
 import { parseDocument, recordOf } from './content-document'
 
-export function revisionTarget(input: { stage: CreativeStage; request: string; atChapter?: number; count?: number; sourceArtifactId?: string; changeScope?: CreativeChangeScope; revisionIssueIds?: number[] }) {
+export function revisionTarget(input: { stage: CreativeStage; request: string; atChapter?: number; count?: number; sourceArtifactId?: string; changeScope?: CreativeChangeScope; revisionIssueIds?: number[]; chapterRevision?: CreativeChapterRevision }) {
   const params = new URLSearchParams({ stage: input.stage, request: input.request, autoApply: 'false' })
   if (input.atChapter !== undefined) params.set('atChapter', String(input.atChapter))
   if (input.count !== undefined) params.set('count', String(input.count))
   if (input.sourceArtifactId) params.set('sourceArtifactId', input.sourceArtifactId)
   if (input.changeScope) params.set('changeScope', JSON.stringify(input.changeScope))
   if (input.revisionIssueIds) params.set('revisionIssueIds', JSON.stringify(input.revisionIssueIds))
+  if (input.chapterRevision) params.set('chapterRevision', JSON.stringify(input.chapterRevision))
   return `guide?${params}`
 }
 export function chapterArrangementTarget(chapter: Pick<Chapter, 'id' | 'chapterNum' | 'title'>) {

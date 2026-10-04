@@ -1562,7 +1562,7 @@ export function recoverOrphanedTasks(): number {
       const message = cancellationRequested
         ? '任务在应用重启前已收到取消请求，已自动收尾。'
         : resumable
-          ? '应用重启后后台流程已暂停，已保留 checkpoint，可继续执行。'
+          ? '应用重启后创作流程已暂停，可继续执行；完整响应会复用，未完成的模型请求会重新执行。'
           : '应用重启时工作流没有可验证的 checkpoint，已停止以避免悬挂。'
       const progress = parseTaskProgress<Record<string, unknown>>(task)
 

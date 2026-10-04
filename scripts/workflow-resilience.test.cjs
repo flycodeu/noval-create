@@ -185,6 +185,9 @@ function testResumeCheckpointHelper() {
   assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ ...creativeProgress, result: { reviewFailureStage: 'rewrite' } }) }), true)
   assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ ...creativeProgress, result: { reviewFailureStage: 'validate' } }) }), false)
   assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ recoveryPending: true }) }), false, 'recovery flag alone is insufficient')
+  const pendingModelTask = { ...creativeTask, progressJson: JSON.stringify({ modelCheckpoint: { ...creativeProgress.modelCheckpoint, schemaVersion: 'creative-model-request-v1' } }) }
+  assert.equal(hasResumableWorkflowCheckpoint(pendingModelTask), true, 'a started request can recover before its first complete response')
+  assert.equal(hasPendingCreativeWorkflowCheckpoint(pendingModelTask), true)
 
   assert.equal(hasResumableWorkflowCheckpoint({
     runnerType: 'workflow',

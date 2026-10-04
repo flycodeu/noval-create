@@ -16,6 +16,7 @@ import { requireArtifact } from './artifact.service'
 import { resolveProsePolicyMaterial } from './prose-operation.service'
 import { creativeChapterRecallQuery, recallCreativeChapterSources } from './creative-chapter-recall'
 import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
+import { chapterRevisionGenerationMaterial, type ChapterRevisionBase } from './creative-chapter-revision'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -165,7 +166,13 @@ export function creativeRevisionSource(input: CreativeWorkflowInput): string | u
 export async function compileCreativeChapterContext(
   input: CreativeWorkflowInput,
   limits: { maxInputTokens: number; outputReserve: number },
+  revisionBase?: ChapterRevisionBase,
 ): Promise<CreativeContextReport> {
+  if (revisionBase?.revision.target === 'summary') {
+    const text = `[task] ${JSON.stringify({ request: input.request, revision: input.chapterRevision })}\n[chapter_revision] ${JSON.stringify(chapterRevisionGenerationMaterial(revisionBase))}`
+    if (estimateTokens(text) > limits.maxInputTokens) fail('CHAPTER_CONTEXT_BUDGET', '本章摘要修订的完整正文依据超过预算，请切换模型或降低输出上限。')
+    return { text, estimatedTokens: estimateTokens(text), ...limits, sources: ['task', 'chapter_revision'], omittedSources: ['future_plans:outside_summary_scope'] }
+  }
   const chapterRows = listChapters(input.novelId)
   const chapterNum = input.atChapter ?? chapterRows.filter(row => row.content?.trim()).reduce((n, row) => Math.max(n, row.chapterNum), 0) + 1
   const { context, policy, povNames } = loadChapterBoundary(input.novelId, chapterNum)
@@ -194,9 +201,10 @@ export async function compileCreativeChapterContext(
   }
   // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
   for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
-  if (input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
-  const revisionSource = creativeRevisionSource(input)
+  if (!revisionBase && input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  const revisionSource = revisionBase ? undefined : creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
+  if (revisionBase) add('chapter_revision', chapterRevisionGenerationMaterial(revisionBase), true, 'draft', contractPolicy)
   add(`chapter:${context.chapter.id}:contract`, {
     chapterNum, title: context.chapter.title, outline: context.chapter.outline, ...context.chapterContract,
     forbiddenActions: context.chapterContractRow?.forbiddenActionsJson,

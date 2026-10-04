@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAssetQualityLoop } from './asset-quality.service'
 
-const mock = vi.hoisted(() => ({ chat: vi.fn(), reviewPrompt: vi.fn(() => 'review'), rewritePrompt: vi.fn(() => 'rewrite') }))
+const mock = vi.hoisted(() => ({ chat: vi.fn(), reviewPrompt: vi.fn((input: { contextSummary: string }) => { void input; return 'review' }), rewritePrompt: vi.fn((input: { contextSummary: string }) => { void input; return 'rewrite' }) }))
 vi.mock('./task.service', () => ({ runChatTask: mock.chat }))
 vi.mock('./prompts', () => ({ assetReviewPrompt: mock.reviewPrompt, assetRewritePrompt: mock.rewritePrompt }))
 const base = { targetType: 'chapter' as const, novelId: 1, contextSummary: '已有事实', generatedOutput: '待审原文' }
@@ -34,6 +34,14 @@ describe('asset quality loop completion gate', () => {
     await runAssetQualityLoop({ ...base, modelConfigId: 2, rewriteModelConfigId: 1, chatOpts: { temperature: 0.2 }, rewriteChatOpts: { temperature: 0.7 } })
     expect(mock.chat.mock.calls.map(([options]) => options.modelConfigId)).toEqual([2, 1, 2])
     expect(mock.chat.mock.calls.map(([options]) => options.chatOpts.temperature)).toEqual([0.2, 0.7, 0.2])
+  })
+  it('reviews each merged patch but keeps rewrite input restricted to the local patch context', async () => {
+    mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('新局部补丁').mockResolvedValueOnce(review())
+    const merged = vi.fn((output: string) => `合并后的完整章：${output}`)
+    await runAssetQualityLoop({ ...base, reviewContextSummary: merged })
+    expect(merged.mock.calls.map(([output]) => output)).toEqual(['待审原文', '新局部补丁'])
+    expect(mock.reviewPrompt.mock.calls.map(([input]) => input.contextSummary)).toEqual(['合并后的完整章：待审原文', '合并后的完整章：新局部补丁'])
+    expect(mock.rewritePrompt.mock.calls[0][0].contextSummary).toBe(base.contextSummary)
   })
   it('keeps structural conflicts blocked and clean map descriptions unchanged', async () => {
     mock.chat.mockResolvedValueOnce(JSON.stringify({ summary: '父级引用错误', rewrite_required: false, reject_required: true, conflict_risks: ['父级不存在'] }))

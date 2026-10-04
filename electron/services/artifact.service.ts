@@ -243,7 +243,7 @@ export function listArtifacts(query: AgentArtifactListQuery): AgentArtifact[] {
     params.push(query.kind)
   } else {
     // Internal recovery responses are not additional author-facing content versions.
-    clauses.push("kind <> 'creative_model_checkpoint'")
+    clauses.push("kind NOT IN ('creative_model_checkpoint', 'creative_chapter_revision_base')")
   }
   if (query.status) {
     clauses.push('status = ?')

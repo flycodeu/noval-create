@@ -7,6 +7,7 @@ import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 import { selectGenreVoiceSeedInserts } from './genre-voice-seeds'
 import { migrateStoryAtlas } from './story-atlas-store'
+import { installChapterIndexTriggers } from './chapter-index-triggers'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
 
@@ -3074,6 +3075,7 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0071_fact_reveal_plan', () => {
     ensureColumn(sqlite, 'story_facts', 'planned_reveal_chapter_num', 'INTEGER')
   })
+  runMigrationStep(sqlite, '0072_chapter_index_outbox', () => installChapterIndexTriggers(sqlite))
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {

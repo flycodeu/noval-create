@@ -78,7 +78,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
         const entity = snapshot.entities.find(entity => item.entityIds.includes(entity.id))
         return <li key={`${item.code}:${index}`}>{item.message}{(edge || entity) && <Button type="link" size="small" onClick={() => edge ? setRelation(edge) : openEntity(entity!)}>查看资料</Button>}</li>
       })}</ul></details>}
-      <AtlasRelationDetails relation={relation} snapshot={snapshot} chapters={chapters} onClose={() => setRelation(null)} onOpen={openEntity} onDiscuss={discussRelation} />
+      <AtlasRelationDetails relation={relation} snapshot={snapshot} chapters={chapters} onClose={() => setRelation(null)} onOpen={openEntity} onDiscuss={discussRelation} onRelation={setRelation} />
       {editing && <AtlasEntityEditor key={editing.id} entity={editing} snapshot={snapshot} atChapter={atChapter} onClose={() => setEditing(null)} onSaved={() => void load()} />}
     </>}
   </AuthorPage>

@@ -764,7 +764,7 @@ async function main() {
     const sourceInput = sqlite.prepare('SELECT input_json FROM tasks WHERE id=?').get(checkpointSource.runId).input_json
     const artifacts = require('../electron/services/artifact.service.ts')
     const checkpointRows = sqlite.prepare("SELECT id FROM artifacts WHERE novel_id=? AND kind='creative_model_checkpoint' AND idempotency_key LIKE ?").all(novelId, `creative:${checkpointSource.runId}:1:checkpoint:%`)
-    const sourceCheckpoint = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate')
+    const sourceCheckpoint = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate' && artifact.content.schemaVersion === 'creative-model-checkpoint-v1')
     assert.ok(sourceCheckpoint)
     const { resumeWorkflowTask } = require('../electron/services/workflow-task.service.ts')
     for (const entrypoint of ['MCP', 'task-center']) {
@@ -787,6 +787,23 @@ async function main() {
       await assert.rejects(() => resumeWorkflowTask(recoveredId), { code: 'workflow.resumeUnsupported' })
       assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, version, 'resume never applies a completed candidate')
     }
+    const pendingSource = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate' && artifact.content.schemaVersion === 'creative-model-request-v1')
+    assert.ok(pendingSource, 'request is durably recorded before first model response')
+    const pendingRecoveryId = await taskService.createTask({ type: 'planning_draft', novelId, modelConfigId: modelId, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: sourceInput, status: 'running' })
+    const pendingCopy = artifacts.createArtifact({ novelId, kind: 'creative_model_checkpoint', status: 'draft', content: pendingSource.content, contextVersion: pendingSource.contextVersion, modelConfigId: pendingSource.modelConfigId, taskId: pendingSource.taskId, producerType: 'system', producerId: 'interrupted-first-request', producerClient: 'fixture', idempotencyKey: `creative:${pendingRecoveryId}:1:checkpoint:${pendingSource.content.requestHash}:request` })
+    taskService.updateTask(pendingRecoveryId, { progressJson: JSON.stringify({ step: 'generating', modelCheckpoint: { schemaVersion: 'creative-model-request-v1', artifactId: pendingCopy.id, attempt: 1, identityHash: pendingCopy.content.identityHash } }) })
+    taskService.recoverOrphanedTasks()
+    assert.equal(taskService.getTaskRecord(pendingRecoveryId).status, 'paused')
+    const beforePendingCalls = requests.length
+    const beforePendingVersion = require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion
+    replies.push(sourceCheckpoint.content.output, review)
+    await call('workflows.resume', { runId: pendingRecoveryId })
+    const pendingRecovered = await finish(pendingRecoveryId)
+    assert.equal(pendingRecovered.status, 'paused', JSON.stringify(pendingRecovered))
+    assert.equal(pendingRecovered.reviewStatus, 'passed')
+    assert.equal(requests.length, beforePendingCalls + 2, 'only interrupted generation and its missing review run; partial output is never accepted')
+    assert.equal(JSON.parse(taskService.getTaskRecord(pendingRecoveryId).inputJson).attempt, 1)
+    assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, beforePendingVersion, 'recovery does not implicitly approve candidates')
     assert.equal(artifacts.listArtifacts({ novelId, limit: 200 }).some(artifact => artifact.kind === 'creative_model_checkpoint'), false, 'internal checkpoints must not crowd the content version list')
     assert.ok(artifacts.listArtifacts({ novelId, kind: 'creative_model_checkpoint' }).length > 0, 'technical checkpoint lookup remains available')
     assert.equal(replies.length, 0)

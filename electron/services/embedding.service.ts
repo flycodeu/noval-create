@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { and, desc, eq, isNotNull, like, lt, or } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
 import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
@@ -420,22 +420,51 @@ function chapterEmbeddingFragments(chapter: typeof chapters.$inferSelect) {
   return fragments
 }
 
+/** Cover the complete saved prose, including the middle of a long chapter. Plans stay out. */
+export function savedProseEmbeddingFragments(content: string): Array<{ type: string; text: string }> {
+  const paragraphs = content.split(/\r?\n\s*\r?\n+/u).map(text => text.trim()).filter(Boolean)
+  const chunks: string[] = []
+  let pending = ''
+  for (const paragraph of paragraphs) {
+    if (pending && pending.length + paragraph.length + 2 > 1600) { chunks.push(pending); pending = '' }
+    if (paragraph.length > 1600) {
+      for (let offset = 0; offset < paragraph.length; offset += 1600) chunks.push(paragraph.slice(offset, offset + 1600))
+    } else pending = pending ? `${pending}\n\n${paragraph}` : paragraph
+  }
+  if (pending) chunks.push(pending)
+  return chunks.map((text, index) => ({ type: index ? `content_excerpt:${index}` : 'content_excerpt', text }))
+}
+
+export function isProseEmbeddingFragment(type: string): boolean {
+  return type === 'content_excerpt' || /^content_excerpt:\d+$/u.test(type)
+}
+
+export interface ChapterEmbeddingRefreshOptions extends EmbeddingRequestOptions { proseOnly?: boolean }
+export interface ChapterEmbeddingRefreshResult {
+  applied: boolean
+  documentCount: number
+  vectorizedCount: number
+  source: EmbeddingBatchResult['source']
+}
+
 /** Save keyword recall before optional vector work; a restart cannot lose the readable index. */
-export function indexChapterForKeywordRecall(novelId: number, chapterId: number, modelConfigId?: number): void {
+export function indexChapterForKeywordRecall(novelId: number, chapterId: number, modelConfigId?: number, options: ChapterEmbeddingRefreshOptions = {}): void {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) return
   if (chapter.novelId !== novelId) throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
-  const fragments = chapterEmbeddingFragments(chapter)
+  const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
   const sourceHash = hashEmbeddingSource(chapterId, chapter.contextVersion || 1, fragments, resolveEmbeddingConfigCacheKey(modelConfigId))
   const existing = new Map(db.select().from(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).all().map(row => [row.fragmentType, row]))
   db.transaction(tx => {
     tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
     for (const fragment of fragments) {
       const cached = existing.get(fragment.type)
-      const reusable = cached?.sourceHash === sourceHash ? cached : undefined
+      // A text-only repair must not discard valid vectors just because the selected
+      // provider changed. Keep the old provenance so a later vector repair can detect it.
+      const reusable = cached?.fragmentText === fragment.text ? cached : undefined
       tx.insert(chapterEmbeddings).values({
-        novelId, chapterId, fragmentType: fragment.type, fragmentText: fragment.text, sourceHash,
+        novelId, chapterId, fragmentType: fragment.type, fragmentText: fragment.text, sourceHash: reusable?.sourceHash || sourceHash,
         contextVersion: chapter.contextVersion || 1, visibility: 'canon',
         embeddingJson: reusable?.embeddingJson || null, modelId: reusable?.modelId || null,
         dimensions: reusable?.dimensions || null, embeddingProfile: reusable?.embeddingProfile || null,
@@ -445,29 +474,37 @@ export function indexChapterForKeywordRecall(novelId: number, chapterId: number,
 }
 
 export function scheduleChapterEmbeddingRefresh(novelId: number, chapterId: number, modelConfigId?: number): void {
-  indexChapterForKeywordRecall(novelId, chapterId, modelConfigId)
-  setImmediate(() => {
-    void generateChapterEmbeddings(novelId, chapterId, modelConfigId)
-      .catch(error => console.warn('[embedding] 章节向量更新失败，保留文字检索索引:', error))
-  })
+  indexChapterForKeywordRecall(novelId, chapterId, modelConfigId, { proseOnly: true })
+  // The existing maintenance worker consumes this durable queue after a restart.
+  // Automatic saves permit local vectors only; a separate explicit rebuild enables remote work.
+  getSqlite().prepare(`
+    INSERT INTO semantic_memory_outbox (novel_id, source_type, source_id, operation, context_version)
+    SELECT novel_id, 'chapter', id, 'upsert', COALESCE(context_version, 1) FROM chapters WHERE id = ? AND novel_id = ?
+    ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+      operation = excluded.operation,
+      revision = semantic_memory_outbox.revision + 1, status = 'pending', attempts = 0,
+      available_at = CURRENT_TIMESTAMP, locked_at = NULL, last_error = NULL,
+      context_version = excluded.context_version, updated_at = CURRENT_TIMESTAMP
+  `).run(chapterId, novelId)
 }
 
 export async function generateChapterEmbeddings(
   novelId: number,
   chapterId: number,
   modelConfigId?: number,
-): Promise<void> {
+  options: ChapterEmbeddingRefreshOptions = {},
+): Promise<ChapterEmbeddingRefreshResult> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) return
+  if (!chapter) return { applied: false, documentCount: 0, vectorizedCount: 0, source: 'unavailable' }
   if (chapter.novelId !== novelId) {
     throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
   }
-  const fragments = chapterEmbeddingFragments(chapter)
+  const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
 
   if (fragments.length === 0) {
     db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
-    return
+    return { applied: true, documentCount: 0, vectorizedCount: 0, source: 'unavailable' }
   }
 
   const contextVersion = chapter.contextVersion || 1
@@ -501,18 +538,20 @@ export async function generateChapterEmbeddings(
   })
   const missingFragments = fragments.filter((fragment) => !reusableByFragmentType.has(fragment.type))
   const embeddingBatch = missingFragments.length > 0
-    ? await embedSemanticTexts(missingFragments.map((fragment) => fragment.text), modelConfigId)
+    ? await embedSemanticTexts(missingFragments.map((fragment) => fragment.text), modelConfigId, options)
     : { source: 'unavailable' as const }
   const generatedByFragmentType = new Map(missingFragments.map((fragment, index) => [
     fragment.type,
     embeddingBatch.embeddings?.[index],
   ]))
 
+  let applied = false
+  let vectorizedCount = 0
   db.transaction((tx) => {
     // Vector generation can outlive an edit or deletion. Re-read the source inside the commit.
     const current = tx.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
     if (!current || current.novelId !== novelId || sourceHash !== hashEmbeddingSource(
-      chapterId, current.contextVersion || 1, chapterEmbeddingFragments(current), resolveEmbeddingConfigCacheKey(modelConfigId),
+      chapterId, current.contextVersion || 1, options.proseOnly ? savedProseEmbeddingFragments(current.content || '') : chapterEmbeddingFragments(current), resolveEmbeddingConfigCacheKey(modelConfigId),
     )) return
     tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
     fragments.forEach((fragment) => {
@@ -521,6 +560,7 @@ export async function generateChapterEmbeddings(
       const modelId = reusable?.modelId || (embedding ? embeddingBatch.modelId : undefined)
       const dimensions = reusable?.dimensions || (embedding ? embeddingBatch.dimensions : undefined)
       const profile = reusable?.profile || (embedding ? embeddingBatch.profile : undefined)
+      if (embedding) vectorizedCount += 1
       tx.insert(chapterEmbeddings).values({
         novelId,
         chapterId,
@@ -537,7 +577,9 @@ export async function generateChapterEmbeddings(
         visibility: 'canon',
       }).run()
     })
+    applied = true
   })
+  return { applied, documentCount: fragments.length, vectorizedCount, source: embeddingBatch.source }
 }
 
 export async function searchSimilarFragments(
