@@ -1,6 +1,6 @@
 import type { AgentToolJsonSchema } from './tool-contracts'
 
-export const CREATIVE_STAGES = ['background', 'world_rules', 'story', 'style', 'outline', 'characters', 'map', 'relationships', 'factions', 'items', 'events', 'chapter'] as const
+export const CREATIVE_STAGES = ['background', 'world_rules', 'story', 'style', 'characters', 'relationships', 'outline', 'map', 'factions', 'items', 'events', 'chapter'] as const
 export type CreativeStage = typeof CREATIVE_STAGES[number]
 export const CREATIVE_STAGE_LABELS: Record<CreativeStage, string> = {
   background: '背景', world_rules: '规则与限制', story: '故事设计', style: '文风', outline: '卷章大纲', characters: '人物', map: '地图', relationships: '关系',

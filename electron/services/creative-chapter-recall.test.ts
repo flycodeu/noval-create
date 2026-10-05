@@ -10,7 +10,7 @@ import type { ContextVisibilityPolicy } from './context-visibility'
 
 const chapters = [{ id: 1, chapterNum: 1, content: '陆闻将旧铜灯放在石台。\n阿烛的秘密来历仍无人知道。' },
   { id: 2, chapterNum: 2, content: '陆闻在旧铜灯边看账。' }, { id: 4, chapterNum: 4, content: '未来旧铜灯被毁。' }]
-const policy: ContextVisibilityPolicy = { novelId: 1, chapterNum: 3, purpose: 'writer', povCharacterIds: [1], unresolvedPovLabels: [], allowedFacts: [], deniedFacts: [], revealDirectives: [] }
+const policy: ContextVisibilityPolicy = { novelId: 1, chapterNum: 3, purpose: 'writer', povCharacterIds: [1], unresolvedPovLabels: [], allowedFacts: [], sceneLimitedFacts: [], deniedFacts: [], revealDirectives: [] }
 const args = { novelId: 1, chapterNum: 3, previousChapterId: 2, queryText: '旧铜灯', chapters, policy, maxInputTokens: 24000 }
 const hit = (id: number, num: number, text: string, type = 'content_excerpt') => ({ chapterId: id, chapterNum: num, fragmentText: text, fragmentType: type, similarity: 0.9, searchMode: 'keyword' as const })
 

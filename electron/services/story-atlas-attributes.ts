@@ -21,6 +21,7 @@ function replacementValue(value: unknown): unknown {
 }
 
 export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryAtlasRelationKind, raw: Record<string, unknown> = {}, current: Record<string, unknown> = {}, mode: StoryAtlasAttributeMode = 'merge'): Record<string, unknown> {
+  if (raw.stateTiming !== undefined && !['chapter_start', 'chapter_end'].includes(String(raw.stateTiming))) throw new Error('stateTiming 必须是 chapter_start 或 chapter_end。')
   const patch: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(raw)) {
     if (referenceAttributes.has(key)) {

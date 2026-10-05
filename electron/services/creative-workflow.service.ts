@@ -13,7 +13,7 @@ import { createChapter, getChapter, listChapters, updateChapter } from './chapte
 import { createArtifact, getArtifact, requireArtifact, hashArtifactContent, findArtifactByIdempotency, updateArtifactLifecycle } from './artifact.service'
 import { savedCreativeEntities } from './creative-run-result'
 import { generateGenericAssetDraft } from './generic-asset-workflow.service'
-import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
+import { assertCreativeContextCoverage, compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { assertCreativeChangeScope, validateCreativeChangeScope } from './creative-change-scope'
 import { applyStoryAtlasChanges, validateStoryAtlasChanges, queryStoryAtlas } from './story-atlas.service'
 import { listSceneContracts, upsertChapterContract, upsertSceneContract } from './endgame-asset.service'
@@ -308,6 +308,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
   const sqlite = getSqlite()
   const committed = sqlite.transaction(() => {
     assertBase(frozen)
+    assertCreativeContextCoverage(data, state.context)
     const ids: number[] = []
     const savedStructureIds = new Map<object, number>()
     let atlasResult: Record<string, unknown> = {}
@@ -517,6 +518,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
         assertActive(runId); assertBase(input)
         try {
           const candidate = parseWorkflowCandidate(input, output)
+          assertCreativeContextCoverage(candidate, context)
           if (input.request.stage === 'story' && candidate.facts) validateCreativeFactPlans(novelId, candidate.facts)
           const resolution = Array.isArray(candidate.changes) && candidate.changes.length ? validateStoryAtlasChanges({ novelId, expectedContextVersion: input.contextVersion, effectiveFromChapter: input.request.atChapter || 0,
             source: { kind: 'task', id: String(runId) }, idempotencyKey: `creative:${runId}:contract`, changes: candidate.changes as StoryAtlasChange[] }) : undefined

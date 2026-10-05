@@ -366,6 +366,40 @@ async function main() {
     const migrationCount = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
     migrateStoryAtlas(db)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, migrationCount, 'migration is idempotent')
+    // Chapter-start projection selects revisions before ranking, preserving a start revision
+    // even after a later end-state update to the same object in the same chapter.
+    const timingNovel = addNovel()
+    const timingApply = (changes, effectiveFromChapter = 0) => applyStoryAtlasChanges({ novelId: timingNovel, expectedContextVersion: queryStoryAtlas({ novelId: timingNovel }).contextVersion, effectiveFromChapter, source: { kind: 'test' }, idempotencyKey: randomUUID(), changes })
+    const timingIds = timingApply([
+      { op: 'upsert_entity', clientId: 'a', kind: 'character', name: '甲', attributes: { appearance: '原衣', speechPattern: '原话' } },
+      { op: 'upsert_entity', clientId: 'b', kind: 'character', name: '乙' },
+      { op: 'upsert_entity', clientId: 'ev', kind: 'event', name: '历史事件', attributes: { timeLabel: '昨天' } },
+    ]).idMap
+    const timingNativeEvent = db.prepare('SELECT id FROM timeline_events WHERE novel_id=? AND event_title=?').get(timingNovel, '历史事件').id
+    db.prepare("UPDATE timeline_events SET status='written' WHERE id=?").run(timingNativeEvent)
+    timingApply([{ op: 'upsert_entity', id: timingIds.ev, kind: 'event', name: '历史事件', summary: '只补摘要' }])
+    assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).status, 'written')
+    assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).time_label, '昨天')
+    const startBond = timingApply([
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章初衣', stateTiming: 'chapter_start' } },
+      { op: 'upsert_relation', clientId: 'bond', kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章初合作', attributes: { stateTiming: 'chapter_start' } },
+    ], 2).idMap.bond
+    timingApply([
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章末衣', speechPattern: '章末话' } },
+      { op: 'upsert_relation', id: startBond, kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章末决裂' },
+      { op: 'upsert_entity', kind: 'character', name: '本章新登场' },
+    ], 2)
+    const opening = queryStoryAtlas({ novelId: timingNovel, atChapter: 2, boundary: 'start' })
+    const ending = queryStoryAtlas({ novelId: timingNovel, atChapter: 2 })
+    assert.equal(opening.entities.find(e => e.id === timingIds.a).attributes.appearance, '章初衣')
+    assert.equal(opening.entities.find(e => e.id === timingIds.a).attributes.speechPattern, '原话')
+    assert.equal(opening.relations.find(e => e.id === startBond).label, '章初合作')
+    assert.equal(ending.entities.find(e => e.id === timingIds.a).attributes.appearance, '章末衣')
+    assert.equal(ending.relations.find(e => e.id === startBond).label, '章末决裂')
+    assert.ok(!opening.entities.some(e => e.name === '本章新登场'))
+    assert.throws(() => timingApply([{ op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '倒写章初', stateTiming: 'chapter_start' } }], 2), error => error.code === 'ATLAS_BOUNDARY_CONFLICT')
+    assert.throws(() => queryStoryAtlas({ novelId: timingNovel, boundary: 'start' }))
+
     process.stdout.write('PASS story atlas: hierarchy, native projections, shared graph, validation without writes, chapter history, future filtering, version/idempotency, cross-project protection, cycle/travel validation, outer transaction rollback, source migration, manual replacement and clearing, migrated reference preservation, current/future position guards\n')
   } finally { closeDb(); fs.rmSync(tempRoot, { recursive: true, force: true }) }
   app.exit(0)

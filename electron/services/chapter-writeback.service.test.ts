@@ -29,6 +29,8 @@ vi.mock('./story-thread.service', () => ({
 
 vi.mock('./story-fact.service', () => ({
   listStoryFacts: vi.fn(() => []),
+  updateStoryFact: vi.fn(),
+  createStoryFact: vi.fn(() => 43),
 }))
 
 vi.mock('./endgame-asset.service', () => ({
@@ -37,6 +39,8 @@ vi.mock('./endgame-asset.service', () => ({
 
 vi.mock('./timeline.service', () => ({
   listTimelineEvents: vi.fn(() => []),
+  updateTimelineEvent: vi.fn(),
+  createTimelineEvent: vi.fn(() => 44),
 }))
 
 vi.mock('./item.service', () => ({
@@ -68,6 +72,8 @@ import {
   updateChapterWritebackDecision,
 } from './chapter-writeback.service'
 import * as storyThreadService from './story-thread.service'
+import * as storyFactService from './story-fact.service'
+import * as timelineService from './timeline.service'
 import { runChatTask } from './task.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -349,8 +355,16 @@ describe('applyChapterWritebackRun', () => {
     const factProvenance = JSON.parse(String(novel.factProvenanceJson || '[]'))
     const canonCards = JSON.parse(String(novel.canonFactCardsJson || '[]'))
 
-    expect(result.activeRun?.status).toBe('applied')
-    expect(diff.writebackStatus).toBe('skipped')
+    expect(result.activeRun?.status).toBe('ready')
+    expect(result.activeRun?.status).not.toBe('applied')
+    expect(diff.canonDecision).toBe('pending')
+    expect(diff.writebackStatus).toBe('pending')
+    expect(JSON.parse(String(rows.get(chapters)?.[0]?.writebackStatusJson))).toMatchObject({
+      phase: 'ready',
+      blockedGeneration: true,
+      readyForNextChapter: false,
+      canonApplied: false,
+    })
     expect(chapterUsage).toEqual(expect.arrayContaining([
       expect.objectContaining({
         usageKey: 'chapter:11',
@@ -524,6 +538,8 @@ describe('prepareChapterWritebackRun', () => {
     vi.mocked(runChatTask).mockReset()
     vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({ extracts: [], diffs: [] }))
     vi.mocked(storyThreadService.listStoryThreads).mockReturnValue([])
+    vi.mocked(storyFactService.listStoryFacts).mockReturnValue([])
+    vi.mocked(timelineService.listTimelineEvents).mockReturnValue([])
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
       prepare: () => ({ run: vi.fn() }),
@@ -549,6 +565,26 @@ describe('prepareChapterWritebackRun', () => {
     expect(status.canonApplied).toBe(true)
     expect(status.blockedGeneration).toBe(false)
     expect(status.readyForNextChapter).toBe(true)
+  })
+
+  it.each(['puzzle', 'timeline'] as const)('preserves omitted %s fields in persisted patches and explicitly permits clearing', async assetType => {
+    const rows = createRows()
+    const chapter = rows.get(chapters)![0]
+    Object.assign(chapter, { content: '旧仓库里多了一把锁。' })
+    rows.set(chapterWritebackDiffs, []); rows.set(chapterWritebackRuns, [])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    const fact = { id: 50, novelId: 1, title: '旧线索', readerKnownChapterId: 11, isKeyTruth: 1, characterKnowledgeJson: '[{"characterId":1,"knownChapterId":11}]' }
+    const event = { id: 50, novelId: 1, eventTitle: '旧事件', timeLabel: '昨天', status: 'written', chapterStartId: 11, chapterEndId: 11, protagonistPresent: 1 }
+    vi.mocked(storyFactService.listStoryFacts).mockReturnValue([fact] as never)
+    vi.mocked(timelineService.listTimelineEvents).mockReturnValue([event] as never)
+    const patch = assetType === 'puzzle' ? { title: '旧线索', summary: '补充锁的位置', readerKnownChapterId: null } : { eventTitle: '旧事件', eventSummary: '补充锁的位置', chapterEndId: null }
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({ extracts: [], diffs: [{ assetType, entityId: 50, confidence: 0.9, afterState: patch }] }))
+    await prepareChapterWritebackRun(11, `patch-${assetType}`)
+    const saved = JSON.parse(String(rows.get(chapterWritebackDiffs)![0].afterStateJson))
+    expect(saved).toEqual(patch)
+    const merged = { ...(assetType === 'puzzle' ? fact : event), ...saved }
+    if (assetType === 'puzzle') expect(merged).toMatchObject({ readerKnownChapterId: null, isKeyTruth: 1, characterKnowledgeJson: fact.characterKnowledgeJson })
+    else expect(merged).toMatchObject({ timeLabel: '昨天', status: 'written', chapterStartId: 11, chapterEndId: null, protagonistPresent: 1 })
   })
 
   it('supplies an object schema and an executable example that remains pending author review', async () => {

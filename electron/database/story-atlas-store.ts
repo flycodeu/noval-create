@@ -117,10 +117,15 @@ export function insertAtlasRevision(sqlite: Database.Database, novelId: number, 
     item.retired ? 'retired' : item.record.status, JSON.stringify(item.record), item.nativeTable, item.nativeId, contextVersion)
 }
 
-export function readAtlasRecords(sqlite: Database.Database, novelId: number, atChapter?: number, includePlanned = true): AtlasStoredRecord[] {
+export function readAtlasRecords(sqlite: Database.Database, novelId: number, atChapter?: number, includePlanned = true, boundary: 'start' | 'end' = 'end'): AtlasStoredRecord[] {
   const where = ['novel_id = ?']
   const args: unknown[] = [novelId]
-  if (atChapter !== undefined) { where.push('effective_from_chapter <= ?'); args.push(atChapter) }
+  if (atChapter !== undefined) {
+    if (boundary === 'start' && atChapter > 0) {
+      where.push("(effective_from_chapter < ? OR (effective_from_chapter = ? AND json_extract(snapshot_json, '$.attributes.stateTiming') = 'chapter_start'))")
+      args.push(atChapter, atChapter)
+    } else { where.push('effective_from_chapter <= ?'); args.push(atChapter) }
+  }
   if (!includePlanned) where.push("status <> 'planned'")
   const rows = sqlite.prepare(`SELECT * FROM (SELECT *, ROW_NUMBER() OVER
     (PARTITION BY record_id ORDER BY effective_from_chapter DESC,id DESC) AS rank

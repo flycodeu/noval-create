@@ -75,9 +75,13 @@ describe('chapter pipeline writer', () => {
       scenePlan: [scene(1), scene(2)], runtimeAssertions: [], narrativeFields: { povGuidance: '', sensoryGuidance: '', narrativeRatioGuidance: '' }, guidance,
       protagonistReference: '姐姐', protagonistRule: '', promptTier: 'standard' }
     const text = buildChapterWriterMessages(input)[0].content
-    for (const marker of ['目的标记1', '目的标记2', '诉求标记1', '诉求标记2', '信息差标记1', '信息差标记2', '样稿正文标记', '说明标记']) {
+    for (const marker of ['目的标记2', '诉求标记1', '诉求标记2', '信息差标记1', '信息差标记2', '样稿正文标记', '说明标记']) {
       expect(text.split(marker)).toHaveLength(2)
     }
+    expect(text.split('目的标记1')).toHaveLength(3)
+    expect(text.split('冲突标记1')).toHaveLength(3)
+    expect(buildChapterWriterMaterialReport(input).scene.purpose).toBe('目的标记1')
+    expect(buildChapterWriterMaterialReport(input).scene.conflict).toBe('冲突标记1')
     expect(text.indexOf('诉求标记1')).toBeLessThan(text.indexOf('目的标记2'))
     expect(text).not.toMatch(/旧文本不应重复注入|场景目标与冲突均缺失|来源追踪：|风格材料估算：/)
     expect(buildChapterWriterMaterialReport(input).sceneSource).toBe('typed')

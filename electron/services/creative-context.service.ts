@@ -8,8 +8,10 @@ import { compileCreativeChapterContext, creativeProjectSources, creativeRevision
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
 import { creativeAtlasCoverage, isCreativeChapterScopedRequest, selectCreativeAssetAtlas, selectCreativePlanningAtlas } from './creative-atlas-context'
+import type { StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
 import { validateCreativeChangeScope } from './creative-change-scope'
 import { getChapterContract, listSceneContracts } from './endgame-asset.service'
+import { creativeRevisionIssueSources } from './creative-review-issues'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { captureChapterRevisionBase, chapterRevisionGenerationMaterial, validateChapterRevision, type ChapterRevisionBase } from './creative-chapter-revision'
 
@@ -43,8 +45,95 @@ function endingEvidence(content: string, preferredCharacters = 1000) {
 // These are adapter/storage bookkeeping fields. Business attributes, evidence, empty authored
 // values, chronology and planned-reveal constraints remain available in their original form.
 const atlasBookkeeping = new Set(['sortOrder', 'recordStatus'])
+/** A model cannot replace fields whose complete baseline was excluded by the budget. */
+export function assertCreativeContextCoverage(data: Record<string, unknown>, context?: Pick<CreativeContextReport, 'omittedSources'>) {
+  for (const source of context?.omittedSources || []) {
+    const index = source.lastIndexOf(':detail:')
+    if (index < 0) continue
+    const id = source.slice(0, index), field = source.slice(index + ':detail:'.length)
+    for (const change of (data.changes || []) as Array<Record<string, unknown>>) {
+      if (change.id !== id) continue
+      const attributes = change.attributes as Record<string, unknown> | undefined
+      if (change.attributeMode === 'replace' || field === 'summary' && Object.prototype.hasOwnProperty.call(change, 'summary')
+        || field !== 'summary' && attributes && Object.prototype.hasOwnProperty.call(attributes, field)) {
+        throw new Error(`本次上下文未提供 ${id} 的完整 ${field}，不能覆盖该字段；请缩小范围并读取完整资料后修订。`)
+      }
+    }
+  }
+}
+const planningNarrativeKeys = new Set(['evidenceQuote', 'eventTitle', 'eventSummary', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'protagonistAction', 'timeLabel', 'timeMode', 'timePrecision', 'relativeDay', 'sequenceInDay', 'chronologyOrder', 'timeOfDayMinutes'])
 function narrativeAttributes(attributes: Record<string, unknown> = {}) {
   return Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))
+}
+
+function clipPlanningValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return undefined
+    return text
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (typeof value === 'boolean') return value
+  if (!value || typeof value !== 'object') return undefined
+  if (Array.isArray(value)) {
+    const items = value.map(item => clipPlanningValue(item)).filter(item => item !== undefined)
+    return items.length ? items : undefined
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(([key]) => !atlasBookkeeping.has(key))
+    .map(([key, item]) => [key, clipPlanningValue(item)] as const).filter(([, item]) => item !== undefined)
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+/** Planning cards keep short public and narrative values, not provenance or the raw attribute bag. */
+function planningAttributes(attributes: Record<string, unknown> | undefined, kind?: StoryAtlasEntity['kind']): Record<string, unknown> {
+  const source = attributes || {}
+  // This is author planning, not a POV projection. Preserve supported business constraints,
+  // including private motives, item risks and future plans; omission must not change their meaning.
+  const projected = narrativeAttributes(source)
+  for (const key of planningNarrativeKeys) if (!(key in projected) && source[key] !== undefined) projected[key] = source[key]
+  if (kind === 'location' && source.geography && typeof source.geography === 'object') projected.geography = source.geography
+  const clipped = clipPlanningValue(projected)
+  return clipped && typeof clipped === 'object' && !Array.isArray(clipped) ? clipped as Record<string, unknown> : {}
+}
+
+function planningSummary(summary: unknown) {
+  if (typeof summary !== 'string') return undefined
+  const text = summary.trim()
+  if (!text) return undefined
+  return text.length > 240 ? `${text.slice(0, 240)}（摘要节选，后文未提供）` : text
+}
+
+const descriptivePlanningKeys = new Set(['background', 'description', 'biography', 'publicSummary', 'appearance', 'traits', 'personalityTraits', 'habits', 'dailyRoutine', 'speechPattern'])
+function entityCard(entity: StoryAtlasEntity) {
+  const summary = planningSummary(entity.summary)
+  const attributes = planningAttributes(entity.attributes, entity.kind)
+  const details: Record<string, unknown> = {}
+  if (typeof entity.summary === 'string' && entity.summary.trim().length > 240) details.summary = entity.summary.trim()
+  for (const [key, value] of Object.entries(attributes)) if (descriptivePlanningKeys.has(key) && estimateTokens(JSON.stringify(value)) > 500) {
+    details[key] = value
+    delete attributes[key]
+  }
+  const card = {
+    id: entity.id, kind: entity.kind, name: entity.name,
+    ...(entity.status ? { status: entity.status } : {}),
+    ...(entity.parentId !== undefined ? { parentId: entity.parentId } : {}),
+    ...(entity.effectiveFromChapter !== undefined ? { effectiveFromChapter: entity.effectiveFromChapter } : {}),
+    ...(summary ? { summary } : {}),
+    ...(Object.keys(attributes).length ? { attributes } : {}),
+    ...(Object.keys(details).length ? { unexpandedFields: Object.keys(details), usage: '卡片未展开字段须以同批完整来源为准；完整来源未提供时保持原值，不得覆盖或猜补。' } : {}),
+  }
+  return { card, details }
+}
+
+function relationCard(edge: Pick<StoryAtlasRelation, 'id' | 'kind' | 'fromId' | 'toId' | 'label' | 'status' | 'effectiveFromChapter'>, attributes: Record<string, unknown>, shared?: { sourceId: string; keys: string[] }) {
+  return {
+    id: edge.id, kind: edge.kind, fromId: edge.fromId, toId: edge.toId,
+    ...(edge.label ? { label: edge.label } : {}),
+    ...(edge.status ? { status: edge.status } : {}),
+    ...(edge.effectiveFromChapter !== undefined ? { effectiveFromChapter: edge.effectiveFromChapter } : {}),
+    ...(Object.keys(attributes).length ? { attributes } : {}),
+    ...(shared ? { sharedAttributes: shared } : {}),
+  }
 }
 
 /** A blank stored field is not a constraint or an instruction to erase a field on apply. */
@@ -134,6 +223,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     seen.set(identity, candidate); candidates.push(candidate)
   }
   add('task', { stage: input.stage, request: input.request, count: input.count, atChapter: input.atChapter, changeScope: input.changeScope }, true)
+  for (const issue of creativeRevisionIssueSources(input)) add(`revision_issue:${issue.id}`, issue, true)
   add('background', novel.userBackground, true)
   const assetStage = input.stage === 'map' || input.stage === 'events' ? input.stage : undefined
   for (const source of creativeProjectSources(novel)) {
@@ -215,6 +305,9 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const coverage = creativeAtlasCoverage(atlas, relevant)
   add('atlas_coverage', { ...coverage, selectedEntityIds: undefined }, true)
   const ordered = [...atlas.entities].sort((a, b) => Number(relevant.has(b.id)) - Number(relevant.has(a.id)) || Number(b.kind === stageKind) - Number(a.kind === stageKind))
+  const scopedIds = new Set([...(input.changeScope?.existingEntityIds || []), ...(input.changeScope?.existingRelationIds || [])])
+  const entityRequired = (id: string) => selection.seedIds.has(id) || selection.constraintEntityIds.has(id) || scopedIds.has(id)
+  const relationRequired = (edge: { id: string; fromId: string; toId: string }) => selection.seedIds.has(edge.fromId) || selection.seedIds.has(edge.toId) || scopedIds.has(edge.id)
   for (const entity of ordered.filter(entity => relevant.has(entity.id))) {
     if (selection.constraintEntityIds.has(entity.id)) {
       add(`${entity.id}:boundary_constraint`, {
@@ -226,7 +319,11 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     // Provenance is kept on the saved record for audit. It is not a narrative fact and can
     // contain long workflow notes that consume the local planning window without helping a scene.
     } else {
-      add(entity.id, { ...entity, source: undefined, attributes: narrativeAttributes(entity.attributes) }, true)
+      const required = entityRequired(entity.id)
+      const { card, details } = entityCard(entity)
+      add(entity.id, card, required)
+      for (const [field, value] of Object.entries(details)) add(`${entity.id}:detail:${field}`, { id: entity.id, field, value }, false, required ? 10 : 60)
+      if (typeof entity.summary === 'string' && entity.summary.trim().length > 240) omittedSources.push(`${entity.id}:summary:excerpt`)
       for (const key of Object.keys(entity.attributes || {})) if (atlasBookkeeping.has(key)) omittedSources.push(`${entity.id}:${key}:storage_metadata`)
     }
   }
@@ -240,10 +337,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
       && /^participation:timeline_events:\d+:\d+$/u.test(edge.id)
       && (relevantEventIds.has(edge.fromId) || relevantEventIds.has(edge.toId))
     if (copiedEvent) {
-      add(`relation:${edge.id}`, {
-        id: edge.id, kind: edge.kind, fromId: edge.fromId, toId: edge.toId,
-        label: edge.label, status: edge.status, effectiveFromChapter: edge.effectiveFromChapter,
-      }, true)
+      add(`relation:${edge.id}`, relationCard(edge, {}), relationRequired(edge))
       omittedSources.push(`${edge.id}:duplicated_event_snapshot`)
       continue
     }
@@ -253,14 +347,13 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     const event = localOutline && edge.kind === 'participation'
       ? atlas.entities.find(entity => relevant.has(entity.id) && entity.kind === 'event' && [edge.fromId, edge.toId].includes(entity.id)) : undefined
     const shared: string[] = []
-    const attributes = Object.fromEntries(Object.entries(narrativeAttributes(edge.attributes)).filter(([key, value]) => {
+    const filtered = Object.fromEntries(Object.entries(narrativeAttributes(edge.attributes)).filter(([key, value]) => {
       const original = key === 'eventTitle' ? event?.name : key === 'eventSummary' ? event?.summary : event?.attributes[key]
       if (event && original !== undefined && JSON.stringify(value) === JSON.stringify(original)) { shared.push(key); return false }
       return true
     }))
-    add(`relation:${edge.id}`, shared.length
-      ? { ...edge, source: undefined, attributes, sharedAttributes: { sourceId: event!.id, keys: shared } }
-      : { ...edge, source: undefined, attributes }, true)
+    const attributes = planningAttributes(filtered)
+    add(`relation:${edge.id}`, relationCard(edge, attributes, shared.length ? { sourceId: event!.id, keys: shared } : undefined), relationRequired(edge))
   }
   // Compact optional catalog is selected before optional full entities. Large projects can omit names
   // explicitly instead of blocking every local task on an ever-growing mandatory global directory.

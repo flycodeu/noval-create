@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
+import { assertCreativeContextCoverage, compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
 import { queryStoryAtlas } from './story-atlas.service'
 import type { CreativeStage } from '../../src/shared/creative-workflow'
@@ -65,8 +65,15 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.maxInputTokens).toBe(24000)
   })
   it('keeps a specifically requested global-task entity mandatory instead of silently dropping it to fit', async () => {
-    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', parentId: null, attributes: { background: '当前人物原记录'.repeat(10000) } }]
-    await expect(compileCreativeContext({ ...input('world_rules'), request: '检查陈舟的能力是否符合世界规则', atChapter: 3 })).rejects.toThrow('必要资料 character:1 超出')
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.novel.expandedBackground = '可选长背景'.repeat(30000)
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', parentId: null, attributes: { background: '当前人物原记录'.repeat(10000) }, summary: '巡河人' }]
+    const report = await compileCreativeContext({ ...input('world_rules'), request: '检查陈舟的能力是否符合世界规则', atChapter: 3 })
+    expect(report.sources).toContain('character:1')
+    expect(report.omittedSources).toContain('expanded_background')
+    expect(report.omittedSources).not.toContain('character:1:outside_world_rules_scope')
+    expect(report.text).toContain('巡河人')
+    expect(report.text).not.toContain('当前人物原记录')
   })
   it('retains chapter participants for the built-in outline prerequisite request with spaced chapter numbers', async () => {
     mock.chapters = [{ id: 24, chapterNum: 4, title: '客至', outline: '检查旧绳', summary: '陈舟在河村检查旧绳' }]
@@ -117,6 +124,8 @@ describe('creative project context budget and saved constraints', () => {
     ]
     mock.atlas.relations = [{ id: 'home', kind: 'presence', fromId: 'character:1', toId: 'location:2', attributes: { locationRole: 'residence' } }]
     const report = await compileCreativeContext({ ...input(), request: '完善南岭下辖地区的地图' })
+    expect(report.text).toContain('既有水网')
+    expect(report.text).toContain('河村')
     expect(report.text).toContain('旧桥不可移动')
     expect(report.text).not.toContain('住民长档案')
     expect(report.text).not.toContain('无关对白文风')
@@ -182,6 +191,19 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.sources).toContain('character:1')
     expect(report.omittedSources.some(source => source.startsWith('identities:'))).toBe(true)
     expect(report.estimatedTokens).toBeLessThanOrEqual(report.maxInputTokens)
+  })
+  it('omits a one-hop neighbour instead of treating its dossier as required', async () => {
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.atlas.entities = [
+      { id: 'character:1', kind: 'character', name: '陈舟', attributes: { publicSummary: '巡河人' } },
+      { id: 'character:2', kind: 'character', name: '周河', attributes: { abilities: Array.from({ length: 400 }, () => '长能力描述'.repeat(30)) } },
+    ]
+    mock.atlas.relations = [{ id: 'bond', kind: 'relationship', fromId: 'character:1', toId: 'character:2', label: '同事', attributes: {} }]
+    const report = await compileCreativeContext({ ...input('characters'), request: '优化陈舟' })
+    expect(report.sources).toContain('character:1')
+    expect(report.sources).toContain('relation:bond')
+    expect(report.omittedSources).toContain('character:2')
+    expect(report.text).not.toContain('长能力描述')
   })
   it('keeps narrative facts while excluding verbose import and review provenance from model context', async () => {
     mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', summary: '住在河边', attributes: {}, source: { kind: 'reviewed_model_canon', note: '候选SHA256与流程备注'.repeat(2000) } }]
@@ -279,6 +301,7 @@ describe('creative project context budget and saved constraints', () => {
     mock.atlas.entities = [{ id: 'item:1', kind: 'item', name: '铜铃', attributes: { risk: '已有裂纹' } }]
     const asset = await compileCreativeContext({ ...input('items'), request: '完善已有物品', changeScope: { existingEntityIds: ['item:1'], newEntityCount: 0 } })
     expect(asset.sources).toContain('item:1')
+    expect(asset.text).toContain('铜铃')
     expect(asset.text).toContain('已有裂纹')
     mock.chapters = [{ id: 24, chapterNum: 4, title: '夜试', outline: '保留旧绳试验' }]
     const outline = await compileCreativeContext({ ...input('outline'), request: '完善已登记安排', atChapter: 4, changeScope: { chapterIds: [24] } })
@@ -340,6 +363,26 @@ describe('creative project context budget and saved constraints', () => {
     expect(JSON.parse(source)).toEqual(draft)
     expect(source).toBe(JSON.stringify(draft))
   })
+  it('keeps long evidence and constraints intact on required planning targets', async () => {
+    const restriction = '只可在干处观察，'.repeat(40) + '不得复生，也不得把目击证言当作已经证实。'
+    const summary = '人物已有背景。'.repeat(60) + '此人不知凶手身份。'
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', summary, attributes: { abilityLimits: restriction, evidenceQuote: restriction, hiddenSecret: '作者尚未揭示的原因' } }]
+    const report = await compileCreativeContext({ ...input('characters'), request: '优化陈舟' })
+    expect(report.text).toContain(restriction)
+    expect(report.text).toContain(summary)
+    expect(report.text).toContain('作者尚未揭示的原因')
+  })
+  it('blocks edits and replacement of omitted narrative fields while allowing unrelated updates', async () => {
+    mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', summary: '巡河人', attributes: { background: '人物历史'.repeat(20000), abilityLimits: '不能复生' } }]
+    const report = await compileCreativeContext({ ...input('characters'), request: '优化陈舟' })
+    expect(report.omittedSources).toContain('character:1:detail:background')
+    expect(report.text).toContain('unexpandedFields')
+    expect(() => assertCreativeContextCoverage({ changes: [{ id: 'character:1', attributes: { background: '随意重写' } }] }, report)).toThrow('完整 background')
+    expect(() => assertCreativeContextCoverage({ changes: [{ id: 'character:1', attributeMode: 'replace', attributes: { age: 22 } }] }, report)).toThrow('完整 background')
+    expect(() => assertCreativeContextCoverage({ changes: [{ id: 'character:1', attributes: { abilityLimits: '不能复生' } }] }, report)).not.toThrow()
+  })
+
   it('removes adapter bookkeeping and blank arrangement fields without dropping evidence or authored prohibitions', async () => {
     mock.chapters = [{ id: 24, chapterNum: 4, outline: '陈舟查验现场' }]
     mock.contract = { chapterGoal: null, forbiddenActionsJson: '["不可点燃"]', targetCharacterArcIdsJson: '[]' }
@@ -347,7 +390,7 @@ describe('creative project context budget and saved constraints', () => {
     const report = await compileCreativeContext({ ...input('outline'), request: '补齐第4章陈舟的场景安排', atChapter: 4 })
     expect(report.text).toContain('他没有点燃旧灯。')
     expect(report.text).toContain('不可凭光影确认成因。')
-    expect(report.text).toContain('作者指定顺序，须保留')
+    expect(report.text).not.toContain('作者指定顺序，须保留')
     expect(report.text).toContain('不可点燃')
     expect(report.text).not.toContain('"chapterGoal":null')
     expect(report.text).not.toContain('"recordStatus":"confirmed"')
@@ -365,7 +408,9 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.text).toContain('另有个人约束。')
     const source = JSON.parse(report.text.match(/<source id="world_rules:powerSystems:0">\n(.*?)\n<\/source>/u)![1])
     expect(source.reviewSnapshotReference).toBe('$["assets"]["worldRules"]["powerSystems"]["0"]')
-    expect(report.text.match(/原有能力限制/g)).toHaveLength(80)
+    expect(report.sources).toContain('character:1')
+    expect((report.text.match(/原有能力限制/g) || []).length).toBeGreaterThan(0)
+    expect((report.text.match(/原有能力限制/g) || []).length).toBeGreaterThanOrEqual(80)
     mock.model = { maxTokens: 8000, maxContextTokens: 32768 }
     await expect(compileCreativeContext(params, undefined, undefined, 0, { huge: rule.repeat(100) })).rejects.toThrow('窗口不足')
   })

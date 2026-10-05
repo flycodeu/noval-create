@@ -67,6 +67,21 @@ describe('saved atlas dependencies for creative context', () => {
     expect(selected.entityIds).toEqual(new Set(['item:1', 'character:1', 'location:1', 'location:2']))
     expect(selected.relationIds).toEqual(new Set(['holder', 'item-place']))
   })
+  it('does not seed every root place or event when the request and anchor name nothing', () => {
+    const map = selectCreativeAssetAtlas(fixture(), { stage: 'map', request: '完善已有地区的边界', anchorText: '没有对应地名' })
+    expect(map.seedIds.size).toBe(0)
+    expect(map.entityIds.size).toBe(0)
+    const anchored = selectCreativeAssetAtlas(fixture(), { stage: 'map', request: '完善已有地区的边界', anchorText: '河村需要重画' })
+    expect(anchored.seedIds).toEqual(new Set(['location:2']))
+    const events = fixture()
+    events.entities.push(entity('event:1', 'event', '渡口火情'), entity('event:2', 'event', '夜汛'))
+    expect(selectCreativeAssetAtlas(events, { stage: 'events', request: '梳理时间线', anchorText: '没有事件名' }).seedIds.size).toBe(0)
+  })
+  it('does not seed every character when a local planning request and anchor name nothing', () => {
+    const selected = selectCreativePlanningAtlas(fixture(), { stage: 'characters', request: '完善人物日常', anchorText: '没有点名', fallbackText: '仍没有点名' })
+    expect(selected.seedIds.size).toBe(0)
+    expect(selected.entityIds.size).toBe(0)
+  })
   it('includes sibling borders as map constraints without expanding their residents or applying that rule to events', () => {
     const atlas = fixture()
     atlas.entities.push(entity('location:6', 'location', '北城', 'location:1', { geography: { boundary: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] } }))

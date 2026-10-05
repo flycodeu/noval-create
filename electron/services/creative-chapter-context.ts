@@ -17,6 +17,7 @@ import { resolveProsePolicyMaterial } from './prose-operation.service'
 import { creativeChapterRecallQuery, recallCreativeChapterSources } from './creative-chapter-recall'
 import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntroductions, selectCreativeAtlas } from './creative-atlas-context'
 import { chapterRevisionGenerationMaterial, type ChapterRevisionBase } from './creative-chapter-revision'
+import { creativeRevisionIssueSources } from './creative-review-issues'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -33,10 +34,21 @@ function ids(raw?: string | null): number[] {
 /** Read-only prerequisite inspection; orchestration may generate/review missing contracts before retrying. */
 export function inspectCreativeChapterPrerequisites(novelId: number, chapterNum: number) {
   if (!Number.isInteger(chapterNum) || chapterNum < 1) fail('CHAPTER_POSITION_INVALID', '正文必须指定正整数章序。')
-  const chapter = listChapters(novelId).find(row => row.chapterNum === chapterNum)
+  const chapterRows = listChapters(novelId)
+  const chapter = chapterRows.find(row => row.chapterNum === chapterNum)
   if (!chapter) return { chapterId: null, blockers: [`第 ${chapterNum} 章尚未建立，需要先生成章节计划。`] }
   const context = loadChapterContractAuditContext(chapter.id)
   const blockers = getChapterContractBlockers(chapter.id)
+  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
+  if (previous?.writebackStatusJson) {
+    try {
+      const sync = JSON.parse(previous.writebackStatusJson) as { runId?: number; phase?: string; blockedGeneration?: boolean; readyForNextChapter?: boolean }
+      // A legacy "needs_sync" marker is also set on saves by the modern transactional flow.
+      // Only an actual writeback run (or one being prepared) owns this gate.
+      const hasWriteback = typeof sync.runId === 'number' && sync.runId > 0 || ['extracting', 'applying'].includes(sync.phase || '')
+      if (hasWriteback && (sync.blockedGeneration === true || sync.readyForNextChapter === false)) blockers.push(`第 ${previous.chapterNum} 章回写仍待决定或处理，完成后才能推进下一章。`)
+    } catch { blockers.push(`第 ${previous.chapterNum} 章回写状态无法读取，请先核对。`) }
+  }
   if (!context.sceneSnapshots.length) blockers.push('章节至少需要一个已审校的场景合同。')
   return { chapterId: chapter.id, blockers }
 }
@@ -52,7 +64,11 @@ function loadChapterBoundary(novelId: number, chapterNum: number) {
   if (policy.unresolvedPovLabels.length || !policy.povCharacterIds.length) fail('CHAPTER_POV_UNRESOLVED', '场景视角必须对应现有人物的唯一姓名。')
   const allowed = new Set(ids(context.chapter.allowedFactIdsJson))
   const revealed = new Set(ids(context.chapter.revealedFactIdsJson))
-  const factIds = new Set([...policy.allowedFacts, ...policy.deniedFacts].map(item => item.fact.id))
+  const factIds = new Set([
+    ...policy.allowedFacts.map(item => item.fact.id),
+    ...policy.sceneLimitedFacts.map(item => item.fact.fact.id),
+    ...policy.deniedFacts.map(item => item.fact.id),
+  ])
   for (const id of [...allowed, ...revealed]) if (!factIds.has(id)) fail('CHAPTER_FACT_REFERENCE_INVALID', `章节引用的信息点 fact:${id} 不属于当前项目。`)
   for (const directive of policy.revealDirectives) {
     if (!allowed.has(directive.factId) || !revealed.has(directive.factId)) fail('CHAPTER_REVEAL_NOT_AUTHORIZED', `场景揭示 fact:${directive.factId} 未同时登记到本章 allowedFactIds 与 revealedFactIds。`)
@@ -162,6 +178,18 @@ export function creativeRevisionSource(input: CreativeWorkflowInput): string | u
   return artifact.content.output
 }
 
+function sceneInChapterContract(
+  scenes: Array<{ sceneId: number; sceneOrder: number; povName: string }>,
+  snapshots: Array<{ segmentId?: number; segmentOrder?: number; pov?: string }>,
+): boolean {
+  return scenes.length > 0 && scenes.every(scene => snapshots.some(snapshot => {
+    if (snapshot.pov && snapshot.pov !== scene.povName) return false
+    if (typeof snapshot.segmentId === 'number' && snapshot.segmentId === scene.sceneId) return true
+    if (typeof snapshot.segmentOrder === 'number' && snapshot.segmentOrder === scene.sceneOrder) return true
+    return snapshot.segmentId == null && snapshot.segmentOrder == null && snapshot.pov === scene.povName
+  }))
+}
+
 /** The chapter writer never receives raw expanded background, private attributes or future graph states. */
 export async function compileCreativeChapterContext(
   input: CreativeWorkflowInput,
@@ -178,7 +206,7 @@ export async function compileCreativeChapterContext(
   const { context, policy, povNames } = loadChapterBoundary(input.novelId, chapterNum)
   const novel = getNovel(input.novelId)
   if (!novel) fail('PROJECT_NOT_FOUND', '项目不存在。')
-  const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: chapterNum - 1, includePlanned: false })
+  const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: chapterNum, boundary: 'start', includePlanned: false })
   const sources: Partial<ContextPackSource>[] = []
   const omitted = ['expanded_background:author_only', 'story_design:future_plan', 'endgame_design:author_only']
   const add = (key: string, value: unknown, required = false, visibility: ContextPackSource['visibility'] = 'canon', sourcePolicy = policy) => {
@@ -211,6 +239,12 @@ export async function compileCreativeChapterContext(
     scenes: context.sceneSnapshots,
   }, true, 'plan', contractPolicy)
   for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'))
+  for (const issue of creativeRevisionIssueSources(input)) add(`revision_issue:${issue.id}`, issue, true, 'draft', { ...policy, deniedFacts: [] })
+  for (const limited of policy.sceneLimitedFacts) {
+    const scenes = limited.scenes.map(scene => `场景${scene.sceneOrder}（scene:${scene.sceneId}，${scene.povName}#${scene.povCharacterId}）`).join('、')
+    const body = [limited.fact.fact.title, limited.fact.fact.summary].filter(Boolean).join('：')
+    add(`fact:${limited.fact.fact.id}:scene_limited`, `仅限指定场景和该视角使用，其他场景不得写出或暗示。允许场景：${scenes}。${body}`, sceneInChapterContract(limited.scenes, context.sceneSnapshots))
+  }
   if (input.operation === 'review') {
     const original = `${context.chapter.content || ''}\n${input.request}`
     for (const item of policy.deniedFacts) {
@@ -321,6 +355,18 @@ export async function compileCreativeChapterContext(
 }
 
 /** Deterministic checks complement independent semantic review; no writes occur here. */
+export function creativeChapterSceneVisibility(novelId: number, chapterNum: number) {
+  const { policy } = loadChapterBoundary(novelId, chapterNum)
+  return [...policy.sceneLimitedFacts.map(item => ({
+    factId: item.fact.fact.id, title: item.fact.fact.title, summary: item.fact.fact.summary,
+    allowedScenes: item.scenes,
+    authorizedRevelations: policy.revealDirectives.filter(directive => directive.factId === item.fact.fact.id),
+  })), ...policy.deniedFacts.map(item => ({
+    factId: item.fact.id, title: item.fact.title, summary: item.fact.summary,
+    allowedScenes: [], authorizedRevelations: policy.revealDirectives.filter(directive => directive.factId === item.fact.id),
+  }))]
+}
+
 export function assertCreativeChapterCandidate(input: {
   novelId: number; chapterNum: number; content: string; expectedContextVersion?: number; changes?: StoryAtlasChange[]
 }) {
@@ -333,6 +379,7 @@ export function assertCreativeChapterCandidate(input: {
     if ([item.fact.title, item.fact.summary].some(text => text && text.trim().length >= 2 && input.content.includes(text.trim()))) fail('CHAPTER_FORBIDDEN_FACT', `正文包含本章不可揭示的信息点 fact:${item.fact.id}。`)
   }
   for (const change of input.changes || []) {
+    if (change.op !== 'retire' && change.attributes?.stateTiming === 'chapter_start') fail('CHAPTER_CHANGE_TIMING_INVALID', '正文实际发生的变化只能在章内或章末生效，不能倒写为章初状态。')
     if (change.op === 'retire') fail('CHAPTER_RETIRE_FORBIDDEN', '正文写回不能删除既有图谱事实，请提交明确的资料修订。')
     const quote = change.attributes?.evidenceQuote
     if (typeof quote !== 'string' || quote.trim().length < 4 || !input.content.includes(quote.trim())) fail('CHAPTER_CHANGE_EVIDENCE_MISSING', '每项图谱变化必须附 attributes.evidenceQuote，并逐字引用本次正文至少 4 个字符。')

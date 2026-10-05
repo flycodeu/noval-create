@@ -10,6 +10,7 @@ import type { ChapterContext, ChapterContextRawData } from './context.service'
 import {
   buildContextVisibilityPolicy,
   filterChapterContextByVisibility,
+  projectPreviousChapterSources,
   type ContextVisibilityFact,
   type ContextVisibilityPolicyInput,
 } from './context-visibility'
@@ -225,6 +226,55 @@ describe('context visibility', () => {
     }))
     expect(policy.allowedFacts).toEqual([])
     expect(policy.deniedFacts.map((item) => item.fact.id)).toContain(8)
+    expect(policy.sceneLimitedFacts).toEqual([])
     expect(policy.unresolvedPovLabels).toContain('scene:201:ambiguous_pov')
+  })
+
+  it('keeps a fact known by only one scene POV out of the global allow and deny sets', () => {
+    const onlyA = fact(10, '药箱暗格', {
+      ...emptyProjection,
+      characterKnowledge: [{ characterId: 7, knownChapterNum: 19 }],
+    })
+    const both = fact(11, '河水暴涨', {
+      ...emptyProjection,
+      characterKnowledge: [
+        { characterId: 7, knownChapterNum: 19 },
+        { characterId: 8, knownChapterNum: 19 },
+      ],
+    })
+    const neither = fact(12, '真凶姓名', emptyProjection)
+    const characters = [
+      { id: 7, fullName: '沈砚青', isProtagonist: true },
+      { id: 8, fullName: '赵队长', isProtagonist: false },
+    ]
+    const scenes = [
+      { id: 201, order: 1, pov: '沈砚青', status: 'locked', revealPayload: [] as string[] },
+      { id: 202, order: 2, pov: '赵队长', status: 'locked', revealPayload: [] as string[] },
+      { id: 203, order: 3, pov: '沈砚青', status: 'ready', revealPayload: [] as string[] },
+    ]
+    const policy = buildContextVisibilityPolicy(input({ facts: [onlyA, both, neither], characters, scenes }))
+    expect(policy.allowedFacts.map((item) => item.fact.id)).toEqual([11])
+    expect(policy.deniedFacts.map((item) => item.fact.id)).toEqual([12])
+    expect(policy.sceneLimitedFacts.map((item) => item.fact.fact.id)).toEqual([10])
+    expect(policy.sceneLimitedFacts[0]?.scenes).toEqual([
+      { sceneId: 201, sceneOrder: 1, povCharacterId: 7, povName: '沈砚青' },
+      { sceneId: 203, sceneOrder: 3, povCharacterId: 7, povName: '沈砚青' },
+    ])
+
+    const review = buildContextVisibilityPolicy(input({ facts: [onlyA, neither], characters, scenes, purpose: 'review' }))
+    expect(review.sceneLimitedFacts).toEqual([])
+    expect(review.allowedFacts.map((item) => item.fact.id)).toEqual([10, 12])
+    expect(review.deniedFacts).toEqual([])
+
+    const past = { id: 19, chapterNum: 19, content: '沈砚青打开药箱暗格。\n\n旁白写下真凶姓名。\n\n廊下只剩雨声。' }
+    const projected = projectPreviousChapterSources(past, policy, '')
+    expect(projected.find((source) => source.text.includes('药箱暗格'))).toMatchObject({ included: true })
+    expect(projected.some((source) => source.text.includes('真凶姓名'))).toBe(false)
+    expect(projected.some((source) => source.reason === 'pov_forbidden_fact' && source.included === false)).toBe(true)
+
+    const single = buildContextVisibilityPolicy(input({ facts: [onlyA] }))
+    expect(single.allowedFacts.map((item) => item.fact.id)).toEqual([10])
+    expect(single.sceneLimitedFacts).toEqual([])
+    expect(single.deniedFacts).toEqual([])
   })
 })

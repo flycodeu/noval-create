@@ -981,7 +981,10 @@ function renderThreadPack(
     activeThreadLines: matchedThreads
       .filter((thread) => thread.status === 'active' || thread.status === 'planned' || thread.status === 'stalled')
       .slice(0, threadLimit)
-      .map((thread) => `${thread.title}${thread.currentState ? `：${thread.currentState}` : thread.summary ? `：${thread.summary}` : ''}`),
+      .map((thread) => {
+        const line = `${thread.title}${thread.currentState ? `：${thread.currentState}` : thread.summary ? `：${thread.summary}` : ''}`
+        return thread.status === 'planned' ? `计划（尚未发生）：${line}` : line
+      }),
     openLoopLines: matchedThreads
       .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
       .slice(0, threadLimit)
@@ -992,7 +995,10 @@ function renderThreadPack(
       .map((entry) => `${entry.title}${entry.summary ? `：${entry.summary}` : ''}`),
     continuityLines: [
       ...foreshadowSnapshot.overdue.map((entry) => entry.warningText || entry.title),
-      ...foreshadowSnapshot.pending.map((entry) => entry.summary || entry.title),
+      ...foreshadowSnapshot.pending.map((entry) => {
+        const text = entry.summary || entry.title
+        return text ? `未到期，不要写成已经发生：${text}` : ''
+      }),
     ].filter(Boolean).slice(0, threadLimit),
   }
 }

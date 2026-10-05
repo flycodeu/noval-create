@@ -15,10 +15,8 @@ export function selectCreativeAssetAtlas(atlas: Atlas, input: {
 }) {
   const explicit = atlas.entities.filter(entity => namedAtlasEntity(input.request, entity))
   const anchor = input.anchorText || input.fallbackText || ''
+  // Unnamed map or timeline work stays empty. The caller may still offer an optional identity catalog.
   const seeds = new Set((explicit.length ? explicit : atlas.entities.filter(entity => namedAtlasEntity(anchor, entity))).map(entity => entity.id))
-  if (!seeds.size) for (const entity of atlas.entities) {
-    if (input.stage === 'map' ? entity.kind === 'location' && !entity.parentId : entity.kind === 'event') seeds.add(entity.id)
-  }
   const entityIds = new Set(seeds), relationIds = new Set<string>()
   const byId = new Map(atlas.entities.map(entity => [entity.id, entity]))
   const include = (edge: StoryAtlasRelation) => { relationIds.add(edge.id); entityIds.add(edge.fromId); entityIds.add(edge.toId) }

@@ -12,6 +12,7 @@ import ChapterArrangement from './ChapterArrangement'
 import ChapterChanges from './ChapterChanges'
 import { ContentDocument } from './ContentDocument'
 import { selectedChapterParagraphs } from './chapter-revision-selection'
+import { manuscriptGenerationFields } from './manuscript-generation'
 
 const VERSION_LABELS = { 'manual-save': '手动保存', 'ai-rewrite': 'AI 修订', 'pipeline-generate': '生成正文', 'version-restore': '恢复版本' }
 
@@ -124,9 +125,10 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     if (!chapter || !await save()) return
     if (revisionTarget !== 'chapter' && !baselineRef.current.trim()) { setError('请先保存正文，再进行局部修订。'); return }
     if (revisionTarget === 'paragraphs' && (!selectedParagraphs.length || selectedParagraphs.length > 30)) { setError('请在正文中选中需要修改的段落，每次最多 30 段。'); return }
+    const fields = manuscriptGenerationFields({ chapterNum: chapter.chapterNum, title: chapter.title, hasSavedProse: Boolean(baselineRef.current.trim()), revisionTarget, userRequest: request, run: workflow.run })
     await workflow.start({ stage: 'chapter', atChapter: chapter.chapterNum, autoApply,
       ...(revisionTarget === 'summary' ? { chapterRevision: { target: 'summary' } } : revisionTarget === 'paragraphs' ? { chapterRevision: { target: 'paragraphs', paragraphIndexes: selectedParagraphs } } : {}),
-      request: request.trim() || (revisionTarget === 'summary' ? '根据本章已保存正文修订摘要，准确概括动作主语、事件先后和结果，不改变正文。' : `结合本章安排、现有设定与前文，${baselineRef.current.trim() ? '审阅并修订' : '生成'}第 ${chapter.chapterNum} 章《${chapter.title || '未命名'}》，保留已确定事实，完成连续性与叙事评审。`) })
+      ...fields })
   }
   const openHistory = async () => {
     if (!chapter) return
@@ -168,7 +170,8 @@ export default function Manuscript({ novelId }: { novelId: number }) {
         </>}
       </>}
       {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}
-      {workflow.run && (workflow.active || workflow.run.stage === 'chapter') && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => navigate(buildWorkspaceRoute(novelId, `revision?artifact=${workflow.run?.artifactId || ''}`))} />}
+      {workflow.run && chapter && workflow.run.atChapter === chapter.chapterNum && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => navigate(buildWorkspaceRoute(novelId, `revision?artifact=${workflow.run?.artifactId || ''}`))} />}
+      {workflow.run && workflow.active && (!chapter || workflow.run.atChapter !== chapter.chapterNum) && <p className="author-muted">第 {workflow.run.atChapter} 章正在运行。停止只会作用在这次任务。<Button size="small" type="link" onClick={() => void workflow.control('cancel')}>停止</Button></p>}
     </section>
     <Drawer title="正文历史版本" width={680} open={historyOpen} onClose={() => setHistoryOpen(false)}><div className="author-manuscript__versions">{versions.length ? versions.map((version) => <button className={selectedVersion?.id === version.id ? 'is-active' : ''} key={version.id} onClick={() => setSelectedVersion(version)}><span>{VERSION_LABELS[version.versionSource]} · {version.wordCount.toLocaleString()} 字</span><time>{new Date(version.createdAt).toLocaleString()}</time></button>) : <EmptyWork title="还没有历史版本">保存正文或完成生成后，版本会出现在这里。</EmptyWork>}</div>{selectedVersion && <section className="author-version-preview"><Button onClick={() => restore(selectedVersion)}>恢复此版本</Button><pre>{selectedVersion.content}</pre></section>}</Drawer>
     <Modal title="添加章节" open={creating} onCancel={() => setCreating(false)} onOk={() => void createChapter()} okText="添加"><div className="author-new-chapter"><label>章节序号<InputNumber min={1} precision={0} value={newNumber} onChange={(value) => setNewNumber(value || 1)} /></label><label>章节标题<Input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="可以暂不填写" /></label></div></Modal>

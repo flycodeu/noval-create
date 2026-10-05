@@ -13,6 +13,8 @@ vi.mock('./artifact.service', () => ({
 vi.mock('./creative-facts', () => ({ queryCreativeFacts: () => [{ id: 1, title: '割绳者', summary: '周荷割断了绳索' }] }))
 vi.mock('./story-atlas.service', () => ({ queryStoryAtlas: () => ({ entities: [{ id: 'character:1', kind: 'character', name: '沈墨' }] }) }))
 vi.mock('./asset-quality.service', () => ({ runNestedReviewTask: vi.fn() }))
+vi.mock('./creative-chapter-context', () => ({ creativeChapterSceneVisibility: vi.fn(() => []) }))
+import { creativeChapterSceneVisibility } from './creative-chapter-context'
 import { runNestedReviewTask } from './asset-quality.service'
 import { assertCreativeEvidence, creativeEvidenceClaims, reviewCreativeEvidence, validateEvidenceAssessments } from './creative-evidence-review'
 import type { ModelOutputCheckpoint } from './creative-model-checkpoint'
@@ -24,7 +26,19 @@ const assessments = (support = 'supported') => creativeEvidenceClaims(1, data).m
 const review = () => reviewCreativeEvidence({ ...base, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
 
 describe('evidence support certificates', () => {
-  beforeEach(() => { store.clear(); vi.clearAllMocks() })
+  beforeEach(() => { store.clear(); vi.clearAllMocks(); vi.mocked(creativeChapterSceneVisibility).mockReturnValue([]) })
+  it('reviews scene-limited knowledge even without fact reveals or graph changes and blocks wrong POV use', async () => {
+    vi.mocked(creativeChapterSceneVisibility).mockReturnValue([{ factId: 1, title: '割绳者', summary: '周荷割断了绳索', allowedScenes: [{ sceneId: 3, sceneOrder: 1, povCharacterId: 1, povName: '沈墨' }], authorizedRevelations: [] }])
+    const candidate = { chapterNum: 2, content: prose, changes: [], factReveals: [] }
+    const claims = creativeEvidenceClaims(1, candidate)
+    expect(claims).toHaveLength(1)
+    expect(claims[0].conclusion).toContain('无法定位场景或知情过程则 insufficient')
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: [{ id: claims[0].id, support: 'contradicted', evidenceQuote: prose, reason: '第二场的未知情 POV 把秘密当作既知事实' }] }))
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    expect(report!.passed).toBe(false)
+    expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).toThrow('未通过')
+    expect(() => validateEvidenceAssessments({ assessments: [{ id: claims[0].id, support: 'supported', evidenceQuote: '', reason: '整章没有使用此事实，各场均未提前知情' }] }, claims, prose)).not.toThrow()
+  })
   it('reviews reader revelation and actual character knowledge separately with the full prose', async () => {
     vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: assessments('insufficient') }))
     const report = await review()

@@ -91,7 +91,9 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
   if (input.atChapter !== undefined) chapter(input.atChapter)
-  const all = readAtlasRecords(sqlite, input.novelId, input.atChapter, input.includePlanned === true).filter((item) => !item.retired)
+  if (input.boundary && !['start', 'end'].includes(input.boundary)) fail('INVALID_INPUT', '章内边界必须是 start 或 end。')
+  if (input.boundary === 'start' && (!Number.isInteger(input.atChapter) || !input.atChapter || input.atChapter < 1)) fail('INVALID_INPUT', '查询章初状态必须指定正整数章序。')
+  const all = readAtlasRecords(sqlite, input.novelId, input.atChapter, input.includePlanned === true, input.boundary).filter((item) => !item.retired)
   let entities = all.flatMap((item) => item.recordType === 'entity' ? [item.record as StoryAtlasEntity] : [])
   const ids = new Set(entities.map((entity) => entity.id))
   let relations = all.flatMap((item) => item.recordType === 'relation' ? [item.record as StoryAtlasRelation] : [])
@@ -139,6 +141,10 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     if (change.attributes !== undefined && (!change.attributes || typeof change.attributes !== 'object' || Array.isArray(change.attributes) || JSON.stringify(change.attributes).length > 32000)) fail('INVALID_INPUT', 'attributes 必须为不超过 32KB 的对象。')
     if (change.attributeMode !== undefined && !['merge', 'replace'].includes(change.attributeMode)) fail('INVALID_INPUT', '属性更新方式只能为 merge 或 replace。')
     if (change.status && !['confirmed', 'planned'].includes(change.status)) fail('INVALID_INPUT', '不支持的资料状态。')
+    if (change.attributes?.stateTiming === 'chapter_start') {
+      const previous = change.id ? byId.get(change.id)?.record : undefined
+      if (previous?.effectiveFromChapter === input.effectiveFromChapter && input.effectiveFromChapter > 0 && previous.attributes.stateTiming !== 'chapter_start') fail('ATLAS_BOUNDARY_CONFLICT', '本章已有章内或章末版本，不能将其整份倒写为章初；请先核对并处理已有变化。')
+    }
     if (change.clientId !== undefined && (typeof change.clientId !== 'string' || !change.clientId.trim() || change.clientId.length > 200)) fail('INVALID_INPUT', '临时 ID 须为 1 至 200 字符。')
     if (!(change.op === 'upsert_entity' ? entityKinds : relationKinds).has(change.kind)) fail('INVALID_INPUT', '不支持的图谱类型。')
     if (change.op === 'upsert_entity' && (typeof change.name !== 'string' || !change.name.trim() || change.name.length > 200)) fail('INVALID_INPUT', '实体名称须为 1 至 200 字符。')
@@ -197,7 +203,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes, status: change.status || previous?.status || 'confirmed',
+        attributes: { ...attributes, stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -239,7 +245,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     const previous = old?.record as StoryAtlasRelation | undefined
     byId.set(id, { recordType: 'relation', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
       id, kind: change.kind, fromId, toId, label: change.label ?? previous?.label ?? '',
-      attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
+      attributes: { ...mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
       effectiveFromChapter: input.effectiveFromChapter, source: input.source,
     } })
   }
@@ -248,6 +254,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     const old = byId.get(id)
     if (!old || old.retired) fail('ENTITY_NOT_FOUND', `无法停用不存在的记录 ${id}。`)
     old.retired = true
+    old.record.attributes = { ...old.record.attributes, stateTiming: 'chapter_end' }
     old.record = { ...old.record, effectiveFromChapter: input.effectiveFromChapter, source: input.source }
     changedIds.add(id)
     if (old.recordType === 'entity') for (const edge of byId.values()) {
@@ -401,9 +408,24 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
       values.level = level
     }
     if (record.kind === 'event') {
-      values.time_label ||= record.effectiveFromChapter ? `第 ${record.effectiveFromChapter} 章` : '背景事件'
-      values.status = 'confirmed'
+      const rawLabel = values.time_label
+      const explicitLabel = typeof rawLabel === 'string' ? rawLabel.trim() : ''
+      if (explicitLabel) values.time_label = explicitLabel
+      else delete values.time_label
+      const explicitStatus = record.attributes.status
+      const existingEvent = item.nativeId
+        ? sqlite.prepare('SELECT status FROM timeline_events WHERE id=? AND novel_id=?').get(item.nativeId, novelId) as { status?: string | null } | undefined
+        : undefined
+      if (typeof explicitStatus === 'string' && explicitStatus.trim()) values.status = explicitStatus.trim()
+      else if (!existingEvent) values.status = 'planned'
       values.chapter_start_id = record.attributes.chapterStartId ?? null
+      if (values.time_label === undefined) {
+        const existing = item.nativeId
+          ? sqlite.prepare('SELECT time_label FROM timeline_events WHERE id=? AND novel_id=?').get(item.nativeId, novelId) as { time_label?: string | null } | undefined
+          : undefined
+        // time_label is NOT NULL. Updates keep the stored label; a new row cannot invent a chapter name.
+        if (!existing) values.time_label = ''
+      }
     }
     if (record.kind === 'character' || record.kind === 'item') values.record_status = 'confirmed'
     item.nativeTable = entityTables[record.kind]
@@ -417,7 +439,7 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     const values: Record<string, unknown> = { novel_id: novelId, relation_label: record.label, relation_type: String(record.attributes.relationType || record.kind),
       bilateral: record.attributes.bilateral === false ? 0 : 1, description: String(record.attributes.description || record.attributes.endState || '') }
     if (record.kind === 'relationship') { values.char_a_id = fromId; values.char_b_id = toId }
-    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = record.attributes.routeOpen === false ? 0 : 1 }
+    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = record.attributes.routeOpen === true ? 1 : record.attributes.routeOpen === false ? 0 : null }
     item.nativeId = writeRow(sqlite, table, item.nativeTable === table ? item.nativeId : null, values)
     item.nativeTable = table
   } else if (record.kind === 'ownership' && record.fromId.startsWith('character:')) {

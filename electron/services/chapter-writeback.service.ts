@@ -915,43 +915,56 @@ function sanitizeAiForeshadowState(afterState: Record<string, unknown>, chapter:
   }
 }
 
-function sanitizeAiFactState(afterState: Record<string, unknown>, chapter: ChapterRow, context: ExistingAssetContext): StoryFactPatch | null {
+/** Missing fields are not deletions. Only creation may supply conservative defaults. */
+function explicitAiPatch<T extends object>(raw: Record<string, unknown>, normalized: T, aliases: Record<string, string[]> = {}): T {
+  return Object.fromEntries(Object.entries(normalized).filter(([key]) =>
+    (aliases[key] || [key]).some(name => Object.prototype.hasOwnProperty.call(raw, name)),
+  )) as T
+}
+
+function explicitScopedId(raw: unknown, allowed: Set<number>, field: string): number | null {
+  if (raw == null) return null
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0 || !allowed.has(raw)) throw new Error(`${field} 必须是本项目中的有效ID；只有明确 null 才能清空。`)
+  return raw
+}
+
+function sanitizeAiFactState(afterState: Record<string, unknown>, _chapter: ChapterRow, context: ExistingAssetContext): StoryFactPatch | null {
   const title = asText(afterState.title)
   if (!title) return null
-  return {
+  return explicitAiPatch(afterState, {
     kind: (asText(afterState.kind) || 'clue') as StoryFactPatch['kind'],
     title,
     summary: asText(afterState.summary),
     status: (asText(afterState.status) || 'introduced') as StoryFactPatch['status'],
-    volumeId: resolveScopedId(afterState.volumeId, context.volumeIds) ?? (chapter.volumeId && context.volumeIds.has(chapter.volumeId) ? chapter.volumeId : null),
-    relatedPuzzleId: resolveScopedId(afterState.relatedPuzzleId, new Set(context.factById.keys())),
-    readerKnownChapterId: resolveScopedId(afterState.readerKnownChapterId, context.chapterIds) ?? chapter.id,
-    protagonistKnownChapterId: resolveScopedId(afterState.protagonistKnownChapterId, context.chapterIds),
+    volumeId: explicitScopedId(afterState.volumeId, context.volumeIds, 'volumeId'),
+    relatedPuzzleId: explicitScopedId(afterState.relatedPuzzleId, new Set(context.factById.keys()), 'relatedPuzzleId'),
+    readerKnownChapterId: explicitScopedId(afterState.readerKnownChapterId, context.chapterIds, 'readerKnownChapterId'),
+    protagonistKnownChapterId: explicitScopedId(afterState.protagonistKnownChapterId, context.chapterIds, 'protagonistKnownChapterId'),
     characterKnowledgeJson: parseStoryFactKnowledge(afterState.characterKnowledge ?? afterState.characterKnowledgeJson)
       .filter((entry) => context.characterById.has(entry.characterId) && (!entry.knownChapterId || context.chapterIds.has(entry.knownChapterId))),
     plannedRevealVolume: asPositiveNumber(afterState.plannedRevealVolume),
-    targetRevealChapterId: resolveScopedId(afterState.targetRevealChapterId, context.chapterIds),
-    isKeyTruth: asBooleanNumber(afterState.isKeyTruth, 1),
+    targetRevealChapterId: explicitScopedId(afterState.targetRevealChapterId, context.chapterIds, 'targetRevealChapterId'),
+    isKeyTruth: asBooleanNumber(afterState.isKeyTruth, 0),
     notes: asText(afterState.notes),
-  }
+  }, { characterKnowledgeJson: ['characterKnowledge', 'characterKnowledgeJson'] })
 }
 
-function sanitizeAiTimelineState(afterState: Record<string, unknown>, chapter: ChapterRow, context: ExistingAssetContext): TimelinePatch | null {
+function sanitizeAiTimelineState(afterState: Record<string, unknown>, _chapter: ChapterRow, context: ExistingAssetContext): TimelinePatch | null {
   const eventTitle = asText(afterState.eventTitle || afterState.title)
   if (!eventTitle) return null
-  return {
+  return explicitAiPatch(afterState, {
     eventTitle,
     eventSummary: asText(afterState.eventSummary || afterState.summary),
     timeMode: asText(afterState.timeMode) || 'custom-era',
-    timeLabel: asText(afterState.timeLabel) || `第${chapter.chapterNum}章`,
-    timeSortValue: asPositiveNumber(afterState.timeSortValue) ?? chapter.chapterNum,
+    timeLabel: asText(afterState.timeLabel),
+    timeSortValue: asPositiveNumber(afterState.timeSortValue),
     eventType: asText(afterState.eventType),
-    chapterStartId: resolveScopedId(afterState.chapterStartId, context.chapterIds) ?? chapter.id,
-    chapterEndId: resolveScopedId(afterState.chapterEndId, context.chapterIds) ?? chapter.id,
-    segmentId: resolveScopedId(afterState.segmentId, context.segmentIds),
+    chapterStartId: explicitScopedId(afterState.chapterStartId, context.chapterIds, 'chapterStartId'),
+    chapterEndId: explicitScopedId(afterState.chapterEndId, context.chapterIds, 'chapterEndId'),
+    segmentId: explicitScopedId(afterState.segmentId, context.segmentIds, 'segmentId'),
     presentCharacterIdsJson: toNumberJson(resolveScopedIds(afterState.presentCharacterIds ?? afterState.presentCharacterIdsJson, new Set(context.characterById.keys()))),
     affectedCharacterIdsJson: toNumberJson(resolveScopedIds(afterState.affectedCharacterIds ?? afterState.affectedCharacterIdsJson, new Set(context.characterById.keys()))),
-    protagonistPresent: asBooleanNumber(afterState.protagonistPresent, 1),
+    protagonistPresent: asBooleanNumber(afterState.protagonistPresent, 0),
     protagonistAction: asText(afterState.protagonistAction),
     eventCause: asText(afterState.eventCause),
     eventProcess: asText(afterState.eventProcess),
@@ -959,9 +972,15 @@ function sanitizeAiTimelineState(afterState: Record<string, unknown>, chapter: C
     linkedItemIdsJson: toNumberJson(resolveScopedIds(afterState.linkedItemIds ?? afterState.linkedItemIdsJson, new Set(context.itemById.keys()))),
     directConsequencesJson: toStringJson(parseJsonStringArray(afterState.directConsequences ?? afterState.directConsequencesJson)),
     openThreadsJson: toStringJson(parseJsonStringArray(afterState.openThreads ?? afterState.openThreadsJson)),
-    status: asText(afterState.status) || 'written',
+    status: asText(afterState.status) || 'planned',
     notes: asText(afterState.notes),
-  }
+  }, {
+    eventTitle: ['eventTitle', 'title'], eventSummary: ['eventSummary', 'summary'],
+    presentCharacterIdsJson: ['presentCharacterIds', 'presentCharacterIdsJson'],
+    affectedCharacterIdsJson: ['affectedCharacterIds', 'affectedCharacterIdsJson'],
+    linkedItemIdsJson: ['linkedItemIds', 'linkedItemIdsJson'],
+    directConsequencesJson: ['directConsequences', 'directConsequencesJson'], openThreadsJson: ['openThreads', 'openThreadsJson'],
+  })
 }
 
 function sanitizeAiItemState(afterState: Record<string, unknown>, chapter: ChapterRow, context: ExistingAssetContext): StoryItemPatch | null {
@@ -974,7 +993,7 @@ function sanitizeAiItemState(afterState: Record<string, unknown>, chapter: Chapt
     category: asText(afterState.category),
     subType: asText(afterState.subType),
     rarity: asText(afterState.rarity),
-    recordStatus: asText(afterState.recordStatus) || 'confirmed',
+    recordStatus: asText(afterState.recordStatus) || 'draft',
     ownerCharacterId: resolveCharacterId(afterState.ownerCharacterId ?? afterState.ownerCharacterName, context),
     locationMapId: resolveScopedId(afterState.locationMapId, context.mapIds),
     status: asText(afterState.status) || 'available',
@@ -1262,7 +1281,7 @@ function applyFactDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): numbe
     storyFactService.updateStoryFact(targetId, afterState, { skipContextTracking: true })
     return targetId
   }
-  return storyFactService.createStoryFact(chapter.novelId, afterState, { skipContextTracking: true })
+  return storyFactService.createStoryFact(chapter.novelId, { kind: 'clue', status: 'introduced', isKeyTruth: 0, ...afterState }, { skipContextTracking: true })
 }
 
 function applyTimelineDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
@@ -1277,7 +1296,7 @@ function applyTimelineDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): n
     timelineService.updateTimelineEvent(targetId, afterState, { skipContextTracking: true })
     return targetId
   }
-  return timelineService.createTimelineEvent(chapter.novelId, afterState, { skipContextTracking: true })
+  return timelineService.createTimelineEvent(chapter.novelId, { status: 'planned', protagonistPresent: 0, timeLabel: '', ...afterState }, { skipContextTracking: true })
 }
 
 function applyItemDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
@@ -2027,7 +2046,7 @@ async function executeRunApply(
 
   if (!retryFailedOnly) {
     loadDiffRows(run.id)
-      .filter((row) => row.canonDecision === 'pending' || row.canonDecision === 'rejected')
+      .filter((row) => row.canonDecision === 'rejected')
       .forEach((row) => {
         db.update(chapterWritebackDiffs).set({
           writebackStatus: 'skipped',
@@ -2056,11 +2075,13 @@ async function executeRunApply(
   const finalDiffs = loadDiffRows(run.id).map(mapDiffRow)
   const totalAppliedCount = finalDiffs.filter((row) => row.writebackStatus === 'applied').length
   const totalFailedCount = finalDiffs.filter((row) => row.writebackStatus === 'failed').length
-  const finalStatus = totalFailedCount === 0
-    ? 'applied'
-    : totalAppliedCount > 0
-      ? 'partially_failed'
-      : 'failed'
+  const pendingCount = finalDiffs.filter((row) => row.canonDecision === 'pending').length
+  const awaitingDecision = pendingCount > 0 && totalFailedCount === 0
+  const finalStatus = totalFailedCount > 0
+    ? (totalAppliedCount > 0 ? 'partially_failed' : 'failed')
+    : awaitingDecision
+      ? 'ready'
+      : 'applied'
   const errorMessage = totalFailedCount > 0 ? `共有 ${totalFailedCount} 条回写失败` : null
   // A stale `applying` run may have committed diff rows just before its process
   // died. In that recovery path appliedCount is zero, but the context bump was
@@ -2082,16 +2103,17 @@ async function executeRunApply(
       status: finalStatus,
       retryCount: run.retryCount || 0,
       lastAttemptAt: finalizedAt,
-      completedAt: finalizedAt,
+      completedAt: finalStatus === 'ready' ? null : finalizedAt,
       failedAt: totalFailedCount > 0 ? finalizedAt : null,
       errorMessage,
       updatedAt: finalizedAt,
     }).where(eq(chapterWritebackRuns.id, run.id)).run()
     updateChapterWritebackSyncStatus(chapter.id, {
-      phase: totalFailedCount === 0 ? 'applied' : 'failed',
+      phase: totalFailedCount > 0 ? 'failed' : awaitingDecision ? 'ready' : 'applied',
       runId: run.id,
-      blockedGeneration: totalFailedCount > 0,
-      readyForNextChapter: totalFailedCount === 0,
+      canonApplied: !awaitingDecision && totalFailedCount === 0,
+      blockedGeneration: totalFailedCount > 0 || awaitingDecision,
+      readyForNextChapter: totalFailedCount === 0 && !awaitingDecision,
       lastError: errorMessage || undefined,
       lastAttemptAt: finalizedAt,
       retryCount: run.retryCount || 0,

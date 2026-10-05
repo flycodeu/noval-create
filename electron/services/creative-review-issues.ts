@@ -61,6 +61,16 @@ export function validateCreativeRevisionTargets(input: CreativeWorkflowInput): v
     } else if (sourceId !== input.sourceArtifactId && !(sourceId && isRepairDescendant(input, id, sourceId))) throw new CreativeReviewTargetError(`修订问题 ${id} 必须沿用最新候选依据。`)
   }
 }
+export function creativeRevisionIssueSources(input: CreativeWorkflowInput) {
+  if (!input.revisionIssueIds?.length) return []
+  validateCreativeRevisionTargets(input)
+  return input.revisionIssueIds.map(id => {
+    const row = getSqlite().prepare('SELECT title,description,fix_brief AS fixBrief FROM revision_tasks WHERE novel_id=? AND id=?').get(input.novelId, id) as { title: string; description: string | null; fixBrief: string | null } | undefined
+    if (!row) throw new CreativeReviewTargetError(`修订问题 ${id} 已不存在。`)
+    return { id, ...row, usage: '评审意见用于定位待修订问题，不是新事实；不能将评审所举错误、推断或未来计划写成正史。' }
+  })
+}
+
 export function advanceCreativeRevisionIssues(input: CreativeWorkflowInput, artifactId: string, cleanFormalReview = false, appliedScope?: CreativeChangeScope): void {
   validateCreativeRevisionTargets(input)
   const db = getSqlite(), now = new Date().toISOString()

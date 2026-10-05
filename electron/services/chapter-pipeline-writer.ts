@@ -68,7 +68,8 @@ export interface LockedParagraphContext {
 
 export function buildChapterWriterMaterialReport(input: ChapterWriterPromptInput) {
   const { context } = input
-  const material = buildSceneWritingBrief(null,
+  const firstScene = input.scenePlan?.[0]
+  const material = buildSceneWritingBrief(firstScene ? { purpose: firstScene.purpose, conflict: firstScene.conflict } : null,
     context.authorStyleMaterials || { targetWorkSampleGuide: '', humanStyleSampleLock: '' })
   return { ...material, narrativeIdentity: context.narrativeIdentity,
     techniqueSelection: context.narrativeIdentity?.policyVersion === 'reader-first-v1' ? compileNarrativeTechniques(input.scenePlan || []).selections : [],

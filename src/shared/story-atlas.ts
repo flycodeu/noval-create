@@ -100,6 +100,10 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
   }, additionalProperties: true },
 }
 export interface StoryAtlasSource { kind: string; id?: string; note?: string }
+for (const schema of Object.values(STORY_ATLAS_ATTRIBUTE_SCHEMAS)) {
+  schema.properties = { ...schema.properties, stateTiming: { enum: ['chapter_start', 'chapter_end'], description: '仅明确采纳的章初修订使用 chapter_start；省略为章内或章末生效，不提前进入正文。' } }
+}
+
 export interface StoryAtlasEntity {
   id: string
   kind: StoryAtlasEntityKind
@@ -132,6 +136,8 @@ export interface StoryAtlasQuery {
   novelId: number
   /** Story chapter number, not the database chapter ID. Omit for current records. */
   atChapter?: number
+  /** Start includes only explicitly accepted chapter_start revisions from this chapter. */
+  boundary?: 'start' | 'end'
   /** Omit or null for root locations. A location ID selects its direct children. */
   locationParentId?: string | null
   focusEntityId?: string

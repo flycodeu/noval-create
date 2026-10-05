@@ -9,6 +9,7 @@ import { AtlasFields } from './AtlasFields'
 const numericFields = new Set(['age', 'chapterNum', 'appearChapter', 'memberCount', 'x', 'y', 'distanceKm', 'travelHours'])
 const referenceField = (key: string) => /(?:Id|Ids|Refs)(?:Json)?$/.test(key)
 const fieldOptions: Record<string, Array<{ value: string; label: string }>> = {
+  stateTiming: [{ value: 'chapter_start', label: '章初已生效' }, { value: 'chapter_end', label: '章内或章末生效' }],
   roleType: [{ value: 'protagonist', label: '主角' }, { value: 'major', label: '主要人物' }, { value: 'supporting', label: '配角' }, { value: 'minor', label: '次要人物' }, { value: 'antagonist', label: '对立人物' }],
   organizationLevel: [{ value: 'organization', label: '组织' }, { value: 'department', label: '部门' }, { value: 'branch', label: '分部' }],
   entityType: [{ value: 'human', label: '人类' }, { value: 'nonhuman', label: '异类' }, { value: 'undead', label: '亡灵' }, { value: 'monster', label: '妖异' }, { value: 'spirit', label: '精怪' }, { value: 'ghost', label: '鬼魂' }],

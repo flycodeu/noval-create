@@ -7,6 +7,7 @@ import {
   getRecommendedGuidedWorkflowStep,
   getRecommendedWorkflowStep,
   getWorkflowBlockers,
+  isWritingStepReady,
 } from './workflow'
 
 describe('workflow asset bloat signal', () => {
@@ -73,7 +74,7 @@ describe('workflow next chapter readiness', () => {
     expect(readiness.label).toBe('可写第一章')
   })
 
-  it('blocks writing before the character network and resistance line are usable', () => {
+  it('allows writing without character arcs, relationship arcs, resistance, volumes, threads, or a timeline', () => {
     const missingCharacterNetwork = getNextChapterReadiness({
       ...EMPTY_WORKFLOW_STATS,
       characterCount: 2,
@@ -85,23 +86,44 @@ describe('workflow next chapter readiness', () => {
       resistanceTrackCount: 1,
     })
 
-    expect(missingCharacterNetwork.ready).toBe(false)
-    expect(missingCharacterNetwork.label).toBe('缺人物网')
+    expect(missingCharacterNetwork.ready).toBe(true)
+    expect(missingCharacterNetwork.label).toBe('可写第一章')
 
     const missingResistance = getNextChapterReadiness({
       ...EMPTY_WORKFLOW_STATS,
       characterCount: 2,
       hasProtagonist: true,
       characterArcCount: 1,
-      relationshipArcCount: 1,
-      outlineCount: 1,
-      timelineCount: 1,
-      threadCount: 1,
-      volumeCount: 1,
+      relationshipArcCount: 0,
+      outlineCount: 0,
+      timelineCount: 0,
+      threadCount: 0,
+      volumeCount: 0,
+      resistanceTrackCount: 0,
     })
 
-    expect(missingResistance.ready).toBe(false)
-    expect(missingResistance.label).toBe('缺阻力线')
+    expect(missingResistance.ready).toBe(true)
+    expect(isWritingStepReady({
+      ...EMPTY_WORKFLOW_STATS,
+      chapterCount: 1,
+      characterCount: 2,
+      hasProtagonist: true,
+    })).toBe(true)
+  })
+
+  it('stays unready while context, assets, or long-term memory are stale', () => {
+    expect(getNextChapterReadiness({
+      ...EMPTY_WORKFLOW_STATS,
+      staleChapterCount: 1,
+    })).toMatchObject({ ready: false, label: '待同步' })
+    expect(getNextChapterReadiness({
+      ...EMPTY_WORKFLOW_STATS,
+      staleAssetCount: 1,
+    }).ready).toBe(false)
+    expect(getNextChapterReadiness({
+      ...EMPTY_WORKFLOW_STATS,
+      staleCheckpointCount: 1,
+    }).ready).toBe(false)
   })
 })
 
@@ -144,37 +166,73 @@ describe('workflow ordering', () => {
     worldRulesJson: '{}',
   }
 
-  it('recommends the endgame before map assets', () => {
-    expect(GUIDED_STEP_ORDER.indexOf('endgame-design')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('map-structure'))
-    expect(getRecommendedGuidedWorkflowStep(baseNovel, EMPTY_WORKFLOW_STATS)).toBe('endgame-design')
-    expect(getRecommendedWorkflowStep(baseNovel, EMPTY_WORKFLOW_STATS)).toBe('endgame')
+  it('recommends characters before the endgame and the map', () => {
+    expect(GUIDED_STEP_ORDER.indexOf('character-roster')).toBe(GUIDED_STEP_ORDER.indexOf('theme-voice') + 1)
+    expect(GUIDED_STEP_ORDER.indexOf('character-roster')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('world-foundation'))
+    expect(GUIDED_STEP_ORDER.indexOf('character-roster')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('endgame-design'))
+    expect(GUIDED_STEP_ORDER.indexOf('character-roster')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('map-structure'))
+    expect(GUIDED_STEP_ORDER.indexOf('story-plot')).toBeGreaterThan(GUIDED_STEP_ORDER.indexOf('character-roster'))
+    expect(GUIDED_STEP_ORDER.indexOf('story-plot')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('map-structure'))
+    expect(GUIDED_STEP_ORDER.indexOf('story-plot')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('items-equipment'))
+    expect(GUIDED_STEP_ORDER.indexOf('outline-structure')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('map-structure'))
+    expect(GUIDED_STEP_ORDER.indexOf('outline-structure')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('items-equipment'))
+    expect(GUIDED_STEP_ORDER.indexOf('outline-structure')).toBeLessThan(GUIDED_STEP_ORDER.indexOf('resistance-system'))
+    expect(getRecommendedGuidedWorkflowStep(baseNovel, EMPTY_WORKFLOW_STATS)).toBe('character-roster')
+    expect(getRecommendedWorkflowStep(baseNovel, EMPTY_WORKFLOW_STATS)).toBe('characters')
   })
 
-  it('moves to the map only after the endgame is ready', () => {
-    const readyNovel = {
+  it('does not let an unfinished endgame block characters, plot, or outline', () => {
+    const castStats = {
+      ...EMPTY_WORKFLOW_STATS,
+      characterCount: 2,
+      hasProtagonist: true,
+      characterArcCount: 1,
+      relationshipArcCount: 1,
+    }
+
+    expect(getRecommendedGuidedWorkflowStep(baseNovel, castStats)).toBe('story-plot')
+    expect(getRecommendedWorkflowStep(baseNovel, castStats)).toBe('story-design')
+
+    const plotReadyNovel = {
       ...baseNovel,
       settingsJson: JSON.stringify({
         ...JSON.parse(baseNovel.settingsJson),
-        endgame_design: {
-          ending_mode: 'costly_victory',
-          final_conflict: '主角必须承担公开真相的代价',
-          theme_answer: '真实需要承担后果',
-          must_deliver_promises: '旧案与主角缺口全部回收',
-          last_scene: '主角把档案放回公开目录',
-        },
+        story_goal: '查清旧案',
+        core_conflict: '真相与秩序冲突',
+        main_plot: '从错档案追到旧案核心',
+        ending: '公开真相并承担代价',
       }),
     }
 
-    expect(getRecommendedGuidedWorkflowStep(readyNovel, EMPTY_WORKFLOW_STATS)).toBe('map-structure')
-    expect(getRecommendedWorkflowStep(readyNovel, EMPTY_WORKFLOW_STATS)).toBe('map')
+    expect(getRecommendedGuidedWorkflowStep(plotReadyNovel, castStats)).toBe('outline-structure')
+    expect(getRecommendedWorkflowStep(plotReadyNovel, castStats)).toBe('outline')
   })
 
-  it('guards direct asset buttons against skipping the endgame gate', () => {
-    const blockers = getWorkflowBlockers('map', baseNovel, {
+  it('does not gate characters on the endgame, map, or items', () => {
+    const blockers = getWorkflowBlockers('characters', baseNovel, EMPTY_WORKFLOW_STATS)
+
+    expect(blockers.some((item) => item.includes('终局'))).toBe(false)
+    expect(blockers.some((item) => item.includes('地图'))).toBe(false)
+    expect(blockers.some((item) => item.includes('物品'))).toBe(false)
+  })
+
+  it('does not gate writing on a missing timeline', () => {
+    const blockers = getWorkflowBlockers('writing', baseNovel, {
       ...EMPTY_WORKFLOW_STATS,
-      mapCount: 0,
+      outlineCount: 0,
+      timelineCount: 0,
+      revisionBlockerCount: 2,
+      staleChapterCount: 1,
+      staleAssetCount: 1,
+      staleAssetLabels: ['旧地图'],
+      staleCheckpointCount: 1,
     })
 
-    expect(blockers).toContain('请先锁定终局承诺，再生成地图。')
+    expect(blockers.some((item) => item.includes('时间轴'))).toBe(false)
+    expect(blockers.some((item) => item.includes('终局'))).toBe(false)
+    expect(blockers.some((item) => item.includes('修订'))).toBe(true)
+    expect(blockers.some((item) => item.includes('旧上下文'))).toBe(true)
+    expect(blockers.some((item) => item.includes('旧设定'))).toBe(true)
+    expect(blockers.some((item) => item.includes('长期记忆'))).toBe(true)
   })
 })

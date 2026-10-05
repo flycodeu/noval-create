@@ -54,6 +54,9 @@ async function main() {
       { op: 'upsert_relation', kind: 'presence', fromId: 'org', toId: 'village', label: '总部所在地', attributes: { locationRole: 'headquarters' } },
       { op: 'upsert_relation', kind: 'route', fromId: 'village', toId: 'harbor', label: '顺流航道', attributes: { travelHours: 4, travelMode: '行船', routeOpen: true } },
     ] })
+    const openingPatch = (appearance, stateTiming) => applyStoryAtlasChanges({ novelId, expectedContextVersion: queryStoryAtlas({ novelId }).contextVersion, effectiveFromChapter: 2, source: { kind: 'test' }, idempotencyKey: 'opening-' + appearance, changes: [{ op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { appearance, ...(stateTiming ? { stateTiming } : {}) } }] })
+    openingPatch('章初已换灰衣', 'chapter_start')
+    openingPatch('章末才换黑衣')
     const beforeCurrentChapter = queryStoryAtlas({ novelId })
     const region = beforeCurrentChapter.entities.find(entity => entity.name === '南岭')
     const existingBond = beforeCurrentChapter.relations.find(edge => edge.kind === 'relationship' && edge.toId === atlasNpc.id)
@@ -156,6 +159,13 @@ async function main() {
     assert.throws(() => gate({ ...base, changes: [{ op: 'retire', id: `characters:${person}` }] }), error => error.code === 'CHAPTER_RETIRE_FORBIDDEN')
     assert.throws(() => gate({ ...base, expectedContextVersion: before + 1 }), error => error.code === 'CHAPTER_CONTEXT_STALE')
     assert.equal(gate({ ...base, changes: [{ op: 'upsert_entity', kind: 'item', name: '新绳', attributes: { evidenceQuote: '他换上新绳，渡船停稳' } }] }).chapterId, target)
+    const openingContext = await compile(input, limits)
+    assert.ok(openingContext.text.includes('章初已换灰衣'))
+    assert.ok(!openingContext.text.includes('章末才换黑衣'))
+    db.prepare('UPDATE chapters SET writeback_status_json=? WHERE id=?').run(JSON.stringify({ runId: 123, phase: 'ready', blockedGeneration: true, readyForNextChapter: false }), first)
+    assert.ok(inspect(novelId, 2).blockers.some(blocker => blocker.includes('回写仍待决定')))
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
+    db.prepare('UPDATE chapters SET writeback_status_json=NULL WHERE id=?').run(first)
     assert.ok(known > 0)
     process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, chapter introduction plans without current end-state leakage, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
   } finally { closeDb(); fs.rmSync(temp, { recursive: true, force: true }) }

@@ -105,18 +105,18 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'project-brief',
   'story-core',
   'theme-voice',
+  'character-roster',
+  'story-plot',
+  'outline-structure',
+  'write-start',
   'world-foundation',
   'endgame-design',
   'map-structure',
   'items-equipment',
-  'character-roster',
   'resistance-system',
   'story-threads',
-  'story-plot',
   'volume-planning',
-  'outline-structure',
   'timeline-causality',
-  'write-start',
 ]
 
 export const GUIDED_STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
@@ -395,13 +395,7 @@ export function isWritingStepReady(
     | 'volumeCount'
   >,
 ): boolean {
-  return isCharacterRosterReady(stats)
-    && isResistanceSystemReady(stats)
-    && stats.volumeCount > 0
-    && stats.outlineCount > 0
-    && stats.timelineCount > 0
-    && stats.threadCount > 0
-    && (stats.chapterCount > 0 || stats.totalWords > 0)
+  return stats.chapterCount > 0 || stats.totalWords > 0
 }
 
 export function getNextChapterReadiness(
@@ -440,58 +434,10 @@ export function getNextChapterReadiness(
     }
   }
 
-  if (!isCharacterRosterReady(stats)) {
-    return {
-      ready: false,
-      label: '缺人物网',
-      reason: '主角、人物弧或关系弧还没形成可承接网络，直接开写会让人物关系变成平铺说明。',
-    }
-  }
-
-  if (!isResistanceSystemReady(stats)) {
-    return {
-      ready: false,
-      label: '缺阻力线',
-      reason: '外部阻力、关系阻力或制度阻力还没入账，章节容易只推进事件而没有持续压力。',
-    }
-  }
-
-  if (stats.volumeCount <= 0) {
-    return {
-      ready: false,
-      label: '缺卷级闭环',
-      reason: '第一卷目标、卷末爆点和阶段代价还没固定，首章很容易开得热闹但后续失焦。',
-    }
-  }
-
-  if (stats.outlineCount <= 0) {
-    return {
-      ready: false,
-      label: '缺大纲',
-      reason: '至少先有可承接的故事大纲，再开始写下一章。',
-    }
-  }
-
-  if (stats.threadCount <= 0) {
-    return {
-      ready: false,
-      label: '缺线程',
-      reason: '主线和支线还没挂成线程，正文很容易只剩局部段落推进。',
-    }
-  }
-
-  if (stats.timelineCount <= 0) {
-    return {
-      ready: false,
-      label: '缺时间轴',
-      reason: '关键事件顺序还没钉住，继续写会增加后续对齐成本。',
-    }
-  }
-
   return {
     ready: true,
     label: stats.chapterCount > 0 || stats.totalWords > 0 ? '可写下一章' : '可写第一章',
-    reason: '当前结构、线程和时间锚点已具备最小可写条件，可以直接进入正文。',
+    reason: '修订阻塞已清空，上下文、资产和长期记忆也已对齐，可以直接进入正文。',
   }
 }
 
@@ -631,16 +577,17 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isProjectBriefReady(novel)) return 'project-brief'
   if (!isStoryCoreReady(novel)) return 'story-core'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
+  if (!isCharacterRosterReady(stats)) return 'character-roster'
+  if (!isStoryPlotReady(novel)) return 'story-plot'
+  if (stats.outlineCount <= 0) return 'outline-structure'
+  if (!isWritingStepReady(stats)) return 'write-start'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
   if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
-  if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isResistanceSystemReady(stats)) return 'resistance-system'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
-  if (!isStoryPlotReady(novel)) return 'story-plot'
   if (!isVolumePlanningReady(stats)) return 'volume-planning'
-  if (stats.outlineCount <= 0) return 'outline-structure'
   if (stats.timelineCount <= 0) return 'timeline-causality'
   return 'write-start'
 }
@@ -653,19 +600,19 @@ export function getRecommendedWorkflowStep(
   if (!isProjectBriefReady(novel)) return 'project-brief'
   if (!isStoryCoreReady(novel)) return 'core-settings'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
+  if (stats.characterCount <= 0) return 'characters'
+  if (!isStoryPlotReady(novel)) return 'story-design'
+  if (stats.outlineCount <= 0) return 'outline'
+  if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'
+  if (stats.revisionTaskCount > 0) return 'revision'
   if (!novel.worldRulesJson) return 'world-rules'
   if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.mapCount <= 0) return 'map'
   if (stats.itemCount <= 0) return 'items'
-  if (stats.characterCount <= 0) return 'characters'
   if (stats.resistanceTrackCount <= 0) return 'resistance'
   if (stats.threadCount <= 0) return 'threads'
-  if (!isStoryPlotReady(novel)) return 'story-design'
   if (stats.volumeCount <= 0) return 'volume-design'
-  if (stats.outlineCount <= 0) return 'outline'
   if (stats.timelineCount <= 0) return 'timeline'
-  if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'
-  if (stats.revisionTaskCount > 0) return 'revision'
   return 'overview'
 }
 
@@ -775,9 +722,6 @@ export function getWorkflowBlockers(
       break
     case 'characters':
       requireWorldRules('生成人物')
-      requireEndgame('生成人物')
-      requireMap('生成人物')
-      requireItems('生成人物')
       break
     case 'items':
       requireWorldRules('生成物品')
@@ -826,13 +770,6 @@ export function getWorkflowBlockers(
       requireRevisionBlockersCleared('生成时间轴')
       break
     case 'writing':
-      requireEndgame('开始正文写作')
-      requireCharacters('开始正文写作')
-      requireResistance('开始正文写作')
-      requireVolumePlanning('开始正文写作')
-      requireThreads('开始正文写作')
-      pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
-      pushIfMissing(stats.timelineCount > 0, '缺少时间轴，无法开始正文写作。')
       requireFreshAssets('开始正文写作')
       requireFreshStoryMemory('开始正文写作')
       requireFreshChapterContext('开始正文写作')

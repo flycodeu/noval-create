@@ -24,7 +24,26 @@ const review = JSON.stringify({ summary: '候选符合需求，引用和剧情�
 let heldResponse
 const server = http.createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk
-  requests.push(JSON.parse(body))
+  const payload = JSON.parse(body)
+  requests.push(payload)
+  const prompt = payload.messages?.map(message => typeof message.content === 'string' ? message.content : '').join('\n') || ''
+  if (prompt.includes('[creative_evidence]')) {
+    const line = prompt.split('\n').find(text => text.startsWith('{"prose":'))
+    const evidence = JSON.parse(line)
+    let scripted
+    try { scripted = JSON.parse(replies[0]) } catch { /* No explicit certificate queued. */ }
+    if (Array.isArray(scripted?.assessments)) replies.shift()
+    const overrides = new Map((scripted?.assessments || []).map(row => [row.id, row]))
+    // The fixture verifies gate wiring, not literary judgments. Explicit negative fact
+    // certificates stay negative; new visibility checks receive a controlled certificate.
+    const assessments = evidence.claims.map(claim => overrides.get(claim.id) || {
+      id: claim.id, support: scripted?.assessments?.[0]?.support || 'supported',
+      evidenceQuote: evidence.prose.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
+    })
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ assessments }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100 } }))
+    return
+  }
   const next = replies.shift()
   if (next === 'HOLD') { heldResponse = res; return }
   if (typeof next !== 'string') { res.writeHead(500).end('unexpected model call'); return }
