@@ -11,6 +11,14 @@ vi.mock('./model.service', () => ({
   getModelConfigRecord: vi.fn(() => ({ id: 7 })),
 }))
 
+vi.mock('./embedding-settings.service', async () => {
+  const { getAdapterById } = await import('./model.service')
+  return {
+    embeddingRuntimeIdentity: vi.fn(() => ({ settings: { mode: 'local' }, modelId: 'local:Xenova/bge-small-zh-v1.5:q8', key: 'local:Xenova/bge-small-zh-v1.5:q8' })),
+    embeddingRemoteAdapter: vi.fn(async () => ({ settings: { mode: 'remote', modelId: 'fixture-vector' }, modelId: 'fixture-vector', adapter: await getAdapterById(7) })),
+  }
+})
+import { embeddingRuntimeIdentity } from './embedding-settings.service'
 import { getDb } from '../database/db'
 import { chapterEmbeddings, chapters } from '../database/schema'
 import { getAdapterById } from './model.service'
@@ -187,6 +195,7 @@ describe('embedding fallback retrieval', () => {
     expect(areUsableEmbeddings([[0.1], [0.2, 0.3]], 2)).toBe(false)
     expect(areUsableEmbeddings([[Number.NaN]], 1)).toBe(false)
     expect(areUsableEmbeddings([], 0)).toBe(false)
+    expect(areUsableEmbeddings([[0,0]], 1)).toBe(false)
   })
 
   it('keeps source hashes stable across unrelated context version changes', () => {
@@ -290,6 +299,7 @@ describe('embedding fallback retrieval', () => {
   })
 
   it('does not replace a newer chapter index when vector work finishes after an edit', async () => {
+    vi.mocked(embeddingRuntimeIdentity).mockReturnValue({ settings: { mode: 'remote', modelId: 'fixture-vector', modelConfigId: 7 }, modelId: 'fixture-vector', key: 'fixture-vector' })
     const rows = new Map<unknown, Array<Record<string, unknown>>>([
       [chapters, [{ id: 101, novelId: 1, chapterNum: 4, summary: '旧稿摘要', contextVersion: 9 }]],
       [chapterEmbeddings, []],

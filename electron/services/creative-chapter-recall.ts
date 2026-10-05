@@ -41,46 +41,50 @@ export async function recallCreativeChapterSources(input: {
   if (!budget || !eligible.size || !input.queryText.trim()) return { sources, omitted }
   const previous = input.chapters.find(chapter => chapter.id === input.previousChapterId)
   const beforeChapterNum = previous?.chapterNum || input.chapterNum
-  let hits: SimilarFragmentHit[]
-  try {
-    const result = await searchSimilarFragments(input.novelId, input.queryText, MAX_SEARCH_HITS, input.modelConfigId, { beforeChapterNum })
-    hits = result.hits
-    if (result.fallbackReason) omitted.push(`chapter_recall:vector_unavailable:${result.fallbackReason}`)
-    // A vector shortlist can be dominated by planning fragments. The existing bounded SQL
-    // fallback also reads saved prose when embedding rows have not been generated yet.
-    if (!hits.some(hit => isProseEmbeddingFragment(hit.fragmentType) && eligible.has(hit.chapterId))) {
-      hits = fallbackKeywordSearch(input.novelId, input.queryText, MAX_SEARCH_HITS, { beforeChapterNum })
-    }
-  } catch {
-    try { hits = fallbackKeywordSearch(input.novelId, input.queryText, MAX_SEARCH_HITS, { beforeChapterNum }) }
-    catch { return { sources, omitted: ['chapter_recall:search_unavailable'] } }
-  }
   const keywords = extractEmbeddingKeywords(input.queryText)
   const ranked: Array<{ source: ContextPackSource; chapterId: number; score: number }> = []
   const seenSources = new Set<string>()
-  for (const hit of hits) {
-    const chapter = eligible.get(hit.chapterId)
-    if (!chapter || hit.chapterNum !== chapter.chapterNum || hit.chapterNum >= beforeChapterNum || !isProseEmbeddingFragment(hit.fragmentType)
-      || hit.similarity <= 0 || hit.searchMode === 'vector' && hit.similarity < 0.25) continue
-    const excerpt = normalize(hit.fragmentText)
-    for (const projected of projectPreviousChapterSources(chapter, input.policy, input.queryText, keywords)) {
-      const key = `chapter:${chapter.id}:recall:${projected.start}`
-      if (seenSources.has(key)) continue
-      const text = chapter.content!.slice(projected.start!, projected.end!)
-      const normalized = normalize(text)
-      const lexical = keywords.reduce((score, keyword) => score + (normalized.includes(keyword) ? Math.min(4, keyword.length) : 0), 0)
-      // Verify a vector hit against current text, so stale index text is never copied back.
-      const excerptMatch = normalized.length >= 8 && excerpt.includes(normalized.slice(0, Math.min(24, normalized.length)))
-      if (!lexical && !(hit.searchMode === 'vector' && excerptMatch)) continue
-      seenSources.add(key)
-      if (!projected.included && projected.reason !== 'unclassified_visibility') {
-        omitted.push(`${key}:${projected.reason}`); continue
-      }
-      const source: ContextPackSource = { ...projected, key, sourceKind: 'recalled_chapter_original', sourceId: String(chapter.id),
-        sourceVersion: stableHash(chapter.content), text, included: true, required: false,
-        reason: `historical_prose_${hit.searchMode}`, estimatedTokens: estimateTokens(`[canon] ${key}: ${text}\n`) }
-      ranked.push({ source, chapterId: chapter.id, score: lexical + (excerptMatch ? 2 : 0) + hit.similarity })
+  let preparedQuery: import('./query-embedding').PreparedQueryEmbedding | null | undefined
+  // Refill after visibility filtering, reusing one query embedding. No age-based shortlist.
+  for (let limit = MAX_SEARCH_HITS; ; limit *= 2) {
+    let hits: SimilarFragmentHit[]
+    try {
+      const result = await searchSimilarFragments(input.novelId, input.queryText, limit, input.modelConfigId, { beforeChapterNum, proseOnly: true, ...(preparedQuery === undefined ? {} : { preparedQuery }) })
+      hits = result.hits
+      preparedQuery = result.preparedQuery ?? null
+      if (result.fallbackReason && !omitted.includes(`chapter_recall:vector_unavailable:${result.fallbackReason}`)) omitted.push(`chapter_recall:vector_unavailable:${result.fallbackReason}`)
+      if (!hits.length) hits = fallbackKeywordSearch(input.novelId, input.queryText, limit, { beforeChapterNum, proseOnly: true })
+    } catch {
+      try { hits = fallbackKeywordSearch(input.novelId, input.queryText, limit, { beforeChapterNum, proseOnly: true }) }
+      catch { omitted.push('chapter_recall:search_unavailable'); break }
     }
+    for (const hit of hits) {
+      const chapter = eligible.get(hit.chapterId)
+      if (!chapter || hit.chapterNum !== chapter.chapterNum || hit.chapterNum >= beforeChapterNum || !isProseEmbeddingFragment(hit.fragmentType)
+        || hit.similarity <= 0 || hit.searchMode === 'vector' && hit.similarity < 0.25) continue
+      const excerpt = normalize(hit.fragmentText)
+      for (const projected of projectPreviousChapterSources(chapter, input.policy, input.queryText, keywords)) {
+        const key = `chapter:${chapter.id}:recall:${projected.start}`
+        if (seenSources.has(key)) continue
+        const text = chapter.content!.slice(projected.start!, projected.end!)
+        const normalized = normalize(text)
+        const lexical = keywords.reduce((score, keyword) => score + (normalized.includes(keyword) ? Math.min(4, keyword.length) : 0), 0)
+        // Verify a vector hit against current text, so stale index text is never copied back.
+        const excerptMatch = normalized.length >= 8 && excerpt.includes(normalized.slice(0, Math.min(24, normalized.length)))
+        if (!lexical && !(hit.searchMode === 'vector' && excerptMatch)) continue
+        seenSources.add(key)
+        if (!projected.included && projected.reason !== 'unclassified_visibility') {
+          omitted.push(`${key}:${projected.reason}`); continue
+        }
+        const source: ContextPackSource = { ...projected, key, sourceKind: 'recalled_chapter_original', sourceId: String(chapter.id),
+          sourceVersion: stableHash(chapter.content), text, included: true, required: false,
+          reason: `historical_prose_${hit.searchMode}`, estimatedTokens: estimateTokens(`[canon] ${key}: ${text}\n`) }
+        ranked.push({ source, chapterId: chapter.id, score: lexical + (excerptMatch ? 2 : 0) + hit.similarity })
+      }
+    }
+    const perChapter = new Map<number, number>()
+    for (const candidate of ranked) if (candidate.source.estimatedTokens <= budget) perChapter.set(candidate.chapterId, Math.min(MAX_PARAGRAPHS_PER_CHAPTER, (perChapter.get(candidate.chapterId) || 0) + 1))
+    if (hits.length < limit || [...perChapter.values()].reduce((sum, count) => sum + count, 0) >= MAX_RECALLED_PARAGRAPHS) break
   }
   ranked.sort((a, b) => b.score - a.score || a.chapterId - b.chapterId || (a.source.start || 0) - (b.source.start || 0))
   const seenText = new Set<string>()

@@ -35,6 +35,7 @@ import { findAcceptedCreativeSuccessor, supersedeCreativeDraftAncestors } from '
 import { scheduleChapterEmbeddingRefresh } from './embedding.service'
 import { createCreativeModelCheckpoint } from './creative-model-checkpoint'
 import { hasPendingCreativeWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
+import { reviewCreativeEvidence, assertCreativeEvidence } from './creative-evidence-review'
 import { assertChapterRevisionBaseCurrent, captureChapterRevisionBase, chapterRevisionSchemaHint, mergeChapterRevision,
   PROSE_ONLY_CHANGE_SCOPE, readChapterRevisionBase, validateChapterRevision, type ChapterRevisionBase } from './creative-chapter-revision'
 
@@ -154,7 +155,7 @@ function progress(runId: number, step: CreativeRun['step'], message: string, pat
   const task = getTaskRecord(runId)
   const current = JSON.parse(task?.progressJson || '{}') as Partial<CreativeRun>
   const events = [...(current.events || []), { at: new Date().toISOString(), step, message }].slice(-60)
-  updateTask(runId, { progressJson: JSON.stringify({ ...current, ...patch, step, message, events }) })
+  updateTask(runId, { progressJson: JSON.stringify({ ...current, ...patch, ...(patch.result ? { result: { ...current.result, ...patch.result } } : {}), step, message, events }) })
 }
 export function getCreativeRun(novelId: number, runId?: number): CreativeRun | null {
   const task = runId ? stored(runId, novelId).task : getDb().select().from(tasks).where(and(eq(tasks.novelId, novelId), eq(tasks.relatedEntityType, 'creative_workflow'))).orderBy(desc(tasks.id)).get()
@@ -323,6 +324,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
       validateOutlineForProject(input.novelId, data, frozen.request)
       ids.push(...applyOutlineData(input.novelId, data, savedStructureIds))
     } else if (frozen.request.stage === 'chapter') {
+      if (requiresChapterContractCheck(frozen)) assertCreativeEvidence({ novelId: input.novelId, runId: input.runId, modelConfigId: frozen.reviewModelConfigId || frozen.modelConfigId, data, candidateArtifactId: draft.id, candidateHash: draft.contentHash, contextVersion: frozen.contextVersion, reportArtifactId: state.result?.evidenceReviewArtifactId })
       if (frozen.request.atChapter && data.chapterNum !== frozen.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
       if (requiresChapterContractCheck(frozen)) {
         assertCreativeChapterCandidate({ novelId: input.novelId, chapterNum: Number(data.chapterNum), content: String(data.content), expectedContextVersion: frozen.contextVersion, changes })
@@ -551,6 +553,14 @@ async function execute(runId: number, novelId: number): Promise<void> {
       if (parsed.chapterNum !== input.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
       assertCreativeChapterCandidate({ novelId, chapterNum: Number(parsed.chapterNum), content: String(parsed.content), expectedContextVersion: input.contextVersion, changes: parsed.changes as StoryAtlasChange[] | undefined })
       validateCreativeFactReveals(novelId, Number(parsed.chapterNum), String(parsed.content), parsed.factReveals || [])
+      const evidence = await reviewCreativeEvidence({ novelId, runId, modelConfigId: input.reviewModelConfigId || input.modelConfigId, contextVersion: input.contextVersion,
+        candidateArtifactId: generated.effectiveArtifact.id, candidateHash: generated.effectiveArtifact.contentHash, data: parsed, maxInputTokens: context.maxInputTokens,
+        outputReserve: context.reviewOutputReserve || 6000, checkpoint: modelCheckpoint(runId, input) })
+      assertActive(runId); assertBase(input)
+      if (evidence) {
+        progress(runId, 'reviewing', evidence.passed ? '逐项证据语义审校通过。' : '证据不足，候选保留。', { result: { evidenceReviewArtifactId: evidence.artifactId } })
+        if (!evidence.passed) throw new Error(`证据语义审校未通过：${evidence.blockers.join('；')}`)
+      }
     }
     progress(runId, 'reviewing', generated.review.summary, { reviewStatus: 'passed' })
     supersedeCreativeDraftAncestors(novelId, generated.effectiveArtifact.id)

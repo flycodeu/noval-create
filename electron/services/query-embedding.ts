@@ -30,6 +30,7 @@ export function isCompatiblePreparedQuery(
     && preparedQuery.embedding.length === preparedQuery.dimensions
     && preparedQuery.embedding.length > 0
     && preparedQuery.embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
+    && preparedQuery.embedding.some((value) => value !== 0)
 }
 
 function isValidBatchMetadata(

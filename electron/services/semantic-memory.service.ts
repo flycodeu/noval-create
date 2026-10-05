@@ -45,8 +45,6 @@ import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-
 import { processChapterIndexClaim } from './chapter-index.service'
 
 const EMBEDDING_BATCH_SIZE = 24
-const MAX_SEARCH_CANDIDATES = 3072
-const RECENT_SEARCH_CANDIDATES = 512
 const MAX_SHORT_KEYWORD_CANDIDATES = 512
 const MAX_LOOKUP_KEYWORDS = 8
 const MIN_FTS_TERM_LENGTH = 3
@@ -161,12 +159,10 @@ async function resolveSemanticSearchQuery(
       dimensions: options.preparedQuery.dimensions,
     }
   }
-  const batch = await embedSemanticTexts([queryText], options.modelConfigId)
-  return {
-    embedding: batch.embeddings?.[0],
-    profile: batch.profile,
-    dimensions: batch.dimensions,
-  }
+  try {
+    const batch = await embedSemanticTexts([queryText], options.modelConfigId)
+    return { embedding: batch.embeddings?.[0], profile: batch.profile, dimensions: batch.dimensions }
+  } catch { return {} }
 }
 
 export function hashSemanticDocument(
@@ -1087,49 +1083,14 @@ export async function searchSemanticMemory(
       cleanProjectionFilter,
       ...validityFilters,
     ]
-    const lexicalCandidateLimit = MAX_SEARCH_CANDIDATES - RECENT_SEARCH_CANDIDATES
-    const ftsCandidateIds = querySemanticMemoryFtsCandidateIds({
-      novelId,
-      keywords: lookupKeywords,
-      sourceTypes,
-      visibility,
-      chapterNum: options.chapterNum,
-      embeddingProfile: queryProfile,
-      dimensions: queryDimensions,
-      limit: lexicalCandidateLimit,
-    })
-    const ftsRows = ftsCandidateIds?.length
-      ? db.select().from(semanticMemoryEntries)
-        .where(and(
-          ...compatibilityFilters,
-          inArray(semanticMemoryEntries.id, ftsCandidateIds),
-        ))
-        .all()
-      : []
-    const likeKeywords = ftsCandidateIds === null
-      ? lookupKeywords
-      : lookupKeywords.filter((keyword) => keyword.length < MIN_FTS_TERM_LENGTH)
-    const textMatches = likeKeywords.map((keyword) => like(semanticMemoryEntries.contentText, `%${keyword}%`))
-    const likeRows = textMatches.length > 0
-      ? db.select().from(semanticMemoryEntries)
-        .where(and(...compatibilityFilters, or(...textMatches)))
-        .orderBy(desc(semanticMemoryEntries.id))
-        .limit(ftsCandidateIds === null ? lexicalCandidateLimit : MAX_SHORT_KEYWORD_CANDIDATES)
-        .all()
-      : []
-    const recentRows = db.select().from(semanticMemoryEntries)
-      .where(and(...compatibilityFilters))
-      .orderBy(desc(semanticMemoryEntries.id))
-      .limit(RECENT_SEARCH_CANDIDATES)
-      .all()
-    const candidates = [...new Map(
-      [...likeRows, ...ftsRows, ...recentRows].map((row) => [row.id, row] as const),
-    ).values()].slice(0, MAX_SEARCH_CANDIDATES)
+    // Structured memory also searches every compatible, clean historical projection.
+    // Lexical overlap and recency cannot decide admission to semantic scoring.
+    const candidates = db.select().from(semanticMemoryEntries).where(and(...compatibilityFilters)).all()
     const vectorHits = candidates.flatMap((row) => {
       if (!isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!)) return []
       try {
         const embedding = JSON.parse(row.embeddingJson || '')
-        if (!Array.isArray(embedding)) return []
+        if (!Array.isArray(embedding) || embedding.length !== queryDimensions || !embedding.every(value => typeof value === 'number' && Number.isFinite(value)) || !embedding.some(value => value !== 0)) return []
         return [{
           sourceType: row.sourceType as SemanticMemorySourceType,
           sourceId: row.sourceId,

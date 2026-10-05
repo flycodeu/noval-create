@@ -6,7 +6,7 @@ import { ATLAS_KIND_LABELS, atlasEntitySummary, atlasLinks, atlasRegionLinks, pr
 import { recordOf } from './content-document'
 import { AtlasFields } from './AtlasFields'
 
-type Props = { entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; chapters: Array<{ id: number; chapterNum: number }>; onOpen: (entity: StoryAtlasEntity) => void; onEdit: () => void; onDiscuss: () => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity) => void }
+type Props = { editingDisabled?: boolean; entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; chapters: Array<{ id: number; chapterNum: number }>; onOpen: (entity: StoryAtlasEntity) => void; onEdit: () => void; onDiscuss: () => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity) => void }
 function Connections({ title, links, empty, onOpen, onRelation }: { title: string; links: AtlasLink[]; empty: string; onOpen: Props['onOpen']; onRelation: Props['onRelation'] }) {
   return <section className="atlas-profile-section"><h3>{title}</h3>{links.length ? <div className="atlas-linked-list">{links.map((link, index) => <div key={`${link.entity.id}:${link.relation?.id || index}`}><button type="button" onClick={() => onOpen(link.entity)}><strong>{link.entity.name}</strong><span>{link.label}{link.planned ? ' · 计划' : ''}</span></button>{link.relation && <button type="button" className="atlas-text-link" onClick={() => onRelation(link.relation!)}>关联详情</button>}</div>)}</div> : <p className="atlas-empty-note">{empty}</p>}</section>
 }
@@ -34,11 +34,11 @@ export function AtlasEntityProfile(props: Props) {
   const summary = atlasEntitySummary(entity)
   const regionLinks = atlasRegionLinks(snapshot, entity)
   return <article className="atlas-profile" aria-label={`${entity.name}资料`}>
-    <header className="atlas-profile-header"><div><span className="author-eyebrow">{ATLAS_KIND_LABELS[entity.kind]} · {entity.status === 'planned' ? '计划设定' : '已记录'}</span><h2>{entity.name}</h2></div><Button icon={<EditOutlined />} onClick={onEdit}>编辑</Button></header>
+    <header className="atlas-profile-header"><div><span className="author-eyebrow">{ATLAS_KIND_LABELS[entity.kind]} · {entity.status === 'planned' ? '计划设定' : '已记录'}</span><h2>{entity.name}</h2></div><Button icon={<EditOutlined />} disabled={props.editingDisabled} onClick={onEdit}>编辑</Button></header>
     {parent && <button type="button" className="atlas-text-link atlas-parent-link" onClick={() => onOpen(parent)}>{entity.kind === 'faction' ? '上级组织' : '所属地点'}：{parent.name}</button>}
     {summary && <p className="atlas-profile-summary">{summary}</p>}
     {entity.summary && entity.summary.trim() !== summary.trim() && <details className="author-disclosure"><summary>作者设定</summary><p>{entity.summary}</p></details>}
-    <div className="atlas-profile-actions"><Button onClick={onDiscuss}>讨论与完善{entity.kind === 'faction' ? '组织' : ATLAS_KIND_LABELS[entity.kind]}</Button>{entity.kind === 'location' && <Button onClick={() => onDrill(entity)}>查看下级地点 <ArrowRightOutlined /></Button>}</div>
+    <div className="atlas-profile-actions"><Button disabled={props.editingDisabled} onClick={onDiscuss}>讨论与完善{entity.kind === 'faction' ? '组织' : ATLAS_KIND_LABELS[entity.kind]}</Button>{entity.kind === 'location' && <Button onClick={() => onDrill(entity)}>查看下级地点 <ArrowRightOutlined /></Button>}</div>
     {entity.kind === 'character' && <Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录出生地、居住地或活动区域。可结合已写正文补充；未知地点应保持待定。" onOpen={onOpen} onRelation={onRelation} />}
     {entity.kind === 'faction' && <Connections title="驻地与涉及区域" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录主要驻地、分驻点或涉及区域。一个组织可以关联多个地区。" onOpen={onOpen} onRelation={onRelation} />}
     {groups.map(group => <section className="atlas-profile-section" key={group.title}><h3>{group.title}</h3>{Object.keys(group.values).length ? <AtlasFields values={group.values} entities={snapshot.entities} chapters={chapters} onOpen={onOpen} /> : <p className="atlas-empty-note">{group.empty}</p>}</section>)}

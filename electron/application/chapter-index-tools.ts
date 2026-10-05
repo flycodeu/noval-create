@@ -1,8 +1,17 @@
 import { AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
 import { getChapterIndexStatus, rebuildChapterIndex } from '../services/chapter-index.service'
 import type { AgentToolRegistry } from './tool-registry'
+import { getEmbeddingSettings, setEmbeddingSettings } from '../services/embedding-settings.service'
 
 export function registerChapterIndexTools(registry: AgentToolRegistry): void {
+  for (const write of [false, true]) registry.register({ descriptor: {
+    id: `novelforge.retrieval.settings_${write ? 'set' : 'get'}`, version: '2.0.0', domain: 'retrieval',
+    title: write ? '设置独立检索模型' : '读取独立检索模型',
+    description: '检索模型与写作模型独立；默认本地中文向量。远程模式单独选择兼容接口及向量模型名称。变更后旧索引不会冒充新模型就绪，不自动调用远程重建。',
+    inputSchema: { type: 'object', properties: write ? { mode: { enum: ['local', 'remote'] }, modelConfigId: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] }, modelId: { type: 'string', maxLength: 200 } } : {}, required: write ? ['mode', 'modelConfigId', 'modelId'] : [], additionalProperties: false },
+    outputSchema: { type: 'object', additionalProperties: true }, effect: write ? 'canonical_write' : 'read', approval: 'policy',
+    scopes: write ? [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite] : [AGENT_TOOL_SCOPES.novelRead], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['chapter-recall'],
+  }, handler: input => write ? setEmbeddingSettings(input as unknown as Parameters<typeof setEmbeddingSettings>[0]) : getEmbeddingSettings() })
   for (const rebuild of [false, true]) {
     registry.register({ descriptor: {
       id: `novelforge.chapters.${rebuild ? 'index_rebuild' : 'index_status'}`, version: '2.0.0', domain: 'chapters',

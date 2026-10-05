@@ -23,7 +23,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 const bridgePids = new Map()
@@ -175,6 +175,8 @@ async function main() {
     const journey = await call(first, 'atlas.journey', { novelId, fromId: applied.idMap.valley, toId: village.id })
     assert.equal(journey.journey.status, 'unknown', 'geographical parent is not a travel route')
     const indexStatus = await call(first, 'chapters.index_status', { novelId })
+    assert.equal(indexStatus.vectorEngine.version, 'v0.1.9', 'packaged sqlite-vec DLL loads in actual runtime')
+    assert.equal((await call(second, 'retrieval.settings_get', {})).mode, 'local')
     assert.equal(indexStatus.savedChapterCount, 0)
     assert.equal((await call(second, 'chapters.index_rebuild', { novelId })).savedChapterCount, 0)
     assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, applied.contextVersion, 'read-only journey and index work do not alter story canon')

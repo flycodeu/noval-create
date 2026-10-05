@@ -8,6 +8,7 @@ import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '
 import { selectGenreVoiceSeedInserts } from './genre-voice-seeds'
 import { migrateStoryAtlas } from './story-atlas-store'
 import { installChapterIndexTriggers } from './chapter-index-triggers'
+import { vectorExtensionStatus } from './chapter-vector-index'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
 
@@ -39,6 +40,7 @@ export function initDb(): AppDatabase {
   ensureLegacyElectronDatabaseCopied(userDataPath, dbPath)
 
   _sqlite = new Database(dbPath)
+  vectorExtensionStatus(_sqlite)
   _sqlite.pragma('busy_timeout = 5000')
   _sqlite.pragma('journal_mode = WAL')
   _sqlite.pragma('foreign_keys = ON')
@@ -46,6 +48,7 @@ export function initDb(): AppDatabase {
   _db = drizzle(_sqlite, { schema })
 
   runMigrations(_sqlite)
+  _sqlite.exec('CREATE TABLE IF NOT EXISTS embedding_settings (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL, model_config_id INTEGER, model_id TEXT NOT NULL)')
   seedBuiltinData(_db)
   seedGenreVoiceFingerprints(_db)
 

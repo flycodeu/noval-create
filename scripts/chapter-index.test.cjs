@@ -24,6 +24,8 @@ async function main() {
   const { registerChapterIndexTools } = require('../electron/application/chapter-index-tools.ts')
   const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
   const modelId = Number(sqlite.prepare('INSERT INTO model_configs(name,provider,model_id,api_key,is_default) VALUES(?,?,?,?,1)').run('Index fixture', 'openai', 'fixture', model.encryptApiKey('fixture-only')).lastInsertRowid)
+  const settings = require('../electron/services/embedding-settings.service.ts')
+  settings.setEmbeddingSettings({ mode: 'remote', modelConfigId: modelId, modelId: 'fixture-vector' })
   const novelId = Number(sqlite.prepare('INSERT INTO novels(title,model_config_id) VALUES(?,?)').run('索引试验', modelId).lastInsertRowid)
   const otherNovelId = Number(sqlite.prepare('INSERT INTO novels(title) VALUES(?)').run('其他项目').lastInsertRowid)
   const original = `${'第一段。'.repeat(450)}\n\n铜牌在中段箱底。\n\n${'结尾。'.repeat(450)}`
@@ -92,11 +94,15 @@ async function main() {
 
   rebuildChapterIndex({ novelId, vectors: true })
   sqlite.prepare('UPDATE novels SET model_config_id=999999 WHERE id=?').run(novelId)
-  assert.throws(() => rebuildChapterIndex({ novelId, vectors: true }), /模型配置已失效/)
+  assert.doesNotThrow(() => rebuildChapterIndex({ novelId, vectors: true }), 'writing model does not control retrieval')
+  sqlite.prepare("UPDATE embedding_settings SET model_config_id=999999 WHERE id=1").run()
+  assert.doesNotThrow(() => rebuildChapterIndex({ novelId, vectors: false }), 'bad vector credentials cannot block text repair')
+  assert.throws(() => rebuildChapterIndex({ novelId, vectors: true }), /模型配置.*(不存在|失效)/)
   assert.equal((await processSemanticMemoryOutbox({ novelId, limit: 10 })).failedCount, 1)
-  assert.match(getChapterIndexStatus(novelId).errors[0].message, /模型配置已失效/)
+  assert.match(getChapterIndexStatus(novelId).errors[0].message, /模型配置.*(不存在|失效)/)
   assert.equal(getChapterIndexStatus(novelId).keywordFallbackAvailable, true)
   sqlite.prepare('UPDATE novels SET model_config_id=? WHERE id=?').run(modelId, novelId)
+  settings.setEmbeddingSettings({ mode: 'remote', modelConfigId: modelId, modelId: 'fixture-vector' })
   rebuildChapterIndex({ novelId, vectors: true })
   const generate = embedding.generateChapterEmbeddings
   embedding.generateChapterEmbeddings = async () => ({ applied: true, documentCount: 1, vectorizedCount: 0, source: 'unavailable' })

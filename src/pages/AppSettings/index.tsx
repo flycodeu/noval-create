@@ -8,6 +8,7 @@ import type { ModelConfig } from '../../types'
 import { isElectronRuntime } from '../../runtime/environment'
 import { useThemeStore, type Theme } from '../../stores/theme.store'
 import './index.css'
+import EmbeddingSettings from './EmbeddingSettings'
 
 function statusText(status: DesktopUpdateStatus): string {
   if (status.mode === 'portable') return '便携版请下载新版软件包后更新。'
@@ -120,6 +121,7 @@ export default function AppSettings() {
         {mcpStatus?.registeredCommand && mcpStatus.registration === 'different' && <div className="app-settings__command"><span>当前登记的旧命令</span><code>{mcpStatus.registeredCommand} {mcpStatus.registeredArgs.join(' ')}</code></div>}
       </div></details>
     </section>
+    <EmbeddingSettings models={models} />
     <div className="app-settings__preferences">
       <section className="app-settings__section" aria-labelledby="settings-model-title"><h2 id="settings-model-title">模型</h2><p className="app-settings__model-name">{defaultModel?.name || (models.length ? '尚未选择默认模型' : '添加一个创作模型')}</p><p className="app-settings__description">{defaultModel ? `${defaultModel.modelId} · 项目可在创作台单独选择模型。` : '配置服务地址和密钥后，即可用于创作。'}</p>{modelError && <p className="app-settings__error" role="alert">{modelError}</p>}<Button onClick={() => navigate('/models')}>管理模型与搜索</Button></section>
       <section className="app-settings__section" aria-labelledby="settings-theme-title"><h2 id="settings-theme-title">外观</h2><div className="app-settings__themes" role="group" aria-label="应用外观">{THEMES.map((option) => <button type="button" key={option.value} className={`app-settings__theme app-settings__theme--${option.value}${theme === option.value ? ' is-selected' : ''}`} aria-pressed={theme === option.value} onClick={() => setTheme(option.value)}><span className="app-settings__theme-sample"><i /><i /><i /></span><span>{option.label}{theme === option.value && <CheckOutlined />}</span></button>)}</div></section>

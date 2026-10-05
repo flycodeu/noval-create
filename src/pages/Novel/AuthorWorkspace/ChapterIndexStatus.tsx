@@ -6,6 +6,8 @@ interface IndexStatus {
   savedChapterCount: number
   keywordIndexedChapterCount: number
   vectorIndexedChapterCount: number
+  configurationError?: string
+  vectorEngine?: { version: string | null; error?: string }
   queue: { pending: number; processing: number; failed: number; dead_letter: number }
   errors: Array<{ chapterId: number; message: string }>
 }
@@ -64,7 +66,8 @@ export default function ChapterIndexStatus({ novelId }: { novelId: number }) {
     refreshRef.current = reload
     void load()
     window.addEventListener('novelforge:creative-completed', reload)
-    return () => { stopped = true; epoch.current += 1; readEpoch.current += 1; clearTimeout(pollTimer.current); refreshRef.current = () => undefined; window.removeEventListener('novelforge:creative-completed', reload) }
+    window.addEventListener('novelforge:embedding-settings-changed', reload)
+    return () => { stopped = true; epoch.current += 1; readEpoch.current += 1; clearTimeout(pollTimer.current); refreshRef.current = () => undefined; window.removeEventListener('novelforge:creative-completed', reload); window.removeEventListener('novelforge:embedding-settings-changed', reload) }
   }, [novelId])
 
   const rebuild = async (vectors: boolean) => {
@@ -105,8 +108,10 @@ export default function ChapterIndexStatus({ novelId }: { novelId: number }) {
         {!status && !error ? <Spin size="small" /> : status && <p className="author-muted">已保存 {status.savedChapterCount} 章 · 文字检索 {status.keywordIndexedChapterCount} 章 · 向量就绪 {status.vectorIndexedChapterCount} 章{queued > 0 ? ` · 处理中 ${queued} 章` : ''}{failures > 0 ? ` · 重试或失败 ${failures} 章` : ''}</p>}
         <div className="author-heading-actions" style={{ flexWrap: 'wrap', paddingTop: 0 }}>
           <Button size="small" loading={busy} disabled={busy || !status?.savedChapterCount} onClick={() => void rebuild(false)}>补齐文字索引</Button>
-          <Button size="small" loading={busy} disabled={busy || !status?.savedChapterCount || queued > 0} onClick={() => void rebuild(true)} title="允许使用项目模型生成向量；不支持时使用本地模型">生成向量索引</Button>
+          <Button size="small" loading={busy} disabled={busy || !status?.savedChapterCount || queued > 0 || Boolean(status?.configurationError)} onClick={() => void rebuild(true)} title="使用设置中的独立检索模型生成向量">生成向量索引</Button>
         </div>
+        {status?.configurationError && <p role="alert">{status.configurationError}</p>}
+        {status?.vectorEngine?.error && <p role="alert">{status.vectorEngine.error}</p>}
         {status?.errors[0] && <p className="author-muted">{status.errors[0].message}</p>}
         {error && <p role="alert">{error}</p>}
       </>}

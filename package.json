@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "2.4.16",
+  "version": "2.4.17",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -58,7 +58,7 @@
     "test:chapter-writeback-idempotency": "electron scripts/chapter-writeback-idempotency.test.cjs",
     "test:web-rpc": "npm run build:app && node scripts/run-web-rpc-smoke.cjs",
     "test:mcp": "npm run build:app && node scripts/mcp-server.test.cjs && electron scripts/creative-workflow.test.cjs",
-    "test:agent-workflow": "electron scripts/creative-workflow.test.cjs && electron scripts/story-atlas.test.cjs && electron scripts/creative-chapter-context.test.cjs && electron scripts/chapter-index.test.cjs && electron scripts/chapter-index-ui.test.cjs && electron scripts/creative-chapter-revision.test.cjs && electron scripts/creative-review-request-boundary.test.cjs",
+    "test:agent-workflow": "electron scripts/creative-workflow.test.cjs && electron scripts/story-atlas.test.cjs && electron scripts/creative-chapter-context.test.cjs && electron scripts/chapter-index.test.cjs && electron scripts/chapter-index-ui.test.cjs && electron scripts/sqlite-vec-retrieval.test.cjs && electron scripts/atlas-chapter-scope-ui.test.cjs && electron scripts/embedding-settings-ui.test.cjs && electron scripts/creative-chapter-revision.test.cjs && electron scripts/creative-review-request-boundary.test.cjs",
     "test:workflow-node": "electron scripts/workflow-node-integrity.test.cjs",
     "test:longform-soak": "node scripts/longform-soak.cjs",
     "test:chapter-soak": "node scripts/chapter-soak.cjs",
@@ -101,6 +101,7 @@
     "react-router-dom": "^6.30.6",
     "reactflow": "^11.11.3",
     "recharts": "^3.10.1",
+    "sqlite-vec": "0.1.9",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

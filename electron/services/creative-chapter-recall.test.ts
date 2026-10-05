@@ -22,7 +22,7 @@ describe('bounded old chapter recall', () => {
     expect(result.sources).toHaveLength(1)
     expect(result.sources[0]).toMatchObject({ sourceId: '1', text: '陆闻将旧铜灯放在石台。', required: false })
     expect(result.sources[0].sourceVersion).toBeTruthy()
-    expect(searchSimilarFragments).toHaveBeenCalledWith(1, '旧铜灯', 24, undefined, { beforeChapterNum: 2 })
+    expect(searchSimilarFragments).toHaveBeenCalledWith(1, '旧铜灯', 24, undefined, { beforeChapterNum: 2, proseOnly: true })
   })
   it('filters forbidden facts and uses prose keyword fallback when the vector index is empty', async () => {
     vi.mocked(searchSimilarFragments).mockResolvedValue({ hits: [], fallbackReason: 'disabled_by_config' })
@@ -44,4 +44,15 @@ describe('bounded old chapter recall', () => {
     expect(result.sources[0]?.text).toBe('陆闻将旧铜灯放在石台。')
     expect(fallbackKeywordSearch).not.toHaveBeenCalled()
   })
+  it('refills after denied facts consume the first page and reuses the query vector', async () => {
+    const hidden = { id: 10, chapterNum: 1, content: '阿烛的秘密来历仍无人知道。' }
+    const prepared = { queryHash: 'fixture', profile: 'fixture:2', dimensions: 2, embedding: [1,0] }
+    vi.mocked(searchSimilarFragments).mockResolvedValueOnce({ hits: Array.from({ length: 24 }, () => ({ ...hit(10, 1, hidden.content), searchMode: 'vector' })), preparedQuery: prepared })
+      .mockResolvedValueOnce({ hits: [{ ...hit(1, 1, chapters[0].content), searchMode: 'vector' }], preparedQuery: prepared })
+    const result = await recallCreativeChapterSources({ ...args, chapters: [...chapters, hidden], policy: { ...policy, deniedFacts: [{ fact: { id: 7, title: '阿烛的秘密来历', summary: '' }, projection: {} } as never] } })
+    expect(result.sources.map(source => source.text).join('')).toContain('旧铜灯')
+    expect(result.sources.map(source => source.text).join('')).not.toContain('秘密来历')
+    expect(searchSimilarFragments).toHaveBeenLastCalledWith(1, '旧铜灯', 48, undefined, { beforeChapterNum: 2, proseOnly: true, preparedQuery: prepared })
+  })
+
 })

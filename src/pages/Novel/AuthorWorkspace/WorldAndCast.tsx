@@ -23,10 +23,13 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const geographic = tab === 'map' && params.get('mapView') !== 'hierarchy'
   const atChapter = params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null
   const selectedId = params.get('entity')
-  const [snapshot, setSnapshot] = useState<StoryAtlasSnapshot | null>(null)
+  const [storedSnapshot, setSnapshot] = useState<StoryAtlasSnapshot | null>(null)
+  const [loadedScope, setLoadedScope] = useState('')
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const parentId = atlasMapScope(params, snapshot, geographic)
   const includePlanned = atlasIncludesPlanned(params, tab === 'map')
+  const queryScope = JSON.stringify([novelId, atChapter, includePlanned])
+  const snapshot = loadedScope === queryScope ? storedSnapshot : null
+  const parentId = atlasMapScope(params, snapshot, geographic)
   const [relation, setRelation] = useState<StoryAtlasRelation | null>(null)
   const [editing, setEditing] = useState<StoryAtlasEntity | null>(null)
   const [loading, setLoading] = useState(true)
@@ -38,11 +41,12 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
     setLoading(true)
     try {
       const [result, chapterRows] = await Promise.all([window.electron.storyAtlas.query({ novelId, ...(atChapter != null ? { atChapter } : {}), includePlanned }), window.electron.chapter.list(novelId)])
-      if (token === epoch.current) { setSnapshot(result); setChapters(chapterRows); setError('') }
+      if (token === epoch.current) { setSnapshot(result); setLoadedScope(JSON.stringify([novelId, atChapter, includePlanned])); setChapters(chapterRows); setError('') }
     } catch (cause) { if (token === epoch.current) setError(cause instanceof Error ? cause.message : '读取世界与人物失败') }
     finally { if (token === epoch.current) setLoading(false) }
   }, [novelId, atChapter, includePlanned])
   useEffect(() => { void load(); return () => { epoch.current += 1 } }, [load])
+  useEffect(() => { setEditing(null); setRelation(null) }, [queryScope])
   useEffect(() => { const refresh = () => { void load() }; window.addEventListener('novelforge:creative-completed', refresh); window.addEventListener('focus', refresh); return () => { window.removeEventListener('novelforge:creative-completed', refresh); window.removeEventListener('focus', refresh) } }, [load])
   const activeKind = ATLAS_TABS.find(item => item.key === tab)!.kind
   const selected = snapshot?.entities.find(item => item.id === selectedId) || null
@@ -71,7 +75,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
     {!snapshot ? loading ? <div className="author-loading"><Spin /></div> : <EmptyWork title="资料暂未读到">请重试读取。</EmptyWork> : <>
       <div className={`atlas-workbench ${geographic ? 'atlas-workbench--geography' : isGraph ? 'atlas-workbench--graph' : 'atlas-workbench--library'}`}>
         {geographic ? <GeographicAtlas snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : isGraph ? <WorldAtlasGraph key={tab} mode={tab} snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : <AtlasEntityLibrary key={tab} kind={activeKind} snapshot={snapshot} selectedId={selectedId} onSelect={select} onGenerate={generateTab} />}
-        {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={selected.id} entity={selected} snapshot={snapshot} chapters={chapters} onOpen={openEntity} onEdit={() => setEditing(selected)} onDiscuss={() => discuss(selected)} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`}>{selectedId ? '资料可能尚未生效，或属于计划；可调整章位及“包含计划”后查看。' : '查看相关地点、人物与组织。'}</EmptyWork>}</section>}
+        {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={selected.id} entity={selected} snapshot={snapshot} chapters={chapters} editingDisabled={loading || Boolean(error)} onOpen={openEntity} onEdit={() => { if (!loading && !error && loadedScope === queryScope) setEditing(selected) }} onDiscuss={() => { if (!loading && !error) discuss(selected) }} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`}>{selectedId ? '资料可能尚未生效，或属于计划；可调整章位及“包含计划”后查看。' : '查看相关地点、人物与组织。'}</EmptyWork>}</section>}
       </div>
       {snapshot.diagnostics.length > 0 && <details className="author-disclosure"><summary>资料提示 · {snapshot.diagnostics.length}</summary><ul>{snapshot.diagnostics.map((item, index) => {
         const edge = snapshot.relations.find(relation => item.entityIds.includes(relation.id))

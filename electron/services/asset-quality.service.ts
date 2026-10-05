@@ -222,7 +222,7 @@ function updateAssetReviewProgress(
   updateTaskProgress(taskId, buildProgressPatch(progress, patch), sender)
 }
 
-async function runNestedReviewTask(params: {
+export async function runNestedReviewTask(params: {
   parentTaskId?: number
   novelId: number
   modelConfigId?: number

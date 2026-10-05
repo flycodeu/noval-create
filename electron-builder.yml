@@ -37,6 +37,7 @@ files:
 
 asarUnpack:
   - "**/*.node"
+  - "**/sqlite-vec-windows-x64/*.dll"
 
 extraResources:
   - from: build/icon.ico
