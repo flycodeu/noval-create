@@ -39,5 +39,5 @@ export default function EmbeddingSettings({ models }: { models: ModelConfig[] })
     <Select aria-label="向量检索方式" value={value.mode} disabled={busy} onChange={mode => update({ ...value, mode })} options={[{ value: 'local', label: '本地中文向量' }, { value: 'remote', label: '独立远程向量接口' }]} />
     {value.mode === 'remote' && <><Select aria-label="向量接口" value={value.modelConfigId} disabled={busy} onChange={modelConfigId => update({ ...value, modelConfigId })} options={models.filter(model => ['openai', 'custom'].includes(model.provider)).map(model => ({ value: model.id, label: model.name }))} /><Input aria-label="向量模型名称" placeholder="向量模型名称" value={value.modelId} disabled={busy} onChange={event => update({ ...value, modelId: event.target.value })} /></>}
     <Button loading={busy} onClick={() => void save()}>保存检索配置</Button>{saved && <span role="status">已保存</span>}
-  </div>}<p className="app-settings__description">与写作、评审模型独立。远程接口沿用所选连接的地址和密钥；向量模型单独指定。修改后可在创作台重建索引。</p>{error && <p role="alert">{error}</p>}</section>
+  </div>}<p className="app-settings__description">与写作、评审模型独立。本地模型首次使用需要下载，缓存保存在用户数据目录。远程接口沿用所选连接的地址和密钥；向量模型单独指定。修改后可在创作台重建索引。</p>{error && <p role="alert">{error}</p>}</section>
 }

@@ -126,6 +126,13 @@ async function main() {
   if (bundled) assert(fs.existsSync(path.join(workspaceRoot, 'out/main/main.js')), 'Run npm run build:app first.')
   fs.mkdirSync(testUserData, { recursive: true })
   verifyTestDirectory()
+  const localModelCache = path.join(workspaceRoot, 'node_modules/@xenova/transformers/.cache/Xenova/bge-small-zh-v1.5')
+  const hasLocalModelFixture = fs.existsSync(path.join(localModelCache, 'onnx/model_quantized.onnx'))
+  if (hasLocalModelFixture) {
+    const fixtureCache = path.join(testUserData, 'models/embeddings/Xenova/bge-small-zh-v1.5')
+    fs.mkdirSync(path.dirname(fixtureCache), { recursive: true })
+    fs.cpSync(localModelCache, fixtureCache, { recursive: true })
+  }
   const version = require('../package.json').version
   try {
     const first = await connect()
@@ -180,6 +187,20 @@ async function main() {
     assert.equal(indexStatus.savedChapterCount, 0)
     assert.equal((await call(second, 'chapters.index_rebuild', { novelId })).savedChapterCount, 0)
     assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, applied.contextVersion, 'read-only journey and index work do not alter story canon')
+
+    if (hasLocalModelFixture) {
+      const chapterId = await rpc('chapter', 'create', [novelId, { chapterNum: 1, title: '本地向量验收' }])
+      await rpc('chapter', 'update', [chapterId, { content: '陈舟把铜铃挂在渡口木桩上。' }])
+      await call(first, 'chapters.index_rebuild', { novelId, vectors: true })
+      let localStatus
+      for (let attempt = 0; attempt < 60; attempt++) {
+        localStatus = await call(first, 'chapters.index_status', { novelId })
+        if (localStatus.vectorIndexedChapterCount === 1) break
+        await wait(500)
+      }
+      assert.equal(localStatus.vectorIndexedChapterCount, 1, 'packaged real local ONNX model runs from user-data cache')
+      console.log('PASS packaged local model: real 512-dimensional vectors from writable user cache, preseeded model weights; no provider calls')
+    }
 
     const missingModel = await first.callTool({ name: 'novelforge.workflows.start', arguments: { novelId, stage: 'background', request: '整理现有背景。', idempotencyKey: 'packaged-no-model' } })
     assert.equal(missingModel.isError, true)

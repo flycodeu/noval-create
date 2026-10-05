@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { app } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
 import { and, desc, eq, isNotNull, like, lt, or } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
@@ -27,14 +30,19 @@ const importEsmModule = new Function('specifier', 'return import(specifier)') as
 
 async function getLocalEmbeddingPipeline() {
   if (!embeddingPipeline) {
-    const { pipeline, env } = await importEsmModule('@xenova/transformers')
-    env.allowLocalModels = true
-    env.useBrowserCache = false
-    embeddingPipeline = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
-      quantized: true,
-    })
+    embeddingPipeline = (async () => {
+      const { pipeline, env } = await importEsmModule('@xenova/transformers')
+      const cache = path.join(app.getPath('userData'), 'models', 'embeddings')
+      fs.mkdirSync(cache, { recursive: true })
+      env.cacheDir = cache
+      env.localModelPath = cache + path.sep
+      env.allowLocalModels = true
+      env.useBrowserCache = false
+      env.useFSCache = true
+      return pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', { quantized: true })
+    })()
   }
-  return embeddingPipeline
+  try { return await embeddingPipeline } catch (error) { embeddingPipeline = null; throw error }
 }
 
 async function getLocalEmbeddings(texts: string[]): Promise<number[][]> {
