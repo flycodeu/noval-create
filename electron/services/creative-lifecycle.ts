@@ -34,3 +34,13 @@ export function resolveCreativeResumeAction(input: {
   if (!['failed', 'blocked', 'cancelled'].includes(input.status)) throw new Error('当前任务状态不能继续。')
   return 'retry'
 }
+
+/** Keep a passed candidate applicable when apply or a later step fails. Evidence failures happen before passed. */
+export function dispositionAfterCreativeFailure(input: {
+  cancelled: boolean
+  reviewStatus?: string
+}): { taskStatus: 'paused' | 'failed' | 'cancelled'; reviewStatus: 'passed' | 'needs_revision'; step: 'needs_attention' | 'cancelled' } {
+  if (input.cancelled) return { taskStatus: 'cancelled', reviewStatus: input.reviewStatus === 'passed' ? 'passed' : 'needs_revision', step: 'cancelled' }
+  if (input.reviewStatus === 'passed') return { taskStatus: 'paused', reviewStatus: 'passed', step: 'needs_attention' }
+  return { taskStatus: 'failed', reviewStatus: 'needs_revision', step: 'needs_attention' }
+}

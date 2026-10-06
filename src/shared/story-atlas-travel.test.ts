@@ -60,6 +60,7 @@ describe('recorded multi-leg journeys', () => {
   it('honors single directions, explicit closure, planning and missing time or mode', () => {
     const directed = [first, second].map(edge => ({ ...edge, attributes: { ...edge.attributes, bilateral: false } }))
     expect(calculateAtlasJourney(places, directed, a.id, c.id).status).toBe('known')
+    expect(calculateAtlasJourney(places, directed.map(edge => ({ ...edge, attributes: { ...edge.attributes, routeOpen: 1 } })), a.id, c.id).status).toBe('known')
     expect(calculateAtlasJourney(places, directed, c.id, a.id).status).toBe('unknown')
     for (const attributes of [{ routeOpen: false }, { routeOpen: undefined }, { travelHours: null }, { travelHours: 0 }, { travelHours: '2' }, { travelMode: '' }]) {
       const result = calculateAtlasJourney(places, [first, { ...second, attributes: { ...second.attributes, ...attributes } }], a.id, c.id)

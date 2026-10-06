@@ -647,10 +647,10 @@ export interface RelationshipArcInput {
   startState?: string
   crackPoint?: string
   changeEvent?: string
-  changeTimelineEventId?: number
+  changeTimelineEventId?: number | null
   endState?: string
   currentStatus?: CharacterArcStatus
-  lastProgressChapterId?: number
+  lastProgressChapterId?: number | null
   stalledReason?: string
   notes?: string
 }

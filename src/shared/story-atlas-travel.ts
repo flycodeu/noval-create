@@ -1,3 +1,4 @@
+import { atlasRouteOpen } from './story-atlas'
 import type { StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasRelation } from './story-atlas'
 import { atlasRouteStraightLineKm, isAtlasInteriorConnection } from './story-atlas-geography'
 
@@ -44,7 +45,7 @@ export function calculateAtlasJourney(entities: readonly StoryAtlasEntity[], rel
     const reasons: string[] = []
     const mode = atlasTravelMode(route.attributes.travelMode)
     if (route.status !== 'confirmed' || byId.get(route.fromId)!.status !== 'confirmed' || byId.get(route.toId)!.status !== 'confirmed') reasons.push('通路或端点尚属规划')
-    if (route.attributes.routeOpen !== true) reasons.push(route.attributes.routeOpen === false ? '通路已关闭' : '是否通行尚未确认')
+    if (atlasRouteOpen(route.attributes.routeOpen) !== true) reasons.push(atlasRouteOpen(route.attributes.routeOpen) === false ? '通路已关闭' : '是否通行尚未确认')
     if (!positive(route.attributes.travelHours)) reasons.push('行程耗时缺失或不是正数')
     if (!mode) reasons.push('交通方式未登记')
     if (allowedMode && mode !== allowedMode) reasons.push('不符合所选交通方式')

@@ -39,6 +39,21 @@ describe('evidence support certificates', () => {
     expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).toThrow('未通过')
     expect(() => validateEvidenceAssessments({ assessments: [{ id: claims[0].id, support: 'supported', evidenceQuote: '', reason: '整章没有使用此事实，各场均未提前知情' }] }, claims, prose)).not.toThrow()
   })
+  it.each([
+    ['陈舟蹲下去。他知道库房钥匙在柜底。\n邱账房核对账目。', 'supported'],
+    ['邱账房想到库房钥匙在柜底，陈舟肯定找不到。', 'contradicted'],
+    ['邱账房想到钥匙藏在库房的柜子底下。', 'contradicted'],
+  ])('delegates actual scene knowledge to bound semantic review: %s', async (content, support) => {
+    vi.mocked(creativeChapterSceneVisibility).mockReturnValue([{ factId: 1, title: '钥匙位置', summary: '库房钥匙在柜底', allowedScenes: [{ sceneId: 3, sceneOrder: 1, povCharacterId: 1, povName: '陈舟' }], authorizedRevelations: [] }])
+    const candidate = { chapterNum: 2, content, changes: [], factReveals: [] }
+    const claims = creativeEvidenceClaims(1,candidate)
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: [{ id: claims[0].id, support, evidenceQuote: content, reason: '按实际场景、内心归属及知情过程核对' }] }))
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    expect(report!.passed).toBe(support === 'supported')
+    const check = () => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })
+    if (support === 'supported') expect(check).not.toThrow(); else expect(check).toThrow('未通过')
+    expect(runNestedReviewTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining(JSON.stringify(content)) }))
+  })
   it('reviews reader revelation and actual character knowledge separately with the full prose', async () => {
     vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: assessments('insufficient') }))
     const report = await review()

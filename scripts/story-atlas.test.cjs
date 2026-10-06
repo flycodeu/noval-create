@@ -43,6 +43,24 @@ async function main() {
       { op: 'upsert_relation', kind: 'ownership', fromId: 'yang', toId: 'book' },
       { op: 'upsert_relation', kind: 'participation', fromId: 'lu', toId: 'event' },
     ])
+    const mapNovel = addNovel()
+    const node = name => Number(db.prepare('INSERT INTO world_map(novel_id,level,name) VALUES(?,1,?)').run(mapNovel,name).lastInsertRowid)
+    const from = node('甲镇'), to = node('乙镇')
+    const mapApi = require('../electron/services/map.service.ts')
+    const mapInput = { novelId: mapNovel, mapAId: from, mapBId: to, relationType: 'road', relationLabel: '镇道' }
+    mapApi.upsertMapRelation(mapInput)
+    let oldRoute = mapApi.getMapRelations(mapNovel)[0]
+    assert.equal(oldRoute.routeOpen, null, 'new route without passage evidence is unknown')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: 1, travelHours: 2, travelMode: '步行' })
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, description: '补充沿途景物' })
+    oldRoute = mapApi.getMapRelations(mapNovel)[0]
+    assert.equal(oldRoute.routeOpen, 1, 'omitted passage status preserves an open road')
+    assert.equal(oldRoute.travelHours, 2, 'partial patch preserves known travel time')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: null })
+    assert.equal(mapApi.getMapRelations(mapNovel)[0].routeOpen, null, 'explicit null clears to unknown')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: 0 })
+    assert.equal(mapApi.getMapRelations(mapNovel)[0].routeOpen, 0, 'confirmed closure stays closed')
+    assert.throws(() => mapApi.upsertMapRelation({ ...mapInput, routeOpen: 2 }), /通行状态/)
     const before = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
     assert.equal(validateStoryAtlasChanges(create).valid, true)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, before, 'validation must not write')

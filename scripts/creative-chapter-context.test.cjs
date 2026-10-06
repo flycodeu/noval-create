@@ -40,7 +40,7 @@ async function main() {
     const atlasNpc = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '邱账房')
     const atlasGhost = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '旧井影鬼')
     applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 0, idempotencyKey: 'geography-and-work', source: { kind: 'test' }, changes: [
-      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语' } },
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语。' + '限制必须完整保留。'.repeat(35) + '禁止借命恢复体力' } },
       { op: 'upsert_entity', id: atlasNpc.id, kind: 'character', name: '邱账房', attributes: { publicSummary: '店中负责客账登记的人', publicGoal: '尽快核对客账', firstImpression: '讲话稳妥', motivation: '灭口保身', abilities: ['暗中催眠'], abilityLimits: '只能催眠熟人', abilityCosts: '损失记忆', habits: ['说话前扶眼镜'] } },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '对账协助' },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasGhost.id, label: '调查涉及' },
@@ -87,7 +87,13 @@ async function main() {
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
     db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId, target, '陈舟', '检查系船绳', '河水暴涨，旧绳磨断', '换上新绳，渡船停稳')
     const before = db.prepare('SELECT context_version FROM novels WHERE id=?').get(novelId).context_version
+    const futureMemory = '第3章师父遇害，凶手是邱账房。'
+    db.prepare("INSERT INTO story_memory_checkpoints(novel_id,scope_type,summary,source_range_end,source_context_version,stale) VALUES(?,'novel',?,3,1,1)").run(novelId, futureMemory)
     const result = await compile(input, limits)
+    assert.ok(!result.text.includes(futureMemory), 'unscoped stale/future checkpoints never enter chapter writing')
+    assert.ok(result.text.includes('禁止借命恢复体力'), 'complete ability restrictions, including the final prohibition, must survive')
+    assert.ok(result.omittedSources.includes('story_memory:unscoped_checkpoint_excluded'))
+    await assert.rejects(compile(input, { ...limits, maxInputTokens: 300 }), error => error.code === 'CHAPTER_CONTEXT_BUDGET')
     assert.ok(result.text.includes('河水暴涨'))
     assert.ok(result.text.includes('话短而清楚'))
     assert.ok(result.text.includes('景朝'))
@@ -166,6 +172,15 @@ async function main() {
     assert.ok(inspect(novelId, 2).blockers.some(blocker => blocker.includes('回写仍待决定')))
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
     db.prepare('UPDATE chapters SET writeback_status_json=NULL WHERE id=?').run(first)
+    const secondScene = Number(db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId,target,'邱账房','核对账目','客账对不上','暂未查清').lastInsertRowid)
+    assert.doesNotThrow(() => gate({ ...base, content: content + '\n陈舟收起旧绳。他知道上游连日降雨。\n邱账房核对账目，客账对不上，暂未查清。' }), 'pronouns in an authorized scene are not mechanically rejected')
+    db.prepare('DELETE FROM scene_contracts WHERE id=?').run(secondScene)
+    const originalRules = db.prepare('SELECT world_rules_json FROM novels WHERE id=?').get(novelId).world_rules_json
+    db.prepare('UPDATE novels SET world_rules_json=? WHERE id=?').run(JSON.stringify({ writingConstraints: { extraRules: ['能力只限现场观察。'.repeat(1800) + '禁止凭空复活亡者'] } }),novelId)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET', 'oversized mandatory world constraints must fail rather than silently become optional')
+    db.prepare('UPDATE novels SET world_rules_json=? WHERE id=?').run(originalRules,novelId)
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('河风吹过渡口。'.repeat(1800) + '陈舟收好旧绳。',target)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET', 'rewriting cannot silently discard most of the saved chapter')
     assert.ok(known > 0)
     process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, chapter introduction plans without current end-state leakage, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
   } finally { closeDb(); fs.rmSync(temp, { recursive: true, force: true }) }

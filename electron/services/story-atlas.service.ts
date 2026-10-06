@@ -1,3 +1,4 @@
+import { atlasRouteOpen } from '../../src/shared/story-atlas'
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { getSqlite } from '../database/db'
@@ -98,7 +99,7 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   const ids = new Set(entities.map((entity) => entity.id))
   let relations = all.flatMap((item) => item.recordType === 'relation' ? [item.record as StoryAtlasRelation] : [])
   const hidden = relations.filter((edge) => !ids.has(edge.fromId) || !ids.has(edge.toId))
-  relations = relations.filter((edge) => ids.has(edge.fromId) && ids.has(edge.toId))
+  relations = relations.filter((edge) => ids.has(edge.fromId) && ids.has(edge.toId)).map(edge => edge.kind === 'route' && Object.prototype.hasOwnProperty.call(edge.attributes, 'routeOpen') ? { ...edge, attributes: { ...edge.attributes, routeOpen: atlasRouteOpen(edge.attributes.routeOpen) } } : edge)
   const diagnostics = diagnose(entities, relations)
   if (hidden.length) diagnostics.push({ severity: 'warning', code: 'RELATION_ENDPOINT_UNAVAILABLE', message: `${hidden.length} 条关系的端点在当前章节或状态下不可见。`, entityIds: hidden.map((edge) => edge.id) })
   if (input.locationParentId && !entities.some((entity) => entity.id === input.locationParentId && entity.kind === 'location')) fail('ENTITY_NOT_FOUND', '所选上级地点不在当前小说或章节中。')
@@ -260,6 +261,7 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
     if (old.recordType === 'entity') for (const edge of byId.values()) {
       if (!isEntity(edge.record) && (edge.record.fromId === id || edge.record.toId === id)) {
         edge.retired = true
+        edge.record.attributes = { ...edge.record.attributes, stateTiming: 'chapter_end' }
         edge.record = { ...edge.record, effectiveFromChapter: input.effectiveFromChapter, source: input.source }
         changedIds.add(edge.record.id)
       }
@@ -439,7 +441,7 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     const values: Record<string, unknown> = { novel_id: novelId, relation_label: record.label, relation_type: String(record.attributes.relationType || record.kind),
       bilateral: record.attributes.bilateral === false ? 0 : 1, description: String(record.attributes.description || record.attributes.endState || '') }
     if (record.kind === 'relationship') { values.char_a_id = fromId; values.char_b_id = toId }
-    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = record.attributes.routeOpen === true ? 1 : record.attributes.routeOpen === false ? 0 : null }
+    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = atlasRouteOpen(record.attributes.routeOpen) === null ? null : atlasRouteOpen(record.attributes.routeOpen) ? 1 : 0 }
     item.nativeId = writeRow(sqlite, table, item.nativeTable === table ? item.nativeId : null, values)
     item.nativeTable = table
   } else if (record.kind === 'ownership' && record.fromId.startsWith('character:')) {

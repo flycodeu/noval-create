@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertCreativeCandidateApplicable, resolveCreativeResumeAction } from './creative-lifecycle'
+import { assertCreativeCandidateApplicable, dispositionAfterCreativeFailure, resolveCreativeResumeAction } from './creative-lifecycle'
 
 const candidate = { status: 'paused', cancelRequested: false, draftStatus: 'reviewed', reviewStatus: 'reviewed' }
 const resume = { status: 'paused', active: false, committed: false, explicitApply: false, reviewPassed: true, reviewOnly: false, cancelRequested: false }
@@ -42,5 +42,20 @@ describe('creative candidate lifecycle', () => {
     expect(resolveCreativeResumeAction({ ...resume, status: 'blocked' })).toBe('retry')
     expect(resolveCreativeResumeAction({ ...resume, status: 'cancel_requested', active: true })).toBe('noop')
     expect(() => resolveCreativeResumeAction({ ...resume, status: 'cancel_requested' })).toThrow('正在取消')
+  })
+  it('pauses a passed candidate when a later step fails so it can be applied again', () => {
+    expect(dispositionAfterCreativeFailure({ cancelled: false, reviewStatus: 'passed' })).toEqual({ taskStatus: 'paused', reviewStatus: 'passed', step: 'needs_attention' })
+    const paused = dispositionAfterCreativeFailure({ cancelled: false, reviewStatus: 'passed' })
+    expect(resolveCreativeResumeAction({ ...resume, status: paused.taskStatus, explicitApply: true, reviewPassed: paused.reviewStatus === 'passed' })).toBe('apply')
+  })
+  it('fails a run whose review is still validating or has not been recorded', () => {
+    expect(dispositionAfterCreativeFailure({ cancelled: false, reviewStatus: 'validating' })).toEqual({ taskStatus: 'failed', reviewStatus: 'needs_revision', step: 'needs_attention' })
+    expect(dispositionAfterCreativeFailure({ cancelled: false }).taskStatus).toBe('failed')
+    expect(dispositionAfterCreativeFailure({ cancelled: false, reviewStatus: undefined }).taskStatus).toBe('failed')
+  })
+  it('keeps a cancelled run cancelled even after the review passed', () => {
+    expect(dispositionAfterCreativeFailure({ cancelled: true, reviewStatus: 'passed' }).taskStatus).toBe('cancelled')
+    expect(dispositionAfterCreativeFailure({ cancelled: true, reviewStatus: 'validating' }).taskStatus).toBe('cancelled')
+    expect(dispositionAfterCreativeFailure({ cancelled: true }).taskStatus).toBe('cancelled')
   })
 })

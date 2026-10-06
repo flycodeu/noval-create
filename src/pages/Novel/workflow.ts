@@ -653,32 +653,8 @@ export function getWorkflowBlockers(
     pushIfMissing(isWorldFoundationReady(novel), `缺少世界规则，无法${action}。`)
   }
 
-  const requireEndgame = (action: string) => {
-    pushIfMissing(isEndgameDesignReady(novel), `请先锁定终局承诺，再${action}。`)
-  }
-
-  const requireMap = (action: string) => {
-    pushIfMissing(isMapStructureReady(stats), `请先建立地图骨架，再${action}。`)
-  }
-
   const requireCharacters = (action: string) => {
     pushIfMissing(isCharacterRosterReady(stats), `请先建立主角与人物网络，再${action}。`)
-  }
-
-  const requireResistance = (action: string) => {
-    pushIfMissing(isResistanceSystemReady(stats), `请先建立阻力线，再${action}。`)
-  }
-
-  const requireVolumePlanning = (action: string) => {
-    pushIfMissing(isVolumePlanningReady(stats), `请先完成第一卷目标、闭环和卷末爆点，再${action}。`)
-  }
-
-  const requireItems = (action: string) => {
-    pushIfMissing(isItemsEquipmentReady(stats), `缺少物品资产，无法${action}。`)
-  }
-
-  const requireThreads = (action: string) => {
-    pushIfMissing(isStoryThreadsReady(stats), `请先建立故事线程，再${action}。`)
   }
 
   const requireRevisionBlockersCleared = (action: string) => {
@@ -718,50 +694,31 @@ export function getWorkflowBlockers(
       break
     case 'map':
       requireWorldRules('生成地图')
-      requireEndgame('生成地图')
       break
     case 'characters':
       requireWorldRules('生成人物')
       break
     case 'items':
       requireWorldRules('生成物品')
-      requireEndgame('生成物品')
-      requireMap('生成物品')
       break
     case 'threads':
-      requireEndgame('生成故事线程')
       if (!isStoryPlotReady(novel)) {
         requireWorldRules('生成故事线程')
-        requireMap('生成故事线程')
         requireCharacters('生成故事线程')
-        requireItems('生成故事线程')
       }
       break
     case 'story-design':
       requireWorldRules('生成故事设计')
-      requireEndgame('生成故事设计')
-      requireMap('生成故事设计')
       requireCharacters('生成故事设计')
-      requireItems('生成故事设计')
-      requireThreads('生成故事设计')
-      requireResistance('生成故事设计')
       break
     case 'outline':
-      requireEndgame('生成故事大纲')
-      pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
       requireCharacters('生成故事大纲')
-      requireResistance('生成故事大纲')
-      requireVolumePlanning('生成故事大纲')
       requireFreshAssets('生成故事大纲')
       requireRevisionBlockersCleared('生成故事大纲')
       break
     case 'timeline':
       requireWorldRules('生成时间轴')
-      requireEndgame('生成时间轴')
-      requireMap('生成时间轴')
       requireCharacters('生成时间轴')
-      requireItems('生成时间轴')
-      requireResistance('生成时间轴')
       requireFreshAssets('生成时间轴')
       pushIfMissing(
         isStoryPlotReady(novel) || stats.outlineCount > 0,

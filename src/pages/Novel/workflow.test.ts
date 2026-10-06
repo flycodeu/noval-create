@@ -216,6 +216,16 @@ describe('workflow ordering', () => {
     expect(blockers.some((item) => item.includes('物品'))).toBe(false)
   })
 
+  it('does not gate map, outline, or timeline on an unfinished endgame', () => {
+    const mapBlockers = getWorkflowBlockers('map', baseNovel, EMPTY_WORKFLOW_STATS)
+    const outlineBlockers = getWorkflowBlockers('outline', baseNovel, EMPTY_WORKFLOW_STATS)
+    const timelineBlockers = getWorkflowBlockers('timeline', baseNovel, EMPTY_WORKFLOW_STATS)
+
+    expect(mapBlockers.some((item) => item.includes('终局'))).toBe(false)
+    expect(outlineBlockers.some((item) => item.includes('终局'))).toBe(false)
+    expect(timelineBlockers.some((item) => item.includes('终局'))).toBe(false)
+  })
+
   it('does not gate writing on a missing timeline', () => {
     const blockers = getWorkflowBlockers('writing', baseNovel, {
       ...EMPTY_WORKFLOW_STATS,

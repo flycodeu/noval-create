@@ -201,3 +201,8 @@ export interface StoryAtlasValidationResult {
   diagnostics: StoryAtlasDiagnostic[]
   resolvedChanges: Array<{ index: number; id: string; isNew: boolean }>
 }
+
+/** Unknown passage is distinct from a confirmed open or closed route. */
+export function atlasRouteOpen(value: unknown): boolean | null {
+  return value === true || value === 1 ? true : value === false || value === 0 ? false : null
+}

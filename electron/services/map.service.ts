@@ -1,3 +1,4 @@
+import { atlasRouteOpen } from '../../src/shared/story-atlas'
 import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
@@ -506,7 +507,7 @@ function mapRelationRecord(row: Record<string, unknown>): MapRelation {
     sortOrder: Number(row.sort_order || 0),
     travelHours: typeof row.travel_hours === 'number' && row.travel_hours > 0 ? row.travel_hours : null,
     travelMode: typeof row.travel_mode === 'string' ? row.travel_mode : null,
-    routeOpen: row.route_open == null ? 1 : (Number(row.route_open) > 0 ? 1 : 0),
+    routeOpen: atlasRouteOpen(row.route_open) === null ? null : atlasRouteOpen(row.route_open) ? 1 : 0,
   }
 }
 
@@ -868,6 +869,7 @@ export function createMapItem(novelId: number, data: Partial<typeof worldMap.$in
 }
 
 function sanitizeMapRelationInput(data: MapRelationInput): MapRelationInput {
+  if (data.routeOpen != null && atlasRouteOpen(data.routeOpen) === null) throw new Error('通行状态必须是已开通、已关闭或未确认。')
   return {
     id: typeof data.id === 'number' ? data.id : undefined,
     novelId: Number(data.novelId),
@@ -884,7 +886,7 @@ function sanitizeMapRelationInput(data: MapRelationInput): MapRelationInput {
       ? Math.round(data.travelHours * 100) / 100
       : null,
     travelMode: asText(data.travelMode),
-    routeOpen: data.routeOpen == null ? 1 : (Number(data.routeOpen) > 0 ? 1 : 0),
+    routeOpen: atlasRouteOpen(data.routeOpen) === null ? null : atlasRouteOpen(data.routeOpen) ? 1 : 0,
   }
 }
 
@@ -931,11 +933,12 @@ export function upsertMapRelation(input: MapRelationInput) {
     sortOrder: data.sortOrder ?? 0,
     travelHours: data.travelHours ?? null,
     travelMode: data.travelMode || null,
-    routeOpen: data.routeOpen ?? 1,
+    routeOpen: data.routeOpen ?? null,
   }
 
   if (existing) {
-    db.update(mapRelations).set(payload).where(eq(mapRelations.id, existing.id)).run()
+    const patch = Object.fromEntries(Object.entries(payload).filter(([key]) => Object.prototype.hasOwnProperty.call(input, key)))
+    db.update(mapRelations).set(patch).where(eq(mapRelations.id, existing.id)).run()
   } else {
     db.insert(mapRelations).values(payload).run()
   }

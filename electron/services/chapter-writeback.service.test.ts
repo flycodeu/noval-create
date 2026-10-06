@@ -59,6 +59,7 @@ vi.mock('./canon-ledger.service', () => ({
 
 import { getDb, getSqlite } from '../database/db'
 import {
+  characters,
   chapterFactExtracts,
   chapterWritebackDiffs,
   chapterWritebackRuns,
@@ -74,6 +75,9 @@ import {
 import * as storyThreadService from './story-thread.service'
 import * as storyFactService from './story-fact.service'
 import * as timelineService from './timeline.service'
+import * as itemService from './item.service'
+import * as endgameAssetService from './endgame-asset.service'
+import * as characterArcService from './character-arc.service'
 import { runChatTask } from './task.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -540,6 +544,9 @@ describe('prepareChapterWritebackRun', () => {
     vi.mocked(storyThreadService.listStoryThreads).mockReturnValue([])
     vi.mocked(storyFactService.listStoryFacts).mockReturnValue([])
     vi.mocked(timelineService.listTimelineEvents).mockReturnValue([])
+    vi.mocked(itemService.listStoryItems).mockReturnValue([])
+    vi.mocked(endgameAssetService.listForeshadowLedger).mockReturnValue([])
+    vi.mocked(characterArcService.listRelationshipArcs).mockReturnValue([])
     vi.mocked(getSqlite).mockImplementation(() => ({
       transaction: (callback: () => unknown) => callback,
       prepare: () => ({ run: vi.fn() }),
@@ -585,6 +592,35 @@ describe('prepareChapterWritebackRun', () => {
     const merged = { ...(assetType === 'puzzle' ? fact : event), ...saved }
     if (assetType === 'puzzle') expect(merged).toMatchObject({ readerKnownChapterId: null, isKeyTruth: 1, characterKnowledgeJson: fact.characterKnowledgeJson })
     else expect(merged).toMatchObject({ timeLabel: '昨天', status: 'written', chapterStartId: 11, chapterEndId: null, protagonistPresent: 1 })
+  })
+
+  it('keeps thread status, chapter anchors and links when the AI only patches its summary', async () => {
+    const rows = createRows(); Object.assign(rows.get(chapters)![0], { content: '旧仓库里多了一把锁。' })
+    rows.set(chapterWritebackDiffs, []); rows.set(chapterWritebackRuns, [])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    const thread = { id: 50, novelId: 1, title: '查锁', status: 'active', startChapter: 1, plantedChapter: 1, relatedCharacterIdsJson: '[1]' }
+    vi.mocked(storyThreadService.listStoryThreads).mockReturnValue([thread] as never)
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({ extracts: [], diffs: [{ assetType: 'thread', entityId: 50, confidence: 0.9, afterState: { title: '查锁', summary: '补充锁的位置' } }] }))
+    await prepareChapterWritebackRun(11, 'thread-partial-patch')
+    const saved = JSON.parse(String(rows.get(chapterWritebackDiffs)![0].afterStateJson))
+    expect(saved).toEqual({ title: '查锁', summary: '补充锁的位置' })
+    expect({ ...thread, ...saved }).toMatchObject({ status: 'active', startChapter: 1, plantedChapter: 1, relatedCharacterIdsJson: '[1]' })
+  })
+
+  it.each(['foreshadow', 'item', 'relation'] as const)('does not reset omitted %s state while accepting deliberate clearing', async assetType => {
+    const rows = createRows(); Object.assign(rows.get(chapters)![0], { content: '旧仓库里多了一把锁。' })
+    rows.set(chapterWritebackDiffs, []); rows.set(chapterWritebackRuns, [])
+    rows.set(characters, [{ id: 1, novelId: 1, fullName: '甲' }, { id: 2, novelId: 1, fullName: '乙' }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(endgameAssetService.listForeshadowLedger).mockReturnValue([{ id: 50, novelId: 1, title: '旧锁', status: 'planted', sourceChapterId: 11 }] as never)
+    vi.mocked(itemService.listStoryItems).mockReturnValue([{ id: 50, novelId: 1, itemName: '旧锁', recordStatus: 'confirmed', ownerCharacterId: 1 }] as never)
+    vi.mocked(characterArcService.listRelationshipArcs).mockReturnValue([{ id: 50, novelId: 1, charAId: 1, charBId: 2, currentStatus: 'active', lastProgressChapterId: 11 }] as never)
+    const patch = assetType === 'foreshadow' ? { title: '旧锁', detail: '位置已核对', sourceChapterId: null } : assetType === 'item' ? { itemName: '旧锁', summary: '位置已核对', ownerCharacterId: null } : { charAId: 1, charBId: 2, changeEvent: '核对锁的位置', lastProgressChapterId: null }
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({ extracts: [], diffs: [{ assetType, entityId: 50, confidence: 0.9, afterState: patch }] }))
+    await prepareChapterWritebackRun(11, 'sparse-' + assetType)
+    const saved = JSON.parse(String(rows.get(chapterWritebackDiffs)![0].afterStateJson))
+    expect(saved).toEqual(assetType === 'relation' ? { novelId: 1, ...patch } : patch)
+    expect(saved).not.toHaveProperty('status'); expect(saved).not.toHaveProperty('currentStatus'); expect(saved).not.toHaveProperty('recordStatus')
   })
 
   it('supplies an object schema and an executable example that remains pending author review', async () => {

@@ -30,7 +30,7 @@ import { captureCreativeHistory } from './creative-history'
 import { recordCreativeReviewIssues, recordCreativeQualityIssues, validateCreativeRevisionTargets, advanceCreativeRevisionIssues, CreativeReviewTargetError } from './creative-review-issues'
 import { ATLAS_REVIEW_STAGES, captureFormalAtlasReview, captureFormalPlanningReview } from './creative-formal-review'
 import { estimateTokens } from '../../src/shared/token-budget'
-import { assertCreativeCandidateApplicable, resolveCreativeResumeAction } from './creative-lifecycle'
+import { assertCreativeCandidateApplicable, dispositionAfterCreativeFailure, resolveCreativeResumeAction } from './creative-lifecycle'
 import { findAcceptedCreativeSuccessor, supersedeCreativeDraftAncestors } from './creative-candidate-lineage'
 import { scheduleChapterEmbeddingRefresh } from './embedding.service'
 import { createCreativeModelCheckpoint } from './creative-model-checkpoint'
@@ -150,6 +150,14 @@ function stored(runId: number, novelId: number): { task: NonNullable<ReturnType<
   const task = getTaskRecord(runId)
   if (!task || task.novelId !== novelId || task.relatedEntityType !== 'creative_workflow') throw new Error('创作任务不存在或不属于当前项目。')
   return { task, input: JSON.parse(task.inputJson || '{}') as StoredRequest }
+}
+/** A new attempt must not inherit the previous attempt's passed review. */
+function clearStaleReviewStatus(runId: number): void {
+  const task = getTaskRecord(runId)
+  const current = JSON.parse(task?.progressJson || '{}') as Partial<CreativeRun>
+  if (!('reviewStatus' in current)) return
+  delete current.reviewStatus
+  updateTask(runId, { progressJson: JSON.stringify(current) })
 }
 function progress(runId: number, step: CreativeRun['step'], message: string, patch: Partial<CreativeRun> = {}): void {
   const task = getTaskRecord(runId)
@@ -474,6 +482,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     const { input } = stored(runId, novelId)
     assertActive(runId); assertBase(input)
     updateTask(runId, { status: 'running', errorMessage: null })
+    clearStaleReviewStatus(runId)
     progress(runId, 'context', '读取本阶段所需资料与章位状态')
     if (input.request.operation === 'review') {
       if (input.request.stage === 'chapter') await executeChapterReview(runId, input)
@@ -590,8 +599,10 @@ async function execute(runId: number, novelId: number): Promise<void> {
         }
       } catch { /* Preserve the original task failure when its baseline is unavailable. */ }
     }
-    updateTask(runId, { status: cancelled ? 'cancelled' : 'failed', errorMessage: message, currentChildTaskId: null })
-    progress(runId, cancelled ? 'cancelled' : 'needs_attention', message, getCreativeRun(novelId, runId)?.artifactId ? { reviewStatus: 'needs_revision' } : {})
+    const progressState = JSON.parse(getTaskRecord(runId)?.progressJson || '{}') as Partial<CreativeRun>
+    const disposition = dispositionAfterCreativeFailure({ cancelled, reviewStatus: progressState.reviewStatus })
+    updateTask(runId, { status: disposition.taskStatus, errorMessage: message, currentChildTaskId: null })
+    progress(runId, disposition.step, message, disposition.reviewStatus === 'passed' || getCreativeRun(novelId, runId)?.artifactId ? { reviewStatus: disposition.reviewStatus } : {})
   } finally { active.delete(runId) }
 }
 

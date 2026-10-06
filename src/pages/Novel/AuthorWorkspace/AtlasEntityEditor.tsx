@@ -55,7 +55,7 @@ export function AtlasEntityEditor({ entity, snapshot, atChapter, onClose, onSave
     if (!name.trim()) return
     setSaving(true)
     try {
-      await window.electron.storyAtlas.apply({ novelId: snapshot.novelId, expectedContextVersion: baseContextVersion, idempotencyKey: `author-atlas:${crypto.randomUUID()}`, effectiveFromChapter: effectiveChapter, source: { kind: 'human', note: '作者修订' }, changes: [{ op: 'upsert_entity', id: entity.id, kind: entity.kind, name: name.trim(), summary, parentId: entity.parentId, attributes: atlasEditedAttributes(entity.attributes, attributes), attributeMode: 'replace', status: entity.status }] })
+      await window.electron.storyAtlas.apply({ novelId: snapshot.novelId, expectedContextVersion: baseContextVersion, idempotencyKey: `author-atlas:${crypto.randomUUID()}`, effectiveFromChapter: effectiveChapter, source: { kind: 'human', note: '作者修订' }, changes: [{ op: 'upsert_entity', id: entity.id, kind: entity.kind, name: name.trim(), summary, parentId: entity.parentId, attributes: { ...atlasEditedAttributes(entity.attributes, attributes), stateTiming: attributes.stateTiming || entity.attributes.stateTiming || 'chapter_end' }, attributeMode: 'replace', status: entity.status }] })
       message.success('资料已保存'); onSaved(); onClose()
     } catch (error) { message.error(error instanceof Error ? error.message : '保存失败') }
     finally { setSaving(false) }
