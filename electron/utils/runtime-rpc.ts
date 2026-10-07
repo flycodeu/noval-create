@@ -1,6 +1,6 @@
 // Browser clients may use registered story operations, never native window or shell commands.
 const STORY_SERVICES = new Set([
-  'agentTool', 'storyAtlas', 'novel', 'model', 'sourceSearch', 'ai', 'aiPatch', 'chapter', 'chapterBatch',
+  'agentTool', 'storyAtlas', 'novel', 'model', 'sourceSearch', 'zhuque', 'ai', 'aiPatch', 'chapter', 'chapterBatch',
   'character', 'map', 'narrativeBoard', 'creativeStage', 'item', 'thread', 'faction', 'glossary',
   'sceneTemplate', 'template', 'prompt', 'structure', 'outline', 'rhythm', 'timeline', 'characterArc',
   'resistance', 'endgameAsset', 'foreshadow', 'volumeDesign', 'contract', 'storyFact', 'knowledgeBoundary',
@@ -11,6 +11,7 @@ const APP_METHODS = new Set(['getDatabasePath', 'getMaintenanceStatus', 'getCapa
 const SENSITIVE_METHODS: Record<string, Set<string>> = {
   model: new Set(['list', 'create', 'update', 'delete', 'setDefault', 'test']),
   sourceSearch: new Set(['getSettings', 'updateSettings', 'test']),
+  zhuque: new Set(['getSettings', 'updateSettings', 'test', 'getChapterResult', 'detectChapter']),
   agentTool: new Set(['list', 'call']),
 }
 

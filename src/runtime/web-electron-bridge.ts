@@ -874,7 +874,7 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
 
   let response: Response
   const controller = new AbortController()
-  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000 : LOCAL_BACKEND_RPC_TIMEOUT_MS
+  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000 : service === 'zhuque' && ['test', 'detectChapter'].includes(method) ? 55_000 : LOCAL_BACKEND_RPC_TIMEOUT_MS
   const timeout = window.setTimeout(() => controller.abort(), rpcTimeout)
   try {
     response = await fetch(`${LOCAL_BACKEND_URL}/rpc`, {
@@ -1101,6 +1101,13 @@ export function installWebElectronBridge(): void {
         latency: 0,
         info: getLocalBackendUnavailableMessage(),
       })),
+    }),
+    zhuque: createService('zhuque', {
+      getSettings: async () => withLocalBackend('zhuque', 'getSettings', [], async () => ({ enabled: false, autoDetect: false, apiKeySet: false })),
+      updateSettings: async (data?: unknown) => withLocalBackend('zhuque', 'updateSettings', [data], async () => { throw new Error('请连接本机 NovelForge 后保存朱雀配置，密钥不会保存在浏览器。') }),
+      test: async () => withLocalBackend('zhuque', 'test', [], async () => ({ success: false, info: getLocalBackendUnavailableMessage(), latency: 0 })),
+      getChapterResult: async (id?: unknown) => withLocalBackend('zhuque', 'getChapterResult', [id], async () => ({ enabled: false, autoDetect: false, apiKeySet: false, status: 'not_checked' })),
+      detectChapter: async (id?: unknown, expectedContent?: unknown) => withLocalBackend('zhuque', 'detectChapter', [id, expectedContent], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
     }),
     sourceSearch: createService('sourceSearch', {
       getSettings: async () => withLocalBackend(

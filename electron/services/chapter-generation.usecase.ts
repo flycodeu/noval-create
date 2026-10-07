@@ -1,4 +1,5 @@
 import { resolveReviewAutomaticIssues } from './quality-issue-policy'
+import { scheduleZhuqueChapterDetection } from './zhuque-detection.service'
 import { qualityIssueHasActionableLevel } from '../../src/shared/quality-issue'
 import { assertChapterNarrativeInputCurrent, resolveChapterNarrativeIdentity } from './chapter-narrative-policy'
 import { narrativeRequestIdentity, type NarrativeInputIdentity } from '../../src/shared/narrative-policy'
@@ -1634,6 +1635,7 @@ export function updateChapter(id: number, data: Partial<{
   if (!options.skipStaleTracking && previous && contentChanged) {
     markChapterContentChanged(previous.novelId, previous.chapterNum)
   }
+  if (contentChanged) scheduleZhuqueChapterDetection(id, safeData.content as string)
 }
 
 export function deleteChapter(id: number) {

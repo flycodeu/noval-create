@@ -34,6 +34,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import { WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import { DEEPSEEK_V4_MAX_OUTPUT_TOKENS, getProviderMaxOutputTokens } from '../../shared/model-token-limits'
 import './index.css'
+import ZhuqueSettings from './ZhuqueSettings'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
 const MASKED_KEY = '已设置'
@@ -623,6 +624,7 @@ export default function ModelManager() {
           </WorkspacePanel>
         </div>
 
+        <WorkspacePanel title="正文检测"><ZhuqueSettings /></WorkspacePanel>
         <details className="model-manager-source-disclosure" data-model-source-disclosure>
           <summary><strong>来源检索与 API Key</strong></summary>
           <WorkspacePanel

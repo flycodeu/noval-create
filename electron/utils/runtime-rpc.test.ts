@@ -14,6 +14,8 @@ describe('runtime browser RPC allowlist', () => {
     expect(resolveRuntimeRpcChannel('agentTools', 'approve')).toBeNull()
     expect(resolveRuntimeRpcChannel('model', 'getApiKey')).toBeNull()
     expect(resolveRuntimeRpcChannel('sourceSearch', 'getRuntimeConfig')).toBeNull()
+    expect(resolveRuntimeRpcChannel('zhuque', 'localKey')).toBeNull()
+    expect(resolveRuntimeRpcChannel('zhuque', 'getChapterResult')).toBe('zhuque:getChapterResult')
     expect(resolveRuntimeRpcChannel('novel', 'export')).toBeNull()
     expect(resolveRuntimeRpcChannel('__proto__', 'constructor')).toBeNull()
     expect(resolveRuntimeRpcChannel('novel', 'get:other')).toBeNull()

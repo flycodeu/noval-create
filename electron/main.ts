@@ -124,6 +124,7 @@ import * as workflowTaskService from './services/workflow-task.service'
 import * as workflowNodeService from './services/workflow-node.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
 import { parseObjectPayload, requireId, requireIds, requireObject, requireString } from './utils/ipc-validate'
+import * as zhuqueDetection from './services/zhuque-detection.service'
 import {
   buildBackgroundExpansionRepairPrompt,
   collectForbiddenBackgroundNaming,
@@ -1391,6 +1392,11 @@ function registerHistoryAndModelIpcHandlers(handle: IpcHandle) {
 }
 
 function registerRuntimeIpcHandlers(handle: IpcHandle) {
+  handle('zhuque:getSettings', () => zhuqueDetection.getZhuqueSettings())
+  handle('zhuque:updateSettings', (_, data) => { requireObject(data, 'data'); return zhuqueDetection.updateZhuqueSettings(data) })
+  handle('zhuque:test', () => zhuqueDetection.testZhuqueConnection())
+  handle('zhuque:getChapterResult', (_, id) => zhuqueDetection.getZhuqueChapterResult(requireId(id)))
+  handle('zhuque:detectChapter', (_, id, expectedContent) => zhuqueDetection.detectZhuqueChapter(requireId(id), expectedContent))
   handle('sourceSearch:getSettings', () => sourceSearchSettingsService.getSourceSearchSettings())
   handle('sourceSearch:updateSettings', (_, data) => {
     requireObject(data, 'data')

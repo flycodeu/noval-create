@@ -37,3 +37,4 @@ release/
 docs/implementation/**/evidence/
 docs/ui-acceptance/
 todo/
+**/local-zhuque/

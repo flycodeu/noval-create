@@ -1,5 +1,6 @@
 import { readCurrentReviewIssues } from '../reading-review-evidence'
 import React from 'react'
+import ZhuqueChapterPanel from '../../../../components/ZhuqueChapterPanel'
 import { Button, Tag } from 'antd'
 import AIScorePanel from '../../../../components/AIScorePanel'
 import ReviewNotesPanel from '../../../../components/novel/writing/ReviewNotesPanel'
@@ -196,6 +197,7 @@ export default function ReviewRoute({ model, actions, title = '审校视图' }: 
     <section className="writing-route-view writing-route-view--review" data-route="review">
       <header className="writing-route-view__header"><strong>{title}</strong></header>
       <div className="writing-route-view__body">
+        {model.chapter ? <ZhuqueChapterPanel chapterId={model.chapter.id} savedContent={model.chapter.content} getContent={actions.getEditorContent} /> : null}
         <CurrentDraftIssues model={model} actions={actions} />
         <div className="novel-writing-shell__insight-stack">
           <InsightCard title="审校意见" eyebrow="事实连续性 / 人物声音 / 语言读感" tone="soft"><ReviewNotesPanel notes={model.reviewNotes as Record<string, unknown> | null} /></InsightCard>

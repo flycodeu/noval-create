@@ -80,6 +80,12 @@ async function main() {
     await assertEventStream()
     const capabilities = await rpc('app', 'getCapabilities')
     assert.equal(capabilities.eventStreaming, true)
+    const zhuque = await rpc('zhuque', 'getSettings')
+    assert.deepEqual(zhuque, { enabled: false, autoDetect: true, apiKeySet: false })
+    const disabled = await rpc('zhuque', 'updateSettings', [{ enabled: false, autoDetect: false }])
+    assert.deepEqual(disabled, { enabled: false, autoDetect: false, apiKeySet: false })
+    assert.equal((await rpc('zhuque', 'test')).success, false)
+    await expectRpcError('zhuque', 'localKey', [], 'runtime.methodNotAllowed')
 
     novelId = Number(await rpc('novel', 'create', [{
       title: `Web RPC smoke ${stamp}`,

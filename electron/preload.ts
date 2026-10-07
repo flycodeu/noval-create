@@ -559,6 +559,13 @@ const api = {
     test: (id: number) => invokeIpc('model:test', id),
   },
 
+  zhuque: {
+    getSettings: () => invokeIpc('zhuque:getSettings'),
+    updateSettings: (data: unknown) => invokeIpc('zhuque:updateSettings', data),
+    test: () => invokeIpc('zhuque:test'),
+    getChapterResult: (id: number) => invokeIpc('zhuque:getChapterResult', id),
+    detectChapter: (id: number, expectedContent?: string) => invokeIpc('zhuque:detectChapter', id, expectedContent),
+  },
   sourceSearch: {
     getSettings: () => invokeIpc('sourceSearch:getSettings'),
     updateSettings: (data: unknown) => invokeIpc('sourceSearch:updateSettings', data),

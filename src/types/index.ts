@@ -1,4 +1,5 @@
 import type { GenreWorldRules } from '../shared/genre-system'
+import type { ZhuqueSettingsView, ZhuqueSettingsUpdate, ZhuqueChapterView, ZhuqueTestResult } from '../shared/zhuque-detection'
 import type { NovelOperatingMode } from '../shared/operating-mode'
 import type { StyleStats } from '../shared/style-fingerprint-stats'
 import type { SemanticMemorySourceType } from '../shared/semantic-memory'
@@ -6410,6 +6411,13 @@ declare global {
         delete: (id: number) => Promise<void>
         setDefault: (id: number) => Promise<void>
         test: (id: number) => Promise<{ success: boolean; latency: number; info: string }>
+      }
+      zhuque: {
+        getSettings: () => Promise<ZhuqueSettingsView>
+        updateSettings: (data: ZhuqueSettingsUpdate) => Promise<ZhuqueSettingsView>
+        test: () => Promise<ZhuqueTestResult>
+        getChapterResult: (chapterId: number) => Promise<ZhuqueChapterView>
+        detectChapter: (chapterId: number, expectedContent?: string) => Promise<ZhuqueChapterView>
       }
       sourceSearch: {
         getSettings: () => Promise<SourceSearchSettingsView>
