@@ -149,6 +149,18 @@ async function main() {
     assert.equal(health.tools, expectedTools.length)
     assert.equal(health.modelConfigured, false)
 
+    assert.deepEqual(await rpc('zhuque', 'getSettings'), { enabled: false, autoDetect: true, apiKeySet: false }, 'packaged detector must default off')
+    const zhuqueFixtureKey = 'packaged-zhuque-fixture-not-a-real-key'
+    const zhuqueSettings = await rpc('zhuque', 'updateSettings', [{ enabled: false, autoDetect: false, apiKey: zhuqueFixtureKey }])
+    assert.deepEqual(zhuqueSettings, { enabled: false, autoDetect: false, apiKeySet: true })
+    const zhuqueLocalFile = path.join(testUserData, 'local-zhuque', 'credentials.json')
+    assert(fs.existsSync(zhuqueLocalFile), 'packaged local credential file must exist')
+    assert.equal(fs.readFileSync(zhuqueLocalFile, 'utf8').includes(zhuqueFixtureKey), false, 'packaged credentials must be encrypted')
+    assert.equal(JSON.stringify(zhuqueSettings).includes(zhuqueFixtureKey), false, 'RPC must not return saved keys')
+    const zhuqueTest = await rpc('zhuque', 'test')
+    assert.equal(zhuqueTest.success, false); assert(zhuqueTest.info.includes('已关闭'), 'disabled packaged test must stop before transport')
+    assert.deepEqual(await rpc('zhuque', 'updateSettings', [{ apiKey: '' }]), { enabled: false, autoDetect: false, apiKeySet: false })
+
     const second = await connect()
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')
     assert.equal(discovery().pid, owner.pid)

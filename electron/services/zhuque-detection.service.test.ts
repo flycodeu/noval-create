@@ -77,6 +77,21 @@ describe('local Zhuque detector', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
     expect(getZhuqueChapterResult(1).status).toBe('stale')
   })
+  it('aborts timed out requests, clears the running state and allows an explicit retry', async () => {
+    vi.useFakeTimers(); updateZhuqueSettings({ enabled: true, apiKey: 'secret-fixture' })
+    mockFetch.mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('secret-fixture aborted transport')), { once: true })
+    }))
+    const pending = detectZhuqueChapter(1)
+    await vi.advanceTimersByTimeAsync(45_000)
+    const result = await pending
+    expect(result.status).toBe('failed'); expect(result.report?.error).toContain('超时')
+    expect(result.report?.metrics).toBeUndefined(); expect(JSON.stringify(result)).not.toContain('secret-fixture')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    mockFetch.mockResolvedValue(reply())
+    expect((await detectZhuqueChapter(1)).status).toBe('success')
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
   it('debounces saved versions, ignores rolled back text and cancels queued calls when disabled', async () => {
     vi.useFakeTimers(); updateZhuqueSettings({ enabled: true, apiKey: 'fixture' }); mockFetch.mockResolvedValue(reply())
     scheduleZhuqueChapterDetection(1, '未提交的正文。')
