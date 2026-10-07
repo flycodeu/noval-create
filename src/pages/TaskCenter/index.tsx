@@ -658,11 +658,11 @@ export default function TaskCenter() {
         ) : modelAttemptsLoading ? (
           <span>正在读取模型调用记录…</span>
         ) : modelAttempts.length === 0 ? (
-          <span>该任务暂无模型调用记录。旧任务或尚未开始的任务可能没有记录。</span>
+          <span>暂无模型调用记录</span>
         ) : (
           <div className="task-center-model-attempts">
             <Button size="small" onClick={exportModelAttempts}>导出提示词与输出 JSON</Button>
-            <span>记录保存在本机，导出文件可能含小说正文和设定，请自行保管。</span>
+
             <Collapse items={modelAttempts.map((attempt) => ({
               key: attempt.request_id,
               label: `${attempt.provider} / ${attempt.model_id} · ${attempt.status} · ${new Date(attempt.started_at).toLocaleString('zh-CN')} · 请求 ${attempt.request_id}`,
@@ -931,7 +931,7 @@ export default function TaskCenter() {
           {!selectedTask ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="先从左侧选择一条任务，右侧会集中显示状态、恢复入口和请求上下文。"
+              description="选择任务"
             />
           ) : (
             <div className="task-center-detail">
@@ -967,7 +967,7 @@ export default function TaskCenter() {
                   type="info"
                   showIcon
                   message="当前任务不支持安全重试"
-                  description="这类任务会直接改动小说数据，不能在这里简单重试。请回到对应功能页重新发起。"
+                  description="请从对应功能页重新发起。"
                 />
               ) : null}
 
@@ -976,7 +976,7 @@ export default function TaskCenter() {
                   type="success"
                   showIcon
                   message="当前任务支持安全重试"
-                  description="系统已经保留本次请求上下文，可以直接重放同一组消息，不需要回到原页面重新填写。"
+
                 />
               ) : null}
 

@@ -66,11 +66,11 @@ export default function ChapterDetailModal({
               <div className="quality-dashboard-page__chapter-score">
                 <Progress
                   type="dashboard"
-                  percent={100 - chapter.aiLikeRate}
+                  percent={chapter.aiLikeRate}
                   strokeColor={chapter.aiLikeRate > 50 ? '#f5222d' : chapter.aiLikeRate > 30 ? '#faad14' : '#52c41a'}
-                  format={() => <span className="quality-dashboard-page__chapter-score-value">{chapter.aiLikeRate}%</span>}
+                  format={() => <span className="quality-dashboard-page__chapter-score-value">{chapter.aiLikeRate} 分</span>}
                 />
-                <div className="quality-dashboard-page__chapter-score-label">AI 味率</div>
+                <div className="quality-dashboard-page__chapter-score-label">文风风险（站内）</div>
               </div>
             </div>
             {chapter.dimensions.map((dim) => (

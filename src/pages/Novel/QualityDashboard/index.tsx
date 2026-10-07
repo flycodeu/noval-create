@@ -204,7 +204,7 @@ export default function QualityDashboard({ novelId }: Props) {
       >
         <RecommendationGovernancePanel novelId={novelId} />
         <WorkspacePanel title="先产出首轮检测">
-          <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。" />
+          <Empty description="暂无质量评估" />
         </WorkspacePanel>
       </WorkspacePage>
     )

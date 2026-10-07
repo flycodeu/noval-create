@@ -906,7 +906,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
                   <Button onClick={() => void handleBatchPriorityUpdate()}>批量改优先级</Button>
                   <Button danger onClick={handleBatchDelete}>批量删除</Button>
                 </div>
-                <div className="novel-filter-bar__summary">危险操作会自动创建恢复点，`Esc` 可清空当前批量选择。</div>
+                <div className="novel-filter-bar__summary">Esc 清空选择</div>
               </div>
             ) : null}
             {loading ? (
@@ -1112,7 +1112,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
             </div>
             <details className="story-threads__advanced" data-story-threads-references>
               <summary>
-                <span><strong>章节挂载与引用来源</strong><small>只显示已建立的引用摘要，不把低频 ID 挤进编辑表单。</small></span>
+                <span><strong>章节挂载与引用来源</strong></span>
                 <Tag>按需查看</Tag>
               </summary>
               <div className="story-threads__reference-summary">

@@ -8,7 +8,6 @@ import './ai-patch-editor.css'
 interface AiPatchEditorProps {
   target: AiPatchTarget | null
   title?: string
-  description?: string
   placeholder?: string
   disabled?: boolean
   compact?: boolean
@@ -18,7 +17,6 @@ interface AiPatchEditorProps {
 export default function AiPatchEditor({
   target,
   title = '定向 AI 修改',
-  description = '输入自然语言要求，AI 只生成字段级补丁；确认后才写入。',
   placeholder = '例如：强化它和当前主线的关联，保留名称和基本定位，只补需要改的字段。',
   disabled,
   compact,
@@ -108,9 +106,6 @@ export default function AiPatchEditor({
       >
         <div className={`novel-ai-patch-editor${compact ? ' novel-ai-patch-editor--compact' : ''}`}>
           <div className="novel-ai-patch-editor__head">
-            <div>
-              {description ? <span>{description}</span> : null}
-            </div>
             <Button
               icon={<MessageOutlined />}
               loading={loading}

@@ -155,7 +155,7 @@ export default function AIScorePanel({
       '【当前内容】',
       content,
       '',
-      '【综合判断】' + result.overall_feedback + '（综合 ' + result.overall_score + '/100，AI 味风险 ' + result.ai_like_rate + '%）',
+      '【综合判断】' + result.overall_feedback + '（综合 ' + result.overall_score + '/100，文风风险（站内） ' + result.ai_like_rate + ' 分）',
       '',
       '【优先处理的问题】',
       topFixes || '1. 先修逻辑和语言里最明显的问题。',
@@ -209,9 +209,9 @@ export default function AIScorePanel({
               <span style={{ color: scoreColor(result.overall_score), fontWeight: 700 }}>
                 {result.overall_score}
               </span>
-              /100&nbsp;·&nbsp;AI 味风险&nbsp;
+              /100&nbsp;·&nbsp;文风风险（站内）&nbsp;
               <span style={{ color: aiRateColor(result.ai_like_rate), fontWeight: 600 }}>
-                {result.ai_like_rate}%
+                {result.ai_like_rate} 分
               </span>
             </span>
 
@@ -230,12 +230,6 @@ export default function AIScorePanel({
           </>
         )}
       </div>
-
-      {result && (
-        <div style={{ marginTop: 2, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          AI 味风险是站内启发式质量指标，不代表番茄、起点或其他平台的审核结果。
-        </div>
-      )}
 
       {result && (
         <Collapse
@@ -319,7 +313,7 @@ export default function AIScorePanel({
                     重复风险：{result.repetition_risk}
                   </Tag>
                   <Tag color={result.ai_like_rate > 50 ? 'error' : result.ai_like_rate > 30 ? 'warning' : 'success'}>
-                    AI 味风险：{result.ai_like_rate}%
+                    文风风险（站内）：{result.ai_like_rate} 分
                   </Tag>
                 </div>
 
@@ -332,7 +326,7 @@ export default function AIScorePanel({
                     gap: 6,
                   }}>
                     <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      AI 味风险分解
+                      文风风险（站内）分解
                     </div>
                     {[...languageDriftLabels]
                       .map((item) => ({
@@ -375,10 +369,7 @@ export default function AIScorePanel({
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>
             按体检结果修复
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
-            AI 会结合体检反馈（主要问题 + 各维度改进建议）对原内容进行局部修复，
-            生成新版本后可选择应用或放弃。
-          </div>
+
           <Input.TextArea
             value={extraReqs}
             onChange={e => setExtraReqs(e.target.value)}

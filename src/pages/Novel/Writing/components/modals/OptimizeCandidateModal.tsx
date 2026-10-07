@@ -42,7 +42,7 @@ export default function OptimizeCandidateModal({
     >
       <div className="novel-note-list writing-layout-note-space-bottom">
         <div className="novel-note-list__item">整章优化只生成候选稿，应用前不会覆盖正文。</div>
-        <div className="novel-note-list__item">重点保留剧情事实，修正 AI 味、衔接、空泛细节和读感问题。</div>
+
         {result?.qualityGate ? (
           <div className="novel-note-list__item">
             {`后验质量门：强 AI 味 ${result.qualityGate.originalStrongAiFlavorCount} -> ${result.qualityGate.optimizedStrongAiFlavorCount}，漂移分 ${result.qualityGate.originalDriftScore} -> ${result.qualityGate.optimizedDriftScore}。`}

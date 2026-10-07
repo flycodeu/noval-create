@@ -385,7 +385,7 @@ function formatChapterRange(scope: NarrativeScope): string {
 }
 
 function aiRateMetricValue(rate?: AiRatePoint): string {
-  return rate ? `${rate.rate}%` : '暂无'
+  return rate ? `${rate.rate} 分` : '暂无'
 }
 
 function aiRateMetricTone(rate?: AiRatePoint): 'warm' | 'cool' {
@@ -734,7 +734,7 @@ function NarrativeBoardMetrics({ data, latestAiRate }: { data: BoardData; latest
     <WorkspaceMetric label="地点" value={`${data.mapTotal}`} tone="warm" />
     <WorkspaceMetric label="人物" value={`${data.characterTotal}`} tone="cool" />
     <WorkspaceMetric label="关系" value={`${data.characterGraph.relations.length}`} />
-    <WorkspaceMetric label="AI 味" value={aiRateMetricValue(latestAiRate)} tone={aiRateMetricTone(latestAiRate)} />
+    <WorkspaceMetric label="文风风险" value={aiRateMetricValue(latestAiRate)} tone={aiRateMetricTone(latestAiRate)} />
   </>
 }
 
@@ -1122,13 +1122,13 @@ function ProgressBoard({
   return (
     <div className="narrative-progress-board">
       <div className="narrative-progress-board__hero">
-        <div><div className="narrative-board__eyebrow"><BranchesOutlined /> 故事推进</div><h2>当前范围的生产脉搏</h2><p>{formatChapterRange(scope)} · 事件、任务和质量信号来自同一项目上下文。</p></div>
+        <div><div className="narrative-board__eyebrow"><BranchesOutlined /> 故事推进</div><h2>当前范围的生产脉搏</h2><p>{formatChapterRange(scope)}</p></div>
         <div className="narrative-progress-board__score"><strong>{wordProgress}%</strong><span>目标字数完成度</span></div>
       </div>
       <div className="narrative-progress-board__metrics">
         <ProgressMetric label="章节" value={`${novelStats.completedChapters}/${novelStats.totalChapters}`} note="已完成 / 总章节" />
         <ProgressMetric label="正文" value={`${novelStats.totalWords.toLocaleString()} 字`} note="当前正文累计" />
-        <ProgressMetric label="AI 味" value={latestAiRate === undefined ? '暂无' : `${latestAiRate}%`} note={aiRateDelta ? `${aiRateDelta > 0 ? '+' : ''}${aiRateDelta}pt 较上一章` : '独立质量趋势'} tone={latestAiRate !== undefined && latestAiRate >= 35 ? 'warn' : 'normal'} />
+        <ProgressMetric label="文风风险" value={latestAiRate === undefined ? '暂无' : `${latestAiRate} 分`} note={aiRateDelta ? `${aiRateDelta > 0 ? '+' : ''}${aiRateDelta}pt 较上一章` : '独立质量趋势'} tone={latestAiRate !== undefined && latestAiRate >= 35 ? 'warn' : 'normal'} />
         <ProgressMetric label="上下文" value={`v${contextStatus?.contextVersion || 1}`} note={contextStatus?.staleChapterCount ? `${contextStatus.staleChapterCount} 章待同步` : '当前版本一致'} tone={contextStatus?.staleChapterCount || contextStatus?.staleAssetCount ? 'warn' : 'normal'} />
       </div>
       <div className="narrative-progress-board__columns">
@@ -1139,7 +1139,7 @@ function ProgressBoard({
         <ProgressAiPanel rate={latestAiRate} advice={aiAdvice} />
         <ProgressThreadPanel threads={threads} />
       </div>
-      {chapters.length === 0 ? <Alert type="info" showIcon message="还没有章节数据" description="当正文和章节产生后，这里会自动串起事件、任务、上下文和质量趋势。" /> : null}
+      {chapters.length === 0 ? <Alert type="info" showIcon message="还没有章节数据"  /> : null}
     </div>
   )
 }
@@ -1149,7 +1149,7 @@ function ProgressMetric({ label, value, note, tone = 'normal' }: { label: string
 }
 
 function getAiAdvice(rate?: number): string {
-  if (rate === undefined) return '暂无独立 AI 味评测，先完成章节质检再判断。'
+  if (rate === undefined) return '暂无文风评估'
   if (rate >= 35) return '风险偏高：减少模板化动作和总结句，优先改最近高风险章节。'
   if (rate >= 20) return '中等风险：保留人物办事动作与具体代价，避免连续面板式结算。'
   return '当前风险较低：继续用事件证据和人物选择承接上下文。'
@@ -1198,8 +1198,8 @@ function ProgressTaskRow({ task }: { task: Task }) {
 }
 
 function ProgressAiPanel({ rate, advice }: { rate?: number; advice: string }) {
-  return <WorkspacePanel title="AI 味如何降低" extra={<RobotOutlined />}>
-    <div className="narrative-ai-advice"><div className={`narrative-ai-advice__signal${rate !== undefined && rate >= 35 ? ' is-warn' : ''}`}><RobotOutlined /><strong>{getAiSignalLabel(rate)}</strong></div><p>{advice}</p><ul><li>让人物用证据、证件、伤口和选择推进情节，不用抽象形容词代替行动。</li><li>把能力结果落到具体感官与代价，减少连续「获得 / 击杀 / 警告」面板。</li><li>每次修订后回看趋势，不把一次启发式分数当成人类作者概率。</li></ul></div>
+  return <WorkspacePanel title="文风评估" extra={<RobotOutlined />}>
+    <div className="narrative-ai-advice"><div className={`narrative-ai-advice__signal${rate !== undefined && rate >= 35 ? ' is-warn' : ''}`}><RobotOutlined /><strong>{getAiSignalLabel(rate)}</strong></div><p>{advice}</p></div>
   </WorkspacePanel>
 }
 
@@ -1237,7 +1237,7 @@ function MapInspector({
       <div className="narrative-inspector narrative-inspector--empty">
         <div className="narrative-inspector__empty-mark"><CompassOutlined /></div>
         <h2>选择一个地区</h2>
-        <p>区域块会把地点、在场人物、时间轴事件和待办任务串在一起。单击查看详情，双击有下级区域时继续向下钻取。</p>
+
         <Button type="link" icon={<LinkOutlined />} onClick={onOpenMapPage}>打开地点结构页</Button>
       </div>
     )
@@ -1415,9 +1415,9 @@ function ContextSyncSection({ contextStatus, quality }: { contextStatus: Context
 
 function ContextAiSection({ latestRate, topRules, driftAlerts }: { latestRate?: AiRatePoint; topRules: QualityDashboardData['antiAiRecurrence']['topRepeatedRules']; driftAlerts: QualityDashboardData['recentLanguageDriftAlerts'] }) {
   const driftStatus = (status: 'worsening' | 'stable' | 'improving') => status === 'worsening' ? '正在恶化' : status === 'improving' ? '正在改善' : '保持稳定'
-  return <InspectorSection title="AI 味信号" icon={<RobotOutlined />}>
-    <div className={`narrative-context-rate${latestRate && latestRate.rate >= 35 ? ' is-warn' : ''}`}><strong>{latestRate ? `${latestRate.rate}%` : '暂无'}</strong><span>{latestRate ? `最近第 ${latestRate.chapterNum} 章 · 分数越高越像模板` : '完成章节质检后显示趋势'}</span></div>
-    <p className="narrative-board__muted">这是启发式风格风险指标，不是“人类作者概率”。降低它要回到具体人物行动、感官证据和可验证代价。</p>
+  return <InspectorSection title="文风风险（启发式）" icon={<RobotOutlined />}>
+    <div className={`narrative-context-rate${latestRate && latestRate.rate >= 35 ? ' is-warn' : ''}`}><strong>{latestRate ? `${latestRate.rate} 分` : '暂无'}</strong><span>{latestRate ? `第 ${latestRate.chapterNum} 章` : '暂无评估'}</span></div>
+
     {topRules.length > 0 ? <div className="narrative-inspector__rule-list">{topRules.map((rule) => <div key={rule.ruleCode}><strong>{rule.ruleTitle}</strong><span>{rule.hitCount} 次 · 最近第 {rule.lastChapterNum} 章</span></div>)}</div> : null}
     {driftAlerts.length > 0 ? <div className="narrative-inspector__alert-list">{driftAlerts.map((alert) => <div key={alert.metric}><Tag color="warning">语言漂移</Tag><span>{alert.label} · {driftStatus(alert.status)}（{alert.latestValue}）</span></div>)}</div> : null}
   </InspectorSection>

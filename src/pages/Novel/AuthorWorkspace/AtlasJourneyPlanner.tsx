@@ -31,7 +31,7 @@ export function AtlasJourneyPlanner({ snapshot, initialFromId = '', initialToId 
           return <li key={`${step.routeId}:${index}`}><button type="button" onClick={() => onRelation(route)}>{placeName(step.fromId)} → {placeName(step.toId)}</button><span>{step.travelMode} · {amount(step.travelHours)} 小时</span></li>
         })}</ol>}
         {result.transfers.map((transfer, index) => <p key={`${transfer.locationId}:${index}`}>{placeName(transfer.locationId)}：{transfer.fromMode}转{transfer.toMode}，换乘 {amount(transfer.minutes)} 分钟</p>)}
-        <small>按条件完整的已登记路线计算；未登记道路和通行条件需另行核实。</small>
+
       </> : <p>{result.reason}</p>}
       {result.excludedRoutes.length > 0 && <details><summary>待核对通路 · {result.excludedRoutes.length}</summary><ul>{result.excludedRoutes.map(issue => {
         const route = snapshot.relations.find(relation => relation.id === issue.routeId)!

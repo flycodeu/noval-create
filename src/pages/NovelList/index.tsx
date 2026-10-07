@@ -95,7 +95,7 @@ export default function NovelList() {
     <Modal title="开始一部小说" open={creating} onCancel={() => { if (!saving) setCreating(false) }} onOk={() => void create().catch(() => undefined)} okText="创建并进入创作台" cancelText="取消" confirmLoading={saving} closable={!saving} maskClosable={!saving} width={720}>
       <Form form={form} layout="vertical" className="novel-create-form">
         <Form.Item name="title" label="书名" rules={[{ required: true, whitespace: true, message: '先给作品一个名字，之后可以修改。' }]}><Input maxLength={100} placeholder="可以先用暂定名" /></Form.Item>
-        <Form.Item name="userBackground" label="故事起点" extra="填写已经确定的时代、人物处境或已有故事；其余内容可以在创作台逐步生成。"><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} placeholder="故事发生在哪里？主角目前面临什么？也可以暂时留空。" /></Form.Item>
+        <Form.Item name="userBackground" label="故事起点" ><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} placeholder="故事发生在哪里？主角目前面临什么？也可以暂时留空。" /></Form.Item>
         <Form.Item name="constraints" label="创作要求与限制"><Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="例如：主角是普通人；不改已有关系；第三人称限知。" /></Form.Item>
         <div className="novel-create-pair"><Form.Item name="genreId" label="题材"><Select allowClear placeholder="暂不指定" options={GENRES.map((label, index) => ({ value: index + 1, label }))} /></Form.Item><Form.Item name="targetWords" label="预计总字数（可选）"><InputNumber min={1000} max={10000000} step={10000} placeholder="仅作为规划参考" style={{ width: '100%' }} /></Form.Item></div>
         <Form.Item name="modelConfigId" label="创作模型"><Select allowClear placeholder={models.find(model => model.isDefault)?.name ? `跟随默认：${models.find(model => model.isDefault)?.name}` : '稍后配置模型也可以创建'} options={models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></Form.Item>

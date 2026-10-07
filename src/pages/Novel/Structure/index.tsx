@@ -628,7 +628,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       compact
       target={{ type: 'structure_chapter', id: chapterDetail.id, novelId }}
       title="定向 AI 修改章节"
-      description="只改当前章节标题、目标、摘要或目标字数；确认后写入结构。"
+
       placeholder="例如：保留章节位置，把本章目标改成更明确的转折：主角救下伤员但暴露补给路线。"
       onApplied={async () => {
         await refreshStructure()
@@ -725,7 +725,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       compact
       target={{ type: 'structure_segment', id: segmentDetail.id, novelId }}
       title="定向 AI 修改场景"
-      description="只改当前场景字段；确认后写入结构。"
+
       placeholder="例如：把这个场景改成更有压迫感的临时救治场面，强化地点、进入状态和离开状态。"
       onApplied={async () => {
         await refreshStructure()

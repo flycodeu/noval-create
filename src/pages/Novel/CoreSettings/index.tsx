@@ -781,7 +781,7 @@ export default function CoreSettings({ novelId }: Props) {
     <>
       <details className="story-design__advanced" data-story-design-guidance>
         <summary>
-          <span><strong>设计原则</strong><small>只在需要时查看，默认把注意力留给当前剧情任务。</small></span>
+          <span><strong>设计原则</strong></span>
           <Tag>查看设计原则</Tag>
         </summary>
         <div className="story-design__guidance-grid">
@@ -880,7 +880,7 @@ export default function CoreSettings({ novelId }: Props) {
   const rhythmTabContent = (
     <WorkspacePanel
       title="节奏与结局"
-      extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
+
     >
       <Form form={form} layout="vertical" onValuesChange={markDraftDirty}>
         <div className="story-design__ratio-grid">
@@ -938,17 +938,17 @@ export default function CoreSettings({ novelId }: Props) {
         <div className="guided-step__fact-card">
           <span>本轮 AI 数量</span>
           <strong>{batchCount}</strong>
-          <small>用于生成或重算支线时的目标数量。</small>
+
         </div>
         <div className="guided-step__fact-card">
           <span>已挂主线</span>
           <strong>{subplotLinkedCount}/{subplots.length}</strong>
-          <small>没有主线因果的支线，应优先删掉或改写。</small>
+
         </div>
         <div className="guided-step__fact-card">
           <span>已排回收</span>
           <strong>{subplotScheduledCount}/{subplots.length}</strong>
-          <small>未定回收章位越多，后期失控风险越高。</small>
+
         </div>
         <div className="guided-step__fact-card">
           <span>预计全书长度</span>
@@ -1066,7 +1066,7 @@ export default function CoreSettings({ novelId }: Props) {
       <div className="story-design__status-rail" data-story-design-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`story-design__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '有未保存修改' : '已与当前故事设计同步'}</strong>
-        <span>当前任务：先把主目标、冲突、推进链和结局方向压成可拆解骨架。</span>
+
       </div>
 
       {!premiseReady || generationBlockers.length > 0 ? (
@@ -1273,9 +1273,7 @@ export default function CoreSettings({ novelId }: Props) {
               />
             </div>
 
-            <div className="story-design__inline-note">
-              支线卡片只保留 5 个高频字段，方便超长篇拆分、替换、回查和后续挂到结构页、时间轴页。
-            </div>
+
           </div>
         ) : null}
       </Drawer>

@@ -1314,7 +1314,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
               {!linkRecommendations || (linkRecommendations.events.length === 0 && linkRecommendations.segments.length === 0) ? (
                 <div className="novel-items__tip-item">
                   <strong>当前状态</strong>
-                  <span>暂时没有命中推荐。优先补充名称、剧情作用、地点或持有人后再刷新。</span>
+                  <span>暂无推荐</span>
                 </div>
               ) : null}
               <Space wrap>
@@ -1334,7 +1334,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             </div>
           )
         ) : (
-          <div>先选择一条物品记录，系统再根据人物、地点、时间轴和场景文本给出关联建议。</div>
+          <div>请选择物品</div>
         )}
       </WorkspaceTip>
 
@@ -1466,7 +1466,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           type="info"
           showIcon
           message={`当前还有 ${stats.draftCount} 条待确认物品草稿`}
-          description="这些草稿通常来自自动发现。补全并保存后，它们会转为正式记录，并进入模板 / 实例链路。"
+
           action={recordStatusFilter !== 'draft' ? <Button size="small" onClick={() => setRecordStatusFilter('draft')}>查看草稿</Button> : undefined}
         />
       ) : null}

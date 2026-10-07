@@ -593,7 +593,7 @@ export default function ResistancePage({ novelId }: Props) {
             type="info"
             showIcon
             message="当前还没有建立阻力线"
-            description="可以从左侧的人物反派、势力反派开始，也可以直接新建环境阻力和制度阻力。"
+
           />
         )}
 
@@ -740,7 +740,7 @@ export default function ResistancePage({ novelId }: Props) {
                   </div>
                 </div>
                 <details className="novel-resistance-page__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-                  <summary><span>展开阻力线细节</span><small>情报、资源、升级、章节绑定和反制按需维护</small></summary>
+                  <summary><span>展开阻力线细节</span></summary>
                   <div className="guided-step__field-grid">
                   <div className="guided-step__field-card">
                     <div className="novel-resistance-page__field-label">情报来源</div>
@@ -799,7 +799,7 @@ export default function ResistancePage({ novelId }: Props) {
                 </div>
               </>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先从左侧选择对象或新建阻力线。" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择对象" />
             )}
           </WorkspacePanel>
 

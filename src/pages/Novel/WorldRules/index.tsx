@@ -1065,7 +1065,7 @@ export default function WorldRules({ novelId }: Props) {
         <AiPatchEditor
           target={{ type: 'world_rules_section', id: novelId, novelId, sectionKey: activeTab }}
           title="定向 AI 修改当前分区"
-          description="只修改当前世界规则分区，确认应用后写入项目规则。"
+
           placeholder={`例如：强化${activeSectionMeta.label}和人物/章节生成的关联，保留已有可用设定，只补需要改变的部分。`}
           disabled={saving || isGenerating || hasRunningAutoTask}
           onApplied={async (applied) => {

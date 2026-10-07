@@ -440,7 +440,7 @@ export default function EndgamePage({ novelId }: Props) {
           type="info"
           showIcon
           message="世界规则尚未完成"
-          description="终局设计最好建立在已经明确的世界口径之上，否则最终冲突和代价很容易失真。"
+
         />
       ) : null}
 
@@ -449,7 +449,7 @@ export default function EndgamePage({ novelId }: Props) {
           type="info"
           showIcon
           message="故事设计里已经有结局方向"
-          description="可以先用“从故事设计导入初始化”带入结局方向，再把最终冲突、主题答案和兑现清单补完整。"
+
         />
       ) : null}
 
@@ -464,7 +464,7 @@ export default function EndgamePage({ novelId }: Props) {
 
       <details className="endgame-page__advanced" data-endgame-guidance>
         <summary>
-          <span><strong>终局工作说明</strong><small>确认这页的边界，避免把故事设计再写一遍。</small></span>
+          <span><strong>终局工作说明</strong></span>
           <Tag color={readyCount >= 5 ? 'green' : 'blue'}>{readyCount >= 5 ? '锚点已成形' : '查看细则'}</Tag>
         </summary>
         <div className="endgame-page__guidance-grid">
@@ -555,7 +555,7 @@ export default function EndgamePage({ novelId }: Props) {
 
       <details className="endgame-page__advanced endgame-page__advanced--payoff" data-endgame-payoff>
         <summary>
-          <span><strong>兑现清单与留白</strong><small>核心锚点确认后，再展开整理承诺、回收点和有意留白。</small></span>
+          <span><strong>兑现清单与留白</strong></span>
           <Tag>{promiseCount + payoffCount} 条待核对</Tag>
         </summary>
         <WorkspacePanel
@@ -624,20 +624,7 @@ export default function EndgamePage({ novelId }: Props) {
                 <Input.TextArea rows={5} placeholder="写允许在结尾故意不解释或只半揭示的谜团，避免后期误判成漏写。" />
               </Form.Item>
             </div>
-            <div className="guided-step__field-card">
-              <strong className="workspace-card-section-title">填写建议</strong>
-              <div className="guided-step__checklist">
-                <div className="guided-step__checkitem guided-step__checkitem--done">
-                  <p>“必须兑现的承诺”写读者会明确等待的结果，不写抽象希望。</p>
-                </div>
-                <div className="guided-step__checkitem guided-step__checkitem--done">
-                  <p>“长线回收清单”写会在终章或终局阶段被爆开的点，不要把普通线程推进全塞进来。</p>
-                </div>
-                <div className="guided-step__checkitem guided-step__checkitem--done">
-                  <p>“故意保留的未解释项”要少而明确，否则后续很容易和真正漏写混在一起。</p>
-                </div>
-              </div>
-            </div>
+
           </div>
         </Form>
         </WorkspacePanel>
@@ -645,7 +632,7 @@ export default function EndgamePage({ novelId }: Props) {
 
       <details className="endgame-page__advanced endgame-page__advanced--sources" data-endgame-sources>
         <summary>
-          <span><strong>引用来源摘要</strong><small>只显示终局承诺被哪些卷、章节或伏笔引用，详情留给对应页面。</small></span>
+          <span><strong>引用来源摘要</strong></span>
           <Tag color={commitments.length > 0 ? 'blue' : 'default'}>{commitments.length} 条承诺</Tag>
         </summary>
         <div className="endgame-page__source-list">
@@ -661,7 +648,7 @@ export default function EndgamePage({ novelId }: Props) {
               <small>{commitment.referenceCount > 0 ? `已被 ${commitment.referenceCount} 处引用` : '尚未被卷章结构引用'}{commitment.targetResolutionChapter ? ` · 目标第 ${commitment.targetResolutionChapter} 章` : ''}</small>
             </article>
           )) : <div className="novel-ui-empty-state">保存终局设计后，这里会显示承诺来源摘要。</div>}
-          {commitments.length > 12 ? <div className="endgame-page__source-foot">仅显示前 12 条摘要，完整引用关系请到卷级设计、章节合同或伏笔账本查看。</div> : null}
+          {commitments.length > 12 ? <div className="endgame-page__source-foot">显示前 12 条摘要</div> : null}
         </div>
       </details>
     </WorkspacePage>

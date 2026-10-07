@@ -642,7 +642,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
             ) : (
               <div className="revision-workspace__empty" data-revision-empty-detail>
                 <strong>选择一条修订任务</strong>
-                <span>队列中的每项任务都会在此处显示问题、方案与可执行动作。</span>
+
               </div>
             )}
           </article>

@@ -1212,7 +1212,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                   type="info"
                   showIcon
                   message={`当前有 ${stats.draftCount} 个待确认角色草稿`}
-                  description="保存草稿角色会自动转为正式角色；如果正文或大纲新发现了物品，请到物品页继续完善。"
+
                 />
               ) : null}
 
@@ -1376,7 +1376,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
               {selectedCharacter ? (
                 <AiPatchEditor
                   target={{ type: 'character', id: selectedCharacter.id, novelId }}
-                  description="面向当前人物档案的字段级补丁，确认后才写入。"
+
                   placeholder="例如：把他改成更像末世里的临时医生，不要换姓名；强化他和药箱、伤员之间的责任压力。"
                   onApplied={async (applied) => {
                     const updated = applied as Character | null
@@ -1653,7 +1653,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 <div className="character-agent-workflow__empty">
                   <SafetyCertificateOutlined />
                   <strong>正在读取项目上下文</strong>
-                  <span>系统会综合主线、线程、终局承诺、势力、物品和现有人物，再决定是否需要新增角色。</span>
+
                 </div>
               ) : (
                 <>

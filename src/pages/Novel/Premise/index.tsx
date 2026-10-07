@@ -873,7 +873,7 @@ export default function PremisePage({ novelId }: Props) {
               <div className="premise-page__language-handoff">
                 <div>
                   <strong>语言边界兼容字段</strong>
-                  <span>这里保留既有项目数据；完整主题、口吻与对白规范在“主题与文风”统一确认。</span>
+
                 </div>
                 <Button size="small" icon={<ArrowRightOutlined />} onClick={navigateToThemeVoice}>去主题与文风</Button>
               </div>

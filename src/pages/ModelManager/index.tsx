@@ -635,7 +635,7 @@ export default function ModelManager() {
               <div className="source-search-config__summary-copy">
                 <span className="source-search-config__eyebrow">来源检索</span>
                 <strong>{sourceGuide.title}</strong>
-                <p>{sourceGuide.detail}</p>
+
               </div>
               <div className="source-search-config__status-grid">
                 <div className="source-search-config__status">
@@ -772,8 +772,7 @@ export default function ModelManager() {
             </Form.Item>
           ) : (
             <div className="model-manager-agent-note">
-              使用本机已登录的 {selectedProvider === 'codex' ? 'Codex' : 'Claude'} 原生模型，不读取或保存 API Key。
-              NovelForge 会禁用工具与持久会话，结果仍只进入草稿、质量门、独立审校和人工 Diff 链。
+              本机登录：{selectedProvider === 'codex' ? 'Codex' : 'Claude'}
             </div>
           )}
 
@@ -797,19 +796,19 @@ export default function ModelManager() {
             <Form.Item
               name="kimiThinking"
               label="Kimi 思考模式"
-              extra="默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。"
+
             >
               <Select
                 options={[
-                  { value: 'disabled', label: 'Disabled' },
-                  { value: 'enabled', label: 'Enabled' },
+                  { value: 'disabled', label: '关闭' },
+                  { value: 'enabled', label: '开启' },
                 ]}
               />
             </Form.Item>
           )}
 
           {selectedProvider === 'deepseek' && (
-            <Form.Item name="deepseekReasoningEffort" label="推理强度" extra="默认低强度。推理和最终文本共用输出额度；较高强度可能让大批资料输出不完整。">
+            <Form.Item name="deepseekReasoningEffort" label="推理强度" >
               <Select options={[{ value: 'none', label: '关闭推理' }, { value: 'low', label: '低' }, { value: 'high', label: '高' }, { value: 'max', label: '最高' }]} />
             </Form.Item>
           )}
@@ -817,8 +816,8 @@ export default function ModelManager() {
           <div className="admin-form-grid admin-form-grid--three">
             <Form.Item
               name="temperature"
-              label="创造性（Temperature）"
-              extra={fixedTemperatureKimiModel ? 'Kimi K2.x 使用固定采样参数，运行时会忽略此项。' : undefined}
+              label={fixedTemperatureKimiModel ? '创造性（模型固定）' : '创造性（Temperature）'}
+
             >
               <Slider disabled={fixedTemperatureKimiModel} min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
             </Form.Item>
@@ -826,9 +825,7 @@ export default function ModelManager() {
             <Form.Item
               name="maxTokens"
               label="单次输出上限（Token）"
-              extra={selectedProvider === 'deepseek'
-                ? '额度包括推理及最终文本。创作流程按阶段预留输出，正文最多使用 16000 Token；资料较多时分批生成。'
-                : '这是输出额度，不是上下文窗口。创作流程会按阶段预留输出，实际额度受模型窗口限制。'}
+
             >
               <InputNumber min={512} max={getProviderMaxOutputTokens(selectedProvider)} step={512} placeholder="例如：16000" />
             </Form.Item>
@@ -836,11 +833,7 @@ export default function ModelManager() {
             <Form.Item
               name="maxContextTokens"
               label="上下文窗口（可留空）"
-              extra={selectedProvider === 'deepseek'
-                ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度。'
-                : selectedProvider === 'kimi'
-                  ? 'Kimi K2.x 按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
-                  : `留空时使用该提供商的默认上下文长度：${formatTokenBudget(selectedDefaultContextWindow)}。`}
+
             >
               <InputNumber
                 min={2048}
@@ -905,7 +898,7 @@ export default function ModelManager() {
             <div className="source-search-config__summary-copy">
               <span className="source-search-config__eyebrow">来源检索</span>
               <strong>{sourceGuide.title}</strong>
-              <p>{sourceGuide.detail}</p>
+
             </div>
             <div className="source-search-config__status-grid">
               <div className="source-search-config__status">
@@ -927,7 +920,7 @@ export default function ModelManager() {
               <Form.Item
                 name="tavilyApiKey"
                 label="Tavily API Key"
-                extra={sourceSettings?.tavilyEnvSet ? '已检测到备用配置。' : undefined}
+
               >
                 <Input.Password
                   disabled={currentSourceMode === 'disabled'}
@@ -937,7 +930,7 @@ export default function ModelManager() {
               <Form.Item
                 name="braveApiKey"
                 label="Brave Search API Key"
-                extra={sourceSettings?.braveEnvSet ? '已检测到备用配置。' : undefined}
+
               >
                 <Input.Password
                   disabled={currentSourceMode === 'disabled'}

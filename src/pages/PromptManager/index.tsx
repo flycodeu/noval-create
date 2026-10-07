@@ -653,8 +653,7 @@ export default function PromptManager() {
             <div className="prompt-manager-card-grid" data-p3-05-prompt-list>
               {filteredPrompts.length === 0 ? (
                 <div className="novel-empty">
-                  当前筛选下没有匹配的提示词，请调整阶段、分类或搜索条件。
-                </div>
+                  无匹配提示词</div>
               ) : filteredPrompts.map(({ prompt, meta, hasOverride }) => (
                 <button
                   key={prompt.key}
@@ -771,8 +770,7 @@ export default function PromptManager() {
                     <div className="prompt-manager-inspector-section">
                       <div className="prompt-manager-inspector-section__title">系统保留规则</div>
                       <div className="prompt-manager-inspector-section__copy">
-                        这类章节级提示词即使被自定义覆盖，系统仍会自动追加不可覆盖的保底规则，并记录覆盖历史。
-                      </div>
+                        章节提示词保留系统规则</div>
                       <div className="prompt-manager-param-list">
                         {PROTECTED_PROMPT_RULES.map((rule) => (
                           <Tag key={rule} style={{ fontSize: 11 }}>

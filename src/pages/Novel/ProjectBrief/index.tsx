@@ -743,7 +743,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         width={520}
       >
         <div className="project-brief__ai-assist">
-          <p>选择本轮对项目立项的作用方式；分区定向生成仍保留在对应区标题。</p>
+
           <div className="project-brief__ai-assist-actions">
             <Button
               type="primary"

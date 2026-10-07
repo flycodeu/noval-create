@@ -12,27 +12,34 @@ async function main() {
   await app.whenReady()
   const contents = [
     "import React from 'react';import{createRoot}from'react-dom/client';",
+    "import{ConfigProvider}from'antd';import{getAntdThemeConfig}from'./src/theme/antd-tokens';import'./src/styles/global.css';import'./src/styles/ui-simplification.css';import'./src/pages/ModelManager/index.css';",
     "import ZhuqueSettings from './src/pages/ModelManager/ZhuqueSettings';",
     "import ZhuqueChapterPanel from './src/components/ZhuqueChapterPanel';",
+    "import Manuscript from './src/pages/Novel/AuthorWorkspace/Manuscript';import{MemoryRouter}from'react-router-dom';",
     "window.calls=[];window.electron={zhuque:{getSettings:()=>Promise.resolve({enabled:false,autoDetect:true,apiKeySet:false}),",
     "updateSettings:input=>new Promise(resolve=>window.calls.push({kind:'settings',input,resolve})),",
     "test:()=>Promise.resolve({success:true,info:'测试成功',latency:5}),",
     "getChapterResult:id=>new Promise(resolve=>window.calls.push({kind:'read',id,resolve})),",
-    "detectChapter:id=>new Promise(resolve=>window.calls.push({kind:'detect',id,resolve}))}};",
+    "detectChapter:(id,expectedContent)=>new Promise(resolve=>window.calls.push({kind:'detect',id,expectedContent,resolve}))},",
+    "chapter:{list:()=>Promise.resolve([{id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7}]),get:()=>Promise.resolve({id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7})},agentTools:{call:()=>Promise.resolve({ok:true,data:{run:null}})}};",
     "const root=createRoot(document.getElementById('root'));window.editor='已保存的正文。';",
-    "window.showSettings=()=>root.render(<ZhuqueSettings/>);",
+    "const frame=children=><ConfigProvider theme={getAntdThemeConfig('light')}><div className='app-layout' data-ui-system='quiet-workspace'>{children}</div></ConfigProvider>;window.showSettings=()=>root.render(frame(<div className='model-manager-page' style={{padding:32,width:'100%'}}><ZhuqueSettings/></div>));",
+    "window.showManuscript=()=>root.render(frame(<MemoryRouter initialEntries={['/novel/1/writing?chapterId=1']}><Manuscript novelId={1}/></MemoryRouter>));",
     'window.showChapter=id=>root.render(<ZhuqueChapterPanel chapterId={id} savedContent="已保存的正文。" getContent={()=>window.editor}/>);window.showSettings();',
   ].join('')
   buildSync({ stdin: { contents, loader: 'tsx', resolveDir: root }, bundle: true, platform: 'browser', outfile: path.join(temp, 'fixture.js') })
-  fs.writeFileSync(path.join(temp, 'index.html'), '<div id="root"></div><script src="fixture.js"></script>')
-  const win = new BrowserWindow({ show: false, webPreferences: { contextIsolation: false, nodeIntegration: false, backgroundThrottling: false } })
+  fs.writeFileSync(path.join(temp, 'index.html'), '<meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  const win = new BrowserWindow({ show: false, width:1180, height:820, webPreferences: { offscreen:true, contextIsolation: false, nodeIntegration: false, backgroundThrottling: false } })
+  win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.error('[renderer]', message) })
   await win.loadFile(path.join(temp, 'index.html'))
   const run = code => win.webContents.executeJavaScript(code)
   const wait = async code => { for (let i = 0; i < 150; i++) { if (await run(code)) return; await new Promise(resolve => setTimeout(resolve, 20)) } throw Error('Timeout: '+code) }
   const click = text => run("{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==="+JSON.stringify(text)+");if(!b)throw Error('button absent');b.click();}")
+  const screenshot = async name => { await run('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); await new Promise(resolve=>setTimeout(resolve,300)); fs.writeFileSync(path.join(temp, name+'.png'), (await win.webContents.capturePage()).toPNG()) }
   await wait('!!document.querySelector("[data-zhuque-settings]") && ![...document.querySelectorAll("button")].find(b=>b.textContent.includes("配置朱雀检测")).disabled')
   await click('配置朱雀检测')
   await wait("!!document.querySelector('input[aria-label=\"朱雀 API Key\"]')")
+  await screenshot('settings')
   await run("{const i=document.querySelector('input[aria-label=\"朱雀 API Key\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'fixture-ui-key');i.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label=\"启用朱雀检测\"]').click();}")
   await wait("document.querySelector('input[aria-label=\"朱雀 API Key\"]').value==='fixture-ui-key'")
   await run("{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存配置');b.click();b.click();}")
@@ -76,7 +83,32 @@ async function main() {
   await wait('window.calls.filter(c=>c.kind==="read"&&c.id===2).length===4')
   await run('window.calls.filter(c=>c.kind==="read"&&c.id===2)[3].resolve('+JSON.stringify({ enabled: true, autoDetect: true, apiKeySet: true, status: 'success', report: currentReport })+')')
   await wait('document.body.textContent.includes("AI内容 30.0%")')
+  // Exercise the actual author workspace entry, not only the reusable panel.
+  await run('window.showManuscript()')
+  await wait('!!document.querySelector(".author-manuscript__editor")')
+  await click('审校')
+  await wait('window.calls.filter(c=>c.kind==="read"&&c.id===1).length===2')
+  await run('window.calls.filter(c=>c.kind==="read"&&c.id===1)[1].resolve({enabled:true,autoDetect:true,apiKeySet:true,status:"not_checked"})')
+  await wait('!!document.querySelector("[data-zhuque-chapter]") && document.body.textContent.includes("尚未检测")')
+  await click('检测正文')
+  await wait('window.calls.filter(c=>c.kind==="detect").length===2')
+  assert.equal(await run('window.calls.filter(c=>c.kind==="detect")[1].id'), 1)
+  assert.equal(await run('window.calls.filter(c=>c.kind==="detect")[1].expectedContent'), '已保存的正文。', 'active manuscript sends its saved version to the CAS guard')
+  await run('window.calls.filter(c=>c.kind==="detect")[1].resolve('+JSON.stringify({ enabled: true, autoDetect: true, apiKeySet: true, status: 'success', report: {...currentReport, chapterId:1} })+')')
+  await wait('document.body.textContent.includes("AI内容 30.0%")')
+  await screenshot('manuscript-review')
+  await click('正文')
+  await wait('!!document.querySelector(".author-manuscript__editor")')
+  await run("{const i=document.querySelector('.author-manuscript__editor');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'修改后的正文。');i.dispatchEvent(new Event('input',{bubbles:true}));}")
+  await wait('document.body.textContent.includes("有未保存修改")')
+  await click('审校')
+  await wait('window.calls.filter(c=>c.kind==="read"&&c.id===1).length===3')
+  await run('window.calls.filter(c=>c.kind==="read"&&c.id===1)[2].resolve({enabled:true,autoDetect:true,apiKeySet:true,status:"not_checked"})')
+  await wait('document.body.textContent.includes("尚未检测")')
+  await click('检测正文')
+  await wait('document.body.textContent.includes("尚有未保存修改")')
+  assert.equal(await run('window.calls.filter(c=>c.kind==="detect").length'), 2, 'actual manuscript preserves the unsaved-text guard across tabs')
   win.destroy()
-  console.log('PASS Zhuque UI: actual ReactDOM configure/save/key omission, duplicate submit lock, unsaved-text guard, chapter switch, stale scores, separate ratios and polling with a previous report. Fixture API only.')
+  console.log('PASS Zhuque UI: actual ReactDOM settings, key omission, duplicate submit, unsaved-text guard, chapter switch, stale scores, separate ratios, polling, and active Manuscript review tab. Fixture API only. Screenshots: '+temp)
 }
 main().then(() => app.exit(0)).catch(error => { console.error(error); app.exit(1) })

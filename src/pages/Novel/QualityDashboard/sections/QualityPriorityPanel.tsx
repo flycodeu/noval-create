@@ -64,7 +64,7 @@ export default function QualityPriorityPanel({ data, pipelineStats, filters, onO
           <Button type="primary" onClick={() => onOpenRevisionQueue()}>进入修订队列</Button>
         </div>
         {!hasAnalyzedProse ? (
-          <p className="quality-dashboard-page__body-copy">当前风险来自已有设定和章节草案；尚未分析正文，不能据此判断成稿质量。</p>
+          <p className="quality-dashboard-page__body-copy">尚无正文分析，当前显示设定与草案风险。</p>
         ) : null}
         {risks.length > 0 ? risks.map((risk) => (
           <article key={`${risk.kind}-${risk.title}`} className="quality-dashboard-page__priority-risk">

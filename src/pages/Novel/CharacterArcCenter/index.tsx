@@ -394,7 +394,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
           <span>{tab === 'relationships' ? (selectedRelation ? `${selectedRelation.relationLabel || '当前关系'} · 关系弧` : '从左侧选择关系对') : (selectedCharacter ? `${selectedCharacter.fullName} · 人物弧` : '从左侧选择人物')}</span>
         </div>
         {refreshing ? <div className="novel-dashboard__refresh-indicator novel-workspace__refresh"><Spin size="small" /><span>正在同步人物弧线数据</span></div> : null}
-        {characters.length <= 0 ? <Alert type="warning" showIcon message="还没有角色资产" description="先去角色系统建立主角和关键人物，再回来补人物弧线。" /> : null}
+        {characters.length <= 0 ? <Alert type="warning" showIcon message="还没有角色资产"  /> : null}
         <div className="novel-character-arc-center__tabs">
           {[
             ['protagonist', '主角弧'],
@@ -565,7 +565,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
                   <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={relationshipDraft.currentStatus} onChange={(value) => updateRelationshipDraft({ currentStatus: value })} options={STATUS_OPTIONS} /></div>
                 </div>
                 <details className="novel-character-arc-center__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-                  <summary><span>展开关系弧细节</span><small>裂缝、改变事件、终局与章节绑定按需维护</small></summary>
+                  <summary><span>展开关系弧细节</span></summary>
                   <div className="guided-step__field-grid">
                     <div className="guided-step__field-card"><FieldLabel>第一次裂缝</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.crackPoint} onChange={(event) => updateRelationshipDraft({ crackPoint: event.target.value })} /></div>
                     <div className="guided-step__field-card"><FieldLabel>关键改变事件</FieldLabel><Input.TextArea rows={4} value={relationshipDraft.changeEvent} onChange={(event) => updateRelationshipDraft({ changeEvent: event.target.value })} /></div>
@@ -591,7 +591,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
                   <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>当前状态</FieldLabel><Select value={characterDraft.currentStatus} onChange={(value) => updateCharacterDraft({ currentStatus: value })} options={STATUS_OPTIONS} /></div>
                 </div>
                 <details className="novel-character-arc-center__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-                  <summary><span>展开人物弧细节</span><small>恐惧、裂缝、改变事件、终局与停滞原因按需维护</small></summary>
+                  <summary><span>展开人物弧细节</span></summary>
                   <div className="guided-step__field-grid">
                     <div className="guided-step__field-card"><FieldLabel>核心恐惧</FieldLabel><Input.TextArea rows={4} value={characterDraft.coreFear} onChange={(event) => updateCharacterDraft({ coreFear: event.target.value })} /></div>
                     <div className="guided-step__field-card"><FieldLabel>误信</FieldLabel><Input.TextArea rows={4} value={characterDraft.misbelief} onChange={(event) => updateCharacterDraft({ misbelief: event.target.value })} /></div>

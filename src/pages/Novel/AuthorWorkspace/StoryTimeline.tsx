@@ -67,7 +67,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   </button>
   return <AuthorPage title="时间轴">
     {error && <LoadFailure message={error} retry={() => void load()} />}
-    {!snapshot && loading ? <div className="author-loading"><Spin /></div> : !snapshot ? <EmptyWork title="时间轴暂未读到">请重试读取。</EmptyWork> : <>
+    {!snapshot && loading ? <div className="author-loading"><Spin /></div> : !snapshot ? <EmptyWork title="时间轴暂未读到" /> : <>
       <section className="story-timeline-overview" aria-label="小说时间与进度">
         <div><span>正文进度</span><strong>{clock.latest ? `已写至第 ${clock.latest.chapterNum} 章` : '尚未开始正文'}</strong><small>{clock.written.length} 章已有正文 · {chapters.length} 章已安排</small>{clock.latest && <Button type="link" onClick={() => open(`writing/editor?chapterId=${clock.latest!.id}`)}>{clock.latest.title || '打开最新正文'} <ArrowRightOutlined /></Button>}</div>
         <div><span>{clock.dynasty ? '朝代与纪年' : '时代与纪年'}</span><strong>{clock.dynasty || clock.epoch || clock.era || '尚未设定'}</strong>{clock.era && clock.era !== (clock.dynasty || clock.epoch) && <small>{clock.era}</small>}{clock.start && <small>起点：{clock.start}</small>}</div>
@@ -83,7 +83,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
         {loading && <Spin size="small" />}
       </div>
       <div className={`story-timeline-layout${selected ? '' : ' story-timeline-layout--single'}`}>
-        <section className="story-timeline-track" aria-label={mode === 'chapter' ? '章节事件' : '故事时间事件'}>{groups.length ? groups.map(group => <section className="story-timeline-group" key={group.key}><div className="story-timeline-group__heading"><h2>{group.title}</h2>{group.chapter && <><span>{chapterWritingLabel(group.chapter)}</span><Button type="link" size="small" onClick={() => open(`story-design?section=structure&chapterId=${group.chapter!.id}`)}>章节安排</Button></>}</div>{group.entries.length ? group.entries.map(eventCard) : <p className="story-timeline-empty">尚未登记本章事件</p>}</section>) : <EmptyWork title={entries.length ? '没有符合条件的事件' : '尚未登记事件'}>{entries.length ? '可调整章节、状态或搜索条件。' : '已有章节和事件会按写作进度归入时间轴。'}</EmptyWork>}</section>
+        <section className="story-timeline-track" aria-label={mode === 'chapter' ? '章节事件' : '故事时间事件'}>{groups.length ? groups.map(group => <section className="story-timeline-group" key={group.key}><div className="story-timeline-group__heading"><h2>{group.title}</h2>{group.chapter && <><span>{chapterWritingLabel(group.chapter)}</span><Button type="link" size="small" onClick={() => open(`story-design?section=structure&chapterId=${group.chapter!.id}`)}>章节安排</Button></>}</div>{group.entries.length ? group.entries.map(eventCard) : <p className="story-timeline-empty">尚未登记本章事件</p>}</section>) : <EmptyWork title={entries.length ? '没有符合条件的事件' : '尚未登记事件'} />}</section>
         {selected && <aside ref={detailRef} className="story-timeline-detail" aria-label="事件详情"><div className="author-section-heading"><h2>{selected.entity.name}</h2><span className={`story-timeline-state story-timeline-state--${selected.state}`}>{STORY_TIMELINE_STATES[selected.state]}</span></div>
           <dl><div><dt>故事时间</dt><dd>{selected.timeLabel || '尚未确定'}</dd></div><div><dt>关联章节</dt><dd>{selected.chapterNum == null ? '待定位' : selected.chapterNum === 0 ? '背景事件' : `第 ${selected.chapterNum} 章`}</dd></div></dl>
           {selected.entity.summary && <p className="author-prose">{selected.entity.summary}</p>}

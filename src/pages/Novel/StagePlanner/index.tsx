@@ -490,7 +490,7 @@ export default function StagePlanner({ novelId }: Props) {
         <div className="creative-stage-empty creative-stage-empty--page" data-stage-empty>
           <CompassOutlined />
           <strong>还没有阶段</strong>
-          <span>建立一个章节窗口后，人物、地点和正文召回都会有明确边界。</span>
+
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openStageForm()}>建立第一个阶段</Button>
         </div>
       ) : (
@@ -705,7 +705,7 @@ export default function StagePlanner({ novelId }: Props) {
                       <span>{handoffStatusLabel(handoff.status)} · {handoff.content.changes.length} 条变化 · {handoff.content.openQuestions.length} 个未决问题</span>
                     </div>
                   ))}
-                  {handoffs.length === 0 ? <div className="creative-stage-assets__empty">尚未建立交接工件；旧的交接文本只作为兼容提示，不会伪装成作者确认状态。</div> : null}
+                  {handoffs.length === 0 ? <div className="creative-stage-assets__empty">尚无已确认交接</div> : null}
                 </div>
               </>
             ) : (
@@ -756,7 +756,7 @@ export default function StagePlanner({ novelId }: Props) {
                       <Button type="text" danger icon={<DeleteOutlined />} aria-label="移除阶段资产" onClick={() => void handleRemoveAsset(asset.id)} />
                     </div>
                   ))}
-                  {assets.length === 0 ? <div className="creative-stage-assets__empty">这个阶段还没有资产焦点。先登记 3–8 个真正会出场的对象。</div> : null}
+                  {assets.length === 0 ? <div className="creative-stage-assets__empty">暂无资产焦点</div> : null}
                 </div>
               </>
             ) : <div className="creative-stage-assets__empty">选择阶段后，可在这里登记人物、地点和剧情线程。</div>}

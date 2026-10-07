@@ -48,7 +48,7 @@ function ScenePlan({ model }: { model: ChapterInspectorViewModel }) {
           ))}
         </div>
       ) : (
-        <div className="novel-copy-block">先运行章节流水线，系统会按合同拆出场景计划后在这里核对。</div>
+        <div className="novel-copy-block">暂无场景计划</div>
       )}
     </InsightCard>
   )

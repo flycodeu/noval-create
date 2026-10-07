@@ -385,7 +385,7 @@ export default function WorkspaceAIQualityBoard({
       )}
     >
       {!canFetch ? (
-        <Empty description="当前页没有局部质量快照，直接去全局质量监控看风险、修法和修复动作。">
+        <Empty description="暂无局部质量快照">
           <Button
             type="primary"
             onClick={() => {
@@ -401,7 +401,7 @@ export default function WorkspaceAIQualityBoard({
       {canFetch && snapshotLoading ? <Spin /> : null}
 
       {canFetch && !snapshotLoading && !snapshot ? (
-        <Empty description="当前页还没有形成可分析快照。先补内容，或切到已落地数据的工作区再分析。">
+        <Empty description="暂无可分析内容">
           <Button icon={<ReloadOutlined />} onClick={() => void loadSnapshot()}>
             重新加载
           </Button>
@@ -414,7 +414,7 @@ export default function WorkspaceAIQualityBoard({
             type="info"
             showIcon
             message="分析目标"
-            description="会检查当前工作区内容是否贴合上下步骤、主题、背景与已有设定，并专项检测 AI 味、格式噪音、空泛修辞与不连贯表达。"
+
           />
 
           {analysisLoading ? <Spin /> : null}
@@ -492,7 +492,7 @@ export default function WorkspaceAIQualityBoard({
                   <Tag>{analysis.globalIssues.length}</Tag>
                 </div>
                 <div className="novel-subpanel__body workspace-ai-quality-board__stack-sm">
-                  {analysis.globalIssues.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前快照没有命中明显问题，可继续推进本页工作。" /> : null}
+                  {analysis.globalIssues.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未发现明显问题" /> : null}
                   {analysis.globalIssues.map((issue) => (
                     <div key={issue.id} className="novel-note-list__item">
                       <div className="workspace-ai-quality-board__tag-row workspace-ai-quality-board__tag-row--wrap workspace-ai-quality-board__tag-row--bottom">

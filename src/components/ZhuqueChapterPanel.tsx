@@ -45,13 +45,12 @@ export default function ZhuqueChapterPanel({ chapterId, savedContent, getContent
   const labels = { not_checked: '尚未检测', running: '检测中', success: '检测完成', failed: '检测失败', stale: '旧结果已过期' }
   return <section className="novel-issue-item" data-zhuque-chapter>
     <Space wrap><strong>朱雀 AI 检测</strong><Tag>{view ? labels[view.status] : '加载中'}</Tag>{view && !view.enabled ? <Tag>开关已关闭</Tag> : null}</Space>
-    <p>检测已保存的完整正文；AI 占比与疑似占比分开显示，供审读参考。</p>
+
     {metrics && view?.status === 'success' ? <Space wrap><span>AI内容 {percent(metrics.aiRatio)}</span><span>疑似AI {percent(metrics.suspectedAiRatio)}</span><span>人工内容 {percent(metrics.humanRatio)}</span></Space> : null}
-    {view?.status === 'stale' ? <p role="status">正文已修改，请重新检测；旧比例不代表当前正文。</p> : null}
+    {view?.status === 'stale' ? <p role="status">正文已修改，请重新检测。</p> : null}
     {view?.status === 'failed' ? <p role="status">{view.report?.error || '朱雀未返回有效结果。'}</p> : null}
     {view?.report?.checkedAt ? <p>检测时间：{new Date(view.report.checkedAt).toLocaleString()}{view.report.metrics?.quotaTokensUsed !== undefined ? ` · Makers用量 ${view.report.metrics.quotaTokensUsed} tokens` : ''}</p> : null}
     <Space><Button size="small" loading={busy} disabled={!chapterId || !view?.enabled || view?.status === 'running'} onClick={() => void detect()}>{view?.status === 'success' ? '检查当前版本' : '检测正文'}</Button><Button size="small" onClick={() => void refresh()}>刷新状态</Button></Space>
-    {!view?.enabled ? <p>在模型设置中配置密钥并启用朱雀后可调用。</p> : null}
     {metrics && view?.status === 'success' && metrics.segments.some(segment => segment.label !== 0) ? <details><summary>AI / 疑似 AI 分段</summary>{metrics.segments.filter(segment => segment.label !== 0).map((segment, index) => <blockquote key={index}><Tag>{segment.label === 1 ? 'AI' : '疑似AI'} · 置信度 {percent(segment.confidence)}</Tag>{segment.text}</blockquote>)}</details> : null}
     {error ? <p role="status">{error}</p> : null}
   </section>

@@ -424,7 +424,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
           type="info"
           showIcon
           message="大纲还不完整"
-          description="场景模板可以先沉淀；等结构页和章节目标更明确后，套用效果会更稳定。"
+
         />
       ) : null}
 
@@ -551,7 +551,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               <details className="novel-scene-templates__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
                 <summary>
                   <span>结构细节</span>
-                  <small>典型节拍、角色功能位和情绪弧线按需维护</small>
+
                 </summary>
                 <div className="novel-scene-templates__advanced-grid">
                   <Form.Item name="typicalBeats" label="典型节拍">

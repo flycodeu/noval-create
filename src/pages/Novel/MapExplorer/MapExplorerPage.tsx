@@ -1536,7 +1536,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                   </div>
 
                   <div className="map-graph-filters">
-                    <div className="map-graph-filters__hint">总览模式固定展示整张地图树。可按需切换层级边、关系边和节点信息密度。</div>
+
                     <div className="map-graph-switch-list">
                       <div className="map-graph-switch">
                         <span>显示层级边</span>

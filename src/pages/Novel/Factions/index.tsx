@@ -786,7 +786,7 @@ export default function FactionsPage({ novelId }: Props) {
                   </div>
 
                   <details className="faction-editor__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-                    <summary><span>展开势力细节</span><small>地盘、资源、成员规则、召回备注和外部关系按需维护</small></summary>
+                    <summary><span>展开势力细节</span></summary>
                     <div className="faction-editor__grid">
                       <Form.Item name="territoryMapNodeIds" label="地盘节点"><Select mode="multiple" allowClear optionFilterProp="label" options={mapOptions.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
                       <Form.Item name="resources" label="资源"><Input.TextArea rows={4} /></Form.Item>

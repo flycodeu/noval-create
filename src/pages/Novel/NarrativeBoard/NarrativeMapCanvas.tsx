@@ -286,7 +286,7 @@ export default function NarrativeMapCanvas({
   }, [onSelect])
 
   if (nodes.length === 0) {
-    return <div className="narrative-map-canvas__empty">当前范围没有可展示的地区。先在地点资料页建立层级区域，或为阶段绑定地图资产。</div>
+    return <div className="narrative-map-canvas__empty">暂无地区</div>
   }
 
   const cameraTransform = `translate(${Math.round(camera.x)} ${Math.round(camera.y)}) scale(${camera.zoom})`

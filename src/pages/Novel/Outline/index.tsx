@@ -695,7 +695,7 @@ export default function Outline({ novelId }: Props) {
       <div className="novel-outline-page__status-rail" data-outline-save-state={arcHasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`novel-outline-page__status-dot${arcHasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{arcHasUnsavedChanges ? '当前故事弧有未保存修改' : '故事弧目录与章节数据同步'}</strong>
-        <span>目录只负责定位；编辑、拖拽、批量操作都作用于当前展开的一条故事弧。</span>
+
       </div>
       <details className="novel-outline-page__tools-disclosure" data-outline-tools>
         <summary>生成与阶段工具</summary>
@@ -794,7 +794,7 @@ export default function Outline({ novelId }: Props) {
         <div data-outline-draft-recovery>
         <WorkspacePanel title="草稿恢复" className="novel-outline-page__draft-panel" >
           <div className="novel-note-list">
-            <div className="novel-note-list__item">最近一次已应用但未保存的故事弧草稿已恢复到表单。保存故事弧后会自动清除。</div>
+            <div className="novel-note-list__item">已恢复未保存的故事弧草稿</div>
           </div>
         </WorkspacePanel>
         </div>
@@ -959,7 +959,7 @@ export default function Outline({ novelId }: Props) {
                       <Button onClick={() => void handleBatchRenumber()}>顺延重排</Button>
                       <Button danger onClick={() => void handleBatchDelete()}>批量删除</Button>
                     </div>
-                    <div className="novel-filter-bar__summary">支持单选、Ctrl/Cmd 追加和 Shift 区间选择，`Esc` 可清空批量选择。</div>
+                    <div className="novel-filter-bar__summary">Ctrl/Cmd 多选 · Shift 区间 · Esc 清空</div>
                   </div>
                 ) : null}
                 {reorderMode ? (
@@ -1039,7 +1039,7 @@ export default function Outline({ novelId }: Props) {
           <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={6} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
           <div className="novel-outline-page__section-stack">
             <div className="novel-outline-page__panel-title">阶段目标覆盖</div>
-            <div className="novel-outline-page__muted novel-outline-page__muted--light">默认按章节范围自动推导 25% / 50% / 75% / 收束；只有你填写的内容才会作为覆盖配置保存。</div>
+            <div className="novel-outline-page__muted novel-outline-page__muted--light">留空使用默认章位</div>
             {PHASE_FIELD_CONFIG.map((phase) => (
               <div key={phase.key} className="novel-outline-page__info-panel">
                 <div className="novel-outline-page__panel-title">{phase.label}</div>

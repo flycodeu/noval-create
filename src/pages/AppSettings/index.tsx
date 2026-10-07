@@ -105,13 +105,13 @@ export default function AppSettings() {
   const serviceReady = Boolean(mcpStatus?.runtime?.reachable && mcpStatus.runtime.projectReadable)
   const connectionReady = registered && serviceReady && !mcpError && !mcpBusy
   const connectionTitle = !desktopRuntime ? '请在桌面版连接 Codex' : mcpBusy ? '正在检查连接配置…' : mcpError ? '暂时无法检查连接' : mcpPathChanged ? '路径已修改，等待检查' : registered && serviceReady ? '配置已登记，创作服务可用' : registered ? '配置已登记，服务待检查' : mcpStatus?.registration === 'different' ? '连接配置需要更新' : mcpStatus?.registration === 'missing' ? '尚未连接 Codex' : mcpStatus ? '需要完成连接配置' : '正在检查连接…'
-  const connectionDetail = !desktopRuntime ? '模型与外观可在这里调整；MCP 登记需要在 NovelForge 桌面版完成。' : mcpStatus && !mcpStatus.codexCliPath ? '没有找到 Codex 程序，可展开下方手动配置。' : registered && !serviceReady && mcpStatus.runtime ? mcpStatus.runtime.message : registered ? 'NovelForge 可以保持打开。更改配置后，请重启 Codex，让当前会话加载工具。' : mcpStatus?.registration === 'different' ? '已登记的程序位置与当前安装不一致，更新后再重启 Codex。' : '连接后，Codex 可以读取作品，并调用项目模型生成、评审和保存内容。'
+  const connectionDetail = mcpStatus && !mcpStatus.codexCliPath ? '未找到 Codex，请填写程序路径。' : registered && !serviceReady && mcpStatus.runtime ? mcpStatus.runtime.message : mcpStatus?.registration === 'different' ? '程序位置已变化，请更新连接配置。' : ''
 
   return <div className="app-settings">
     <header className="app-settings__heading"><span>NovelForge</span><h1>应用设置</h1></header>
     <section className="app-settings__section app-settings__connection" aria-labelledby="settings-mcp-title">
       <div className="app-settings__section-heading"><div><span className="app-settings__eyebrow">创作连接</span><h2 id="settings-mcp-title">Codex MCP</h2></div><span className={`app-settings__connection-state${connectionReady ? ' is-ready' : ''}`}><i />{!desktopRuntime ? '桌面功能' : connectionReady ? '可用' : mcpBusy ? '检查中' : '待检查'}</span></div>
-      <div className="app-settings__connection-copy"><strong>{connectionTitle}</strong><p>{connectionDetail}</p></div>
+      <div className="app-settings__connection-copy"><strong>{connectionTitle}</strong>{connectionDetail && <p>{connectionDetail}</p>}</div>
       {mcpError && <Alert type="error" showIcon message={mcpError} />}
       <div className="app-settings__actions"><Button type={registered ? 'default' : 'primary'} onClick={() => void refreshMcp(true)} loading={mcpBusy} disabled={!desktopRuntime || !mcpStatus?.supported || (!mcpStatus.codexCliPath && !codexCliPath.trim())}>{registered || mcpStatus?.registration === 'different' ? '更新连接配置' : '配置到 Codex'}</Button><Button icon={<ReloadOutlined />} onClick={() => void refreshMcp()} loading={mcpBusy} disabled={!desktopRuntime}>检查连接</Button></div>
       <details className="app-settings__details"><summary>手动配置与连接诊断</summary><div className="app-settings__details-body">
@@ -123,7 +123,7 @@ export default function AppSettings() {
     </section>
     <EmbeddingSettings models={models} />
     <div className="app-settings__preferences">
-      <section className="app-settings__section" aria-labelledby="settings-model-title"><h2 id="settings-model-title">模型</h2><p className="app-settings__model-name">{defaultModel?.name || (models.length ? '尚未选择默认模型' : '添加一个创作模型')}</p><p className="app-settings__description">{defaultModel ? `${defaultModel.modelId} · 项目可在创作台单独选择模型。` : '配置服务地址和密钥后，即可用于创作。'}</p>{modelError && <p className="app-settings__error" role="alert">{modelError}</p>}<Button onClick={() => navigate('/models')}>管理模型与搜索</Button></section>
+      <section className="app-settings__section" aria-labelledby="settings-model-title"><h2 id="settings-model-title">模型</h2><p className="app-settings__model-name">{defaultModel?.name || (models.length ? '尚未选择默认模型' : '添加一个创作模型')}</p><p className="app-settings__description">{defaultModel?.modelId}</p>{modelError && <p className="app-settings__error" role="alert">{modelError}</p>}<Button onClick={() => navigate('/models')}>管理模型与搜索</Button></section>
       <section className="app-settings__section" aria-labelledby="settings-theme-title"><h2 id="settings-theme-title">外观</h2><div className="app-settings__themes" role="group" aria-label="应用外观">{THEMES.map((option) => <button type="button" key={option.value} className={`app-settings__theme app-settings__theme--${option.value}${theme === option.value ? ' is-selected' : ''}`} aria-pressed={theme === option.value} onClick={() => setTheme(option.value)}><span className="app-settings__theme-sample"><i /><i /><i /></span><span>{option.label}{theme === option.value && <CheckOutlined />}</span></button>)}</div></section>
     </div>
     <section className="app-settings__section" aria-labelledby="settings-update-title"><div className="app-settings__section-heading"><div><h2 id="settings-update-title">版本与更新</h2><p className="app-settings__description">{status?.mode === 'installed' ? 'Windows 安装版' : status?.mode === 'portable' ? 'Windows 便携版' : desktopRuntime ? '桌面应用' : '网页预览'}</p></div><strong className="app-settings__version" data-app-version>{status?.currentVersion ? `v${status.currentVersion}` : desktopRuntime ? '读取中…' : '网页预览'}</strong></div>
@@ -131,8 +131,8 @@ export default function AppSettings() {
       {downloading && <Progress percent={status.downloadPercent ?? 0} size="small" status="active" />}
       {(status?.error || loadError) && <Alert type="error" showIcon message={loadError || status?.error} />}
       <div className="app-settings__actions">{ready ? <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => void install()} loading={busy}>重启并安装</Button> : <Button icon={<ReloadOutlined />} onClick={() => void check()} loading={busy || status?.phase === 'checking'} disabled={!desktopRuntime || (!!status && status.mode !== 'installed') || downloading}>{status?.phase === 'error' || loadError ? '重试更新' : '检查更新'}</Button>}{desktopRuntime && <Button type="text" icon={<ExportOutlined />} onClick={() => void openReleasePage()}>GitHub 发布页</Button>}</div>
-      <p className="app-settings__note">{status?.checkedAt ? `上次检查：${new Date(status.checkedAt).toLocaleString('zh-CN')}。` : ''}{status?.mode === 'installed' && '下载不打断写作，安装前会提示保存。'}</p>
-      <details className="app-settings__details"><summary>作品保存与导出</summary><div className="app-settings__details-body"><p className="app-settings__description">作品保存在本机。打开作品后，可从右上角菜单导出 TXT、Markdown、Word 或 EPUB 正文。</p><p className="app-settings__note">正文导出不包含完整的人物、地图和项目配置。</p><div><Button onClick={() => navigate('/novels')}>选择要导出的作品 <ArrowRightOutlined /></Button></div></div></details>
+      <p className="app-settings__note">{status?.checkedAt ? `上次检查：${new Date(status.checkedAt).toLocaleString('zh-CN')}。` : ''}</p>
+      <details className="app-settings__details"><summary>导出正文</summary><div className="app-settings__details-body"><div><Button onClick={() => navigate('/novels')}>选择作品 <ArrowRightOutlined /></Button></div></div></details>
     </section>
   </div>
 }

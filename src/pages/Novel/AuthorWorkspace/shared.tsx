@@ -11,8 +11,8 @@ export function AuthorPage({ title, actions, children }: {
   return <div className="author-workspace"><h1 className="author-visually-hidden">{title}</h1>{actions && <div className="author-page-actions">{actions}</div>}{children}</div>
 }
 
-export function EmptyWork({ title, children, action, actionLabel }: { title: string; children: React.ReactNode; action?: () => void; actionLabel?: string }) {
-  return <div className="author-empty"><strong>{title}</strong><p>{children}</p>{action && <Button icon={<ArrowRightOutlined />} onClick={action}>{actionLabel || '提出生成要求'}</Button>}</div>
+export function EmptyWork({ title, action, actionLabel }: { title: string; action?: () => void; actionLabel?: string }) {
+  return <div className="author-empty"><strong>{title}</strong>{action && <Button icon={<ArrowRightOutlined />} onClick={action}>{actionLabel || '提出生成要求'}</Button>}</div>
 }
 
 export function LoadFailure({ message, retry }: { message: string; retry: () => void }) {

@@ -574,7 +574,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
           showIcon
           type="warning"
           message={`当前有 ${overLimitCount} 卷超出真相揭示比例上限`}
-          description="系统允许超限但会持续警告，请在章节揭示安排前先调整计划。"
+
           className="novel-info-gap-board__alert"
         />
       ) : null}
@@ -582,7 +582,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       <div className="novel-info-gap-board__status-rail" data-info-gap-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`novel-info-gap-board__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '信息点编辑器有未保存修改' : '目录与当前项目数据同步'}</strong>
-        <span>先定位一个谜题或真相，再在右侧检查揭示边界与角色认知。</span>
+
       </div>
 
       <div className="novel-info-gap-board__workspace">
@@ -644,7 +644,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
           {loading ? (
             <div className="novel-info-gap-board__loading"><Spin /></div>
           ) : filteredFacts.length === 0 ? (
-            <div className="novel-empty">没有匹配的信息点。可以清空筛选，或新建一条谜题/线索。</div>
+            <div className="novel-empty">无匹配信息点</div>
           ) : (
             <div className="novel-info-gap-board__directory" role="list" data-info-gap-list>
               {filteredFacts.map((fact) => (

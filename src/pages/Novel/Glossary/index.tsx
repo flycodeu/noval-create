@@ -410,7 +410,7 @@ export default function GlossaryPage({ novelId }: Props) {
           type="info"
           showIcon
           message="正文还没开始推进"
-          description="可以先录入核心名词。等结构和章节增加后，再回填首次出现章位。"
+
         />
       ) : null}
 
@@ -531,7 +531,7 @@ export default function GlossaryPage({ novelId }: Props) {
               <details className="novel-glossary__advanced" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
                 <summary>
                   <span>扩展设定</span>
-                  <small>Markdown 长文、别名和关联实体按需维护</small>
+
                 </summary>
                 <div className="novel-glossary__advanced-grid">
                   <Form.Item name="aliases" label="别名">

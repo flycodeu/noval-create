@@ -495,7 +495,7 @@ export default function GrowthSystemPage({ novelId }: Props) {
       contextSummary={<WorkspaceContextSummary items={[{ label: '当前项目', value: currentNovel?.title || '未命名小说' }, { label: '章节数', value: chapters.length }, { label: '卷数', value: volumes.length }, { label: '回写事件', value: events.length }]} />}
       metrics={<><WorkspaceMetric label="收益循环健康度" value={`${health}/100`} tone={health < 60 ? 'warm' : 'cool'} /><WorkspaceMetric label="成长轨道" value={summary.trackCount} /><WorkspaceMetric label="临界资源池" value={summary.criticalPoolCount} tone={summary.criticalPoolCount > 0 ? 'warm' : 'default'} /><WorkspaceMetric label="未解代价链" value={summary.unresolvedCostCount} tone={summary.unresolvedCostCount > 0 ? 'warm' : 'default'} /></>}
     >
-      {summary.criticalPoolCount > 0 ? <Alert showIcon type="warning" message="存在稀缺/临界资源池" description="建议先处理临界资源，再把收益/代价挂到正文合同。" /> : null}
+      {summary.criticalPoolCount > 0 ? <Alert showIcon type="warning" message="存在稀缺/临界资源池"  /> : null}
       <div className="novel-growth-system__status-rail" data-growth-save-state={hasUnsavedChanges ? 'unsaved' : 'saved'}>
         <span className={`novel-growth-system__status-dot${hasUnsavedChanges ? ' is-unsaved' : ''}`} aria-hidden="true" />
         <strong>{hasUnsavedChanges ? '成长编辑器有未保存修改' : '成长系统与当前项目数据同步'}</strong>

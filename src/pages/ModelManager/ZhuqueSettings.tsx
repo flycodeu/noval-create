@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Button, Input, Modal, Space, Switch } from 'antd'
 import type { ZhuqueSettingsView, ZhuqueTestResult } from '../../shared/zhuque-detection'
+import './zhuque-settings.css'
 
 export default function ZhuqueSettings() {
   const [settings, setSettings] = useState<ZhuqueSettingsView | null>(null)
@@ -32,7 +33,7 @@ export default function ZhuqueSettings() {
   }
   return <section className="admin-detail-stack" data-zhuque-settings>
     <div className="source-search-config__summary">
-      <div className="source-search-config__summary-copy"><strong>朱雀 AI 检测</strong><p>检查正文的 AI 内容占比，结果与文学质量评估分别展示。</p></div>
+      <div className="source-search-config__summary-copy"><strong>朱雀 AI 检测</strong></div>
       <div className="source-search-config__status-grid">
         <div className="source-search-config__status"><span>检测状态</span><strong>{settings ? settings.enabled ? '已启用' : '已关闭' : '加载中'}</strong></div>
         <div className="source-search-config__status"><span>本地密钥</span><strong>{settings?.apiKeySet ? '已保存' : '未配置'}</strong></div>
@@ -42,13 +43,13 @@ export default function ZhuqueSettings() {
     <div><Button disabled={!settings || busy} onClick={edit}>配置朱雀检测</Button></div>
     {feedback ? <p role="status">{feedback}</p> : null}
     <Modal title="朱雀检测配置" open={open} onCancel={() => { if (!busy) { setOpen(false); setKey('') } }} footer={<Space><Button disabled={busy || !enabled} onClick={() => void save(true)}>保存并测试</Button><Button type="primary" loading={busy} onClick={() => void save(false)}>保存配置</Button></Space>}>
-      <div className="admin-detail-stack">
-        <label>启用朱雀检测 <Switch aria-label="启用朱雀检测" checked={enabled} disabled={busy} onChange={setEnabled} /></label>
-        <label>保存正文后自动检测 <Switch aria-label="保存正文后自动检测" checked={automatic} disabled={busy} onChange={setAutomatic} /></label>
-        <label>EdgeOne Makers API Key<Input.Password aria-label="朱雀 API Key" value={key} disabled={busy || clearKey} autoComplete="new-password" placeholder={settings?.apiKeySet ? '已保存；留空保留密钥' : '输入 API Key'} onChange={event => setKey(event.target.value)} /></label>
-        {settings?.apiKeySet ? <label>清除本地密钥 <Switch aria-label="清除朱雀密钥" checked={clearKey} disabled={busy} onChange={value => { setClearKey(value); if (value) setEnabled(false) }} /></label> : null}
-        <p>密钥仅在本机加密保存，不参与项目导出或模型提示词。启用检测时，正文发送给腾讯朱雀，密钥仅用于官方接口鉴权。相同正文复用已成功的结果；失败后由你手动重试。</p>
-        <p><a href="https://cloud.tencent.com/document/product/1552/137539" target="_blank" rel="noreferrer">获取 API Key 与接口说明</a></p>
+      <div className="zhuque-settings-form">
+        <label className="zhuque-settings-form__toggle">启用朱雀检测 <Switch aria-label="启用朱雀检测" checked={enabled} disabled={busy} onChange={setEnabled} /></label>
+        <label className="zhuque-settings-form__toggle">保存正文后自动检测 <Switch aria-label="保存正文后自动检测" checked={automatic} disabled={busy} onChange={setAutomatic} /></label>
+        <label className="zhuque-settings-form__key">EdgeOne Makers API Key<Input.Password aria-label="朱雀 API Key" value={key} disabled={busy || clearKey} autoComplete="new-password" placeholder={settings?.apiKeySet ? '已保存；留空保留密钥' : '输入 API Key'} onChange={event => setKey(event.target.value)} /></label>
+        {settings?.apiKeySet ? <label className="zhuque-settings-form__toggle">清除本地密钥 <Switch aria-label="清除朱雀密钥" checked={clearKey} disabled={busy} onChange={value => { setClearKey(value); if (value) setEnabled(false) }} /></label> : null}
+
+        <p className="zhuque-settings-form__link"><a href="https://cloud.tencent.com/document/product/1552/137539" target="_blank" rel="noreferrer">获取 API Key</a></p>
         {testResult ? <p role="status">{testResult.info}{testResult.success ? `（${testResult.latency}ms）` : ''}</p> : null}
         {feedback ? <p role="status">{feedback}</p> : null}
       </div>

@@ -161,7 +161,7 @@ function ReviewDiagnostics({ model, actions }: Pick<Props, 'model' | 'actions'>)
         {model.contractAudit ? <StringList items={model.contractAudit.items.map((item) => `${item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'} · ${item.label}：${item.detail}`)} empty="先生成或刷新合同对账，再看当前缺口。" /> : <div className="novel-copy-block">先生成或刷新合同对账，再看当前缺口。</div>}
       </InsightCard>
       <InsightCard title="章后状态回写" eyebrow="正典确认 / 统一写回" tone="soft">
-        {model.chapter ? <div className="writing-layout-stack writing-layout-stack--sm"><div className="novel-copy-block">写完本章后，在这里进入独立回写中心，先确认事实抽取和状态候选，再统一写回线程、伏笔、谜题、关系、物品与时间轴。</div><div><Button onClick={actions.onOpenWriteback}>打开章后状态回写中心</Button></div></div> : <div className="novel-copy-block">先选择章节，再进入章后状态回写中心。</div>}
+        {model.chapter ? <div className="writing-layout-stack writing-layout-stack--sm"><div><Button onClick={actions.onOpenWriteback}>打开章后状态回写中心</Button></div></div> : <div className="novel-copy-block">先选择章节，再进入章后状态回写中心。</div>}
       </InsightCard>
       <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft"><LanguageDriftHealthCard dashboard={model.qualityDashboard} currentChapter={model.chapter} /></InsightCard>
       <InsightCard title="人味硬约束" eyebrow="模板 / 解释 / 立场" tone="soft"><HumanizationHealthCard dashboard={model.qualityDashboard} reviewNotes={model.reviewNotes} /></InsightCard>
@@ -170,7 +170,7 @@ function ReviewDiagnostics({ model, actions }: Pick<Props, 'model' | 'actions'>)
       <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft"><WorldStateHealthCard dashboard={model.qualityDashboard} /></InsightCard>
       <InsightCard title="AI 检测与复检" eyebrow="局部诊断" tone="soft">
         <AIScorePanel getContent={actions.getEditorContent} contentType="chapter" genreContext={model.aiScore.genreContext} novelBackground={model.aiScore.novelBackground} modelConfigId={model.aiScore.modelConfigId} novelId={model.aiScore.novelId} chapterId={model.chapter?.id} disabled={model.aiScore.disabled} onRegenerate={actions.onRegenerate} drawCount={1} />
-        {model.aiResult ? <div className="writing-layout-note-space-top"><AiCheckResult result={model.aiResult} /></div> : <div className="novel-copy-block writing-layout-note-space-top">点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
+        {model.aiResult ? <div className="writing-layout-note-space-top"><AiCheckResult result={model.aiResult} /></div> : null}
       </InsightCard>
       <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={model.focusAreas} empty="最近没有新的高优先项，继续推进正文即可。" /></InsightCard>
     </>
@@ -188,7 +188,7 @@ function CurrentDraftIssues({ model, actions }: Props) {
         <Button size="small" disabled={!current} onClick={() => actions.onLocateEvidence?.(evidence)}>定位原文</Button>
       </div>)}
       {!current ? <p role="status">缺少当前稿证据或原稿已变化，请重新审校。</p> : null}
-    </div>) : <p>当前没有可定位的问题证据。可在正文选择文段，比较修订候选或记录阅读偏好。</p>}
+    </div>) : <p>暂无当前稿问题证据</p>}
   </InsightCard>
 }
 

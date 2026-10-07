@@ -433,11 +433,11 @@ export default function StyleLabPage({ novelId }: Props) {
             type="info"
             showIcon
             message={`当前按「${RESOLVE_SOURCE_LABEL[resolved.source]}」生效：${resolved.record.name}`}
-            description="这是题材通用参考，尚未认可正文样稿。可在候选卡片上选择「认可并启用」。"
+            description="尚未启用正文样稿"
           />
         ) : null}
         {fingerprints.length === 0 ? (
-          <Empty description="还没有风格指纹。点击页面顶部的“新建风格指纹”，可粘贴范文或选择已有章节生成。" />
+          <Empty description="暂无风格指纹" />
         ) : (
           <div className="style-lab__fingerprint-list">
             {fingerprints.map((fingerprint) => {
@@ -647,7 +647,7 @@ export default function StyleLabPage({ novelId }: Props) {
                   type="info"
                   showIcon
                   message="先盲选，再看指标"
-                  description="两段文本的生成方式已隐藏。请只按人物声音、叙事距离和阅读感受选择，避免分数与标签影响判断。"
+                  description="按人物声音和阅读感受选择。"
                 />
               ) : (
                 <Alert

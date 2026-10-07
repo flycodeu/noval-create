@@ -460,7 +460,7 @@ export default function BatchWorkbench({ novelId }: Props) {
               <div className="novel-batch-workbench__empty-mark">◌</div>
               <div>
                 <strong>当前没有批次快照</strong>
-                <p>先运行章节批量生成，系统会在批次启动时自动保存快照；这里不会伪造可恢复批次。</p>
+                <p>暂无批次快照</p>
               </div>
             </div>
           )}
@@ -512,7 +512,7 @@ export default function BatchWorkbench({ novelId }: Props) {
               ) : (
                 <div className="novel-batch-workbench__preview-placeholder">
                   <span>尚未生成当前恢复级别的影响预演</span>
-                  <small>执行按钮会保持锁定，避免沿用其他恢复级别的旧结果。</small>
+                  <small>请重新预检</small>
                 </div>
               )}
             </div>
@@ -526,7 +526,7 @@ export default function BatchWorkbench({ novelId }: Props) {
               <span className="novel-batch-workbench__summary-meta">{lockCount ? `${lockCount} 条锁定规则` : '尚未设置'} · 按需编辑</span>
             </summary>
             <div className="novel-batch-workbench__disclosure-content">
-              <div className="novel-batch-workbench__lock-note"><SafetyCertificateOutlined /><span>锁定内容会进入后续批次的上下文约束，不会被自动重写覆盖。修改后请保存。</span></div>
+              <div className="novel-batch-workbench__lock-note"><SafetyCertificateOutlined /></div>
               <div className="novel-batch-workbench__lock-grid">
                 <label><span>锁定事实</span><Input.TextArea rows={5} value={toLines(lockDraft?.lockedCanonFacts || [])} onChange={(event) => setLockField('lockedCanonFacts', event.target.value)} placeholder="一行一条，例如：主角左臂有旧伤，第三卷前不能痊愈。" /></label>
                 <label><span>锁定段落</span><Input.TextArea rows={5} value={toLines(lockDraft?.lockedParagraphs || [])} onChange={(event) => setLockField('lockedParagraphs', event.target.value)} placeholder="保留关键原文或不可改写的段落摘要。" /></label>

@@ -153,10 +153,10 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
         {nextChapter ? <button className="author-next-chapter" disabled={checkingNextChapter || workflow.active || workflow.submitting || savingModel} onClick={() => { void planNextChapter() }}><span>{checkingNextChapter ? '检查章节安排' : '下一章'}</span><strong>第 {nextChapter.chapterNum} 章 · {nextChapter.title || '未命名'}</strong><ArrowRightOutlined /></button> : <p className="author-muted">{chapters.length ? '现有章节均已有正文，可继续安排下一阶段。' : '确定故事方向后，开始安排首个单元。'}</p>}
       </section>
       <section className="author-paper"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" onClick={() => open('revision')}>查看全部 <ArrowRightOutlined /></Button></div>
-        {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">当前没有记录中的待处理问题。新内容生成后会继续审校。</p>}
+        {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">暂无待处理问题</p>}
       </section>
     </div>
     {dataError && <p className="author-error" role="alert">{dataError}</p>}
-    {!novel?.userBackground?.trim() && !workflow.run && <EmptyWork title="先给故事一个起点" actionLabel="填写背景要求" action={() => { setStage('background'); document.getElementById('author-request')?.focus() }}>可以直接描述时代、主角、想写的冲突和你不希望出现的内容。</EmptyWork>}
+    {!novel?.userBackground?.trim() && !workflow.run && <EmptyWork title="先给故事一个起点" actionLabel="填写背景要求" action={() => { setStage('background'); document.getElementById('author-request')?.focus() }} />}
   </AuthorPage>
 }

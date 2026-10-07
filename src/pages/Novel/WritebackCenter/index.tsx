@@ -483,7 +483,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           </div>
         ) : null}
         {chapters.length <= 0 ? (
-          <Alert showIcon type="info" message="当前还没有章节" description="先去结构规划或正文写作创建章节，再进入章后状态回写中心。" />
+          <Alert showIcon type="info" message="当前还没有章节"  />
         ) : null}
 
         <WorkspacePanel
@@ -605,7 +605,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
                   <div className="novel-writeback-center-page__empty-orbit" aria-hidden="true">◎</div>
                   <span className="novel-writeback-center-page__kicker">当前章节</span>
                   <h3>还没有可写回的 Diff</h3>
-                  <p>从页面顶部“更多”菜单重新抽取，会生成事实与状态候选；有候选后，这里只聚焦一条当前 Diff。</p>
+
                 </div>
               )}
             </article>
@@ -739,7 +739,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
                   ) : <Tag color="green">当前运行已无待确认候选</Tag>}
                 </div>
               ) : (
-                <Alert type="info" showIcon message="当前章节还没有回写运行" description="点击页面动作“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
+                <Alert type="info" showIcon message="当前章节还没有回写运行"  />
               )}
             </div>
           </details>
