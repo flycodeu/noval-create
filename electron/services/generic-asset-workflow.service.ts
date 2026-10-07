@@ -1,4 +1,5 @@
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
+import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -360,6 +361,11 @@ export async function generateGenericAssetDraft(
     reviewFocus: uniqueLines([
       '核对输出是否完全满足用户给定的资产标题、要求和输出格式。',
       '信息不足时应明确待确认，不得伪造为项目既有事实。',
+      ...(['chapter', 'outline'].includes(input.assetType) ? [
+        buildNarrativeDetailGuidance('review'),
+        '若上下文含开篇进度与阅读期待，核对首章的具体期待、次章的行动后果、第三章的阶段回报；引用候选中的实际结果，只有准备、同义问询或新谜团须指出空转。作者合同限制兑现时报告设计缺口，不擅自改揭示边界，也不因缺反转或爆点否定合法日常。',
+        '核对人物行动的动机和承接，指出重复解释谨慎与善意、同质问答、无功能微动作填充的具体段落；保留有效心理与生活体验。结构进度和文字自然度分别判断，不能用换词掩盖无结果的场景。',
+      ] : []),
       ...(['map', 'faction', 'character'].includes(input.assetType) ? [
         '简介、特点、日常和岗位职责应是小说资料；检查并移除文件路径、生成操作说明、不虚构等作者指令。未知字段省略，不用重复空值或待补充填满档案。',
         '区分固定设定与现场变化。未来计划、未查明事项及证言不能变成已发生的事实，具体变化须保持原章位。',

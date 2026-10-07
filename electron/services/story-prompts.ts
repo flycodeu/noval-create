@@ -20,6 +20,7 @@ import {
 } from '../../src/shared/prompt-library'
 import { applyPromptOverride } from './prompt-override.service'
 import { buildReaderFirstRolePrompt, type NarrativePromptOptions, type ReaderFirstRole } from './reader-first-prompts'
+import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
 
 function readerFirstPrompt(role: ReaderFirstRole, key: string, params: object & NarrativePromptOptions): string {
   const input = params as Record<string, unknown> & NarrativePromptOptions
@@ -105,7 +106,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput & NarrativePro
     '- 场景数量必须覆盖现有章节合同的全部场景；不得把两个合同场景合并成一个，也不得让某个合同场景只有标题没有结果状态。',
     '- 不要写"角色思考了很久"或"一番讨论后"这类跳过过程的总结句——把过程展开写。',
   ])
-  return applyPromptOverride('scenePlan', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('scenePlan', appendPromptText(fallback, buildNarrativeDetailGuidance('scenePlan')), params as unknown as Record<string, unknown>)
 }
 
 function buildRhythmGuide(emotionTone?: string, targetWords?: number): string {
@@ -164,7 +165,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput & Narr
       ? ['- 关键章节必须把冲突升级、关系变化或阶段代价明确落到事件结果里，不能只做铺陈。']
       : []),
   ])
-  return applyPromptOverride('chapterDraft', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('chapterDraft', appendPromptText(fallback, buildNarrativeDetailGuidance('draft')), params as unknown as Record<string, unknown>)
 }
 
 export function buildChapterWritingPrompt(params: ChapterWritingPromptInput & NarrativePromptOptions): string {
@@ -177,7 +178,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput & Na
     ...CHAPTER_DELIVERY_GATE_LINES,
     ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
   ])
-  return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('chapterWriting', appendPromptText(fallback, buildNarrativeDetailGuidance('writing')), params as unknown as Record<string, unknown>)
 }
 
 export function buildChapterReviewPrompt(params: ChapterReviewPromptInput & NarrativePromptOptions): string {
@@ -236,7 +237,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput & Narr
     ]),
     '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"design_flatness_risks":["设计扁平风险：只把事件写顺、缺潜台词/博弈/反讽/场景内转折"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[],"verdicts":[{"dimension":"contract_delivery","status":"warning","summary":"判定说明","suggestion":"可执行的修复建议","evidence":[{"excerpt":"逐字摘抄的正文短句","explanation":"证据如何支持判定"}]}]}',
   )
-  return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('chapterReview', appendPromptText(fallback, buildNarrativeDetailGuidance('review')), params as unknown as Record<string, unknown>)
 }
 
 export function buildChapterRewritePrompt(params: ChapterRewritePromptInput & NarrativePromptOptions): string {
@@ -257,7 +258,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput & Na
     ...CHAPTER_DELIVERY_GATE_LINES,
     '- 关键章节不允许只润色表面措辞，必须同时兑现阶段冲突、结果代价和关系变化。',
   ])
-  return applyPromptOverride('chapterRewrite', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('chapterRewrite', appendPromptText(fallback, buildNarrativeDetailGuidance('rewrite')), params as unknown as Record<string, unknown>)
 }
 
 export function buildContinuityStatePrompt(params: ContinuityPromptInput): string {

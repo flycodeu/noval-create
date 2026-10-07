@@ -201,6 +201,11 @@ async function main() {
     const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
+    const prosePrompt = requests[beforeFirst + 2].messages.map(message => message.content).join('\n')
+    assert.ok(prosePrompt.includes('changes必须为空数组[]'), 'prose-only generation must not invite graph changes')
+    assert.ok(prosePrompt.includes('factId必须是已有信息点的数值整数'), 'fact ID format is explicit before generation and repair')
+    const { creativeSchemaHint } = require('../electron/services/creative-workflow.service.ts')
+    assert.ok(creativeSchemaHint('chapter', { existingEntityIds: ['character:1'] }).includes('upsert_entity'), 'explicitly allowed graph edits retain their schema')
     assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')
     const chapter = sqlite.prepare('SELECT content, summary FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId)
     assert.equal(chapter.content, prose)

@@ -28,8 +28,8 @@ function fixture(readerFirst: boolean) {
     protagonistReference: '姐姐', protagonistRule: '姐姐不知弟弟已经辞职。', promptTier: 'standard' as const }
 }
 
-function fourRoles(readerFirst: boolean) {
-  const input = fixture(readerFirst)
+function fourRoles(readerFirst: boolean, chapterNum = 2) {
+  const input = { ...fixture(readerFirst), chapterNum }
   return {
     planner: buildChapterPlannerMessages({ ...input, plotPoints: '把明天送饭的约定说定。' })[0].content,
     writer: buildChapterWriterMessages(input)[0].content,
@@ -39,6 +39,58 @@ function fourRoles(readerFirst: boolean) {
 }
 
 describe('RF-06 final role messages', () => {
+  it.each([true, false])('retains detail and evidence boundaries beyond the opening, reader-first=%s', readerFirst => {
+    const messages = fourRoles(readerFirst, 10)
+    for (const prompt of Object.values(messages)) {
+      expect(prompt.split('【叙事细节与证据承接】')).toHaveLength(2)
+      expect(prompt).toContain('不必每笔成为伏笔')
+      expect(prompt).toContain('沿用已确立的物品性质、位置朝向、时间顺序和能力边界')
+      expect(prompt).toContain('情绪动作不能替代位置确认、同意或事实验证')
+      expect(prompt).toContain('保留人物当时能取得并再次核对的原始记录或实物依据')
+      expect(prompt).toContain('提前出现相同反应、同时改变其他条件会限制结论')
+      expect(prompt).toContain('移动、踩踏、取样等会改变状态时交代范围与后果')
+      expect(prompt).not.toContain('陆闻')
+    }
+    expect(messages.critic).toContain('上下文未提供后文时说明无法核对')
+    expect(messages.critic).toContain('不推测冲突或预测 AI 检测分数')
+    expect(messages.rewriter).toContain('范围外的问题另报建议，不扩大补丁')
+    expect(messages.rewriter).toContain('作者锁定原句')
+  })
+  it.each([true, false])('custom style cannot erase causal boundaries, reader-first=%s', readerFirst => {
+    state.custom = '作者表达要求：保留长句与心理。\n{chapterTitle}'
+    try {
+      for (const prompt of Object.values(fourRoles(readerFirst, 10))) {
+        expect(prompt).toContain('作者表达要求：保留长句与心理。')
+        expect(prompt.split('【叙事细节与证据承接】')).toHaveLength(2)
+        expect(prompt).toContain('外观深浅本身不能证明异常或书写时间')
+        expect(prompt).toContain('不要求每次观察都抄一遍')
+      }
+    } finally { state.custom = '' }
+  })
+  it('checks opening delivery in all roles without reinstating universal drama quotas', () => {
+    const messages = fourRoles(true)
+    for (const prompt of Object.values(messages)) {
+      expect(prompt).toContain('【开篇进度与阅读期待】')
+      expect(prompt).toContain('同一问题换人再问')
+      expect(prompt).toContain('不要求日常题材制造袭击')
+      expect(prompt).toContain('作者明确安排与事实边界优先')
+      expect(prompt).toContain('操作齐全、事件先后相接不等于故事推进')
+    }
+    expect(messages.critic).toContain('"opening_hook_risks":[]')
+    expect(messages.critic).toContain('"reader_hook_risks":[]')
+    expect(messages.critic).toContain('问题须引用当前正文连续原句')
+    expect(messages.critic).toContain('不能用题材标签、大纲或世界规则中已知的信息替正文作答')
+    expect(messages.rewriter).toContain('局部修订仍只改选定范围')
+    const later = buildChapterPlannerMessages({ ...fixture(true), chapterNum: 4, plotPoints: '按原计划相处。' })[0].content
+    expect(later).not.toContain('【开篇进度与阅读期待】')
+    const first = buildChapterPlannerMessages({ ...fixture(true), chapterNum: 1, plotPoints: '主角入场。' })[0].content
+    const third = buildChapterPlannerMessages({ ...fixture(true), chapterNum: 3, plotPoints: '完成阶段行动。' })[0].content
+    expect(first).toContain('第一章让读者认识正在做事的主角')
+    expect(first).toContain('正文应让读者辨认本书题材、基本生活环境和主角为何能介入眼前的事')
+    expect(third).toContain('第三章对已建立的阅读期待给出阶段回报')
+    expect(third).toContain('不得擅改揭示章位')
+    expect(third).toContain('愿意点开下一章不等于愿意持续追这本书')
+  })
   it('removes universal quotas and duplicate material while preserving fact, POV and schema contracts', () => {
     const messages = fourRoles(true)
     for (const prompt of Object.values(messages)) {
@@ -67,6 +119,8 @@ describe('RF-06 final role messages', () => {
     try {
       for (const prompt of Object.values(fourRoles(true))) {
         expect(prompt).toContain('LITERAL: 每章至少一个代价。\n晚饭\n$KEEP [原样]')
+        expect(prompt).toContain('【开篇进度与阅读期待】')
+        expect(prompt).toContain('操作齐全、事件先后相接不等于故事推进')
         expect(prompt).not.toContain('【读者自然度校准】')
       }
     } finally { state.custom = '' }

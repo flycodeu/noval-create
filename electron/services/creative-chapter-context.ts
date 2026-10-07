@@ -1,4 +1,5 @@
 import { formatChapterVoice } from '../../src/shared/chapter-voice'
+import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance } from '../../src/shared/prompts/prompt-common'
 import { selectStyleParagraphs } from '../../src/shared/scene-fact-boundary'
 import { compileContextPack, stableHash, type ContextPackSource } from '../../src/shared/context-pack'
 import { hasHardContractValidationBlocker } from '../../src/shared/contract-validation'
@@ -237,6 +238,10 @@ export async function compileCreativeChapterContext(
   const revealIds = new Set(policy.revealDirectives.map(directive => directive.factId))
   const contractPolicy = { ...policy, deniedFacts: policy.deniedFacts.filter(item => !revealIds.has(item.fact.id)) }
   add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。人物内在目标、动机和自身能力只限本人视角使用，不能移入其他人物视角；其他人物公开目标以 publicGoal 或已知信息点为准。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan', contractPolicy)
+  // Summary patches have already returned; prose and its review share this scoped material.
+  if (!revisionBase) add('opening_progress', buildReaderFirstOpeningGuidance(chapterNum, input.operation === 'review' ? 'review' : 'writing'), true, 'plan', contractPolicy)
+  add('narrative_detail', buildNarrativeDetailGuidance(input.operation === 'review' ? 'review' : revisionBase ? 'rewrite' : 'writing'), true, 'plan', contractPolicy)
+  if (input.operation !== 'review' && !revisionBase) add('fact_reveal_evidence_rule', 'factReveals 的 evidenceQuote 必须连续摘录本章实际获知的原句。非本场视角人物若登记知情，引文要覆盖该人物姓名及其说出、听到或看到的具体过程；不要只截匿名对白。人物在附近不表示知道，原文没支持就不登记，不能为了补引文新增人物认知。', true, 'plan', contractPolicy)
   for (const source of creativeProjectSources(novel, true, omitted)) {
     const text = typeof source.value === 'string' ? source.value : JSON.stringify(source.value)
     if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')

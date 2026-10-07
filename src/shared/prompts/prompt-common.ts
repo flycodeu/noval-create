@@ -56,6 +56,28 @@ export function isGoldenThreeChapter(chapterNum: number): boolean {
   return chapterNum >= 1 && chapterNum <= 3
 }
 
+/** Opening checks follow the author's contract and never authorize new story facts. */
+export function buildReaderFirstOpeningGuidance(chapterNum: number, stage: 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'): string {
+  if (!Number.isInteger(chapterNum) || !isGoldenThreeChapter(chapterNum)) return ''
+  const phase: Record<number, string> = {
+    1: '第一章让读者认识正在做事的主角，理解他眼下想要什么、哪里难办，以及本书值得继续读的具体期待。正文应让读者辨认本书题材、基本生活环境和主角为何能介入眼前的事；从已确认设定里选与当前选择有关的细节，允许简短必要说明，不堆世界观百科，也不把正常背景全藏成谜。开场可以安静，但不能只有背景介绍；已有异常或冲突要在人物行动中发生。',
+    2: '第二章接住首章结果，让上章的问题改变人物接下来的行动或关系。调查、相处和日常均可推进；同一问题换人再问、同一判断换话再说，不能代替新的结果。',
+    3: '第三章对已建立的阅读期待给出阶段回报：落实已有合同中的局部答案、行动结果或关系选择，再由结果引出下一步。案件不必结完，但不能读完仍只是在准备；不要用更多谜团或更大的危险代替回报。长篇还应让既定人物目标或关系出现可延续的期待，愿意点开下一章不等于愿意持续追这本书；不为此增添身世秘密或新主线。',
+  }
+  const stageRule = stage === 'review'
+    ? '审读开场、章中与章尾的完整推进：指出读者实际得到什么、人物为何继续行动、哪些问询或准备没有结果。先仅从提供的正文判断读者能认识的题材、环境、主角介入理由及持续期待，不能用题材标签、大纲或世界规则中已知的信息替正文作答。问题须引用当前正文连续原句，缺上下文时说明无法判断；分别写入 opening_hook_risks、reader_hook_risks 或 coherence_risks，不用吸引力评分冒充读者验证。'
+    : stage === 'scenePlan'
+      ? '在当前输出格式的场景目的、行动过程、必须覆盖内容和退场结果字段中写清本场接住什么、谁为何行动、退场时发生什么变化。已有合同限制本章兑现时，在计划中指出缺口；不得擅改揭示章位、提前破案或编造伤亡。'
+      : stage === 'rewrite'
+        ? '先修本次要求中有证据的空转和因果断点，再修词句；如果必须改变合同或加入关键事实才能兑现，返回规划建议。局部修订仍只改选定范围。'
+        : '写出计划中的实际结果，让下一场因人物选择继续；缩短同义问答和反复记录，保留必要推理、空间交代及有效生活细节。不要用旁白反复解释人物的谨慎、善意或证据边界。'
+  return section('开篇进度与阅读期待', [phase[chapterNum], stageRule,
+    '作者明确安排与事实边界优先。这是开篇阅读检查，不是固定爆点、字数、配角或代价配额；不要求日常题材制造袭击，也不要求每章反转。',
+    '调查和准备围绕人物当前要解决的问题组织：新发现怎样改变判断与下一步选择。操作齐全、事件先后相接不等于故事推进；不反复列待办、交接或由旁白替每段总结意义。作者明确要保留的身份、世界或类型谜底不提前揭开。',
+    '人物表达随身份、利益和亲疏变化；避免人人轮流提问、解释、复述。微动作、感官与心理服务当前体验，不按句机械填充，也不为了去 AI 味删掉真实情感。',
+  ].join('\n'))
+}
+
 export function buildGoldenThreeChapterGuidance(chapterNum: number, stage: 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'): string {
   if (!isGoldenThreeChapter(chapterNum)) return ''
 
@@ -93,6 +115,27 @@ export function buildGoldenThreeOutlineGuidance(chapterStart: number, chapterEnd
 
 export type StepMemoryStage = 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'
 export type GenreExecutionStage = StepMemoryStage
+
+/** Detail may enrich experience, but cannot silently change an established causal condition. */
+export function buildNarrativeDetailGuidance(stage: StepMemoryStage): string {
+  const stageRules: Record<StepMemoryStage, string> = {
+    scenePlan: '在既有场景字段里安排必要的感知、确认、记录和后续行动，保留已经承担比较作用的原始状态；缺少关键依据时报告计划缺口，不另造线索或提前揭示。',
+    writing: '用人物实际注意、确认和选择承接细节；必要空间关系可以直接说明，不强制把每条信息改成表演或微动作。只输出正文，不输出检查清单。',
+    draft: '首稿先让物品入场、观察与行动接得上，再安排文气；不为凑字数或增强惊异补出新的物性、机制或决定性证据。只输出正文。',
+    review: '引用候选连续原句，说明细节改变了哪项既有条件、判断依据或后续承接；区分事实矛盾、依据不足与可选表达建议，写入现有连续性/因果/虚构风险字段。上下文未提供后文时说明无法核对，不推测冲突或预测 AI 检测分数。',
+    rewrite: '只修指定范围中有依据的问题，先保留原始记录、比较条件与后文承接，再调整入场和反应；范围外的问题另报建议，不扩大补丁，不用新增秘密、特殊物性或总结判断修补。',
+  }
+  return section('叙事细节与证据承接', [
+    '细节可以服务观察判断、人物行动、关系情绪或生活体验，不必每笔成为伏笔；不按段落配额填充声音、动作和感官，也不把正常心理与安静描写当成缺陷。',
+    '沿用已确立的物品性质、位置朝向、时间顺序和能力边界。描写变强不能暗改这些条件；新增关键线索或机制须有已批准依据。',
+    '需要过渡时，让注意转移有现场来由；普通陈设可以直接进入画面，不强制每个物件都先发出声音。',
+    '比较应有可比条件；先后发生或外观深浅本身不能证明异常或书写时间。观察、证言与推断分开，情绪动作不能替代位置确认、同意或事实验证。',
+    '后文若依赖前后差异，保留人物当时能取得并再次核对的原始记录或实物依据；不要只给读者看见却让人物凭空知道，也不要求每次观察都抄一遍。',
+    '对照前后的初始状态与操作过程要可辨认；提前出现相同反应、同时改变其他条件会限制结论，不能据局部对照宣布完整机制已证实。',
+    '保护证物、样本或现场的行动应与操作一致；移动、踩踏、取样等会改变状态时交代范围与后果，不能一边保留证据一边无说明毁去比较依据。',
+    stageRules[stage],
+  ].join('\n'))
+}
 
 export function buildStepMemoryContinuityGuidance(stage: StepMemoryStage): string {
   const stageRules: Record<StepMemoryStage, string> = {

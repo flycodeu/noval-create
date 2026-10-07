@@ -1,4 +1,4 @@
-import { section, sectionUnlessCovered } from '../../src/shared/prompts/prompt-common'
+import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance, section, sectionUnlessCovered } from '../../src/shared/prompts/prompt-common'
 import { compileNarrativeTechniques, type NarrativeTechniqueScene } from '../../src/shared/narrative-techniques'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { STORY_DESIGN_SCHEMA } from '../../src/shared/story-thread-generation'
@@ -36,11 +36,11 @@ const COMMON = [
 const ROLE_RULES: Record<ReaderFirstRole, string[]> = {
   planner: ['规划能被写出来的具体经历：谁在何时何地做什么、为何接着做下一件事。合法日常可以只完成一次约定或相处。', '依已有合同安排场景，保留人物各自诉求和谁知道什么；秘密、反转、代价与主题回应只在本场确有需要时安排，允许相关字段为空。'],
   writer: ['直接完成可阅读的首稿，写眼前的人怎样行动、回应和注意事物。沿用认可样稿或本书既有正文的叙述距离和人物口吻，不复制样稿句子与情节。', '逐场承接已有计划，关系、物品和未完动作的变化要有来由。生活细节和审美体验可停留到其自身完成，收束不以另造危险为条件。'],
-  critic: ['只判断当前稿是否使读者读乱、重复理解或误解人物选择，引用当前正文的连续原句说明原因与最小修改范围。缺少证据时说明不能判断。', '正常长句、心理、职业词与有意重复不是作者身份依据。风格偏好是建议；已证实的事实/格式/明确合同问题单独表达。没有使用某项文学方法不构成缺陷。'],
+  critic: ['判断当前稿是否兑现作者安排的阅读期待、让人物行动产生结果，是否使读者读乱、重复理解或误解人物选择，引用当前正文的连续原句说明原因与最小修改范围。缺少证据时说明不能判断。', '正常长句、心理、职业词与有意重复不是作者身份依据。风格偏好是建议；已证实的事实/格式/明确合同问题单独表达。没有使用某项文学方法不构成缺陷。'],
   rewriter: ['只修复有当前正文证据且被要求处理的问题，保留有效句子、叙述距离、人物口吻与锁定段落；不为显示改过而扩大范围。', '局部重复可以直接删除。因果缺口需要新关键事实时返回计划建议，不擅自编造动机和解围条件；不添加总结句替读者确认本段意义。'],
 }
 const PLANNER_SCHEMA = '只输出非空 JSON 数组。每项字段：scene_order（正整数）、scene_title、purpose、location、time_anchor、present_characters（字符串数组）、key_items（字符串数组）、conflict、beat、must_cover（字符串数组）、climax_variant、exit_hook、hidden_agendas（字符串数组）、irony_gap、audience。除说明为数组/数字者均为字符串，可选主题字段 theme_question/theme_choice/theme_cost/theme_consequence 也为字符串。不承担的设计字段用空串或空数组，不增加其他字段。'
-const CRITIC_SCHEMA = '只输出 JSON 对象：{"summary":"根据具体正文判断","strengths":[],"critical_fixes":[],"continuity_risks":[],"coherence_risks":[],"hallucination_risks":[],"language_risks":[],"human_language_repairs":[],"missing_payoffs":[],"severity":"low","rewrite_required":false,"revision_brief":"","verdicts":[]}。风险项写作“问题。【证据】正文连续原句”，不得捏造引文。verdicts 可用 contract_delivery/structural_beat/cost_and_choice/supporting_agency/dialogue_voice/prose_economy，status 为 pass/warning/blocker/uncertain，附 summary、suggestion、evidence:[{excerpt,explanation}]；不适用或无证据不补强判定。动作由质量 policy 校验，不由 rewrite_required 自行授权。'
+const CRITIC_SCHEMA = '只输出 JSON 对象：{"summary":"根据具体正文判断","strengths":[],"critical_fixes":[],"continuity_risks":[],"coherence_risks":[],"opening_hook_risks":[],"reader_hook_risks":[],"hallucination_risks":[],"language_risks":[],"human_language_repairs":[],"missing_payoffs":[],"severity":"low","rewrite_required":false,"revision_brief":"","verdicts":[]}。风险项写作“问题。【证据】正文连续原句”，不得捏造引文。verdicts 可用 contract_delivery/structural_beat/cost_and_choice/supporting_agency/dialogue_voice/opening_hook/prose_economy，status 为 pass/warning/blocker/uncertain，附 summary、suggestion、evidence:[{excerpt,explanation}]；不适用或无证据不补强判定。动作由质量 policy 校验，不由 rewrite_required 自行授权。'
 
 export function buildReaderFirstRolePrompt(role: ReaderFirstRole, params: PromptParams): string {
   const hard = text(params, 'hardConstraintContext')
@@ -52,6 +52,8 @@ export function buildReaderFirstRolePrompt(role: ReaderFirstRole, params: Prompt
     (role === 'planner' || role === 'writer') && typeof params.targetWords === 'number' && params.targetWords > 0
       ? section('篇幅', `本章目标约 ${params.targetWords} 字，按场景需要安排详略，不用重复解释或无关事件凑字。`) : '',
     section('硬约束', hard),
+    buildReaderFirstOpeningGuidance(Number(params.chapterNum), role === 'planner' ? 'scenePlan' : role === 'critic' ? 'review' : role === 'rewriter' ? 'rewrite' : 'writing'),
+    buildNarrativeDetailGuidance(role === 'planner' ? 'scenePlan' : role === 'critic' ? 'review' : role === 'rewriter' ? 'rewrite' : 'writing'),
     ...COVERED_FIELDS.map(([key, title, covered]) => sectionUnlessCovered(title, text(params, key), hard, [covered])),
     ...FACT_FIELDS.map(([key, title]) => section(title, text(params, key))),
     !text(params, 'previousChapterContext') ? section('前章摘要', text(params, 'previousSummaries')) : '',

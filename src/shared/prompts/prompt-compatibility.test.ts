@@ -398,7 +398,12 @@ describe('17-04 real Electron wrappers and applyPromptOverride (database boundar
     database.content = row.mode === 'override' ? overrideText : ''
     const module = row.file === 'prompts' ? electronPrompts : storyPrompts
     const output = invoke(module, row.name, 'ordinary')
-    expect(digest(output)).toBe(row.hash)
+    // This change appends a causal-detail guard; all frozen pre-existing bytes stay intact.
+    const detailStages = { chapterWritingPrompt: 'writing', buildScenePlanPrompt: 'scenePlan', buildChapterWritingPrompt: 'writing', buildChapterDraftPrompt: 'draft', buildChapterReviewPrompt: 'review', buildChapterRewritePrompt: 'rewrite' } as const
+    const stage = detailStages[row.name as keyof typeof detailStages]
+    const guidance = stage ? commonPrompts.buildNarrativeDetailGuidance(stage) : ''
+    if (guidance) expect(output.split(guidance)).toHaveLength(2)
+    expect(digest(guidance ? output.replace(`\n\n${guidance}`, '') : output)).toBe(row.hash)
     if (row.mode === 'fallback') {
       expect(database.audit).not.toHaveBeenCalled()
     } else {

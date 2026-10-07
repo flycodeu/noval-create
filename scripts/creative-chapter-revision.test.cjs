@@ -63,6 +63,9 @@ async function main() {
     assert.equal(paragraphs.status, 'paused', JSON.stringify(paragraphs))
     const generation = requests.at(-2).messages[0].content
     assert.ok(generation.includes('指定段落')); assert.equal(generation.includes('"output"'), false, 'generation must not repeat the complete source artifact JSON')
+    assert.ok(generation.includes('叙事细节与证据承接'), 'actual patch request includes the detail boundaries')
+    assert.ok(generation.includes('范围外的问题另报建议，不扩大补丁'))
+    assert.ok(requests.at(-1).messages[0].content.includes('上下文未提供后文时说明无法核对'), 'actual independent review receives the same causal checks')
     await call('workflows.apply', { runId: paragraphs.runId })
     const expected = content.replace('他看见纸片仍干，把原位置记在薄册。', '他看见纸片仍干，随即将原位置记入薄册。')
     assert.equal(chapter.getChapter(chapterId).content, expected); assert.equal(chapter.getChapter(chapterId).summary, '沈墨确认纸片仍干，记下位置。')
@@ -112,6 +115,28 @@ async function main() {
     await call('workflows.apply', { runId: recovered.runId })
     assert.equal(chapter.getChapter(chapterId).summary, '恢复后通过的摘要。'); assert.equal(chapter.getChapter(chapterId).content, expected)
     assert.equal(artifacts.listArtifacts({ novelId, limit: 200 }).some(row => row.kind === 'creative_chapter_revision_base'), false)
+    // A formal prose patch preserves reveal metadata; it must still retain the fact in merged prose.
+    const facts = require('../electron/services/story-fact.service.ts')
+    const factId = facts.createStoryFact(novelId, { title: '纸片仍干', summary: '沈墨确认纸片仍干', kind: 'clue', status: 'introduced', readerKnownChapterId: chapterId, protagonistKnownChapterId: chapterId })
+    chapter.updateChapter(chapterId, { allowedFactIdsJson: JSON.stringify([factId]), revealedFactIdsJson: JSON.stringify([factId]) })
+    contracts.upsertSceneContract(chapterId, segmentId, { pov: '沈墨', timeLocation: '当日，干台', sceneGoal: '核对纸片', obstacle: '不能移动原物', resultState: '记录纸片仍干', status: 'ready', revealPayload: [`fact:${factId}`] })
+    const factBefore = sqlite.prepare('SELECT * FROM story_facts WHERE id=?').get(factId)
+    const retainedQuote = '他看见纸片仍干，随即将原位置记入薄册。'
+    const preservationReply = support => JSON.stringify({ assessments: [
+      { id: `preserved:fact:${factId}:reader`, support, evidenceQuote: support === 'supported' ? retainedQuote : '他把纸片浸入水中。', reason: support === 'supported' ? '合并正文保留核对结果' : '所选段落删除了原核对结果，改为浸水' },
+      { id: `visibility:fact:${factId}`, support: 'supported', evidenceQuote: support === 'supported' ? retainedQuote : '他把纸片浸入水中。', reason: '实际叙述保持在沈墨的合法视角内，未向其他视角泄露' },
+    ] })
+    replies.push(JSON.stringify({ paragraphs: [{ index: 3, text: '他收好薄册，纸片仍留在原位。' }] }), review, preservationReply('supported'))
+    const retained = await finish((await start({ chapterRevision: { target: 'paragraphs', paragraphIndexes: [3] } })).run.runId)
+    assert.equal(retained.status, 'paused', JSON.stringify(retained))
+    await call('workflows.apply', { runId: retained.runId })
+    assert.deepEqual(sqlite.prepare('SELECT * FROM story_facts WHERE id=?').get(factId), factBefore, 'prose-only revision must not rewrite fact or knowledge metadata')
+    const savedProse = chapter.getChapter(chapterId).content
+    replies.push(JSON.stringify({ paragraphs: [{ index: 2, text: '他把纸片浸入水中。' }] }), review, preservationReply('insufficient'))
+    const lost = await finish((await start({ chapterRevision: { target: 'paragraphs', paragraphIndexes: [2] } })).run.runId)
+    assert.ok(['blocked', 'failed'].includes(lost.status), JSON.stringify(lost))
+    assert.equal((await invoke('workflows.apply', { runId: lost.runId })).ok, false)
+    assert.equal(chapter.getChapter(chapterId).content, savedProse, 'missing retained evidence cannot silently overwrite formal prose')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS bounded chapter revision: candidate chain, CRLF preservation, independent review reserve, formal-summary-only apply, CAS/idempotency, default graph isolation and failed-review recovery. Loopback fixture only.\n')
   } finally {
