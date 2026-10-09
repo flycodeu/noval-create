@@ -22,6 +22,7 @@ import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntr
 import { chapterRevisionGenerationMaterial, type ChapterRevisionBase } from './creative-chapter-revision'
 import { getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
 import { creativeRevisionIssueSources } from './creative-review-issues'
+import { chapterMaterialPriority, compactChapterScenes } from './creative-chapter-material'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
@@ -256,14 +257,15 @@ export async function compileCreativeChapterContext(
   add(`chapter:${context.chapter.id}:contract`, {
     chapterNum, title: context.chapter.title, outline: context.chapter.outline, ...context.chapterContract,
     forbiddenActions: context.chapterContractRow?.forbiddenActionsJson,
-    scenes: context.sceneSnapshots,
+    scenes: compactChapterScenes(context.sceneSnapshots),
   }, true, 'plan', contractPolicy)
   const sceneFacts = policy.sceneLimitedFacts.flatMap(limited => {
     const text = sceneLimitedBody(limited.fact.fact)
     if (!text) return []
     return limited.scenes.map(scene => ({ sceneOrder: scene.sceneOrder, text }))
   })
-  const obligations = formatChapterVoice({ scenes: context.sceneSnapshots, recurringAvoids: recurringVoiceAvoids(input.novelId, chapterNum) })
+  // Goals, obstacles and outcomes already appear in the required contract; do not repeat them.
+  const obligations = formatChapterVoice({ scenes: context.sceneSnapshots.map(({ segmentOrder, pov }) => ({ segmentOrder, pov })), recurringAvoids: recurringVoiceAvoids(input.novelId, chapterNum) })
   if (obligations) add('scene_obligations', obligations, true, 'plan', contractPolicy)
   sceneFacts.forEach((fact, index) => {
     const body = visibleText(fact.text, contractPolicy)
@@ -354,7 +356,7 @@ export async function compileCreativeChapterContext(
     safeRelations.push({ ...edge, ...value })
     add(`relation:${edge.id}`, value, relationRequired(edge))
   }
-  add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id)))), true, 'plan')
+  add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id))), new Set(safeEntities.filter(entity => povNames.includes(entity.name)).map(entity => entity.id))), true, 'plan')
   if (previous) {
     const projected = projectPreviousChapterSources(previous, policy, dependency)
     // Actual prose is already reader-visible. Preserve paragraphs without forbidden facts even when no
@@ -362,8 +364,8 @@ export async function compileCreativeChapterContext(
     for (const source of projected) {
       if (source.reason === 'unclassified_visibility') {
         const text = previous.content!.slice(source.start!, source.end!)
-        sources.push({ ...source, text, included: true, reason: 'previous_prose_without_forbidden_fact', required: source.end === previous.content!.trimEnd().length, estimatedTokens: estimateTokens(text) })
-      } else if (source.included) sources.push(source)
+        sources.push({ ...source, text, included: true, reason: 'previous_prose_without_forbidden_fact', required: source.required || source.end === previous.content!.trimEnd().length, estimatedTokens: estimateTokens(text) })
+      } else if (source.included) sources.push({ ...source, required: source.required || source.end === previous.content!.trimEnd().length })
       else omitted.push(`${source.key}:${source.reason}`)
     }
   }
@@ -383,7 +385,7 @@ export async function compileCreativeChapterContext(
   // Whole-book checkpoints have no per-scene knowledge provenance. Use scoped facts and verified prior prose recall.
   omitted.push('story_memory:unscoped_checkpoint_excluded')
   // Include rendering overhead in selection; compiler otherwise counts payload text alone.
-  const packed = sources.map(source => ({ ...source, text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
+  const packed = sources.map(source => ({ ...source, selectionPriority: chapterMaterialPriority(source, previous?.content?.trimEnd().length), text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
   const compiled = await compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',
     contextVersion: novel.contextVersion || 1, contractVersion: stableHash({ contract: context.chapterContractRow, scenes: context.sceneSnapshots }),
     outputReserve: limits.outputReserve, budget: limits.maxInputTokens,

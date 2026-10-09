@@ -40,7 +40,7 @@ async function main() {
     const atlasNpc = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '邱账房')
     const atlasGhost = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '旧井影鬼')
     applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 0, idempotencyKey: 'geography-and-work', source: { kind: 'test' }, changes: [
-      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语。' + '限制必须完整保留。'.repeat(35) + '禁止借命恢复体力' } },
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', innerConflict: '想歇工又怕失约', relationshipTension: '不愿再欠掌柜人情', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语。' + '限制必须完整保留。'.repeat(35) + '禁止借命恢复体力' } },
       { op: 'upsert_entity', id: atlasNpc.id, kind: 'character', name: '邱账房', attributes: { publicSummary: '店中负责客账登记的人', publicGoal: '尽快核对客账', firstImpression: '讲话稳妥', motivation: '灭口保身', abilities: ['暗中催眠'], abilityLimits: '只能催眠熟人', abilityCosts: '损失记忆', habits: ['说话前扶眼镜'] } },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '对账协助' },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasGhost.id, label: '调查涉及' },
@@ -98,6 +98,13 @@ async function main() {
     assert.ok(result.sources.includes('fact_reveal_evidence_rule'), 'generation is told how to quote non-POV knowledge without inventing it')
     assert.ok(!result.text.includes(futureMemory), 'unscoped stale/future checkpoints never enter chapter writing')
     assert.ok(result.text.includes('禁止借命恢复体力'), 'complete ability restrictions, including the final prohibition, must survive')
+    for (const inner of ['想歇工又怕失约', '不愿再欠掌柜人情']) assert.ok(result.text.includes(inner), 'own POV retains saved conflicts and relationships')
+    const originalPrevious = db.prepare('SELECT content FROM chapters WHERE id=?').get(first).content
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('他答应回来检查渡口旧绳。\n' + '长路上只有细雨与空山。'.repeat(1800) + '\n夜色落在石阶上。', first)
+    const dependencyContext = await compile(input, limits)
+    assert.ok(dependencyContext.text.includes('他答应回来检查渡口旧绳。'), 'unclassified non-ending prose required by this scene survives a tight budget')
+    assert.ok(dependencyContext.omittedSources.some(key => key.startsWith(`chapter:${first}:original:`) && key.endsWith(':budget_insufficient')), 'fixture actually drops incidental prior prose under budget')
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run(originalPrevious, first)
     assert.ok(result.omittedSources.includes('story_memory:unscoped_checkpoint_excluded'))
     await assert.rejects(compile(input, { ...limits, maxInputTokens: 300 }), error => error.code === 'CHAPTER_CONTEXT_BUDGET')
     assert.ok(result.text.includes('河水暴涨'))

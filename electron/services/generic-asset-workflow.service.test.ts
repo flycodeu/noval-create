@@ -104,6 +104,8 @@ describe('generic asset quality gate', () => {
     const result = assess({ output: '{"rule":"能力必有代价"}', outputFormat: 'json' })
     expect(result).toMatchObject({ status: 'passed', score: 100, readyForHumanApply: true })
     expect(result.modelReview).not.toHaveProperty('finalOutput')
+    expect(result.summary).toContain('流程检查分 100/100')
+    expect(result.summary).toContain('不代表文学质量评分或 AI 检测结果')
   })
 
   it('keeps an asset in human review when the project context advanced during generation', () => {

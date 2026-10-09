@@ -157,9 +157,13 @@ async function main() {
     assert(fs.existsSync(zhuqueLocalFile), 'packaged local credential file must exist')
     assert.equal(fs.readFileSync(zhuqueLocalFile, 'utf8').includes(zhuqueFixtureKey), false, 'packaged credentials must be encrypted')
     assert.equal(JSON.stringify(zhuqueSettings).includes(zhuqueFixtureKey), false, 'RPC must not return saved keys')
-    const zhuqueTest = await rpc('zhuque', 'test')
-    assert.equal(zhuqueTest.success, false); assert(zhuqueTest.info.includes('已关闭'), 'disabled packaged test must stop before transport')
+    // Connection tests may run while chapter detection is disabled. Remove the
+    // storage fixture before testing so this smoke never submits an external request.
     assert.deepEqual(await rpc('zhuque', 'updateSettings', [{ apiKey: '' }]), { enabled: false, autoDetect: false, apiKeySet: false })
+    const zhuqueTest = await rpc('zhuque', 'test')
+    assert.equal(zhuqueTest.success, false)
+    assert(zhuqueTest.info.includes('密钥不可用'), 'missing-key packaged test must stop before transport')
+    assert.deepEqual(await rpc('zhuque', 'getSettings'), { enabled: false, autoDetect: false, apiKeySet: false }, 'connection test must preserve disabled chapter detection')
 
     const second = await connect()
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')

@@ -1,5 +1,6 @@
 import { classifyQualityIssueLevels } from './quality-issue-policy'
 import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
+import { buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
@@ -307,7 +308,9 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
       contextSummary: options.reviewContextSummary?.(options.generatedOutput) ?? options.contextSummary,
       generatedOutput: options.generatedOutput,
       schemaHint: options.schemaHint,
-      reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
+      reviewFocus: [...(options.reviewFocus || []),
+        ...(['chapter', 'outline'].includes(options.targetType) ? buildStoryQualityGuidance('review') : []),
+        ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
         '阅读问题按 fact/format/narrative/style 与 blocker/repair/advice 分级；风格偏好仅为 advice，不因数量或模型布尔判断强制改写。',
         `必须返回 issues 数组，无问题返回 []；拒收/修订判断必须有对应问题。每项含 id、ruleId、category、level、detector=model、confidence、scope、message、evidence。evidence 是数组，每项含 artifactHash=${qualityIssueArtifactHash(options.generatedOutput)}、start、end（JS UTF-16 索引）、quote（逐字原文，不清洗）。没有证据不补造。`,
         `ruleId 只能使用以下规则，分类/默认级别为：${JSON.stringify(QUALITY_ISSUE_RULE_SPECS)}。`,
@@ -343,6 +346,7 @@ export async function rewriteGeneratedAsset(
       schemaHint: options.schemaHint,
       rewriteConstraints: uniqueLines([
         ...(options.rewriteConstraints || []),
+        ...(['chapter', 'outline'].includes(options.targetType) ? buildStoryQualityGuidance('write') : []),
         ...(options.validateOutput ? ['结构校验指出的不支持字段必须删除或按契约放到正确位置；不能为保持原字段而保留非法结构，已有有效事实仍须保留。'] : []),
       ]),
     }),

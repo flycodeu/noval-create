@@ -203,5 +203,17 @@ describe('saved atlas dependencies for creative context', () => {
     const self = creativePublicAttributes(original, { kind: 'character', isPov: true })
     expect(self.goals).toBe(original.goals)
     expect(self.abilities).toEqual(original.abilities)
+    expect(self.innerConflict).toBe(original.innerConflict)
+    const tension = { relationshipTension: '想求助又怕欠人情' }
+    expect(creativePublicAttributes(tension, { kind: 'character', isPov: true })).toEqual(tension)
+    expect(creativePublicAttributes(tension, { kind: 'character', isPov: false })).toEqual({})
+    expect(creativePublicAttributes(tension)).toEqual({})
+  })
+  it('does not ask the writer to fill withheld NPC motives or flaws', () => {
+    const atlas = fixture()
+    const coverage = creativeAtlasCoverage(atlas, new Set(['character:1']), new Set())
+    const fields = coverage.missing.find(item => item.entityId === 'character:1')?.fields || []
+    expect(fields).toContain('publicGoal')
+    for (const field of ['goals', 'personalityTraits', 'flaws']) expect(fields).not.toContain(field)
   })
 })

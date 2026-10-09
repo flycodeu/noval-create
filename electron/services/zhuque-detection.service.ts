@@ -48,9 +48,9 @@ export function updateZhuqueSettings(input: ZhuqueSettingsUpdate): ZhuqueSetting
   if (!next.enabled || !next.autoDetect) { for (const timer of timers.values()) clearTimeout(timer); timers.clear() }
   return getZhuqueSettings()
 }
-function localKey(): string {
+function localKey(purpose: 'chapter' | 'connection-test'): string {
   const settings = readSettings()
-  if (!settings.enabled) throw new Error('朱雀检测已关闭。')
+  if (purpose === 'chapter' && !settings.enabled) throw new Error('朱雀检测已关闭。')
   if (!settings.encryptedKey || !safeStorage.isEncryptionAvailable()) throw new Error('朱雀本地密钥不可用，请重新配置。')
   try { return safeStorage.decryptString(Buffer.from(settings.encryptedKey, 'base64')) }
   catch { throw new Error('朱雀本地密钥无法解密，请重新配置。') }
@@ -75,8 +75,8 @@ export function parseZhuqueResponse(value: unknown): ZhuqueMetrics {
   return { humanRatio, aiRatio, suspectedAiRatio, confidence: ratio(data.softmax_confidence), riskRatio: ratio(data.ratio_confidence), segments,
     tokensUsed: tokens(record(data.usage).total_tokens), quotaTokensUsed: tokens(record(data.makers_models_usage).total_tokens) }
 }
-async function classify(content: string): Promise<ZhuqueMetrics> {
-  const key = localKey()
+async function classify(content: string, purpose: 'chapter' | 'connection-test' = 'chapter'): Promise<ZhuqueMetrics> {
+  const key = localKey(purpose)
   if (!key) throw new Error('朱雀本地密钥为空，请重新配置。')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 45_000)
@@ -159,7 +159,12 @@ export function scheduleZhuqueChapterDetection(id: number, expectedContent: stri
 export async function testZhuqueConnection(): Promise<ZhuqueTestResult> {
   const started = Date.now()
   try {
-    await classify('清晨的街道上，卖豆浆的摊主刚刚支起炉子。行人停下来买了一碗热豆浆，又匆匆走向巷口。')
-    return { success: true, info: '朱雀接口检测成功。', latency: Date.now() - started }
+    const credential = readSettings().encryptedKey
+    // Testing uses this fixed sample only; it does not enable or schedule chapter detection.
+    let failure: string | undefined
+    try { await classify('清晨的街道上，卖豆浆的摊主刚刚支起炉子。行人停下来买了一碗热豆浆，又匆匆走向巷口。', 'connection-test') }
+    catch (error) { failure = error instanceof Error ? error.message : '朱雀连接失败。' }
+    if (readSettings().encryptedKey !== credential) return { success: false, info: '朱雀本地密钥已变化，请重新测试。', latency: Date.now() - started }
+    return { success: !failure, info: failure || '朱雀接口连接正常，已用固定示例文本验证。', latency: Date.now() - started }
   } catch (error) { return { success: false, info: error instanceof Error ? error.message : '朱雀连接失败。', latency: Date.now() - started } }
 }

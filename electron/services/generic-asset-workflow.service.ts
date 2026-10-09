@@ -1,5 +1,6 @@
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
+import { buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -96,6 +97,7 @@ function buildGenerationPrompt(input: GenerateGenericAssetDraftInput, contextSum
     `类型：${input.assetType}`,
     `标题：${input.title.trim()}`,
     requirements.length > 0 ? `要求：\n${requirements.map((line) => `- ${line}`).join('\n')}` : '要求：在不新增无依据事实的前提下，产出完整、具体、可审阅的草稿。',
+    ...(['chapter', 'outline'].includes(input.assetType) ? ['【故事质量取舍】', ...buildStoryQualityGuidance('write')] : []),
     '',
     '【输出契约】',
     outputInstruction(format, input.schemaHint?.trim() || ''),
@@ -175,6 +177,11 @@ export function assessGenericAssetDraftQuality(params: {
   ])
   const score = Math.max(0, 100 - hardBlockers.length * 45 - warnings.length * 8)
   const status = hardBlockers.length > 0 ? 'blocked' : warnings.length > 0 ? 'needs_revision' : 'passed'
+  const outcomeSummary = status === 'blocked'
+    ? `审校阻断：${hardBlockers.join('；')}`
+    : status === 'needs_revision'
+      ? `草稿已保存，但仍需复核：${warnings.join('；')}`
+      : '结构检查与独立模型审校均通过，可按本轮设置应用。'
   return {
     schemaVersion: 'generic-asset-review-v1',
     draftArtifactId: params.draftArtifactId,
@@ -184,11 +191,7 @@ export function assessGenericAssetDraftQuality(params: {
     status,
     score,
     readyForHumanApply: status === 'passed',
-    summary: status === 'blocked'
-      ? `审校阻断：${hardBlockers.join('；')}`
-      : status === 'needs_revision'
-        ? `草稿已保存，但仍需复核：${warnings.join('；')}`
-        : '结构检查与独立模型审校均通过，可按本轮设置应用。',
+    summary: `${outcomeSummary} 流程检查分 ${score}/100 仅表示本轮检查状态，不代表文学质量评分或 AI 检测结果。`,
     hardBlockers,
     warnings,
     checks,
@@ -364,7 +367,7 @@ export async function generateGenericAssetDraft(
       ...(['chapter', 'outline'].includes(input.assetType) ? [
         buildNarrativeDetailGuidance('review'),
         '若上下文含开篇进度与阅读期待，核对首章的具体期待、次章的行动后果、第三章的阶段回报；引用候选中的实际结果，只有准备、同义问询或新谜团须指出空转。作者合同限制兑现时报告设计缺口，不擅自改揭示边界，也不因缺反转或爆点否定合法日常。',
-        '核对人物行动的动机和承接，指出重复解释谨慎与善意、同质问答、无功能微动作填充的具体段落；保留有效心理与生活体验。结构进度和文字自然度分别判断，不能用换词掩盖无结果的场景。',
+        '指出重复解释谨慎与善意、同质问答、无功能微动作填充的具体段落，保留有效心理与生活体验；不能用换词掩盖因果或人物选择的问题。',
       ] : []),
       ...(['map', 'faction', 'character'].includes(input.assetType) ? [
         '简介、特点、日常和岗位职责应是小说资料；检查并移除文件路径、生成操作说明、不虚构等作者指令。未知字段省略，不用重复空值或待补充填满档案。',

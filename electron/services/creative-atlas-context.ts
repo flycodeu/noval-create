@@ -171,7 +171,7 @@ export function selectCreativeAtlas(atlas: Atlas, input: {
 
 const publicAttributes = new Set([
   'roleType', 'entityType', 'age', 'gender', 'occupation', 'appearance', 'personalityTraits', 'flaws', 'speechPattern',
-  'publicSummary', 'firstImpression',
+  'publicSummary', 'firstImpression', 'innerConflict', 'relationshipTension',
   'goals', 'habits', 'dailyRoutine', 'motivation', 'moralLine', 'surfaceDesire', 'abilityLimits', 'abilityCosts',
   'subtype', 'locationType', 'nodeType', 'terrain', 'climate', 'waterSource', 'livelihood', 'access', 'x', 'y',
   'category', 'function', 'abilities', 'limitations', 'culture', 'publicGoal', 'organizationLevel', 'traits', 'ideology', 'methods', 'funding',
@@ -179,7 +179,7 @@ const publicAttributes = new Set([
   'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral', 'transfers', 'seasonAccess',
   'locationRole', 'positionId', 'responsibilities',
 ])
-const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])
+const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'innerConflict', 'relationshipTension', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])
 const npcPublicAttributes = new Set(['entityType', 'age', 'gender', 'occupation', 'appearance', 'publicSummary', 'firstImpression', 'publicGoal', 'traits', 'habits', 'speechPattern'])
 
 /** Nested author-only keys are never passed through simply because their parent is public. */
@@ -208,7 +208,7 @@ export function creativePublicAttributes(attributes: Record<string, unknown>, sc
 }
 
 /** Gaps guide writing and review; absence is never permission to invent canon or proof of nonexistence. */
-export function creativeAtlasCoverage(atlas: Atlas, selectedIds: Set<string>) {
+export function creativeAtlasCoverage(atlas: Atlas, selectedIds: Set<string>, povIds?: Set<string>) {
   const missing: Array<{ entityId?: string; fields: string[] }> = []
   const populated = (value: unknown) => value !== undefined && value !== null && value !== '' && (!Array.isArray(value) || value.length > 0)
   if (!atlas.entities.some(entity => entity.kind === 'location')) missing.push({ fields: ['map_locations'] })
@@ -216,7 +216,10 @@ export function creativeAtlasCoverage(atlas: Atlas, selectedIds: Set<string>) {
     const fields: string[] = []
     if (entity.kind === 'character') {
       if (!populated(entity.summary) && !populated(entity.attributes.publicSummary) && !populated(entity.attributes.firstImpression)) fields.push('public_description')
-      for (const field of ['occupation', 'goals', 'personalityTraits', 'flaws', 'speechPattern']) if (!populated(entity.attributes[field])) fields.push(field)
+      const characterFields = povIds && !povIds.has(entity.id)
+        ? ['occupation', 'publicGoal', 'speechPattern']
+        : ['occupation', 'goals', 'personalityTraits', 'flaws', 'speechPattern']
+      for (const field of characterFields) if (!populated(entity.attributes[field])) fields.push(field)
       const places = atlas.relations.filter(edge => edge.kind === 'presence' && edge.fromId === entity.id)
       for (const role of ['residence', 'activity', 'current']) if (!places.some(edge => edge.attributes.locationRole === role)) fields.push(`location_${role}`)
     }
