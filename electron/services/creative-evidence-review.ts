@@ -8,7 +8,7 @@ import { creativeChapterSceneVisibility } from './creative-chapter-context'
 
 interface EvidenceClaim { id: string; conclusion: string; evidenceQuote: string; checkType?: 'scene_visibility' }
 interface EvidenceAssessment { id: string; support: 'supported' | 'contradicted' | 'insufficient'; evidenceQuote: string; reason: string }
-interface EvidenceReport { schemaVersion: 'creative-evidence-review-v1'; candidateArtifactId: string; candidateHash: string; claimsHash: string; contextVersion: number; passed: boolean; assessments: EvidenceAssessment[]; formatRepairCount?: number }
+interface EvidenceReport { schemaVersion: 'creative-evidence-review-v1'; candidateArtifactId: string; candidateHash: string; claimsHash: string; contextVersion: number; passed: boolean; assessments: EvidenceAssessment[]; formatRepairCount?: number; modelOriginNote?: string }
 interface PreservedReveals { preservedFactIds?: number[]; preservedChapterId?: number }
 export function creativeEvidenceClaims(novelId: number, data: Record<string, unknown>, preserved: PreservedReveals = {}): EvidenceClaim[] {
   const claims: EvidenceClaim[] = []
@@ -62,7 +62,7 @@ export function validateEvidenceAssessments(raw: unknown, claims: EvidenceClaim[
   }
   return rows as EvidenceAssessment[]
 }
-export async function reviewCreativeEvidence(input: { novelId: number; runId: number; modelConfigId: number; contextVersion: number; candidateArtifactId: string; candidateHash: string; data: Record<string, unknown>; maxInputTokens: number; outputReserve: number; checkpoint: ModelOutputCheckpoint } & PreservedReveals) {
+export async function reviewCreativeEvidence(input: { novelId: number; runId: number; modelConfigId: number; contextVersion: number; candidateArtifactId: string; candidateHash: string; data: Record<string, unknown>; maxInputTokens: number; outputReserve: number; checkpoint: ModelOutputCheckpoint; modelOriginNote?: string } & PreservedReveals) {
   const claims = creativeEvidenceClaims(input.novelId, input.data, input)
   if (!claims.length) return null
   const prose = String(input.data.content)
@@ -84,7 +84,7 @@ export async function reviewCreativeEvidence(input: { novelId: number; runId: nu
   const passed = assessments.every(row => row.support === 'supported')
   const report = createArtifact({ novelId: input.novelId, kind: 'quality_report', status: 'reviewed', parentArtifactId: input.candidateArtifactId, contextVersion: input.contextVersion, modelConfigId: input.modelConfigId,
     producerType: 'novelforge_model', producerId: `task:${input.runId}`, producerClient: 'novelforge', taskId: input.runId,
-    content: { schemaVersion: 'creative-evidence-review-v1', candidateArtifactId: input.candidateArtifactId, candidateHash: input.candidateHash, claimsHash: hashArtifactContent(claims), contextVersion: input.contextVersion, passed, assessments, formatRepairCount } satisfies EvidenceReport,
+    content: { schemaVersion: 'creative-evidence-review-v1', candidateArtifactId: input.candidateArtifactId, candidateHash: input.candidateHash, claimsHash: hashArtifactContent(claims), contextVersion: input.contextVersion, passed, assessments, formatRepairCount, ...(input.modelOriginNote ? { modelOriginNote: input.modelOriginNote } : {}) } satisfies EvidenceReport,
     idempotencyKey: `creative:${input.runId}:evidence:${hashArtifactContent({ candidate: input.candidateHash, raw })}` })
   return { artifactId: report.id, passed, blockers: assessments.filter(row => row.support !== 'supported').map(row => `${row.id}：${row.reason}`) }
 }

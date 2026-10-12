@@ -1,18 +1,19 @@
 import React from 'react'
 import { Checkbox, Input, InputNumber, Select } from 'antd'
-import { DOCUMENT_OPTIONS, INTERNAL_FIELDS, documentEnumLabel, documentFieldKey, documentHasContent, fieldLabel, parseDocument } from './content-document'
+import { DOCUMENT_OPTIONS, INTERNAL_FIELDS, documentEnumLabel, documentFieldKey, documentHasContent, fieldLabel, parseDocument, recordOf } from './content-document'
 import { atlasAttributeValue } from './atlas-presentation'
 import { documentReferenceLabel, documentReferenceOptions, documentReferenceType } from './document-references'
 
 export function ContentDocument({ value, names = {}, showEmpty = false, fieldKey = '' }: { value: unknown; names?: Record<string, string>; showEmpty?: boolean; fieldKey?: string }): React.ReactElement {
   const parsed = parseDocument(value)
+  const processReview = recordOf(value).schemaVersion === 'generic-asset-review-v1'
   if (parsed !== value) return <ContentDocument value={parsed} names={names} showEmpty={showEmpty} fieldKey={fieldKey} />
   if (!documentHasContent(value)) return <span className="author-missing">尚未补充</span>
   if (Array.isArray(value)) return <div className="author-document-list">{value.map((item, i) => <section key={i}><ContentDocument value={item} names={names} showEmpty={showEmpty} fieldKey={fieldKey} /></section>)}</div>
   if (value && typeof value === 'object') return <dl className="author-document-fields">{Object.entries(value).filter(([key, item]) => {
     const present = documentHasContent(item)
     return !INTERNAL_FIELDS.has(documentFieldKey(key)) && (present || showEmpty && !documentReferenceType(key))
-  }).map(([key, item]) => <div key={key}><dt>{fieldLabel(key, item)}</dt><dd><ContentDocument value={item} names={names} showEmpty={showEmpty} fieldKey={key} /></dd></div>)}</dl>
+  }).map(([key, item]) => <div key={key}><dt>{processReview && key === 'score' ? '流程检查分' : fieldLabel(key, item)}</dt><dd><ContentDocument value={item} names={names} showEmpty={showEmpty} fieldKey={processReview && key === 'status' ? 'processReviewStatus' : key} /></dd></div>)}</dl>
   const display = documentReferenceLabel(fieldKey, value, names) ?? documentEnumLabel(fieldKey, atlasAttributeValue(documentFieldKey(fieldKey), value))
   return <div className="author-prose">{typeof display === 'boolean' ? display ? '是' : '否' : String(display)}</div>
 }

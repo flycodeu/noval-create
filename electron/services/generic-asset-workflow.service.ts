@@ -30,6 +30,8 @@ import * as novelService from './novel.service'
 import { createTask, executeChatTask, updateTask } from './task.service'
 import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
 import { getSqlite } from '../database/db'
+import { getModelConfigRecord } from './model.service'
+import { reviewModelOriginNote } from './review-model-origin'
 
 const OUTPUT_PREVIEW_LIMIT = 900
 const PROCESS_LEAK_PATTERN = /(?:作为(?:一个)?AI|我是(?:一个)?(?:AI|人工智能)|下面是(?:我为你|生成的)|希望(?:以上|这些)内容|如果你(?:还)?需要|以下是(?:根据|为你))/iu
@@ -114,6 +116,7 @@ function isJsonShapeValid(output: string): boolean {
 }
 
 export function assessGenericAssetDraftQuality(params: {
+  modelOriginNote?: string
   draftArtifactId: string
   draftContentHash: string
   effectiveArtifactId: string
@@ -156,7 +159,7 @@ export function assessGenericAssetDraftQuality(params: {
     : failureLabel
     ? { code: 'model_review', status: 'fail', message: `${failureLabel}未完成：${params.quality.warnings.join('；') || '请重试'}。候选已保留，未应用。` }
     : params.quality.initialModelReviewSkipped && !params.quality.rewrittenReview
-      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，独立模型复检尚未完成。' }
+      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，模型复检尚未完成。' }
       : reviewFailedOpen
       ? { code: 'model_review', status: 'fail', message: '模型审校未完整执行，候选已保留，须重新审校。' }
       : effectiveModelReview.rejectRequired
@@ -181,7 +184,7 @@ export function assessGenericAssetDraftQuality(params: {
     ? `审校阻断：${hardBlockers.join('；')}`
     : status === 'needs_revision'
       ? `草稿已保存，但仍需复核：${warnings.join('；')}`
-      : '结构检查与独立模型审校均通过，可按本轮设置应用。'
+      : '结构检查与模型审校均通过，可按本轮设置应用。'
   return {
     schemaVersion: 'generic-asset-review-v1',
     draftArtifactId: params.draftArtifactId,
@@ -191,7 +194,7 @@ export function assessGenericAssetDraftQuality(params: {
     status,
     score,
     readyForHumanApply: status === 'passed',
-    summary: `${outcomeSummary} 流程检查分 ${score}/100 仅表示本轮检查状态，不代表文学质量评分或 AI 检测结果。`,
+    summary: [outcomeSummary, params.modelOriginNote, `流程检查分 ${score}/100 仅表示本轮检查状态，不代表文学质量评分或 AI 检测结果。`].filter(Boolean).join(' '),
     hardBlockers,
     warnings,
     checks,
@@ -432,6 +435,7 @@ export async function generateGenericAssetDraft(
       return mapArtifactError(error)
     }
     const review = assessGenericAssetDraftQuality({
+      modelOriginNote: reviewModelOriginNote(route.modelConfigId ? getModelConfigRecord(route.modelConfigId) : undefined, qualityRoute.modelConfigId ? getModelConfigRecord(qualityRoute.modelConfigId) : undefined),
       draftArtifactId: draftArtifact.id,
       draftContentHash: draftArtifact.contentHash,
       effectiveArtifactId: draftArtifact.id,

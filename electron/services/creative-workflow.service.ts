@@ -10,6 +10,7 @@ import { tasks } from '../database/schema'
 import { createTask, getTaskRecord, updateTask, cancelTask } from './task.service'
 import { getNovel, updateNovel } from './novel.service'
 import { getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
+import { reviewModelOriginNote } from './review-model-origin'
 import { createChapter, getChapter, listChapters, updateChapter } from './chapter.service'
 import { createArtifact, getArtifact, requireArtifact, hashArtifactContent, findArtifactByIdempotency, updateArtifactLifecycle } from './artifact.service'
 import { savedCreativeEntities } from './creative-run-result'
@@ -143,6 +144,11 @@ export function parseCreativeCandidate(stage: CreativeStage, raw: string): Recor
     }
   }
   return data
+}
+
+function creativeAppliedMessage(request: CreativeWorkflowInput): string {
+  if (request.stage !== 'chapter') return '已更新本阶段资料。'
+  return request.chapterRevision?.target === 'summary' && !request.sourceArtifactId ? '已更新章节摘要。' : '已写入草稿。'
 }
 
 function modelFingerprint(modelConfigId: number): string {
@@ -443,7 +449,8 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   try { assertCreativeChapterCandidate({ novelId, chapterNum: chapter.chapterNum, content, expectedContextVersion: input.contextVersion }) }
   catch (error) { deterministicBlockers.push(error instanceof Error ? error.message : String(error)) }
   const status = deterministicBlockers.length || review.rejectRequired ? 'blocked' : review.rewriteRequired ? 'needs_revision' : 'passed'
-  const summary = deterministicBlockers.length ? `确定性检查未通过：${deterministicBlockers.join('；')}。模型评审：${review.summary}` : review.summary
+  const reviewSummary = deterministicBlockers.length ? `确定性检查未通过：${deterministicBlockers.join('；')}。模型评审：${review.summary}` : review.summary
+  const summary = [reviewSummary, reviewModelOriginNote(getModelConfigRecord(input.modelConfigId), route.modelConfigId ? getModelConfigRecord(route.modelConfigId) : undefined, true)].filter(Boolean).join(' ')
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
     schemaVersion: 'chapter-review-v1', chapterId: chapter.id, chapterNum: chapter.chapterNum,
     contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status, context: report, createdAt: new Date().toISOString(),
@@ -481,14 +488,15 @@ async function executeAssetReview(runId: number, input: StoredRequest): Promise<
   assertActive(runId); assertBase(input)
   if (hashArtifactContent(capture(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
   const status = review.rejectRequired ? 'blocked' : review.rewriteRequired ? 'needs_revision' : 'passed'
+  const summary = [review.summary, reviewModelOriginNote(getModelConfigRecord(input.modelConfigId), route.modelConfigId ? getModelConfigRecord(route.modelConfigId) : undefined, true)].filter(Boolean).join(' ')
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
-    schemaVersion: ATLAS_REVIEW_STAGES.includes(input.request.stage) ? 'atlas-review-v1' : 'creative-assets-review-v1', stage: input.request.stage, atChapter: input.request.atChapter, snapshot, contentHash, review, deterministicBlockers: [], summary: review.summary, status, context: report,
+    schemaVersion: ATLAS_REVIEW_STAGES.includes(input.request.stage) ? 'atlas-review-v1' : 'creative-assets-review-v1', stage: input.request.stage, atChapter: input.request.atChapter, snapshot, contentHash, review, deterministicBlockers: [], summary, status, context: report,
   }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: route.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
   const issueIds = recordCreativeReviewIssues(input.request, runId, artifact.id, review)
   if (status === 'passed' && !review.issues?.length) advanceCreativeRevisionIssues(input.request, artifact.id, true)
-  const result = { artifactId: artifact.id, contentHash, review, summary: review.summary, status, issueIds }
+  const result = { artifactId: artifact.id, contentHash, review, summary, status, issueIds }
   updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })
-  progress(runId, 'completed', review.summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
+  progress(runId, 'completed', summary, { artifactId: artifact.id, reviewArtifactId: artifact.id, reviewStatus: status, result })
 }
 
 async function execute(runId: number, novelId: number): Promise<void> {
@@ -589,6 +597,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
       assertCreativeChapterCandidate({ novelId, chapterNum: Number(parsed.chapterNum), content: String(parsed.content), expectedContextVersion: input.contextVersion, changes: parsed.changes as StoryAtlasChange[] | undefined })
       if (!preservesFormalReveals(input)) validateCreativeFactReveals(novelId, Number(parsed.chapterNum), String(parsed.content), parsed.factReveals || [])
       const evidence = await reviewCreativeEvidence({ novelId, runId, modelConfigId: input.reviewModelConfigId || input.modelConfigId, contextVersion: input.contextVersion,
+        modelOriginNote: reviewModelOriginNote(getModelConfigRecord(input.modelConfigId), getModelConfigRecord(input.reviewModelConfigId || input.modelConfigId)),
         candidateArtifactId: generated.effectiveArtifact.id, candidateHash: generated.effectiveArtifact.contentHash, data: parsed, ...preservedFormalReveals(input), maxInputTokens: context.maxInputTokens,
         outputReserve: context.reviewOutputReserve || 6000, checkpoint: modelCheckpoint(runId, input) })
       assertActive(runId); assertBase(input)
@@ -606,7 +615,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     progress(runId, 'applying', '应用通过审校的内容，更新图谱与正式资料')
     const result = applyCreativeDraft({ novelId, runId })
     updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })
-    progress(runId, 'completed', '本阶段完成，可继续扩展或推进下一阶段。', { result })
+    progress(runId, 'completed', creativeAppliedMessage(input.request), { result })
   } catch (error) {
     const cancelled = ['cancelled', 'cancel_requested'].includes(getTaskRecord(runId)?.status || '')
     const message = error instanceof Error ? error.message : String(error)
@@ -710,7 +719,7 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
   if (action === 'apply') {
     const result = applyCreativeDraft({ novelId, runId })
     updateTask(runId, { status: 'success', outputText: JSON.stringify(result) })
-    progress(runId, 'completed', '已应用通过审校的候选。', { result })
+    progress(runId, 'completed', creativeAppliedMessage(input.request), { result })
   } else {
     if (action === 'resume_checkpoint') {
       const recoveries = (input.recoveryPass || 0) + 1

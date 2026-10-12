@@ -201,6 +201,10 @@ async function main() {
     const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
+    assert.equal(written.message, '已写入草稿。')
+    const writtenReport = (await call('artifacts.get', { artifactId: written.reviewArtifactId })).artifact.content
+    assert.ok(writtenReport.summary.includes('审校与生成使用同一模型配置。'))
+    assert.equal(sqlite.prepare('SELECT status FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId).status, 'draft')
     const prosePrompt = requests[beforeFirst + 2].messages.map(message => message.content).join('\n')
     assert.ok(prosePrompt.includes('changes必须为空数组[]'), 'prose-only generation must not invite graph changes')
     assert.ok(prosePrompt.includes('factId必须是已有信息点的数值整数'), 'fact ID format is explicit before generation and repair')
@@ -220,6 +224,7 @@ async function main() {
     const reviewed = await finish(reviewRun.runId)
     assert.equal(reviewed.status, 'success', JSON.stringify(reviewed))
     assert.equal(reviewed.reviewStatus, 'passed')
+    assert.ok(reviewed.message.includes('本次审校使用当前生成模型配置。'))
     assert.equal(requests.length, beforeReview + 1, 'review does not regenerate or rewrite')
     assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content, prose)
     assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: reviewed.runId } }, context)).ok, false, 'a report is not an applicable prose candidate')
@@ -606,6 +611,9 @@ async function main() {
       const historical = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '只更新简介', autoApply: false, idempotencyKey: 'history-candidate' })).run.runId)
       assert.equal(historical.status, 'paused', JSON.stringify(historical))
       assert.equal(historical.reviewModelConfigId, reviewerId)
+      const historicalReview = (await isolatedCall('artifacts.get', { artifactId: historical.reviewArtifactId })).artifact.content
+      assert.ok(!historicalReview.summary.includes('同一模型配置'))
+      assert.ok(!historicalReview.summary.includes('模型标识相同'))
       assert.deepEqual(requests.slice(beforeRoutes).map(request => request.model), ['creative-fixture', 'review-fixture'])
       assert.ok(historical.context.maxInputTokens < 10000, 'smaller reviewer window bounds shared context')
       const comparison = (await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts

@@ -105,6 +105,31 @@ async function main() {
     assert.ok(dependencyContext.text.includes('他答应回来检查渡口旧绳。'), 'unclassified non-ending prose required by this scene survives a tight budget')
     assert.ok(dependencyContext.omittedSources.some(key => key.startsWith(`chapter:${first}:original:`) && key.endsWith(':budget_insufficient')), 'fixture actually drops incidental prior prose under budget')
     db.prepare('UPDATE chapters SET content=? WHERE id=?').run(originalPrevious, first)
+    // A deliberately selected fact has no lexical overlap with the scene contract.
+    // Its provenance is the registered earlier chapter, not a new inferred summary.
+    const handoffText = '竹笼已敞，青翅停在北窗；它没有答应借感。'
+    const handoff = Number(db.prepare('INSERT INTO story_facts(novel_id,title,summary,protagonist_known_chapter_id) VALUES(?,?,?,?)').run(novelId, '青翅的处境', handoffText, first).lastInsertRowid)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([handoff]), target)
+    const handoffContext = await compile(input, limits)
+    assert.ok(handoffContext.sources.includes(`fact:${handoff}`))
+    assert.ok(handoffContext.text.includes(handoffText), 'explicit prior facts survive without four-character dependency matches')
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText.repeat(2000), handoff)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET'
+      && error.requiredSourceKeys.includes(`fact:${handoff}`) && error.message.includes(`fact:${handoff}`))
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([handoff, secret]), first)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run('[]', target)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET'
+      && error.requiredSourceKeys.includes(`fact:${handoff}`) && !error.requiredSourceKeys.includes(`fact:${secret}`))
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText, handoff)
+    const inheritedContext = await compile(input, limits)
+    assert.ok(inheritedContext.text.includes(handoffText), 'a blank chapter fact selection inherits registered prior handoff facts')
+    assert.ok(!inheritedContext.text.includes('失踪的税银藏在井底'), 'handoff inheritance never grants future knowledge')
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText.repeat(2000), handoff)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([known]), target)
+    const optionalContext = await compile(input, limits)
+    assert.ok(optionalContext.omittedSources.includes(`fact:${handoff}:budget_insufficient`), 'unselected background facts remain optional')
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id IN (?,?)').run('[]', first, target)
+    db.prepare('DELETE FROM story_facts WHERE id=?').run(handoff)
     assert.ok(result.omittedSources.includes('story_memory:unscoped_checkpoint_excluded'))
     await assert.rejects(compile(input, { ...limits, maxInputTokens: 300 }), error => error.code === 'CHAPTER_CONTEXT_BUDGET')
     assert.ok(result.text.includes('河水暴涨'))

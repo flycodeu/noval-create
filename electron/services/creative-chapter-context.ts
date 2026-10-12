@@ -29,7 +29,7 @@ import {
 } from './context-visibility'
 
 export class CreativeChapterContextError extends Error {
-  constructor(readonly code: string, message: string) { super(message); this.name = 'CreativeChapterContextError' }
+  constructor(readonly code: string, message: string, readonly requiredSourceKeys: string[] = []) { super(message); this.name = 'CreativeChapterContextError' }
 }
 function fail(code: string, message: string): never { throw new CreativeChapterContextError(code, message) }
 function ids(raw?: string | null): number[] {
@@ -220,6 +220,7 @@ export async function compileCreativeChapterContext(
   }
   const chapterRows = listChapters(input.novelId)
   const chapterNum = input.atChapter ?? chapterRows.filter(row => row.content?.trim()).reduce((n, row) => Math.max(n, row.chapterNum), 0) + 1
+  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
   const { context, policy, povNames } = loadChapterBoundary(input.novelId, chapterNum)
   const novel = getNovel(input.novelId)
   if (!novel) fail('PROJECT_NOT_FOUND', '项目不存在。')
@@ -272,7 +273,14 @@ export async function compileCreativeChapterContext(
     if (!body) { omitted.push(`scene_fact:${fact.sceneOrder}:${index}:pov_forbidden_fact`); return }
     add(`scene_fact:${fact.sceneOrder}:${index}`, `场景${fact.sceneOrder}本场已知：${body}`, true, 'plan', { ...contractPolicy, deniedFacts: [] })
   })
-  for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'))
+  // Explicit chapter fact references are a contract dependency, not keyword recall.
+  // A blank selection inherits the last written chapter's declared handoff, not
+  // every known fact in the book. An explicit selection can narrow that scope.
+  // Only facts already admitted by the POV/chronology policy reach this loop;
+  // planned reveals remain scoped to their authorized scenes above.
+  const selectedFactIds = ids(context.chapter.allowedFactIdsJson)
+  const requiredFactIds = new Set(selectedFactIds.length ? selectedFactIds : [...ids(previous?.allowedFactIdsJson), ...ids(previous?.revealedFactIdsJson)])
+  for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'), requiredFactIds.has(fact.fact.id))
   for (const issue of creativeRevisionIssueSources(input)) add(`revision_issue:${issue.id}`, issue, true, 'draft', { ...policy, deniedFacts: [] })
   for (const limited of policy.sceneLimitedFacts) {
     const scenes = limited.scenes.map(scene => `场景${scene.sceneOrder}（${scene.povName}）`).join('、')
@@ -294,7 +302,6 @@ export async function compileCreativeChapterContext(
   }
   const safeEntityIds = new Set<string>()
   const dependency = `${input.request}\n${JSON.stringify(context.sceneSnapshots)}\n${JSON.stringify(context.chapterContract)}\n${context.chapter.title}\n${context.chapter.outline || ''}`
-  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
   const { seedIds, entityIds: relevant, relationIds: relevantEdges } = selectCreativeAtlas(atlas, {
     request: input.request, anchorText: dependency, povNames,
     fallbackText: previous?.summary || previous?.content?.slice(-2000),
@@ -391,7 +398,11 @@ export async function compileCreativeChapterContext(
     outputReserve: limits.outputReserve, budget: limits.maxInputTokens,
     sources: packed,
   })
-  if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) fail('CHAPTER_CONTEXT_BUDGET', '本章必要资料超过输入预算，需要缩小场景范围或切换模型。')
+  if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) {
+    const requiredSourceKeys = compiled.pack.sources.filter(source => source.included && source.required).map(source => source.key)
+    const factKeys = requiredSourceKeys.filter(key => key.startsWith('fact:'))
+    throw new CreativeChapterContextError('CHAPTER_CONTEXT_BUDGET', `本章必要资料超过输入预算，需要缩小场景范围或切换模型。${factKeys.length ? `不能省略本章已选用的承接事实：${factKeys.join('、')}。` : ''}`, requiredSourceKeys)
+  }
   return { text: compiled.rendered, estimatedTokens: estimateTokens(compiled.rendered), ...limits,
     sources: compiled.pack.sources.filter(source => source.included).map(source => source.key),
     omittedSources: [...omitted, ...compiled.pack.sources.filter(source => !source.included).map(source => `${source.key}:${source.reason}`)],

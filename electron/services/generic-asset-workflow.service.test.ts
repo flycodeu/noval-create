@@ -42,6 +42,15 @@ function assess(overrides: Partial<Parameters<typeof assessGenericAssetDraftQual
 }
 
 describe('generic asset quality gate', () => {
+  it('reports model origin without treating same-model review as a quality failure', () => {
+    const note = '审校与生成使用同一模型配置。'
+    const result = assess({ modelOriginNote: note })
+    expect(result.summary).toContain(note)
+    expect(result.summary).not.toContain('独立模型审校')
+    expect(result.status).toBe('passed')
+    expect(result.score).toBe(100)
+    expect(result.warnings).toEqual([])
+  })
   it('never turns an unavailable model review into an implicit pass', () => {
     const result = assess({
       quality: quality({
