@@ -39,6 +39,17 @@ function fourRoles(readerFirst: boolean, chapterNum = 2) {
 }
 
 describe('RF-06 final role messages', () => {
+  it.each([true, false])('keeps fluency, attribution and next-chapter boundaries in final model messages, reader-first=%s', readerFirst => {
+    const messages = fourRoles(readerFirst, 10)
+    for (const prompt of [messages.writer, messages.critic, messages.rewriter]) {
+      expect(prompt).toContain('第二个人不照抄第一个人的问询步骤')
+      expect(prompt).toContain('必要复核、情绪回响和人物立场不同的重复仍可保留')
+      expect(prompt).toContain('保住证据来源、同意、原始抄底与比较条件')
+    }
+    expect(messages.critic).toContain('核对说话者、动作主体')
+    expect(messages.critic).toContain('安排后章兑现的道具和试验不要求本章提前完成')
+    expect(messages.rewriter).toContain('保留所选范围之外的正文')
+  })
   it.each([true, false])('retains detail and evidence boundaries beyond the opening, reader-first=%s', readerFirst => {
     const messages = fourRoles(readerFirst, 10)
     for (const prompt of Object.values(messages)) {

@@ -321,6 +321,7 @@ export function resolveModelRuntimeBudget(modelConfigId?: number | null): {
   maxContextTokens: number | null
   maxTokens: number | null
   provider?: string
+  reasoningEnabled?: boolean
   tokenSafetyMarginPct?: number
 } {
   try {
@@ -335,6 +336,7 @@ export function resolveModelRuntimeBudget(modelConfigId?: number | null): {
       maxContextTokens: adapter.maxContextTokens,
       maxTokens,
       provider: config.provider,
+      reasoningEnabled: config.provider === 'deepseek' && parseModelExtraParams(config.extraParamsJson).deepseekReasoningEffort !== 'none',
       tokenSafetyMarginPct: getProviderTokenSafetyMarginPct(config.provider),
     }
   } catch {

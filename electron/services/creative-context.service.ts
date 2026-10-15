@@ -172,22 +172,27 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   // so the base also covers changes to existing parents, endpoints and supporting records.
   const structuredAssets = ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'outline'].includes(input.stage)
   const assetCount = Number.isFinite(input.count) ? Math.max(1, Math.min(12, Math.floor(input.count!))) : 3
-  const stageOutputLimit = revisionBase ? revisionBase.revision.target === 'summary' ? 2_000
+  const stageContentLimit = revisionBase ? revisionBase.revision.target === 'summary' ? 2_000
     : Math.min(8_000, Math.max(2_000, Math.ceil(estimateTokens(JSON.stringify(chapterRevisionGenerationMaterial(revisionBase))) * 1.6) + 1_000))
     : input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
+  // DeepSeek counts hidden reasoning against max_tokens. A small local JSON
+  // patch still needs room to reason before emitting any usable prose.
+  const stageOutputLimit = stageContentLimit + (revisionBase && generationBudget.reasoningEnabled ? 12_000 : 0)
   const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
   const reviewOutputReserve = revisionBase
-    ? Math.min(reviewBudget.maxTokens || 12_000, 6_000, Math.floor((reviewBudget.maxContextTokens || 32_768) * 0.22))
+    ? Math.min(reviewBudget.maxTokens || 12_000, 6_000 + (reviewBudget.reasoningEnabled ? 12_000 : 0), Math.floor((reviewBudget.maxContextTokens || 32_768) * 0.22))
     : outputReserve
   // Leave room for the candidate and instructions during the independent review request.
   const formalSnapshotTokens = input.operation === 'review' && formalReviewSnapshot !== undefined ? estimateTokens(JSON.stringify(formalReviewSnapshot)) : 0
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
     ? Math.max(formalSnapshotTokens, estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '')) : Math.max(formalReviewTokens, formalSnapshotTokens)
-  const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
+  const reviewReserve = revisionBase && revisionBase.revision.target !== 'summary' ? estimateTokens(JSON.stringify(revisionBase.chapter)) + outputReserve + 500 : 0
+  // The 24k context-material cap does not include the merged formal chapter and
+  // patch used by local review. Reserve those once, inside the configured window.
+  const maxInputTokens = Math.min(24_000 + reviewReserve, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
   if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
   if (input.stage === 'chapter') {
     // Review sees the complete merged chapter; generation only needs the selected ranges.
-    const reviewReserve = revisionBase && revisionBase.revision.target !== 'summary' ? estimateTokens(JSON.stringify(revisionBase.chapter)) + outputReserve + 500 : 0
     if (maxInputTokens - reviewReserve < 1000) throw new Error('局部修订的合并章评审依据超过当前预算，请降低输出上限或切换模型。')
     const result = await compileCreativeChapterContext(input, { maxInputTokens: maxInputTokens - reviewReserve, outputReserve }, revisionBase)
     return { ...result, maxInputTokens, reviewOutputReserve }

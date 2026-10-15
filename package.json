@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "2.4.24",
+  "version": "2.4.26",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -41,7 +41,7 @@
     "test:reader-first": "node --test scripts/reader-first-expansion.test.cjs && electron scripts/reader-first-storage.test.cjs && electron scripts/reader-first-policy-storage.test.cjs && electron scripts/reader-first-context.test.cjs && electron scripts/reader-first-revision.test.cjs && electron scripts/reader-first-story-design.test.cjs && electron scripts/reader-first-writeback.test.cjs && electron scripts/reader-first-pilot.test.cjs && electron scripts/reader-first-feedback.test.cjs && electron scripts/reader-first-entrypoints.test.cjs && electron scripts/reader-first-launch.test.cjs",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:layout-governance && npm run test:workspace-chrome-contract && npm run test:chapter-soak-contract && npm run test:timeline-context-projection && npm run test:thread-context-projection && npm run test:fast-launch-bootstrap && npm run test:agent-conflict-stress && npm run test:chapter-integrity && npm run test:delete-integrity && npm run test:chapter-writeback-idempotency && npm run test:web-rpc && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow",
+    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:layout-governance && npm run test:workspace-chrome-contract && npm run test:chapter-soak-contract && npm run test:timeline-context-projection && npm run test:thread-context-projection && npm run test:fast-launch-bootstrap && npm run test:agent-conflict-stress && npm run test:chapter-integrity && npm run test:delete-integrity && npm run test:chapter-writeback-idempotency && npm run test:web-rpc && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow && npm run test:window-chrome",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:migrations": "electron scripts/migration-safety.test.cjs",
     "test:fts5": "electron scripts/fts5-capability.test.cjs",
@@ -81,7 +81,8 @@
     "test:reader-first-policy-storage": "electron scripts/reader-first-policy-storage.test.cjs",
     "audit:complexity": "node scripts/complexity-audit.cjs",
     "audit:complexity:strict": "node scripts/complexity-audit.cjs --strict",
-    "mcp": "npm run build:app && node scripts/run-novelforge-mcp.cjs"
+    "mcp": "node scripts/run-novelforge-mcp.cjs",
+    "test:window-chrome": "electron scripts/window-chrome-ui.test.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",

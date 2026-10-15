@@ -16,6 +16,7 @@ import {
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
 import AppShellBar from './AppShellBar'
+import CloseWindowDialog from './CloseWindowDialog'
 import './AppLayout.css'
 
 const { Sider, Content } = Layout
@@ -72,6 +73,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <Layout className="app-layout" data-ui-system="quiet-workspace">
+      <CloseWindowDialog />
       {!isNovelWorkspace ? <AppShellBar /> : null}
 
       {!isNovelWorkspace ? (

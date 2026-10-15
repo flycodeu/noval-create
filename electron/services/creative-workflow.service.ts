@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import type { CreativeRun, CreativeStage, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS } from '../../src/shared/creative-workflow'
+import { parseStrictJsonEnvelope } from '../../src/shared/strict-json-envelope'
 import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance } from '../../src/shared/prompts/prompt-common'
 import type { GenericAssetDraftContent, GenericAssetReviewContent, GenericAssetType } from '../../src/shared/generic-asset-workflow'
 import type { StoryAtlasChange } from '../../src/shared/story-atlas'
@@ -81,7 +82,7 @@ export function creativeSchemaHint(stage: CreativeStage, scope: CreativeWorkflow
   if (stage === 'background') return '{"userBackground":"故事发生的世界、时代、处境和初始冲突，纯小说背景","expandedBackground":"展开设定，避免与背景重复","synopsis":"面向读者的作品简介"}。只输出本次需要修改的非空字段，至少一项，未提及字段保留。不要改书名，不要放文件路径、字数目标、工作流程、作者操作指令。'
   if (stage === 'outline') return '{"volumes":[{"clientId":"v1","title":"卷名","summary":"本卷冲突和进展","parts":[{"clientId":"p1","title":"单元名","summary":"本单元完整事件"}]}],"chapters":[{"id":123,"chapterNum":1,"volumeId":"v1","partId":"p1","title":"章名","outline":"本章目的、冲突、事件、人物变化与悬念","chapterContract":{"chapterGoal":"本章应完成的事情","forbiddenActions":[],"acceptanceNotes":[]},"scenes":[{"pov":"现有人物精确全名","timeLocation":"时间地点","sceneGoal":"具体目标","obstacle":"具体阻碍","resultState":"结束状态","revealPayload":[]}],"allowedFactIds":[],"revealedFactIds":[]}]}。volumes和chapters可分别省略，但至少提供一个非空数组。新卷/单元用clientId，既有卷/单元用数值id；章节volumeId/partId引用既有数值ID或本批clientId。新章不带id，既有章必须使用id；每个章节必须有chapterContract及完整scenes，已有场景按既有顺序保留。增量补充，不清空已有卷章。事实ID来自已有资料，不编造。场景POV必须是现有人物唯一全名。' + `完整字段契约（不得增添字段）：${JSON.stringify(outlineSchema)}`
   const proseOnly = scope?.existingEntityIds?.length === 0 && scope.existingRelationIds?.length === 0 && scope.newEntityCount === 0 && scope.allowNewRelations === false
-  return '{"chapterNum":4,"title":"章名","content":"完整正文","summary":"本章实际发生事件的摘要","changes":[],"factReveals":[]}。factReveals仅逐项兑现本章已登记的revealedFactIds，不得编造编号；factId必须是已有信息点的数值整数，不写字符串或fact:前缀；characterIds使用已有图谱ID字符串，不是姓名也不是nativeId。每项evidenceQuote必须连续逐字引用本章实际获知过程，不用省略号拼接；没有新揭示时为空数组。characterIds只包括原文证明确实获知者，读者获知不代表所有人物知情。不能把计划、猜测、被否认的说法当作已获知真相。' + (proseOnly
+  return '{"chapterNum":4,"title":"章名","content":"完整正文","summary":"本章实际发生事件的摘要","changes":[],"factReveals":[]}。factReveals仅逐项兑现本章已登记的revealedFactIds，不得编造编号；factId必须是已有信息点的数值整数，不写字符串或fact:前缀；characterIds使用已有图谱ID字符串，不是姓名也不是nativeId。每项evidenceQuote必须连续逐字引用本章实际获知过程，连同标点和正文段落换行原样保留，不能把换行压成空格或自行改写，不用省略号拼接；没有新揭示时为空数组。先完成可阅读正文，再从正文提取证据；引文可包含连续多个句段，须覆盖该事实的实际来源、获知动作与必要比较，不能只摘最后一句判断。正文已经写清而引文不足时，只扩充引文，不把同一信息再写进正文。characterIds只包括原文证明确实获知者，读者获知不代表所有人物知情。不能把计划、猜测、被否认的说法当作已获知真相。' + (proseOnly
     ? '本次只生成正文与摘要，changes必须为空数组[]，不得输出人物、地点、物品或关系变更。正文里出现动作、位置变化和持有物不授权登记图谱。'
     : 'changes仅记录本次范围允许且正文已发生的变化；每项attributes.evidenceQuote必须是正文中至少4字的精确原句，不写计划或推测。结构如下：' + ATLAS_SCHEMA_HINT)
 }
@@ -99,7 +100,7 @@ function positive(value: unknown, name: string): number {
   return Number(value)
 }
 export function parseCreativeCandidate(stage: CreativeStage, raw: string): Record<string, unknown> {
-  const data = object(JSON.parse(raw))
+  const data = object(parseStrictJsonEnvelope(raw))
   if (atlasStages.has(stage)) {
     if (!Array.isArray(data.changes) || !data.changes.length || data.changes.length > 100) throw new Error('图谱变更数量必须为 1–100。')
   } else if (isProjectAssetStage(stage)) {
@@ -391,7 +392,7 @@ function revisionBase(input: StoredRequest): ChapterRevisionBase | undefined {
 }
 function parseWorkflowCandidate(input: StoredRequest, raw: string): Record<string, unknown> {
   const base = revisionBase(input)
-  return base ? parseCreativeCandidate('chapter', JSON.stringify(mergeChapterRevision(base, object(JSON.parse(raw))))) : parseCreativeCandidate(input.request.stage, raw)
+  return base ? parseCreativeCandidate('chapter', JSON.stringify(mergeChapterRevision(base, object(parseStrictJsonEnvelope(raw))))) : parseCreativeCandidate(input.request.stage, raw)
 }
 function requiresChapterContractCheck(input: StoredRequest) {
   return input.request.chapterRevision?.target !== 'summary' || Boolean(input.request.sourceArtifactId)

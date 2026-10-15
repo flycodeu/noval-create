@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { assertCreativeContextCoverage, compileCreativeContext, resolveCreativeChapterPosition } from './creative-context.service'
 import { creativeProjectSources, creativeRevisionSource } from './creative-chapter-context'
+import * as chapterContext from './creative-chapter-context'
 import { queryStoryAtlas } from './story-atlas.service'
 import type { CreativeStage } from '../../src/shared/creative-workflow'
+import { estimateTokens } from '../../src/shared/token-budget'
+import { chapterRevisionGenerationMaterial } from './creative-chapter-revision'
 
-const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, facts: [] as Array<Record<string, unknown>>, contract: {} as Record<string, unknown>, model: { maxTokens: 393216, maxContextTokens: 1048576 } }))
+const mock = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, artifact: {} as Record<string, unknown>, atlas: { entities: [] as Array<Record<string, unknown>>, relations: [] as Array<Record<string, unknown>> }, chapters: [] as Array<Record<string, unknown>>, facts: [] as Array<Record<string, unknown>>, contract: {} as Record<string, unknown>, model: { maxTokens: 393216, maxContextTokens: 1048576, reasoningEnabled: false } as { maxTokens: number; maxContextTokens: number; reasoningEnabled?: boolean } }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ prepare: (sql: string) => ({ all: () => sql.includes('story_volumes') ? [{ id: 11, title: '渡口卷', summary: '卷概要' }] : sql.includes('story_parts') ? [{ id: 12, volumeId: 11, title: '渡船单元', summary: '单元概要' }] : [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }] }) }) }))
 vi.mock('./novel.service', () => ({ getNovel: () => mock.novel }))
 vi.mock('./chapter.service', () => ({ listChapters: () => mock.chapters }))
@@ -19,7 +22,7 @@ describe('creative project context budget and saved constraints', () => {
     vi.mocked(queryStoryAtlas).mockClear()
     mock.atlas = { entities: [], relations: [] }; mock.chapters = []
     mock.facts = [{ id: 13, title: '旧绳秘密', summary: '事实概要', protagonistKnownChapterId: 3 }]
-    mock.model = { maxTokens: 393216, maxContextTokens: 1048576 }
+    mock.model = { maxTokens: 393216, maxContextTokens: 1048576, reasoningEnabled: false }
     mock.contract = {}
     mock.novel = {
       userBackground: '渡口故事', contextVersion: 1,
@@ -41,6 +44,37 @@ describe('creative project context budget and saved constraints', () => {
     expect(report.text).not.toContain('future')
     mock.model = { maxTokens: 8000, maxContextTokens: 6400 }
     await expect(compileCreativeContext(request, undefined, undefined, 0, undefined, base)).rejects.toThrow('窗口不足')
+  })
+  it('reserves merged local review outside the material cap while staying within the configured model window', async () => {
+    const base = { schemaVersion: 'creative-chapter-revision-base-v1' as const, chapterId: 21, chapterNum: 4, formalHash: 'fixture',
+      chapter: { chapterNum: 4, title: '夜试', content: '陆闻核对干湿分段，保留证言。'.repeat(300), summary: '陆闻核对湿缝', changes: [], factReveals: [] }, revision: { target: 'paragraphs' as const, paragraphIndexes: [1] } }
+    const request = { ...input('chapter'), atChapter: 4, chapterRevision: base.revision, request: '只修指定段落' }
+    const compile = vi.spyOn(chapterContext, 'compileCreativeChapterContext').mockImplementation(async (_input, limits) => ({ text: '完整必要资料', estimatedTokens: 100, sources: [], omittedSources: [], ...limits }))
+    try {
+      const report = await compileCreativeContext(request, undefined, undefined, 0, undefined, base)
+      const reserve = estimateTokens(JSON.stringify(base.chapter)) + report.outputReserve + 500
+      expect(compile.mock.calls[0][1].maxInputTokens).toBe(24000)
+      expect(report.maxInputTokens).toBe(24000 + reserve)
+      mock.model = { maxTokens: 8000, maxContextTokens: 64000 }
+      const limited = await compileCreativeContext(request, undefined, undefined, 0, undefined, base)
+      expect(limited.maxInputTokens + limited.outputReserve + limited.reviewOutputReserve! + 2000).toBeLessThanOrEqual(Math.floor(mock.model.maxContextTokens * 0.85))
+      expect(limited.outputReserve).toBeLessThanOrEqual(Math.min(8000, Math.ceil(estimateTokens(JSON.stringify(chapterRevisionGenerationMaterial(base))) * 1.6) + 1000))
+      mock.model = { maxTokens: 8000, maxContextTokens: 16000 }
+      await expect(compileCreativeContext(request, undefined, undefined, 0, undefined, base)).rejects.toThrow(/窗口不足|合并章评审依据/)
+    } finally { compile.mockRestore() }
+  })
+  it('reserves reasoning before a DeepSeek local patch without overriding user token limits', async () => {
+    const base = { schemaVersion: 'creative-chapter-revision-base-v1' as const, chapterId: 21, chapterNum: 4, formalHash: 'fixture',
+      chapter: { chapterNum: 4, title: '夜试', content: '杨嫂点亮灯，陆闻看守湿缝。', summary: '陆闻点灯', changes: [], factReveals: [] }, revision: { target: 'summary' as const } }
+    const request = { ...input('chapter'), atChapter: 4, chapterRevision: base.revision, request: '只纠正摘要中的点灯者' }
+    mock.model.reasoningEnabled = true
+    const report = await compileCreativeContext(request, undefined, undefined, 0, undefined, base)
+    expect(report.outputReserve).toBe(14000)
+    expect(report.reviewOutputReserve).toBe(18000)
+    mock.model.maxTokens = 4000
+    const capped = await compileCreativeContext(request, undefined, undefined, 0, undefined, base)
+    expect(capped.outputReserve).toBe(4000)
+    expect(capped.reviewOutputReserve).toBe(4000)
   })
   it('compacts structured prose revision metadata without changing any original paragraph', () => {
     const data = { chapterNum: 4, title: '夜试', content: '  第一段原文。\n\n第二段仍保留空行。  ', summary: '原摘要', changes: [], factReveals: [] }

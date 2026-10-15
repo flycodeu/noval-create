@@ -58,4 +58,15 @@ describe('creative narrative model dispatch', () => {
     expect(prompt).not.toContain('转折须能回看')
     expect(prompt).toContain('必须遵循此结构提示')
   })
+
+  it('puts fluency guidance into the actual chapter request without imposing it on planning assets', async () => {
+    const chapter = await dispatch('chapter')
+    expect(chapter).toContain('【正文流畅度】')
+    expect(chapter).toContain('不把职业调查删成跳结论')
+    expect(chapter).toContain('第二个人不照抄第一个人的问询步骤')
+    for (const type of ['outline', 'map'] as AssetReviewTarget[]) {
+      mock.generate.mockClear()
+      expect(await dispatch(type)).not.toContain('【正文流畅度】')
+    }
+  })
 })

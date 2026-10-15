@@ -5930,10 +5930,13 @@ declare global {
         minimize: () => Promise<void>
         toggleMaximize: () => Promise<boolean>
         close: () => Promise<void>
+        confirmClose: (choice: 'minimize' | 'exit') => Promise<void>
+        onCloseRequested: (callback: (hasUnsavedChanges: boolean) => void) => () => void
         isMaximized: () => Promise<boolean>
         onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => () => void
       }
       app: {
+        getRuntimeInfo?: () => Promise<import('../shared/runtime-identity').RuntimeIdentity>
         getDatabasePath: () => Promise<string>
         getMaintenanceStatus: () => Promise<MaintenanceWorkerStatus>
         getUpdateStatus: () => Promise<import('../shared/desktop-update').DesktopUpdateStatus>

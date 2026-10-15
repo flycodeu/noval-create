@@ -243,7 +243,7 @@ export async function compileCreativeChapterContext(
   // Summary patches have already returned; prose and its review share this scoped material.
   if (!revisionBase) add('opening_progress', buildReaderFirstOpeningGuidance(chapterNum, input.operation === 'review' ? 'review' : 'writing'), true, 'plan', contractPolicy)
   add('narrative_detail', buildNarrativeDetailGuidance(input.operation === 'review' ? 'review' : revisionBase ? 'rewrite' : 'writing'), true, 'plan', contractPolicy)
-  if (input.operation !== 'review' && !revisionBase) add('fact_reveal_evidence_rule', 'factReveals 的 evidenceQuote 必须连续摘录本章实际获知的原句。非本场视角人物若登记知情，引文要覆盖该人物姓名及其说出、听到或看到的具体过程；不要只截匿名对白。人物在附近不表示知道，原文没支持就不登记，不能为了补引文新增人物认知。', true, 'plan', contractPolicy)
+  if (input.operation !== 'review' && !revisionBase) add('fact_reveal_evidence_rule', 'factReveals 的 evidenceQuote 必须连续摘录本章实际获知的原句，逐字保留标点与正文中的段落换行，不能把换行压成空格或自行改写。非本场视角人物若登记知情，引文要覆盖该人物姓名及其说出、听到或看到的具体过程；不要只截匿名对白。人物在附近不表示知道，原文没支持就不登记，不能为了补引文新增人物认知。', true, 'plan', contractPolicy)
   for (const source of creativeProjectSources(novel, true, omitted)) {
     const text = typeof source.value === 'string' ? source.value : JSON.stringify(source.value)
     if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')
@@ -251,7 +251,10 @@ export async function compileCreativeChapterContext(
   }
   // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
   for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
-  if (!revisionBase && input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  if (!revisionBase && input.operation !== 'review' && context.chapter.content?.trim()) {
+    add('original_prose_usage', '本章旧正文是事实、状态、人物口吻与前后衔接的依据，不是必须照搬的句段模板。按本次请求确定修改范围：要求重写或重新生成时，可在合同内重组重复问答、记录与转场，保留有效表达；仅要求局部修订或逐字保留时遵守指定范围。降低 AI 味或改善流畅度不能只改错字、替换同义词，也不能为了显示变化改写无问题的句子。不得改事实、知识边界、事件顺序、同意关系和揭示章位，不输出改稿分析。', true, 'plan', contractPolicy)
+    add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  }
   const revisionSource = revisionBase ? undefined : creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
   if (revisionBase) add('chapter_revision', chapterRevisionGenerationMaterial(revisionBase), true, 'draft', contractPolicy)
@@ -444,8 +447,15 @@ export function assertCreativeChapterCandidate(input: {
   // Keep their diagnostics for review, but do not force new plot consequences into a quiet scene.
   const contractedValidation = { ...validation, itemResults: validation.itemResults.filter(item =>
     item.contractItemType !== 'golden_three_state_delivery'
+    // Book-level theme keywords cannot prove that a chapter lacks a meaningful
+    // choice. Keep this diagnostic for semantic review; explicit chapter/scene
+    // goals and results remain mandatory below.
+    && item.contractItemType !== 'theme_chapter_response'
     && (item.contractItemType !== 'chapter_hook' || Boolean(context.chapterContract.hookType)),
   ) }
-  if (hasHardContractValidationBlocker(contractedValidation)) fail('CHAPTER_CONTRACT_NOT_DELIVERED', `正文未兑现必要合同：${validation.summary}`)
+  if (hasHardContractValidationBlocker(contractedValidation)) {
+    const blockers = contractedValidation.itemResults.filter(item => hasHardContractValidationBlocker({ ...contractedValidation, itemResults: [item] }))
+    fail('CHAPTER_CONTRACT_NOT_DELIVERED', `正文未兑现必要合同：${blockers.map(item => `${item.contractItemType}：${item.expected}；${item.rewriteHint}`).join('；')}`)
+  }
   return { chapterId: context.chapter.id, validation }
 }

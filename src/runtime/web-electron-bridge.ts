@@ -958,6 +958,8 @@ export function installWebElectronBridge(): void {
       minimize: noop,
       toggleMaximize: async () => false,
       close: noop,
+      confirmClose: noop,
+      onCloseRequested: () => () => undefined,
       isMaximized: async () => false,
       onMaximizedStateChange: () => () => undefined,
     },
@@ -1500,6 +1502,7 @@ export function installWebElectronBridge(): void {
     premiseDraft: createService('premiseDraft'),
     planningDraft: createService('planningDraft'),
     app: createService('app', {
+      getRuntimeInfo: async () => withLocalBackend('app', 'getRuntimeInfo', [], async () => null),
       getDatabasePath: async () => withLocalBackend(
         'app',
         'getDatabasePath',

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   execFile: vi.fn(),
   probeRuntime: vi.fn(),
   runtimeRequest: vi.fn(),
+  testProfile: false,
 }))
 
 vi.mock('electron', () => ({ app: mocks.app }))
@@ -16,12 +17,14 @@ vi.mock('node:child_process', () => ({
   execFile: (...args: unknown[]) => mocks.execFile(...args),
 }))
 vi.mock('../utils/mcp-runtime', () => ({ probeRuntime: mocks.probeRuntime, runtimeRequest: mocks.runtimeRequest }))
+vi.mock('../utils/desktop-profile', () => ({ isTestProfile: () => mocks.testProfile }))
 
 import { configureCodexMcp, getCodexMcpSetupStatus } from './codex-mcp-setup.service'
 
 describe('Codex MCP setup', () => {
   beforeEach(() => {
     mocks.app.isPackaged = true
+    mocks.testProfile = false
     mocks.command = 'D:\\Program Files\\NovelForge\\NovelForge.exe'
     mocks.args = ['--mcp']
     mocks.missing = false
@@ -52,6 +55,13 @@ describe('Codex MCP setup', () => {
     expect(status.command).toContain("'D:\\Program Files\\NovelForge\\NovelForge.exe' '--mcp'")
     expect(status.runtime.reachable).toBe(false)
     expect(mocks.execFile).toHaveBeenCalledWith('C:\\Tools\\codex.exe', ['mcp', 'get', 'novelforge', '--json'], expect.objectContaining({ windowsHide: true }), expect.any(Function))
+  })
+
+  it('never registers a test copy as the formal Codex entry', async () => {
+    mocks.testProfile = true
+    expect((await getCodexMcpSetupStatus('C:\\Tools\\codex.exe')).supported).toBe(false)
+    await expect(configureCodexMcp('C:\\Tools\\codex.exe')).rejects.toThrow('正式')
+    expect(mocks.execFile).not.toHaveBeenCalled()
   })
 
   it('replaces a stale path using fixed argument boundaries and verifies the result', async () => {

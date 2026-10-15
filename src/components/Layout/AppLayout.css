@@ -131,8 +131,40 @@
   gap: 20px;
   min-height: 44px;
   padding: 0 10px 0 18px;
+  -webkit-app-region: drag;
+}
+
+.app-shell-bar__window-controls,
+.app-shell-bar__task-indicator {
   -webkit-app-region: no-drag;
 }
+
+.runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+.runtime-badge:hover { color: var(--text-primary); background: var(--bg-hover); border-color: var(--border-default); }
+.runtime-badge__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.runtime-badge--test { color: var(--warning, #a56b16); background: color-mix(in srgb, var(--warning, #a56b16) 10%, transparent); }
+.runtime-badge--test .runtime-badge__dot { background: currentColor; }
+.runtime-details { max-width: min(360px, calc(100vw - 64px)); color: var(--text-secondary); font-size: 12px; }
+.runtime-details dl { margin: 14px 0 0; }
+.runtime-details dt { margin-top: 10px; color: var(--text-muted); font-size: 11px; }
+.runtime-details dd { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--text-primary); }
 
 .app-shell-bar--windowless {
   min-height: 38px;
@@ -145,7 +177,7 @@
 
 .app-shell-bar__meta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   min-width: 0;
 }
@@ -164,22 +196,24 @@
 .app-shell-bar__window-controls {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex: 0 0 auto;
-  margin-left: 24px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-default);
 }
 
 .app-shell-bar__window-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 30px;
+  width: 36px;
+  height: 32px;
   color: var(--text-secondary);
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: background 140ms ease, color 140ms ease;
 }
 
@@ -274,3 +308,23 @@
   flex: 0 0 auto;
   margin-left: auto;
 }
+
+.runtime-badge:focus-visible,
+.app-shell-bar__window-button:focus-visible,
+.author-window-button:focus-visible,
+.close-window-dialog__choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.close-window-dialog .ant-modal-content { padding: 28px; border: 1px solid var(--border-default); border-radius: 16px; background: var(--bg-surface); }
+.close-window-dialog .ant-modal-header { margin-bottom: 10px; background: transparent; }
+.close-window-dialog .ant-modal-title { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+.close-window-dialog__intro { margin: 0 0 22px; font-size: 13px; line-height: 1.8; color: var(--text-secondary); }
+.close-window-dialog__choices { display: grid; gap: 10px; }
+.close-window-dialog__choice { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; text-align: left; font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 10px; cursor: pointer; transition: background 140ms, border-color 140ms; }
+.close-window-dialog__choice > .anticon { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; font-size: 17px; border-radius: 8px; color: var(--text-secondary); background: var(--bg-muted); }
+.close-window-dialog__choice strong { display: block; font-size: 14px; font-weight: 600; }
+.close-window-dialog__choice small { display: block; margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.close-window-dialog__choice:hover { background: var(--bg-hover); border-color: var(--accent); }
+.close-window-dialog__choice--exit:hover { border-color: var(--danger); }
+.close-window-dialog__choice--exit:hover > .anticon { color: var(--danger); }
+.close-window-dialog__choice:disabled { opacity: .6; cursor: wait; }
+.close-window-dialog .ant-modal-footer { margin-top: 22px; }
+.close-window-dialog__error { color: var(--danger); margin: 12px 0 0; }

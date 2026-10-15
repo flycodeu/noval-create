@@ -1,43 +1,27 @@
 import fs from 'node:fs'
 import readline from 'node:readline'
-import { spawn } from 'node:child_process'
 import { app } from 'electron'
 import { probeRuntime, readRuntimeConnection, runtimeRequest, type RuntimeConnection } from './utils/mcp-runtime'
 import { assertNotUpdating } from './utils/update-lifecycle'
+import { applicationVersion, isTestProfile } from './utils/desktop-profile'
+import { assertMcpDesktopOwner } from './utils/mcp-owner-policy'
 
 /** A stdio client never opens storage; every request goes to the existing owner. */
-export async function startMcpStdio(runtimeArgs?: string[]): Promise<void> {
+export async function startMcpStdio(): Promise<void> {
   console.log = (...args) => console.error(...args)
   console.info = (...args) => console.error(...args)
   console.debug = (...args) => console.error(...args)
   await app.whenReady()
+  if (!app.isPackaged || isTestProfile()) throw new Error('MCP 不接受源码版或临时数据目录，请手动打开安装版的正式实例。')
   const directory = app.getPath('userData')
-  const version = app.getVersion()
+  const version = applicationVersion()
   const connectInitialOwner = async (): Promise<RuntimeConnection> => {
     assertNotUpdating(directory, version)
     const live = await probeRuntime(directory, version)
-    if (live) return live.connection
-    assertNotUpdating(directory, version)
-    const args = runtimeArgs || [...(app.isPackaged ? [] : [app.getAppPath()]), '--runtime']
-    const child = spawn(process.execPath, args, {
-      env: { ...process.env, NOVELFORGE_USER_DATA_DIR: directory },
-      detached: true, stdio: 'ignore', windowsHide: true,
-    })
-    let launchError: Error | undefined
-    child.once('error', (error) => { launchError = error })
-    child.unref()
-    const deadline = Date.now() + 30_000
-    while (Date.now() < deadline) {
-      assertNotUpdating(directory, version)
-      if (launchError) throw launchError
-      const ready = await probeRuntime(directory, version)
-      if (ready) return ready.connection
-      await new Promise((resolve) => setTimeout(resolve, 150))
-    }
-    throw new Error('NovelForge runtime did not become ready in 30 seconds. Check the app startup log.')
+    assertMcpDesktopOwner(live?.health, directory, app.getPath('exe'))
+    return live!.connection
   }
-  // Only initial connection may start an owner. An established bridge must release the
-  // installed executable when its owner stops, even while Codex keeps stdin open.
+  // Connection-only: neither initial connection nor reconnect may start an owner.
   const connection = await connectInitialOwner()
   const input = fs.createReadStream('', { fd: 0, autoClose: false })
   const lines = readline.createInterface({ input, crlfDelay: Infinity })
@@ -76,6 +60,7 @@ export async function startMcpStdio(runtimeArgs?: string[]): Promise<void> {
       // replacement owner to serve it.
       assertBoundOwnerExists()
       const owner = await probeRuntime(directory, version)
+      if (owner) assertMcpDesktopOwner(owner.health, directory, app.getPath('exe'))
       assertNotUpdating(directory, version)
       assertBoundOwnerExists()
       // A cold BrowserWindow can temporarily block the owner's HTTP loop. A

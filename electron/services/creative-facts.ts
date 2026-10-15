@@ -6,6 +6,7 @@ import { getChapter, listChapters } from './chapter.service'
 import { listSceneContracts } from './endgame-asset.service'
 import { createStoryFact, listStoryFacts, updateStoryFact } from './story-fact.service'
 import { markNovelContextChanged } from './context-impact.service'
+import { matchesCreativeEvidenceQuote } from './creative-evidence-quote'
 
 const text: Schema = { type: 'string', minLength: 1, maxLength: 12000 }
 const id: Schema = { type: 'integer', minimum: 1 }
@@ -140,7 +141,7 @@ export function validateCreativeFactReveals(novelId: number, chapterNum: number,
     seen.add(fact.id)
     if (!allowed.has(fact.id) || !required.has(fact.id)) throw new Error(`fact:${fact.id} 未获得本章揭示授权。`)
     const quote = reveal.evidenceQuote.trim()
-    if (quote.length < 4 || !content.includes(quote)) throw new Error(`fact:${fact.id} 缺少逐字匹配正文的揭示证据。`)
+    if (!matchesCreativeEvidenceQuote(content, quote)) throw new Error(`fact:${fact.id} 缺少逐字匹配正文的揭示证据。`)
     const authorizedScenes = scenes.filter(scene => scene.revealPayload.some(value => [`fact:${fact.id}`, `#${fact.id}`, fact.title, fact.summary].includes(value.trim())))
     if (!authorizedScenes.length) throw new Error(`fact:${fact.id} 缺少场景揭示安排。`)
     if (new Set(reveal.characterIds).size !== reveal.characterIds.length) throw new Error('获知人物不能重复提交。')

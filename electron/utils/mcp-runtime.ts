@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
+import type { RuntimeIdentity } from '../../src/shared/runtime-identity'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js'
@@ -17,6 +18,7 @@ export interface RuntimeConnection {
   token: string
 }
 export interface RuntimeHealth {
+  identity?: RuntimeIdentity
   instanceId: string
   version: string
   storage: 'ready'
@@ -115,6 +117,7 @@ function toolResult(result: AgentToolCallResult) {
 
 /** The caller already owns and initialized storage. This transport never opens SQLite. */
 export async function startMcpRuntime(options: {
+  identity?: RuntimeIdentity
   directory: string
   version: string
   registry: Registry
@@ -142,6 +145,7 @@ export async function startMcpRuntime(options: {
     if (closing) { json(503, { error: 'Runtime is stopping' }); return }
     if (request.method === 'GET' && request.url === '/health') {
       json(200, {
+        identity: options.identity,
         instanceId: connection.instanceId, version: options.version, storage: 'ready',
         tools: options.registry.list().length, activeRequests: transports.size,
         modelConfigured: options.modelConfigured?.() ?? false, desktopAvailable: Boolean(options.openDesktop), desktopOpen: options.isDesktopOpen?.() ?? false,
@@ -183,7 +187,7 @@ export async function startMcpRuntime(options: {
     if (request.method !== 'POST') { json(405, { error: 'Use MCP POST requests; poll durable runs for progress' }); return }
     const mcp = new Server({ name: 'novelforge', version: options.version }, {
       capabilities: { tools: {}, resources: {} },
-      instructions: 'Select and read the project first; projects.create creates a new book only when requested. Query relevant assets and atlas records, and inspect context.preview for coverage, constraints and budget. Build missing locations, character profiles and organizations from approved story material before prose needs them. Preserve unknown facts and distinguish confirmed records, planned characters and unfilled organization positions. Character residence, activity and current position use presence.locationRole; organizations use headquarters, outpost and jurisdiction, faction.parentId and positions; membership.positionId links an actual member to a position. Empty positions are not invented people. For generation, use workflows.start with the project-configured model, an explicit stage, a bounded count and the intended atChapter. Use autoApply:false for new character or prose designs that need discussion. Use chapters.review to review existing prose without changing it. Poll workflows.get and read the returned candidate and review artifacts; preserve atChapter and sourceArtifactId for a targeted revision. Use atlas.apply for reviewed factual corrections. Do not copy candidates into desktop forms. Missing facts remain unknown until a generated candidate is accepted.',
+      instructions: (options.identity ? `Runtime: ${options.identity.environment === 'test' ? 'TEST COPY; changes do not update formal manuscripts' : 'FORMAL INSTANCE'}. Data directory: ${options.identity.dataDirectory}. Version: ${options.identity.version}. ` : '') + 'Select and read the project first; projects.create creates a new book only when requested. Query relevant assets and atlas records, and inspect context.preview for coverage, constraints and budget. Build missing locations, character profiles and organizations from approved story material before prose needs them. Preserve unknown facts and distinguish confirmed records, planned characters and unfilled organization positions. Character residence, activity and current position use presence.locationRole; organizations use headquarters, outpost and jurisdiction, faction.parentId and positions; membership.positionId links an actual member to a position. Empty positions are not invented people. For generation, use workflows.start with the project-configured model, an explicit stage, a bounded count and the intended atChapter. Use autoApply:false for new character or prose designs that need discussion. Use chapters.review to review existing prose without changing it. Poll workflows.get and read the returned candidate and review artifacts; preserve atChapter and sourceArtifactId for a targeted revision. Use atlas.apply for reviewed factual corrections. Do not copy candidates into desktop forms. Missing facts remain unknown until a generated candidate is accepted.',
     })
     mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: options.registry.list().map(descriptorForMcp) }))
     mcp.setRequestHandler(CallToolRequestSchema, async (call) => {

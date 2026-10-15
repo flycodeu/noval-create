@@ -8,7 +8,7 @@ import { safeParseJson } from '../utils/json'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { stableHash } from '../../src/shared/context-pack'
-import { appendNarrativeNaturalnessPrompt } from '../../src/shared/narrative-naturalness'
+import { appendNarrativeNaturalnessPrompt, buildProseFluencyGuidance } from '../../src/shared/narrative-naturalness'
 import type { AiExecutionMode } from '../../src/shared/ai-execution'
 import { resolveAuthorStyleMaterial } from './style-analysis.service'
 import { applyPromptOverride, getNarrativePromptSource } from './prompt-override.service'
@@ -79,7 +79,7 @@ export function buildProseOperation(kind: 'rewrite' | 'score', input: RewritePro
     const body = kind === 'rewrite'
       ? `只输出所选原文的修订候选，不扩写邻段；允许最小修改和有依据的删冗。\n要求：${(input as RewriteProseInput).specificRequirements}\n前文：${(input as RewriteProseInput).contextBefore}\n原文：${(input as RewriteProseInput).originalParagraph}`
       : `评价当前文本的阅读效果，有效表达应保留；指出问题原文、最小修改范围与需保留之处。只输出 JSON，字段 dimensions（name/score/feedback/suggestion）、ai_like_rate、repetition_risk、overall_score、overall_feedback、top_fixes。评分不能证明作者身份，也不授予定稿许可。\n内容类型：${(input as ScoreProseInput).contentType}\n原文：${(input as ScoreProseInput).content}`
-    prompt = applyPromptOverride(key, [rules, body, material?.reference || ''].filter(Boolean).join('\n\n'), { ...input }, 'reader-first-v1')
+    prompt = applyPromptOverride(key, [rules, ...buildProseFluencyGuidance(kind === 'rewrite' ? 'rewrite' : 'review'), body, material?.reference || ''].filter(Boolean).join('\n\n'), { ...input }, 'reader-first-v1')
   }
   const execution = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel?.settingsJson })
   const route = buildAiModelRouteReport({ taskKind: kind === 'rewrite' ? 'paragraph_rewrite' : 'chapter_review', stageLabel: kind === 'rewrite' ? 'Paragraph Rewrite' : 'Content Score', executionMode: execution.mode, resolutionSource: execution.source, modelConfigId: input.modelConfigId ?? novel?.modelConfigId })

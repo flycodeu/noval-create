@@ -7,7 +7,7 @@ const STORY_SERVICES = new Set([
   'growthSystem', 'task', 'workflow', 'workflowNode', 'history', 'revision', 'premiseDraft', 'planningDraft',
   'subplot', 'worldRules', 'batchWorkbench', 'writeback', 'quality', 'embedding', 'style', 'parallel',
 ])
-const APP_METHODS = new Set(['getDatabasePath', 'getMaintenanceStatus', 'getCapabilities', 'getUpdateStatus', 'getCodexMcpSetupStatus'])
+const APP_METHODS = new Set(['getRuntimeInfo', 'getDatabasePath', 'getMaintenanceStatus', 'getCapabilities', 'getUpdateStatus', 'getCodexMcpSetupStatus'])
 const SENSITIVE_METHODS: Record<string, Set<string>> = {
   model: new Set(['list', 'create', 'update', 'delete', 'setDefault', 'test']),
   sourceSearch: new Set(['getSettings', 'updateSettings', 'test']),

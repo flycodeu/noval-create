@@ -6,7 +6,7 @@ const net = require('node:net')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js')
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js')
+const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js')
 const root = path.resolve(__dirname, '..')
 const directory = path.join(root, '.tmp-tests', `mcp-runtime-${process.pid}-${randomUUID()}`)
 const env = { ...process.env, NOVELFORGE_USER_DATA_DIR: directory, NOVELFORGE_DISABLE_LEGACY_DB_COPY: '1', ELECTRON_RENDERER_URL: 'data:text/html,<title>NovelForge runtime integration</title><p>Isolated desktop host</p>' }
@@ -30,17 +30,34 @@ async function rpc(service, method, args = []) {
 }
 async function connect() {
   const client = new Client({ name: 'mcp-runtime-integration', version: '1.0.0' })
-  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(__dirname, 'run-novelforge-mcp.cjs')], cwd: root, env, stderr: 'pipe' })
-  transport.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+  const live = discovery()
+  const transport = new StreamableHTTPClientTransport(new URL('/mcp', live.url), { requestInit: { headers: { Authorization: `Bearer ${live.token}` } } })
   clients.push(client)
   await client.connect(transport, { timeout: 60_000 })
   return client
 }
+async function startFixtureOwner() {
+  // Fixture startup is explicit. Production stdio refuses test profiles and never starts owners.
+  const owner = spawn(require('electron'), [path.join(__dirname, 'novelforge-mcp.cjs'), '--runtime'], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+  owner.stderr.on('data', chunk => { stderr += String(chunk) })
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (fs.existsSync(discoveryPath)) return
+    if (owner.exitCode != null) throw new Error('Fixture owner exited')
+    await wait(100)
+  }
+  owner.kill(); throw new Error('Fixture owner startup timed out')
+}
 async function main() {
   fs.mkdirSync(directory, { recursive: true })
   try {
+    await startFixtureOwner()
     const first = await connect()
     const firstOwner = discovery()
+    const health = await (await request('/health')).json()
+    assert.equal(health.version, require('../package.json').version, 'Report app version, never Electron version')
+    assert.equal(health.identity.environment, 'test')
+    assert.equal(health.identity.dataDirectory, directory)
+    assert.equal((await rpc('app', 'getRuntimeInfo')).environment, 'test')
     const listed = await first.listTools()
     assert(listed.tools.some((tool) => tool.name === 'novelforge.projects.list'))
     const projects = await first.callTool({ name: 'novelforge.projects.list', arguments: {} })
@@ -125,12 +142,14 @@ async function main() {
     for (let attempt = 0; attempt < 100 && fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')); attempt += 1) await wait(100)
     assert(!fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')), 'Explicit stop must release the writer lock')
     assert(modelRequestClosed, 'Explicit exit must close the in-flight model connection')
-    // Stopping the owner invalidates existing bridges; only an explicit new
-    // client connection may start another owner, without replaying mutations.
+    // A new connection cannot start an owner either; only the fixture controller may.
     await assert.rejects(second.callTool({ name: 'novelforge.projects.list', arguments: {} }, undefined, { timeout: 10_000 }))
     await wait(1_500)
     assert(!fs.existsSync(discoveryPath), 'A stopped bridge must not restart the owner')
     assert(!fs.existsSync(path.join(directory, 'novelforge.single-writer.lock')), 'A stopped bridge must not reacquire storage')
+    await assert.rejects(connect())
+    assert(!fs.existsSync(discoveryPath), 'Fresh connection must not create an owner')
+    await startFixtureOwner()
     const fresh = await connect()
     assert(!(await fresh.callTool({ name: 'novelforge.projects.list', arguments: {} })).isError)
     assert.notEqual(discovery().instanceId, firstOwner.instanceId)
@@ -139,7 +158,7 @@ async function main() {
     assert.equal((await rpc('novel', 'get', [novelId])).userBackground, '渡口的两名船工。')
     const recoveredMap = await fresh.callTool({ name: 'novelforge.atlas.query', arguments: { novelId, locationParentId: mapIds.country } })
     assert.deepEqual(recoveredMap.structuredContent.atlas.locationChildren[0].attributes.geography, savedGeography, 'map geometry survives a full owner restart and MCP reconnect')
-    process.stdout.write(`PASS shared Electron runtime: ${listed.tools.length} tools; desktop + Web proxy + 2 MCP clients + reconnect + owner stop invalidates old bridge + fresh-client restart + model cancellation + key masking + map geometry validation/write/read/restart\n`)
+    process.stdout.write(`PASS shared Electron runtime HTTP: ${listed.tools.length} tools; explicit fixture startup + Web proxy + 2 MCP clients + reconnect without autostart + model cancellation + map geometry validation/write/read/restart\n`)
   } catch (error) {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error

@@ -9,6 +9,7 @@ import { useThemeStore } from '../../stores/theme.store'
 import { isElectronRuntime } from '../../runtime/environment'
 import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
 import WindowControls from '../../components/Layout/WindowControls'
+import RuntimeBanner from '../../components/Layout/RuntimeBanner'
 import { WorkspaceChromePortalContext } from '../../components/novel/workspace-layout/workspace-chrome-contract'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import { NovelWorkspaceActionsProvider } from './workspace-shortcuts'
@@ -140,6 +141,7 @@ export default function NovelRouter() {
           { type: 'divider' }, { key: 'export', label: '导出作品', children: ['txt', 'md', 'docx', 'epub'].map((format) => ({ key: format, label: format.toUpperCase(), onClick: () => void exportBook(format) })) },
           { key: 'theme', label: '外观', children: [{ key: 'light', label: '浅色', onClick: () => setTheme('light') }, { key: 'soft', label: '柔和', onClick: () => setTheme('soft') }, { key: 'dark', label: '深色', onClick: () => setTheme('dark') }] },
         ] }}><Button type="text" icon={<EllipsisOutlined />} aria-label="作品设置与导出" /></Dropdown>
+        <RuntimeBanner />
         {isElectronRuntime() && <WindowControls className="author-window-controls" buttonClassName="author-window-button" dangerButtonClassName="author-window-button--danger" />}</div>
       </header>
       <aside className="author-shell-sidebar">{sidebar}</aside>

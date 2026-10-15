@@ -28,7 +28,7 @@ const server = http.createServer(async (req, res) => {
   requests.push(payload)
   const prompt = payload.messages?.map(message => typeof message.content === 'string' ? message.content : '').join('\n') || ''
   if (prompt.includes('[creative_evidence]')) {
-    const line = prompt.split('\n').find(text => text.startsWith('{"prose":'))
+    const line = prompt.split('\n').find(text => text.startsWith('{"sourceParagraphs":'))
     const evidence = JSON.parse(line)
     let scripted
     try { scripted = JSON.parse(replies[0]) } catch { /* No explicit certificate queued. */ }
@@ -38,7 +38,7 @@ const server = http.createServer(async (req, res) => {
     // certificates stay negative; new visibility checks receive a controlled certificate.
     const assessments = evidence.claims.map(claim => overrides.get(claim.id) || {
       id: claim.id, support: scripted?.assessments?.[0]?.support || 'supported',
-      evidenceQuote: evidence.prose.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
+      evidenceQuote: evidence.sourceParagraphs[0].text.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
     })
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ assessments }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100 } }))
@@ -208,7 +208,10 @@ async function main() {
     const prosePrompt = requests[beforeFirst + 2].messages.map(message => message.content).join('\n')
     assert.ok(prosePrompt.includes('changes必须为空数组[]'), 'prose-only generation must not invite graph changes')
     assert.ok(prosePrompt.includes('factId必须是已有信息点的数值整数'), 'fact ID format is explicit before generation and repair')
-    const { creativeSchemaHint } = require('../electron/services/creative-workflow.service.ts')
+    const { creativeSchemaHint, parseCreativeCandidate } = require('../electron/services/creative-workflow.service.ts')
+    const fencedCandidate = { chapterNum: 1, title: '渡口', content: prose, summary: '船停稳了。', changes: [], factReveals: [] }
+    assert.deepEqual(parseCreativeCandidate('chapter', '```json\n' + JSON.stringify(fencedCandidate) + '\n```'), fencedCandidate)
+    assert.throws(() => parseCreativeCandidate('chapter', '解释\n```json\n' + JSON.stringify(fencedCandidate) + '\n```'))
     assert.ok(creativeSchemaHint('chapter', { existingEntityIds: ['character:1'] }).includes('upsert_entity'), 'explicitly allowed graph edits retain their schema')
     assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')
     const chapter = sqlite.prepare('SELECT content, summary FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId)
@@ -481,6 +484,9 @@ async function main() {
     const foreignFactId = require('../electron/services/story-fact.service.ts').createStoryFact(novelId, { title: '别的小说信息点', summary: secret })
     const validReveal = { factId: secretFact.id, characterIds: [shen.id], evidenceQuote: `他辨出最后一行字：${secret}。` }
     const chapterCandidate = factReveals => ({ chapterNum: 2, title: '旧信', content: revealProse, summary: '沈墨读信知道割绳者。', changes: [], factReveals })
+    const multilineProse = `沈墨读信，信被泥水浸湿。\n\n他辨出最后一行字：${secret}。`
+    const flattenedQuote = multilineProse.replace(/\s+/gu, ' ')
+    assert.doesNotThrow(() => require('../electron/services/creative-facts.ts').validateCreativeFactReveals(mysteryId, 2, multilineProse, [{ ...validReveal, evidenceQuote: flattenedQuote }]), 'whitespace-only quote serialization remains auditable')
     for (const [label, badReveal] of [
       ['bad-quote', { ...validReveal, evidenceQuote: '这句话不在正文里面' }],
       ['bad-character', { ...validReveal, characterIds: ['character:missing'] }],

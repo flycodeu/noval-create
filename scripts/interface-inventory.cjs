@@ -23,6 +23,7 @@ const DESKTOP_WEB_PLATFORM_ONLY = new Set([
   'app.getCodexMcpSetupStatus',
   'app.configureCodexMcp',
   'window.close',
+  'window.confirmClose',
   'window.isMaximized',
   'window.minimize',
   'window.toggleMaximize',

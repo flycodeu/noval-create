@@ -1,6 +1,6 @@
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
-import { buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
+import { buildProseFluencyGuidance, buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -100,6 +100,7 @@ function buildGenerationPrompt(input: GenerateGenericAssetDraftInput, contextSum
     `标题：${input.title.trim()}`,
     requirements.length > 0 ? `要求：\n${requirements.map((line) => `- ${line}`).join('\n')}` : '要求：在不新增无依据事实的前提下，产出完整、具体、可审阅的草稿。',
     ...(['chapter', 'outline'].includes(input.assetType) ? ['【故事质量取舍】', ...buildStoryQualityGuidance('write')] : []),
+    ...(input.assetType === 'chapter' ? ['【正文流畅度】', ...buildProseFluencyGuidance('write')] : []),
     '',
     '【输出契约】',
     outputInstruction(format, input.schemaHint?.trim() || ''),

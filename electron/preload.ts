@@ -90,6 +90,12 @@ const api = {
     minimize: () => invokeIpc('window:minimize'),
     toggleMaximize: () => invokeIpc<boolean>('window:toggleMaximize'),
     close: () => invokeIpc('window:close'),
+    confirmClose: (choice: 'minimize' | 'exit') => invokeIpc('window:confirmClose', choice),
+    onCloseRequested: (callback: (hasUnsavedChanges: boolean) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, hasUnsavedChanges: boolean) => callback(hasUnsavedChanges)
+      ipcRenderer.on('window:close-requested', subscription)
+      return () => ipcRenderer.removeListener('window:close-requested', subscription)
+    },
     isMaximized: () => invokeIpc<boolean>('window:isMaximized'),
     onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => {
       const subscription = (_event: Electron.IpcRendererEvent, isMaximized: boolean) => callback(isMaximized)
@@ -99,6 +105,7 @@ const api = {
   },
 
   app: {
+    getRuntimeInfo: () => invokeIpc<import('../src/shared/runtime-identity').RuntimeIdentity>('app:getRuntimeInfo'),
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
     getMaintenanceStatus: () => invokeIpc<MaintenanceWorkerStatus>('app:getMaintenanceStatus'),
     getUpdateStatus: () => invokeIpc<DesktopUpdateStatus>('app:getUpdateStatus'),

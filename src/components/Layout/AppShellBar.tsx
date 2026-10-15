@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { WORKSPACE_MODULE_DEFINITIONS } from '../../shared/novel-workspace'
 import { isElectronRuntime } from '../../runtime/environment'
 import WindowControls from './WindowControls'
+import RuntimeBanner from './RuntimeBanner'
 import TaskIndicator from '../TaskIndicator'
 import './AppLayout.css'
 
@@ -41,6 +42,7 @@ export default function AppShellBar() {
       <div className="app-shell-bar__content">
         <div className="app-shell-bar__meta">
           <strong className="app-shell-bar__title">{title}</strong>
+          <RuntimeBanner />
         </div>
         <TaskIndicator className="app-shell-bar__task-indicator" />
         {showWindowControls ? (

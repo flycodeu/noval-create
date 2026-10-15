@@ -1,4 +1,5 @@
 import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance, section, sectionUnlessCovered } from '../../src/shared/prompts/prompt-common'
+import { buildProseFluencyGuidance } from '../../src/shared/narrative-naturalness'
 import { compileNarrativeTechniques, type NarrativeTechniqueScene } from '../../src/shared/narrative-techniques'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { STORY_DESIGN_SCHEMA } from '../../src/shared/story-thread-generation'
@@ -48,6 +49,8 @@ export function buildReaderFirstRolePrompt(role: ReaderFirstRole, params: Prompt
   const parts = [
     `${role === 'planner' ? '规划本章场景' : role === 'critic' ? '审读本章正文' : role === 'rewriter' ? '修订本章正文' : '写本章正文'}：${text(params, 'novelTitle')} · 第 ${params.chapterNum} 章 ${text(params, 'chapterTitle')}`,
     section('写作依据', [...COMMON, ...ROLE_RULES[role]].join('\n')),
+    role === 'planner' ? section('场景衔接', '先接住前章结尾实际未完的动作与当前人物、物品状态；后续场景沿用上一场带来的变化，写清已有事实为何使人物继续、改问或暂缓。已完成的核对不重新安排，已准备的行动按合同兑现；缺少关键原因时保留缺口，不擅自补造动机、新证据或提前兑现后章。') : '',
+    role !== 'planner' ? section('正文流畅度', buildProseFluencyGuidance(role === 'critic' ? 'review' : role === 'rewriter' ? 'rewrite' : 'write').join('\n')) : '',
     section('题材与当下语气', [text(params, 'genre'), text(params, 'emotionTone')].filter(Boolean).join('；')),
     (role === 'planner' || role === 'writer') && typeof params.targetWords === 'number' && params.targetWords > 0
       ? section('篇幅', `本章目标约 ${params.targetWords} 字，按场景需要安排详略，不用重复解释或无关事件凑字。`) : '',

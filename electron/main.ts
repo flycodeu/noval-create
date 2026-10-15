@@ -1,7 +1,10 @@
-import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, screen } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
+import { applicationVersion, formalDataDirectory, installedExecutable, isTestProfile, registerFormalInstallation, runtimeIdentity, sameDirectory } from './utils/desktop-profile'
+import { restoreWindowBounds } from './utils/window-placement'
+import { assertMcpDesktopOwner } from './utils/mcp-owner-policy'
 
 // Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码。
 // 启动时把当前控制台切到 UTF-8，仅影响显示。
@@ -43,6 +46,7 @@ import type {
   RelationshipArcInput,
 } from '../src/types'
 import { closeDb, getDb, initDb } from './database/db'
+import { confirmWindowClose, installWindowCloseGuard } from './utils/window-close'
 import { acquireSingleWriterLock, type SingleWriterLockHandle } from './utils/single-writer-lock'
 import {
   chapters,
@@ -78,7 +82,7 @@ import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, s
 import { assertNotUpdating, assertUpdateStorageReleased, waitForMcpBridgesToExit } from './utils/update-lifecycle'
 import { configureCodexMcp, getCodexMcpSetupStatus } from './services/codex-mcp-setup.service'
 import { startMcpStdio } from './mcp-stdio'
-import { attachToExistingRuntime, startMcpRuntime, type RuntimeHandle } from './utils/mcp-runtime'
+import { attachToExistingRuntime, probeRuntime, startMcpRuntime, type RuntimeHandle } from './utils/mcp-runtime'
 import { resolveRuntimeRpcChannel } from './utils/runtime-rpc'
 import { registerStoryWorkspaceIpc } from './application/story-workspace-ipc'
 import * as styleAnalysisService from './services/style-analysis.service'
@@ -160,9 +164,18 @@ const mcpMode = process.argv.includes('--mcp')
 const runtimeMode = process.argv.includes('--runtime')
 if (process.env.NOVELFORGE_USER_DATA_DIR) {
   const userDataDir = path.resolve(process.env.NOVELFORGE_USER_DATA_DIR)
-  fs.mkdirSync(userDataDir, { recursive: true })
+  if (mcpMode && !sameDirectory(userDataDir, formalDataDirectory())) {
+    console.error('MCP 不接受临时数据目录，请手动打开安装版的正式实例。')
+    app.exit(1)
+  }
+  if (!mcpMode) fs.mkdirSync(userDataDir, { recursive: true })
   app.setPath('userData', userDataDir)
+} else {
+  app.setPath('userData', formalDataDirectory())
 }
+const desktopTitle = isTestProfile() ? 'NovelForge · 测试副本（不会同步正式正文）' : 'NovelForge'
+if (isTestProfile()) process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
+if (process.platform === 'win32' && isTestProfile()) app.setAppUserModelId('com.novelforge.test')
 
 interface WindowState {
   x?: number
@@ -191,15 +204,13 @@ function loadWindowState(): WindowState {
 function saveWindowState(win: BrowserWindow) {
   try {
     const isMaximized = win.isMaximized()
-    const bounds = win.getBounds()
-    const state: WindowState = isMaximized
-      ? { width: bounds.width, height: bounds.height, isMaximized: true }
-      : {
+    const bounds = win.getNormalBounds()
+    const state: WindowState = {
           x: bounds.x,
           y: bounds.y,
           width: bounds.width,
           height: bounds.height,
-          isMaximized: false,
+          isMaximized,
         }
 
     fs.writeFileSync(getWindowStatePath(), JSON.stringify(state), 'utf-8')
@@ -214,17 +225,18 @@ function sendWindowState(win: BrowserWindow) {
 
 function createWindow() {
   const winState = loadWindowState()
+  const display = Number.isFinite(winState.x) && Number.isFinite(winState.y)
+    ? screen.getDisplayNearestPoint({ x: winState.x!, y: winState.y! }) : screen.getPrimaryDisplay()
+  const bounds = restoreWindowBounds(winState, display.workArea)
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, 'icon.ico')
     : path.join(app.getAppPath(), 'build/icon.ico')
 
   mainWindow = new BrowserWindow({
-    x: winState.x,
-    y: winState.y,
-    width: winState.width || 1400,
-    height: winState.height || 900,
-    minWidth: 1100,
-    minHeight: 700,
+    title: desktopTitle,
+    ...bounds,
+    minWidth: Math.min(1100, display.workArea.width),
+    minHeight: Math.min(700, display.workArea.height),
     frame: false,
     backgroundColor: '#0f1117',
     icon: iconPath,
@@ -259,33 +271,8 @@ function createWindow() {
   })
 
   const window = mainWindow
-  window.on('close', (event) => {
-    // Programmatic quits (including an approved update) have already finished
-    // the shutdown path. Only a user's window-close request needs this choice.
-    if (shutdownComplete) {
-      saveWindowState(window)
-      return
-    }
-    const choice = dialog.showMessageBoxSync(window, {
-      type: 'question',
-      title: '关闭 NovelForge',
-      message: '要最小化窗口，还是退出 NovelForge？',
-      detail: '最小化后可从任务栏恢复，Codex 仍可调用。退出会停止本地创作服务并取消正在运行的 AI 请求；请先保存正在编辑的内容。',
-      buttons: ['最小化并继续任务', '退出并停止服务', '取消'],
-      defaultId: 1,
-      cancelId: 2,
-      noLink: true,
-    })
-    if (choice === 2) {
-      event.preventDefault()
-      return
-    }
-    saveWindowState(window)
-    if (choice === 0) {
-      event.preventDefault()
-      window.minimize()
-    }
-  })
+  window.on('page-title-updated', (event) => { event.preventDefault(); window.setTitle(desktopTitle) })
+  installWindowCloseGuard(window, () => shutdownComplete, () => saveWindowState(window))
 
   mainWindow.on('maximize', () => {
     if (mainWindow) sendWindowState(mainWindow)
@@ -318,7 +305,7 @@ function createRuntimeTray() {
   const icon = app.isPackaged ? path.join(process.resourcesPath, 'icon.ico') : path.join(app.getAppPath(), 'build/icon.ico')
   if (!fs.existsSync(icon)) return
   runtimeTray = new Tray(icon)
-  runtimeTray.setToolTip('NovelForge · 本地创作服务运行中')
+  runtimeTray.setToolTip(`${desktopTitle} · 本地创作服务运行中`)
   runtimeTray.on('right-click', () => {
     const running = databaseReady ? getDb().select({ status: tasks.status, parentTaskId: tasks.parentTaskId }).from(tasks).all()
       .filter((task) => task.parentTaskId == null && ['pending', 'running', 'cancel_requested'].includes(task.status || '')).length : 0
@@ -332,19 +319,35 @@ function createRuntimeTray() {
 }
 
 async function attachToRuntime(): Promise<boolean> {
-  assertNotUpdating(app.getPath('userData'), app.getVersion())
-  if (!await attachToExistingRuntime(app.getPath('userData'), app.getVersion(), !runtimeMode)) return false
+  assertNotUpdating(app.getPath('userData'), applicationVersion())
+  if (!await attachToExistingRuntime(app.getPath('userData'), applicationVersion(), !runtimeMode)) return false
   shutdownComplete = true
   app.quit()
   return true
 }
 
 app.whenReady().then(async () => {
-  assertNotUpdating(app.getPath('userData'), app.getVersion())
+  // Source builds must never silently become the owner of the formal database.
+  if (!app.isPackaged && !isTestProfile()) {
+    const executable = installedExecutable()
+    if (mcpMode) {
+      const live = await probeRuntime(formalDataDirectory(), applicationVersion())
+      assertMcpDesktopOwner(live?.health, formalDataDirectory(), executable)
+    }
+    const child = spawn(executable, mcpMode ? ['--mcp'] : runtimeMode ? ['--runtime'] : [], {
+      env: { ...process.env, NOVELFORGE_USER_DATA_DIR: formalDataDirectory() },
+      stdio: mcpMode ? 'inherit' : 'ignore', windowsHide: true, detached: !mcpMode,
+    })
+    child.once('error', (error) => { console.error(error); app.exit(1) })
+    if (mcpMode) child.once('exit', (code) => app.exit(code ?? 1))
+    else { child.unref(); shutdownComplete = true; app.quit() }
+    return
+  }
+  assertNotUpdating(app.getPath('userData'), applicationVersion())
   if (mcpMode) {
-    void startMcpStdio(app.isPackaged ? undefined : [process.argv[1] || app.getAppPath(), '--runtime']).catch((error) => {
+    void startMcpStdio().catch((error) => {
       console.error('[novelforge-mcp] fatal:', error)
-      app.quit()
+      app.exit(1)
     })
     return
   }
@@ -364,13 +367,14 @@ app.whenReady().then(async () => {
     return
   }
   writerLock = lockHandle
+  registerFormalInstallation()
 
   initDb()
   databaseReady = true
   taskService.recoverOrphanedTasks()
   registerIpcHandlers()
   runtimeHandle = await startMcpRuntime({
-    directory: app.getPath('userData'), version: app.getVersion(), registry: novelForgeToolRegistry,
+    directory: app.getPath('userData'), version: applicationVersion(), identity: runtimeIdentity(), registry: novelForgeToolRegistry,
     modelConfigured: () => { try { return Boolean(modelService.getDefaultModelConfigRecord()) } catch { return false } },
     openDesktop: showDesktop, isDesktopOpen: () => Boolean(mainWindow && !mainWindow.isDestroyed()), shutdown: () => app.quit(),
     invokeRpc: async (service, method, args) => {
@@ -384,7 +388,7 @@ app.whenReady().then(async () => {
   createRuntimeTray()
   if (!runtimeMode) createWindow()
   maintenanceWorker.start()
-  startDesktopUpdater(() => mainWindow, async () => {
+  if (!isTestProfile()) startDesktopUpdater(() => mainWindow, async () => {
     await shutdownApplication()
     await waitForMcpBridgesToExit(app.getPath('exe'))
     assertUpdateStorageReleased(app.getPath('userData'))
@@ -498,12 +502,19 @@ function registerIpcHandlers() {
     return null
   })
 
+  handle('window:confirmClose', (event, choice: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) confirmWindowClose(window, choice)
+    return null
+  })
+
   handle('window:isMaximized', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     return window?.isMaximized() ?? false
   })
 
   handle('app:getDatabasePath', () => getDatabasePath())
+  handle('app:getRuntimeInfo', () => runtimeIdentity())
   handle('app:getCapabilities', () => ({ surface: 'shared-runtime', realDatabase: true, writesEnabled: true, generationEnabled: true, eventStreaming: true }))
   handle('app:getMaintenanceStatus', () => maintenanceWorker.getStatus())
   handle('app:getUpdateStatus', () => getDesktopUpdateStatus())

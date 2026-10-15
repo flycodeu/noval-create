@@ -19,6 +19,7 @@ import { creativeChapterSceneVisibility } from './creative-chapter-context'
 import { runNestedReviewTask } from './asset-quality.service'
 import { assertCreativeEvidence, creativeEvidenceClaims, reviewCreativeEvidence, validateEvidenceAssessments } from './creative-evidence-review'
 import type { ModelOutputCheckpoint } from './creative-model-checkpoint'
+import { estimateTokens } from '../../src/shared/token-budget'
 
 const prose = '沈墨看到信上写着周荷的名字，但他说：“这封信不足以证明她割断绳索。”'
 const data = { chapterNum: 2, content: prose, factReveals: [{ factId: 1, characterIds: ['character:1'], evidenceQuote: prose }], changes: [] }
@@ -28,6 +29,83 @@ const review = () => reviewCreativeEvidence({ ...base, maxInputTokens: 24000, ou
 
 describe('evidence support certificates', () => {
   beforeEach(() => { store.clear(); vi.clearAllMocks(); Object.assign(factContext, { kind: 'truth', status: 'confirmed', notes: '', characterKnowledge: [] }); vi.mocked(creativeChapterSceneVisibility).mockReturnValue([]) })
+  it('resolves selected source paragraphs into exact continuous evidence including CRLF and speaker actions', async () => {
+    const content = '沈墨走近。\r\n\r\n他看见周荷割断绳索。\r\n\r\n周荷放下刀。'
+    const candidate = { ...data, content }
+    const rows = creativeEvidenceClaims(1, candidate).map(claim => ({ id: claim.id, support: 'supported', evidenceParagraphRange: { start: 1, end: 2 }, reason: '核对完整正文中的目击过程' }))
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: rows }))
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    const certificate = store.get(report!.artifactId)!.content as { assessments: Array<{ evidenceQuote: string }> }
+    expect(certificate.assessments.every(row => row.evidenceQuote === '沈墨走近。\r\n\r\n他看见周荷割断绳索。')).toBe(true)
+    expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).not.toThrow()
+    expect(vi.mocked(runNestedReviewTask).mock.calls[0][0].prompt).toContain('sourceParagraphs')
+  })
+  it.each([{ start: 0, end: 1 }, { start: 1, end: 99 }, { start: 2, end: 1 }, { start: '1', end: 1 }, null])('blocks invalid or empty paragraph references for ordinary claims: %j', async (range) => {
+    const rows = creativeEvidenceClaims(1, data).map(claim => ({ id: claim.id, support: 'supported', evidenceParagraphRange: range, reason: '模型判断不能覆盖引用校验' }))
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: rows }))
+    await expect(review()).rejects.toThrow()
+    expect(store.size).toBe(0)
+  })
+  it('keeps a negative semantic finding even when its source range is valid', async () => {
+    const rows = creativeEvidenceClaims(1, data).map(claim => ({ id: claim.id, support: 'insufficient', evidenceParagraphRange: { start: 1, end: 1 }, reason: '正文只有否认，不能证实割绳者' }))
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: rows }))
+    const report = await review()
+    expect(report!.passed).toBe(false)
+    expect(() => assertCreativeEvidence({ ...base, reportArtifactId: report!.artifactId })).toThrow('未通过')
+  })
+  it('names copied input-only fields during repair without accepting the malformed report', async () => {
+    const rows = creativeEvidenceClaims(1, data).map(claim => ({ id: claim.id, support: 'insufficient', evidenceParagraphRange: { start: 1, end: 1 }, reason: '只有否认，不能证明结论' }))
+    vi.mocked(runNestedReviewTask)
+      .mockResolvedValueOnce(JSON.stringify({ assessments: rows.map(row => ({ ...row, checkType: 'scene_visibility' })) }))
+      .mockResolvedValueOnce(JSON.stringify({ assessments: rows }))
+    const report = await review()
+    expect(runNestedReviewTask).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(runNestedReviewTask).mock.calls[1][0].prompt).toContain('多余字段：checkType')
+    expect(report!.passed).toBe(false)
+    expect((store.get(report!.artifactId)!.content as { formatRepairCount: number }).formatRepairCount).toBe(1)
+  })
+  it('accepts a complete fenced JSON report without another model call or changing its quotes', async () => {
+    const rows = assessments()
+    vi.mocked(runNestedReviewTask).mockResolvedValue('```json\n' + JSON.stringify({ assessments: rows }) + '\n```')
+    const report = await review()
+    expect(report!.passed).toBe(true)
+    expect(runNestedReviewTask).toHaveBeenCalledTimes(1)
+    expect((store.get(report!.artifactId)!.content as { assessments: unknown }).assessments).toEqual(rows)
+    expect(() => assertCreativeEvidence({ ...base, reportArtifactId: report!.artifactId })).not.toThrow()
+  })
+  it.each(['```json\n{\n```', '```json\n{}\n```\nextra', '```json\n' + JSON.stringify({ assessments: [] }) + '\n```'])('still rejects incomplete or invalid fenced reports: %s', async (response) => {
+    vi.mocked(runNestedReviewTask).mockResolvedValue(response)
+    await expect(review()).rejects.toThrow()
+    expect(runNestedReviewTask).toHaveBeenCalledTimes(2)
+    expect(store.size).toBe(0)
+  })
+  it('reviews full prose once despite repeated long quotes and repairs a large invalid reply within budget', async () => {
+    const content = '沈墨逐行核对信上的文字。'.repeat(250) + '周荷割断了绳索。'
+    const candidate = { ...data, content, factReveals: [{ ...data.factReveals[0], evidenceQuote: content }] }
+    const rows = creativeEvidenceClaims(1, candidate).map(claim => ({ id: claim.id, support: 'supported', evidenceQuote: '周荷割断了绳索。', reason: '本章实际读信并核对获知' }))
+    vi.mocked(runNestedReviewTask).mockResolvedValueOnce(JSON.stringify({ assessments: rows.map(row => ({ ...row, evidenceQuote: '无效原句'.repeat(5000) })) })).mockResolvedValueOnce(JSON.stringify({ assessments: rows }))
+    const maxInputTokens = 6000
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    expect(report!.passed).toBe(true)
+    expect(runNestedReviewTask).toHaveBeenCalledTimes(2)
+    for (const [request] of vi.mocked(runNestedReviewTask).mock.calls) {
+      expect(estimateTokens(request.prompt)).toBeLessThanOrEqual(maxInputTokens)
+      expect(request.prompt.split(JSON.stringify(content)).length - 1).toBe(1)
+      expect(request.prompt).not.toContain('无效原句')
+      for (const row of rows) expect(request.prompt).toContain(row.id)
+    }
+    expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).not.toThrow()
+  })
+  it('keeps whitespace-normalized assessment quotes unchanged in the bound certificate', async () => {
+    const content = '沈墨读信。\n\n周荷割断了绳索。'
+    const quote = '沈墨读信。周荷割断了绳索。'
+    const candidate = { ...data, content, factReveals: [{ ...data.factReveals[0], evidenceQuote: quote }] }
+    const rows = creativeEvidenceClaims(1, candidate).map(claim => ({ id: claim.id, support: 'supported', evidenceQuote: quote, reason: '逐项核对正文，换行序列化不同' }))
+    vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: rows }))
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    expect((store.get(report!.artifactId)!.content as { assessments: unknown }).assessments).toEqual(rows)
+    expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).not.toThrow()
+  })
   it('requires retained character delivery in its original chapter and invalidates a changed knowledge scope', async () => {
     factContext.characterKnowledge = [
       { characterId: 'character:1', knownChapterId: 2, knownFromStart: false },
@@ -99,6 +177,18 @@ describe('evidence support certificates', () => {
     expect(runNestedReviewTask).toHaveBeenCalledTimes(2)
     expect(store.size).toBe(0)
   })
+  it('identifies the invalid claim without accepting abbreviated speakers or omitted words', async () => {
+    const content = '沈墨跟过来，低头看，才说：“周荷割断了绳索。”'
+    const candidate = { ...data, content }
+    const claims = creativeEvidenceClaims(1, candidate)
+    const rows = claims.map(claim => ({ id: claim.id, support: 'supported', evidenceQuote: '沈墨说：“周荷割断了绳索。”', reason: '核对完整正文' }))
+    expect(() => validateEvidenceAssessments({ assessments: rows }, claims, content)).toThrow(`结论 ${claims[0].id}`)
+    vi.mocked(runNestedReviewTask).mockResolvedValueOnce(JSON.stringify({ assessments: rows })).mockResolvedValueOnce(JSON.stringify({ assessments: rows.map(row => ({ ...row, evidenceQuote: content })) }))
+    const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
+    expect(report!.passed).toBe(true)
+    expect(vi.mocked(runNestedReviewTask).mock.calls[1][0].prompt).toContain(`结论 ${claims[0].id}`)
+    expect(vi.mocked(runNestedReviewTask).mock.calls[1][0].prompt).toContain('不要输出 evidenceQuote，不复制或改写引文')
+  })
   it('preserves testimony qualifications and never requires revealing a clue to prove the entire case', async () => {
     Object.assign(factContext, { kind: 'clue', status: 'introduced', notes: '这是证人的说法，尚未查明谁割断绳索，不得据此定罪。' })
     const claims = creativeEvidenceClaims(1, data)
@@ -122,9 +212,12 @@ describe('evidence support certificates', () => {
     const claims = creativeEvidenceClaims(1, candidate)
     expect(claims).toHaveLength(1)
     expect(claims[0].conclusion).toContain('无法定位场景或知情过程则 insufficient')
+    expect(claims[0].conclusion).toContain('此项仅检查未越界，不要求本章揭示该事实')
+    expect(claims[0].conclusion).toContain('完全未使用此事实应 supported')
     vi.mocked(runNestedReviewTask).mockResolvedValue(JSON.stringify({ assessments: [{ id: claims[0].id, support: 'contradicted', evidenceQuote: prose, reason: '第二场的未知情 POV 把秘密当作既知事实' }] }))
     const report = await reviewCreativeEvidence({ ...base, data: candidate, maxInputTokens: 24000, outputReserve: 6000, checkpoint: {} as ModelOutputCheckpoint })
     expect(report!.passed).toBe(false)
+    expect(runNestedReviewTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('不能以没有出现后章内容') }))
     expect(() => assertCreativeEvidence({ ...base, data: candidate, reportArtifactId: report!.artifactId })).toThrow('未通过')
     expect(() => validateEvidenceAssessments({ assessments: [{ id: claims[0].id, support: 'supported', evidenceQuote: '', reason: '整章没有使用此事实，各场均未提前知情' }] }, claims, prose)).not.toThrow()
   })
