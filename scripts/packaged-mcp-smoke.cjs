@@ -93,7 +93,7 @@ async function startFixtureOwner() {
 async function connect() {
   const live = discovery()
   const transport = new StreamableHTTPClientTransport(new URL('/mcp', live.url), { requestInit: { headers: { Authorization: `Bearer ${live.token}` } } })
-  const client = new Client({ name: 'packaged-runtime-smoke', version: '2.4.26' })
+  const client = new Client({ name: 'packaged-runtime-smoke', version: require('../package.json').version })
   clients.push(client)
   await client.connect(transport, { timeout: 60000 })
   return client

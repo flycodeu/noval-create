@@ -9,6 +9,8 @@ fs.mkdirSync(tempRoot, { recursive: true })
 const temp = fs.mkdtempSync(path.join(tempRoot, 'window-chrome-'))
 app.setPath('userData', temp)
 app.disableHardwareAcceleration()
+// Match the CI runner at the responsive breakpoint, independently of host DPI.
+app.commandLine.appendSwitch('force-device-scale-factor', '1')
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function main() {
   await app.whenReady()
@@ -22,7 +24,7 @@ import './src/styles/global.css';import './src/styles/ui-simplification.css';
 const {ipcRenderer}=require('electron');window.operations=[];window.dirty=false;
 window.addEventListener('beforeunload',event=>{if(window.dirty){event.preventDefault();event.returnValue='';}});
 window.electron={on:()=>{},novel:{list:async()=>[],get:async()=>({id:292,title:'照夜行',totalWords:16214})},
-app:{getRuntimeInfo:async()=>({environment:'formal',source:'installed',version:'2.4.26',executable:'D:/Program Files/NovelForge/NovelForge.exe',dataDirectory:'C:/Users/author/AppData/Roaming/NovelForge'})},
+app:{getRuntimeInfo:async()=>({environment:'formal',source:'installed',version:'${require('../package.json').version}',executable:'D:/Program Files/NovelForge/NovelForge.exe',dataDirectory:'C:/Users/author/AppData/Roaming/NovelForge'})},
 windowControls:{minimize:async()=>{window.operations.push('minimize');},toggleMaximize:async()=>false,isMaximized:async()=>false,onMaximizedStateChange:()=>()=>{},
 close:()=>ipcRenderer.invoke('fixture:close'),confirmClose:choice=>ipcRenderer.invoke('fixture:confirm',choice),
 onCloseRequested:callback=>{const f=(_,value)=>callback(value);ipcRenderer.on('window:close-requested',f);return()=>ipcRenderer.removeListener('window:close-requested',f);}}};
@@ -51,8 +53,8 @@ const root=createRoot(document.getElementById('root'));window.paint=(theme,route
   for (const theme of ['light','dark','soft']) for (const width of [1280,960,720]) {
     win.setContentSize(width,900)
     await run(`window.paint('${theme}')`);await pause(200)
-    const layout=await run(`(()=>{const header=document.querySelector('.author-shell-header'),close=document.querySelector('.author-window-button--danger'),r=close.getBoundingClientRect();return{height:header.getBoundingClientRect().height,scrollWidth:document.documentElement.scrollWidth,innerWidth,overflow:document.documentElement.scrollWidth>innerWidth+1,closeVisible:r.left>=0&&r.right<=innerWidth+1,banners:document.querySelectorAll('.runtime-banner').length}})()`)
-    assert.equal(layout.banners,0);assert.equal(layout.overflow,false,JSON.stringify({theme,width,...layout}));assert.equal(layout.closeVisible,true);assert(Math.abs(layout.height-56)<1)
+    const layout=await run(`(()=>{const header=document.querySelector('.author-shell-header'),close=document.querySelector('.author-window-button--danger'),r=close.getBoundingClientRect();return{height:header.getBoundingClientRect().height,compact:matchMedia('(max-width:720px)').matches,scrollWidth:document.documentElement.scrollWidth,innerWidth,overflow:document.documentElement.scrollWidth>innerWidth+1,closeVisible:r.left>=0&&r.right<=innerWidth+1,banners:document.querySelectorAll('.runtime-banner').length}})()`)
+    assert.equal(layout.banners,0);assert.equal(layout.overflow,false,JSON.stringify({theme,width,...layout}));assert.equal(layout.closeVisible,true);assert(Math.abs(layout.height-(layout.compact?58:56))<1,JSON.stringify({theme,width,...layout}))
     await click('关闭或最小化窗口');await wait('!!document.querySelector(".close-window-dialog .ant-modal-title")');await pause(700)
     const modal=await run(`(()=>{const r=document.querySelector('.close-window-dialog .ant-modal-content').getBoundingClientRect();return{left:r.left,right:r.right,focused:document.activeElement.textContent,text:document.querySelector('.close-window-dialog').textContent}})()`)
     assert(modal.left>=0&&modal.right<=width+1);assert.equal(modal.focused,'继续编辑',JSON.stringify({theme,width,focused:modal.focused}))
