@@ -14,6 +14,9 @@ process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath
 app.setPath('userData', isolatedPath)
 app.commandLine.appendSwitch('disable-gpu')
 registerProjectTsRuntime(root)
+// This is a storage/prompt test. Optional local embedding must use its fallback,
+// rather than waiting for an external model download on development or CI hosts.
+globalThis.fetch = async () => { throw new Error('RF-12 isolation refused outbound request') }
 
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex')
 const runId = new Date().toISOString().replace(/[:.]/g, '-')
