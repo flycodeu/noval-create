@@ -7,8 +7,9 @@ import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { LoadFailure } from './shared'
 import { loadDocumentNames } from './document-references'
 import { chapterArrangementTarget } from './revision-target'
+import type { ObjectTaskTarget } from './ObjectTaskPanel'
 
-export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: { chapter: Chapter; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+export default function ChapterArrangement({ chapter, onSaved, onDirtyChange, onDiscuss }: { chapter: Chapter; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void; onDiscuss?: (target: ObjectTaskTarget) => void }) {
   const navigate = useNavigate()
   const [contract, setContract] = useState<ChapterContractAsset | null>(null)
   const [scenes, setScenes] = useState<SceneContractAsset[]>([])
@@ -45,8 +46,14 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange }: 
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存安排失败') }
     finally { setSaving(false) }
   }
+  const discuss = () => {
+    if (!onDiscuss) { navigate(buildWorkspaceRoute(chapter.novelId, chapterArrangementTarget(chapter))); return }
+    onDiscuss({ title: `第 ${chapter.chapterNum} 章 · 写作安排`, stage: 'outline', atChapter: chapter.chapterNum, count: 1,
+      request: `仅完善第 ${chapter.chapterNum} 章《${chapter.title || '未命名'}》的章节目标与完整场景安排，保留已有大纲、事实揭示边界和有效场景。`,
+      changeScope: { chapterIds: [chapter.id], preserveChapterFields: ['title', 'outline', 'volumeId', 'partId', 'targetWords', 'allowedFactIds', 'revealedFactIds'] } })
+  }
   return <div className="author-arrangement">
-    <div className="author-section-heading"><h2>第 {chapter.chapterNum} 章 · 写作安排</h2><Button disabled={dirty || saving} onClick={() => navigate(buildWorkspaceRoute(chapter.novelId, chapterArrangementTarget(chapter)))}>让 AI 完善本章安排</Button></div>
+    <div className="author-section-heading"><h2>第 {chapter.chapterNum} 章 · 写作安排</h2><Button disabled={dirty || saving} onClick={discuss}>让 AI 完善本章安排</Button></div>
     {error && <LoadFailure message={error} retry={() => void load()} />}
     <section><div className="author-section-heading"><h3>完整大纲</h3><Button size="small" onClick={() => edit('outline', chapter.outline || '')}>编辑</Button></div><ContentDocument value={chapter.outline} /></section>
     {loading ? <Spin /> : <>

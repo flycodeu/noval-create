@@ -8,6 +8,7 @@ import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { AuthorPage, EmptyWork, LoadFailure } from './shared'
 import { buildStoryTimelineEntries, chapterWritingLabel, STORY_TIMELINE_STATES, storyTimelineClock, storyTimelineGroups, timelineEntityRoute, type StoryTimelineEntry, type StoryTimelineState } from './story-timeline'
 import './story-timeline.css'
+import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 
 const DETAILS = [{ key: 'eventCause', title: '前因' }, { key: 'eventProcess', title: '经过' }, { key: 'eventResult', title: '结果' }]
 
@@ -23,6 +24,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   const [novel, setNovel] = useState<Novel | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [taskTarget, setTaskTarget] = useState<ObjectTaskTarget | null>(null)
   const epoch = useRef(0)
   const detailRef = useRef<HTMLElement | null>(null)
   const load = useCallback(async () => {
@@ -51,9 +53,9 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   const groups = storyTimelineGroups(filtered, chapterFilter == null ? chapters : chapters.filter(chapter => chapter.chapterNum === chapterFilter), mode, status === 'all' && !keyword.trim())
   const selected = filtered.find(entry => entry.entity.id === params.get('event')) || groups.find(group => group.entries.length)?.entries[0]
   const open = (route: string) => navigate(buildWorkspaceRoute(novelId, route))
-  const discuss = (entry?: StoryTimelineEntry) => open(`guide?${new URLSearchParams({ stage: entry ? 'events' : 'world_rules', autoApply: 'false', request: entry
+  const discuss = (entry?: StoryTimelineEntry) => setTaskTarget({ title: entry ? entry.entity.name : '小说时间设计', stage: entry ? 'events' : 'world_rules', ...(entry?.chapterNum != null ? { atChapter: entry.chapterNum } : {}), request: entry
     ? `结合现有正文检查事件“${entry.entity.name}”（${entry.entity.id}）的发生时间、章节锚点、因果顺序、参与人物和地点。区分已经写定与计划；仅在有依据时细化日期。只有先后证据时使用chronologyOrder表达项目内事件先后，不猜日期，也不把列表sortOrder当时间证据；保留原有事实和正文。`
-    : '结合已有正文和世界设定梳理小说时间：朝代、纪年、开篇时间、当前故事时间及对应已写章序。使用 worldRules.timelineConfig 的 dynastyName、storyStartLabel、currentTimeLabel、currentTimeChapterNum、currentTimeEvidence 保存；当前时间必须有原文或作者设定依据，不能取历史事件时间、电脑日期或数据库记录时间。时间不足先输出候选和缺口，不改正文。' })}`)
+    : '结合已有正文和世界设定梳理小说时间：朝代、纪年、开篇时间、当前故事时间及对应已写章序。使用 worldRules.timelineConfig 的 dynastyName、storyStartLabel、currentTimeLabel、currentTimeChapterNum、currentTimeEvidence 保存；当前时间必须有原文或作者设定依据，不能取历史事件时间、电脑日期或数据库记录时间。时间不足先输出候选和缺口，不改正文。' })
   const selectEvent = (entry: StoryTimelineEntry) => {
     updateParams('event', entry.entity.id)
     if (window.matchMedia('(max-width: 1120px)').matches) requestAnimationFrame(() => detailRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
@@ -93,5 +95,6 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
         </aside>}
       </div>
     </>}
+    <ObjectTaskPanel novelId={novelId} target={taskTarget} onClose={() => setTaskTarget(null)} onApplied={() => void load()} />
   </AuthorPage>
 }

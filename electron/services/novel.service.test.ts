@@ -28,6 +28,11 @@ import { createNovel, deleteNovel, getNovel, listNovels, updateNovel } from './n
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
+function transactionMock(callback: () => unknown) {
+  const run = vi.fn(callback)
+  return Object.assign(run, { immediate: run })
+}
+
 function toCamelCase(value: string): string {
   return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase())
 }
@@ -170,9 +175,7 @@ function createSqliteDeleteMock(tables: Record<string, Array<Record<string, unkn
 
       throw new Error(`Unexpected SQL in sqlite mock: ${sql}`)
     }),
-    transaction: vi.fn((callback: () => void) => {
-      return () => callback()
-    }),
+    transaction: vi.fn(transactionMock),
     __tableInfoCalls: tableInfoCalls,
     __deleteCalls: deleteCalls,
   }
@@ -183,6 +186,7 @@ function createSqliteDeleteMock(tables: Record<string, Array<Record<string, unkn
 describe('novel source/canon fields', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getSqlite).mockReturnValue({ transaction: vi.fn(transactionMock) } as never)
   })
 
   afterEach(() => {

@@ -242,6 +242,10 @@ export interface Novel extends NovelSourceCanonFields {
 
 export type NovelLaunchMode = 'professional_longform' | 'fast_launch'
 
+export interface NovelUpdateOptions {
+  expectedContextVersion?: number
+}
+
 export interface NovelCreateInput extends NovelSourceCanonFields {
   title: string
   synopsis?: string
@@ -5978,7 +5982,7 @@ declare global {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>
         create: (data: NovelCreateInput) => Promise<number>
-        update: (id: number, data: Partial<Novel>) => Promise<void>
+        update: (id: number, data: Partial<Novel>, options?: NovelUpdateOptions) => Promise<void>
         delete: (id: number) => Promise<void>
         export: (id: number, format: string) => Promise<string>
         formatForPlatform: (id: number, options: PlatformFormatOptions) => Promise<PlatformFormatResult>

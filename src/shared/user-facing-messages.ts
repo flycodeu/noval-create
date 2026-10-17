@@ -44,6 +44,8 @@ export const USER_FACING_MESSAGES = {
   'template.deleteFailed': '删除失败',
   'template.deleted': '模板已删除',
   'novel.notFound': '小说不存在',
+  'novel.contextVersionConflict': '作品已被其他任务修改，请刷新后再编辑；当前编辑内容仍保留。',
+  'novel.invalidExpectedContextVersion': '作品保存的预期版本无效，请重新打开后再保存。',
   'novel.listLoadFailed': '加载小说列表失败。',
   'novel.deleted': '小说已删除。',
   'novel.exportedTo': '已导出到 {{path}}',

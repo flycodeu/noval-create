@@ -23,6 +23,7 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 import { describeNovelLifecycle, syncNovelLifecycleStatus, syncNovelLifecycleStatuses } from './novel-lifecycle.service'
+import type { NovelUpdateOptions } from '../../src/types'
 
 type NovelSourceCanonJsonFields = {
   historicalProfileJson: string
@@ -138,7 +139,7 @@ function deleteNovelScopedRows(tableNames: Set<string>, novelId: number) {
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
   try {
-    return stringifyWorldRulesDraft(normalizeWorldRulesDraft(JSON.parse(raw) as unknown, genreName))
+    return JSON.stringify(normalizeWorldRulesDraft(JSON.parse(raw) as unknown, genreName, { preserveExtensions: true }))
   } catch {
     return raw
   }
@@ -357,7 +358,7 @@ export function createNovel(data: {
   return Number(result.lastInsertRowid)
 }
 
-export function updateNovel(id: number, data: Partial<{
+type NovelUpdateData = Partial<{
   title: string
   synopsis: string
   genreId: number
@@ -376,12 +377,27 @@ export function updateNovel(id: number, data: Partial<{
   modelConfigId: number
   styleTemplateId: number
   worldTemplateId: number
-} & NovelSourceCanonJsonFields>) {
+} & NovelSourceCanonJsonFields>
+
+export function updateNovel(id: number, data: NovelUpdateData, options: NovelUpdateOptions = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)
+    || options.expectedContextVersion !== undefined && (!Number.isSafeInteger(options.expectedContextVersion) || options.expectedContextVersion < 1)) {
+    throwUserFacingError('novel.invalidExpectedContextVersion')
+  }
+  // Version validation, content changes and their impact records share one writer transaction.
+  // Existing callers can continue to omit options; guarded editors opt into compare-and-save.
+  return getSqlite().transaction(() => updateNovelRecord(id, data, options)).immediate()
+}
+
+function updateNovelRecord(id: number, data: NovelUpdateData, options: NovelUpdateOptions) {
   const db = getDb()
   const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]
 
   if (!current) {
     throwUserFacingError('novel.notFound')
+  }
+  if (options.expectedContextVersion !== undefined && current.contextVersion !== options.expectedContextVersion) {
+    throwUserFacingError('novel.contextVersionConflict')
   }
 
   const nextGenreId = typeof data.genreId === 'number' ? data.genreId : current.genreId || undefined

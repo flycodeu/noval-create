@@ -8,6 +8,12 @@ export const ATLAS_TABS = [
   { key: 'items', label: '物品', kind: 'item' }, { key: 'events', label: '事件', kind: 'event' },
 ] as const
 export type AtlasTab = typeof ATLAS_TABS[number]['key']
+export const WORLD_WORKSPACE_TABS = [...ATLAS_TABS, { key: 'rules', label: '世界规则' }, { key: 'research', label: '参考资料' }] as const
+export type WorldWorkspaceTab = typeof WORLD_WORKSPACE_TABS[number]['key']
+export function resolveWorldWorkspaceTab(params: URLSearchParams): WorldWorkspaceTab {
+  const tab = params.get('tab')
+  return tab === 'rules' || tab === 'research' ? tab : resolveAtlasTab(params)
+}
 export function resolveAtlasTab(params: URLSearchParams): AtlasTab {
   const tab = params.get('tab')
   if (ATLAS_TABS.some(item => item.key === tab)) return tab as AtlasTab
@@ -34,6 +40,9 @@ export function hasAtlasValue(value: unknown): boolean {
 }
 const FIELD_LABELS: Record<string, string> = {
   clothing: '常用衣着', carriedItems: '随身物品', physicalHabits: '动作与体态', portraitPrompt: '视觉描述', portraitImage: '角色参考像',
+  authorPlanning: '作者后续规划', truthBoundary: '已发生与规划边界', speciesOrigin: '种属与来历', bodyAndDailyLife: '身体与日常规则',
+  independentPreference: '个人喜好', entryPlan: '入场安排', independentRelationships: '独立关系', nonProtagonistScene: '人物自己的场景',
+  humanAppearance: '人形视觉规划', speechAndPhase: '语言与形态阶段', personalGoals: '个人目标', futureFlaws: '后续弱点与代价', revision: '方案版本',
   name: '名称', summary: '说明', status: '状态', role: '职责', fromId: '起点', toId: '关联对象', kind: '关联类型', effectiveFromChapter: '生效章位',
   note: '说明', notes: '补充说明', traits: '特点', description: '说明', parentId: '上级', ...ATLAS_ATTRIBUTE_LABELS,
 }
@@ -58,17 +67,25 @@ export function atlasScalarText(key: string, value: unknown, entities: StoryAtla
   if (reference) return reference.name
   if (REFERENCE_KINDS[key] || typeof value === 'string' && /^(location|character|faction|item|event):/.test(value)) return '关联资料在当前章位不可用'
   if (typeof value === 'boolean') return value ? '是' : '否'
+  if (key === 'status' && value === 'approved_design') return '已采纳规划'
   if (['protagonistPresent', 'isMajorEvent'].includes(key)) return Number(value) === 1 ? '是' : '否'
   return VALUE_LABELS[String(value)] || String(atlasAttributeValue(key, value))
 }
 
-export type AtlasProfileGroup = { title: string; fields: string[]; empty: string }
+export type AtlasProfileSection = 'overview' | 'appearance' | 'abilities' | 'relationships' | 'planning'
+export const CHARACTER_PROFILE_SECTIONS: Array<{ key: AtlasProfileSection; label: string }> = [
+  { key: 'overview', label: '概览' }, { key: 'appearance', label: '形象日常' },
+  { key: 'abilities', label: '能力限制' }, { key: 'relationships', label: '关系' }, { key: 'planning', label: '作者规划' },
+]
+export type AtlasProfileGroup = { title: string; fields: string[]; empty: string; section?: AtlasProfileSection }
 export const PROFILE_GROUPS: Record<StoryAtlasEntity['kind'], AtlasProfileGroup[]> = {
   character: [
-    { title: '身份与外貌', fields: ['roleType', 'entityType', 'age', 'gender', 'species', 'occupation', 'socialIdentity', 'appearance', 'clothing', 'carriedItems', 'physicalHabits', 'firstImpression'], empty: '身份、外貌与日常形象尚未补充' },
-    { title: '性格与行为', fields: ['personalityTraits', 'flaws', 'strengths', 'weaknesses', 'habits', 'speechPattern', 'dailyRoutine', 'catchphrases', 'vocabularyLevel', 'dialectFeatures'], empty: '性格表现、弱点、习惯与说话方式尚未补充' },
-    { title: '动机与底线', fields: ['goals', 'publicGoal', 'motivation', 'surfaceDesire', 'deepNeed', 'coreFear', 'innerConflict', 'moralLine', 'beliefs', 'values', 'selfDeception', 'contradiction', 'resonancePoint', 'hiddenSecret'], empty: '目标、内在需要与行事底线尚未补充' },
-    { title: '能力与经历', fields: ['abilities', 'abilityLimits', 'abilityCosts', 'abilityCost', 'limitations', 'background', 'characterArc', 'arcStage', 'dramaticEngine'], empty: '能力边界与经历尚未补充' },
+    { title: '身份', section: 'overview', fields: ['roleType', 'entityType', 'age', 'gender', 'species', 'occupation', 'socialIdentity'], empty: '身份尚未补充' },
+    { title: '性格与动机', section: 'overview', fields: ['personalityTraits', 'flaws', 'strengths', 'weaknesses', 'goals', 'publicGoal', 'motivation', 'surfaceDesire', 'deepNeed', 'coreFear', 'innerConflict', 'moralLine', 'beliefs', 'values', 'selfDeception', 'contradiction', 'resonancePoint'], empty: '性格表现、目标与行事底线尚未补充' },
+    { title: '外貌与衣着', section: 'appearance', fields: ['appearance', 'clothing', 'carriedItems', 'physicalHabits', 'firstImpression'], empty: '外貌、衣着与随身物品尚未补充' },
+    { title: '日常与说话方式', section: 'appearance', fields: ['habits', 'speechPattern', 'dailyRoutine', 'catchphrases', 'vocabularyLevel', 'dialectFeatures'], empty: '日常习惯与说话方式尚未补充' },
+    { title: '能力、代价与经历', section: 'abilities', fields: ['abilities', 'abilityLimits', 'abilityCosts', 'abilityCost', 'limitations', 'background'], empty: '能力边界、代价与经历尚未补充' },
+    { title: '成长、秘密与后续安排', section: 'planning', fields: ['authorPlanning', 'characterArc', 'arcStage', 'dramaticEngine', 'hiddenSecret'], empty: '尚未补充作者规划' },
   ],
   faction: [
     { title: '组织特点与立场', fields: ['organizationLevel', 'category', 'traits', 'ideology', 'goal', 'goals', 'methods'], empty: '组织特点、目标与行事方式尚未补充' },
@@ -88,7 +105,7 @@ export function profileFieldGroups(entity: StoryAtlasEntity) {
     return { ...group, values: Object.fromEntries(group.fields.filter(key => hasAtlasValue(entity.attributes[key])).map(key => [key, entity.attributes[key]])) }
   })
   const other = Object.fromEntries(Object.entries(entity.attributes).filter(([key, value]) => !used.has(key) && hasAtlasValue(value)))
-  if (Object.keys(other).length) groups.push({ title: '补充设定', fields: [], empty: '', values: other })
+  if (Object.keys(other).length) groups.push({ title: '补充设定', fields: [], empty: '', values: other, ...(entity.kind === 'character' ? { section: 'planning' as const } : {}) })
   return groups
 }
 

@@ -44,6 +44,10 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+function extensions(value: unknown, preserve: boolean, omitted: string[] = []): Record<string, unknown> {
+  return preserve ? Object.fromEntries(Object.entries(asRecord(value)).filter(([key]) => !omitted.includes(key))) : {}
+}
+
 export function createEmptyWorldRules(genreName?: string | null): GenreWorldRules {
   const builtin = getBuiltinGenreRules(genreName)
   return {
@@ -100,9 +104,10 @@ export function createEmptyWorldRules(genreName?: string | null): GenreWorldRule
   }
 }
 
-function normalizeGenreProfile(value: unknown, fallback: GenreProfile): GenreProfile {
+function normalizeGenreProfile(value: unknown, fallback: GenreProfile, preserve = false): GenreProfile {
   const record = asRecord(value)
   return {
+    ...extensions(record, preserve),
     key: typeof record.key === 'string' ? record.key as GenreProfile['key'] : fallback.key,
     name: asText(record.name),
     subgenre: asText(record.subgenre),
@@ -113,7 +118,7 @@ function normalizeGenreProfile(value: unknown, fallback: GenreProfile): GenrePro
   }
 }
 
-function normalizePowerSystems(value: unknown): PowerSystem[] {
+function normalizePowerSystems(value: unknown, preserve = false): PowerSystem[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -127,6 +132,7 @@ function normalizePowerSystems(value: unknown): PowerSystem[] {
       const taboo = asText(record.taboo)
       if (!name && appliesTo.length === 0 && levels.length === 0 && !advancementRule && !limitations && !cost && !taboo) return null
       return {
+        ...extensions(record, preserve),
         id: asText(record.id) || `power-${index + 1}`,
         name,
         appliesTo,
@@ -140,7 +146,7 @@ function normalizePowerSystems(value: unknown): PowerSystem[] {
     .filter((item): item is PowerSystem => Boolean(item))
 }
 
-function normalizeSpecies(value: unknown): SpeciesProfile[] {
+function normalizeSpecies(value: unknown, preserve = false): SpeciesProfile[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -153,6 +159,7 @@ function normalizeSpecies(value: unknown): SpeciesProfile[] {
       const storyUse = asText(record.storyUse)
       if (!name && !summary && traits.length === 0 && commonIdentities.length === 0 && !relationToHumans && !storyUse) return null
       return {
+        ...extensions(record, preserve),
         id: asText(record.id) || `species-${index + 1}`,
         name,
         entityType: asText(record.entityType) || 'human',
@@ -166,7 +173,7 @@ function normalizeSpecies(value: unknown): SpeciesProfile[] {
     .filter((item): item is SpeciesProfile => Boolean(item))
 }
 
-function normalizeFactions(value: unknown): FactionProfile[] {
+function normalizeFactions(value: unknown, preserve = false): FactionProfile[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -180,6 +187,7 @@ function normalizeFactions(value: unknown): FactionProfile[] {
       const notableSites = dedupe(toStringArray(record.notableSites))
       if (!name && !summary && !structure && !resources && !externalRelations && !recruitFrom && notableSites.length === 0) return null
       return {
+        ...extensions(record, preserve),
         id: asText(record.id) || `faction-${index + 1}`,
         name,
         factionType: asText(record.factionType) || '',
@@ -194,7 +202,7 @@ function normalizeFactions(value: unknown): FactionProfile[] {
     .filter((item): item is FactionProfile => Boolean(item))
 }
 
-function normalizeMapLevels(value: unknown): MapBlueprintLevel[] {
+function normalizeMapLevels(value: unknown, preserve = false): MapBlueprintLevel[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -206,6 +214,7 @@ function normalizeMapLevels(value: unknown): MapBlueprintLevel[] {
       const suggestedCount = Math.max(1, asNumber(record.suggestedCount, 3))
       if (!label && nodeTypes.length === 0 && !relationHint && examples.length === 0) return null
       return {
+        ...extensions(record, preserve),
         depth: Math.max(1, asNumber(record.depth, index + 1)),
         label,
         nodeTypes,
@@ -217,7 +226,7 @@ function normalizeMapLevels(value: unknown): MapBlueprintLevel[] {
     .filter((item): item is MapBlueprintLevel => Boolean(item))
 }
 
-function normalizeClimateCycles(value: unknown): ClimateCycle[] {
+function normalizeClimateCycles(value: unknown, preserve = false): ClimateCycle[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -230,6 +239,7 @@ function normalizeClimateCycles(value: unknown): ClimateCycle[] {
       const resourceImpact = asText(record.resourceImpact)
       if (!region && !pattern && !seasonalShift && !hazardTrigger && !travelImpact && !resourceImpact) return null
       return {
+        ...extensions(record, preserve),
         id: asText(record.id) || `climate-${index + 1}`,
         region,
         pattern,
@@ -242,7 +252,7 @@ function normalizeClimateCycles(value: unknown): ClimateCycle[] {
     .filter((item): item is ClimateCycle => Boolean(item))
 }
 
-function normalizeEconomyLoops(value: unknown): EconomyLoop[] {
+function normalizeEconomyLoops(value: unknown, preserve = false): EconomyLoop[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item, index) => {
@@ -256,6 +266,7 @@ function normalizeEconomyLoops(value: unknown): EconomyLoop[] {
       const storyUse = asText(record.storyUse)
       if (!name && !coreResource && !circulationPath && !controller && !scarcityTrigger && !volatilityTrigger && !storyUse) return null
       return {
+        ...extensions(record, preserve),
         id: asText(record.id) || `economy-${index + 1}`,
         name,
         coreResource,
@@ -269,7 +280,8 @@ function normalizeEconomyLoops(value: unknown): EconomyLoop[] {
     .filter((item): item is EconomyLoop => Boolean(item))
 }
 
-export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null): GenreWorldRules {
+export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null, options: { preserveExtensions?: boolean } = {}): GenreWorldRules {
+  const preserve = Boolean(options.preserveExtensions)
   const base = createEmptyWorldRules(genreName)
   const record = asRecord(raw)
   const writing = asRecord(record.writingConstraints)
@@ -281,12 +293,14 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
     : base.writingConstraints.realismLevel
 
   return {
+    ...extensions(record, preserve),
     version: 2,
-    genreProfile: normalizeGenreProfile(record.genreProfile, base.genreProfile),
-    powerSystems: normalizePowerSystems(record.powerSystems),
-    speciesSystem: normalizeSpecies(record.speciesSystem),
-    factionSystem: normalizeFactions(record.factionSystem),
+    genreProfile: normalizeGenreProfile(record.genreProfile, base.genreProfile, preserve),
+    powerSystems: normalizePowerSystems(record.powerSystems, preserve),
+    speciesSystem: normalizeSpecies(record.speciesSystem, preserve),
+    factionSystem: normalizeFactions(record.factionSystem, preserve),
     characterEcology: {
+      ...extensions(ecology, preserve),
       overview: asText(ecology.overview),
       slots: Array.isArray(ecology.slots)
         ? ecology.slots.map((item: unknown, index: number) => {
@@ -300,6 +314,7 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
             const powerBias = dedupe(toStringArray(slot.powerBias))
             if (!label && !species && !narrativeFunction && !contextLink && preferredFactions.length === 0 && powerBias.length === 0) return null
             return {
+              ...extensions(slot, preserve),
               id: asText(slot.id) || `ecology-${index + 1}`,
               label,
               entityType,
@@ -313,15 +328,18 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
         : [],
     },
     mapBlueprint: {
+      ...extensions(record.mapBlueprint, preserve),
       overview: asText(asRecord(record.mapBlueprint).overview),
-      levels: normalizeMapLevels(asRecord(record.mapBlueprint).levels),
+      levels: normalizeMapLevels(asRecord(record.mapBlueprint).levels, preserve),
     },
     worldDynamics: {
+      ...extensions(record.worldDynamics, preserve, ['economicSystems']),
       overview: asText(asRecord(record.worldDynamics).overview),
-      climateCycles: normalizeClimateCycles(asRecord(record.worldDynamics).climateCycles),
-      economyLoops: normalizeEconomyLoops(asRecord(record.worldDynamics).economyLoops ?? asRecord(record.worldDynamics).economicSystems),
+      climateCycles: normalizeClimateCycles(asRecord(record.worldDynamics).climateCycles, preserve),
+      economyLoops: normalizeEconomyLoops(asRecord(record.worldDynamics).economyLoops ?? asRecord(record.worldDynamics).economicSystems, preserve),
     },
     timelineConfig: {
+      ...extensions(timeline, preserve, ['dynastyName', 'storyStartLabel', 'currentTimeLabel', 'currentTimeChapterNum', 'currentTimeEvidence']),
       ...(asText(timeline.dynastyName) ? { dynastyName: asText(timeline.dynastyName) } : {}),
       ...(asText(timeline.storyStartLabel) ? { storyStartLabel: asText(timeline.storyStartLabel) } : {}),
       ...(asText(timeline.currentTimeLabel) ? { currentTimeLabel: asText(timeline.currentTimeLabel) } : {}),
@@ -337,6 +355,7 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
       precisionOptions: dedupe(toStringArray(timeline.precisionOptions)),
     },
     writingConstraints: {
+      ...extensions(writing, preserve),
       antiQuoteEmphasis: typeof writing.antiQuoteEmphasis === 'boolean' ? writing.antiQuoteEmphasis : base.writingConstraints.antiQuoteEmphasis,
       antiConceptSlogans: typeof writing.antiConceptSlogans === 'boolean' ? writing.antiConceptSlogans : base.writingConstraints.antiConceptSlogans,
       antiSymmetricLines: typeof writing.antiSymmetricLines === 'boolean' ? writing.antiSymmetricLines : base.writingConstraints.antiSymmetricLines,

@@ -31,6 +31,7 @@ import type {
   NarrativeBoardQueryInput,
   MaintenanceWorkerStatus,
   NovelCreateInput,
+  NovelUpdateOptions,
 } from '../src/types'
 
 interface IpcBridgeErrorPayload {
@@ -135,7 +136,7 @@ const api = {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),
     get: (id: number) => invokeIpc('novel:get', id),
     create: (data: NovelCreateInput) => invokeIpc('novel:create', data),
-    update: (id: number, data: unknown) => invokeIpc('novel:update', id, data),
+    update: (id: number, data: unknown, options?: NovelUpdateOptions) => invokeIpc('novel:update', id, data, options),
     delete: (id: number) => invokeIpc('novel:delete', id),
     export: (id: number, format: string) => invokeIpc('novel:export', id, format),
     formatForPlatform: (id: number, options: unknown) => invokeIpc('novel:formatForPlatform', id, options),

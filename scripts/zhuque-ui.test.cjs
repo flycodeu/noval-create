@@ -21,7 +21,7 @@ async function main() {
     "test:()=>new Promise(resolve=>window.calls.push({kind:'test',resolve})),",
     "getChapterResult:id=>new Promise(resolve=>window.calls.push({kind:'read',id,resolve})),",
     "detectChapter:(id,expectedContent)=>new Promise(resolve=>window.calls.push({kind:'detect',id,expectedContent,resolve}))},",
-    "chapter:{list:()=>Promise.resolve([{id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7}]),get:()=>Promise.resolve({id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7})},agentTools:{call:()=>Promise.resolve({ok:true,data:{run:null}})}};",
+    "chapter:{list:()=>Promise.resolve([{id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7}]),get:()=>Promise.resolve({id:1,novelId:1,chapterNum:1,title:'第一章',content:'已保存的正文。',wordCount:7})},structure:{getTree:()=>Promise.resolve({volumes:[]})},agentTools:{call:()=>Promise.resolve({ok:true,data:{run:null}})}};",
     "const root=createRoot(document.getElementById('root'));window.editor='已保存的正文。';",
     "const frame=children=><ConfigProvider theme={getAntdThemeConfig('light')}><div className='app-layout' data-ui-system='quiet-workspace'>{children}</div></ConfigProvider>;window.showSettings=()=>root.render(frame(<div className='model-manager-page' style={{padding:32,width:'100%'}}><ZhuqueSettings/></div>));",
     "window.showManuscript=()=>root.render(frame(<MemoryRouter initialEntries={['/novel/1/writing?chapterId=1']}><Manuscript novelId={1}/></MemoryRouter>));",
@@ -34,7 +34,7 @@ async function main() {
   await win.loadFile(path.join(temp, 'index.html'))
   const run = code => win.webContents.executeJavaScript(code)
   const wait = async code => { for (let i = 0; i < 150; i++) { if (await run(code)) return; await new Promise(resolve => setTimeout(resolve, 20)) } throw Error('Timeout: '+code) }
-  const click = text => run("{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==="+JSON.stringify(text)+");if(!b)throw Error('button absent');b.click();}")
+  const click = text => run("{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.replace(/\\s+/g,'').trim()==="+JSON.stringify(text.replace(/\s+/g, ''))+");if(!b)throw Error('button absent: '+"+JSON.stringify(text)+");b.click();}")
   const screenshot = async name => { await run('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); await new Promise(resolve=>setTimeout(resolve,300)); fs.writeFileSync(path.join(temp, name+'.png'), (await win.webContents.capturePage()).toPNG()) }
   await wait('!!document.querySelector("[data-zhuque-settings]") && ![...document.querySelectorAll("button")].find(b=>b.textContent.includes("配置朱雀检测")).disabled')
   await click('配置朱雀检测')
@@ -149,7 +149,8 @@ async function main() {
   await run('window.calls.filter(c=>c.kind==="detect")[1].resolve('+JSON.stringify({ enabled: true, autoDetect: true, apiKeySet: true, status: 'success', report: {...currentReport, chapterId:1} })+')')
   await wait('document.body.textContent.includes("AI内容 30.0%")')
   await screenshot('manuscript-review')
-  await click('正文')
+  await click('审校')
+  await wait('!document.querySelector("[data-zhuque-chapter]")')
   await wait('!!document.querySelector(".author-manuscript__editor")')
   await run("{const i=document.querySelector('.author-manuscript__editor');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'修改后的正文。');i.dispatchEvent(new Event('input',{bubbles:true}));}")
   await wait('document.body.textContent.includes("有未保存修改")')

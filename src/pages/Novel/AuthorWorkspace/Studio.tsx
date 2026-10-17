@@ -10,7 +10,7 @@ import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, useCreativeWorkflow } from './workflow-client'
 import { buildStorySettingsPayload, parseStorySettingsDocument } from '../../../shared/story-settings'
 import ChapterIndexStatus from './ChapterIndexStatus'
-import ResearchLibrary from './ResearchLibrary'
+import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 
 export default function AuthorStudio({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
@@ -33,6 +33,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
   const [dataError, setDataError] = useState('')
   const [models, setModels] = useState<ModelConfig[]>([])
   const [savingModel, setSavingModel] = useState(false)
+  const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const workflow = useCreativeWorkflow(novelId)
 
   useEffect(() => {
@@ -120,13 +121,26 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
   }
 
   return <AuthorPage title="创作台">
-    <nav className="author-stage-path" aria-label="创作内容">{CREATIVE_STAGES.map(value => <button key={value} disabled={checkingNextChapter || workflow.submitting} className={stage === value ? 'is-selected' : ''} onClick={() => changeStage(value)}>{CREATIVE_STAGE_LABELS[value]}</button>)}</nav>
+    <header className="studio-heading"><div><span className="author-eyebrow">继续当前工作</span><h2>{novel?.title}</h2></div><div className="studio-quick-links"><Button onClick={() => open('narrative-board?tab=research')}>参考资料</Button><Button onClick={() => open('narrative-board?tab=rules')}>世界规则</Button></div></header>
+    <div className="author-overview-grid studio-overview">
+      <section className="author-paper"><div className="author-section-heading"><h2>作品进展</h2><Button type="text" onClick={() => open('writing/editor')}>卷章与正文 <ArrowRightOutlined /></Button></div>
+        <div className="author-book-progress"><strong>{drafted.length}<small> 章已有正文</small></strong><span>{chapters.length} 章安排 · {chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字</span></div>
+        <ChapterIndexStatus novelId={novelId} />
+        {nextChapter ? <button className="author-next-chapter" disabled={checkingNextChapter || workflow.active || workflow.submitting || savingModel} onClick={() => { void planNextChapter(); document.getElementById('author-request')?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }}><span>{checkingNextChapter ? '检查章节安排' : '下一章'}</span><strong>第 {nextChapter.chapterNum} 章 · {nextChapter.title || '未命名'}</strong><ArrowRightOutlined /></button> : <p className="author-muted">{chapters.length ? '现有章节均已有正文，可继续安排下一阶段。' : '确定故事方向后，开始安排首个单元。'}</p>}
+      </section>
+      <section className="author-paper"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" onClick={() => open('revision?view=issues')}>查看全部 <ArrowRightOutlined /></Button></div>
+        {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">暂无待处理问题</p>}
+      </section>
+    </div>
+    {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}
+    {workflow.run && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => { const run = workflow.run; if (run) setTask({ title: `${CREATIVE_STAGE_LABELS[run.stage]} · 第 ${run.atChapter} 章`, stage: run.stage, request: run.request, atChapter: run.atChapter, changeScope: run.changeScope, chapterRevision: run.chapterRevision, revisionIssueIds: run.revisionIssueIds, sourceArtifactId: run.sourceArtifactId, runId: run.runId, artifactId: run.artifactId }) }} />}
+    <details className="author-disclosure studio-model-settings" open={!effectiveModel || Boolean(reviewerId && !models.some(model => model.id === reviewerId))}><summary>模型与审校设置{effectiveModel ? ` · ${effectiveModel.name}` : ' · 尚未配置'}</summary>
     <div className="author-model-route"><div className="author-model-route__field"><label htmlFor="author-project-model">生成模型</label><Select id="author-project-model" aria-label="生成模型" value={effectiveModel?.id} placeholder="选择已配置的模型" disabled={workflow.active || savingModel || !models.length} loading={savingModel} onChange={(value) => void changeModel(value)} options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></div>
       <div className="author-model-route__field"><label htmlFor="author-review-model">审校模型</label><Select id="author-review-model" aria-label="审校模型" value={reviewerId || 0} disabled={workflow.active || savingModel} loading={savingModel} onChange={value => void changeReviewer(value)} options={[{ value: 0, label: '跟随生成模型' }, ...models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))]} /></div>
-      <span>{workflow.active ? '当前任务的模型已固定' : reviewerId && !models.some(model => model.id === reviewerId) ? '原审校模型已不可用，请重新选择' : novel?.modelConfigId && !effectiveModel ? '原项目模型已不可用，请重新选择' : novel?.modelConfigId ? '已用于本项目及 Codex 调用' : effectiveModel ? '生成模型跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div>
+      <span>{workflow.active ? '当前任务的模型已固定' : reviewerId && !models.some(model => model.id === reviewerId) ? '原审校模型已不可用，请重新选择' : novel?.modelConfigId && !effectiveModel ? '原项目模型已不可用，请重新选择' : novel?.modelConfigId ? '已用于本项目及 Codex 调用' : effectiveModel ? '生成模型跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div></details>
     <section className="author-composer">
       <label htmlFor="author-request" className="author-composer__label">这一轮的要求</label>
-      <Input.TextArea id="author-request" value={request} disabled={checkingNextChapter || workflow.submitting} onChange={(event) => setRequest(event.target.value)} autoSize={{ minRows: 5, maxRows: 12 }}
+      <Input.TextArea id="author-request" value={request} disabled={checkingNextChapter || workflow.submitting} onChange={(event) => setRequest(event.target.value)} autoSize={{ minRows: 3, maxRows: 12 }}
         placeholder="例如：结合前三章，把借灯客栈的地点和通行关系补齐，检查人物能否按现有线索完成调查。" />
       <div className="author-composer__options">
         <label>创作内容 <Select aria-label="创作内容" value={stage} disabled={checkingNextChapter || workflow.submitting} onChange={changeStage} options={CREATIVE_STAGES.map((value) => ({ value, label: CREATIVE_STAGE_LABELS[value] }))} /></label>
@@ -145,19 +159,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
       {chapterScope?.chapterIds?.length && <p className="author-composer__hint">本轮只修改第 {atChapter} 章的章节安排{chapterScope.preserveChapterFields?.length ? '，保留原章名、大纲、卷章位置与信息揭示' : ''}。</p>}
       {sourceArtifactId && <p className="author-composer__hint">正在修订所选候选</p>}
     </section>
-    {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}
-    {workflow.run && <RunProgress run={workflow.run} active={workflow.active} onCancel={() => void workflow.control('cancel')} onResume={() => void workflow.control('resume')} onOpenResult={() => open(`revision?artifact=${encodeURIComponent(workflow.run?.artifactId || '')}`)} />}
-    <div className="author-overview-grid">
-      <section className="author-paper"><div className="author-section-heading"><h2>作品进展</h2><Button type="text" onClick={() => open('writing/editor')}>打开正文 <ArrowRightOutlined /></Button></div>
-        <div className="author-book-progress"><strong>{drafted.length}<small> 章已有正文</small></strong><span>{chapters.length} 章安排 · {chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字</span></div>
-        <ChapterIndexStatus novelId={novelId} />
-        {nextChapter ? <button className="author-next-chapter" disabled={checkingNextChapter || workflow.active || workflow.submitting || savingModel} onClick={() => { void planNextChapter() }}><span>{checkingNextChapter ? '检查章节安排' : '下一章'}</span><strong>第 {nextChapter.chapterNum} 章 · {nextChapter.title || '未命名'}</strong><ArrowRightOutlined /></button> : <p className="author-muted">{chapters.length ? '现有章节均已有正文，可继续安排下一阶段。' : '确定故事方向后，开始安排首个单元。'}</p>}
-      </section>
-      <section className="author-paper"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" onClick={() => open('revision')}>查看全部 <ArrowRightOutlined /></Button></div>
-        {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">暂无待处理问题</p>}
-      </section>
-    </div>
-    <ResearchLibrary novelId={novelId} disabled={workflow.active || workflow.submitting} />
+    <ObjectTaskPanel novelId={novelId} target={task} onClose={() => setTask(null)} />
     {dataError && <p className="author-error" role="alert">{dataError}</p>}
     {!novel?.userBackground?.trim() && !workflow.run && <EmptyWork title="先给故事一个起点" actionLabel="填写背景要求" action={() => { setStage('background'); document.getElementById('author-request')?.focus() }} />}
   </AuthorPage>

@@ -620,7 +620,7 @@ function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
   handle('novel:create', (_, data) => novelService.createNovel(parseObjectPayload<NovelCreateInput>(data, 'data')))
-  handle('novel:update', (_, id, data) => novelService.updateNovel(requireId(id), data))
+  handle('novel:update', (_, id, data, options) => novelService.updateNovel(requireId(id), data, options ?? undefined))
   handle('novel:delete', (_, id) => novelService.deleteNovel(requireId(id)))
   handle('novel:export', (_, id, format) => exportService.exportNovel(requireId(id), format))
   handle('novel:formatForPlatform', (_, id, options) =>

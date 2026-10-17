@@ -14,7 +14,7 @@ export function isRunActive(run: CreativeRun | null | undefined) {
     && !['failed', 'completed', 'cancelled', 'paused'].includes(run.status))
 }
 
-export function useCreativeWorkflow(novelId: number) {
+export function useCreativeWorkflow(novelId: number, selectedRunId?: number) {
   const [run, setRun] = useState<CreativeRun | null>(null)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -48,12 +48,12 @@ export function useCreativeWorkflow(novelId: number) {
     let stopped = false
     let timer: number | undefined
     const poll = async () => {
-      const next = await refresh()
+      const next = await refresh(selectedRunId)
       if (!stopped) timer = window.setTimeout(() => { void poll() }, isRunActive(next) ? 1600 : 5000)
     }
     void poll()
     return () => { stopped = true; alive.current = false; requestEpoch.current += 1; mutationEpoch.current += 1; mutationInProgress.current = false; window.clearTimeout(timer) }
-  }, [refresh])
+  }, [refresh, selectedRunId])
 
   useEffect(() => {
     if (!run || run.step !== 'completed') return

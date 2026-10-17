@@ -30,7 +30,7 @@ describe('optional character portraits', () => {
   })
   it('keeps portrait bytes out of textual dossier groups while showing clothes, possessions and movement', () => {
     const groups = profileFieldGroups(character)
-    expect(groups[0].values).toMatchObject({ clothing: '洗旧的青布短衣', carriedItems: '小册与炭笔', physicalHabits: '抬手时先拢袖口' })
+    expect(groups.find(group => group.title === '外貌与衣着')?.values).toMatchObject({ clothing: '洗旧的青布短衣', carriedItems: '小册与炭笔', physicalHabits: '抬手时先拢袖口' })
     expect(groups.some(group => 'portraitImage' in group.values || 'portraitPrompt' in group.values)).toBe(false)
   })
   it('rejects unsuitable uploads before attempting to decode them', async () => {

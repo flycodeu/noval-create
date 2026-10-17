@@ -18,6 +18,7 @@ import { buildStoryDesignPatch, resolveStoryDesignLocation, STORY_DESIGN_TABS, S
 import ChapterArrangement from './ChapterArrangement'
 import StoryFacts from './StoryFacts'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
+import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 import './story-design.css'
 
 type Section = { key: string; title: string; value: unknown; stage: CreativeStage; contextVersion?: number }
@@ -38,6 +39,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const [draft, setDraft] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [arrangementDirty, setArrangementDirty] = useState(false)
+  const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const dirty = arrangementDirty || Boolean(editing) && JSON.stringify(draft) !== JSON.stringify(editing?.value)
   useRegisterWorkspaceLeaveGuard(dirty || saving)
   const story = parseStorySettingsDocument(novel?.settingsJson)
@@ -70,7 +72,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
       onOk: () => { flushSync(() => { setEditing(null); setDraft(null); setArrangementDirty(false) }); change() },
     })
   }
-  const discuss = (stage: CreativeStage, request: string) => changeView(() => navigate(buildWorkspaceRoute(novelId, `guide?${new URLSearchParams({ stage, request, autoApply: 'false' })}`)))
+  const discuss = (stage: CreativeStage, request: string) => changeView(() => setTask({ title: section?.title || '故事设计', stage, request }))
   const sections: Section[] = tab === 'background' ? [
     { key: 'background', title: '背景与简介', value: { title: novel?.title || '', synopsis: novel?.synopsis || '', userBackground: novel?.userBackground || '', expandedBackground: novel?.expandedBackground || '' }, stage: 'background' },
     { key: 'brief', title: '作品定位与读者承诺', value: brief, stage: 'story' },
@@ -89,9 +91,9 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
     try {
       const latest = await window.electron.novel.get(novelId)
       if (!latest || latest.contextVersion !== editing.contextVersion) throw new Error('作品已被其他任务修改，请刷新后再编辑；当前编辑内容仍保留。')
-      await window.electron.novel.update(novelId, buildStoryDesignPatch(latest, editing.key, draft))
+      await window.electron.novel.update(novelId, buildStoryDesignPatch(latest, editing.key, draft), { expectedContextVersion: editing.contextVersion })
       const updated = await window.electron.novel.get(novelId)
-      if (updated) setNovel(updated)
+      if (updated && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
       setEditing(null); message.success('已保存这一部分')
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败') }
     finally { setSaving(false) }
@@ -114,5 +116,6 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
       if (JSON.stringify(draft) === JSON.stringify(editing?.value)) setEditing(null)
       else Modal.confirm({ title: '放弃这一部分的修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: () => setEditing(null) })
     }} okText="保存这一部分" cancelText="取消" confirmLoading={saving} onOk={() => void save()}><DocumentEditor value={draft} names={names} onChange={setDraft} /></Modal>
+    <ObjectTaskPanel novelId={novelId} target={task} onClose={() => setTask(null)} onApplied={() => void load()} />
   </AuthorPage>
 }
