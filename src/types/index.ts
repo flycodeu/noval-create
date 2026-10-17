@@ -6426,6 +6426,8 @@ declare global {
         getSettings: () => Promise<SourceSearchSettingsView>
         updateSettings: (data: SourceSearchSettingsUpdate) => Promise<SourceSearchSettingsView>
         test: () => Promise<SourceSearchTestResult>
+        research: (novelId: number, request: string, atChapter?: number) => Promise<import('../shared/creative-research').CreativeResearchResult>
+        listResearch: (novelId: number, query?: string) => Promise<import('../shared/creative-research').CreativeResearchSource[]>
       }
       template: {
         list: (type?: string) => Promise<Template[]>

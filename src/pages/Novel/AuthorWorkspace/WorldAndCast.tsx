@@ -26,7 +26,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const [storedSnapshot, setSnapshot] = useState<StoryAtlasSnapshot | null>(null)
   const [loadedScope, setLoadedScope] = useState('')
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const includePlanned = atlasIncludesPlanned(params, tab === 'map')
+  const includePlanned = atlasIncludesPlanned(params)
   const queryScope = JSON.stringify([novelId, atChapter, includePlanned])
   const snapshot = loadedScope === queryScope ? storedSnapshot : null
   const parentId = atlasMapScope(params, snapshot, geographic)
@@ -60,9 +60,9 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const generateTab = () => {
     if (tab === 'relationships') return generate('relationships', '结合现有人物与已写正文，补充有具体依据的人物关系、相处方式、关系张力及变化。现有关系按稳定 ID 更新，不虚构过去纠葛。')
     const parent = snapshot?.entities.find(item => item.id === parentId)
-    generate(STAGES[activeKind], activeKind === 'location' ? `补充${parent ? `“${parent.name}”范围内` : '当前故事需要的'}地理设计：国家/区域边界、地区方位、城镇位置、地形水源、生计与通路。先明确国家和地区，再将城市村落归入区域；用 geography.boundary 和 geography.position 保存父地图内0到100的相对坐标，北方在上。进入地域时其外边界包围盒归一化为自身地图0到100，所有下级边界与位置必须落在父轮廓内；同级行政区域不重叠。设定上级 mapFrame 公里尺度，系统按多边形面积比例计算下级面积和跨度；明确面积应与此一致，不得把整幅矩形面积当成不规则国土面积。已有面积与尺度沿用设定；缺少时结合本轮需求设计合理候选，在说明中交代依据，不冒充已定事实。保留尚未划分空间；未展开地域用 geography.development=unexplored，新的不确定地区保持计划。已有记录带稳定ID，保留已定事实、章节位置与现有关系，输出可讨论候选。` : activeKind === 'character' ? '结合现有背景与正文补充人物档案：身份、具体性格表现、目标与动机、弱点和底线、习惯与说话方式、职业日常、能力代价与边界；以 presence 关系明确已有依据的出生地、居住地和活动区域，未知保持待定。已有角色按稳定 ID 更新，不捏造创伤或关系。' : activeKind === 'faction' ? '结合已有背景和地点补充组织势力：特点、立场、目标、行事方式与资源；用 presence 关联主要驻地与涉及区域，部门分部用 parentId；设计确有必要的岗位职责，以 membership 关联已知人员。尚未确定的岗位标为计划，不为填岗位虚构人物。' : `结合现有背景、资料与正文补充${ATLAS_KIND_LABELS[activeKind]}，已有记录按稳定 ID 更新，无依据内容保持计划。`)
+    generate(STAGES[activeKind], activeKind === 'location' ? `补充${parent ? `“${parent.name}”范围内` : '当前故事需要的'}地理设计：国家/区域边界、地区方位、城镇位置、地形水源、生计与通路。先明确国家和地区，再将城市村落归入区域；用 geography.boundary 和 geography.position 保存父地图内0到100的相对坐标，北方在上。进入地域时其外边界包围盒归一化为自身地图0到100，所有下级边界与位置必须落在父轮廓内；同级行政区域不重叠。设定上级 mapFrame 公里尺度，系统按多边形面积比例计算下级面积和跨度；明确面积应与此一致，不得把整幅矩形面积当成不规则国土面积。已有面积与尺度沿用设定；缺少时结合本轮需求设计合理候选，在说明中交代依据，不冒充已定事实。保留尚未划分空间；未展开地域用 geography.development=unexplored，新的不确定地区保持计划。已有记录带稳定ID，保留已定事实、章节位置与现有关系，输出可讨论候选。` : activeKind === 'character' ? '结合现有背景与正文补充人物档案：身份、具体性格表现、目标与动机、弱点和底线、习惯与说话方式、职业日常、能力代价与边界，以及有叙事作用的外貌 appearance、常用衣着 clothing、随身物品 carriedItems、动作与体态 physicalHabits；不是每人都必须填写，不凭空给无依据的角色补统一脸谱；以 presence 关系明确已有依据的出生地、居住地和活动区域，未知保持待定。已有角色按稳定 ID 更新，不捏造创伤或关系。' : activeKind === 'faction' ? '结合已有背景和地点补充组织势力：特点、立场、目标、行事方式与资源；用 presence 关联主要驻地与涉及区域，部门分部用 parentId；设计确有必要的岗位职责，以 membership 关联已知人员。尚未确定的岗位标为计划，不为填岗位虚构人物。' : `结合现有背景、资料与正文补充${ATLAS_KIND_LABELS[activeKind]}，已有记录按稳定 ID 更新，无依据内容保持计划。`)
   }
-  const discuss = (entity: StoryAtlasEntity) => generate(STAGES[entity.kind], `讨论并完善${ATLAS_KIND_LABELS[entity.kind]}“${entity.name}”（${entity.id}）。结合现有背景、当前章位与关联资料，保留已定事实。${entity.kind === 'character' ? '检查身份、性格表现、动机目标、弱点底线、习惯语言、职业日常、能力代价以及居住和活动区域，地域用 presence 关联；未知保持待定。' : entity.kind === 'faction' ? '检查组织特点、驻地与涉及区域、部门结构、岗位职责、现有成员和待定岗位；人员必须有依据，空岗位不虚构成人物。' : '补足本条资料确有依据的缺项，并检查与关联资料是否一致。'}重大改变先保留为候选。`)
+  const discuss = (entity: StoryAtlasEntity) => generate(STAGES[entity.kind], `讨论并完善${ATLAS_KIND_LABELS[entity.kind]}“${entity.name}”（${entity.id}）。结合现有背景、当前章位与关联资料，保留已定事实。${entity.kind === 'character' ? '检查身份、性格表现、动机目标、弱点底线、习惯语言、职业日常、能力代价、有叙事作用的外貌与衣着、随身物品、动作体态以及居住和活动区域，地域用 presence 关联；未知保持待定。' : entity.kind === 'faction' ? '检查组织特点、驻地与涉及区域、部门结构、岗位职责、现有成员和待定岗位；人员必须有依据，空岗位不虚构成人物。' : '补足本条资料确有依据的缺项，并检查与关联资料是否一致。'}重大改变先保留为候选。`)
   const discussRelation = (item: StoryAtlasRelation) => {
     const subjectKind = snapshot?.entities.find(entity => entity.id === item.fromId)?.kind
     const stage = item.kind === 'route' ? 'map' : item.kind === 'membership' ? 'factions' : item.kind === 'presence' && subjectKind ? STAGES[subjectKind] : 'relationships'

@@ -10,6 +10,7 @@ import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, useCreativeWorkflow } from './workflow-client'
 import { buildStorySettingsPayload, parseStorySettingsDocument } from '../../../shared/story-settings'
 import ChapterIndexStatus from './ChapterIndexStatus'
+import ResearchLibrary from './ResearchLibrary'
 
 export default function AuthorStudio({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
@@ -156,6 +157,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
         {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">暂无待处理问题</p>}
       </section>
     </div>
+    <ResearchLibrary novelId={novelId} disabled={workflow.active || workflow.submitting} />
     {dataError && <p className="author-error" role="alert">{dataError}</p>}
     {!novel?.userBackground?.trim() && !workflow.run && <EmptyWork title="先给故事一个起点" actionLabel="填写背景要求" action={() => { setStage('background'); document.getElementById('author-request')?.focus() }} />}
   </AuthorPage>

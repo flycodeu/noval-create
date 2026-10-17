@@ -95,6 +95,7 @@ import * as creativeStageService from './services/creative-stage.service'
 import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
 import * as sourceSearchSettingsService from './services/source-search-settings.service'
+import { listCreativeResearch, searchCreativeResearch } from './services/creative-research.service'
 import { throwUserFacingError } from './utils/user-facing-error'
 import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
@@ -1414,6 +1415,8 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
     return sourceSearchSettingsService.updateSourceSearchSettings(data)
   })
   handle('sourceSearch:test', () => sourceSearchSettingsService.testSourceSearchSettings())
+  handle('sourceSearch:research', (_, novelId, request, atChapter) => searchCreativeResearch(requireId(novelId, 'novelId'), requireString(request, 'request'), atChapter))
+  handle('sourceSearch:listResearch', (_, novelId, query) => listCreativeResearch(requireId(novelId, 'novelId'), typeof query === 'string' ? query : ''))
 
   handle('template:list', (_, type) => {
     const db = getDb()

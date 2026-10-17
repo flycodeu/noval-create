@@ -5,6 +5,7 @@ import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '.
 import { ATLAS_KIND_LABELS, atlasEntitySummary, atlasLinks, atlasRegionLinks, profileFieldGroups, type AtlasLink } from './atlas-profile'
 import { recordOf } from './content-document'
 import { AtlasFields } from './AtlasFields'
+import { AtlasPortrait } from './AtlasPortrait'
 
 type Props = { editingDisabled?: boolean; entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; chapters: Array<{ id: number; chapterNum: number }>; onOpen: (entity: StoryAtlasEntity) => void; onEdit: () => void; onDiscuss: () => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity) => void }
 function Connections({ title, links, empty, onOpen, onRelation }: { title: string; links: AtlasLink[]; empty: string; onOpen: Props['onOpen']; onRelation: Props['onRelation'] }) {
@@ -39,6 +40,7 @@ export function AtlasEntityProfile(props: Props) {
     {summary && <p className="atlas-profile-summary">{summary}</p>}
     {entity.summary && entity.summary.trim() !== summary.trim() && <details className="author-disclosure"><summary>作者设定</summary><p>{entity.summary}</p></details>}
     <div className="atlas-profile-actions"><Button disabled={props.editingDisabled} onClick={onDiscuss}>讨论与完善{entity.kind === 'faction' ? '组织' : ATLAS_KIND_LABELS[entity.kind]}</Button>{entity.kind === 'location' && <Button onClick={() => onDrill(entity)}>查看下级地点 <ArrowRightOutlined /></Button>}</div>
+    {entity.kind === 'character' && <AtlasPortrait entity={entity} onEdit={onEdit} disabled={props.editingDisabled} />}
     {entity.kind === 'character' && <Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录出生地、居住地或活动区域。可结合已写正文补充；未知地点应保持待定。" onOpen={onOpen} onRelation={onRelation} />}
     {entity.kind === 'faction' && <Connections title="驻地与涉及区域" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录主要驻地、分驻点或涉及区域。一个组织可以关联多个地区。" onOpen={onOpen} onRelation={onRelation} />}
     {groups.map(group => <section className="atlas-profile-section" key={group.title}><h3>{group.title}</h3>{Object.keys(group.values).length ? <AtlasFields values={group.values} entities={snapshot.entities} chapters={chapters} onOpen={onOpen} /> : <p className="atlas-empty-note">{group.empty}</p>}</section>)}

@@ -10,6 +10,16 @@ afterEach(() => {
 })
 
 describe('source-grounding-search service', () => {
+  it('keeps time, region and exclusions in explicit research despite old project sources', () => {
+    const queries = buildSourceGroundingQueries({ novelId: 1, chapterId: 1, chapterNum: 1,
+      researchRequest: '查宋代江南普通行旅者衣料，排除道袍', researchTopics: ['服饰器物'],
+      sourceLedgerJson: '[{"sourceKey":"old","factTitle":"道教"}]' })
+    expect(queries).toHaveLength(2)
+    for (const query of queries) {
+      expect(query).toContain('宋代江南普通行旅者衣料')
+      expect(query).toContain('排除道袍')
+    }
+  })
   it('builds real-world grounding queries for source-poor historical or domain contexts', () => {
     const historicalQueries = buildSourceGroundingQueries({
       novelId: 1,

@@ -22,6 +22,23 @@ const fixture = () => ({ entities: [
 ] })
 
 describe('saved atlas dependencies for creative context', () => {
+  it('projects observable physical details while excluding portrait media and private lore', () => {
+    const attributes = { appearance: '眉尾旧疤', clothing: '磨旧的棉布短褐', carriedItems: '小布包', physicalHabits: '走路稍跛',
+      portraitImage: 'data:image/webp;base64,large-image', portraitPrompt: 'hidden future costume',
+      goals: '秘密复仇', clothingSecret: '夹层藏符', secret: '真身' }
+    const visible = creativePublicAttributes(attributes, { kind: 'character', isPov: false })
+    expect(visible).toEqual({ appearance: attributes.appearance, clothing: attributes.clothing, carriedItems: attributes.carriedItems, physicalHabits: attributes.physicalHabits })
+    expect(creativePublicAttributes({ clothing: { public: '灰布袍', secretPocket: '诏书', futurePlan: '龙袍' } }, { kind: 'character', isPov: true })).toEqual({ clothing: { public: '灰布袍' } })
+  })
+  it('reports missing physical design as optional gaps without inventing clothes or objects', () => {
+    const atlas = { entities: [entity('character:1', 'character', '路人')], relations: [] }
+    const coverage = creativeAtlasCoverage(atlas, new Set(['character:1']))
+    expect(coverage.missing[1].fields).toEqual(expect.arrayContaining(['appearance', 'clothing', 'carriedItems']))
+    expect(coverage.instruction).toContain('无关缺项不妨碍写作')
+    expect(atlas.entities[0].attributes).toEqual({})
+    atlas.entities[0].attributes = { appearance: { description: '  ' }, clothing: [], carriedItems: { description: null } }
+    expect(creativeAtlasCoverage(atlas, new Set(['character:1'])).missing[1].fields).toEqual(expect.arrayContaining(['appearance', 'clothing', 'carriedItems']))
+  })
   it.each(['background', 'world_rules', 'style', 'story'] as const)('does not turn a global %s edit into the current scene or protagonist graph', stage => {
     const atlas = fixture()
     const selected = selectCreativePlanningAtlas(atlas, { stage, request: '完善全书的时间表达', anchorText: '陈舟与周河在河村交谈', fallbackText: '陈舟曾到远港' })

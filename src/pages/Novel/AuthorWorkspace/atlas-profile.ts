@@ -33,6 +33,7 @@ export function hasAtlasValue(value: unknown): boolean {
   return true
 }
 const FIELD_LABELS: Record<string, string> = {
+  clothing: '常用衣着', carriedItems: '随身物品', physicalHabits: '动作与体态', portraitPrompt: '视觉描述', portraitImage: '角色参考像',
   name: '名称', summary: '说明', status: '状态', role: '职责', fromId: '起点', toId: '关联对象', kind: '关联类型', effectiveFromChapter: '生效章位',
   note: '说明', notes: '补充说明', traits: '特点', description: '说明', parentId: '上级', ...ATLAS_ATTRIBUTE_LABELS,
 }
@@ -64,7 +65,7 @@ export function atlasScalarText(key: string, value: unknown, entities: StoryAtla
 export type AtlasProfileGroup = { title: string; fields: string[]; empty: string }
 export const PROFILE_GROUPS: Record<StoryAtlasEntity['kind'], AtlasProfileGroup[]> = {
   character: [
-    { title: '身份与外貌', fields: ['roleType', 'entityType', 'age', 'gender', 'species', 'occupation', 'socialIdentity', 'appearance', 'firstImpression'], empty: '身份与外貌尚未补充' },
+    { title: '身份与外貌', fields: ['roleType', 'entityType', 'age', 'gender', 'species', 'occupation', 'socialIdentity', 'appearance', 'clothing', 'carriedItems', 'physicalHabits', 'firstImpression'], empty: '身份、外貌与日常形象尚未补充' },
     { title: '性格与行为', fields: ['personalityTraits', 'flaws', 'strengths', 'weaknesses', 'habits', 'speechPattern', 'dailyRoutine', 'catchphrases', 'vocabularyLevel', 'dialectFeatures'], empty: '性格表现、弱点、习惯与说话方式尚未补充' },
     { title: '动机与底线', fields: ['goals', 'publicGoal', 'motivation', 'surfaceDesire', 'deepNeed', 'coreFear', 'innerConflict', 'moralLine', 'beliefs', 'values', 'selfDeception', 'contradiction', 'resonancePoint', 'hiddenSecret'], empty: '目标、内在需要与行事底线尚未补充' },
     { title: '能力与经历', fields: ['abilities', 'abilityLimits', 'abilityCosts', 'abilityCost', 'limitations', 'background', 'characterArc', 'arcStage', 'dramaticEngine'], empty: '能力边界与经历尚未补充' },
@@ -81,7 +82,7 @@ export const PROFILE_GROUPS: Record<StoryAtlasEntity['kind'], AtlasProfileGroup[
   event: [{ title: '事件经过', fields: ['eventType', 'timeLabel', 'status', 'chapterNum', 'chapterStartId', 'chapterEndId', 'eventCause', 'eventProcess', 'eventResult', 'significance', 'protagonistPresent', 'protagonistAction', 'presentCharacterIds', 'affectedCharacterIds', 'directConsequences', 'openThreads'], empty: '前因、经过与结果尚未补充' }],
 }
 export function profileFieldGroups(entity: StoryAtlasEntity) {
-  const used = new Set<string>(['positions', 'x', 'y', 'publicSummary', ...ATLAS_INTERNAL_FIELDS])
+  const used = new Set<string>(['positions', 'x', 'y', 'publicSummary', 'portraitImage', 'portraitPrompt', ...ATLAS_INTERNAL_FIELDS])
   const groups = PROFILE_GROUPS[entity.kind].map(group => {
     group.fields.forEach(key => used.add(key))
     return { ...group, values: Object.fromEntries(group.fields.filter(key => hasAtlasValue(entity.attributes[key])).map(key => [key, entity.attributes[key]])) }

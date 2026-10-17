@@ -1,5 +1,6 @@
 /** The same story graph contract is used by the author workspace and MCP. */
 import type { AgentToolJsonSchema } from './tool-contracts'
+import { ATLAS_PORTRAIT_MAX_LENGTH, ATLAS_PORTRAIT_PATTERN } from './story-atlas-portrait'
 
 export type StoryAtlasEntityKind = 'location' | 'character' | 'faction' | 'item' | 'event'
 export type StoryAtlasRelationKind = 'relationship' | 'route' | 'presence' | 'ownership' | 'membership' | 'participation'
@@ -29,6 +30,14 @@ export interface StoryAtlasPosition {
   reportsToPositionId?: string | null
 }
 export interface StoryAtlasCharacterAttributes extends Record<string, unknown> {
+  appearance?: string | Record<string, unknown>
+  clothing?: string
+  carriedItems?: string
+  physicalHabits?: string
+  /** Optional visual brief, kept separate from story facts. */
+  portraitPrompt?: string
+  /** Embedded compressed reference image; never include in a writing prompt. */
+  portraitImage?: string
   occupation?: string
   dailyRoutine?: string
   motivation?: string
@@ -83,7 +92,9 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
     } },
   }, additionalProperties: true },
   character: { type: 'object', properties: {
-    ...textFields('gender', 'birthDate', 'occupation', 'dailyRoutine', 'motivation', 'goals', 'publicSummary', 'publicGoal', 'surfaceDesire', 'deepNeed', 'coreFear', 'moralLine', 'speechPattern', 'abilityLimits', 'abilityCosts', 'relationshipTension', 'dramaticEngine'),
+    ...textFields('gender', 'birthDate', 'occupation', 'dailyRoutine', 'motivation', 'goals', 'publicSummary', 'publicGoal', 'surfaceDesire', 'deepNeed', 'coreFear', 'moralLine', 'speechPattern', 'abilityLimits', 'abilityCosts', 'relationshipTension', 'dramaticEngine', 'clothing', 'carriedItems', 'physicalHabits', 'portraitPrompt'),
+    appearance: { anyOf: [atlasText, { type: 'object', additionalProperties: true }], description: '兼容既有结构化外貌资料；修订时保留未变更的已定字段。' },
+    portraitImage: { type: 'string', maxLength: ATLAS_PORTRAIT_MAX_LENGTH, pattern: ATLAS_PORTRAIT_PATTERN, description: '可选的人物参考像，仅由作者导入并压缩；不得由文字模型编造图片数据或当作正文事实。' },
     age: { type: 'integer', minimum: 0 }, personalityTraits: atlasTexts, flaws: atlasTexts, habits: atlasTexts,
     abilities: { anyOf: [atlasText, { type: 'array', maxItems: 50, items: { anyOf: [atlasText, { type: 'object', required: ['name'], additionalProperties: false, properties: textFields('name', 'effect', 'limits', 'cost') }] } }] },
   }, additionalProperties: true },

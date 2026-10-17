@@ -6,6 +6,8 @@ describe('runtime browser RPC allowlist', () => {
     expect(resolveRuntimeRpcChannel('novel', 'update')).toBe('novel:update')
     expect(resolveRuntimeRpcChannel('storyAtlas', 'query')).toBe('storyAtlas:query')
     expect(resolveRuntimeRpcChannel('agentTools', 'call')).toBe('agentTool:call')
+    expect(resolveRuntimeRpcChannel('sourceSearch', 'research')).toBe('sourceSearch:research')
+    expect(resolveRuntimeRpcChannel('sourceSearch', 'listResearch')).toBe('sourceSearch:listResearch')
     expect(resolveRuntimeRpcChannel('app', 'getCodexMcpSetupStatus')).toBe('app:getCodexMcpSetupStatus')
   })
   it('rejects native shell, window, approval-dialog and malformed channels', () => {

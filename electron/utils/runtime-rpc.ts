@@ -10,7 +10,7 @@ const STORY_SERVICES = new Set([
 const APP_METHODS = new Set(['getRuntimeInfo', 'getDatabasePath', 'getMaintenanceStatus', 'getCapabilities', 'getUpdateStatus', 'getCodexMcpSetupStatus'])
 const SENSITIVE_METHODS: Record<string, Set<string>> = {
   model: new Set(['list', 'create', 'update', 'delete', 'setDefault', 'test']),
-  sourceSearch: new Set(['getSettings', 'updateSettings', 'test']),
+  sourceSearch: new Set(['getSettings', 'updateSettings', 'test', 'research', 'listResearch']),
   zhuque: new Set(['getSettings', 'updateSettings', 'test', 'getChapterResult', 'detectChapter']),
   agentTool: new Set(['list', 'call']),
 }

@@ -1112,6 +1112,8 @@ export function installWebElectronBridge(): void {
       detectChapter: async (id?: unknown, expectedContent?: unknown) => withLocalBackend('zhuque', 'detectChapter', [id, expectedContent], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
     }),
     sourceSearch: createService('sourceSearch', {
+      research: async (novelId?: unknown, request?: unknown, atChapter?: unknown) => withLocalBackend('sourceSearch', 'research', [novelId, request, atChapter], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
+      listResearch: async (novelId?: unknown, query?: unknown) => withLocalBackend('sourceSearch', 'listResearch', [novelId, query], async () => []),
       getSettings: async () => withLocalBackend(
         'sourceSearch',
         'getSettings',

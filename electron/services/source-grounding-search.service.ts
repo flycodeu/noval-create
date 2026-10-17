@@ -6,7 +6,7 @@ import {
 } from '../../src/shared/genre-system'
 import { getSourceSearchRuntimeConfig } from './source-search-settings.service'
 
-interface WebSearchResult {
+export interface WebSearchResult {
   title: string
   url: string
   snippet: string
@@ -37,6 +37,9 @@ export interface SourceGroundingEnrichmentInput {
   sourceLedgerJson?: string | null
   canonSourceLedgerJson?: string | null
   canonFactCardsJson?: string | null
+  /** Explicit research bypasses the legacy one-time project grounding gate. */
+  researchRequest?: string
+  researchTopics?: string[]
 }
 
 export interface SourceGroundingEnrichmentResult {
@@ -210,6 +213,12 @@ function needsExternalGrounding(input: SourceGroundingEnrichmentInput): boolean 
 }
 
 export function buildSourceGroundingQueries(input: SourceGroundingEnrichmentInput): string[] {
+  if (input.researchRequest?.trim()) {
+    const focus = compactText(input.researchRequest, 240)
+    const topic = (input.researchTopics || []).join(' ')
+    const query = [...new Set([focus, topic].filter(Boolean))].join(' ')
+    return [`${query} 原典 文献 博物馆 大学`, `${query} 历史 生活 实践 研究`]
+  }
   if (!needsExternalGrounding(input)) return []
 
   const terms = extractSearchTerms([
@@ -256,8 +265,9 @@ function mapSearchResultsToSourceEntries(
   for (const result of results) {
     const title = compactText(result.title || result.url, 80)
     const url = result.url.trim()
-    const snippet = compactText(result.snippet || title, 260)
+    const snippet = compactText(result.snippet || title, input.researchRequest ? 1000 : 260)
     if (!title || !url) continue
+    try { const parsed = new URL(url); if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue } catch { continue }
 
     const key = `web:${stableHash(`${providerName}|${url}`)}`
     const confidence = normalizeScore(result.score)
@@ -276,6 +286,8 @@ function mapSearchResultsToSourceEntries(
       verificationStatus: 'web_found',
       publishedAt: result.publishedAt,
       recordedAt,
+      researchTopics: input.researchTopics,
+      canonDecision: 'reference_only',
     })
     canonFactCards.push({
       cardKey: key,

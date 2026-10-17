@@ -86,10 +86,24 @@ async function main() {
     db.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'ready')").run(novelId, target, '检查系船绳')
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
     db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId, target, '陈舟', '检查系船绳', '河水暴涨，旧绳磨断', '换上新绳，渡船停稳')
+    const priorCanon = db.prepare('SELECT canon_fact_cards_json FROM novels WHERE id=?').get(novelId).canon_fact_cards_json
+    const research = await require('../electron/services/creative-research.service.ts').searchCreativeResearch(novelId, '搜索道教知识作为有出处的创作参考', 2, {
+      providerName: 'fixture', provider: async () => [{ title: '道德經', url: 'https://ctext.org/dao-de-jing/zh', snippet: '知止与克制的原典参考，用于选择和代价，不能当作人物已经知道的秘密。' }],
+    })
+    assert.equal(research.updated, true)
+    assert.equal(db.prepare('SELECT canon_fact_cards_json FROM novels WHERE id=?').get(novelId).canon_fact_cards_json, priorCanon, 'research references never become Canon')
     const before = db.prepare('SELECT context_version FROM novels WHERE id=?').get(novelId).context_version
     const futureMemory = '第3章师父遇害，凶手是邱账房。'
     db.prepare("INSERT INTO story_memory_checkpoints(novel_id,scope_type,summary,source_range_end,source_context_version,stale) VALUES(?,'novel',?,3,1,1)").run(novelId, futureMemory)
-    const result = await compile(input, limits)
+    const result = await compile({ ...input, request: input.request + '；参考已保存的道教知识资料' }, limits)
+    assert.ok(result.sources.some(key => key.startsWith('research:web:')), 'the real SQLite research ledger reaches the chapter writer')
+    assert.ok(result.text.includes('https://ctext.org/dao-de-jing/zh'), 'writing material retains the reference URL')
+    assert.ok(result.text.includes('不是小说正史或人物已知信息'), 'research does not grant fictional knowledge or override Canon')
+    const originalOutline = db.prepare('SELECT outline FROM chapters WHERE id=?').get(target).outline
+    db.prepare('UPDATE chapters SET outline=? WHERE id=?').run('陈舟在道观外检查系船绳。', target)
+    const inheritedResearch = await compile({ ...input, request: '继续下一章' }, limits)
+    assert.ok(inheritedResearch.sources.some(key => key.startsWith('research:web:')), 'generic continuation recalls research from the chapter outline without repeating the topic in the user request')
+    db.prepare('UPDATE chapters SET outline=? WHERE id=?').run(originalOutline, target)
     assert.ok(result.sources.includes('opening_progress'), 'MCP chapter generation retains opening delivery guidance in its compiled request')
     assert.ok(result.sources.includes('narrative_detail'), 'detail boundaries survive context allocation as required material')
     assert.ok(result.text.includes('情绪动作不能替代位置确认、同意或事实验证'))

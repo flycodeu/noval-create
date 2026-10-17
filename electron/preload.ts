@@ -577,6 +577,8 @@ const api = {
     getSettings: () => invokeIpc('sourceSearch:getSettings'),
     updateSettings: (data: unknown) => invokeIpc('sourceSearch:updateSettings', data),
     test: () => invokeIpc('sourceSearch:test'),
+    research: (novelId: number, request: string, atChapter?: number) => invokeIpc('sourceSearch:research', novelId, request, atChapter),
+    listResearch: (novelId: number, query?: string) => invokeIpc('sourceSearch:listResearch', novelId, query),
   },
 
   // Template APIs

@@ -1,0 +1,11 @@
+.research-library { margin-top: 24px; }
+.research-library__search { display: flex; gap: 12px; }
+.research-library__search > .ant-input { min-width: 0; }
+.research-library__sources article { padding: 16px 0; border-top: 1px solid var(--border-default); overflow-wrap: anywhere; }
+.research-library__sources article > a { color: var(--accent); font-size: 14px; font-weight: 500; }
+.research-library__sources small { display: block; margin: 7px 0; color: var(--text-muted); font-size: 11px; }
+.research-library__sources p { color: var(--text-secondary); font-size: 12px; line-height: 1.85; white-space: pre-wrap; }
+.research-library__sources details { color: var(--text-muted); font-size: 11px; }
+.research-library__sources summary { cursor: pointer; }
+.research-library__sources details a { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .research-library__search { flex-wrap: wrap; } .research-library__search > .ant-btn { width: 100%; } }

@@ -125,6 +125,31 @@ describe('creative project context budget and saved constraints', () => {
     await expect(compileCreativeContext({ ...input('outline'), request, atChapter: 4 })).rejects.toThrow('必要资料 chapter:24:target 超出')
   })
   const input = (stage: CreativeStage = 'map') => ({ novelId: 1, stage, request: '补充已有资料', idempotencyKey: 'fixture' })
+  it('carries relevant saved external references and their usage boundary into planning', async () => {
+    mock.novel.sourceLedgerJson = JSON.stringify([{ sourceKey: 'web:dao', sourceType: 'web_search', verificationStatus: 'web_found', sourceUrl: 'https://ctext.org/dao-de-jing/zh', factTitle: '道德经', sourceText: '知止与克制的参考资料', researchTopics: ['道教'], query: '道教 原典' }])
+    const report = await compileCreativeContext({ ...input('story'), request: '在道教背景中设计有代价的选择' })
+    expect(report.sources).toContain('research:web:dao')
+    expect(report.text).toContain('https://ctext.org/dao-de-jing/zh')
+    expect(report.text).toContain('不是小说正史或人物已知信息')
+    expect(report.text).toContain('reference_only')
+  })
+  it('excludes portrait media and visual prompts from planning, review budgets and existing draft baselines', async () => {
+    const portraitImage = 'data:image/png;base64,' + 'A'.repeat(200000)
+    mock.atlas.entities = [{ id: 'character:1', kind: 'character', name: '陈舟', attributes: { appearance: '瘦高，眼尾有旧疤', portraitImage, portraitPrompt: '披红披风的视觉试稿' } }]
+    const planning = await compileCreativeContext({ ...input('characters'), request: '完善陈舟' })
+    expect(planning.text).toContain('眼尾有旧疤')
+    expect(planning.text).not.toContain('data:image')
+    expect(planning.text).not.toContain('披红披风')
+    const snapshot = { entities: mock.atlas.entities }
+    const review = await compileCreativeContext({ ...input('characters'), operation: 'review', request: '复核陈舟' }, undefined, undefined, estimateTokens(JSON.stringify(snapshot)), snapshot)
+    expect(review.maxInputTokens).toBeGreaterThan(1000)
+    expect(review.text).not.toContain('data:image')
+    mock.artifact.content = { schemaVersion: 'generic-asset-draft-v1', output: JSON.stringify({ changes: mock.atlas.entities.map(entity => ({ ...entity, op: 'upsert_entity' })) }) }
+    const source = creativeRevisionSource({ ...input('characters'), sourceArtifactId: 'portrait' })!
+    expect(source).toContain('眼尾有旧疤')
+    expect(source).not.toContain('data:image')
+    expect(source).not.toContain('披红披风')
+  })
   it.each(['world_rules', 'story', 'style', 'characters', 'map', 'outline'] as CreativeStage[])('includes saved rules, story and voice in %s', async stage => {
     const report = await compileCreativeContext(input(stage))
     for (const text of ['不能复生', '主角是凡人', '伤势不能突然痊愈', ...(stage === 'map' ? [] : ['对白克制'])]) expect(report.text).toContain(text)

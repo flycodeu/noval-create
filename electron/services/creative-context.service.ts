@@ -1,4 +1,6 @@
 import { estimateTokens } from '../../src/shared/token-budget'
+import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
+import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import { listChapters } from './chapter.service'
 import { getNovel } from './novel.service'
@@ -63,7 +65,7 @@ export function assertCreativeContextCoverage(data: Record<string, unknown>, con
 }
 const planningNarrativeKeys = new Set(['evidenceQuote', 'eventTitle', 'eventSummary', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'protagonistAction', 'timeLabel', 'timeMode', 'timePrecision', 'relativeDay', 'sequenceInDay', 'chronologyOrder', 'timeOfDayMinutes'])
 function narrativeAttributes(attributes: Record<string, unknown> = {}) {
-  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))
+  return creativeTextProjection(Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))) as Record<string, unknown>
 }
 
 function clipPlanningValue(value: unknown): unknown {
@@ -158,6 +160,11 @@ function formalSnapshotValues(snapshot: unknown) {
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
 export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0, formalReviewSnapshot?: unknown, frozenRevisionBase?: ChapterRevisionBase): Promise<CreativeContextReport> {
+  if (formalReviewSnapshot !== undefined) {
+    const projected = creativeTextProjection(formalReviewSnapshot)
+    if (JSON.stringify(projected) !== JSON.stringify(formalReviewSnapshot)) formalReviewTokens = estimateTokens(JSON.stringify(projected))
+    formalReviewSnapshot = projected
+  }
   validateCreativeChangeScope(input)
   validateChapterRevision(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
@@ -243,6 +250,12 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
+  const researchText = [input.request, novel.userBackground, novel.expandedBackground].filter(Boolean).join('\n')
+  const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchText)
+  if (research.length) {
+    add('research:usage', CREATIVE_RESEARCH_USAGE, true)
+    for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 15)
+  }
   const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
   const previousChapter = chapterRows.filter(chapter => chapter.chapterNum < target && chapter.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
