@@ -76,7 +76,10 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
     if (group) next.set('group', group.key)
     setParams(next)
   }
-  const names = Object.fromEntries(snapshot?.entities.map(entity => [entity.id, entity.name]) || [])
+  const names = Object.fromEntries([
+    ...(snapshot?.entities.map(entity => [entity.id, entity.name]) || []),
+    ...chapters.map(chapter => [`chapter:${chapter.id}`, `第 ${chapter.chapterNum} 章${chapter.title ? ` · ${chapter.title}` : ''}`]),
+  ])
   const eventCard = (entry: StoryTimelineEntry, index: number) => <button type="button" className={`story-timeline-event${selected?.entity.id === entry.entity.id ? ' is-selected' : ''}`} key={entry.entity.id} aria-label={`查看事件：${entry.entity.name}`} aria-pressed={selected?.entity.id === entry.entity.id} onClick={() => selectEvent(entry)}>
     <span className="story-timeline-event__index">{String((page - 1) * PAGE_SIZE + index + 1).padStart(2, '0')}</span>
     <span className="story-timeline-event__main"><strong>{entry.entity.name}</strong><span className="story-timeline-event__time" title={entry.timeLabel}>{entry.plannedVolume ? `第 ${entry.plannedVolume} 卷 · ` : ''}{entry.timeLabel || '故事时间待确定'}</span>{entry.entity.summary && <span className="story-timeline-event__summary">{entry.entity.summary}</span>}</span>
