@@ -1,6 +1,7 @@
 .research-library { margin-top: 24px; }
 .research-library__search { display: flex; gap: 12px; }
 .research-library__search > .ant-input { min-width: 0; }
+.research-library__sources, .research-library > .ant-spin { margin-top: 18px; }
 .research-library__sources article { padding: 16px 0; border-top: 1px solid var(--border-default); overflow-wrap: anywhere; }
 .research-library__sources article > a { color: var(--accent); font-size: 14px; font-weight: 500; }
 .research-library__sources small { display: block; margin: 7px 0; color: var(--text-muted); font-size: 11px; }

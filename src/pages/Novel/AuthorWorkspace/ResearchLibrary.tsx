@@ -62,7 +62,6 @@ export default function ResearchLibrary({ novelId, disabled }: { novelId: number
       <Input aria-label="需要查找的创作资料" placeholder="例如：查找适合本书的道教观念、行旅服饰与民间生活资料" value={request} maxLength={2000} disabled={disabled || searching} onChange={event => setRequest(event.target.value)} onPressEnter={() => void search()} />
       <Button onClick={() => void search()} loading={searching} disabled={disabled || !request.trim()}>搜索并保存参考</Button>
     </div>
-    <p className="author-muted">写作按相关性选用来源摘要；参考资料需要结合本书设定，不能直接当作小说事实。</p>
     {error && <p className="author-error" role="alert">{error} <Button type="link" onClick={() => void refresh()}>重新读取</Button></p>}
     {diagnostics.length > 0 && <p className="author-muted" role="status">{diagnostics.join('；')}</p>}
     {loading ? <Spin /> : <div className="research-library__sources">{sources.slice((page - 1) * 5, page * 5).map(source => <article key={source.sourceKey}>
