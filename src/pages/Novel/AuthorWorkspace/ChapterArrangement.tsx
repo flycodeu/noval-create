@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { Button, Input, Modal, Spin } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import type { Chapter, ChapterContractAsset, SceneContractAsset } from '../../../types'
@@ -21,7 +21,7 @@ export default function ChapterArrangement({ chapter, onSaved, onDirtyChange, on
   const [saving, setSaving] = useState(false)
   const [initialDraft, setInitialDraft] = useState<unknown>(null)
   const dirty = editing !== null && JSON.stringify(initialDraft) !== JSON.stringify(draft)
-  useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false) }, [dirty, onDirtyChange])
+  useLayoutEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false) }, [dirty, onDirtyChange])
   const edit = (kind: 'outline' | 'contract' | 'scene', value: unknown) => { setInitialDraft(value); setDraft(value); setEditing(kind) }
   const load = useCallback(async () => {
     setLoading(true)

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Drawer, Dropdown, Input, Modal, Spin, message } from 'antd'
 import { ArrowLeftOutlined, EllipsisOutlined, MenuOutlined, SearchOutlined } from '@ant-design/icons'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -86,11 +86,11 @@ export default function NovelRouter() {
     return () => { alive = false }
   }, [novelId, currentPage, mutationToken, setNovel])
   useEffect(() => () => resetWorkspace(), [novelId, resetWorkspace])
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (lastRoutes.current.novelId !== novelId) lastRoutes.current = { novelId, routes: {} }
     if (!legacyDestination) lastRoutes.current.routes[currentPage] = location.pathname.replace(`/novels/${novelId}/`, '') + location.search
-    previousHash.current = window.location.hash
-  }, [novelId, currentPage, location.pathname, location.search, legacyDestination])
+    previousHash.current = `#${location.pathname}${location.search}${location.hash}`
+  }, [novelId, currentPage, location.pathname, location.search, location.hash, legacyDestination])
   useEffect(() => () => { searchEpoch.current += 1 }, [novelId])
   useEffect(() => {
     const handle = () => notifyWorkspaceMutation()

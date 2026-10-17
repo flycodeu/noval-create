@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button, Drawer, Grid, Input, InputNumber, Modal, Select, Spin, message } from 'antd'
 import { HistoryOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -124,8 +124,8 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     finally { setSaving(false) }
   }, [chapter, notifyWorkspaceMutation, reloadList, saving])
   useEffect(() => { registerSaveHandler(() => { void save() }); return () => registerSaveHandler(null) }, [registerSaveHandler, save])
-  useEffect(() => { registerLeaveGuard(() => arrangementDirty || draftRef.current !== baselineRef.current); return () => registerLeaveGuard(null) }, [registerLeaveGuard, arrangementDirty])
-  useEffect(() => { registerViewLeaveGuard?.(() => arrangementDirty); return () => registerViewLeaveGuard?.(null) }, [registerViewLeaveGuard, arrangementDirty])
+  useLayoutEffect(() => { registerLeaveGuard(() => arrangementDirty || draftRef.current !== baselineRef.current); return () => registerLeaveGuard(null) }, [registerLeaveGuard, arrangementDirty])
+  useLayoutEffect(() => { registerViewLeaveGuard?.(() => arrangementDirty); return () => registerViewLeaveGuard?.(null) }, [registerViewLeaveGuard, arrangementDirty])
   useEffect(() => {
     const refresh = () => {
       void reloadList().catch((cause) => setError(String(cause)))

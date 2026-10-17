@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, screen } = require('electron')
 const { build } = require('esbuild')
 
 const root = path.resolve(__dirname, '..')
-const output = path.join(root, 'outputs', 'layout-release-2.4.30')
+const version = require('../package.json').version
+const output = path.join(root, 'outputs', `layout-release-${version}`)
 const tmpRoot = path.join(root, '.tmp-tests')
 fs.mkdirSync(output, { recursive: true })
 fs.mkdirSync(tmpRoot, { recursive: true })
@@ -18,6 +19,14 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 let activeWindow
 const rendererErrors = []
 const rendererWarnings = []
+let phase = 'setup'
+let lastExpression = ''
+const progress = value => { phase = value; console.log('[workspace-layout-ui] ' + value) }
+const bounded = async (promise, label, ms = 15000) => {
+  let timer
+  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Error(label + ' timed out')), ms) })]) }
+  finally { clearTimeout(timer) }
+}
 
 async function main() {
   await app.whenReady()
@@ -25,17 +34,19 @@ async function main() {
   fs.writeFileSync(path.join(profile, 'index.html'), '<meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   const win = new BrowserWindow({ show: false, width: 1440, height: 1000, useContentSize: true, webPreferences: { contextIsolation: false, nodeIntegration: false, backgroundThrottling: false } })
   activeWindow = win
+  win.webContents.on('render-process-gone', (_, details) => { const note = 'Renderer exited: ' + JSON.stringify(details); rendererErrors.push(note); fs.writeSync(2, '[workspace-layout-ui] ' + note + '\n') })
+  win.on('unresponsive', () => fs.writeSync(2, '[workspace-layout-ui] Renderer unresponsive during ' + phase + '\n'))
   const errors = rendererErrors
   win.webContents.on('console-message', (_, level, text) => {
     if (text.startsWith('Warning: [antd:') && text.includes('Static function can not consume context')) rendererWarnings.push(text)
     else if (level >= 3 && !text.includes('Content-Security-Policy')) errors.push(text)
   })
-  const run = expression => win.webContents.executeJavaScript(expression)
+  const run = expression => { lastExpression = expression; return bounded(win.webContents.executeJavaScript(expression), 'Renderer expression during ' + phase) }
   const wait = async expression => { for (let i = 0; i < 200; i++) { if (await run(expression)) return; await pause(25) } throw Error('Timeout: ' + expression) }
   const click = (text, scope = 'document') => run(`{const target=[...${scope}.querySelectorAll('button')].find(el=>el.textContent.replace(/\\s+/g,'').trim()===${JSON.stringify(text.replace(/\s+/g, ''))});if(!target)throw Error('Missing button: '+${JSON.stringify(text)});target.click()}`)
   const tab = text => run(`{const target=[...document.querySelectorAll('[role="tab"]')].find(el=>el.textContent.trim()===${JSON.stringify(text)});if(!target)throw Error('Missing tab');target.click()}`)
   const edit = (selector, value) => run(`{const input=document.querySelector(${JSON.stringify(selector)});if(!input)throw Error('Missing input');Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}))}`)
-  const go = async route => { await run(`location.hash=${JSON.stringify('/novels/292/' + route)}`); await wait('!!document.querySelector(".author-shell-main") && !document.querySelector(".author-loading")'); await pause(80) }
+  const go = async route => { progress('route ' + route); await run(`location.hash=${JSON.stringify('/novels/292/' + route)}`); await wait('!!document.querySelector(".author-shell-main") && !document.querySelector(".author-loading")'); await pause(80) }
   const snapshot = async name => { const [w, h] = win.getContentSize(); win.setContentSize(w + 1, h); await pause(60); win.setContentSize(w, h); await pause(180); fs.writeFileSync(path.join(output, name), (await win.webContents.capturePage()).toPNG()) }
   const noOverflow = async label => assert.equal(await run('document.documentElement.scrollWidth<=innerWidth+1'), true, label + ' has no page horizontal overflow')
   await win.loadFile(path.join(profile, 'index.html'))
@@ -149,8 +160,14 @@ async function main() {
   await wait('!!document.querySelector(".ant-modal textarea")')
   const unsavedArrangement = '未保存安排哨兵：只保留在当前编辑框，不写入章节。'
   const outlineBeforeGuard = await run('window.fixture.chapters[0].outline')
+  progress('dirty arrangement committed, then native same-chapter navigation')
+  // Observe the actual child dirty-state commit, then navigate immediately in
+  // its MutationObserver microtask. No extra IPC/sleep may accidentally flush
+  // the parent's old passive guard and mask the native-navigation race.
+  await run(`{const button=[...document.querySelectorAll('.author-arrangement button')].find(el=>el.textContent.includes('让 AI 完善本章安排'));if(!button||button.disabled)throw Error('Arrangement action must start enabled');window.arrangementNavigation={fired:false};const observer=new MutationObserver(()=>{if(!button.disabled)return;observer.disconnect();window.arrangementNavigation={fired:true,childDirtyCommitted:button.disabled,aiActionDisabled:[...document.querySelectorAll('.manuscript-toolbar button')].some(el=>el.textContent.includes('AI')&&el.disabled),previousHash:location.hash};location.hash='/novels/292/writing/editor?chapterId=682'});observer.observe(button,{attributes:true,attributeFilter:['disabled']})}`)
   await edit('.ant-modal textarea', unsavedArrangement)
-  await run('location.hash="/novels/292/writing/editor?chapterId=682"')
+  await wait('window.arrangementNavigation?.fired')
+  assert.equal(await run('window.arrangementNavigation.childDirtyCommitted'), true, 'native navigation starts from a real committed arrangement edit')
   await wait('!!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelectorAll(".ant-modal-confirm").length'), 1, 'native same-chapter panel change raises one confirmation for a dirty arrangement')
   await click('继续编辑')
@@ -159,6 +176,7 @@ async function main() {
   assert.equal(await run('document.querySelector(".ant-modal textarea").value'), unsavedArrangement, 'cancel native panel navigation preserves the exact arrangement draft')
   assert.equal(await run('new URLSearchParams(location.hash.split("?")[1]).get("panel")'), 'arrangement', 'cancel restores the original chapter context panel')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value'), dirtyProse, 'arrangement guard also keeps the prose draft')
+  progress('cancel retained arrangement; discard internally once')
   await click('参考资料')
   await wait('!!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelectorAll(".ant-modal-confirm").length'), 1, 'internal panel switch asks once before discarding the arrangement draft')
@@ -193,6 +211,7 @@ async function main() {
   await wait('!!document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]")')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value'), dirtyProse, 'clean sidebar round-trip restores the selected saved chapter')
   await edit('textarea[aria-label="第 1 章正文"]', dirtyProse + '\n尚未保存的下一句。')
+  progress('dirty prose after clean sidebar round-trip')
   await click('故事设计', 'document.querySelector(".author-shell-sidebar")')
   await wait('!!document.querySelector(".ant-modal-confirm")')
   await click('继续编辑')
@@ -208,6 +227,7 @@ async function main() {
   await click('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm") && !!document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]")')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value'), dirtyProse + '\n尚未保存的下一句。', 'native browser back cancellation also retains the exact editor draft')
+  progress('native hash and browser back retained prose')
   await click('保存', 'document.querySelector(".author-manuscript__heading")')
   await wait('window.fixture.chapters[0].content.endsWith("尚未保存的下一句。")')
   for (const width of [1280, 720]) {
@@ -230,6 +250,7 @@ async function main() {
   await wait('!!document.querySelector("textarea[aria-label=\\"第 42 章正文\\"]")')
   assert.equal(await run('new URLSearchParams(location.hash.split("?")[1]).get("chapterId")'), '723', 'directory selection preserves the chapter ID in the URL')
   await click('生成正文')
+  progress('chapter task is limited to the selected chapter')
   await wait('!!document.querySelector("#object-task-request") && document.querySelector(".object-task-context")?.textContent.includes("第 42 章")')
   await run('document.querySelector(".object-task-request details summary").click()')
   assert.equal(await run('document.querySelector(".object-task-options input[aria-label=\\"本轮生成数量\\"]").disabled'), true, 'chapter task count is fixed to one in the UI')
@@ -261,15 +282,28 @@ async function main() {
   assert.equal(await run('!!document.querySelector(".ant-pagination-item-2.ant-pagination-item-active")'), true)
   assert.deepEqual(await run('window.unexpected'), [], 'fixture covers all invoked tool contracts')
   assert.deepEqual(errors, [], 'no renderer runtime errors')
-  fs.writeFileSync(path.join(output, 'workspace-layout-ui-result.json'), JSON.stringify({ version: require('../package.json').version, profile, renderer: 'real App + HashRouter + production components', services: 'isolated deterministic fixture; no real search/model or author data writes', primaryNavigation: navigation, widths: [1440, 1280, 720], assertions: ['six workspaces render', '人物分页与搜索', 'confirmed summary and author planning separated', 'portrait clothing and ability sections', 'reference drawer keeps object selected', 'dirty rule close cancellation', 'rule save passes captured contextVersion and preserves extensions', 'source paging/search/readback', 'candidate generation leaves formal data untouched', 'candidate revision retains source and stage', 'apply selected candidate', 'return from rules preserves filter and selection', 'chapter arrangement and sources preserve editor draft', 'native same-chapter panel navigation cancellation preserves arrangement draft', 'internal explicit arrangement discard confirms once without a navigation loop', 'outline save preserves prose draft', 'chapter reference uses chapter-start without plans', 'manual save expectedContent retained', 'clean sidebar round-trip followed by native navigation still guards draft', 'cancel sidebar and native hash navigation preserves draft', 'resize keeps editor mounted', '42 chapters actual directory pagination and search', 'chapter task count disabled and forced to one after attempted expansion', 'chapter deep-link ID retained', 'global person search opens stable identity', '25 issues deep link opens second page and highlights target', 'narrow layout has no page overflow'], warnings: rendererWarnings, errors }, null, 2))
+  fs.writeFileSync(path.join(output, 'workspace-layout-ui-result.json'), JSON.stringify({ version, profile, renderer: 'real App + HashRouter + production components', services: 'isolated deterministic fixture; no real search/model or author data writes', primaryNavigation: navigation, widths: [1440, 1280, 720], assertions: ['six workspaces render', '人物分页与搜索', 'confirmed summary and author planning separated', 'portrait clothing and ability sections', 'reference drawer keeps object selected', 'dirty rule close cancellation', 'rule save passes captured contextVersion and preserves extensions', 'source paging/search/readback', 'candidate generation leaves formal data untouched', 'candidate revision retains source and stage', 'apply selected candidate', 'return from rules preserves filter and selection', 'chapter arrangement and sources preserve editor draft', 'native navigation immediately after committed dirty edit', 'native same-chapter panel navigation cancellation preserves arrangement draft', 'internal explicit arrangement discard confirms once without a navigation loop', 'outline save preserves prose draft', 'chapter reference uses chapter-start without plans', 'manual save expectedContent retained', 'clean sidebar round-trip followed by native navigation still guards draft', 'cancel sidebar and native hash navigation preserves draft', 'resize keeps editor mounted', '42 chapters actual directory pagination and search', 'chapter task count disabled and forced to one after attempted expansion', 'chapter deep-link ID retained', 'global person search opens stable identity', '25 issues deep link opens second page and highlights target', 'narrow layout has no page overflow'], warnings: rendererWarnings, errors }, null, 2))
   win.destroy()
   console.log('PASS workspace layout real Electron/React UI; deterministic service fixture, no provider verification. Evidence: ' + output)
 }
 main().then(() => app.exit(0)).catch(async error => {
-  if (activeWindow && !activeWindow.isDestroyed()) {
-    fs.writeFileSync(path.join(output, 'workspace-layout-ui-failure.png'), (await activeWindow.webContents.capturePage()).toPNG())
-    fs.writeFileSync(path.join(output, 'workspace-layout-ui-failure.json'), JSON.stringify({ ...await activeWindow.webContents.executeJavaScript('({text:document.body.innerText,calls:window.calls,unexpected:window.unexpected,dialogs:[...document.querySelectorAll(".ant-modal")].map(el=>({text:el.innerText,visible:!!el.offsetParent}))})'), rendererErrors }, null, 2))
+  // Emit the original error before any renderer/capture request: a crashed or
+  // unresponsive renderer must never hide the actual CI failure.
+  fs.writeSync(2, `[workspace-layout-ui] FAIL during ${phase}\n${error.stack || error}\n`)
+  const failure = { version, phase, lastExpression, profile, output, cwd: process.cwd(), error: error.stack || String(error), rendererErrors, rendererWarnings }
+  try {
+    if (activeWindow && !activeWindow.isDestroyed()) {
+      failure.window = { contentSize: activeWindow.getContentSize(), bounds: activeWindow.getBounds(), primaryDisplay: { scaleFactor: screen.getPrimaryDisplay().scaleFactor, size: screen.getPrimaryDisplay().size } }
+      try {
+        failure.renderer = await bounded(activeWindow.webContents.executeJavaScript('({hash:location.hash,text:document.body.innerText,calls:window.calls,unexpected:window.unexpected,viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},prose:document.querySelector(".author-manuscript__editor")?.value,arrangementDraft:document.querySelector(".ant-modal textarea")?.value,arrangementNavigation:window.arrangementNavigation,aiActions:[...document.querySelectorAll(".manuscript-toolbar button")].map(el=>({text:el.textContent,disabled:el.disabled})),dialogs:[...document.querySelectorAll(".ant-modal")].map(el=>({text:el.innerText,visible:!!el.offsetParent}))})'), 'Failure DOM diagnostics', 2000)
+      } catch (diagnosticError) { failure.diagnosticError = String(diagnosticError) }
+      try { fs.writeFileSync(path.join(output, 'workspace-layout-ui-failure.png'), (await bounded(activeWindow.webContents.capturePage(), 'Failure screenshot', 2000)).toPNG()) }
+      catch (captureError) { failure.captureError = String(captureError) }
+    }
+    fs.writeFileSync(path.join(output, 'workspace-layout-ui-failure.json'), JSON.stringify(failure, null, 2))
+  } catch (diagnosticError) {
+    fs.writeSync(2, '[workspace-layout-ui] Additional diagnostic failure: ' + String(diagnosticError) + '\n')
+  } finally {
+    app.exit(1)
   }
-  console.error(error)
-  app.exit(1)
 })
