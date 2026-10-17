@@ -23,7 +23,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set', 'research.query', 'research.search',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 let fixtureOwner
@@ -200,6 +200,13 @@ async function main() {
     const projectLists = await Promise.all([first, second].map((client) => call(client, 'projects.list', {})))
     assert(projectLists.every((result) => result.projects.some((project) => project.id === novelId && project.title === title)))
     const project = (await call(first, 'projects.get', { novelId })).project
+    assert.deepEqual((await call(first, 'research.query', { novelId })).sources, [])
+    assert.deepEqual(await rpc('sourceSearch', 'listResearch', [novelId]), [])
+    const missingSearch = await call(first, 'research.search', { novelId, request: '搜索道教知识' })
+    assert.equal(missingSearch.updated, false, 'missing search configuration cannot invent references')
+    assert.deepEqual(missingSearch.sources, [])
+    assert(missingSearch.diagnostics.length > 0, 'missing search service must return a useful diagnosis')
+    assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, project.contextVersion, 'failed research does not change story data')
 
     const changes = {
       novelId, expectedContextVersion: project.contextVersion, idempotencyKey: `packaged-atlas-${randomUUID()}`,
