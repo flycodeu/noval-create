@@ -7,12 +7,14 @@ const { build } = require('esbuild')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const root = path.resolve(__dirname, '..')
+fs.mkdirSync(path.join(root, '.tmp-tests'), { recursive: true })
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'character-library-ui-'))
 const output = path.join(root, 'outputs', 'character-library-ui')
 fs.mkdirSync(output, { recursive: true })
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
 app.setPath('userData', temp)
 app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('force-device-scale-factor', '1')
 registerProjectTsRuntime(root)
 
 async function main() {
