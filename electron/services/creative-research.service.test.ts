@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { searchCreativeResearch, listCreativeResearch } from './creative-research.service'
 import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
@@ -110,7 +111,7 @@ describe('creative research persistence and subsequent writing material', () => 
     await expect(searchCreativeResearch(1, '搜索道教知识', 2, { provider: search, providerName: 'fixture' })).rejects.toThrow('检索期间项目资料已变化')
     expect(state.writes).toHaveLength(0)
     state.novel.contextVersion = 7
-    await expect(searchCreativeResearch(1, '搜索道教知识', 2, { provider: provider(), providerName: 'fixture', beforeSave: () => { throw new Error('已取消') } })).rejects.toThrow('已取消')
+    await expect(searchCreativeResearch(1, '搜索道教知识', 2, { provider: provider(), providerName: 'fixture', beforeSave: () => { throw new Error(formatUserFacingMessage('services.cancelled')) } })).rejects.toThrow('已取消')
     expect(state.writes).toHaveLength(0)
   })
   it('recognizes explicit needs and respects the request not to search', () => {

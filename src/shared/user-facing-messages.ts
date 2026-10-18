@@ -1,4 +1,11 @@
+import { RUNTIME_USER_FACING_MESSAGES } from './user-facing-messages.runtime'
+import { USER_FACING_SERVICE_MESSAGES } from './user-facing-messages.services'
+import { WORKSPACE_USER_FACING_MESSAGES } from './user-facing-messages.workspace'
+
 export const USER_FACING_MESSAGES = {
+  ...RUNTIME_USER_FACING_MESSAGES,
+  ...USER_FACING_SERVICE_MESSAGES,
+  ...WORKSPACE_USER_FACING_MESSAGES,
   'common.loadFailed': '加载失败，请稍后再试。',
   'common.saveFailed': '保存失败',
   'common.saveRetryLater': '保存失败，请稍后重试。',

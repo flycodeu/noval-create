@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
 import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeStage, type CreativeChangeScope, type CreativeChapterRevision } from '../../../shared/creative-workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import type { Chapter, ModelConfig, RevisionTask } from '../../../types'
 import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, useCreativeWorkflow } from './workflow-client'
@@ -91,7 +92,7 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
     setSavingModel(true)
     try {
       const latest = await window.electron.novel.get(novelId)
-      if (!latest || latest.id !== novelId) throw new Error('项目不存在')
+      if (!latest || latest.id !== novelId) throw new Error(getUserFacingMessage('workspace.projectNotFound'))
       await window.electron.novel.update(novelId, { settingsJson: JSON.stringify(buildStorySettingsPayload({ aiEngine: { reviewModelConfigId: reviewModelConfigId || null } }, latest.settingsJson)) }, { expectedContextVersion: latest.contextVersion })
       const updated = await window.electron.novel.get(novelId)
       if (updated?.id === novelId && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
@@ -105,12 +106,12 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
     setSavingModel(true)
     try {
       const latest = await window.electron.novel.get(novelId)
-      if (!latest || latest.id !== novelId) throw new Error('项目不存在')
+      if (!latest || latest.id !== novelId) throw new Error(getUserFacingMessage('workspace.projectNotFound'))
       await window.electron.novel.update(novelId, { modelConfigId }, { expectedContextVersion: latest.contextVersion })
       const updated = await window.electron.novel.get(novelId)
       if (updated?.id === novelId && useNovelStore.getState().currentNovel?.id === novelId) {
         setNovel(updated)
-        setDataError(''); message.success('项目模型已更新')
+        setDataError(''); message.success(getUserFacingMessage('workspace.modelUpdated'))
       }
     } catch (cause) { setDataError(cause instanceof Error ? cause.message : '保存项目模型失败') }
     finally { modelSaveInFlight.current = false; setSavingModel(false) }
@@ -140,7 +141,7 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
     try {
       const readiness = await callAuthorTool<{ ready: boolean; chapterId: number | null; blockers: string[] }>('novelforge.chapters.readiness', { novelId, atChapter: nextChapter.chapterNum })
       if (epoch !== nextPlanEpoch.current) return
-      if (readiness.chapterId !== nextChapter.id) throw new Error('下一章目标已变化，请刷新作品进展后重试。')
+      if (readiness.chapterId !== nextChapter.id) throw new Error(getUserFacingMessage('workspace.nextChapterChanged'))
       const chapterStage = readiness.ready ? 'chapter' : 'outline'
       setStage(chapterStage)
       setRepairTargetActive(false)

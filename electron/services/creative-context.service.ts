@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { estimateTokens } from '../../src/shared/token-budget'
 import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
 import { creativeTextProjection } from '../../src/shared/creative-text-projection'
@@ -23,7 +24,7 @@ export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): nu
   const chapters = listChapters(input.novelId)
   if (input.stage === 'outline' && input.changeScope?.chapterIds?.length === 1) {
     const chapter = chapters.find(row => row.id === input.changeScope!.chapterIds![0])
-    if (!chapter) throw new Error(`章节 ${input.changeScope.chapterIds[0]} 不属于当前项目。`)
+    if (!chapter) throw new Error(formatUserFacingMessage('services.creativeContext.chapterWrongProject', { chapterId: `${input.changeScope.chapterIds[0]}` }))
     return chapter.chapterNum
   }
   const writtenThrough = chapters.filter(chapter => chapter.content?.trim()).reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0)
@@ -58,7 +59,7 @@ export function assertCreativeContextCoverage(data: Record<string, unknown>, con
       const attributes = change.attributes as Record<string, unknown> | undefined
       if (change.attributeMode === 'replace' || field === 'summary' && Object.prototype.hasOwnProperty.call(change, 'summary')
         || field !== 'summary' && attributes && Object.prototype.hasOwnProperty.call(attributes, field)) {
-        throw new Error(`本次上下文未提供 ${id} 的完整 ${field}，不能覆盖该字段；请缩小范围并读取完整资料后修订。`)
+        throw new Error(formatUserFacingMessage('services.creativeContext.fieldIncomplete', { id: `${id}`, field: `${field}` }))
       }
     }
   }
@@ -170,7 +171,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const revisionBase = input.chapterRevision ? frozenRevisionBase || captureChapterRevisionBase(input) : undefined
   const novel = getNovel(input.novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   const generationBudget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
   const reviewerId = reviewModelConfigId || parseStorySettingsDocument(novel.settingsJson).aiEngine.reviewModelConfigId
   const reviewBudget = reviewerId ? resolveModelRuntimeBudget(reviewerId) : generationBudget
@@ -197,16 +198,16 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   // The 24k context-material cap does not include the merged formal chapter and
   // patch used by local review. Reserve those once, inside the configured window.
   const maxInputTokens = Math.min(24_000 + reviewReserve, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
-  if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
+  if (maxInputTokens < 1_000) throw new Error(formatUserFacingMessage('services.creativeContext.modelWindowInsufficient'))
   if (input.stage === 'chapter') {
     // Review sees the complete merged chapter; generation only needs the selected ranges.
-    if (maxInputTokens - reviewReserve < 1000) throw new Error('局部修订的合并章评审依据超过当前预算，请降低输出上限或切换模型。')
+    if (maxInputTokens - reviewReserve < 1000) throw new Error(formatUserFacingMessage('services.creativeContext.revisionReviewOverBudget'))
     const result = await compileCreativeChapterContext(input, { maxInputTokens: maxInputTokens - reviewReserve, outputReserve }, revisionBase)
     return { ...result, maxInputTokens, reviewOutputReserve }
   }
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: input.atChapter, includePlanned: true })
-  for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(`资料 ${id} 在当前项目章位不存在。`)
-  for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(`关系 ${id} 在当前项目章位不存在。`)
+  for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(formatUserFacingMessage('services.creativeContext.entityMissing', { id: `${id}` }))
+  for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(formatUserFacingMessage('services.creativeContext.relationMissing', { id: `${id}` }))
   const chapterRows = listChapters(input.novelId)
   const sources: string[] = []
   const omittedSources: string[] = []
@@ -262,7 +263,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const localOutline = input.stage === 'outline' && (isCreativeChapterScopedRequest(input.request) || Boolean(input.changeScope?.chapterIds))
   const scopedChapters = input.changeScope?.chapterIds?.map(id => {
     const chapter = chapterRows.find(row => row.id === id)
-    if (!chapter) throw new Error(`章节 ${id} 不属于当前项目。`)
+    if (!chapter) throw new Error(formatUserFacingMessage('services.creativeContext.chapterWrongProject', { chapterId: `${id}` }))
     return chapter
   }) || []
   if (targetChapter) add(`chapter:${targetChapter.id}:target`, {
@@ -393,7 +394,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     const section = `<source id="${id}">\n${text}\n</source>`
     const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
     if (used + size > maxInputTokens) {
-      if (required) throw new Error(`必要资料 ${id} 超出模型上下文预算，请缩小本阶段范围。`)
+      if (required) throw new Error(formatUserFacingMessage('services.creativeContext.requiredAssetOverBudget', { id: `${id}` }))
       omittedSources.push(id); continue
     }
     used += size; sources.push(id); pieces.push(section)

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
 import { parseAiJsonResult } from '../utils/json'
@@ -161,7 +162,7 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
   })
   const shape = parsed.success ? validateScenePlanModelOutput(parsed.data) : { valid: false, issue: 'JSON 解析失败' }
   if (input.recentStoryDesign && (!parsed.success || !shape.valid)) {
-    throw new ChapterPipelineStageError('contract_blocked', `近期场景计划需要重新规划：${shape.issue}`, {
+    throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.replanRequired', { issue: `${shape.issue}` }), {
       blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: parsed.success ? parsed.data : input.rawOutput, issue: shape.issue }),
     })
   }
@@ -184,7 +185,7 @@ export function resolvePlannerModelOutput(input: ResolvePlannerModelOutputInput)
   }
   if (input.recentStoryDesign) {
     const findings = reviewRecentStoryDesign(reconciliation.plan, input.recentStoryDesign)
-    if (findings.length || reconciliation.stateConflicts.length) throw new ChapterPipelineStageError('contract_blocked', '近期故事设计需回到规划处理，原计划与正文保留。', {
+    if (findings.length || reconciliation.stateConflicts.length) throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.returnToPlanning'), {
       blocked: true, rewriteScope: 'contract_replan',
       outputText: JSON.stringify({ candidate: normalized, findings, stateConflicts: reconciliation.stateConflicts, sourceProjection: input.recentStoryDesign }),
     })
@@ -214,7 +215,7 @@ export function loadReusablePlannerOutput(
     const frozen = normalizeScenePlan(JSON.parse(immutableScenePlanJson) as unknown, [])
     const current = scenePlanJson ? normalizeScenePlan(JSON.parse(scenePlanJson) as unknown, []) : []
     if (frozen.length === 0 || JSON.stringify(frozen) !== JSON.stringify(current)) {
-      throw new ChapterPipelineStageError('contract_blocked', 'Planner 快照与当前场景计划不一致，请从 Planner 重新生成，保留现有 Writer 稿。', { blocked: true, rewriteScope: 'contract_replan' })
+      throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.snapshotChanged'), { blocked: true, rewriteScope: 'contract_replan' })
     }
     scenePlanJson = immutableScenePlanJson
   }
@@ -254,14 +255,14 @@ export async function runChapterPlannerStage(input: {
   if (!input.shouldRun) {
     const output = loadReusablePlannerOutput(input.storedScenePlanJson, input.fallbackScenePlan, input.immutableScenePlanJson)
     if (!output) {
-      throw new ChapterPipelineStageError('contract_blocked', '没有可复用的 Planner 场景快照，无法从当前节点重试。', {
+      throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.snapshotMissing'), {
         blocked: true,
         rewriteScope: 'contract_replan',
       })
     }
     if (input.recentStoryDesign) {
       const findings = reviewRecentStoryDesign(output.scenePlan, input.recentStoryDesign)
-      if (findings.length) throw new ChapterPipelineStageError('contract_blocked', '旧 Planner 计划与当前期待或状态依据不符，请返回规划。', {
+      if (findings.length) throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.planOutdated'), {
         blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: output.scenePlan, findings }),
       })
     }
@@ -300,7 +301,7 @@ export async function runChapterPlannerStage(input: {
   let resolved: PlannerStageOutput
   try {
     if (input.reloadStoryDesign && JSON.stringify(input.reloadStoryDesign()) !== JSON.stringify(input.recentStoryDesign)) {
-      throw new ChapterPipelineStageError('contract_blocked', '规划期间故事线或状态依据已变化，保留候选并重新规划。', {
+      throw new ChapterPipelineStageError('contract_blocked', formatUserFacingMessage('services.chapterPlanner.basisChanged'), {
         blocked: true, rewriteScope: 'contract_replan', outputText: JSON.stringify({ candidate: rawOutput, sourceProjection: input.recentStoryDesign }),
       })
     }

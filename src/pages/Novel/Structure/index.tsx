@@ -501,7 +501,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         })
         const plan = await runPlannerChunk(chunk)
         if (!plan?.volumes.length || !plan.volumes[0]?.parts.length) {
-          throw new Error(`${describePlannerChunk(chunk, isChunked)}未生成有效结构，本轮不会落库不完整规划。`)
+          throw new Error(getUserFacingMessage('structure.chunkInvalid', { chunk: describePlannerChunk(chunk, isChunked) }))
         }
         collectPlan(plan, chunk)
         setPlannerProgress({

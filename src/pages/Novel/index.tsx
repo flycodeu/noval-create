@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, EllipsisOutlined, MenuOutlined, SearchOutlined } fro
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AUTHOR_WORKSPACE_PAGES, getAuthorWorkspaceKey, resolveAuthorWorkspaceRoute, type AuthorWorkspaceKey } from '../../shared/author-workspace'
 import { buildWorkspaceRoute } from '../../shared/novel-workspace'
+import { getUserFacingMessage } from '../../utils/user-facing-message'
 import { useNovelStore } from '../../stores/novel.store'
 import { useThemeStore } from '../../stores/theme.store'
 import { isElectronRuntime } from '../../runtime/environment'
@@ -165,8 +166,8 @@ export default function NovelRouter() {
     return () => window.removeEventListener('keydown', keydown)
   }, [openSearch])
   const exportBook = async (format: string) => {
-    try { const path = await window.electron.novel.export(novelId, format); message.success(`已导出到 ${path}`) }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '导出失败') }
+    try { const path = await window.electron.novel.export(novelId, format); message.success(getUserFacingMessage('novel.exportedTo', { path })) }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.exportFailed')) }
   }
   const sidebar = <ProjectSidebar stageLabel="" progressText="" currentTask="" navGroups={[]} activeKey={currentPage} onNavigate={go} onPrefetchRoute={(route) => { void WORKSPACE_STAGE_LOADERS[getAuthorWorkspaceKey(route)]() }} />
   const searchEntries = workspaceSearchEntries(chapters, searchEntities).filter(entry => `${entry.label} ${entry.searchText}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))

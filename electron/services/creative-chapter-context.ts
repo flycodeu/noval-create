@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { formatChapterVoice } from '../../src/shared/chapter-voice'
 import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance } from '../../src/shared/prompts/prompt-common'
 import { selectStyleParagraphs } from '../../src/shared/scene-fact-boundary'
@@ -411,7 +412,7 @@ export async function compileCreativeChapterContext(
   if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) {
     const requiredSourceKeys = compiled.pack.sources.filter(source => source.included && source.required).map(source => source.key)
     const factKeys = requiredSourceKeys.filter(key => key.startsWith('fact:'))
-    throw new CreativeChapterContextError('CHAPTER_CONTEXT_BUDGET', `本章必要资料超过输入预算，需要缩小场景范围或切换模型。${factKeys.length ? `不能省略本章已选用的承接事实：${factKeys.join('、')}。` : ''}`, requiredSourceKeys)
+    throw new CreativeChapterContextError('CHAPTER_CONTEXT_BUDGET', formatUserFacingMessage('services.chapterContext.requiredInputOverflow', { detail: `${factKeys.length ? formatUserFacingMessage('services.chapterContext.selectedFactsRequired', { factKeys: `${factKeys.join('、')}` }) : ''}` }), requiredSourceKeys)
   }
   return { text: compiled.rendered, estimatedTokens: estimateTokens(compiled.rendered), ...limits,
     sources: compiled.pack.sources.filter(source => source.included).map(source => source.key),

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash, randomUUID } from 'node:crypto'
 import { getSqlite } from '../database/db'
 
@@ -118,14 +119,14 @@ function parseJson(value: string | null | undefined): unknown {
 
 function requirePositive(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new WorkflowNodeError('INVALID_INPUT', `${label}必须是正整数。`)
+    throw new WorkflowNodeError('INVALID_INPUT', formatUserFacingMessage('services.validation.positiveInteger', { label: `${label}` }))
   }
   return value
 }
 
 function requireText(value: string, label: string): string {
   const normalized = value.trim()
-  if (!normalized) throw new WorkflowNodeError('INVALID_INPUT', `${label}不能为空。`)
+  if (!normalized) throw new WorkflowNodeError('INVALID_INPUT', formatUserFacingMessage('services.validation.notEmpty', { label: `${label}` }))
   return normalized
 }
 
@@ -225,7 +226,7 @@ export function beginWorkflowNode(input: BeginWorkflowNodeInput): WorkflowNodeLe
       LIMIT 1
     `).get(workflowTaskId, nodeKey) as Record<string, unknown> | undefined
     if (active && !isExpired(active.lease_expires_at)) {
-      throw new WorkflowNodeError('LEASE_CONFLICT', `节点 ${nodeKey} 当前由其他 Worker 执行。`)
+      throw new WorkflowNodeError('LEASE_CONFLICT', formatUserFacingMessage('services.workflowNode.workerBusy', { nodeKey: `${nodeKey}` }))
     }
     if (active && isExpired(active.lease_expires_at)) {
       sqlite.prepare(`
@@ -294,7 +295,7 @@ export function renewWorkflowNodeLease(nodeRunId: number, leaseToken: string, le
     SET lease_expires_at = ?, updated_at = ?
     WHERE id = ? AND lease_token = ? AND status IN ('leased', 'running')
   `).run(expiresAt, nowIso(), id, token)
-  if (!result.changes) throw new WorkflowNodeError('LEASE_EXPIRED', '节点租约已失效，不能续租。')
+  if (!result.changes) throw new WorkflowNodeError('LEASE_EXPIRED', formatUserFacingMessage('services.workflowNode.renewLeaseExpired'))
   return expiresAt
 }
 
@@ -309,13 +310,13 @@ export function recordWorkflowNodeSnapshot(input: {
   return runTransaction(() => {
     const sqlite = getSqlite()
     const node = getNodeRow(nodeRunId)
-    if (!node) throw new WorkflowNodeError('NODE_NOT_FOUND', `找不到节点运行 ${nodeRunId}。`)
+    if (!node) throw new WorkflowNodeError('NODE_NOT_FOUND', formatUserFacingMessage('services.workflowNode.runMissing', { nodeRunId: `${nodeRunId}` }))
     if (node.snapshot_id) {
       const existing = getSnapshotRow(String(node.snapshot_id))
       if (existing) return mapSnapshot(existing)
     }
     if (String(node.lease_token || '') !== leaseToken || isExpired(node.lease_expires_at)) {
-      throw new WorkflowNodeError('LEASE_EXPIRED', '节点租约已失效，不能写入快照。')
+      throw new WorkflowNodeError('LEASE_EXPIRED', formatUserFacingMessage('services.workflowNode.snapshotLeaseExpired'))
     }
     const snapshotId = `ws_${randomUUID()}`
     const payloadJson = jsonText(input.payload)
@@ -349,10 +350,10 @@ export function recordWorkflowNodeSnapshot(input: {
     `).run(snapshotId, createdAt, createdAt, nodeRunId, leaseToken)
     const updated = sqlite.prepare('SELECT status, snapshot_id FROM workflow_node_runs WHERE id = ?').get(nodeRunId) as Record<string, unknown> | undefined
     if (!updated || String(updated.status || '') !== 'produced' || String(updated.snapshot_id || '') !== snapshotId) {
-      throw new WorkflowNodeError('SNAPSHOT_CONFLICT', '节点租约已被其他尝试抢占，快照未提交。')
+      throw new WorkflowNodeError('SNAPSHOT_CONFLICT', formatUserFacingMessage('services.workflowNode.snapshotLeaseClaimed'))
     }
     const snapshot = getSnapshotRow(snapshotId)
-    if (!snapshot) throw new WorkflowNodeError('SNAPSHOT_CONFLICT', '节点快照写入后无法读取。')
+    if (!snapshot) throw new WorkflowNodeError('SNAPSHOT_CONFLICT', formatUserFacingMessage('services.workflowNode.snapshotUnreadable'))
     return mapSnapshot(snapshot)
   })
 }
@@ -382,7 +383,7 @@ export function failWorkflowNode(input: {
     nodeRunId,
     leaseToken,
   )
-  if (!result.changes) throw new WorkflowNodeError('LEASE_EXPIRED', '节点租约已失效，不能记录失败。')
+  if (!result.changes) throw new WorkflowNodeError('LEASE_EXPIRED', formatUserFacingMessage('services.workflowNode.failureLeaseExpired'))
 }
 
 export function markWorkflowNodeCommitted(nodeRunId: number): void {
@@ -392,7 +393,7 @@ export function markWorkflowNodeCommitted(nodeRunId: number): void {
     SET status = 'committed', updated_at = ?
     WHERE id = ? AND status IN ('produced', 'validated', 'approved')
   `).run(nowIso(), id)
-  if (!result.changes) throw new WorkflowNodeError('NODE_NOT_FOUND', '节点尚未产生可提交的快照。')
+  if (!result.changes) throw new WorkflowNodeError('NODE_NOT_FOUND', formatUserFacingMessage('services.workflowNode.committableSnapshotMissing'))
 }
 
 export function getLatestWorkflowNodeSnapshot(workflowTaskId: number, nodeKey: string): WorkflowNodeSnapshot | null {
@@ -464,16 +465,16 @@ export interface WorkflowNodeRetryPlan {
 
 export function prepareWorkflowNodeRetry(nodeRunId: number): WorkflowNodeRetryPlan {
   const source = getWorkflowNodeRun(nodeRunId)
-  if (!source) throw new WorkflowNodeError('NODE_NOT_FOUND', `找不到节点运行 ${nodeRunId}。`)
+  if (!source) throw new WorkflowNodeError('NODE_NOT_FOUND', formatUserFacingMessage('services.workflowNode.runMissing', { nodeRunId: `${nodeRunId}` }))
   if (!['failed', 'blocked', 'cancelled'].includes(source.status)) {
-    throw new WorkflowNodeError('SNAPSHOT_CONFLICT', `节点 ${source.nodeKey} 当前状态不可重试。`)
+    throw new WorkflowNodeError('SNAPSHOT_CONFLICT', formatUserFacingMessage('services.workflowNode.retryStateInvalid', { nodeKey: `${source.nodeKey}` }))
   }
   const active = listWorkflowNodeRuns({
     workflowTaskId: source.workflowTaskId,
     nodeKey: source.nodeKey,
     limit: 20,
   }).find((item) => ['leased', 'running'].includes(item.status) && !isExpired(item.leaseExpiresAt))
-  if (active) throw new WorkflowNodeError('LEASE_CONFLICT', `节点 ${source.nodeKey} 已有运行中的重试。`)
+  if (active) throw new WorkflowNodeError('LEASE_CONFLICT', formatUserFacingMessage('services.workflowNode.retryBusy', { nodeKey: `${source.nodeKey}` }))
   return {
     source,
     latestSnapshot: source.snapshotId ? getWorkflowNodeSnapshot(source.snapshotId) : null,

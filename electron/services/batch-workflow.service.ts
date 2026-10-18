@@ -1642,7 +1642,7 @@ async function runChapterQualityAnalysisWorkflow(taskId: number, sender?: Progre
 
       try {
         if (!chapter) {
-          throw new Error(`章节 ${chapterId} 不存在。`)
+          throw new Error(formatUserFacingMessage('services.batchWorkflow.chapterMissing', { chapterId: `${chapterId}` }))
         }
 
         if (options.includeAiCheck !== false) {

@@ -191,7 +191,7 @@ export default function StyleLabPage({ novelId }: Props) {
     try {
       await window.electron.style.setActive(novelId, next ? fingerprintId : null)
       if (!next) setAbFingerprintId(null)
-      message.success(next ? '已认可并启用样稿。' : '已撤销认可，后续写作不再使用该样稿；原文仍保留。')
+      message.success(getUserFacingMessage(next ? 'styleLab.fingerprintApproved' : 'styleLab.fingerprintUnapproved'))
       await loadData()
     } catch (error) {
       console.error(error)

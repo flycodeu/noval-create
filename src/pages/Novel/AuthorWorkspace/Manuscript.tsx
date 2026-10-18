@@ -4,6 +4,7 @@ import { HistoryOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Chapter, ChapterVersion, StoryStructureTree } from '../../../types'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { countChapterWords } from '../Writing/useChapterEditor'
 import { EmptyWork, LoadFailure, RunProgress } from './shared'
@@ -88,7 +89,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     try {
       const next = await window.electron.chapter.get(id)
       if (epoch !== loadEpoch.current) return
-      if (!next || next.novelId !== novelId) throw new Error('所选章节不存在于这部作品中。')
+      if (!next || next.novelId !== novelId) throw new Error(getUserFacingMessage('workspace.manuscript.chapterWrongNovel'))
       installChapter(next)
     } catch (cause) { if (epoch === loadEpoch.current) setError(cause instanceof Error ? cause.message : '读取正文失败') }
     finally { if (epoch === loadEpoch.current) setLoading(false) }
@@ -132,7 +133,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
       setChapter((current) => current && { ...current, content, wordCount })
       setError(''); await reloadList(); notifyWorkspaceMutation()
       return true
-    } catch (cause) { if (session === sessionEpoch.current) setError(cause instanceof Error ? cause.message : '保存失败，正文仍保留在编辑器中'); return false }
+    } catch (cause) { if (session === sessionEpoch.current) setError(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.manuscript.saveFailedDraftPreserved')); return false }
     finally { saveInFlight.current = false; if (session === sessionEpoch.current) setSaving(false) }
   }, [chapter, notifyWorkspaceMutation, reloadList])
   useEffect(() => { registerSaveHandler(() => { void save() }); return () => registerSaveHandler(null) }, [registerSaveHandler, save])
@@ -152,7 +153,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     if (id === chapter?.id) { setDirectoryOpen(false); return }
     const change = () => { const search = new URLSearchParams(params); search.set('chapterId', String(id)); setParams(search); setDirectoryOpen(false); setArrangementDirty(false); setTaskTarget(null) }
     if (!dirty && !arrangementDirty) { change(); return }
-    Modal.confirm({ title: dirty ? '保存这一章的修改？' : '放弃安排中的未保存修改？', content: arrangementDirty ? '安排编辑中的未保存修改会放弃；正文修改会先保存，再切换章节。' : '保存后再切换章节。', okText: dirty ? '保存并切换' : '放弃并切换', cancelText: '继续编辑', onOk: async () => { if (dirty && !await save()) throw new Error('保存失败，请检查正文提示'); change() } })
+    Modal.confirm({ title: dirty ? '保存这一章的修改？' : '放弃安排中的未保存修改？', content: arrangementDirty ? '安排编辑中的未保存修改会放弃；正文修改会先保存，再切换章节。' : '保存后再切换章节。', okText: dirty ? '保存并切换' : '放弃并切换', cancelText: '继续编辑', onOk: async () => { if (dirty && !await save()) throw new Error(getUserFacingMessage('workspace.manuscript.saveFailedCheckFeedback')); change() } })
   }
   const generate = async () => {
     if (!chapter || !await save()) return
@@ -166,9 +167,9 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   const restore = (version: ChapterVersion) => {
     if (!chapter) return
     Modal.confirm({ title: '恢复这个正文版本？', content: '当前已保存正文仍保留在历史版本中。', okText: '恢复版本', cancelText: '取消', onOk: async () => {
-      if (!await save()) throw new Error('请先处理正文保存冲突')
+      if (!await save()) throw new Error(getUserFacingMessage('workspace.manuscript.saveConflictRequiresResolution'))
       await window.electron.chapter.update(chapter.id, { content: version.content, wordCount: version.wordCount }, { expectedContent: baselineRef.current, versionSource: 'version-restore' })
-      await loadChapter(chapter.id); await reloadList(); setVersions(await window.electron.chapter.listVersions(chapter.id)); notifyWorkspaceMutation(); message.success('正文已恢复')
+      await loadChapter(chapter.id); await reloadList(); setVersions(await window.electron.chapter.listVersions(chapter.id)); notifyWorkspaceMutation(); message.success(getUserFacingMessage('workspace.manuscript.restored'))
     } })
   }
   const createChapter = async () => {
@@ -206,7 +207,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
       navigate(buildWorkspaceRoute(novelId, `${path}?${search}`))
     }
     if (!dirty && !arrangementDirty) { open(); return }
-    Modal.confirm({ title: dirty ? '保存正文后查看资料？' : '放弃安排中的未保存修改？', content: arrangementDirty ? '安排中的未保存修改会放弃；正文会先保存，再打开完整资料。' : '保存当前正文后打开完整资料。', okText: dirty ? '保存并查看' : '放弃并查看', cancelText: '继续编辑', onOk: async () => { if (dirty && !await save()) throw new Error('保存失败，请检查正文提示'); open() } })
+    Modal.confirm({ title: dirty ? '保存正文后查看资料？' : '放弃安排中的未保存修改？', content: arrangementDirty ? '安排中的未保存修改会放弃；正文会先保存，再打开完整资料。' : '保存当前正文后打开完整资料。', okText: dirty ? '保存并查看' : '放弃并查看', cancelText: '继续编辑', onOk: async () => { if (dirty && !await save()) throw new Error(getUserFacingMessage('workspace.manuscript.saveFailedCheckFeedback')); open() } })
   }
   const contextTabs = [{ key: 'arrangement', label: '本章安排' }, { key: 'references', label: '参考资料' }, { key: 'review', label: '审校' }, { key: 'changes', label: '章后变化' }, { key: 'history', label: '本章历史' }]
   const activeContext = contextTabs.find(item => item.key === panel)

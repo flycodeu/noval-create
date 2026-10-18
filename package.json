@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "2.4.37",
+  "version": "2.4.38",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -48,6 +48,7 @@
     "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:layout-governance && npm run test:workspace-chrome-contract && npm run test:chapter-soak-contract && npm run test:timeline-context-projection && npm run test:thread-context-projection && npm run test:fast-launch-bootstrap && npm run test:agent-conflict-stress && npm run test:chapter-integrity && npm run test:delete-integrity && npm run test:chapter-writeback-idempotency && npm run test:web-rpc && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow && npm run test:window-chrome && npm run test:novel-update",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:migrations": "electron scripts/migration-safety.test.cjs",
+    "test:local-embedding": "electron scripts/local-embedding-runtime.test.cjs",
     "test:fts5": "electron scripts/fts5-capability.test.cjs",
     "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
     "test:workflow-resilience": "node scripts/workflow-resilience.test.cjs",
@@ -76,7 +77,7 @@
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck": "npm run typecheck:web && npm run typecheck:node",
     "check:encoding": "node scripts/check-encoding.cjs",
-    "check:user-messages": "node scripts/check-user-facing-messages.cjs",
+    "check:user-messages": "node scripts/check-user-facing-messages.cjs && node --test scripts/check-user-facing-messages.test.cjs",
     "audit:interfaces": "node scripts/interface-inventory.cjs --check",
     "audit:reader-first": "node scripts/reader-first-audit.cjs",
     "test:reader-first-pilot": "electron scripts/reader-first-pilot.test.cjs",
@@ -91,20 +92,20 @@
   "dependencies": {
     "@ant-design/icons": "^5.3.0",
     "@hello-pangea/dnd": "^18.0.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "@xenova/transformers": "^2.17.2",
+    "@huggingface/transformers": "4.3.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "antd": "^5.15.0",
     "better-sqlite3": "^9.4.3",
     "crypto-js": "^4.2.0",
     "dayjs": "^1.11.20",
     "diff": "^9.0.0",
     "docx": "^8.5.0",
-    "drizzle-orm": "^0.30.8",
+    "drizzle-orm": "^0.45.4",
     "electron-updater": "6.8.10",
     "epub-gen-memory": "^1.1.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "react-router-dom": "^6.30.6",
+    "react-router-dom": "^7.18.4",
     "reactflow": "^11.11.3",
     "recharts": "^3.10.1",
     "sqlite-vec": "0.1.9",
@@ -134,11 +135,13 @@
     "vitest": "^1.6.1"
   },
   "overrides": {
+    "brace-expansion@2": "2.1.7",
     "@modelcontextprotocol/sdk": {
       "@hono/node-server": "1.19.15",
-      "fast-uri": "3.1.6",
+      "fast-uri": "3.1.8",
       "hono": "4.13.7",
-      "ip-address": "10.7.0",
+      "ip-address": "10.7.4",
+      "proxy-addr": "2.0.8",
       "qs": "6.16.0"
     },
     "docx": {
@@ -146,11 +149,10 @@
     },
     "drizzle-kit": {
       "@hono/node-server": "1.19.15",
-      "brace-expansion": "2.1.4",
       "hono": "4.13.7"
     },
-    "epub-gen-memory": {
-      "brace-expansion": "2.1.4"
+    "electron-updater": {
+      "js-yaml": "4.3.2"
     }
   },
   "author": "FlyLabs"

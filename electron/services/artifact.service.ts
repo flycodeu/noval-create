@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash, randomUUID } from 'node:crypto'
 import type {
   AgentArtifact,
@@ -101,7 +102,7 @@ export function getArtifact<T = unknown>(id: string): AgentArtifact<T> | null {
 
 export function requireArtifact<T = unknown>(id: string): AgentArtifact<T> {
   const artifact = getArtifact<T>(id)
-  if (!artifact) throw new ArtifactServiceError('ARTIFACT_NOT_FOUND', `找不到工件 ${id}。`)
+  if (!artifact) throw new ArtifactServiceError('ARTIFACT_NOT_FOUND', formatUserFacingMessage('services.artifact.notFound', { id: `${id}` }))
   return artifact
 }
 
@@ -128,7 +129,7 @@ export function createArtifact<T>(input: CreateAgentArtifactInput<T>): AgentArti
     `).get(input.novelId, input.kind, idempotencyKey) as ArtifactDbRow | undefined
     if (existing) {
       if (existing.content_hash !== contentHash) {
-        throw new ArtifactServiceError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于不同的工件内容。')
+        throw new ArtifactServiceError('IDEMPOTENCY_KEY_CONFLICT', formatUserFacingMessage('services.artifact.idempotencyConflict'))
       }
       return mapArtifact<T>(existing)
     }
@@ -138,7 +139,7 @@ export function createArtifact<T>(input: CreateAgentArtifactInput<T>): AgentArti
   if (input.parentArtifactId) {
     const parent = getRow(input.parentArtifactId)
     if (!parent || parent.novel_id !== input.novelId) {
-      throw new ArtifactServiceError('ARTIFACT_PARENT_INVALID', '父工件不存在或属于其他项目。')
+      throw new ArtifactServiceError('ARTIFACT_PARENT_INVALID', formatUserFacingMessage('services.artifact.parentWrongProject'))
     }
     const versionRow = sqlite.prepare(`
       SELECT MAX(version) AS max_version FROM artifacts
@@ -153,7 +154,7 @@ export function createArtifact<T>(input: CreateAgentArtifactInput<T>): AgentArti
     if (existingId.content_hash === contentHash && existingId.novel_id === input.novelId && existingId.kind === input.kind) {
       return mapArtifact<T>(existingId)
     }
-    throw new ArtifactServiceError('ARTIFACT_ID_CONFLICT', `工件 ID ${id} 已存在且内容不同。`)
+    throw new ArtifactServiceError('ARTIFACT_ID_CONFLICT', formatUserFacingMessage('services.artifact.idConflict', { id: `${id}` }))
   }
 
   try {
@@ -191,7 +192,7 @@ export function createArtifact<T>(input: CreateAgentArtifactInput<T>): AgentArti
       `).get(input.novelId, input.kind, idempotencyKey) as ArtifactDbRow | undefined
       if (raced) {
         if (raced.content_hash !== contentHash) {
-          throw new ArtifactServiceError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于不同的工件内容。')
+          throw new ArtifactServiceError('IDEMPOTENCY_KEY_CONFLICT', formatUserFacingMessage('services.artifact.idempotencyConflict'))
         }
         return mapArtifact<T>(raced)
       }
@@ -213,7 +214,7 @@ export function updateArtifactLifecycle(
   if (patch.reviewArtifactId) {
     const review = requireArtifact(patch.reviewArtifactId)
     if (review.novelId !== current.novelId) {
-      throw new ArtifactServiceError('ARTIFACT_PARENT_INVALID', '审校工件属于其他项目。')
+      throw new ArtifactServiceError('ARTIFACT_PARENT_INVALID', formatUserFacingMessage('services.artifact.reviewWrongProject'))
     }
   }
   getSqlite().prepare(`

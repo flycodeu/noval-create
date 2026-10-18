@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
 import { getSqlite } from '../database/db'
 import { getModelConfigRecord, getAdapterById } from './model.service'
@@ -9,12 +10,12 @@ export function getEmbeddingSettings(): EmbeddingSettings {
   return row || { ...DEFAULT_EMBEDDING_SETTINGS }
 }
 export function setEmbeddingSettings(input: EmbeddingSettings): EmbeddingSettings {
-  if (!['local', 'remote'].includes(input.mode)) throw new Error('向量模式无效。')
+  if (!['local', 'remote'].includes(input.mode)) throw new Error(formatUserFacingMessage('services.embeddingSettings.modeInvalid'))
   const next = input.mode === 'local' ? { ...DEFAULT_EMBEDDING_SETTINGS } : { ...input, modelId: input.modelId.trim() }
   if (next.mode === 'remote') {
-    if (!Number.isSafeInteger(next.modelConfigId) || !next.modelConfigId || !next.modelId || next.modelId.length > 200) throw new Error('请选择独立的向量接口，并填写向量模型名称。')
+    if (!Number.isSafeInteger(next.modelConfigId) || !next.modelConfigId || !next.modelId || next.modelId.length > 200) throw new Error(formatUserFacingMessage('services.embeddingSettings.remoteModelRequired'))
     const config = getModelConfigRecord(next.modelConfigId)
-    if (!['openai', 'custom'].includes(config.provider)) throw new Error('远程向量接口需选择 OpenAI 或自定义兼容接口。')
+    if (!['openai', 'custom'].includes(config.provider)) throw new Error(formatUserFacingMessage('services.embeddingSettings.providerInvalid'))
   }
   getEmbeddingSettings()
   getSqlite().prepare('INSERT INTO embedding_settings(id,mode,model_config_id,model_id) VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,model_config_id=excluded.model_config_id,model_id=excluded.model_id')
@@ -25,12 +26,12 @@ export function embeddingRuntimeIdentity(): { settings: EmbeddingSettings; model
   const settings = getEmbeddingSettings()
   if (settings.mode === 'local') return { settings, modelId: LOCAL_EMBEDDING_MODEL_ID, key: LOCAL_EMBEDDING_MODEL_ID }
   const config = getModelConfigRecord(settings.modelConfigId!)
-  if (!['openai', 'custom'].includes(config.provider) || !settings.modelId.trim()) throw new Error('向量接口配置已失效。')
+  if (!['openai', 'custom'].includes(config.provider) || !settings.modelId.trim()) throw new Error(formatUserFacingMessage('services.embeddingSettings.configStale'))
   const fingerprint = createHash('sha256').update(JSON.stringify({ baseUrl: config.baseUrl || 'https://api.openai.com/v1', modelId: settings.modelId })).digest('hex').slice(0, 20)
   return { settings, modelId: `remote:${fingerprint}:${settings.modelId}`, key: `remote:${fingerprint}:${settings.modelId}` }
 }
 export async function embeddingRemoteAdapter() {
   const runtime = embeddingRuntimeIdentity()
-  if (runtime.settings.mode !== 'remote') throw new Error('当前向量模型为本地模式。')
+  if (runtime.settings.mode !== 'remote') throw new Error(formatUserFacingMessage('services.embeddingSettings.localModeActive'))
   return { ...runtime, adapter: await getAdapterById(runtime.settings.modelConfigId!) }
 }

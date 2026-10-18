@@ -1,4 +1,5 @@
 import { logWarn } from './runtime-log'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 export type AiJsonRoot = 'object' | 'array' | 'any'
 
@@ -39,7 +40,7 @@ function trimCodeFence(text: string): string {
 
 function buildParseError(message: string, text: string): SyntaxError {
   const preview = text.replace(/\s+/g, ' ').slice(0, 220)
-  return new SyntaxError(`${message}。输出片段：${preview}`)
+  return new SyntaxError(formatUserFacingMessage('json.errorWithPreview', { message, preview }))
 }
 
 function buildPayloadPreview(text: string): string {
@@ -48,11 +49,11 @@ function buildPayloadPreview(text: string): string {
 
 function assertExpectedRoot(value: unknown, expectedRoot: AiJsonRoot, sourceText: string): void {
   if (expectedRoot === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
-    throw buildParseError('AI JSON 根节点必须是对象', sourceText)
+    throw buildParseError(formatUserFacingMessage('json.objectRootRequired'), sourceText)
   }
 
   if (expectedRoot === 'array' && !Array.isArray(value)) {
-    throw buildParseError('AI JSON 根节点必须是数组', sourceText)
+    throw buildParseError(formatUserFacingMessage('json.arrayRootRequired'), sourceText)
   }
 }
 
@@ -143,7 +144,7 @@ export function extractBalancedJson(text: string, expectedRoot: AiJsonRoot = 'an
   }
 
   if (!bestMatch) {
-    throw buildParseError('AI 返回内容中未找到完整 JSON', cleaned)
+    throw buildParseError(formatUserFacingMessage('json.completeJsonMissing'), cleaned)
   }
 
   return cleaned.slice(bestMatch.startIdx, bestMatch.endIdx + 1)
@@ -409,7 +410,7 @@ function parseAiJsonInternal<T = unknown>(
     assertExpectedRoot(parsed, expectedRoot, cleaned)
     return { data: parsed, strategy: 'raw' }
   } catch (rawError) {
-    if (rawError instanceof SyntaxError && rawError.message.includes('AI JSON 根节点必须是')) {
+    if (rawError instanceof SyntaxError && rawError.message.includes(formatUserFacingMessage('json.rootRequiredPrefix'))) {
       throw rawError
     }
   }
@@ -428,8 +429,8 @@ function parseAiJsonInternal<T = unknown>(
       assertExpectedRoot(parsed, expectedRoot, repaired)
       return { data: parsed, strategy: 'repaired' }
     } catch (repairError) {
-      const rawMessage = repairError instanceof Error ? repairError.message : 'JSON 解析失败'
-      throw buildParseError(`AI JSON 解析失败：${rawMessage}`, repaired)
+      const rawMessage = repairError instanceof Error ? repairError.message : formatUserFacingMessage('json.innerParseFailed')
+      throw buildParseError(formatUserFacingMessage('json.parseFailedDetail', { detail: rawMessage }), repaired)
     }
   }
 }
@@ -453,7 +454,7 @@ export function parseAiJsonResult<T = unknown>(
   } catch (error) {
     const syntaxError = error instanceof SyntaxError
       ? error
-      : buildParseError(error instanceof Error ? error.message : 'AI JSON 解析失败', text)
+      : buildParseError(error instanceof Error ? error.message : formatUserFacingMessage('json.parseFailed'), text)
 
     logWarn(logOptions.channel || 'json', logOptions.message || 'AI JSON 解析失败。', {
       consoleSummary: logOptions.consoleSummary || `[json:warn] AI JSON parse failed`,
@@ -481,7 +482,7 @@ export function parseAiJsonResult<T = unknown>(
 export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonRoot = 'any'): T {
   const result = parseAiJsonResult<T>(text, expectedRoot)
   if (result.success) return result.data as T
-  throw result.error || buildParseError('AI JSON 解析失败', text)
+  throw result.error || buildParseError(formatUserFacingMessage('json.parseFailed'), text)
 }
 
 /**

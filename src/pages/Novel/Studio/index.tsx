@@ -38,7 +38,7 @@ import {
   WorkspacePage,
 } from '../components/WorkspaceShell'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getStudioNextStep, getRecentStudioChapter, getStudioSceneLabel } from './studio-next-step'
 import { isExternalImportedDraft } from './imported-drafts'
 import './index.css'
@@ -131,7 +131,7 @@ export default function StudioPage({ novelId }: Props) {
       })
       if (!result.ok) throw new Error(result.error.message)
       const artifact = (result.data as { artifact: ImportedDraft }).artifact
-      if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error('草稿不属于当前作品或不是外部导入')
+      if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error(getUserFacingMessage('workspace.import.wrongNovelOrSource'))
       setSelectedImportedDraft(artifact)
     } catch (error) {
       setImportError(error instanceof Error ? error.message : '草稿读取失败')
@@ -584,8 +584,8 @@ export default function StudioPage({ novelId }: Props) {
                   <div className="studio-page__imported-actions">
                     <Button icon={<CopyOutlined />} onClick={() => {
                       void (navigator.clipboard?.writeText(selectedImportedDraft.content.output) || Promise.reject(new Error('Clipboard unavailable')))
-                        .then(() => message.success('已复制草稿全文'))
-                        .catch(() => message.error('复制失败，请手动选中正文复制'))
+                        .then(() => message.success(getUserFacingMessage('workspace.import.draftCopied')))
+                        .catch(() => message.error(getUserFacingMessage('workspace.import.copyFailed')))
                     }}>复制全文</Button>
                     {selectedImportedDraft.content.assetType === 'project_brief' && selectedImportedDraft.content.outputFormat === 'json' ? (
                       <Button type="primary" disabled={importedDraftStale} onClick={() => {

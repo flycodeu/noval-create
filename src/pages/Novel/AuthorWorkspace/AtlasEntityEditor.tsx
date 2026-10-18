@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Button, Checkbox, Input, InputNumber, Modal, Select, message } from 'antd'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { atlasFieldLabel, atlasScalarText, ATLAS_KIND_LABELS, ATLAS_INTERNAL_FIELDS, PROFILE_GROUPS, hasAtlasValue, atlasEditedAttributes } from './atlas-profile'
 import { recordOf } from './content-document'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
@@ -16,7 +17,7 @@ function PortraitEditor({ entity, attributes, onChange, onBusy }: { entity: Stor
     if (!file) return
     setImporting(true); onBusy(true)
     try { onChange({ portraitImage: await importAtlasPortrait(file) }) }
-    catch (error) { message.error(error instanceof Error ? error.message : '头像导入失败') }
+    catch (error) { message.error(error instanceof Error ? error.message : getUserFacingMessage('workspace.portrait.importFailed')) }
     finally { setImporting(false); onBusy(false) }
   }
   return <details className="author-disclosure" open><summary>肖像与视觉描述（可选）</summary><div className="atlas-editor-fields">
@@ -77,12 +78,12 @@ export function AtlasEntityEditor({ entity, snapshot, atChapter, onClose, onSave
   const cancel = () => { if (!dirty) onClose(); else Modal.confirm({ title: '放弃尚未保存的修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: onClose }) }
   const save = async () => {
     if (!name.trim() || importingPortrait) return
-    if (JSON.stringify(attributes).length > 32000) { message.error('人物资料超过 32KB，请精简补充设定或移除肖像后重试。'); return }
+    if (JSON.stringify(attributes).length > 32000) { message.error(getUserFacingMessage('workspace.atlas.attributesTooLarge')); return }
     setSaving(true)
     try {
       await window.electron.storyAtlas.apply({ novelId: snapshot.novelId, expectedContextVersion: baseContextVersion, idempotencyKey: `author-atlas:${crypto.randomUUID()}`, effectiveFromChapter: effectiveChapter, source: { kind: 'human', note: '作者修订' }, changes: [{ op: 'upsert_entity', id: entity.id, kind: entity.kind, name: name.trim(), summary, parentId: entity.parentId, attributes: { ...atlasEditedAttributes(entity.attributes, attributes), stateTiming: attributes.stateTiming || entity.attributes.stateTiming || 'chapter_end' }, attributeMode: 'replace', status: entity.status }] })
-      message.success('资料已保存'); onSaved(); onClose()
-    } catch (error) { message.error(error instanceof Error ? error.message : '保存失败') }
+      message.success(getUserFacingMessage('workspace.atlas.saved')); onSaved(); onClose()
+    } catch (error) { message.error(error instanceof Error ? error.message : getUserFacingMessage('common.saveFailed')) }
     finally { setSaving(false) }
   }
   const groupedKeys = new Set([...PROFILE_GROUPS[entity.kind].flatMap(group => group.fields), ...(entity.kind === 'character' ? ['publicSummary', 'portraitImage', 'portraitPrompt'] : [])])

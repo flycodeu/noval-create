@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { and, desc, eq } from 'drizzle-orm'
 import type { CreativeRun, CreativeStage, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS } from '../../src/shared/creative-workflow'
@@ -91,60 +92,60 @@ export function creativeSchemaHint(stage: CreativeStage, scope: CreativeWorkflow
 }
 
 function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('生成结果必须是 JSON 对象。')
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.outputObjectRequired'))
   return value as Record<string, unknown>
 }
 function text(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${name}不能为空。`)
+  if (typeof value !== 'string' || !value.trim()) throw new Error(formatUserFacingMessage('services.validation.notEmpty', { label: `${name}` }))
   return value.trim()
 }
 function positive(value: unknown, name: string): number {
-  if (!Number.isInteger(value) || Number(value) < 1) throw new Error(`${name}必须是正整数。`)
+  if (!Number.isInteger(value) || Number(value) < 1) throw new Error(formatUserFacingMessage('services.validation.positiveInteger', { label: `${name}` }))
   return Number(value)
 }
 export function parseCreativeCandidate(stage: CreativeStage, raw: string): Record<string, unknown> {
   const data = object(parseStrictJsonEnvelope(raw))
   if (atlasStages.has(stage)) {
-    if (!Array.isArray(data.changes) || !data.changes.length || data.changes.length > 100) throw new Error('图谱变更数量必须为 1–100。')
+    if (!Array.isArray(data.changes) || !data.changes.length || data.changes.length > 100) throw new Error(formatUserFacingMessage('services.creativeWorkflow.graphChangeCountInvalid'))
   } else if (isProjectAssetStage(stage)) {
     validateProjectAsset(stage, data)
   } else if (stage === 'background') {
-    if (!Object.keys(data).length || Object.keys(data).some(key => !['userBackground', 'expandedBackground', 'synopsis'].includes(key))) throw new Error('背景候选只允许原始背景、扩展背景与简介，至少提供一项。')
+    if (!Object.keys(data).length || Object.keys(data).some(key => !['userBackground', 'expandedBackground', 'synopsis'].includes(key))) throw new Error(formatUserFacingMessage('services.creativeWorkflow.backgroundFieldsInvalid'))
     for (const [field, label] of Object.entries({ userBackground: '背景', expandedBackground: '扩展背景', synopsis: '简介' })) if (data[field] !== undefined) {
       text(data[field], label)
-      if (/(?:[A-Z]:[\\/]|file:\/\/|原始工作包|目标.{0,6}\d+万字|具体规则.{0,8}为准)/iu.test(String(data[field]))) throw new Error(`${label}中混入文件路径或创作管理说明。`)
+      if (/(?:[A-Z]:[\\/]|file:\/\/|原始工作包|目标.{0,6}\d+万字|具体规则.{0,8}为准)/iu.test(String(data[field]))) throw new Error(formatUserFacingMessage('services.creativeWorkflow.managementTextRejected', { label: `${label}` }))
     }
   } else if (stage === 'outline') {
     const validation = validateJsonSchema(data, outlineSchema)
-    if (!validation.valid) throw new Error(`大纲结构错误：${validation.issues.join('；')}`)
-    if (!(Array.isArray(data.chapters) && data.chapters.length) && !(Array.isArray(data.volumes) && data.volumes.length)) throw new Error('大纲必须提供卷或章节。')
+    if (!validation.valid) throw new Error(formatUserFacingMessage('services.creativeWorkflow.outlineStructureInvalid', { issues: `${validation.issues.join('；')}` }))
+    if (!(Array.isArray(data.chapters) && data.chapters.length) && !(Array.isArray(data.volumes) && data.volumes.length)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.outlineMissing'))
     const numbers = new Set<number>()
     for (const value of (data.chapters || []) as unknown[]) {
       const chapter = object(value); const num = positive(chapter.chapterNum, '章节序号')
-      if (numbers.has(num)) throw new Error('同一批大纲存在重复章序。')
+      if (numbers.has(num)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.duplicateChapterNumbers'))
       numbers.add(num); text(chapter.title, '章名'); text(chapter.outline, '大纲')
       if (chapter.id !== undefined) positive(chapter.id, '章节ID')
       if (chapter.chapterContract) text(object(chapter.chapterContract).chapterGoal, '本章目标')
       if (chapter.scenes !== undefined) {
-        if (!Array.isArray(chapter.scenes) || !chapter.scenes.length || chapter.scenes.length > 12) throw new Error('每章须包含 1–12 个场景。')
+        if (!Array.isArray(chapter.scenes) || !chapter.scenes.length || chapter.scenes.length > 12) throw new Error(formatUserFacingMessage('services.creativeWorkflow.sceneCountInvalid'))
         for (const rawScene of chapter.scenes) { const scene = object(rawScene); for (const field of ['pov', 'timeLocation', 'sceneGoal', 'obstacle', 'resultState']) text(scene[field], field) }
       }
     }
   } else {
     positive(data.chapterNum, '章节序号'); text(data.title, '章名'); text(data.content, '正文'); text(data.summary, '摘要')
-    if (data.changes !== undefined && !Array.isArray(data.changes)) throw new Error('正文事实变化必须为数组。')
+    if (data.changes !== undefined && !Array.isArray(data.changes)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.factChangesArrayRequired'))
     const validation = validateJsonSchema(data.factReveals || [], CREATIVE_FACT_REVEALS_SCHEMA)
-    if (!validation.valid) throw new Error(`信息揭示结构错误：${validation.issues.join('；')}`)
+    if (!validation.valid) throw new Error(formatUserFacingMessage('services.creativeWorkflow.revealStructureInvalid', { issues: `${validation.issues.join('；')}` }))
   }
   if (Array.isArray(data.changes)) {
     const entityKinds: Partial<Record<CreativeStage, string[]>> = { characters: ['character'], map: ['location'], factions: ['faction'], items: ['item'], events: ['event'], relationships: [] }
     const relationKinds: Partial<Record<CreativeStage, string[]>> = { characters: ['relationship', 'presence', 'membership'], map: ['route', 'presence'], factions: ['membership', 'presence'], items: ['ownership', 'presence'], events: ['participation', 'presence'], relationships: ['relationship', 'presence', 'membership', 'ownership', 'participation'] }
     for (const rawChange of data.changes) {
       const change = object(rawChange)
-      if (!['upsert_entity', 'upsert_relation'].includes(String(change.op))) throw new Error('模型生成只允许增量新增或更新；停用资料请使用明确的资料更正操作。')
-      if (change.attributeMode !== undefined && change.attributeMode !== 'merge') throw new Error('模型生成只允许增量合并属性；删除或替换资料请使用明确的资料更正操作。')
+      if (!['upsert_entity', 'upsert_relation'].includes(String(change.op))) throw new Error(formatUserFacingMessage('services.creativeWorkflow.graphUpsertOnly'))
+      if (change.attributeMode !== undefined && change.attributeMode !== 'merge') throw new Error(formatUserFacingMessage('services.creativeWorkflow.attributeMergeOnly'))
       const allowed = change.op === 'upsert_entity' ? entityKinds[stage] : relationKinds[stage]
-      if (allowed && !allowed.includes(String(change.kind))) throw new Error(`生成结果修改了当前${CREATIVE_STAGE_LABELS[stage]}阶段之外的资料。`)
+      if (allowed && !allowed.includes(String(change.kind))) throw new Error(formatUserFacingMessage('services.creativeWorkflow.crossStageChange', { stage: `${CREATIVE_STAGE_LABELS[stage]}` }))
     }
   }
   return data
@@ -162,7 +163,7 @@ function modelFingerprint(modelConfigId: number): string {
 
 function stored(runId: number, novelId: number): { task: NonNullable<ReturnType<typeof getTaskRecord>>; input: StoredRequest } {
   const task = getTaskRecord(runId)
-  if (!task || task.novelId !== novelId || task.relatedEntityType !== 'creative_workflow') throw new Error('创作任务不存在或不属于当前项目。')
+  if (!task || task.novelId !== novelId || task.relatedEntityType !== 'creative_workflow') throw new Error(formatUserFacingMessage('services.creativeWorkflow.taskMissingOrWrongProject'))
   return { task, input: JSON.parse(task.inputJson || '{}') as StoredRequest }
 }
 /** A new attempt must not inherit the previous attempt's passed review. */
@@ -202,12 +203,12 @@ export function listCreativeRuns(novelId: number): CreativeRun[] {
 }
 function assertActive(runId: number): void {
   const task = getTaskRecord(runId)
-  if (!task || ['cancelled', 'cancel_requested'].includes(task.status || '') || JSON.parse(task.controlJson || '{}').cancelRequested) throw new Error('创作任务已取消。')
+  if (!task || ['cancelled', 'cancel_requested'].includes(task.status || '') || JSON.parse(task.controlJson || '{}').cancelRequested) throw new Error(formatUserFacingMessage('services.creativeWorkflow.taskCancelled'))
 }
 function assertBase(input: StoredRequest): void {
-  if ((getNovel(input.request.novelId)?.contextVersion || 1) !== input.contextVersion) throw new Error('创作期间资料已变化，请查看候选并基于最新资料重新运行。')
-  if (modelFingerprint(input.modelConfigId) !== input.modelFingerprint) throw new Error('本任务使用的模型配置已变更，请新建任务以采用当前配置。')
-  if (input.reviewModelConfigId && modelFingerprint(input.reviewModelConfigId) !== input.reviewModelFingerprint) throw new Error('本任务审校模型配置已变更，请新建任务。')
+  if ((getNovel(input.request.novelId)?.contextVersion || 1) !== input.contextVersion) throw new Error(formatUserFacingMessage('services.creativeWorkflow.contextChanged'))
+  if (modelFingerprint(input.modelConfigId) !== input.modelFingerprint) throw new Error(formatUserFacingMessage('services.creativeWorkflow.generationModelChanged'))
+  if (input.reviewModelConfigId && modelFingerprint(input.reviewModelConfigId) !== input.reviewModelFingerprint) throw new Error(formatUserFacingMessage('services.creativeWorkflow.reviewModelChanged'))
 }
 
 function validateOutlineForProject(novelId: number, data: Record<string, unknown>, request: CreativeWorkflowInput): void {
@@ -220,20 +221,20 @@ function validateOutlineForProject(novelId: number, data: Record<string, unknown
   const clients = new Set<string>()
   const changedIds = new Set<string>()
   const claim = (row: Record<string, unknown>, kind: string) => {
-    if (row.id !== undefined) { const key = `${kind}:${row.id}`; if (changedIds.has(key)) throw new Error('大纲不能重复修改同一卷或单元。'); changedIds.add(key) }
-    if (row.clientId) { if (clients.has(String(row.clientId))) throw new Error('大纲临时ID重复。'); clients.add(String(row.clientId)) }
+    if (row.id !== undefined) { const key = `${kind}:${row.id}`; if (changedIds.has(key)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.duplicateStructureUpdates')); changedIds.add(key) }
+    if (row.clientId) { if (clients.has(String(row.clientId))) throw new Error(formatUserFacingMessage('services.creativeWorkflow.duplicateTemporaryIds')); clients.add(String(row.clientId)) }
   }
   for (const rawVolume of (data.volumes || []) as Record<string, unknown>[]) {
     claim(rawVolume, 'volume')
-    if (rawVolume.id !== undefined && !volumes.some(row => row.id === rawVolume.id)) throw new Error('卷ID不属于当前小说。')
-    if (rawVolume.id === undefined && volumes.some(row => row.title === rawVolume.title)) throw new Error('同名卷已存在，请使用其ID更新。')
+    if (rawVolume.id !== undefined && !volumes.some(row => row.id === rawVolume.id)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.volumeWrongNovel'))
+    if (rawVolume.id === undefined && volumes.some(row => row.title === rawVolume.title)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.volumeNameExists'))
     const volumeRef = (rawVolume.id ?? rawVolume.clientId ?? `new-volume:${volumeRefs.size}`) as string | number
     volumeRefs.add(volumeRef)
     if (rawVolume.clientId) volumeRefs.add(String(rawVolume.clientId))
     for (const part of (rawVolume.parts || []) as Record<string, unknown>[]) {
       claim(part, 'part')
-      if (part.id !== undefined && !parts.some(row => row.id === part.id && row.volumeId === rawVolume.id)) throw new Error('单元ID不属于指定卷。')
-      if (part.id === undefined && parts.some(row => row.volumeId === rawVolume.id && row.title === part.title)) throw new Error('同名单元已存在，请使用其ID更新。')
+      if (part.id !== undefined && !parts.some(row => row.id === part.id && row.volumeId === rawVolume.id)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.partWrongVolume'))
+      if (part.id === undefined && parts.some(row => row.volumeId === rawVolume.id && row.title === part.title)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.partNameExists'))
       if (part.id !== undefined) partVolumes.set(Number(part.id), volumeRef)
       if (part.clientId) partVolumes.set(String(part.clientId), volumeRef)
     }
@@ -243,21 +244,21 @@ function validateOutlineForProject(novelId: number, data: Record<string, unknown
   const chapters = (data.chapters || []) as Record<string, unknown>[]
   for (const chapter of chapters) {
     const existing = current.find(row => row.chapterNum === chapter.chapterNum)
-    if (chapter.id !== undefined && existing?.id !== chapter.id) throw new Error('大纲章节ID与章序不一致。')
-    if (existing && chapter.id === undefined) throw new Error(`第 ${chapter.chapterNum} 章已存在，请使用其ID更新。`)
-    if (request.count && chapters.length > request.count) throw new Error('大纲超出本次指定章节数量。')
-    if (request.atChapter && Number(chapter.chapterNum) < request.atChapter) throw new Error('大纲不得修改目标章位之前的章节。')
-    if (chapter.volumeId !== undefined && !volumeRefs.has(chapter.volumeId as string | number)) throw new Error('章节引用了不存在的卷。')
+    if (chapter.id !== undefined && existing?.id !== chapter.id) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterIdentityMismatch'))
+    if (existing && chapter.id === undefined) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterAlreadyExists', { chapterNum: `${chapter.chapterNum}` }))
+    if (request.count && chapters.length > request.count) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterCountExceeded'))
+    if (request.atChapter && Number(chapter.chapterNum) < request.atChapter) throw new Error(formatUserFacingMessage('services.creativeWorkflow.earlierChapterProtected'))
+    if (chapter.volumeId !== undefined && !volumeRefs.has(chapter.volumeId as string | number)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.volumeReferenceMissing'))
     if (chapter.partId !== undefined) {
       const parent = partVolumes.get(chapter.partId as string | number)
-      if (parent === undefined) throw new Error('章节引用了不存在的单元。')
+      if (parent === undefined) throw new Error(formatUserFacingMessage('services.creativeWorkflow.partReferenceMissing'))
       const requestedVolume = (data.volumes as Record<string, unknown>[] | undefined)?.find(row => row.clientId === chapter.volumeId)?.id ?? chapter.volumeId
-      if (requestedVolume !== undefined && parent !== requestedVolume) throw new Error('章节的卷和单元不匹配。')
+      if (requestedVolume !== undefined && parent !== requestedVolume) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterStructureMismatch'))
     }
-    for (const id of [...(chapter.allowedFactIds || []) as number[], ...(chapter.revealedFactIds || []) as number[]]) if (!factIds.has(id)) throw new Error(`章节引用的信息点 fact:${id} 不属于当前项目。`)
-    for (const scene of chapter.scenes as Record<string, unknown>[]) if (characters.filter(row => row.name === scene.pov).length !== 1) throw new Error(`场景视角“${scene.pov}”必须对应已确认人物的唯一姓名。`)
+    for (const id of [...(chapter.allowedFactIds || []) as number[], ...(chapter.revealedFactIds || []) as number[]]) if (!factIds.has(id)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.factWrongProject', { id: `${id}` }))
+    for (const scene of chapter.scenes as Record<string, unknown>[]) if (characters.filter(row => row.name === scene.pov).length !== 1) throw new Error(formatUserFacingMessage('services.creativeWorkflow.povNameInvalid', { name: `${scene.pov}` }))
     const existingScenes = existing ? listSceneContracts(existing.id) : []
-    if (existingScenes.length > (chapter.scenes as unknown[]).length) throw new Error('增量大纲不能静默删除已有场景，请保留全部场景并明确修改目标。')
+    if (existingScenes.length > (chapter.scenes as unknown[]).length) throw new Error(formatUserFacingMessage('services.creativeWorkflow.existingSceneDeletionBlocked'))
   }
 }
 
@@ -279,14 +280,14 @@ function applyOutlineData(novelId: number, data: Record<string, unknown>, savedS
   const ids: number[] = []
   for (const value of (data.chapters || []) as Record<string, unknown>[]) {
     const existing = current.find(chapter => chapter.chapterNum === value.chapterNum)
-    if (value.id !== undefined && existing?.id !== value.id) throw new Error('大纲章节 ID 与章序不一致。')
-    if (existing && value.id === undefined) throw new Error(`第 ${value.chapterNum} 章已存在，请使用其 ID 更新。`)
+    if (value.id !== undefined && existing?.id !== value.id) throw new Error(formatUserFacingMessage('services.creativeWorkflow.outlineChapterIdentityMismatch'))
+    if (existing && value.id === undefined) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterAlreadyExistsSpaced', { chapterNum: `${value.chapterNum}` }))
     const volumeId = typeof value.volumeId === 'string' ? volumeIds.get(value.volumeId) : value.volumeId as number | undefined
     const partId = typeof value.partId === 'string' ? partIds.get(value.partId) : value.partId as number | undefined
     const placement = { ...(volumeId ? { volumeId } : {}), ...(partId ? { partId } : {}), ...(value.targetWords ? { targetWords: Number(value.targetWords) } : {}) }
     const id = existing?.id || createChapter(novelId, { chapterNum: Number(value.chapterNum), title: String(value.title), outline: String(value.outline), ...placement })
     const factIds = (raw: unknown): number[] => {
-      if (!Array.isArray(raw) || raw.some(item => !Number.isInteger(item) || item < 1)) throw new Error('章节事实引用必须为正整数 ID 数组。')
+      if (!Array.isArray(raw) || raw.some(item => !Number.isInteger(item) || item < 1)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.factReferenceIdsInvalid'))
       return raw as number[]
     }
     updateChapter(id, { title: String(value.title), outline: String(value.outline), ...placement, ...(value.allowedFactIds !== undefined ? { allowedFactIdsJson: JSON.stringify(factIds(value.allowedFactIds)) } : {}), ...(value.revealedFactIds !== undefined ? { revealedFactIdsJson: JSON.stringify(factIds(value.revealedFactIds)) } : {}) })
@@ -306,7 +307,7 @@ function applyOutlineData(novelId: number, data: Record<string, unknown>, savedS
       }
     }
     const prerequisites = inspectCreativeChapterPrerequisites(novelId, Number(value.chapterNum))
-    if (prerequisites.blockers.length) throw new Error(`第 ${value.chapterNum} 章安排尚不可执行：${prerequisites.blockers.join('；')}`)
+    if (prerequisites.blockers.length) throw new Error(formatUserFacingMessage('services.creativeWorkflow.chapterPrerequisitesBlocked', { chapterNum: `${value.chapterNum}`, blockers: `${prerequisites.blockers.join('；')}` }))
     ids.push(id)
   }
   return ids
@@ -314,18 +315,18 @@ function applyOutlineData(novelId: number, data: Record<string, unknown>, savedS
 
 export function applyCreativeDraft(input: { novelId: number; runId: number }): Record<string, unknown> {
   const { input: frozen, task } = stored(input.runId, input.novelId)
-  if (frozen.request.operation === 'review') throw new Error('评审报告不能作为正文应用；请根据报告发起修订。')
+  if (frozen.request.operation === 'review') throw new Error(formatUserFacingMessage('services.creativeWorkflow.reviewCannotApplyAsProse'))
   const state = getCreativeRun(input.novelId, input.runId)!
   const key = `creative:${input.runId}:apply`
   const previous = findArtifactByIdempotency(input.novelId, 'creative_commit', key)
   if (previous) return previous.content as Record<string, unknown>
-  if (!state.artifactId || !state.reviewArtifactId) throw new Error('任务尚无已审校候选。')
+  if (!state.artifactId || !state.reviewArtifactId) throw new Error(formatUserFacingMessage('services.creativeWorkflow.reviewedCandidateMissing'))
   const draft = requireArtifact<GenericAssetDraftContent>(state.artifactId)
   const review = requireArtifact<GenericAssetReviewContent>(state.reviewArtifactId)
   const successor = findAcceptedCreativeSuccessor(input.novelId, draft.id)
-  if (successor) throw new Error(`候选已由任务 #${successor.runId} 的修订版本替代，请查看并应用新版候选。`)
+  if (successor) throw new Error(formatUserFacingMessage('services.creativeWorkflow.candidateSuperseded', { runId: `${successor.runId}` }))
   assertCreativeCandidateApplicable({ status: task.status || 'pending', cancelRequested: Boolean(JSON.parse(task.controlJson || '{}').cancelRequested), draftStatus: draft.status, reviewStatus: review.status })
-  if (state.reviewStatus !== 'passed' || draft.novelId !== input.novelId || review.novelId !== input.novelId || review.content.status !== 'passed' || review.content.effectiveContentHash !== draft.contentHash || review.content.effectiveArtifactId !== draft.id) throw new Error('当前候选未通过审校，不能应用。')
+  if (state.reviewStatus !== 'passed' || draft.novelId !== input.novelId || review.novelId !== input.novelId || review.content.status !== 'passed' || review.content.effectiveContentHash !== draft.contentHash || review.content.effectiveArtifactId !== draft.id) throw new Error(formatUserFacingMessage('services.creativeWorkflow.candidateReviewNotPassed'))
   const data = parseWorkflowCandidate(frozen, draft.content.output)
   const sqlite = getSqlite()
   const committed = sqlite.transaction(() => {
@@ -348,7 +349,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
       ids.push(...applyOutlineData(input.novelId, data, savedStructureIds))
     } else if (frozen.request.stage === 'chapter') {
       if (requiresChapterContractCheck(frozen)) assertCreativeEvidence({ novelId: input.novelId, runId: input.runId, modelConfigId: frozen.reviewModelConfigId || frozen.modelConfigId, data, ...preservedFormalReveals(frozen), candidateArtifactId: draft.id, candidateHash: draft.contentHash, contextVersion: frozen.contextVersion, reportArtifactId: state.result?.evidenceReviewArtifactId })
-      if (frozen.request.atChapter && data.chapterNum !== frozen.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
+      if (frozen.request.atChapter && data.chapterNum !== frozen.request.atChapter) throw new Error(formatUserFacingMessage('services.creativeWorkflow.generatedChapterNumberMismatch'))
       if (requiresChapterContractCheck(frozen)) {
         assertCreativeChapterCandidate({ novelId: input.novelId, chapterNum: Number(data.chapterNum), content: String(data.content), expectedContextVersion: frozen.contextVersion, changes })
         if (!preservesFormalReveals(frozen)) validateCreativeFactReveals(input.novelId, Number(data.chapterNum), String(data.content), data.factReveals || [])
@@ -388,7 +389,7 @@ export function applyCreativeDraft(input: { novelId: number; runId: number }): R
 }
 function revisionBase(input: StoredRequest): ChapterRevisionBase | undefined {
   if (!input.request.chapterRevision) return undefined
-  if (!input.chapterRevisionBaseArtifactId) throw new Error('局部修订缺少冻结基线，请重新启动任务。')
+  if (!input.chapterRevisionBaseArtifactId) throw new Error(formatUserFacingMessage('services.creativeWorkflow.frozenRevisionBaseMissing'))
   const base = readChapterRevisionBase(input.chapterRevisionBaseArtifactId)
   assertChapterRevisionBaseCurrent(input.request, base)
   return base
@@ -408,7 +409,7 @@ function preservedFormalReveals(input: StoredRequest): { preservedFactIds?: numb
   const base = revisionBase(input)!
   const chapter = getChapter(base.chapterId)!
   const ids: unknown = JSON.parse(chapter.revealedFactIdsJson || '[]')
-  if (!Array.isArray(ids) || ids.some(id => !Number.isInteger(id) || id < 1)) throw new Error('原章揭示信息点范围无效。')
+  if (!Array.isArray(ids) || ids.some(id => !Number.isInteger(id) || id < 1)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.originalRevealScopeInvalid'))
   // The patch cannot edit fact metadata. Review retained delivery instead of requiring new writes.
   return { preservedFactIds: ids as number[], preservedChapterId: base.chapterId }
 }
@@ -430,7 +431,7 @@ function modelCheckpoint(runId: number, input: StoredRequest) {
 async function executeChapterReview(runId: number, input: StoredRequest): Promise<void> {
   const novelId = input.request.novelId
   const chapter = listChapters(novelId).find(row => row.chapterNum === input.request.atChapter)
-  if (!chapter?.content?.trim()) throw new Error('目标章节没有可评审的正文。')
+  if (!chapter?.content?.trim()) throw new Error(formatUserFacingMessage('services.creativeWorkflow.reviewChapterContentMissing'))
   const content = chapter.content
   const novel = getNovel(novelId)!
   const context = await compileCreativeContext(input.request, input.modelConfigId, input.reviewModelConfigId)
@@ -448,7 +449,7 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
     modelCheckpoint: modelCheckpoint(runId, input),
   })
   assertActive(runId); assertBase(input)
-  if (getChapter(chapter.id)?.content !== content) throw new Error('评审期间正文已变化，请对当前版本重新评审。')
+  if (getChapter(chapter.id)?.content !== content) throw new Error(formatUserFacingMessage('services.creativeWorkflow.reviewedContentChanged'))
   const deterministicBlockers: string[] = []
   try { assertCreativeChapterCandidate({ novelId, chapterNum: chapter.chapterNum, content, expectedContextVersion: input.contextVersion }) }
   catch (error) { deterministicBlockers.push(error instanceof Error ? error.message : String(error)) }
@@ -461,7 +462,7 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: route.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
   const issueIds = recordCreativeReviewIssues(input.request, runId, artifact.id, review, deterministicBlockers)
   assertBase(input)
-  if (getChapter(chapter.id)?.content !== content) throw new Error('评审期间正文已变化，请重新评审。')
+  if (getChapter(chapter.id)?.content !== content) throw new Error(formatUserFacingMessage('services.creativeWorkflow.contentChangedDuringReview'))
   if (status === 'passed' && !review.issues?.length && !review.rewriteRequired && !review.rejectRequired) advanceCreativeRevisionIssues(input.request, artifact.id, true)
   const result = { artifactId: artifact.id, chapterId: chapter.id, contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status, issueIds }
   updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })
@@ -491,7 +492,7 @@ async function executeAssetReview(runId: number, input: StoredRequest): Promise<
     modelCheckpoint: modelCheckpoint(runId, input),
   })
   assertActive(runId); assertBase(input)
-  if (hashArtifactContent(capture(input.request)) !== contentHash) throw new Error('评审期间正式资料已变化，请重新复核。')
+  if (hashArtifactContent(capture(input.request)) !== contentHash) throw new Error(formatUserFacingMessage('services.creativeWorkflow.assetsChangedDuringReview'))
   const status = review.rejectRequired ? 'blocked' : review.rewriteRequired ? 'needs_revision' : 'passed'
   const summary = [review.summary, reviewModelOriginNote(getModelConfigRecord(input.modelConfigId), route.modelConfigId ? getModelConfigRecord(route.modelConfigId) : undefined, true)].filter(Boolean).join(' ')
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
@@ -525,7 +526,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
         expectedContextVersion: input.contextVersion, beforeSave: () => assertActive(runId),
       })
       assertActive(runId)
-      if (!research.sources.length) throw new Error(`未取得可用的外部资料，本次未开始生成：${research.diagnostics.join('；') || '没有有效搜索结果。'}`)
+      if (!research.sources.length) throw new Error(formatUserFacingMessage('services.creativeWorkflow.researchUnavailable', { diagnostics: `${research.diagnostics.join('；') || formatUserFacingMessage('services.creativeWorkflow.noSearchResults')}` }))
       input.contextVersion = research.contextVersion
       updateTask(runId, { inputJson: JSON.stringify(input) })
       progress(runId, 'context', `${research.cached ? '已复用' : '已保存'} ${research.sources.length} 条外部参考资料；摘要尚未核验全文。${research.diagnostics.length ? research.diagnostics.join('；') : ''}`)
@@ -567,7 +568,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
         const reviewContext = localRevisionBase.revision.target === 'summary'
           ? `本次仅审校摘要补丁，正文与标题均锁定，不得要求改写正文。\n${JSON.stringify({ chapterNum: merged.chapterNum, title: merged.title, content: merged.content, summary: merged.summary })}`
           : `${context.text}\n[merged_chapter_for_review] ${JSON.stringify({ chapterNum: merged.chapterNum, title: merged.title, content: merged.content, summary: merged.summary })}\n只审校指定段落补丁及其与完整章的衔接；完整章由服务端合并，范围外内容不能改写。`
-        if (estimateTokens(reviewContext) + estimateTokens(output) + 500 > context.maxInputTokens) throw new Error('局部修订合并章与补丁的实际评审输入超过预算，已停止评审请求；请缩小段落范围或切换模型。')
+        if (estimateTokens(reviewContext) + estimateTokens(output) + 500 > context.maxInputTokens) throw new Error(formatUserFacingMessage('services.creativeWorkflow.mergedRevisionReviewOverBudget'))
         return reviewContext
       } } : {}),
       modelCheckpoint: modelCheckpoint(runId, input),
@@ -583,7 +584,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
           assertCreativeChangeScope(input.request, candidate, resolution)
           if (input.request.stage === 'outline') validateOutlineForProject(novelId, candidate, input.request)
           if (input.request.stage === 'chapter' && requiresChapterContractCheck(input)) {
-            if (candidate.chapterNum !== input.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
+            if (candidate.chapterNum !== input.request.atChapter) throw new Error(formatUserFacingMessage('services.creativeWorkflow.generatedChapterNumberMismatch'))
             assertCreativeChapterCandidate({ novelId, chapterNum: Number(candidate.chapterNum), content: String(candidate.content), expectedContextVersion: input.contextVersion, changes: candidate.changes as StoryAtlasChange[] | undefined })
             if (!preservesFormalReveals(input)) validateCreativeFactReveals(novelId, Number(candidate.chapterNum), String(candidate.content), candidate.factReveals || [])
           }
@@ -610,7 +611,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
     progress(runId, 'reviewing', generated.review.summary, { result: { issueIds, comparisonArtifactId: comparison.id } })
     if (input.request.stage === 'outline') validateOutlineForProject(novelId, parsed, input.request)
     if (input.request.stage === 'chapter' && requiresChapterContractCheck(input)) {
-      if (parsed.chapterNum !== input.request.atChapter) throw new Error('生成正文的章序与任务不一致。')
+      if (parsed.chapterNum !== input.request.atChapter) throw new Error(formatUserFacingMessage('services.creativeWorkflow.generatedChapterNumberMismatch'))
       assertCreativeChapterCandidate({ novelId, chapterNum: Number(parsed.chapterNum), content: String(parsed.content), expectedContextVersion: input.contextVersion, changes: parsed.changes as StoryAtlasChange[] | undefined })
       if (!preservesFormalReveals(input)) validateCreativeFactReveals(novelId, Number(parsed.chapterNum), String(parsed.content), parsed.factReveals || [])
       const evidence = await reviewCreativeEvidence({ novelId, runId, modelConfigId: input.reviewModelConfigId || input.modelConfigId, contextVersion: input.contextVersion,
@@ -620,7 +621,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
       assertActive(runId); assertBase(input)
       if (evidence) {
         progress(runId, 'reviewing', evidence.passed ? '逐项证据语义审校通过。' : '证据不足，候选保留。', { result: { evidenceReviewArtifactId: evidence.artifactId } })
-        if (!evidence.passed) throw new Error(`证据语义审校未通过：${evidence.blockers.join('；')}`)
+        if (!evidence.passed) throw new Error(formatUserFacingMessage('services.creativeWorkflow.evidenceReviewFailed', { blockers: `${evidence.blockers.join('；')}` }))
       }
     }
     progress(runId, 'reviewing', generated.review.summary, { reviewStatus: 'passed' })
@@ -661,27 +662,27 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   if (request.stage === 'chapter' && request.operation !== 'review') request = { ...request, changeScope: { ...structuredClone(PROSE_ONLY_CHANGE_SCOPE), ...request.changeScope } }
   validateCreativeChangeScope(request)
   validateChapterRevision(request)
-  if (!CREATIVE_STAGES.includes(request.stage)) throw new Error('未知创作阶段。')
+  if (!CREATIVE_STAGES.includes(request.stage)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.stageUnknown'))
   text(request.request, '需求'); text(request.idempotencyKey, '幂等键')
-  if (request.count !== undefined && (!Number.isInteger(request.count) || request.count < 1 || request.count > 50)) throw new Error('每次生成数量为 1–50。')
-  if (request.stage === 'chapter' && request.count !== undefined && request.count !== 1) throw new Error('正文每次推进一章；下一章需基于本章已审校结果继续。')
-  if (request.operation === 'review' && request.sourceArtifactId) throw new CreativeReviewTargetError('正式复核不能将候选作为待评内容。')
-  if (request.atChapter !== undefined && (!Number.isInteger(request.atChapter) || request.atChapter < 0)) throw new Error('章位必须为非负整数。')
+  if (request.count !== undefined && (!Number.isInteger(request.count) || request.count < 1 || request.count > 50)) throw new Error(formatUserFacingMessage('services.creativeWorkflow.generationCountInvalid'))
+  if (request.stage === 'chapter' && request.count !== undefined && request.count !== 1) throw new Error(formatUserFacingMessage('services.creativeWorkflow.singleChapterOnly'))
+  if (request.operation === 'review' && request.sourceArtifactId) throw new CreativeReviewTargetError(formatUserFacingMessage('services.formalReview.candidateBlocked'))
+  if (request.atChapter !== undefined && (!Number.isInteger(request.atChapter) || request.atChapter < 0)) throw new Error(formatUserFacingMessage('services.chapterPositionInvalid'))
   const novel = getNovel(request.novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   if (request.sourceArtifactId) {
     const source = requireArtifact<GenericAssetDraftContent>(request.sourceArtifactId)
-    if (source.novelId !== novel.id || source.kind !== 'generic_draft' || source.content.assetType !== assetTypes[request.stage]) throw new Error('修订来源必须是当前项目同类阶段的候选。')
+    if (source.novelId !== novel.id || source.kind !== 'generic_draft' || source.content.assetType !== assetTypes[request.stage]) throw new Error(formatUserFacingMessage('services.creativeWorkflow.revisionSourceInvalid'))
   }
   const key = `creative:${request.novelId}:${request.idempotencyKey}`
   const replay = getDb().select().from(tasks).where(eq(tasks.idempotencyKey, key)).get()
   if (replay) {
     const prior = JSON.parse(replay.inputJson || '{}') as StoredRequest
-    if (prior.requestFingerprint !== rawRequestFingerprint) throw new Error('幂等键已用于另一份创作需求。')
+    if (prior.requestFingerprint !== rawRequestFingerprint) throw new Error(formatUserFacingMessage('services.creativeWorkflow.idempotencyConflict'))
     return getCreativeRun(request.novelId, replay.id)!
   }
   const busy = listCreativeRuns(request.novelId).find(run => ['pending', 'running', 'cancel_requested'].includes(run.status))
-  if (busy) throw new Error(`当前项目正在执行任务 #${busy.runId}，完成或取消后再启动下一阶段。`)
+  if (busy) throw new Error(formatUserFacingMessage('services.creativeWorkflow.projectBusy', { runId: `${busy.runId}` }))
   const model = novel.modelConfigId ? getModelConfigRecord(novel.modelConfigId) : getDefaultModelConfigRecord()
   const reviewModelConfigId = parseStorySettingsDocument(novel.settingsJson).aiEngine.reviewModelConfigId || model.id
   getModelConfigRecord(reviewModelConfigId)
@@ -691,11 +692,11 @@ export async function startCreativeWorkflow(request: CreativeWorkflowInput): Pro
   const localRevisionBase = resolvedRequest.chapterRevision ? captureChapterRevisionBase(resolvedRequest) : undefined
   if (resolvedRequest.stage === 'chapter' && resolvedRequest.operation !== 'review' && !(resolvedRequest.chapterRevision?.target === 'summary' && !resolvedRequest.sourceArtifactId)) {
     const readiness = inspectCreativeChapterPrerequisites(resolvedRequest.novelId, resolvedRequest.atChapter)
-    if (readiness.blockers.length) throw new CreativeChapterContextError('CHAPTER_PREREQUISITES_REQUIRED', `第 ${resolvedRequest.atChapter} 章尚不能生成正文：${readiness.blockers.join('；')}。请先生成并应用本章的大纲与场景安排。`)
+    if (readiness.blockers.length) throw new CreativeChapterContextError('CHAPTER_PREREQUISITES_REQUIRED', formatUserFacingMessage('services.creativeWorkflow.chapterNotReady', { chapterNum: `${resolvedRequest.atChapter}`, blockers: `${readiness.blockers.join('；')}` }))
   }
   if (request.operation === 'review') {
     if (request.stage === 'chapter') {
-      if (!listChapters(request.novelId).find(chapter => chapter.chapterNum === resolvedRequest.atChapter)?.content?.trim()) throw new CreativeReviewTargetError('目标章节没有可评审的正文。')
+      if (!listChapters(request.novelId).find(chapter => chapter.chapterNum === resolvedRequest.atChapter)?.content?.trim()) throw new CreativeReviewTargetError(formatUserFacingMessage('services.creativeWorkflow.reviewChapterContentMissing'))
     } else if (ATLAS_REVIEW_STAGES.includes(request.stage)) captureFormalAtlasReview(resolvedRequest)
     else captureFormalPlanningReview(resolvedRequest)
   }
@@ -740,7 +741,7 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
   } else {
     if (action === 'resume_checkpoint') {
       const recoveries = (input.recoveryPass || 0) + 1
-      if (recoveries > 3) throw new Error('本任务已达到恢复请求上限，请调整需求或模型后创建新任务。')
+      if (recoveries > 3) throw new Error(formatUserFacingMessage('services.creativeWorkflow.resumeLimitReached'))
       input.recoveryPass = recoveries
       if (state.artifactId && input.request.operation !== 'review') input.recoveryParentArtifactId = state.artifactId
       updateTask(runId, { status: 'pending', inputJson: JSON.stringify(input), controlJson: '{}', errorMessage: null })
@@ -753,7 +754,7 @@ export function resumeCreativeWorkflow(novelId: number, runId: number, options: 
     input.attempt += 1
     input.recoveryPass = 0
     input.recoveryParentArtifactId = undefined
-    if (input.attempt > 3) throw new Error('本任务已达到重试上限，请调整需求后创建新任务。')
+    if (input.attempt > 3) throw new Error(formatUserFacingMessage('services.creativeWorkflow.retryLimitReached'))
     updateTask(runId, { status: 'pending', inputJson: JSON.stringify(input), controlJson: '{}', errorMessage: null })
     setImmediate(() => { void execute(runId, novelId) })
   }

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 export function sameDirectory(left: string, right: string): boolean {
   const canonical = (value: string) => {
@@ -43,6 +44,6 @@ export function registerFormalInstallation(): void {
 export function installedExecutable(): string {
   const record = JSON.parse(fs.readFileSync(path.join(formalDataDirectory(), 'desktop-install.json'), 'utf8')) as { executable: string }
   if (!path.isAbsolute(record.executable) || !fs.statSync(record.executable).isFile()
-    || sameDirectory(record.executable, process.execPath)) throw new Error('正式程序路径无效，请先启动已安装的 NovelForge。')
+    || sameDirectory(record.executable, process.execPath)) throw new Error(formatUserFacingMessage('runtime.invalidInstalledExecutable'))
   return record.executable
 }

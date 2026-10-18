@@ -3,6 +3,7 @@ import { Button, Input, Select, Spin } from 'antd'
 import type { AgentArtifact } from '../../../shared/agent-artifacts'
 import { CREATIVE_STAGE_LABELS, type CreativeRun } from '../../../shared/creative-workflow'
 import type { RevisionTask } from '../../../types'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { ContentDocument } from './ContentDocument'
 import { EmptyWork, LoadFailure } from './shared'
 import { callAuthorTool } from './workflow-client'
@@ -43,7 +44,7 @@ export default function CandidateReview({ novelId, artifactId, onRevise, onAppli
         loadDocumentNames(novelId, value => { referenceError = value }),
       ])
       if (token !== epoch.current) return
-      if (result.artifact.novelId !== novelId) throw new Error('这份内容属于另一部作品。')
+      if (result.artifact.novelId !== novelId) throw new Error(getUserFacingMessage('workspace.candidate.wrongNovel'))
       const item = result.artifact
       const relatedRun = tasks.runs.find(task => task.novelId === novelId && (task.artifactId === item.id || task.reviewArtifactId === item.id)) || null
       const related = await callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, parentArtifactId: item.id, kind: item.status === 'committed' ? 'creative_commit' : 'creative_comparison', limit: 200 })
@@ -53,7 +54,7 @@ export default function CandidateReview({ novelId, artifactId, onRevise, onAppli
         item.reviewArtifactId ? callAuthorTool<{ artifact: AgentArtifact }>('novelforge.artifacts.get', { artifactId: item.reviewArtifactId }) : null,
       ])
       if (token !== epoch.current) return
-      if (comparisonResult && comparisonResult.artifact.novelId !== novelId || reviewResult && reviewResult.artifact.novelId !== novelId) throw new Error('关联记录不属于当前作品。')
+      if (comparisonResult && comparisonResult.artifact.novelId !== novelId || reviewResult && reviewResult.artifact.novelId !== novelId) throw new Error(getUserFacingMessage('workspace.candidate.relatedRecordWrongNovel'))
       setArtifact(item); setRun(relatedRun); setNames(nextNames); setReview(reviewResult?.artifact.content ?? null)
       setHistory(comparisonResult?.artifact.content.history ?? null); setLoadedId(artifactId); setError(referenceError)
     } catch (cause) { if (token === epoch.current) setError(cause instanceof Error ? cause.message : '读取候选失败') }
@@ -81,11 +82,11 @@ export default function CandidateReview({ novelId, artifactId, onRevise, onAppli
       const issues = run.operation === 'review' ? await window.electron.revision.list(novelId) : []
       const sources = [...new Set((run.operation === 'review' ? run.revisionIssueIds || [] : []).map(id => {
         const issue: RevisionTask | undefined = issues.find(row => row.id === id)
-        if (!issue) throw new Error('修订问题已不在当前列表，请刷新后重试。')
+        if (!issue) throw new Error(getUserFacingMessage('workspace.candidate.revisionIssueMissing'))
         const meta = recordOf(parseDocument(issue.originMetaJson))
         return meta.repairArtifactId || meta.candidateArtifactId
       }))]
-      if (sources.length > 1) throw new Error('这些问题属于不同候选，请分别修订。')
+      if (sources.length > 1) throw new Error(getUserFacingMessage('workspace.candidate.mixedRevisionSources'))
       const route = artifactTarget({ ...run, ...(typeof sources[0] === 'string' ? { sourceArtifactId: sources[0] } : {}) }, current.id, feedback.trim(), run.operation === 'review' ? current.content : undefined)
       const target = objectTaskFromRoute(route, `${CREATIVE_STAGE_LABELS[run.stage]} · ${runChapterLabel(run)}`)
       if (run.stage === 'chapter') target.chapterRevision = revisionTarget === 'summary' ? { target: 'summary' } : revisionTarget === 'original' ? run.chapterRevision : undefined

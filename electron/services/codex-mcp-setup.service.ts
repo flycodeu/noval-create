@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
@@ -49,7 +50,7 @@ function findCodexCli(input?: string): string | null {
   if (input !== undefined) {
     const selected = input.trim()
     if (!path.isAbsolute(selected) || path.basename(selected).toLowerCase() !== 'codex.exe' || !isFile(selected)) {
-      throw new Error('请选择存在的 codex.exe 绝对路径。')
+      throw new Error(formatUserFacingMessage('services.codexSetup.executableInvalid'))
     }
     return selected
   }
@@ -131,11 +132,11 @@ export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMc
 
 export async function configureCodexMcp(cliInput?: string): Promise<CodexMcpSetupStatus> {
   const before = await getCodexMcpSetupStatus(cliInput)
-  if (!before.supported || !before.novelForgePath) throw new Error('请从 Windows 安装版的正式实例配置 Codex；测试副本不能修改正式入口。')
-  if (!before.codexCliPath) throw new Error('未找到 Codex CLI，请先指定 codex.exe 路径。')
+  if (!before.supported || !before.novelForgePath) throw new Error(formatUserFacingMessage('services.codexSetup.formalInstanceRequired'))
+  if (!before.codexCliPath) throw new Error(formatUserFacingMessage('services.codexSetup.cliMissing'))
   if (before.registration === 'configured') return before
   await runCodex(before.codexCliPath, ['mcp', 'add', SERVER_NAME, '--', before.novelForgePath, ...getLaunchArgs()])
   const after = await getCodexMcpSetupStatus(before.codexCliPath)
-  if (after.registration !== 'configured') throw new Error(`配置命令已执行，但复核未通过：${after.message}`)
+  if (after.registration !== 'configured') throw new Error(formatUserFacingMessage('services.codexSetup.verificationFailed', { message: `${after.message}` }))
   return after
 }

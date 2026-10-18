@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fixture = vi.hoisted(() => ({ files: new Map<string, string>(), chapters: new Map<number, string>(), encryptionAvailable: true, activeGeneration: false }))
 vi.mock('electron', () => ({ app: { getPath: () => '/fixture-local' }, safeStorage: {
@@ -101,7 +102,7 @@ describe('local Zhuque detector', () => {
   })
   it('records safe failure details without leaking upstream secrets or retrying requests', async () => {
     updateZhuqueSettings({ enabled: true, apiKey: 'secret-fixture' })
-    mockFetch.mockRejectedValue(new Error('朱雀 secret-fixture in upstream error'))
+    mockFetch.mockRejectedValue(new Error(formatUserFacingMessage('services.test.zhuquePrivateUpstreamError')))
     const result = await detectZhuqueChapter(1)
     expect(result.status).toBe('failed'); expect(result.report?.metrics).toBeUndefined()
     expect(JSON.stringify(result)).not.toContain('secret-fixture'); expect(mockFetch).toHaveBeenCalledTimes(1)

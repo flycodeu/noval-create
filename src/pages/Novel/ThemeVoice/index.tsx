@@ -506,7 +506,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     form.setFieldsValue(nextValues)
     setSelectedStyleTemplateId(template.id)
     setTemplateOpen(false)
-    message.success(templateApplyMode === 'fill_blanks' ? '模板已补入空白文风字段，现有内容保持不变。' : '模板文风字段已覆盖到表单，保存后生效。')
+    message.success(getUserFacingMessage(templateApplyMode === 'fill_blanks' ? 'themeVoice.templateFilledBlanks' : 'themeVoice.templateOverwritten'))
   }
 
   const navigateWithUnsavedGuard = (target: 'world-rules' | 'style-lab' | 'writing/editor') => {

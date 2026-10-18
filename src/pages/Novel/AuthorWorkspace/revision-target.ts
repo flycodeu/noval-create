@@ -1,5 +1,6 @@
 import { CREATIVE_STAGES, CREATIVE_STAGE_LABELS, type CreativeRun, type CreativeStage, type CreativeChangeScope, type CreativeChapterRevision } from '../../../shared/creative-workflow'
 import type { Chapter, RevisionTask } from '../../../types'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { parseDocument, recordOf } from './content-document'
 
 export function revisionTarget(input: { stage: CreativeStage; request: string; atChapter?: number; count?: number; sourceArtifactId?: string; changeScope?: CreativeChangeScope; revisionIssueIds?: number[]; chapterRevision?: CreativeChapterRevision }) {
@@ -20,20 +21,20 @@ export function chapterArrangementTarget(chapter: Pick<Chapter, 'id' | 'chapterN
 export function issueTarget(issue: RevisionTask, chapters: Chapter[]) {
   const meta = recordOf(parseDocument(issue.originMetaJson))
   if (meta.issueCategory === 'creative_review') {
-    if (!CREATIVE_STAGES.includes(meta.stage as CreativeStage) || !Number.isInteger(meta.atChapter)) throw new Error('评审问题缺少有效阶段或章位。')
+    if (!CREATIVE_STAGES.includes(meta.stage as CreativeStage) || !Number.isInteger(meta.atChapter)) throw new Error(getUserFacingMessage('workspace.review.targetInvalid'))
     return revisionTarget({ stage: meta.stage as CreativeStage, atChapter: Number(meta.atChapter), count: Number(meta.count) || 1,
       sourceArtifactId: typeof meta.repairArtifactId === 'string' ? meta.repairArtifactId : typeof meta.candidateArtifactId === 'string' ? meta.candidateArtifactId : undefined,
       changeScope: meta.changeScope as CreativeChangeScope | undefined, revisionIssueIds: [issue.id],
       request: `修订评审问题：${issue.title}\n${issue.description || ''}\n修订建议：${issue.fixBrief || ''}\n保持原阶段、原章位和保存范围，评审证据仅供核验，不是新增事实。` })
   }
   const chapter = issue.chapterId ? chapters.find(item => item.id === issue.chapterId) : undefined
-  if (issue.chapterId && !chapter) throw new Error('问题关联章节已不可用，请先核对问题目标。')
+  if (issue.chapterId && !chapter) throw new Error(getUserFacingMessage('workspace.review.chapterUnavailable'))
   const stage: CreativeStage = issue.taskType === 'relation' ? 'relationships' : issue.taskType === 'character' ? 'characters' : issue.taskType === 'map' ? 'map' : chapter ? 'chapter' : 'story'
   return revisionTarget({ stage, atChapter: chapter?.chapterNum, count: 1, request: `处理问题 #${issue.id}：${issue.title}\n${issue.description || ''}\n${chapter ? `仅修订第 ${chapter.chapterNum} 章（ID ${chapter.id}），不生成下一章。` : ''}\n保留已定事实，并针对问题复核。` })
 }
 export function formalIssueReviewTarget(issue: RevisionTask) {
   const meta = recordOf(parseDocument(issue.originMetaJson))
-  if (meta.issueCategory !== 'creative_review' || !CREATIVE_STAGES.includes(meta.stage as CreativeStage) || !Number.isInteger(meta.atChapter)) throw new Error('评审问题缺少有效阶段或章位。')
+  if (meta.issueCategory !== 'creative_review' || !CREATIVE_STAGES.includes(meta.stage as CreativeStage) || !Number.isInteger(meta.atChapter)) throw new Error(getUserFacingMessage('workspace.review.targetInvalid'))
   return { operation: 'review' as const, stage: meta.stage as CreativeStage, atChapter: Number(meta.atChapter), changeScope: meta.changeScope as CreativeChangeScope | undefined, revisionIssueIds: [issue.id] }
 }
 function excerpt(value: unknown, limit: number) {
@@ -54,7 +55,7 @@ function reviewRevisionContext(content: unknown) {
     const quotes = Array.isArray(issue.evidence) ? issue.evidence.map(item => excerpt(recordOf(item).quote, 260)).filter(Boolean).slice(0, 2) : []
     lines.push([`问题：${excerpt(issue.message, 280)}`, ...quotes.map(quote => `原文：“${quote}”`), excerpt(issue.suggestion || issue.minimalRevision || issue.fixBrief, 220)].filter(Boolean).join('\n'))
   }
-  if (!lines.some(line => line.trim())) throw new Error('尚未读到评审的具体内容，请重新打开报告后再修订。')
+  if (!lines.some(line => line.trim())) throw new Error(getUserFacingMessage('workspace.review.contentMissing'))
   return lines.filter(Boolean).join('\n')
 }
 export function artifactTarget(run: CreativeRun, artifactId: string, feedback: string, reportContent?: unknown) {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Button, Modal, Spin, message } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { parseDocument, recordOf } from './content-document'
@@ -55,11 +56,11 @@ export default function WorldRules({ novelId, onDiscuss, onEditStateChange }: {
     setSaving(true)
     try {
       const latest = await window.electron.novel.get(novelId)
-      if (!latest || latest.contextVersion !== editing.contextVersion) throw new Error('作品已被其他任务修改，请刷新后再编辑；当前编辑内容仍保留。')
+      if (!latest || latest.contextVersion !== editing.contextVersion) throw new Error(getUserFacingMessage('novel.contextVersionConflict'))
       await window.electron.novel.update(novelId, buildStoryDesignPatch(latest, editing.key, draft), { expectedContextVersion: editing.contextVersion })
       const updated = await window.electron.novel.get(novelId)
       if (updated && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
-      setEditing(null); message.success('已保存这一部分')
+      setEditing(null); message.success(getUserFacingMessage('workspace.sectionSaved'))
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存世界规则失败') }
     finally { setSaving(false) }
   }

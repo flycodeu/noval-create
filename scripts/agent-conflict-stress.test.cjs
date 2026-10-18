@@ -116,10 +116,20 @@ function spawnWorker(options) {
     })
     let stdout = ''
     let stderr = ''
+    let timedOut = false
+    const deadline = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, 60_000)
     child.stdout.on('data', (chunk) => { stdout += chunk.toString() })
     child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
-    child.on('error', reject)
+    child.on('error', error => { clearTimeout(deadline); reject(error) })
     child.on('close', (code) => {
+      clearTimeout(deadline)
+      if (timedOut) {
+        reject(new Error(`Conflict stress worker ${child.pid} did not exit within 60s. ${stderr || stdout}`))
+        return
+      }
       const marker = '__NOVELFORGE_AGENT_RESULT__'
       const line = stdout.split(/\r?\n/).find((entry) => entry.startsWith(marker))
       if (!line) {

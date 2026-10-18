@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import { tasks } from '../database/schema'
@@ -291,7 +292,7 @@ export class ChapterPipelineRuntime {
     const task = getTaskRecord(this.workflowTaskId)
     if (!task) throwUserFacingError('task.notFound', { id: this.workflowTaskId })
     if (!parseTaskControl(task).cancelRequested) return
-    const error = new Error('用户已取消')
+    const error = new Error(formatUserFacingMessage('services.chapterRuntime.userCancelled'))
     error.name = 'AbortError'
     throw error
   }

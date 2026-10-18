@@ -61,7 +61,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
     } catch (error) {
       if (loadRequestRef.current !== requestId) return
       console.error(error)
-      message.error(error instanceof Error ? error.message : '推荐治理状态读取失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.loadFailed'))
     } finally {
       if (loadRequestRef.current === requestId) setLoading(false)
     }
@@ -91,7 +91,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.preflightCompleted'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '推荐预检失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.preflightFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)
@@ -123,7 +123,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.candidateLocked'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '候选稿锁定失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.lockFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)
@@ -167,7 +167,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.externalResultRecorded'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '外部评估结果记录失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.recordFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)

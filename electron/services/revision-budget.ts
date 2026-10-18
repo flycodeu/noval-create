@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 /**
  * Shared logical content-revision quota. Physical provider retries are not
  * reservations: the caller reserves once, then may retry the same attemptKey.
@@ -112,12 +113,12 @@ export function reserveRevisionAttempt(
   const key = typeof attemptKey === 'string' ? attemptKey.trim() : ''
   if (!key) throw new RevisionBudgetError(
     'NF_REVISION_ATTEMPT_INVALID',
-    'attemptKey 不能为空。',
+    formatUserFacingMessage('services.revisionBudget.attemptKeyRequired'),
     state,
   )
   if (state.attemptKeys.includes(key)) throw new RevisionBudgetError(
     'NF_REVISION_ATTEMPT_DUPLICATE',
-    `attemptKey 已经发起过：${key}`,
+    formatUserFacingMessage('services.revisionBudget.attemptStarted', { key: `${key}` }),
     state,
     key,
   )
@@ -128,7 +129,7 @@ export function reserveRevisionAttempt(
     || state.used > state.attemptKeys.length
   if (!hasRevisionBudget(state) || (key.startsWith('reading:') && readingSpent)) throw new RevisionBudgetError(
     'NF_REVISION_BUDGET_EXHAUSTED',
-    `内容修订额度已用尽（${state.used}/${state.limit}）。`,
+    formatUserFacingMessage('services.revisionBudget.exhausted', { used: `${state.used}`, limit: `${state.limit}` }),
     state,
     key,
   )

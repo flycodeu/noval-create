@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
 import { buildProseFluencyGuidance, buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
@@ -67,7 +68,7 @@ function qualitySnapshot(result: AssetQualityLoopResult): GenericAssetQualitySna
 
 function requireNovel(novelId: number) {
   const novel = novelService.getNovel(novelId)
-  if (!novel) throw new GenericAssetWorkflowError('PROJECT_NOT_FOUND', `未找到项目 #${novelId}。`)
+  if (!novel) throw new GenericAssetWorkflowError('PROJECT_NOT_FOUND', formatUserFacingMessage('services.genericAssets.projectMissing', { novelId: `${novelId}` }))
   return novel
 }
 
@@ -246,13 +247,13 @@ function readReplay(
   const draft = findArtifactByIdempotency<GenericAssetDraftContent>(input.novelId, 'generic_draft', input.idempotencyKey)
   if (!draft) return null
   if (draft.content.schemaVersion !== 'generic-asset-draft-v1' || draft.content.requestFingerprint !== fingerprint) {
-    throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产草稿请求。')
+    throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', formatUserFacingMessage('services.genericAssets.idempotencyRequestConflict'))
   }
   if (!draft.content.taskId) {
-    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '该幂等键已用于外部导入草稿。')
+    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', formatUserFacingMessage('services.genericAssets.idempotencyImportConflict'))
   }
   if (!draft.reviewArtifactId) {
-    throw new GenericAssetWorkflowError('ARTIFACT_REVIEW_MISSING', '幂等草稿缺少审校工件，无法安全重放。')
+    throw new GenericAssetWorkflowError('ARTIFACT_REVIEW_MISSING', formatUserFacingMessage('services.genericAssets.replayReviewMissing'))
   }
   const reviewArtifact = requireArtifact<GenericAssetReviewContent>(draft.reviewArtifactId)
   const effectiveArtifact = requireArtifact<GenericAssetDraftContent>(reviewArtifact.content.effectiveArtifactId)
@@ -326,7 +327,7 @@ export async function generateGenericAssetDraft(
     retryable: true,
   })
   if (!taskId || !rawOutput.trim()) {
-    throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', '模型未返回可用的资产草稿。')
+    throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', formatUserFacingMessage('services.genericAssets.modelDraftMissing'))
   }
   if (!cached) runtime.modelCheckpoint?.save(checkpointRequest, rawOutput, taskId)
 

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { and, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, novels, revisionTasks, storyArcs } from '../database/schema'
@@ -163,7 +164,7 @@ async function parseOutlineJsonArrayWithRepair<T>(params: {
 
   const firstMessage = parsed.error?.message || '首轮解析失败'
   const secondMessage = repaired.error?.message || '修复后解析失败'
-  throw new Error(`${params.label} JSON 解析失败，自动修复一次仍未成功。首轮原因：${firstMessage}。修复后原因：${secondMessage}。原始输出片段：${previewText(params.raw)}`)
+  throw new Error(formatUserFacingMessage('services.outline.jsonRepairInvalid', { label: `${params.label}`, firstMessage: `${firstMessage}`, secondMessage: `${secondMessage}`, preview: `${previewText(params.raw)}` }))
 }
 
 export async function generateStoryArcs(novelId: number): Promise<Record<string, unknown>[]> {

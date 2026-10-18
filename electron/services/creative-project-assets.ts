@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { eq } from 'drizzle-orm'
 import { validateJsonSchema, type AgentToolJsonSchema as Schema } from '../../src/shared/tool-contracts'
 import { buildStorySettingsPayload } from '../../src/shared/story-settings'
@@ -62,14 +63,14 @@ export type ProjectAssetStage = keyof typeof PROJECT_STAGE_SCHEMAS
 export function isProjectAssetStage(stage: string): stage is ProjectAssetStage { return Object.hasOwn(PROJECT_STAGE_SCHEMAS, stage) }
 export function validateProjectAsset(stage: ProjectAssetStage, data: unknown): void {
   const result = validateJsonSchema(data, PROJECT_STAGE_SCHEMAS[stage])
-  if (!result.valid) throw new Error(`阶段输出结构错误：${result.issues.join('；')}`)
+  if (!result.valid) throw new Error(formatUserFacingMessage('services.projectAssets.structureInvalid', { issues: `${result.issues.join('；')}` }))
   const containsValue = (value: unknown): boolean => value !== null && typeof value === 'object'
     ? Object.values(value).some(containsValue) : typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string' && Boolean(value.trim())
-  if (!containsValue(data)) throw new Error('阶段输出没有实际变更。')
+  if (!containsValue(data)) throw new Error(formatUserFacingMessage('services.projectAssets.noChanges'))
   if (stage === 'world_rules') {
     const clock = (data as { worldRules?: { timelineConfig?: Record<string, unknown> } }).worldRules?.timelineConfig
     if (clock?.currentTimeLabel && (clock.currentTimeChapterNum == null || typeof clock.currentTimeEvidence !== 'string' || !clock.currentTimeEvidence.trim())) {
-      throw new Error('当前故事时间必须同时提供对应章序和时间依据。')
+      throw new Error(formatUserFacingMessage('services.projectAssets.storyTimeEvidenceMissing'))
     }
   }
 }
@@ -100,7 +101,7 @@ export function mergeCreativeAssetPatch(current: unknown, patch: unknown): unkno
 export function applyCreativeProjectAsset(novelId: number, stage: ProjectAssetStage, data: Record<string, unknown>, sourceArtifactId: string): Record<string, unknown> {
   validateProjectAsset(stage, data)
   const novel = getNovel(novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   let result: Record<string, unknown> = {}
   if (stage === 'world_rules') {
     const merged = mergeCreativeAssetPatch(json(novel.worldRulesJson), data.worldRules)

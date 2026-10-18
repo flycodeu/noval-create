@@ -1,14 +1,15 @@
 import React from 'react'
 import { Button, message } from 'antd'
 import type { StoryAtlasEntity } from '../../../shared/story-atlas'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { atlasPortraitImage, buildAtlasPortraitPrompt } from './atlas-portrait'
 
 export function AtlasPortrait({ entity, onEdit, disabled }: { entity: StoryAtlasEntity; onEdit: () => void; disabled?: boolean }) {
   const image = atlasPortraitImage(entity.attributes.portraitImage)
   const prompt = typeof entity.attributes.portraitPrompt === 'string' && entity.attributes.portraitPrompt.trim() ? entity.attributes.portraitPrompt : buildAtlasPortraitPrompt(entity)
   const copy = async () => {
-    try { await navigator.clipboard.writeText(prompt); message.success('视觉描述已复制，可用于生成角色参考像。') }
-    catch { message.error('复制失败，可展开视觉描述后手动复制。') }
+    try { await navigator.clipboard.writeText(prompt); message.success(getUserFacingMessage('workspace.portrait.promptCopied')) }
+    catch { message.error(getUserFacingMessage('workspace.portrait.copyFailed')) }
   }
   return <section className="atlas-profile-section atlas-portrait" aria-label="人物肖像">
     <div className="atlas-portrait-heading"><h3>人物肖像</h3><span>可选</span></div>

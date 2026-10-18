@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { asc, eq } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
 import { assertChapterNarrativeInputCurrent, currentNarrativeSceneIdentity, resolveChapterNarrativeIdentity } from './chapter-narrative-policy'
@@ -162,7 +163,7 @@ export function createChapterStagePrepareInput(
       const transcript = messages.map((message) => message.content).join('\n')
       const missingEvidence = context.previousChapterSampleReport?.sources?.filter((source) => source.required && source.included && !transcript.includes(source.text)) || []
       if (missingEvidence.length) {
-        throw new HardConstraintOverflowError('NF_CONTEXT_REQUIRED_OVERFLOW：最终请求缺少上章关键依据，请检查提示覆盖或缩小本章范围。', context, context.contextBudgetReport, {
+        throw new HardConstraintOverflowError(formatUserFacingMessage('services.chapterContext.requestEvidenceMissing'), context, context.contextBudgetReport, {
           requiredTokens: missingEvidence.reduce((sum, source) => sum + source.estimatedTokens, 0),
           availableTokens: request.budgetReport.effectiveBudget || 0, deficitTokens: 0,
           missingConstraintIds: missingEvidence.map((source) => source.key), missingConstraintLabels: [],

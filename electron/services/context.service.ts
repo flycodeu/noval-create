@@ -1,4 +1,5 @@
-﻿import type { ApprovedStyleSample } from '../../src/shared/style-source'
+﻿import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import type { ApprovedStyleSample } from '../../src/shared/style-source'
 import { asc, eq } from 'drizzle-orm'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import {
@@ -4286,7 +4287,7 @@ export function allocateChapterContext(
   }
 
   if (originalSelection?.overflow) {
-    throw new HardConstraintOverflowError('NF_CONTEXT_REQUIRED_OVERFLOW：上章关键承接原文无法完整注入，请检查视角权限或缩小本章范围。', result, contextBudgetReport, {
+    throw new HardConstraintOverflowError(formatUserFacingMessage('services.context.previousEvidenceOverflow'), result, contextBudgetReport, {
       requiredTokens: originalSelection.requiredTokens, availableTokens: Math.max(0, softContextBudget - coreReserve),
       deficitTokens: Math.max(0, originalSelection.requiredTokens - Math.max(0, softContextBudget - coreReserve)),
       missingConstraintIds: originalSelection.sources.filter((source) => source.required).map((source) => source.key),
@@ -4317,7 +4318,7 @@ export function allocateChapterContext(
     const missingConstraintLabels = visibilityMissing.requiredMissingSourceKeys
       .flatMap((key) => key.startsWith('hard:') ? [key.slice(5) as HardConstraintSourceLabel] : [])
     throw new HardConstraintOverflowError(
-      `NF_CONTEXT_REQUIRED_OVERFLOW：${visibilityMissing.requiredMissingSourceKeys.length} 项必需资料因视角或来源不明被隔离；来源 ID：${visibilityMissing.requiredMissingSourceKeys.join('、')}。请补充人物知情记录或明确场景揭示合同。`,
+      formatUserFacingMessage('services.context.requiredVisibilityMissing', { count: `${visibilityMissing.requiredMissingSourceKeys.length}`, sourceIds: `${visibilityMissing.requiredMissingSourceKeys.join('、')}` }),
       result,
       contextBudgetReport,
       {
@@ -4332,7 +4333,7 @@ export function allocateChapterContext(
 
   if (softAllocation.warnings.length > 0) {
     throw new ContextOverflowError(
-      '当前章节上下文已超出推荐预算，系统已自动裁剪低优先级信息。',
+      formatUserFacingMessage('services.context.budgetCropped'),
       result,
       contextBudgetReport,
     )

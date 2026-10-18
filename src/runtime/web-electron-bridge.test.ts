@@ -80,6 +80,18 @@ describe('Web search settings bridge', () => {
     expect((await sourceSearch.test(input)).success).toBe(false)
   })
 
+  it('preserves the read-only error class, code and method detail in explicit demo mode', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ ok: true })
+      throw new Error('Controlled offline RPC')
+    }))
+    const { setItem } = await installBridge(true)
+    const error = await window.electron.novel.delete(1).then(() => null, cause => cause as Error & { code: string })
+    expect(error).toBeInstanceOf(Error)
+    expect(error).toMatchObject({ name: 'WebPreviewReadOnlyError', code: 'WEB_PREVIEW_READ_ONLY', message: '浏览器预览不支持写入操作：novel.delete。请在 NovelForge 桌面端执行。' })
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['test', 55_000], ['research', 100_000],
   ] as const)('gives sourceSearch.%s a bounded deadline long enough for model-backed searches', async (method, timeoutMs) => {

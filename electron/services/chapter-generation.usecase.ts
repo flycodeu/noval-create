@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { resolveReviewAutomaticIssues } from './quality-issue-policy'
 import { scheduleZhuqueChapterDetection } from './zhuque-detection.service'
 import { qualityIssueHasActionableLevel } from '../../src/shared/quality-issue'
@@ -1411,7 +1412,7 @@ export function createChapter(novelId: number, data: Partial<{
   const resolvedVolumeId = volumeId ?? explicitPart?.volumeId ?? defaults.volumeId
   const status = normalizeChapterStatus(safeData.status) || 'outline'
   if (status === 'final') {
-    throwUserFacingError('chapter.publishBlocked', { summary: '新章节必须先完成正文和发布前检查。' })
+    throwUserFacingError('chapter.publishBlocked', { summary: formatUserFacingMessage('services.chapterGeneration.newChapterPublishBlocked') })
   }
   const result = getSqlite().transaction(() => {
     if (resolvedPartId == null && volumeId != null) {
@@ -3547,7 +3548,7 @@ async function executeGeneratedChapterRewritePhase(
   }
 
   if (!draftContent.trim() || !hasReviewNotes(reviewNotes)) {
-    throw new ChapterPipelineStageError('invalid_output', '没有可复用的 Rewriter 前置快照，无法从当前节点重试。', {
+    throw new ChapterPipelineStageError('invalid_output', formatUserFacingMessage('services.chapterGeneration.rewriterSnapshotMissing'), {
       blocked: true,
       outputText: buildPipelineFailureOutput('invalid_output', '缺少可复用的正文或审校快照。'),
     })
@@ -3650,10 +3651,10 @@ function assertPreviousChapterContentReady(
   if (chapterNum <= 1) return
   const previous = chapterRows.find((row) => row.chapterNum === chapterNum - 1)
   if (!previous) {
-    throw new Error(`生成第${chapterNum}章前，请先建立第${chapterNum - 1}章并写出正文草稿；当前没有可承接的紧邻前章。`)
+    throw new Error(formatUserFacingMessage('services.chapterGeneration.previousChapterMissing', { chapterNum: `${chapterNum}`, previousChapterNum: `${chapterNum - 1}` }))
   }
   if (!previous.content?.trim()) {
-    throw new Error(`生成第${chapterNum}章前，请先补上第${chapterNum - 1}章正文草稿；只有大纲或摘要不能作为跨章续写依据。`)
+    throw new Error(formatUserFacingMessage('services.chapterGeneration.previousDraftMissing', { chapterNum: `${chapterNum}`, previousChapterNum: `${chapterNum - 1}` }))
   }
 }
 
@@ -4056,7 +4057,7 @@ async function generateChapterContentInternal(
       throw error
     }
     failRoleTask(state.snapshot.currentRole || 'planner', state.snapshot.currentRole ? state.snapshot.roles[state.snapshot.currentRole].taskId : undefined, error)
-    throw error instanceof Error ? error : new Error('章节生成中断')
+    throw error instanceof Error ? error : new Error(formatUserFacingMessage('services.chapterGeneration.interrupted'))
   }
 }
 

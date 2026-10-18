@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
 import { creativeResearchTopics, readCreativeResearchSources, selectCreativeResearchSources, type CreativeResearchResult } from '../../src/shared/creative-research'
 import { getSqlite } from '../database/db'
@@ -10,7 +11,7 @@ function ledger(raw?: string | null): Record<string, unknown>[] {
 }
 export function listCreativeResearch(novelId: number, query = '') {
   const novel = getNovel(novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   return query.trim() ? selectCreativeResearchSources(novel.sourceLedgerJson, query, 12) : readCreativeResearchSources(novel.sourceLedgerJson).reverse()
 }
 
@@ -19,13 +20,13 @@ export async function searchCreativeResearch(
   novelId: number, request: string, atChapter?: number,
   dependencies: { provider?: SourceGroundingSearchProvider; providerName?: string; now?: () => string; expectedContextVersion?: number; beforeSave?: () => void } = {},
 ): Promise<CreativeResearchResult> {
-  if (!Number.isInteger(novelId) || novelId < 1) throw new Error('项目编号无效。')
-  if (typeof request !== 'string' || !request.trim() || request.length > 12000) throw new Error('资料需求为 1–12000 个字符。')
-  if (atChapter !== undefined && (!Number.isInteger(atChapter) || atChapter < 0)) throw new Error('章位必须为非负整数。')
+  if (!Number.isInteger(novelId) || novelId < 1) throw new Error(formatUserFacingMessage('services.research.projectIdInvalid'))
+  if (typeof request !== 'string' || !request.trim() || request.length > 12000) throw new Error(formatUserFacingMessage('services.research.requestLengthInvalid'))
+  if (atChapter !== undefined && (!Number.isInteger(atChapter) || atChapter < 0)) throw new Error(formatUserFacingMessage('services.chapterPositionInvalid'))
   const novel = getNovel(novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   const version = novel.contextVersion || 1
-  if (dependencies.expectedContextVersion !== undefined && dependencies.expectedContextVersion !== version) throw new Error('检索前项目资料已变化，请重新启动任务。')
+  if (dependencies.expectedContextVersion !== undefined && dependencies.expectedContextVersion !== version) throw new Error(formatUserFacingMessage('services.research.contextChangedBeforeSearch'))
   const requestKey = createHash('sha256').update(request.trim().replace(/\s+/gu, ' ')).digest('hex').slice(0, 24)
   const now = dependencies.now?.() || new Date().toISOString()
   const cachedRows = ledger(novel.sourceLedgerJson).filter(row => Array.isArray(row.researchRequestKeys) && row.researchRequestKeys.includes(requestKey)
@@ -42,7 +43,7 @@ export async function searchCreativeResearch(
   dependencies.beforeSave?.()
   return getSqlite().transaction(() => {
     const current = getNovel(novelId)
-    if (!current || (current.contextVersion || 1) !== version) throw new Error('检索期间项目资料已变化，未保存本次结果，请重新检索。')
+    if (!current || (current.contextVersion || 1) !== version) throw new Error(formatUserFacingMessage('services.research.contextChangedDuringSearch'))
     const byKey = new Map<string, Record<string, unknown>>()
     const other: Record<string, unknown>[] = []
     for (const row of ledger(current.sourceLedgerJson)) {

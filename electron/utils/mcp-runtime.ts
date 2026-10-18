@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { DESKTOP_AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
 import type { AgentToolCallContext, AgentToolCallRequest, AgentToolCallResult, AgentToolDescriptor } from '../../src/shared/tool-contracts'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 const DISCOVERY_FILE = 'novelforge-runtime.json'
 export interface RuntimeConnection {
@@ -69,7 +70,7 @@ export async function probeRuntime(directory: string, expectedVersion?: string):
   } catch { return null }
   // An incompatible live owner must never be mistaken for an absent owner.
   if (expectedVersion !== undefined && health.version !== expectedVersion) {
-    throw new Error(`NovelForge 后台版本 ${health.version || '未知'} 与当前程序 ${expectedVersion} 不一致。请先保存内容，在 NovelForge 托盘菜单选择“退出并停止创作服务”，再启动当前版本并重启 Codex 的 MCP 连接。`)
+    throw new Error(formatUserFacingMessage('runtime.versionMismatch', { runtimeVersion: health.version || '未知', expectedVersion }))
   }
   return { connection, health }
 }
@@ -79,7 +80,7 @@ export async function attachToExistingRuntime(directory: string, expectedVersion
   if (!existing) return false
   if (openDesktop) {
     const response = await runtimeRequest(existing.connection, '/desktop/open', { method: 'POST', timeoutMs: 30_000 })
-    if (!response.ok) throw new Error('已运行的服务无法打开桌面，请先退出该开发服务。')
+    if (!response.ok) throw new Error(formatUserFacingMessage('runtime.desktopOpenFailed'))
   }
   return true
 }
@@ -172,7 +173,7 @@ export async function startMcpRuntime(options: {
         const chunks: Buffer[] = []
         for await (const chunk of request) {
           length += Buffer.byteLength(chunk)
-          if (length > 4 * 1024 * 1024) { json(413, { ok: false, error: { code: 'runtime.payloadTooLarge', message: '请求内容超过 4 MiB。' } }); return }
+          if (length > 4 * 1024 * 1024) { json(413, { ok: false, error: { code: 'runtime.payloadTooLarge', message: formatUserFacingMessage('runtime.payloadTooLarge') } }); return }
           chunks.push(Buffer.from(chunk))
         }
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { service?: unknown; method?: unknown; args?: unknown }

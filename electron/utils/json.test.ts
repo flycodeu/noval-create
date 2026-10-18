@@ -69,7 +69,22 @@ describe('json utils', () => {
 
     expect(result.success).toBe(false)
     expect(result.payloadPreview).toContain('[1, 2, 3]')
-    expect(result.error?.message).toContain('AI JSON 根节点必须是对象')
+    expect(result.error?.constructor).toBe(SyntaxError)
+    expect(result.error?.message).toBe('AI JSON 根节点必须是对象。输出片段：[1, 2, 3]')
+  })
+
+  it('keeps array root errors as SyntaxError without extracting a nested array', () => {
+    const result = parseAiJsonResult('{"items":[1,2]}', 'array')
+
+    expect(result.success).toBe(false)
+    expect(result.error?.constructor).toBe(SyntaxError)
+    expect(result.error?.message).toBe('AI JSON 根节点必须是数组。输出片段：{"items":[1,2]}')
+  })
+
+  it('keeps missing JSON errors and their bounded internal payload preview', () => {
+    const text = 'x'.repeat(300)
+    expect(() => extractBalancedJson(text, 'object')).toThrow(SyntaxError)
+    expect(() => extractBalancedJson(text, 'object')).toThrow(`AI 返回内容中未找到完整 JSON。输出片段：${'x'.repeat(220)}`)
   })
 
   it('keeps safeParse helpers aligned', () => {

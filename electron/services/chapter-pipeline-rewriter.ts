@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { resolveReviewAutomaticIssues } from './quality-issue-policy'
 import { qualityIssueHasActionableLevel } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
@@ -505,7 +506,7 @@ export async function runRewriterCandidateLoop(input: {
   if (!reserveRevisionAttempt(input.revisionBudget, resolveRewriterCandidateAttemptKey(input.reviewPrioritySummary, attemptNumber))) {
     throw new ChapterPipelineStageError(
       'human_review_required',
-      '自动修订额度已用尽或恢复状态不确定，保留现有候选并转人工复核。',
+      formatUserFacingMessage('services.chapterRewriter.budgetExhausted'),
       { blocked: true, rewriteScope: 'chapter_rewrite' },
     )
   }
@@ -1269,10 +1270,10 @@ export async function processChapterRewriteOutcome(input: {
       }
     } else {
       try {
-        if (baseProtection.violated) throw new RevisionPatchValidationError('NF_PATCH_LOCKED', '当前原稿不再包含锁定正文。')
+        if (baseProtection.violated) throw new RevisionPatchValidationError('NF_PATCH_LOCKED', formatUserFacingMessage('services.chapterRewriter.lockedProseMissing'))
         const evidence = selectCompatibleRevisionPatchEvidence(originalPriority, patchBase)
         if (evidence.length !== originalPriority.topIssues.length || originalPriority.deferredIssues.length) {
-          throw new RevisionPatchValidationError('NF_PATCH_EVIDENCE', '存在未覆盖的当前问题证据。')
+          throw new RevisionPatchValidationError('NF_PATCH_EVIDENCE', formatUserFacingMessage('services.chapterRewriter.issueEvidenceUncovered'))
         }
         validateRevisionPatchEvidence(patchBase, candidatePatch, evidence)
         requiresAuthorReview = revisionPatchNeedsAuthorReview(patchBase, candidatePatch)

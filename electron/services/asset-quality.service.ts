@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { classifyQualityIssueLevels } from './quality-issue-policy'
 import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
 import { buildProseFluencyGuidance, buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
@@ -146,18 +147,18 @@ export function parseAssetReviewResult(raw: string, content?: string, policyVers
   const parsed = safeParseJson<Record<string, unknown>>(raw)
   if (!parsed || typeof parsed !== 'object' || typeof parsed.summary !== 'string' || !parsed.summary.trim()
     || typeof parsed.rewrite_required !== 'boolean' || typeof parsed.reject_required !== 'boolean') {
-    throw new Error('审校结果缺少有效摘要或明确的修订、拒收判断。')
+    throw new Error(formatUserFacingMessage('services.assetQuality.decisionMissing'))
   }
   const issues = policyVersion === 'reader-first-v1' ? (() => {
-    if (!Array.isArray(parsed.issues)) throw new Error('审校结果不完整：必须返回 issues 数组，无问题时返回空数组。')
-    if (!parsed.issues.length && (parsed.reject_required || parsed.rewrite_required)) throw new Error('审校结果不完整：拒收或修订判断缺少对应问题与证据。')
+    if (!Array.isArray(parsed.issues)) throw new Error(formatUserFacingMessage('services.assetQuality.issuesMissing'))
+    if (!parsed.issues.length && (parsed.reject_required || parsed.rewrite_required)) throw new Error(formatUserFacingMessage('services.assetQuality.decisionEvidenceMissing'))
     return parsed.issues.map((rawIssue) => {
       const issue = normalizeQualityIssue(rawIssue && typeof rawIssue === 'object' ? { ...rawIssue, detector: 'model' } : rawIssue)
       const spec = issue && getQualityIssueRuleSpec(issue.ruleId)
-      if (!issue || !spec) throw new Error('审校结果不完整：问题缺少有效规则或说明。')
+      if (!issue || !spec) throw new Error(formatUserFacingMessage('services.assetQuality.issueRuleMissing'))
       const verified = validateQualityIssuesForContent([issue], content || '')[0]
       if ((spec.requiresEvidence && !verified.evidence.length) || verified.evidence.length !== issue.evidence.length) {
-        throw new Error(`审校结果不完整：${issue.ruleId} 缺少当前候选的有效原文证据。`)
+        throw new Error(formatUserFacingMessage('services.assetQuality.issueEvidenceMissing', { ruleId: `${issue.ruleId}` }))
       }
       return verified
     })

@@ -98,6 +98,7 @@ import { encryptApiKey } from './services/model.service'
 import * as sourceSearchSettingsService from './services/source-search-settings.service'
 import { listCreativeResearch, searchCreativeResearch } from './services/creative-research.service'
 import { throwUserFacingError } from './utils/user-facing-error'
+import { formatUserFacingMessage } from '../src/shared/user-facing-messages'
 import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
 import * as themeVoiceService from './services/theme-voice.service'
@@ -382,7 +383,7 @@ app.whenReady().then(async () => {
     invokeRpc: async (service, method, args) => {
       const channel = resolveRuntimeRpcChannel(service, method)
       const handler = channel ? runtimeRpcHandlers.get(channel) : undefined
-      if (!handler) return { ok: false, error: { code: 'runtime.methodNotAllowed', message: `本地网页未开放 ${service}.${method}` } }
+      if (!handler) return { ok: false, error: { code: 'runtime.methodNotAllowed', message: formatUserFacingMessage('runtime.methodNotAllowed', { service, method }) } }
       const event = { sender: { id: -1, isDestroyed: () => false, send: (name: string, ...values: unknown[]) => runtimeHandle?.publishEvent(name, ...values) } } as unknown as Electron.IpcMainInvokeEvent
       return handler(event, ...args)
     },
@@ -446,7 +447,7 @@ function shutdownApplication(): Promise<void> {
       runtimeTray = null
       shutdownComplete = true
     }
-    if (failure) throw new Error('后台服务未能完整退出，请重新启动 NovelForge 后再更新。', { cause: failure })
+    if (failure) throw new Error(formatUserFacingMessage('update.shutdownIncomplete'), { cause: failure })
   })()
   return shutdownPromise
 }

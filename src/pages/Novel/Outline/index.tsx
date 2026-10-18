@@ -570,7 +570,7 @@ export default function Outline({ novelId }: Props) {
       arcForm.resetFields()
       await loadData()
       notifyWorkspaceMutation()
-      message.success(editingArc ? '故事弧已更新。' : '故事弧已创建。')
+      message.success(getUserFacingMessage(editingArc ? 'outline.arcUpdated' : 'outline.arcCreated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))

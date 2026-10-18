@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { desc, eq } from 'drizzle-orm'
 import type { ProgressSink } from '../utils/progress-sink'
 import { getDb } from '../database/db'
@@ -45,7 +46,7 @@ export async function loadOrPrepareChapterCanonRun(input: {
     .all()
     .find((run) => ['ready', 'applied'].includes(run.status || '') && isChapterWritebackRunCurrent(run))
   if (!reusableCanonRun) {
-    throw new ChapterPipelineStageError('canon_pending', '没有可复用的 Canon 快照，无法从 Finalize 节点重试。', {
+    throw new ChapterPipelineStageError('canon_pending', formatUserFacingMessage('services.chapterFinalize.canonSnapshotMissing'), {
       blocked: true,
       outputText: buildPipelineFailureOutput('canon_pending', '没有可复用的 Canon 草案。'),
     })
@@ -164,7 +165,7 @@ export async function runChapterCanonizerAndFinalize(input: {
         errorMessage: canonRun.errorMessage || 'Canon 草案生成失败',
         recoveryHintJson: input.canonizerRecoveryHintJson,
       })
-      input.failCanonizer(canonizerTaskId, new Error(canonRun.errorMessage || 'Canon 草案生成失败'))
+      input.failCanonizer(canonizerTaskId, new Error(canonRun.errorMessage || formatUserFacingMessage('services.chapterFinalize.canonGenerationFailed')))
     }
     const detail = canonRun.summaryText?.trim() || 'Canon 差异草案已生成，可进入章后状态回写中心确认。'
     updateTaskStatus(canonizerTaskId, 'success', input.sender, {

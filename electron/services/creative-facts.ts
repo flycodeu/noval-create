@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { AgentToolJsonSchema as Schema } from '../../src/shared/tool-contracts'
 import { validateJsonSchema } from '../../src/shared/tool-contracts'
 import { getSqlite } from '../database/db'
@@ -40,7 +41,7 @@ function chapterCharacters(novelId: number, chapterNum: number) {
 }
 function schema(value: unknown, expected: Schema): void {
   const result = validateJsonSchema(value, expected)
-  if (!result.valid) throw new Error(`信息点结构错误：${result.issues.join('；')}`)
+  if (!result.valid) throw new Error(formatUserFacingMessage('services.facts.structureInvalid', { issues: `${result.issues.join('；')}` }))
 }
 
 export function queryCreativeFacts(novelId: number) {
@@ -67,30 +68,30 @@ export function validateCreativeFactPlans(novelId: number, raw: unknown): assert
   const cast = new Map(characters(novelId).map(character => [character.id, character]))
   const seen = new Set<string>(), clients = new Set<string>(), names = new Set<string>()
   for (const fact of plans) {
-    if (!fact.title.trim() || !fact.summary.trim()) throw new Error('信息点标题与内容不能为空。')
-    if (fact.id && !existingIds.has(fact.id)) throw new Error('信息点ID不属于当前项目。')
+    if (!fact.title.trim() || !fact.summary.trim()) throw new Error(formatUserFacingMessage('services.facts.titleAndContentRequired'))
+    if (fact.id && !existingIds.has(fact.id)) throw new Error(formatUserFacingMessage('services.facts.wrongProject'))
     const previous = fact.id ? existing.find(row => row.id === fact.id) : undefined
     if (previous && (previous.readerKnownChapterId || previous.protagonistKnownChapterId || knowledge(previous.characterKnowledgeJson).some(entry => entry.knownFromStart || entry.knownChapterId))
       && (previous.summary || '').trim() !== fact.summary.trim()) {
-      throw new Error('已揭示的信息点内容不能通过生成改写；后续发现请新增信息点并安排实际揭示章位，资料纠错使用明确的编辑操作。')
+      throw new Error(formatUserFacingMessage('services.facts.revealedContentImmutable'))
     }
-    if (fact.id && seen.has(String(fact.id))) throw new Error('同一批不能重复更新信息点。')
+    if (fact.id && seen.has(String(fact.id))) throw new Error(formatUserFacingMessage('services.facts.duplicateUpdates'))
     if (fact.id) seen.add(String(fact.id))
-    if (fact.clientId) { if (clients.has(fact.clientId)) throw new Error('信息点clientId重复。'); clients.add(fact.clientId) }
-    if (names.has(fact.title.trim()) || existing.some(row => row.title.trim() === fact.title.trim() && row.id !== fact.id)) throw new Error('同名信息点已存在，请用原ID更新，不要重复创建。')
+    if (fact.clientId) { if (clients.has(fact.clientId)) throw new Error(formatUserFacingMessage('services.facts.duplicateClientId')); clients.add(fact.clientId) }
+    if (names.has(fact.title.trim()) || existing.some(row => row.title.trim() === fact.title.trim() && row.id !== fact.id)) throw new Error(formatUserFacingMessage('services.facts.nameExists'))
     names.add(fact.title.trim())
     for (const characterId of fact.knownFromStartCharacterIds || []) {
       const character = cast.get(characterId)
-      if (!character) throw new Error('开篇知情人物必须是当前项目已确认人物的图谱ID。')
+      if (!character) throw new Error(formatUserFacingMessage('services.facts.initialKnowledgeCharacterInvalid'))
       const priorKnowledge = knowledge(previous?.characterKnowledgeJson).find(entry => entry.characterId === character.nativeId)
       if (priorKnowledge?.knownFromStart === true && priorKnowledge.knownChapterId === null) continue
       if (priorKnowledge?.knownChapterId || previous?.protagonistKnownChapterId && character.roleType === 'protagonist') {
-        throw new Error('人物已在后续章节获知的信息不能通过生成回填为开篇已知；知情章位纠错请使用明确的编辑操作。')
+        throw new Error(formatUserFacingMessage('services.facts.laterKnowledgeCannotBackfill'))
       }
     }
   }
   for (const fact of plans) if (fact.relatedPuzzleId !== undefined) {
-    if (typeof fact.relatedPuzzleId === 'number' ? !existingIds.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.id : !clients.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.clientId) throw new Error('关联谜题必须是本项目其他信息点或本批clientId。')
+    if (typeof fact.relatedPuzzleId === 'number' ? !existingIds.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.id : !clients.has(fact.relatedPuzzleId) || fact.relatedPuzzleId === fact.clientId) throw new Error(formatUserFacingMessage('services.facts.puzzleReferenceInvalid'))
   }
 }
 
@@ -128,7 +129,7 @@ export function applyCreativeFactPlans(novelId: number, raw: unknown, sourceArti
 export function validateCreativeFactReveals(novelId: number, chapterNum: number, content: string, raw: unknown): asserts raw is CreativeFactReveal[] {
   schema(raw, CREATIVE_FACT_REVEALS_SCHEMA)
   const chapter = listChapters(novelId).find(row => row.chapterNum === chapterNum)
-  if (!chapter) throw new Error('揭示信息点前必须建立目标章节安排。')
+  if (!chapter) throw new Error(formatUserFacingMessage('services.facts.revealChapterPlanRequired'))
   const allowed = new Set(ids(chapter.allowedFactIdsJson)), required = new Set(ids(chapter.revealedFactIdsJson))
   const facts = new Map(listStoryFacts(novelId).map(fact => [fact.id, fact]))
   const cast = chapterCharacters(novelId, chapterNum)
@@ -136,27 +137,27 @@ export function validateCreativeFactReveals(novelId: number, chapterNum: number,
   const seen = new Set<number>()
   for (const reveal of raw as CreativeFactReveal[]) {
     const fact = facts.get(reveal.factId)
-    if (!fact) throw new Error('揭示的信息点ID不属于当前项目。')
-    if (seen.has(fact.id)) throw new Error('同一信息点不能重复提交揭示。')
+    if (!fact) throw new Error(formatUserFacingMessage('services.facts.revealWrongProject'))
+    if (seen.has(fact.id)) throw new Error(formatUserFacingMessage('services.facts.duplicateReveals'))
     seen.add(fact.id)
-    if (!allowed.has(fact.id) || !required.has(fact.id)) throw new Error(`fact:${fact.id} 未获得本章揭示授权。`)
+    if (!allowed.has(fact.id) || !required.has(fact.id)) throw new Error(formatUserFacingMessage('services.facts.revealUnauthorized', { id: `${fact.id}` }))
     const quote = reveal.evidenceQuote.trim()
-    if (!matchesCreativeEvidenceQuote(content, quote)) throw new Error(`fact:${fact.id} 缺少逐字匹配正文的揭示证据。`)
+    if (!matchesCreativeEvidenceQuote(content, quote)) throw new Error(formatUserFacingMessage('services.facts.revealEvidenceMissing', { id: `${fact.id}` }))
     const authorizedScenes = scenes.filter(scene => scene.revealPayload.some(value => [`fact:${fact.id}`, `#${fact.id}`, fact.title, fact.summary].includes(value.trim())))
-    if (!authorizedScenes.length) throw new Error(`fact:${fact.id} 缺少场景揭示安排。`)
-    if (new Set(reveal.characterIds).size !== reveal.characterIds.length) throw new Error('获知人物不能重复提交。')
+    if (!authorizedScenes.length) throw new Error(formatUserFacingMessage('services.facts.sceneRevealMissing', { id: `${fact.id}` }))
+    if (new Set(reveal.characterIds).size !== reveal.characterIds.length) throw new Error(formatUserFacingMessage('services.facts.duplicateKnowledgeCharacters'))
     for (const characterId of reveal.characterIds) {
       const character = cast.get(characterId)
-      if (!character) throw new Error('获知人物必须是当前项目截至本章已确认的人物图谱ID。')
-      if (!authorizedScenes.some(scene => scene.pov === character.name) && !quote.includes(character.name)) throw new Error(`人物“${character.name}”不是揭示场景视角，证据中也没有其在场获知依据。`)
+      if (!character) throw new Error(formatUserFacingMessage('services.facts.knowledgeCharacterInvalid'))
+      if (!authorizedScenes.some(scene => scene.pov === character.name) && !quote.includes(character.name)) throw new Error(formatUserFacingMessage('services.facts.characterEvidenceMissing', { name: `${character.name}` }))
     }
   }
-  for (const factId of required) if (!seen.has(factId)) throw new Error(`本章计划揭示 fact:${factId}，候选必须给出实际揭示与知情人物证据，不能仅提交计划。`)
+  for (const factId of required) if (!seen.has(factId)) throw new Error(formatUserFacingMessage('services.facts.plannedRevealEvidenceMissing', { id: `${factId}` }))
 }
 
 export function applyCreativeFactReveals(novelId: number, chapterId: number, content: string, reveals: CreativeFactReveal[], sourceArtifactId: string) {
   const chapter = getChapter(chapterId)
-  if (!chapter || chapter.novelId !== novelId) throw new Error('揭示目标章节不属于当前项目。')
+  if (!chapter || chapter.novelId !== novelId) throw new Error(formatUserFacingMessage('services.facts.revealChapterWrongProject'))
   validateCreativeFactReveals(novelId, chapter.chapterNum, content, reveals)
   const rows = listChapters(novelId), numbers = new Map(rows.map(row => [row.id, row.chapterNum]))
   const earlier = (old: number | null) => old && (numbers.get(old) ?? Infinity) <= chapter.chapterNum ? old : chapterId

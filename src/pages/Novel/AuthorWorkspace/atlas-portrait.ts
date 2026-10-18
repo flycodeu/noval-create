@@ -1,5 +1,6 @@
 import type { StoryAtlasEntity } from '../../../shared/story-atlas'
 import { ATLAS_PORTRAIT_MAX_LENGTH } from '../../../shared/story-atlas-portrait'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { atlasFieldLabel } from './atlas-profile'
 import { displayValue } from './atlas-presentation'
 export { atlasPortraitImage } from '../../../shared/story-atlas-portrait'
@@ -12,14 +13,14 @@ export function buildAtlasPortraitPrompt(entity: StoryAtlasEntity): string {
 }
 
 export async function importAtlasPortrait(file: File): Promise<string> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('请选择 PNG、JPEG 或 WebP 图片。')
-  if (file.size > 5 * 1024 * 1024) throw new Error('原始头像图片不能超过 5MB。')
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error(getUserFacingMessage('workspace.portrait.unsupportedFormat'))
+  if (file.size > 5 * 1024 * 1024) throw new Error(getUserFacingMessage('workspace.portrait.originalTooLarge'))
   const bitmap = await createImageBitmap(file)
   try {
-    if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 40_000_000) throw new Error('图片尺寸过大或无法读取，请选择较小的头像。')
+    if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 40_000_000) throw new Error(getUserFacingMessage('workspace.portrait.invalidDimensions'))
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')
-    if (!context) throw new Error('当前环境无法处理头像。')
+    if (!context) throw new Error(getUserFacingMessage('workspace.portrait.processingUnavailable'))
     for (const edge of [320, 256, 192, 128]) {
       const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height))
       canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale))
@@ -29,6 +30,6 @@ export async function importAtlasPortrait(file: File): Promise<string> {
         if (encoded.length <= ATLAS_PORTRAIT_MAX_LENGTH) return encoded
       }
     }
-    throw new Error('图片压缩后仍然过大，请选择更简洁的头像。')
+    throw new Error(getUserFacingMessage('workspace.portrait.compressedTooLarge'))
   } finally { bitmap.close() }
 }

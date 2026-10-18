@@ -3,10 +3,12 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { wrapIpcHandler } from './ipc-wrapper'
 import { UserFacingError } from './user-facing-error'
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import { confirmWindowClose } from './window-close'
+import type { BrowserWindow } from 'electron'
 
 vi.mock('electron', () => ({ app: { isPackaged: true } }))
 
-describe('production IPC search configuration errors', () => {
+describe('production IPC error disclosure', () => {
   beforeEach(() => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -49,5 +51,29 @@ describe('production IPC search configuration errors', () => {
       },
     })
     expect(JSON.stringify(result)).not.toContain(secret)
+  })
+
+  it('does not make a centralized ordinary runtime error public', async () => {
+    const handler = wrapIpcHandler('window:confirmClose', () => confirmWindowClose({} as BrowserWindow, 'discard'))
+    const result = await handler({} as IpcMainInvokeEvent)
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'common.executionFailed', message: formatUserFacingMessage('common.executionFailed'), detail: undefined },
+    })
+    expect(JSON.stringify(result)).not.toContain(formatUserFacingMessage('window.invalidAction'))
+  })
+
+  it('keeps internal causes private after formatting a shutdown error', async () => {
+    const cause = new Error('test-only-private-shutdown-cause')
+    const handler = wrapIpcHandler('app:installUpdate', () => {
+      throw new Error(formatUserFacingMessage('update.shutdownIncomplete'), { cause })
+    })
+    const result = await handler({} as IpcMainInvokeEvent)
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'common.executionFailed', message: formatUserFacingMessage('common.executionFailed'), detail: undefined },
+    })
+    expect(JSON.stringify(result)).not.toContain(cause.message)
+    expect(JSON.stringify(result)).not.toContain(formatUserFacingMessage('update.shutdownIncomplete'))
   })
 })

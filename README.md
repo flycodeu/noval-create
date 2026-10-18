@@ -120,8 +120,11 @@ MCP 的 `autoApply:false` 保留候选供讨论；需要自动推进时显式指
 - 模型审校和程序校验分别记录。实际文学质量、长篇连续性仍需要真实试写与作者评判。
 - 地图、人物档案、规则等资料按结构和事实审校，允许条目表达和未确定项；正文另外检查叙事效果。请求失败会说明生成、审校或修订中的具体失败环节。
 - 本机运行数据、密钥、私有小说资料、临时测试输出不提交到仓库。
+- 2.4.38 升级本地向量运行时并区分新旧索引；模型缓存文件可继续使用，旧向量不会与新向量混算。升级后可在作品创作台的“旧章检索”中点击“生成向量索引”，完成前仍可使用文字检索，不修改正文。
 
 ## 开发
+
+构建环境使用 Node.js 22.12 或更新版本。
 
 ```powershell
 npm ci
@@ -133,13 +136,16 @@ Web 开发：`npm run dev:web`。默认前端 `http://127.0.0.1:4175`，Web 代�
 ```powershell
 npm run typecheck
 npm run lint
+npm run check:user-messages
+npm audit --omit=dev --registry=https://registry.npmjs.org
 npm test
+npm run test:local-embedding -- --download-model
 npm run build:installer
-node scripts/packaged-mcp-smoke.cjs
+node scripts/packaged-mcp-smoke.cjs --require-local-model
 node scripts/verify-release-assets.cjs
 ```
 
-打包脚本执行完整测试后生成安装版与便携版。发布工作流校验版本、包内 MCP、更新元数据和资产哈希，再发布 GitHub Release。
+打包脚本执行完整测试后生成安装版与便携版。发布工作流还检查生产依赖、集中消息、离线本地向量、包内 MCP、更新元数据和资产哈希，再发布 GitHub Release。向量测试仅下载公开模型文件，使用隔离测试数据，不调用付费供应商。
 
 核心代码：
 

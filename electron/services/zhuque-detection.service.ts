@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { app, safeStorage } from 'electron'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
@@ -25,50 +26,50 @@ function readSettings(): StoredSettings {
   try {
     const data = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) as StoredSettings
     return { enabled: data.enabled === true, autoDetect: data.autoDetect === true, encryptedKey: typeof data.encryptedKey === 'string' ? data.encryptedKey : undefined }
-  } catch { throw new Error('朱雀本地配置无法读取，请重新保存配置。') }
+  } catch { throw new Error(formatUserFacingMessage('services.zhuque.settingsUnreadable')) }
 }
 export function getZhuqueSettings(): ZhuqueSettingsView {
   const settings = readSettings()
   return { enabled: settings.enabled, autoDetect: settings.autoDetect, apiKeySet: Boolean(settings.encryptedKey) }
 }
 export function updateZhuqueSettings(input: ZhuqueSettingsUpdate): ZhuqueSettingsView {
-  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['enabled', 'autoDetect', 'apiKey'].includes(key))) throw new Error('朱雀配置字段无效。')
-  for (const key of ['enabled', 'autoDetect'] as const) if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error('朱雀开关必须为布尔值。')
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['enabled', 'autoDetect', 'apiKey'].includes(key))) throw new Error(formatUserFacingMessage('services.zhuque.settingsInvalid'))
+  for (const key of ['enabled', 'autoDetect'] as const) if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(formatUserFacingMessage('services.zhuque.enabledFlagInvalid'))
   const next = { ...readSettings(), ...(input.enabled !== undefined ? { enabled: input.enabled } : {}), ...(input.autoDetect !== undefined ? { autoDetect: input.autoDetect } : {}) }
   if (input.apiKey !== undefined) {
-    if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096 || /[\r\n]/.test(input.apiKey)) throw new Error('朱雀 API Key 格式无效。')
+    if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096 || /[\r\n]/.test(input.apiKey)) throw new Error(formatUserFacingMessage('services.zhuque.keyInvalid'))
     const key = input.apiKey.trim()
     if (key) {
-      if (!safeStorage.isEncryptionAvailable()) throw new Error('本机安全存储不可用，未保存密钥。')
+      if (!safeStorage.isEncryptionAvailable()) throw new Error(formatUserFacingMessage('services.zhuque.secureStorageUnavailable'))
       next.encryptedKey = safeStorage.encryptString(key).toString('base64')
     } else delete next.encryptedKey
   }
-  if (next.enabled && !next.encryptedKey) throw new Error('启用朱雀前请先保存 API Key。')
+  if (next.enabled && !next.encryptedKey) throw new Error(formatUserFacingMessage('services.zhuque.keyRequired'))
   writeJson(settingsFile(), next)
   if (!next.enabled || !next.autoDetect) { for (const timer of timers.values()) clearTimeout(timer); timers.clear() }
   return getZhuqueSettings()
 }
 function localKey(purpose: 'chapter' | 'connection-test'): string {
   const settings = readSettings()
-  if (purpose === 'chapter' && !settings.enabled) throw new Error('朱雀检测已关闭。')
-  if (!settings.encryptedKey || !safeStorage.isEncryptionAvailable()) throw new Error('朱雀本地密钥不可用，请重新配置。')
+  if (purpose === 'chapter' && !settings.enabled) throw new Error(formatUserFacingMessage('services.zhuque.disabled'))
+  if (!settings.encryptedKey || !safeStorage.isEncryptionAvailable()) throw new Error(formatUserFacingMessage('services.zhuque.localKeyUnavailable'))
   try { return safeStorage.decryptString(Buffer.from(settings.encryptedKey, 'base64')) }
-  catch { throw new Error('朱雀本地密钥无法解密，请重新配置。') }
+  catch { throw new Error(formatUserFacingMessage('services.zhuque.localKeyDecryptFailed')) }
 }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function ratio(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new ZhuqueResponseError('朱雀返回的检测比例无效。')
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.scoreInvalid'))
   return value
 }
 export function parseZhuqueResponse(value: unknown): ZhuqueMetrics {
   const data = record(value), labels = record(data.labels_ratio)
-  if (data.status !== 'success') throw new ZhuqueResponseError('朱雀未返回成功检测结果。')
+  if (data.status !== 'success') throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.successMissing'))
   const humanRatio = ratio(labels['0']), aiRatio = ratio(labels['1']), suspectedAiRatio = ratio(labels['2'])
-  if (Math.abs(humanRatio + aiRatio + suspectedAiRatio - 1) > 0.02) throw new ZhuqueResponseError('朱雀返回的内容占比不完整。')
-  if (!Array.isArray(data.segment_labels)) throw new ZhuqueResponseError('朱雀返回的分段结果无效。')
+  if (Math.abs(humanRatio + aiRatio + suspectedAiRatio - 1) > 0.02) throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.contentRatioIncomplete'))
+  if (!Array.isArray(data.segment_labels)) throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.segmentInvalid'))
   const segments = data.segment_labels.map(value => {
     const segment = record(value)
-    if (![0, 1, 2].includes(Number(segment.label)) || typeof segment.label !== 'number' || typeof segment.text !== 'string') throw new ZhuqueResponseError('朱雀返回的分段标签无效。')
+    if (![0, 1, 2].includes(Number(segment.label)) || typeof segment.label !== 'number' || typeof segment.text !== 'string') throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.segmentLabelInvalid'))
     return { label: segment.label as 0 | 1 | 2, confidence: ratio(segment.conf), text: segment.text }
   })
   const tokens = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
@@ -77,27 +78,27 @@ export function parseZhuqueResponse(value: unknown): ZhuqueMetrics {
 }
 async function classify(content: string, purpose: 'chapter' | 'connection-test' = 'chapter'): Promise<ZhuqueMetrics> {
   const key = localKey(purpose)
-  if (!key) throw new Error('朱雀本地密钥为空，请重新配置。')
+  if (!key) throw new Error(formatUserFacingMessage('services.zhuque.localKeyEmpty'))
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 45_000)
   try {
     // Do not use chat tasks, model attempt logs or provider messages containing credentials.
     const response = await fetch(ENDPOINT, { method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ text: content, is_merge: false }) })
-    if (!response.ok) throw new ZhuqueResponseError(response.status === 401 ? '朱雀密钥无效（401），请重新配置。' : response.status === 429 ? '朱雀请求限流（429），请稍后手动重试。' : `朱雀接口请求失败（HTTP ${response.status}）。`)
+    if (!response.ok) throw new ZhuqueResponseError(response.status === 401 ? formatUserFacingMessage('services.zhuque.keyRejected') : response.status === 429 ? formatUserFacingMessage('services.zhuque.rateLimited') : formatUserFacingMessage('services.zhuque.httpRejected', { value1: `${response.status}` }))
     const metrics = parseZhuqueResponse(await response.json())
-    if (metrics.segments.some(segment => !content.includes(segment.text))) throw new ZhuqueResponseError('朱雀分段结果与提交的正文不匹配。')
+    if (metrics.segments.some(segment => !content.includes(segment.text))) throw new ZhuqueResponseError(formatUserFacingMessage('services.zhuque.segmentContentMismatch'))
     return metrics
   } catch (error) {
     // Never echo upstream bodies, fetch exceptions, headers or the key into IPC/logs.
     if (error instanceof ZhuqueResponseError) throw error
-    throw new Error(controller.signal.aborted ? '朱雀检测超时，未自动重试。' : '朱雀检测请求失败，未自动重试。')
+    throw new Error(controller.signal.aborted ? formatUserFacingMessage('services.zhuque.requestTimedOut') : formatUserFacingMessage('services.zhuque.requestFailed'))
   } finally { clearTimeout(timer) }
 }
 function chapterContent(id: number): string {
-  if (!Number.isInteger(id) || id < 1) throw new Error('章节编号无效。')
+  if (!Number.isInteger(id) || id < 1) throw new Error(formatUserFacingMessage('services.zhuque.chapterIdInvalid'))
   const chapter = getSqlite().prepare('SELECT content FROM chapters WHERE id = ?').get(id) as { content: string | null } | undefined
-  if (!chapter) throw new Error('章节不存在。')
+  if (!chapter) throw new Error(formatUserFacingMessage('services.zhuque.chapterMissing'))
   return chapter.content || ''
 }
 export function zhuqueContentHash(text: string): string { return createHash('sha256').update(text).digest('hex') }
@@ -116,9 +117,9 @@ export function getZhuqueChapterResult(id: number): ZhuqueChapterView {
 }
 export async function detectZhuqueChapter(id: number, expectedContent?: string): Promise<ZhuqueChapterView> {
   const content = chapterContent(id)
-  if (expectedContent !== undefined && (typeof expectedContent !== 'string' || content !== expectedContent)) throw new Error('正文版本已变化，请刷新后检测。')
-  if (!content.trim()) throw new Error('正文为空，无法进行朱雀检测。')
-  if (!getZhuqueSettings().enabled) throw new Error('朱雀检测已关闭，请在模型设置中启用。')
+  if (expectedContent !== undefined && (typeof expectedContent !== 'string' || content !== expectedContent)) throw new Error(formatUserFacingMessage('services.zhuque.contentChanged'))
+  if (!content.trim()) throw new Error(formatUserFacingMessage('services.zhuque.contentEmpty'))
+  if (!getZhuqueSettings().enabled) throw new Error(formatUserFacingMessage('services.zhuque.enableFirst'))
   if (running.has(id)) return running.get(id)!
   const contentHash = zhuqueContentHash(content), existing = readReport(id)
   if (existing?.status === 'success' && existing.contentHash === contentHash) return getZhuqueChapterResult(id)

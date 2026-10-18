@@ -150,8 +150,12 @@ async function main() {
   if (bundled) assert(fs.existsSync(path.join(workspaceRoot, 'out/main/main.js')), 'Run npm run build:app first.')
   fs.mkdirSync(testUserData, { recursive: true })
   verifyTestDirectory()
-  const localModelCache = path.join(workspaceRoot, 'node_modules/@xenova/transformers/.cache/Xenova/bge-small-zh-v1.5')
+  const modelCacheRoot = process.env.NOVELFORGE_EMBEDDING_FIXTURE_CACHE
+    || path.join(workspaceRoot, '.tmp-tests/embedding-runtime-model-cache')
+  const localModelCache = path.join(modelCacheRoot, 'Xenova/bge-small-zh-v1.5')
   const hasLocalModelFixture = fs.existsSync(path.join(localModelCache, 'onnx/model_quantized.onnx'))
+  assert(hasLocalModelFixture || !process.argv.includes('--require-local-model'),
+    'Run npm run test:local-embedding -- --download-model before the mandatory packaged model check')
   if (hasLocalModelFixture) {
     const fixtureCache = path.join(testUserData, 'models/embeddings/Xenova/bge-small-zh-v1.5')
     fs.mkdirSync(path.dirname(fixtureCache), { recursive: true })

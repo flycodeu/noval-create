@@ -6,6 +6,7 @@ import type { ModelConfig, Novel } from '../../types'
 import { useNovelStore } from '../../stores/novel.store'
 import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
+import { getUserFacingMessage } from '../../utils/user-facing-message'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
 import './index.css'
 
@@ -69,20 +70,20 @@ export default function NovelList() {
       setCreating(false); form.resetFields()
       navigate(buildWorkspaceRoute(id, 'guide'))
     } catch (cause) {
-      if (!(typeof cause === 'object' && cause !== null && 'errorFields' in cause)) message.error(cause instanceof Error ? cause.message : '创建作品失败')
+      if (!(typeof cause === 'object' && cause !== null && 'errorFields' in cause)) message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.createFailed'))
     } finally { createInFlight.current = false; setSaving(false) }
   }
   const remove = (novel: Novel) => Modal.confirm({ title: `删除《${novel.title}》？`, content: '章节、人物、地图及历史版本都会删除，无法恢复。', okText: '删除作品', okButtonProps: { danger: true }, cancelText: '取消', onOk: async () => {
     try { await window.electron.novel.delete(novel.id); await load() }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '删除作品失败'); throw cause }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.deleteFailed')); throw cause }
   } })
   const updateStatus = async (id: number, next: Novel['status']) => {
     try { await window.electron.novel.update(id, { status: next }); await load() }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '保存状态失败') }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.statusSaveFailed')) }
   }
   const exportBook = async (id: number, format: string) => {
-    try { const destination = await window.electron.novel.export(id, format); if (destination) message.success(`已导出到 ${destination}`) }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '导出失败') }
+    try { const destination = await window.electron.novel.export(id, format); if (destination) message.success(getUserFacingMessage('novel.exportedTo', { path: destination })) }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.exportFailed')) }
   }
   const filtered = novels.filter(novel => (status === 'all' || novel.status === status) && `${novel.title} ${novel.synopsis || ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).sort((a, b) => {
     if (sort === 'title') return a.title.localeCompare(b.title, 'zh-CN')

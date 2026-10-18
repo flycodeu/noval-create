@@ -1,4 +1,5 @@
 import type { BrowserWindow } from 'electron'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 const approved = new WeakSet<BrowserWindow>()
 
@@ -24,5 +25,5 @@ export function confirmWindowClose(window: BrowserWindow, choice: unknown): void
   else if (choice === 'exit') {
     approved.add(window)
     window.close()
-  } else throw new Error('无效的窗口操作')
+  } else throw new Error(formatUserFacingMessage('window.invalidAction'))
 }

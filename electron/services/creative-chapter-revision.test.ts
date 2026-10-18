@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { assertChapterRevisionBaseCurrent, captureChapterRevisionBase, chapterRevisionParagraphs, mergeChapterRevision,
   validateChapterRevision, type ChapterRevisionBase } from './creative-chapter-revision'
@@ -8,7 +9,7 @@ vi.mock('./chapter.service', () => ({ getChapter: () => state.chapter, listChapt
 vi.mock('./task.service', () => ({ getTaskRecord: (id: number) => state.tasks.get(id) }))
 vi.mock('./endgame-asset.service', () => ({ listSceneContracts: () => state.scenes }))
 vi.mock('./story-structure.service', () => ({ listChapterSegments: () => state.segments }))
-vi.mock('./artifact.service', () => ({ getArtifact: (id: string) => state.artifacts.get(id), requireArtifact: (id: string) => { if (!state.artifacts.has(id)) throw new Error('不存在'); return state.artifacts.get(id) }, hashArtifactContent: (value: unknown) => JSON.stringify(value) }))
+vi.mock('./artifact.service', () => ({ getArtifact: (id: string) => state.artifacts.get(id), requireArtifact: (id: string) => { if (!state.artifacts.has(id)) throw new Error(formatUserFacingMessage('services.notFound')); return state.artifacts.get(id) }, hashArtifactContent: (value: unknown) => JSON.stringify(value) }))
 const request: CreativeWorkflowInput = { novelId: 1, stage: 'chapter', atChapter: 4, request: '只修一段', chapterRevision: { target: 'paragraphs', paragraphIndexes: [2] }, idempotencyKey: 'patch-fixture' }
 const save = (id: string, kind: string, content: unknown) => { const artifact = { id, novelId: 1, kind, content, contentHash: JSON.stringify(content) }; state.artifacts.set(id, artifact); return artifact }
 

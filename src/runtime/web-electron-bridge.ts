@@ -598,7 +598,7 @@ class WebPreviewReadOnlyError extends Error {
   code = 'WEB_PREVIEW_READ_ONLY'
 
   constructor(methodName: string) {
-    super(`浏览器预览不支持写入操作：${methodName}。请在 NovelForge 桌面端执行。`)
+    super(formatUserFacingMessage('runtime.previewReadOnly', { methodName }))
     this.name = 'WebPreviewReadOnlyError'
   }
 }
@@ -856,7 +856,7 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
     const timedOut = error instanceof DOMException && error.name === 'AbortError'
     rememberLocalBackendError(timedOut ? `本地后端请求超时：${service}.${method}` : '无法请求 /rpc', error)
     throw new LocalBackendUnavailableError(
-      timedOut ? `${service}.${method} 请求超时，请检查本地后端状态` : undefined,
+      timedOut ? formatUserFacingMessage('runtime.requestTimedOut', { service, method }) : undefined,
     )
   }
 
@@ -872,7 +872,7 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
   } catch (error) {
     if (controller.signal.aborted) {
       rememberLocalBackendError(`本地后端请求超时：${service}.${method}`)
-      throw new LocalBackendUnavailableError(`${service}.${method} 请求超时，请检查本地后端状态`)
+      throw new LocalBackendUnavailableError(formatUserFacingMessage('runtime.requestTimedOut', { service, method }))
     }
     rememberLocalBackendError('本地后端返回了非 JSON 响应', error)
     throw new LocalBackendUnavailableError('Local backend returned a non-JSON response')
@@ -1081,7 +1081,7 @@ export function installWebElectronBridge(): void {
     }),
     zhuque: createService('zhuque', {
       getSettings: async () => withLocalBackend('zhuque', 'getSettings', [], async () => ({ enabled: false, autoDetect: false, apiKeySet: false })),
-      updateSettings: async (data?: unknown) => withLocalBackend('zhuque', 'updateSettings', [data], async () => { throw new Error('请连接本机 NovelForge 后保存朱雀配置，密钥不会保存在浏览器。') }),
+      updateSettings: async (data?: unknown) => withLocalBackend('zhuque', 'updateSettings', [data], async () => { throw new Error(formatUserFacingMessage('workspace.zhuque.localConnectionRequired')) }),
       test: async () => withLocalBackend('zhuque', 'test', [], async () => ({ success: false, info: getLocalBackendUnavailableMessage(), latency: 0 })),
       getChapterResult: async (id?: unknown) => withLocalBackend('zhuque', 'getChapterResult', [id], async () => ({ enabled: false, autoDetect: false, apiKeySet: false, status: 'not_checked' })),
       detectChapter: async (id?: unknown, expectedContent?: unknown) => withLocalBackend('zhuque', 'detectChapter', [id, expectedContent], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { getSqlite } from '../database/db'
 import { embeddingRuntimeIdentity } from './embedding-settings.service'
 import { vectorExtensionStatus } from '../database/chapter-vector-index'
@@ -6,9 +7,9 @@ import { generateChapterEmbeddings, indexChapterForKeywordRecall } from './embed
 export interface ChapterIndexQueueClaim { id: number; novelId: number; sourceId: number; revision: number; operation: string }
 
 function requireNovel(novelId: number): { modelConfigId: number | null } {
-  if (!Number.isSafeInteger(novelId) || novelId <= 0) throw new Error('novelId 必须是正整数。')
+  if (!Number.isSafeInteger(novelId) || novelId <= 0) throw new Error(formatUserFacingMessage('services.chapterIndex.novelIdInvalid'))
   const novel = getSqlite().prepare('SELECT model_config_id AS modelConfigId FROM novels WHERE id = ?').get(novelId) as { modelConfigId: number | null } | undefined
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   return novel
 }
 
@@ -44,7 +45,7 @@ export function getChapterIndexStatus(novelId: number) {
 /** Rebuild only the currently saved chapters; artifacts and empty future plans are never read. */
 export function rebuildChapterIndex(input: { novelId: number; throughChapter?: number; vectors?: boolean }) {
   const novel = requireNovel(input.novelId)
-  if (input.throughChapter !== undefined && (!Number.isSafeInteger(input.throughChapter) || input.throughChapter <= 0)) throw new Error('throughChapter 必须是正整数。')
+  if (input.throughChapter !== undefined && (!Number.isSafeInteger(input.throughChapter) || input.throughChapter <= 0)) throw new Error(formatUserFacingMessage('services.chapterIndex.throughChapterInvalid'))
   if (input.vectors) embeddingRuntimeIdentity()
   const sqlite = getSqlite()
   let lastId = 0, rebuiltChapterCount = 0
@@ -91,11 +92,11 @@ export async function processChapterIndexClaim(claim: ChapterIndexQueueClaim): P
     // An edit trigger has already queued a newer revision. Never acknowledge that new work.
     return false
   }
-  if (result.vectorizedCount < result.documentCount) throw new Error('向量模型不可用，章节文字检索已保存；后台会有限重试，可修复模型配置后重新请求索引。')
+  if (result.vectorizedCount < result.documentCount) throw new Error(formatUserFacingMessage('services.chapterIndex.vectorModelUnavailable'))
   if (claim.operation === 'upsert_remote') {
     const activeModel = embeddingRuntimeIdentity().modelId
     const mismatch = sqlite.prepare("SELECT 1 FROM chapter_embeddings WHERE chapter_id=? AND novel_id=? AND fragment_type LIKE 'content_excerpt%' AND (embedding_profile IS NULL OR embedding_profile != ? || ':' || dimensions) LIMIT 1").get(claim.sourceId, claim.novelId, activeModel)
-    if (mismatch) throw new Error('所选向量接口未完成索引，已保留文字与本地回退；请检查检索模型配置后重试。')
+    if (mismatch) throw new Error(formatUserFacingMessage('services.chapterIndex.remoteIndexIncomplete'))
   }
   const removed = sqlite.prepare("DELETE FROM semantic_memory_outbox WHERE id = ? AND revision = ? AND status = 'processing'").run(claim.id, claim.revision)
   return removed.changes > 0

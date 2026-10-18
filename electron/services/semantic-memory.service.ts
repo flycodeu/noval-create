@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
 import {
   and,
@@ -502,7 +503,7 @@ export async function reindexSemanticMemorySource(
   options: IncrementalProjectionOptions = {},
 ): Promise<SemanticMemorySourceReindexResult> {
   if (!isIndexedSourceType(sourceType)) {
-    throw new Error(`不支持的语义记忆来源类型：${sourceType}`)
+    throw new Error(formatUserFacingMessage('services.semanticMemory.sourceUnsupported', { sourceType: `${sourceType}` }))
   }
   const db = getDb()
   const novel = db.select({
@@ -510,7 +511,7 @@ export async function reindexSemanticMemorySource(
     contextVersion: novels.contextVersion,
     modelConfigId: novels.modelConfigId,
   }).from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error(`小说 ${novelId} 不存在。`)
+  if (!novel) throw new Error(formatUserFacingMessage('services.semanticMemory.novelMissing', { novelId: `${novelId}` }))
 
   const documents = loadSourceDocuments(novelId, sourceType, sourceId)
   const existingRows = db.select().from(semanticMemoryEntries).where(and(
@@ -606,7 +607,7 @@ export async function reindexCoreSemanticMemory(
     contextVersion: novels.contextVersion,
     modelConfigId: novels.modelConfigId,
   }).from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error(`小说 ${novelId} 不存在。`)
+  if (!novel) throw new Error(formatUserFacingMessage('services.semanticMemory.novelMissing', { novelId: `${novelId}` }))
 
   enqueueFullSemanticMemoryReindex(novelId)
   const effectiveModelConfigId = modelConfigId || novel.modelConfigId || undefined
@@ -626,7 +627,7 @@ export async function reindexCoreSemanticMemory(
       AND status IN ('failed', 'dead_letter')
   `).get(novelId) as { count?: number } | undefined)?.count || 0)
   if (failedCount > 0) {
-    throw new Error(`语义记忆重索引仍有 ${failedCount} 个来源处理失败，请稍后重试。`)
+    throw new Error(formatUserFacingMessage('services.semanticMemory.reindexIncomplete', { count: `${failedCount}` }))
   }
   cleanupOrphanedSemanticMemoryEntries(novelId)
   return loadSemanticMemoryReindexSummary(novelId)

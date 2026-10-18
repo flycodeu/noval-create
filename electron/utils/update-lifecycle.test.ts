@@ -31,6 +31,16 @@ describe('update maintenance lifecycle', () => {
     expect(() => assertNotUpdating(directory, 'old')).not.toThrow()
   })
 
+  it('preserves the maintenance error class, code and message', () => {
+    const error = new UpdateInProgressError()
+    expect(error.constructor).toBe(UpdateInProgressError)
+    expect(error).toMatchObject({
+      name: 'UpdateInProgressError',
+      code: 'UPDATE_IN_PROGRESS',
+      message: 'NovelForge 正在准备安装更新，当前版本暂时不能启动或重新连接。请等待安装完成后重启 Codex 的 MCP 连接；若安装已取消，请在 10 分钟后重试。',
+    })
+  })
+
   it('expires so a cancelled installer cannot permanently block the app', () => {
     const now = Date.now()
     vi.spyOn(Date, 'now').mockReturnValue(now)
@@ -63,6 +73,14 @@ describe('update maintenance lifecycle', () => {
   it('rejects a timed-out bridge wait instead of allowing installation', async () => {
     mocks.queryProcesses.mockResolvedValue({ stdout: '[101]' })
     await expect(waitForMcpBridgesToExit('D:\\NovelForge\\NovelForge.exe', 0)).rejects.toThrow('等待 MCP 后台退出超时')
+  })
+
+  it('rejects unrecognized bridge state without retrying or allowing installation', async () => {
+    mocks.queryProcesses.mockResolvedValue({ stdout: '{"pid":101}' })
+    const error = await waitForMcpBridgesToExit('D:\\NovelForge\\NovelForge.exe').catch(error => error)
+    expect(error?.constructor).toBe(Error)
+    expect(error.message).toBe('无法确认 MCP 后台是否已退出，请关闭 Codex 后重新启动 NovelForge 再更新。')
+    expect(mocks.queryProcesses).toHaveBeenCalledOnce()
   })
 
   it('blocks installation if another owner acquired storage after the previous shutdown', () => {

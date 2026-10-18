@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
 import { getSqlite } from '../database/db'
 
@@ -133,7 +134,7 @@ function boundedConfidence(value: number | undefined): number {
 
 function normalizeEntryType(value: string): CanonLedgerEntryType {
   if (value === 'event' || value === 'state_delta' || value === 'knowledge') return value
-  throw new CanonLedgerError('INVALID_INPUT', `不支持的正典账本类型：${value}`)
+  throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.canonLedger.kindUnsupported', { kind: `${value}` }))
 }
 
 function normalizeEntry(input: CanonLedgerEntryInput, index: number): Required<Pick<CanonLedgerEntryInput, 'entryType' | 'entityType'>> & {
@@ -148,7 +149,7 @@ function normalizeEntry(input: CanonLedgerEntryInput, index: number): Required<P
   idempotencyKey: string
 } {
   const entityType = textValue(input.entityType, 120)
-  if (!entityType) throw new CanonLedgerError('INVALID_INPUT', `第 ${index + 1} 条账本记录缺少实体类型。`)
+  if (!entityType) throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.canonLedger.entityTypeMissing', { index: `${index + 1}` }))
   const entryType = normalizeEntryType(input.entryType)
   const entityId = positiveId(input.entityId)
   const stateKey = textValue(input.stateKey, 160)
@@ -176,14 +177,14 @@ function normalizeEntry(input: CanonLedgerEntryInput, index: number): Required<P
 
 function requirePositive(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new CanonLedgerError('INVALID_INPUT', `${label}必须是正整数。`)
+    throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.validation.positiveInteger', { label: `${label}` }))
   }
   return value
 }
 
 function requireText(value: string, label: string): string {
   const normalized = value.trim()
-  if (!normalized) throw new CanonLedgerError('INVALID_INPUT', `${label}不能为空。`)
+  if (!normalized) throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.validation.notEmpty', { label: `${label}` }))
   return normalized
 }
 
@@ -263,7 +264,7 @@ export function recordCommittedCanonLedger(input: RecordCommittedCanonLedgerInpu
   const contextVersionBefore = requirePositive(input.contextVersionBefore, 'contextVersionBefore')
   const contextVersionAfter = requirePositive(input.contextVersionAfter, 'contextVersionAfter')
   if (contextVersionAfter < contextVersionBefore) {
-    throw new CanonLedgerError('INVALID_INPUT', 'contextVersionAfter 不能小于 contextVersionBefore。')
+    throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.canonLedger.contextVersionDecreased'))
   }
   const entries = input.entries.map(normalizeEntry)
   if (entries.length === 0) return null
@@ -272,7 +273,7 @@ export function recordCommittedCanonLedger(input: RecordCommittedCanonLedgerInpu
     const existing = getCommitByKey(novelId, idempotencyKey)
     if (existing) {
       if (String(existing.input_hash || '') !== inputHash) {
-        throw new CanonLedgerError('IDEMPOTENCY_CONFLICT', '正典提交幂等键已对应不同输入。')
+        throw new CanonLedgerError('IDEMPOTENCY_CONFLICT', formatUserFacingMessage('services.canonLedger.idempotencyConflict'))
       }
       return mapCommit(existing)
     }
@@ -280,9 +281,9 @@ export function recordCommittedCanonLedger(input: RecordCommittedCanonLedgerInpu
     const currentNovel = getSqlite().prepare(`
       SELECT context_version FROM novels WHERE id = ?
     `).get(novelId) as { context_version?: number | null } | undefined
-    if (!currentNovel) throw new CanonLedgerError('INVALID_INPUT', `找不到小说 ${novelId}。`)
+    if (!currentNovel) throw new CanonLedgerError('INVALID_INPUT', formatUserFacingMessage('services.canonLedger.novelMissing', { novelId: `${novelId}` }))
     if (Number(currentNovel.context_version || 1) !== contextVersionAfter) {
-      throw new CanonLedgerError('CONTEXT_VERSION_CONFLICT', '正典提交的上下文版本与当前小说版本不一致。')
+      throw new CanonLedgerError('CONTEXT_VERSION_CONFLICT', formatUserFacingMessage('services.canonLedger.contextVersionConflict'))
     }
 
     const now = new Date().toISOString()

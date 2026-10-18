@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
+  getSqlite: vi.fn(() => { throw new Error('Native vector extension is unavailable in this unit fixture') }),
 }))
 
 vi.mock('./model.service', () => ({
@@ -13,17 +14,20 @@ vi.mock('./model.service', () => ({
 
 vi.mock('./embedding-settings.service', async () => {
   const { getAdapterById } = await import('./model.service')
+  const { LOCAL_EMBEDDING_MODEL_ID } = await import('../../src/shared/embedding-settings')
   return {
-    embeddingRuntimeIdentity: vi.fn(() => ({ settings: { mode: 'local' }, modelId: 'local:Xenova/bge-small-zh-v1.5:q8', key: 'local:Xenova/bge-small-zh-v1.5:q8' })),
+    embeddingRuntimeIdentity: vi.fn(() => ({ settings: { mode: 'local', modelConfigId: null, modelId: '' }, modelId: LOCAL_EMBEDDING_MODEL_ID, key: LOCAL_EMBEDDING_MODEL_ID })),
     embeddingRemoteAdapter: vi.fn(async () => ({ settings: { mode: 'remote', modelId: 'fixture-vector' }, modelId: 'fixture-vector', adapter: await getAdapterById(7) })),
   }
 })
-import { embeddingRuntimeIdentity } from './embedding-settings.service'
+import { embeddingRemoteAdapter, embeddingRuntimeIdentity } from './embedding-settings.service'
 import { getDb } from '../database/db'
 import { chapterEmbeddings, chapters } from '../database/schema'
 import { getAdapterById } from './model.service'
+import { LOCAL_EMBEDDING_MODEL_ID } from '../../src/shared/embedding-settings'
 import {
   areUsableEmbeddings,
+  buildEmbeddingProfile,
   extractEmbeddingKeywords,
   fallbackKeywordSearch,
   generateChapterEmbeddings,
@@ -33,9 +37,12 @@ import {
   searchSimilarFragments,
   savedProseEmbeddingFragments,
   isProseEmbeddingFragment,
+  isCompatibleEmbeddingRow,
 } from './embedding.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
+// Historical rows intentionally retain the pre-upgrade runtime identity.
+const LEGACY_LOCAL_EMBEDDING_MODEL_ID = 'local:Xenova/bge-small-zh-v1.5:q8'
 
 function queryHash(query: string): string {
   return `sha256:${createHash('sha256').update(query.trim(), 'utf8').digest('hex')}`
@@ -72,6 +79,7 @@ function createDbMock(rowsByTable: TableRows) {
 describe('embedding fallback retrieval', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(embeddingRuntimeIdentity).mockReturnValue({ settings: { mode: 'local', modelConfigId: null, modelId: '' }, modelId: LOCAL_EMBEDDING_MODEL_ID, key: LOCAL_EMBEDDING_MODEL_ID })
   })
 
   it('uses bounded chapter content when finalized summary or embeddings are absent', async () => {
@@ -254,9 +262,9 @@ describe('embedding fallback retrieval', () => {
         chapterId: 101,
         fragmentType: 'summary',
         embeddingJson: '[0.1,0.2]',
-        modelId: 'local:Xenova/bge-small-zh-v1.5:q8',
+        modelId: LOCAL_EMBEDDING_MODEL_ID,
         dimensions: 2,
-        embeddingProfile: 'local:Xenova/bge-small-zh-v1.5:q8:2',
+        embeddingProfile: buildEmbeddingProfile(LOCAL_EMBEDDING_MODEL_ID, 2),
         sourceHash: hashEmbeddingSource(101, 9, fragments, resolveEmbeddingConfigCacheKey()),
       }]],
     ])
@@ -319,5 +327,79 @@ describe('embedding fallback retrieval', () => {
     await generateChapterEmbeddings(1, 101, 7)
     expect(remove).not.toHaveBeenCalled()
     expect(insert).not.toHaveBeenCalled()
+  })
+
+  it('rejects historical local vector profiles even when their dimensions still match', () => {
+    const currentProfile = buildEmbeddingProfile(LOCAL_EMBEDDING_MODEL_ID, 2)
+    const historicalProfile = buildEmbeddingProfile(LEGACY_LOCAL_EMBEDDING_MODEL_ID, 2)
+    expect(currentProfile).not.toBe(historicalProfile)
+    expect(isCompatibleEmbeddingRow({ embeddingJson: '[0.1,0.2]', dimensions: 2, embeddingProfile: historicalProfile }, currentProfile, 2)).toBe(false)
+    expect(isCompatibleEmbeddingRow({ embeddingJson: '[0.1,0.2]', dimensions: 2, embeddingProfile: currentProfile }, currentProfile, 2)).toBe(true)
+  })
+
+  it.each(['source hash', 'model', 'source hash and model'] as const)('refreshes unchanged chapter text instead of reusing a legacy %s', async (legacyField) => {
+    const fragments = [{ type: 'summary', text: '升级前后正文没有修改，铜灯仍留在书箱底。' }]
+    const currentHash = hashEmbeddingSource(101, 9, fragments, LOCAL_EMBEDDING_MODEL_ID)
+    const legacyHash = hashEmbeddingSource(101, 9, fragments, LEGACY_LOCAL_EMBEDDING_MODEL_ID)
+    const historicalModel = legacyField.includes('model') ? LEGACY_LOCAL_EMBEDDING_MODEL_ID : LOCAL_EMBEDDING_MODEL_ID
+    const rows = new Map<unknown, Array<Record<string, unknown>>>([
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 4, summary: fragments[0].text, contextVersion: 9 }]],
+      [chapterEmbeddings, [{ id: 1, novelId: 1, chapterId: 101, fragmentType: 'summary', fragmentText: fragments[0].text,
+        embeddingJson: '[0.1,0.2]', modelId: historicalModel, dimensions: 2,
+        embeddingProfile: buildEmbeddingProfile(historicalModel, 2), sourceHash: legacyField.includes('source hash') ? legacyHash : currentHash }]],
+    ])
+    const insertedRows: Array<Record<string, unknown>> = []
+    const remove = vi.fn()
+    const db = createDbMock(rows)
+    vi.mocked(getDb).mockReturnValue({ ...db, transaction: (callback: (tx: unknown) => unknown) => callback({
+      select: db.select,
+      delete: () => ({ where: () => ({ run: remove }) }),
+      insert: () => ({ values: (row: Record<string, unknown>) => ({ run: () => insertedRows.push(row) }) }),
+    }) } as never)
+    // Reuse the existing adapter fixture as a deterministic stand-in for the new
+    // runtime output. No model download, native inference or provider is used.
+    const embed = vi.fn(async () => [[0.3, 0.4]])
+    vi.mocked(embeddingRuntimeIdentity).mockReturnValue({ settings: { mode: 'remote', modelConfigId: 7, modelId: 'fixture-vector' }, modelId: LOCAL_EMBEDDING_MODEL_ID, key: LOCAL_EMBEDDING_MODEL_ID })
+    vi.mocked(embeddingRemoteAdapter).mockResolvedValue({ settings: { mode: 'remote', modelConfigId: 7, modelId: 'fixture-vector' }, modelId: LOCAL_EMBEDDING_MODEL_ID, key: LOCAL_EMBEDDING_MODEL_ID, adapter: { embed } } as never)
+
+    const result = await generateChapterEmbeddings(1, 101)
+
+    expect(currentHash).not.toBe(legacyHash)
+    expect(embed).toHaveBeenCalledOnce()
+    expect(embed).toHaveBeenCalledWith([fragments[0].text], { model: 'fixture-vector' })
+    expect(result).toMatchObject({ applied: true, documentCount: 1, vectorizedCount: 1 })
+    expect(remove).toHaveBeenCalledOnce()
+    expect(insertedRows).toHaveLength(1)
+    expect(insertedRows[0]).toMatchObject({ embeddingJson: '[0.3,0.4]', modelId: LOCAL_EMBEDDING_MODEL_ID,
+      embeddingProfile: buildEmbeddingProfile(LOCAL_EMBEDDING_MODEL_ID, 2), sourceHash: currentHash })
+  })
+
+  it('keeps historical rows intact and uses keyword recall when only legacy vectors exist', async () => {
+    const historicalRow = { id: 1, novelId: 1, chapterId: 101, chapterNum: 3, fragmentType: 'summary', fragmentText: '铜灯藏在书箱底。',
+      embeddingJson: '[1,0]', modelId: LEGACY_LOCAL_EMBEDDING_MODEL_ID, dimensions: 2,
+      embeddingProfile: buildEmbeddingProfile(LEGACY_LOCAL_EMBEDDING_MODEL_ID, 2), sourceHash: 'historical-source-hash' }
+    const rows = new Map<unknown, Array<Record<string, unknown>>>([
+      [chapterEmbeddings, [historicalRow]],
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 3, summary: historicalRow.fragmentText }]],
+    ])
+    const before = structuredClone(historicalRow)
+    const db = createDbMock(rows)
+    const remove = vi.fn()
+    const insert = vi.fn()
+    const transaction = vi.fn()
+    vi.mocked(getDb).mockReturnValue({ ...db, delete: remove, insert, transaction } as never)
+
+    const result = await searchSimilarFragments(1, '铜灯', 5, undefined, { preparedQuery: {
+      queryHash: queryHash('铜灯'), profile: buildEmbeddingProfile(LOCAL_EMBEDDING_MODEL_ID, 2), dimensions: 2, embedding: [1, 0],
+    } })
+
+    expect(result.fallbackReason).toBe('embedding_profile_mismatch')
+    expect(result.hits).toContainEqual(expect.objectContaining({ chapterId: 101, fragmentText: historicalRow.fragmentText, searchMode: 'keyword' }))
+    expect(result.hits.every(hit => hit.searchMode === 'keyword')).toBe(true)
+    expect(getAdapterById).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    expect(insert).not.toHaveBeenCalled()
+    expect(transaction).not.toHaveBeenCalled()
+    expect(rows.get(chapterEmbeddings)).toEqual([before])
   })
 })

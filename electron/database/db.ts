@@ -10,7 +10,7 @@ import { migrateStoryAtlas } from './story-atlas-store'
 import { installChapterIndexTriggers } from './chapter-index-triggers'
 import { vectorExtensionStatus } from './chapter-vector-index'
 
-type AppDatabase = BetterSQLite3Database<typeof schema>
+type AppDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database }
 
 const DATABASE_FILE_NAME = 'novelforge.db'
 

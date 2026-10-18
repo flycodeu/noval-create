@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { SourceSearchProtocol, SourceSearchRuntimeConfig } from '../../src/shared/source-search'
 
 export interface WebSearchResult {
@@ -15,16 +16,16 @@ type SourceSearchErrorCode =
   | 'SEARCH_NOT_EXECUTED' | 'MISSING_SOURCES'
 
 const ERROR_MESSAGES: Record<SourceSearchErrorCode, string> = {
-  INVALID_CONFIG: '搜索接口配置无效，请检查平台、协议、地址和搜索模型。',
-  INVALID_QUERY: '请输入有效的检索词。',
-  QUERY_TOO_LONG: 'DeepSeek Search 检索词最多支持 128 个 Unicode 字符，请缩短后重试。',
-  HTTP_ERROR: '搜索服务请求失败，请检查 API Key、额度和服务状态后重试。',
-  NETWORK_ERROR: '连接失败，请检查 API Key、网络和服务状态后重试。',
-  TIMEOUT: '连接超时，请检查网络后重试。',
-  RESPONSE_TOO_LARGE: '搜索服务返回的数据过大，请缩小检索范围后重试。',
-  INVALID_RESPONSE: '搜索服务返回的数据无效或尚未完成，请检查搜索协议后重试。',
-  SEARCH_NOT_EXECUTED: '接口未执行联网搜索，请确认模型支持搜索，或选择独立搜索接口。',
-  MISSING_SOURCES: '接口未返回可用的结构化来源，请检查搜索协议或改用独立搜索接口。',
+  INVALID_CONFIG: formatUserFacingMessage('services.sourceSearch.configInvalid'),
+  INVALID_QUERY: formatUserFacingMessage('services.sourceSearch.queryInvalid'),
+  QUERY_TOO_LONG: formatUserFacingMessage('services.sourceSearch.queryTooLong'),
+  HTTP_ERROR: formatUserFacingMessage('services.sourceSearch.requestFailed'),
+  NETWORK_ERROR: formatUserFacingMessage('services.sourceSearch.networkFailed'),
+  TIMEOUT: formatUserFacingMessage('services.sourceSearch.timeout'),
+  RESPONSE_TOO_LARGE: formatUserFacingMessage('services.sourceSearch.responseTooLarge'),
+  INVALID_RESPONSE: formatUserFacingMessage('services.sourceSearch.responseInvalid'),
+  SEARCH_NOT_EXECUTED: formatUserFacingMessage('services.sourceSearch.notExecuted'),
+  MISSING_SOURCES: formatUserFacingMessage('services.sourceSearch.sourcesMissing'),
 }
 
 /** Only fixed, locally defined messages cross the provider boundary. */
@@ -35,7 +36,7 @@ export class SourceSearchError extends Error {
   constructor(code: SourceSearchErrorCode, status?: number) {
     const safeStatus = typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined
     super(code === 'HTTP_ERROR' && safeStatus !== undefined
-      ? `搜索服务请求失败（HTTP ${safeStatus}），请检查 API Key、额度和服务状态后重试。`
+      ? formatUserFacingMessage('services.sourceSearch.httpFailed', { status: `${safeStatus}` })
       : ERROR_MESSAGES[code])
     this.name = 'SourceSearchError'
     this.code = code

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ProgressSink } from '../utils/progress-sink'
 import { eq } from 'drizzle-orm'
 import { Message } from '../adapters/base.adapter'
@@ -239,7 +240,7 @@ export async function retrySubplotBatch(taskId: number): Promise<number> {
   const db = getDb()
   const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0]
   if (!task) throwUserFacingError('task.notFound', { id: taskId })
-  if (!task.inputJson) throw new Error('\u4efb\u52a1\u7f3a\u5c11\u8f93\u5165\u4e0a\u4e0b\u6587\uff0c\u65e0\u6cd5\u91cd\u8bd5')
+  if (!task.inputJson) throw new Error(formatUserFacingMessage('services.subplot.retryInputMissing'))
 
   const request = JSON.parse(task.inputJson) as SubplotGenerationRequest
   const result = await generateSubplotBatch(request)
