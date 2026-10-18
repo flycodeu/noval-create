@@ -44,6 +44,34 @@ async function main() {
   const run = expression => { lastExpression = expression; return bounded(win.webContents.executeJavaScript(expression), 'Renderer expression during ' + phase) }
   const wait = async expression => { for (let i = 0; i < 200; i++) { if (await run(expression)) return; await pause(25) } throw Error('Timeout: ' + expression) }
   const click = (text, scope = 'document') => run(`{const target=[...${scope}.querySelectorAll('button')].find(el=>el.textContent.replace(/\\s+/g,'').trim()===${JSON.stringify(text.replace(/\s+/g, ''))});if(!target)throw Error('Missing button: '+${JSON.stringify(text)});target.click()}`)
+  const waitPainted = async expression => {
+    const deadline = Date.now() + 5000
+    for (let i = 0; i < 200; i++) {
+      if (await run(expression)) return
+      if (Date.now() >= deadline) break
+      // Hidden Chromium windows can leave CSS motion waiting for a compositor
+      // frame. Drive normal painting without finishing animations, changing CSS
+      // or extending the polling budget used by the behavioral assertions.
+      await bounded(win.webContents.capturePage(undefined, { stayHidden: true }), 'Hidden-window paint during ' + phase)
+      win.webContents.invalidate()
+      await run('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      await pause(25)
+    }
+    throw Error('Timeout waiting for painted UI: ' + expression)
+  }
+  const clickConfirmation = async text => {
+    await waitPainted(`(()=>{
+      const dialogs=[...document.querySelectorAll('.ant-modal-confirm')];
+      if(dialogs.length!==1)return false;
+      const modal=dialogs[0],style=getComputedStyle(modal);
+      const button=[...modal.querySelectorAll('button')].find(el=>el.textContent.replace(/\\s+/g,'').trim()===${JSON.stringify(text.replace(/\s+/g, ''))});
+      if(!button||button.disabled||style.opacity!=='1'||style.visibility==='hidden'||/ant-zoom-(?:appear|enter|leave)(?:-|\\s|$)/.test(modal.className)||modal.getAnimations().some(animation=>animation.pending||animation.playState==='running'))return false;
+      const rect=button.getBoundingClientRect(),buttonStyle=getComputedStyle(button);
+      return rect.width>0&&rect.height>0&&buttonStyle.visibility!=='hidden'&&buttonStyle.pointerEvents!=='none'&&button.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));
+    })()`)
+    await click(text, 'document.querySelector(".ant-modal-confirm")')
+    await waitPainted('!document.querySelector(".ant-modal-confirm")')
+  }
   const tab = text => run(`{const target=[...document.querySelectorAll('[role="tab"]')].find(el=>el.textContent.trim()===${JSON.stringify(text)});if(!target)throw Error('Missing tab');target.click()}`)
   const edit = (selector, value) => run(`{const input=document.querySelector(${JSON.stringify(selector)});if(!input)throw Error('Missing input');Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}))}`)
   const select = async (label, option) => {
@@ -117,7 +145,7 @@ async function main() {
   await edit('.ant-modal textarea', '两种形态共用伤势、疲惫与同一人格。')
   await run('document.querySelector(".ant-drawer-close").click()')
   await wait('document.body.textContent.includes("未保存") && !!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelector(".ant-modal textarea").value'), '两种形态共用伤势、疲惫与同一人格。', 'cancel drawer close retains dirty rule draft')
   await click('保存这一部分')
@@ -204,7 +232,7 @@ async function main() {
   assert.equal(await run('window.arrangementNavigation.childDirtyCommitted'), true, 'native navigation starts from a real committed arrangement edit')
   await wait('!!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelectorAll(".ant-modal-confirm").length'), 1, 'native same-chapter panel change raises one confirmation for a dirty arrangement')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('!!document.querySelector(".ant-modal textarea")'), true, 'cancel native same-chapter navigation keeps the arrangement editor mounted')
   assert.equal(await run('document.querySelector(".ant-modal textarea").value'), unsavedArrangement, 'cancel native panel navigation preserves the exact arrangement draft')
@@ -214,7 +242,7 @@ async function main() {
   await click('参考资料')
   await wait('!!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelectorAll(".ant-modal-confirm").length'), 1, 'internal panel switch asks once before discarding the arrangement draft')
-  await click('放弃并切换')
+  await clickConfirmation('放弃并切换')
   await wait('!!document.querySelector("[aria-label=\\"本章人物与地点参考\\"]") && ![...document.querySelectorAll(".ant-modal")].some(el=>el.offsetParent)')
   await pause(250)
   assert.equal(await run('document.querySelectorAll(".ant-modal-confirm").length'), 0, 'explicit internal discard does not trigger a second global confirmation')
@@ -248,17 +276,17 @@ async function main() {
   progress('dirty prose after clean sidebar round-trip')
   await click('故事设计', 'document.querySelector(".author-shell-sidebar")')
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value.endsWith("尚未保存的下一句。")'), true, 'cancel navigation retains draft')
   await run('location.hash="/novels/292/narrative-board?tab=characters"')
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm") && !!document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]")')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value.endsWith("尚未保存的下一句。")'), true, 'native hash navigation cancellation retains the exact editor draft')
   await run('history.back()')
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm") && !!document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]")')
   assert.equal(await run('document.querySelector("textarea[aria-label=\\"第 1 章正文\\"]").value'), dirtyProse + '\n尚未保存的下一句。', 'native browser back cancellation also retains the exact editor draft')
   progress('native hash and browser back retained prose')
@@ -592,7 +620,7 @@ async function main() {
   assert.equal(await run(`document.querySelector(${synopsisInput}).value`), designConflictDraft, 'optimistic-conflict failure preserves the exact design draft')
   await click('取消', 'document.querySelector(".ant-modal")')
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('放弃修改')
+  await clickConfirmation('放弃修改')
   await wait('![...document.querySelectorAll(".ant-modal")].some(el=>el.offsetParent)')
   await go('guide')
   await run('window.fixture.controls.holdStructureLoads=1')
@@ -690,7 +718,7 @@ async function main() {
   await wait('!!document.querySelector(".task-indicator-popover:not(.ant-popover-hidden) .task-indicator-panel__row")')
   await click('打开运行记录', taskPanelScope)
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run(`document.querySelector(${proseInput}).value`), taskPanelDraft, 'cancelling task-center navigation preserves the exact manuscript draft')
   assert.equal(await run('location.hash.includes("chapterId=682")'), true)
@@ -698,14 +726,14 @@ async function main() {
   await wait('!!document.querySelector(".task-indicator-popover:not(.ant-popover-hidden) .task-indicator-panel__row")')
   await click('查看', taskPanelScope)
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('继续编辑')
+  await clickConfirmation('继续编辑')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run(`document.querySelector(${proseInput}).value`), taskPanelDraft, 'opening a different task chapter also passes through the leave guard')
   await run('document.querySelector(".author-shell-header .task-indicator").click()')
   await wait('!!document.querySelector(".task-indicator-popover:not(.ant-popover-hidden) .task-indicator-panel__row")')
   await click('打开运行记录', taskPanelScope)
   await wait('!!document.querySelector(".ant-modal-confirm")')
-  await click('放弃并离开')
+  await clickConfirmation('放弃并离开')
   await wait('location.hash==="#/tasks" && !!document.querySelector(".task-center-page")')
   await wait('!document.querySelector(".ant-modal-confirm")')
   assert.equal(await run('window.fixture.chapters[0].content'), guardedProse, 'confirmed task-center navigation discards only the unsubmitted fixture draft')
@@ -768,7 +796,24 @@ main().then(() => app.exit(0)).catch(async error => {
     if (activeWindow && !activeWindow.isDestroyed()) {
       failure.window = { contentSize: activeWindow.getContentSize(), bounds: activeWindow.getBounds(), primaryDisplay: { scaleFactor: screen.getPrimaryDisplay().scaleFactor, size: screen.getPrimaryDisplay().size } }
       try {
-        failure.renderer = await bounded(activeWindow.webContents.executeJavaScript('({hash:location.hash,text:document.body.innerText,calls:window.calls,unexpected:window.unexpected,viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},prose:document.querySelector(".author-manuscript__editor")?.value,arrangementDraft:document.querySelector(".ant-modal textarea")?.value,arrangementNavigation:window.arrangementNavigation,aiActions:[...document.querySelectorAll(".manuscript-toolbar button")].map(el=>({text:el.textContent,disabled:el.disabled})),dialogs:[...document.querySelectorAll(".ant-modal")].map(el=>({text:el.innerText,visible:!!el.offsetParent}))})'), 'Failure DOM diagnostics', 2000)
+        failure.renderer = await bounded(activeWindow.webContents.executeJavaScript(`({
+          hash:location.hash,text:document.body.innerText,calls:window.calls,unexpected:window.unexpected,
+          viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},
+          prose:document.querySelector('.author-manuscript__editor')?.value,
+          arrangementDraft:document.querySelector('.ant-modal textarea')?.value,arrangementNavigation:window.arrangementNavigation,
+          aiActions:[...document.querySelectorAll('.manuscript-toolbar button')].map(el=>({text:el.textContent,disabled:el.disabled})),
+          dialogs:[...document.querySelectorAll('.ant-modal')].map(el=>{
+            const style=getComputedStyle(el);
+            return {text:el.innerText,visible:!!el.offsetParent,className:el.className,
+              opacity:style.opacity,visibility:style.visibility,display:style.display,
+              animations:el.getAnimations().map(animation=>({playState:animation.playState,pending:animation.pending,currentTime:animation.currentTime})),
+              buttons:[...el.querySelectorAll('button')].map(button=>{
+                const rect=button.getBoundingClientRect();
+                return {text:button.textContent,disabled:button.disabled,pointerEvents:getComputedStyle(button).pointerEvents,
+                  hit:button.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2))};
+              })};
+          })
+        })`), 'Failure DOM diagnostics', 2000)
       } catch (diagnosticError) { failure.diagnosticError = String(diagnosticError) }
       try { fs.writeFileSync(path.join(output, 'workspace-layout-ui-failure.png'), (await bounded(activeWindow.webContents.capturePage(), 'Failure screenshot', 2000)).toPNG()) }
       catch (captureError) { failure.captureError = String(captureError) }
