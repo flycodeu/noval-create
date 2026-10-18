@@ -8,7 +8,6 @@ import type {
   ModelConfig,
   Template,
   Novel,
-  SourceSearchProviderMode,
   SourceSearchSettingsView,
 } from '../types'
 import {
@@ -16,6 +15,8 @@ import {
   WEB_DEMO_PREVIEW_STORAGE_KEY,
 } from './web-preview-mode'
 import { normalizeWritebackSyncStatus } from '../shared/writeback-status'
+import { SOURCE_SEARCH_PLATFORM_DEFAULTS, SOURCE_SEARCH_PLATFORM_NAMES } from '../shared/source-search'
+import { formatUserFacingMessage } from '../shared/user-facing-messages'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
 type BridgeService = Record<string, BridgeMethod>
@@ -71,12 +72,9 @@ const NOW = '2026-05-24T09:00:00.000Z'
 const LOCAL_BACKEND_URL = ''
 const LOCAL_BACKEND_RPC_TIMEOUT_MS = 15_000
 const WEB_MODEL_CONFIGS_KEY = 'novelforge.webPreview.modelConfigs'
-const WEB_SOURCE_SEARCH_KEY = 'novelforge.webPreview.sourceSearchSettings'
 const MASKED_KEY = '已设置'
 
 type WebModelConfig = Omit<ModelConfig, 'apiKey'> & { apiKeySet?: boolean }
-type WebSourceSearchSettings = Pick<SourceSearchSettingsView, 'provider' | 'tavilyApiKeySet' | 'braveApiKeySet' | 'updatedAt'>
-
 let localBackendLastError = ''
 let localBackendStatus: 'checking' | 'connected' | 'unavailable' = 'checking'
 let backendCheckPromise: Promise<boolean> | null = null
@@ -760,53 +758,19 @@ function buildWebModelConfig(input: unknown, existing?: WebModelConfig): WebMode
   }
 }
 
-function normalizeSourceProvider(value: unknown): SourceSearchProviderMode {
-  if (value === 'tavily' || value === 'brave' || value === 'disabled') return value
-  return 'auto'
-}
-
-function readWebSourceSearchSettings(): WebSourceSearchSettings {
-  const settings = readJsonFromStorage<WebSourceSearchSettings>(WEB_SOURCE_SEARCH_KEY, {
+function getPreviewSourceSearchSettings(): SourceSearchSettingsView {
+  return {
     provider: 'auto',
     tavilyApiKeySet: false,
     braveApiKeySet: false,
-    updatedAt: NOW,
-  })
-  return {
-    provider: normalizeSourceProvider(settings.provider),
-    tavilyApiKeySet: Boolean(settings.tavilyApiKeySet),
-    braveApiKeySet: Boolean(settings.braveApiKeySet),
-    updatedAt: settings.updatedAt || NOW,
-  }
-}
-
-function exposeWebSourceSearchSettings(settings: WebSourceSearchSettings): SourceSearchSettingsView {
-  const activeProvider = settings.provider === 'disabled'
-    ? null
-    : settings.provider === 'tavily'
-      ? (settings.tavilyApiKeySet ? 'tavily' : null)
-      : settings.provider === 'brave'
-        ? (settings.braveApiKeySet ? 'brave' : null)
-        : settings.tavilyApiKeySet
-          ? 'tavily'
-          : settings.braveApiKeySet
-            ? 'brave'
-            : null
-
-  return {
-    provider: settings.provider,
-    tavilyApiKeySet: settings.tavilyApiKeySet,
-    braveApiKeySet: settings.braveApiKeySet,
     tavilyEnvSet: false,
     braveEnvSet: false,
-    activeProvider,
-    updatedAt: settings.updatedAt,
+    activeProvider: null,
+    platforms: Object.fromEntries(SOURCE_SEARCH_PLATFORM_NAMES.map(slot => [slot, {
+      ...SOURCE_SEARCH_PLATFORM_DEFAULTS[slot], apiKeySet: false, envSet: false,
+    }])),
+    updatedAt: null,
   }
-}
-
-function resolveSavedKeyFlag(current: boolean, value: unknown): boolean {
-  if (value === undefined || value === MASKED_KEY) return current
-  return typeof value === 'string' ? Boolean(value.trim()) : Boolean(value)
 }
 
 class LocalBackendUnavailableError extends Error {
@@ -874,7 +838,11 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
 
   let response: Response
   const controller = new AbortController()
-  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000 : service === 'zhuque' && ['test', 'detectChapter'].includes(method) ? 55_000 : LOCAL_BACKEND_RPC_TIMEOUT_MS
+  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000
+    : service === 'zhuque' && ['test', 'detectChapter'].includes(method) ? 55_000
+      : service === 'sourceSearch' && method === 'test' ? 55_000
+        : service === 'sourceSearch' && method === 'research' ? 100_000
+          : LOCAL_BACKEND_RPC_TIMEOUT_MS
   const timeout = window.setTimeout(() => controller.abort(), rpcTimeout)
   try {
     response = await fetch(`${LOCAL_BACKEND_URL}/rpc`, {
@@ -884,16 +852,16 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
       signal: controller.signal,
     })
   } catch (error) {
+    window.clearTimeout(timeout)
     const timedOut = error instanceof DOMException && error.name === 'AbortError'
     rememberLocalBackendError(timedOut ? `本地后端请求超时：${service}.${method}` : '无法请求 /rpc', error)
     throw new LocalBackendUnavailableError(
       timedOut ? `${service}.${method} 请求超时，请检查本地后端状态` : undefined,
     )
-  } finally {
-    window.clearTimeout(timeout)
   }
 
   if (response.status === 404) {
+    window.clearTimeout(timeout)
     rememberLocalBackendError(`本地后端未实现接口 ${service}.${method}`)
     throw new LocalBackendUnavailableError(`${service}.${method} is not implemented by local backend`)
   }
@@ -902,8 +870,14 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
   try {
     payload = await response.json()
   } catch (error) {
+    if (controller.signal.aborted) {
+      rememberLocalBackendError(`本地后端请求超时：${service}.${method}`)
+      throw new LocalBackendUnavailableError(`${service}.${method} 请求超时，请检查本地后端状态`)
+    }
     rememberLocalBackendError('本地后端返回了非 JSON 响应', error)
     throw new LocalBackendUnavailableError('Local backend returned a non-JSON response')
+  } finally {
+    window.clearTimeout(timeout)
   }
 
   const record = asRecord(payload)
@@ -1119,19 +1093,10 @@ export function installWebElectronBridge(): void {
         'sourceSearch',
         'getSettings',
         [],
-        async () => exposeWebSourceSearchSettings(readWebSourceSearchSettings()),
+        async () => getPreviewSourceSearchSettings(),
       ),
       updateSettings: async (data?: unknown) => withLocalBackend('sourceSearch', 'updateSettings', [data], async () => {
-        const current = readWebSourceSearchSettings()
-        const record = asRecord(data)
-        const nextSettings: WebSourceSearchSettings = {
-          provider: normalizeSourceProvider(record.provider ?? current.provider),
-          tavilyApiKeySet: resolveSavedKeyFlag(current.tavilyApiKeySet, record.tavilyApiKey),
-          braveApiKeySet: resolveSavedKeyFlag(current.braveApiKeySet, record.braveApiKey),
-          updatedAt: new Date().toISOString(),
-        }
-        writeJsonToStorage(WEB_SOURCE_SEARCH_KEY, nextSettings)
-        return exposeWebSourceSearchSettings(nextSettings)
+        throw new Error(formatUserFacingMessage('sourceSearch.localConnectionRequired'))
       }),
       test: async (data?: unknown) => withLocalBackend('sourceSearch', 'test', data === undefined ? [] : [data], async () => ({
         success: false,

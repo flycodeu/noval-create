@@ -113,7 +113,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       chapterCount: rows.length, chapters: rows.slice(offset, offset + limit).map(row => ({ id: row.id, chapterNum: row.chapterNum, volumeId: row.volumeId, partId: row.partId, title: row.title, outline: row.outline, summary: row.summary, status: row.status, wordCount: row.wordCount })), nextOffset: offset + limit < rows.length ? offset + limit : null }
   })
   registerChapterIndexTools(registry)
-  add('research.query', '查询小说参考资料', '读取已保存的外部网页检索摘要、URL、检索主题及时间。这些仅是未核验全文的参考，不是小说正史或人物知识。query按本次主题选取，省略则列出资料。', { novelId: number, query: string }, ['novelId'], 'read', input => ({ sources: listCreativeResearch(Number(input.novelId), String(input.query || '')) }))
+  add('research.query', '查询小说参考资料', '读取已保存的外部参考、URL、检索主题及时间。excerptKind为source_metadata时仅有来源标题与链接，没有网页摘要。参考未核验全文，不是小说正史或人物知识。query按本次主题选取，省略则列出资料。', { novelId: number, query: string }, ['novelId'], 'read', input => ({ sources: listCreativeResearch(Number(input.novelId), String(input.query || '')) }))
   add('research.search', '检索并保存创作参考', '根据作者资料需求检索真实网页，保存出处和摘要，供后续创作上下文按相关性使用。道教、哲理、政治、人性及服饰器物均可查；失败返回诊断，不编造来源。复用本周相同需求，新的需求不受旧资料抑制。仅保存来源，不写入正文、图谱或Canon。', { novelId: number, request: { type: 'string', minLength: 1, maxLength: 12000 }, atChapter: { type: 'integer', minimum: 0 } }, ['novelId', 'request'], 'draft_write', input => searchCreativeResearch(Number(input.novelId), String(input.request), input.atChapter as number | undefined))
   registerAtlasJourneyTools(registry)
   return registry

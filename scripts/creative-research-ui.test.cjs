@@ -17,7 +17,7 @@ async function main() {
     import{getAntdThemeConfig}from'./src/theme/antd-tokens';
     import './src/styles/global.css';import './src/pages/Novel/AuthorWorkspace/author-workspace.css';
     window.requests=[];window.rows=Array.from({length:7},(_,i)=>({sourceKey:'s'+i,title:'资料来源 '+i,url:'https://example.org/source/'+i,excerpt:'示例来源摘要，仅用于界面验证。可用于人物抉择和生活细节，仍须核对本书设定。',topics:['道教'],query:'道教行旅资料',recordedAt:'2026-10-17T00:00:00Z',verificationStatus:'web_found',canonDecision:'reference_only'}));
-    window.electron={sourceSearch:{listResearch:async id=>id===1?window.rows:[],research:(id,request)=>new Promise((resolve,reject)=>window.requests.push({id,request,resolve,reject}))},novel:{get:async id=>({id,title:'界面测试作品',contextVersion:2})}};
+    window.electron={sourceSearch:{listResearch:async id=>id===1?structuredClone(window.rows):[],research:(id,request)=>new Promise((resolve,reject)=>window.requests.push({id,request,resolve,reject}))},novel:{get:async id=>({id,title:'界面测试作品',contextVersion:2})}};
     const root=createRoot(document.getElementById('root'));window.paint=(id=1,disabled=false)=>root.render(<ConfigProvider theme={getAntdThemeConfig('light')}><div className="author-workspace"><ResearchLibrary novelId={id} disabled={disabled}/></div></ConfigProvider>);window.paint();
   `, loader: 'tsx', resolveDir: root }, outfile: path.join(dir, 'fixture.js'), bundle: true, platform: 'browser' })
   fs.writeFileSync(path.join(dir, 'index.html'), '<meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
@@ -41,6 +41,10 @@ async function main() {
   await wait('document.body.textContent.includes("新检索来源")')
   assert((await run('document.body.textContent')).includes('摘要已保存'))
   assert.equal(await run('document.querySelector(".research-library__sources a").getAttribute("rel")'), 'noreferrer')
+  await wait('!document.querySelector("input").disabled')
+  await run("window.rows.unshift({...window.rows[0],sourceKey:'metadata-only',title:'仅标题来源',excerpt:'仅标题来源',excerptKind:'source_metadata'});window.dispatchEvent(new Event('novelforge:creative-completed'))")
+  await wait('document.body.textContent.includes("仅来源链接，未返回网页摘要")')
+  assert.equal(await run('document.querySelector(".research-library__sources article").querySelectorAll(":scope > p").length'), 0, 'model-backed source metadata is not rendered as a webpage excerpt')
   await input('检索故障')
   await clickSearch()
   await wait('window.requests.length===2')

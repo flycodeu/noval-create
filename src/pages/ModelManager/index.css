@@ -1,5 +1,4 @@
-.model-manager-modal-form .model-manager-identity-grid,
-.model-manager-source-key-grid {
+.model-manager-modal-form .model-manager-identity-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
@@ -11,8 +10,7 @@
   gap: 16px;
 }
 
-.model-manager-modal-form .admin-form-grid > *,
-.model-manager-source-key-grid > * {
+.model-manager-modal-form .admin-form-grid > * {
   min-width: 0;
 }
 
@@ -21,17 +19,30 @@
   gap: 16px;
 }
 
-.model-manager-source-intro {
-  padding: 12px 14px;
-  border-left: 3px solid var(--accent, #a67638);
-  background: var(--bg-muted, rgba(125, 125, 125, 0.06));
-  font-size: 13px;
+.model-manager-source-modal {
+  top: 32px;
+  max-width: calc(100vw - 32px);
+  padding-bottom: 32px;
 }
 
-.model-manager-source-intro p {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.65;
+.model-manager-source-modal .ant-modal-body {
+  max-height: calc(100dvh - 190px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.model-manager-source-form,
+.model-manager-source-platform {
+  min-width: 0;
+}
+
+.model-manager-source-form .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+.model-manager-source-key-reset {
+  margin-top: 12px;
+  align-items: flex-start;
 }
 
 .model-manager-source-modal .source-search-config__test-result {
@@ -83,6 +94,10 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status strong {
+  overflow-wrap: anywhere;
+}
+
 .app-layout .model-manager-page .model-manager-detection-panel {
   order: 4;
 }
@@ -111,13 +126,21 @@
 @media (max-width: 560px) {
   .model-manager-modal-form .model-manager-identity-grid,
   .model-manager-modal-form .admin-form-grid--three,
-  .model-manager-source-key-grid,
   .app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .model-id-picker__controls {
     gap: 6px;
+  }
+
+  .model-manager-source-key-reset {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .model-manager-source-key-reset .ant-alert-action {
+    margin-left: 24px;
   }
 }
 

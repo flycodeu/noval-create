@@ -29,6 +29,7 @@ async function main() {
         import { ConfigProvider, message } from 'antd';
         import ModelManager from './src/pages/ModelManager';
         import { getAntdThemeConfig } from './src/theme/antd-tokens';
+        import { SOURCE_SEARCH_PLATFORM_DEFAULTS, SOURCE_SEARCH_PLATFORM_NAMES } from './src/shared/source-search';
         import './src/styles/global.css';
         import './src/styles/ui-simplification.css';
 
@@ -46,7 +47,21 @@ async function main() {
           maxConcurrency: 2, isDefault: 1, extraParamsJson: null }];
         window.sourceSettings = { provider: 'auto', tavilyApiKeySet: false,
           braveApiKeySet: false, tavilyEnvSet: false, braveEnvSet: false,
+          platforms: Object.fromEntries(SOURCE_SEARCH_PLATFORM_NAMES.map(slot => [slot,
+            { ...clone(SOURCE_SEARCH_PLATFORM_DEFAULTS[slot]), apiKeySet: false, envSet: false }])),
           activeProvider: null, updatedAt: null };
+        window.searchTests = [];
+        window.deferSearchTests = false;
+        const keySet = (value, current) => value === undefined || value === masked ? Boolean(current) : Boolean(value);
+        const sourceActiveProvider = settings => {
+          const available = provider => provider === 'tavily' ? settings.tavilyApiKeySet || settings.tavilyEnvSet
+            : provider === 'brave' ? settings.braveApiKeySet || settings.braveEnvSet
+            : settings.platforms[provider]?.apiKeySet || settings.platforms[provider]?.envSet;
+          if (settings.provider === 'disabled') return null;
+          return settings.provider === 'auto'
+            ? ['tavily', 'brave', ...SOURCE_SEARCH_PLATFORM_NAMES].find(available) || null
+            : available(settings.provider) ? settings.provider : null;
+        };
         const record = (kind, input) => window.calls.push({ kind, input: clone(input) });
         window.electron = {
           model: {
@@ -76,14 +91,25 @@ async function main() {
             updateSettings: async input => {
               record('sourceSearch.updateSettings', input);
               window.sourceSettings = { ...window.sourceSettings, provider: input.provider || 'auto',
-                tavilyApiKeySet: Boolean(input.tavilyApiKey), braveApiKeySet: Boolean(input.braveApiKey),
-                activeProvider: input.provider === 'disabled' ? null : input.provider === 'brave' ? 'brave' : input.tavilyApiKey ? 'tavily' : null,
+                tavilyApiKeySet: keySet(input.tavilyApiKey, window.sourceSettings.tavilyApiKeySet),
+                braveApiKeySet: keySet(input.braveApiKey, window.sourceSettings.braveApiKeySet),
+                platforms: Object.fromEntries(SOURCE_SEARCH_PLATFORM_NAMES.map(slot => {
+                  const prior = window.sourceSettings.platforms[slot];
+                  const patch = input.platforms?.[slot] || {};
+                  return [slot, { protocol: patch.protocol ?? prior.protocol, baseUrl: patch.baseUrl ?? prior.baseUrl,
+                    model: patch.model ?? prior.model, apiKeySet: keySet(patch.apiKey, prior.apiKeySet), envSet: false }];
+                })),
                 updatedAt: '2026-10-18T00:00:00.000Z' };
+              window.sourceSettings.activeProvider = sourceActiveProvider(window.sourceSettings);
               return clone(window.sourceSettings);
             },
             test: async input => {
               record('sourceSearch.test', input);
-              return { success: true, providerName: input?.provider === 'brave' ? 'brave' : 'tavily', latency: 18, info: '隔离配置测试成功' };
+              if (window.deferSearchTests) return new Promise(resolve => window.searchTests.push({ input: clone(input), resolve }));
+              const provider = input?.provider || window.sourceSettings.provider;
+              return { success: provider !== 'disabled', providerName: provider === 'disabled' ? null
+                : provider === 'auto' ? window.sourceSettings.activeProvider : provider,
+                latency: 18, info: provider === 'disabled' ? '来源检索已关闭。' : '隔离配置测试成功' };
             },
           },
           zhuque: { getSettings: async () => ({ enabled: false, autoDetect: true, apiKeySet: false }) },
@@ -160,6 +186,7 @@ async function main() {
   }
   const snapshot = async name => {
     await run('window.clearMessages()')
+    await wait('!document.querySelector(".ant-message-notice")')
     const [width, height] = win.getContentSize()
     // Hidden windows can return a previous compositor frame. A tiny resize,
     // capture wake-up and two painted frames make screenshots match the DOM.
@@ -174,7 +201,7 @@ async function main() {
     fs.writeFileSync(path.join(profile, name), (await win.webContents.capturePage(undefined, { stayHidden: true })).toPNG())
   }
   const layouts = async prefix => {
-    for (const width of [1280, 720]) {
+    for (const width of [1280, 720, 480]) {
       win.setContentSize(width, 1000)
       await pause(120)
       assert.equal(await run('document.documentElement.scrollWidth > innerWidth + 1'), false, `${prefix}: page overflows at ${width}`)
@@ -317,10 +344,19 @@ async function main() {
   await wait('window.ui.modal()?.textContent.includes("联网搜索配置")')
   await choose('sourceSearch_provider', 'Tavily')
   await edit('sourceSearch_tavilyApiKey', 'tvly-fixture-current')
+  assert.equal(await run('!!window.ui.modal().querySelector("#sourceSearch_braveApiKey")'), false, 'fixed mode only displays its own key')
+  await choose('sourceSearch_provider', 'Brave Search')
   await edit('sourceSearch_braveApiKey', 'brave-fixture-current')
+  await choose('sourceSearch_provider', 'Tavily')
+  assert.equal(await value('sourceSearch_tavilyApiKey'), 'tvly-fixture-current', 'switching slots preserves unsaved values')
   await click('测试连接', true)
   await wait('window.calls.some(call => call.kind === "sourceSearch.test")')
-  assert.deepEqual((await calls('sourceSearch.test')).at(-1), { provider: 'tavily', tavilyApiKey: 'tvly-fixture-current', braveApiKey: 'brave-fixture-current' })
+  const defaultPlatforms = {
+    deepseek: { protocol: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: '', apiKey: '' },
+    openai: { protocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5', apiKey: '' },
+    custom: { protocol: 'responses', baseUrl: '', model: '', apiKey: '' },
+  }
+  assert.deepEqual((await calls('sourceSearch.test')).at(-1), { provider: 'tavily', tavilyApiKey: 'tvly-fixture-current', braveApiKey: 'brave-fixture-current', platforms: defaultPlatforms })
   assert.equal((await calls('sourceSearch.updateSettings')).length, 0, 'testing draft search settings does not save keys')
   await wait('window.ui.modal().textContent.includes("隔离配置测试成功")')
   await layouts('search-config')
@@ -337,21 +373,196 @@ async function main() {
   assert.equal(await value('sourceSearch_tavilyApiKey'), '', 'cancelled draft is not rehydrated as a saved key')
   await choose('sourceSearch_provider', 'Tavily')
   await edit('sourceSearch_tavilyApiKey', 'tvly-fixture-saved')
+  await choose('sourceSearch_provider', 'Brave Search')
   await edit('sourceSearch_braveApiKey', 'brave-fixture-saved')
+  await choose('sourceSearch_provider', 'Tavily')
   await click('保存', true)
   await wait('!window.ui.modal() && window.calls.some(call => call.kind === "sourceSearch.updateSettings")')
-  assert.deepEqual((await calls('sourceSearch.updateSettings')).at(-1), { provider: 'tavily', tavilyApiKey: 'tvly-fixture-saved', braveApiKey: 'brave-fixture-saved' })
-  assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('已保存'))
+  assert.deepEqual((await calls('sourceSearch.updateSettings')).at(-1), { provider: 'tavily', tavilyApiKey: 'tvly-fixture-saved', braveApiKey: 'brave-fixture-saved', platforms: defaultPlatforms })
+  assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('Tavily、Brave Search'))
   await click('配置搜索')
   await wait('!!window.ui.modal()')
   assert.equal(await value('sourceSearch_tavilyApiKey'), '已设置')
+  await choose('sourceSearch_provider', 'Brave Search')
   assert.equal(await value('sourceSearch_braveApiKey'), '已设置')
   assert.equal(await run('document.body.textContent.includes("tvly-fixture-saved") || document.body.textContent.includes("brave-fixture-saved")'), false, 'saved secrets are not rendered as text')
+  await click('取消', true)
+  await wait('!window.ui.modal()')
+
+  phase = 'DeepSeek, OpenAI Chat and Responses, and five custom protocols'
+  await click('配置搜索')
+  await wait('!!window.ui.modal()')
+  await choose('sourceSearch_provider', 'DeepSeek Search')
+  assert.equal(await value('sourceSearch_platforms_deepseek_baseUrl'), 'https://api.deepseek.com/v1')
+  assert.equal(await run('window.ui.modal().textContent.includes("128 个字符")'), true, 'DeepSeek query limit is visible at configuration time')
+  assert.equal(await run('!!window.ui.modal().querySelector("#sourceSearch_platforms_deepseek_model")'), false, 'DeepSeek standalone search does not request a model')
+  assert.equal(await run('!!window.ui.modal().querySelector("#sourceSearch_platforms_deepseek_protocol")'), false, 'DeepSeek standalone protocol is fixed')
+  await edit('sourceSearch_platforms_deepseek_apiKey', 'deepseek-search-fixture')
+  await click('测试连接', true)
+  await wait('window.calls.filter(call => call.kind === "sourceSearch.test").at(-1).input.provider === "deepseek"')
+  assert.deepEqual((await calls('sourceSearch.test')).at(-1).platforms.deepseek, { protocol: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: '', apiKey: 'deepseek-search-fixture' })
+  await choose('sourceSearch_provider', 'OpenAI / GPT')
+  await wait('!!window.ui.modal().querySelector("#sourceSearch_platforms_openai_model")')
+  assert.equal(await run('window.ui.modal().textContent.includes("不将模型回答当作网页摘录")'), true, 'model search attribution boundary is explicit')
+  assert.equal(await value('sourceSearch_platforms_openai_model'), 'gpt-5.5')
+  await edit('sourceSearch_platforms_openai_apiKey', 'openai-search-fixture')
+  await openOptions('sourceSearch_platforms_openai_protocol')
+  assert.equal(await run('window.ui.options().length'), 2, 'OpenAI only offers Responses and Chat search protocols')
+  await run('window.ui.options().find(el => el.textContent.trim() === "Chat Completions · 搜索模型").click()')
+  await wait('window.ui.modal().querySelector("#sourceSearch_platforms_openai_model").value === "gpt-5-search-api"')
+  await edit('sourceSearch_platforms_openai_model', 'owner-specific-search-model')
+  await choose('sourceSearch_platforms_openai_protocol', 'Responses · web_search')
+  assert.equal(await value('sourceSearch_platforms_openai_model'), 'owner-specific-search-model', 'protocol selection never replaces a manually configured model')
+  await click('测试连接', true)
+  await wait('window.calls.filter(call => call.kind === "sourceSearch.test").at(-1).input.provider === "openai"')
+  assert.equal((await calls('sourceSearch.test')).at(-1).platforms.openai.protocol, 'responses')
+  await choose('sourceSearch_provider', '自定义兼容接口')
+  await edit('sourceSearch_platforms_custom_baseUrl', 'https://custom-search.example.test/v1')
+  await edit('sourceSearch_platforms_custom_model', 'custom-grounded-search')
+  await edit('sourceSearch_platforms_custom_apiKey', 'custom-search-fixture')
+  await openOptions('sourceSearch_platforms_custom_protocol')
+  assert.equal(await run('window.ui.options().length'), 5, 'custom endpoint offers all supported search protocols')
+  await run('window.ui.options().find(el => el.textContent.trim() === "DeepSeek Search").click()')
+  await wait('!window.ui.modal().querySelector("#sourceSearch_platforms_custom_model")')
+  await choose('sourceSearch_platforms_custom_protocol', 'Tavily Search')
+  assert.equal(await run('!!window.ui.modal().querySelector("#sourceSearch_platforms_custom_model")'), false)
+  await choose('sourceSearch_platforms_custom_protocol', 'Brave Search')
+  assert.equal(await run('!!window.ui.modal().querySelector("#sourceSearch_platforms_custom_model")'), false)
+  await choose('sourceSearch_platforms_custom_protocol', 'Chat Completions · 搜索模型')
+  assert.equal(await value('sourceSearch_platforms_custom_model'), 'custom-grounded-search', 'custom model survives toggling non-model protocols')
+  await choose('sourceSearch_platforms_custom_protocol', 'Responses · web_search')
+  await layouts('search-multi-platform')
+
+  phase = 'auto mode tests the edited slot and saves all independent slots'
+  await choose('sourceSearch_provider', '自动选择')
+  await choose('sourceSearch_editingPlatform', '自定义兼容接口')
+  const updatesBeforeAutoTest = (await calls('sourceSearch.updateSettings')).length
+  await click('测试连接', true)
+  await wait('window.calls.filter(call => call.kind === "sourceSearch.test").at(-1).input.provider === "custom"')
+  assert.equal((await calls('sourceSearch.updateSettings')).length, updatesBeforeAutoTest, 'auto draft test does not save')
+  await wait('window.ui.modal().textContent.includes("隔离配置测试成功")')
+  await choose('sourceSearch_editingPlatform', 'DeepSeek Search')
+  await wait('!window.ui.modal().textContent.includes("隔离配置测试成功")')
+  assert.equal(await value('sourceSearch_platforms_deepseek_apiKey'), 'deepseek-search-fixture', 'draft credentials remain scoped to their own platform')
+  await choose('sourceSearch_editingPlatform', 'OpenAI / GPT')
+  assert.equal(await value('sourceSearch_platforms_openai_apiKey'), 'openai-search-fixture')
+  await click('保存', true)
+  await wait('!window.ui.modal() && window.calls.filter(call => call.kind === "sourceSearch.updateSettings").length === 2')
+  const multiSave = (await calls('sourceSearch.updateSettings')).at(-1)
+  assert.equal(multiSave.provider, 'auto', 'testing a specific auto slot does not change the saved selection mode')
+  assert.equal(multiSave.tavilyApiKey, '已设置')
+  assert.equal(multiSave.braveApiKey, '已设置')
+  assert.equal(multiSave.platforms.deepseek.apiKey, 'deepseek-search-fixture')
+  assert.equal(multiSave.platforms.openai.apiKey, 'openai-search-fixture')
+  assert.equal(multiSave.platforms.custom.apiKey, 'custom-search-fixture')
+  for (const slot of Object.values(multiSave.platforms)) assert.deepEqual(Object.keys(slot).sort(), ['apiKey', 'baseUrl', 'model', 'protocol'], 'only configuration fields enter the update contract')
+  assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('DeepSeek Search'))
+  assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('自动选择'))
+  const beforeSavedSearchTest = (await calls('sourceSearch.test')).length
+  await click('测试已保存配置')
+  await wait(`window.calls.filter(call => call.kind === "sourceSearch.test").length === ${beforeSavedSearchTest + 1}`)
+  assert.equal((await calls('sourceSearch.test')).at(-1), undefined, 'saved test keeps the no-argument RPC contract')
+
+  phase = 'saved keys are isolated when base URL or protocol changes'
+  await click('配置搜索')
+  await wait('!!window.ui.modal()')
+  await choose('sourceSearch_editingPlatform', 'OpenAI / GPT')
+  assert.equal(await value('sourceSearch_platforms_openai_apiKey'), '已设置')
+  await edit('sourceSearch_platforms_openai_baseUrl', 'https://changed-search.example.test/v1')
+  assert.equal(await value('sourceSearch_platforms_openai_apiKey'), '', 'changing endpoint removes the old credential mask')
+  await wait('window.ui.modal().textContent.includes("接口已改变")')
+  const blockedUpdates = (await calls('sourceSearch.updateSettings')).length
+  const blockedTests = (await calls('sourceSearch.test')).length
+  await click('保存', true)
+  await pause(50)
+  assert.equal((await calls('sourceSearch.updateSettings')).length, blockedUpdates, 'save requires a new key or explicit clear')
+  await click('测试连接', true)
+  await pause(50)
+  assert.equal((await calls('sourceSearch.test')).length, blockedTests, 'test never reuses the previous endpoint key')
+  await choose('sourceSearch_editingPlatform', 'Brave Search')
+  assert.equal(await value('sourceSearch_braveApiKey'), '已设置', 'reset guard is scoped and leaves other credentials intact')
+  await click('保存', true)
+  await pause(50)
+  assert.equal((await calls('sourceSearch.updateSettings')).length, blockedUpdates, 'hiding a slot does not bypass its unresolved key reset')
+  await choose('sourceSearch_editingPlatform', 'OpenAI / GPT')
+  await edit('sourceSearch_platforms_openai_apiKey', 'new-endpoint-search-fixture')
+  await wait('!window.ui.modal().textContent.includes("接口已改变")')
+  await click('测试连接', true)
+  await wait('window.calls.filter(call => call.kind === "sourceSearch.test").at(-1).input.platforms.openai.apiKey === "new-endpoint-search-fixture"')
+  await click('取消', true)
+  await wait('!window.ui.modal()')
+  await click('配置搜索')
+  await wait('!!window.ui.modal()')
+  await choose('sourceSearch_editingPlatform', 'OpenAI / GPT')
+  assert.equal(await value('sourceSearch_platforms_openai_baseUrl'), 'https://api.openai.com/v1', 'cancel discards endpoint drafts')
+  assert.equal(await value('sourceSearch_platforms_openai_apiKey'), '已设置', 'cancel restores the saved mask, never draft plaintext')
+  await choose('sourceSearch_platforms_openai_protocol', 'Chat Completions · 搜索模型')
+  assert.equal(await value('sourceSearch_platforms_openai_apiKey'), '', 'changing protocol removes the old credential mask')
+  assert.equal(await value('sourceSearch_platforms_openai_model'), 'owner-specific-search-model')
+  await click('清空此平台密钥', true)
+  await wait('!window.ui.modal().textContent.includes("接口已改变")')
+  await click('保存', true)
+  await wait('!window.ui.modal() && window.calls.filter(call => call.kind === "sourceSearch.updateSettings").length === 3')
+  const clearSave = (await calls('sourceSearch.updateSettings')).at(-1)
+  assert.equal(clearSave.platforms.openai.apiKey, '')
+  assert.equal(clearSave.platforms.openai.protocol, 'chat-completions')
+  assert.equal(clearSave.platforms.deepseek.apiKey, '已设置')
+  assert.equal(clearSave.platforms.custom.apiKey, '已设置')
+
+  phase = 'cancel/reopen and draft changes reject late search test results'
+  await click('配置搜索')
+  await wait('!!window.ui.modal()')
+  await choose('sourceSearch_editingPlatform', 'DeepSeek Search')
+  assert.equal(await value('sourceSearch_platforms_deepseek_apiKey'), '已设置')
+  await run('window.deferSearchTests = true')
+  await click('测试连接', true)
+  await click('测试连接', true)
+  await wait('window.searchTests.length === 1')
+  await click('取消', true)
+  await wait('!window.ui.modal()')
+  await click('配置搜索')
+  await wait('!!window.ui.modal()')
+  const pendingCancelledTests = (await calls('sourceSearch.test')).length
+  await click('测试连接', true)
+  await pause(40)
+  assert.equal((await calls('sourceSearch.test')).length, pendingCancelledTests, 'reopening cannot start a second paid test while the cancelled draft request remains in flight')
+  await run('window.searchTests[0].resolve({ success: true, providerName: "deepseek", latency: 2, info: "STALE_CANCELLED_SEARCH" })')
+  await pause(60)
+  assert.equal(await run('window.ui.modal().textContent.includes("STALE_CANCELLED_SEARCH")'), false, 'cancelled tests cannot contaminate reopened drafts')
+  await choose('sourceSearch_editingPlatform', '自定义兼容接口')
+  await click('测试连接', true)
+  await wait('window.searchTests.length === 2')
+  await edit('sourceSearch_platforms_custom_model', 'changed-after-test')
+  const pendingEditedTests = (await calls('sourceSearch.test')).length
+  await click('测试连接', true)
+  await click('测试连接', true)
+  await pause(40)
+  assert.equal((await calls('sourceSearch.test')).length, pendingEditedTests, 'draft edits invalidate results without releasing the real in-flight request lock')
+  await run('window.searchTests[1].resolve({ success: true, providerName: "custom", latency: 2, info: "STALE_EDITED_SEARCH" })')
+  await pause(60)
+  assert.equal(await run('window.ui.modal().textContent.includes("STALE_EDITED_SEARCH")'), false, 'edited drafts cannot display obsolete success')
+  await run('window.deferSearchTests = false')
+
+  phase = 'small-screen search modal has a real scrollable body and reachable footer'
+  win.setContentSize(480, 560)
+  await pause(80)
+  await run('window.ui.modal().querySelector(".ant-modal-body").scrollTop = 100000')
+  assert.equal(await run('(() => { const body = window.ui.modal().querySelector(".ant-modal-body"); return body.scrollHeight > body.clientHeight && body.scrollTop > 0; })()'), true, 'long mobile form genuinely scrolls')
+  assert.equal(await run('(() => { const button = window.ui.button("保存", true).getBoundingClientRect(); return button.bottom <= innerHeight && button.top >= 0; })()'), true, 'save remains reachable below the scrollable body')
+  assert.equal(await run('window.ui.modal().querySelector(".ant-modal-content").scrollWidth > window.ui.modal().querySelector(".ant-modal-content").clientWidth + 1'), false)
+  await snapshot('search-scroll-480.png')
+  win.setContentSize(1280, 1000)
+  await choose('sourceSearch_provider', '关闭来源检索')
+  assert.equal(await run('!!window.ui.modal().querySelector("input[type=password]")'), false, 'disabled mode hides credential fields')
+  await click('保存', true)
+  await wait('!window.ui.modal() && window.sourceSettings.provider === "disabled"')
+  assert.equal((await calls('sourceSearch.updateSettings')).at(-1).platforms.deepseek.apiKey, '已设置', 'disabling search keeps saved credentials')
+  assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('已关闭'))
   if (rendererErrors.length) console.error('Renderer errors:', JSON.stringify(rendererErrors, null, 2))
   assert.deepEqual(rendererErrors, [], 'no renderer errors')
   win.destroy()
   activeWindow = null
-  console.log('PASS model manager UI: discovery/select/manual fallback, masked saved credentials, URL/key/provider invalidation and races, delayed post-save refresh session isolation, draft search testing, save/masked readback, 720/1280 layouts. Screenshots: ' + profile)
+  console.log('PASS model manager UI: full model discovery regression; five independent search platforms; custom protocol matrix; auto-slot test targeting; masked key/endpoint/protocol isolation; explicit clear; cancel/edit race invalidation; 480/720/1280 layouts and mobile modal scrolling. Screenshots: ' + profile)
   if (rendererWarnings.length) console.log('Known antd static-message context warning recorded; no renderer errors.')
 }
 

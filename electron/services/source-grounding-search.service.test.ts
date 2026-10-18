@@ -20,6 +20,19 @@ describe('source-grounding-search service', () => {
       expect(query).toContain('排除道袍')
     }
   })
+
+  it('preserves a long explicit research request including its trailing exclusions instead of silently truncating', () => {
+    const exclusion = '排除明清服饰、道袍与影视剧二创设定，只采用宋代江南材料。'
+    const request = `查询宋代江南普通行旅者衣料；${'希望说明实物、文献与年代依据。'.repeat(30)}\n  ${exclusion}`
+    const queries = buildSourceGroundingQueries({ novelId: 1, chapterId: 1, chapterNum: 1, researchRequest: request, researchTopics: ['服饰器物'] })
+
+    expect(request.length).toBeGreaterThan(240)
+    expect(queries).toHaveLength(2)
+    for (const query of queries) {
+      expect(query).toContain(request.replace(/\s+/gu, ' ').trim())
+      expect(query).toContain(exclusion)
+    }
+  })
   it('builds real-world grounding queries for source-poor historical or domain contexts', () => {
     const historicalQueries = buildSourceGroundingQueries({
       novelId: 1,
@@ -198,7 +211,8 @@ describe('source-grounding-search service', () => {
 
     expect(result.attempted).toBe(true)
     expect(result.updated).toBe(false)
-    expect(result.diagnostics.join('\n')).toMatch(/未配置真实网页检索 provider/u)
+    expect(result.diagnostics.join('\n')).toContain('未配置真实网页检索服务')
+    expect(result.diagnostics.join('\n')).toContain('联网搜索配置')
   })
 
   it('does not call providers directly from env fallback when runtime settings are unavailable', async () => {
@@ -216,6 +230,23 @@ describe('source-grounding-search service', () => {
 
     expect(result.attempted).toBe(true)
     expect(result.updated).toBe(false)
-    expect(result.diagnostics.join('\n')).toMatch(/未配置真实网页检索 provider/u)
+    expect(result.diagnostics.join('\n')).toContain('未配置真实网页检索服务')
+    expect(result.diagnostics.join('\n')).toContain('联网搜索配置')
+  })
+
+  it('does not include unknown provider errors or credentials in grounding diagnostics', async () => {
+    const sourceLedgerJson = JSON.stringify([{ sourceKey: 'existing-evidence', sourceText: '保留原有证据' }])
+    const provider = vi.fn(async () => { throw new Error('Authorization: Bearer fixture-secret-do-not-echo') })
+
+    const result = await enrichSourceGroundingFromWeb({
+      novelId: 1, chapterId: 10, chapterNum: 3,
+      researchRequest: '查询宋代行旅衣料资料', sourceLedgerJson,
+    }, { provider, providerName: 'fixture' })
+
+    expect(provider).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ attempted: true, updated: false, sourceLedgerJson, discoveredSourceLedgerEntries: [], discoveredCanonFactCards: [] })
+    expect(result.diagnostics.join('\n')).toContain('检索失败，请检查搜索配置或网络后重试。')
+    expect(JSON.stringify(result)).not.toContain('fixture-secret-do-not-echo')
+    expect(JSON.stringify(result)).not.toContain('Authorization')
   })
 })

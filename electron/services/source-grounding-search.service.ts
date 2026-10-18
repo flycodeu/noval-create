@@ -5,14 +5,8 @@ import {
   isChapterWritebackSourceLedgerEntry,
 } from '../../src/shared/genre-system'
 import { getSourceSearchRuntimeConfig } from './source-search-settings.service'
-
-export interface WebSearchResult {
-  title: string
-  url: string
-  snippet: string
-  score?: number
-  publishedAt?: string
-}
+import { executeSourceSearch, SourceSearchError, type WebSearchResult } from './source-search-provider.service'
+export type { WebSearchResult } from './source-search-provider.service'
 
 export type SourceGroundingSearchProvider = (query: string, options: {
   maxResults: number
@@ -85,6 +79,7 @@ export function mergeSourceGroundingEnrichmentIntoCurrent(
 interface ProviderBundle {
   name: string
   search: SourceGroundingSearchProvider
+  queryCodePointLimit?: number
 }
 
 const WEB_GROUNDING_MAX_QUERIES = 2
@@ -212,12 +207,17 @@ function needsExternalGrounding(input: SourceGroundingEnrichmentInput): boolean 
   return /真实|现实|行业|职业|职场|政治|政务|政策|法规|法律|法院|检察|公安|刑侦|法医|医疗|医院|药品|金融|证券|银行|商业|商战|公司|互联网|科研|高校|军警|军事|地理|城市|年代|历史|新闻|舆情|制度|流程/u.test(combinedText)
 }
 
-export function buildSourceGroundingQueries(input: SourceGroundingEnrichmentInput): string[] {
+export function buildSourceGroundingQueries(input: SourceGroundingEnrichmentInput, queryCodePointLimit?: number): string[] {
   if (input.researchRequest?.trim()) {
-    const focus = compactText(input.researchRequest, 240)
+    // Query operators and exclusions at the end of a request must not be silently dropped.
+    // Protocol-specific limits are enforced explicitly by the selected search adapter.
+    const focus = input.researchRequest.replace(/\s+/gu, ' ').trim()
     const topic = (input.researchTopics || []).join(' ')
     const query = [...new Set([focus, topic].filter(Boolean))].join(' ')
-    return [`${query} 原典 文献 博物馆 大学`, `${query} 历史 生活 实践 研究`]
+    const variants = [`${query} 原典 文献 博物馆 大学`, `${query} 历史 生活 实践 研究`]
+    // Drop only our optional expansion when it would exceed the provider's limit.
+    // The complete author request remains intact, and overlong requests fail explicitly.
+    return [...new Set(variants.map(value => queryCodePointLimit && Array.from(value).length > queryCodePointLimit ? focus : value))]
   }
   if (!needsExternalGrounding(input)) return []
 
@@ -282,6 +282,7 @@ function mapSearchResultsToSourceEntries(
       sourceUrl: url,
       factTitle: title,
       sourceText: snippet,
+      ...(result.excerptKind ? { excerptKind: result.excerptKind } : {}),
       confidence,
       verificationStatus: 'web_found',
       publishedAt: result.publishedAt,
@@ -296,6 +297,7 @@ function mapSearchResultsToSourceEntries(
       entityId: null,
       title,
       summary: snippet,
+      ...(result.excerptKind ? { excerptKind: result.excerptKind } : {}),
       sourceTexts: [url, snippet].filter(Boolean),
       sourceKeys: [key],
       confidence,
@@ -308,113 +310,15 @@ function mapSearchResultsToSourceEntries(
   return { sourceLedgerEntries, canonFactCards }
 }
 
-async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<unknown> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    })
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return await response.json() as unknown
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-function normalizeTavilyResults(payload: unknown): WebSearchResult[] {
-  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : {}
-  const results = Array.isArray(record.results) ? record.results : []
-  return results
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
-    .map((item) => ({
-      title: asText(item.title),
-      url: asText(item.url),
-      snippet: asText(item.content) || asText(item.snippet),
-      score: typeof item.score === 'number' ? item.score : undefined,
-      publishedAt: asText(item.published_date),
-    }))
-    .filter((item) => item.title && item.url)
-}
-
-function normalizeBraveResults(payload: unknown): WebSearchResult[] {
-  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : {}
-  const web = record.web && typeof record.web === 'object' && !Array.isArray(record.web)
-    ? record.web as Record<string, unknown>
-    : {}
-  const results = Array.isArray(web.results) ? web.results : []
-  return results
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
-    .map((item) => ({
-      title: asText(item.title),
-      url: asText(item.url),
-      snippet: asText(item.description),
-      publishedAt: asText(item.age),
-    }))
-    .filter((item) => item.title && item.url)
-}
-
-function createTavilyProvider(apiKey: string): ProviderBundle {
-  return {
-    name: 'tavily',
-    search: async (query, options) => {
-      const payload = await fetchJson('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          query,
-          search_depth: 'basic',
-          include_answer: false,
-          include_raw_content: false,
-          max_results: options.maxResults,
-        }),
-      }, options.timeoutMs)
-      return normalizeTavilyResults(payload).slice(0, options.maxResults)
-    },
-  }
-}
-
-function createBraveProvider(apiKey: string): ProviderBundle {
-  return {
-    name: 'brave',
-    search: async (query, options) => {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${options.maxResults}`
-      const payload = await fetchJson(url, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          'X-Subscription-Token': apiKey,
-        },
-      }, options.timeoutMs)
-      return normalizeBraveResults(payload).slice(0, options.maxResults)
-    },
-  }
-}
-
-function createProviderFromStoredSettings(): ProviderBundle | null {
+function createDefaultProvider(): ProviderBundle | null {
   try {
     const runtime = getSourceSearchRuntimeConfig()
     if (!runtime.apiKey || !runtime.providerName) return null
-    return runtime.providerName === 'tavily'
-      ? createTavilyProvider(runtime.apiKey)
-      : createBraveProvider(runtime.apiKey)
+    return { name: runtime.providerName, search: (query, options) => executeSourceSearch(runtime, query, options),
+      queryCodePointLimit: runtime.protocol === 'deepseek' || runtime.providerName === 'deepseek' ? 128 : undefined }
   } catch {
     return null
   }
-}
-
-function createDefaultProvider(): ProviderBundle | null {
-  return createProviderFromStoredSettings()
 }
 
 export async function enrichSourceGroundingFromWeb(
@@ -425,7 +329,7 @@ export async function enrichSourceGroundingFromWeb(
     now?: () => string
   } = {},
 ): Promise<SourceGroundingEnrichmentResult> {
-  const queries = buildSourceGroundingQueries(input)
+  let queries = buildSourceGroundingQueries(input)
   const sourceLedgerJson = input.sourceLedgerJson || ''
   const canonSourceLedgerJson = input.canonSourceLedgerJson || ''
   const canonFactCardsJson = input.canonFactCardsJson || ''
@@ -444,6 +348,7 @@ export async function enrichSourceGroundingFromWeb(
   }
 
   const defaultProvider = dependencies.provider ? null : createDefaultProvider()
+  if (defaultProvider?.queryCodePointLimit) queries = buildSourceGroundingQueries(input, defaultProvider.queryCodePointLimit)
   const provider = dependencies.provider || defaultProvider?.search
   const providerName = dependencies.providerName || defaultProvider?.name
   if (!provider || !providerName) {
@@ -451,7 +356,7 @@ export async function enrichSourceGroundingFromWeb(
       attempted: true,
       updated: false,
       queries,
-      diagnostics: ['未配置真实网页检索 provider；可在模型管理的“来源检索配置”保存 Tavily/Brave Key，或设置 TAVILY_API_KEY / BRAVE_SEARCH_API_KEY。'],
+      diagnostics: ['未配置真实网页检索服务；请在“模型与搜索”的“联网搜索配置”中配置搜索平台与 API Key。'],
       sourceLedgerJson,
       canonSourceLedgerJson,
       canonFactCardsJson,
@@ -478,7 +383,7 @@ export async function enrichSourceGroundingFromWeb(
         diagnostics.push(`查询无有效结果：${query}`)
       }
     } catch (error) {
-      diagnostics.push(`查询失败：${query}；${error instanceof Error ? error.message : String(error)}`)
+      diagnostics.push(`查询失败：${query}；${error instanceof SourceSearchError ? error.message : '检索失败，请检查搜索配置或网络后重试。'}`)
     }
   }
 

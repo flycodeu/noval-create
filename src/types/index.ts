@@ -1,4 +1,10 @@
 import type { GenreWorldRules } from '../shared/genre-system'
+import type { SourceSearchSettingsView, SourceSearchSettingsUpdate, SourceSearchTestResult } from '../shared/source-search'
+export type {
+  SourceSearchPlatformName, SourceSearchProviderMode, SourceSearchProviderName, SourceSearchProtocol,
+  SourceSearchPlatformConfig, SourceSearchPlatformView, SourceSearchSettingsView,
+  SourceSearchSettingsUpdate, SourceSearchTestResult,
+} from '../shared/source-search'
 import type { ZhuqueSettingsView, ZhuqueSettingsUpdate, ZhuqueChapterView, ZhuqueTestResult } from '../shared/zhuque-detection'
 import type { NovelOperatingMode } from '../shared/operating-mode'
 import type { StyleStats } from '../shared/style-fingerprint-stats'
@@ -1556,32 +1562,6 @@ export interface ModelDiscoveryRequest {
 
 export interface ModelDiscoveryResult {
   models: string[]
-}
-
-export type SourceSearchProviderMode = 'auto' | 'tavily' | 'brave' | 'disabled'
-export type SourceSearchProviderName = 'tavily' | 'brave'
-
-export interface SourceSearchSettingsView {
-  provider: SourceSearchProviderMode
-  tavilyApiKeySet: boolean
-  braveApiKeySet: boolean
-  tavilyEnvSet: boolean
-  braveEnvSet: boolean
-  activeProvider: SourceSearchProviderName | null
-  updatedAt?: string | null
-}
-
-export interface SourceSearchSettingsUpdate {
-  provider?: SourceSearchProviderMode
-  tavilyApiKey?: string
-  braveApiKey?: string
-}
-
-export interface SourceSearchTestResult {
-  success: boolean
-  providerName: SourceSearchProviderName | null
-  latency: number
-  info: string
 }
 
 export interface Template {

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { searchCreativeResearch, listCreativeResearch } from './creative-research.service'
 import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
+import type { SourceSearchRuntimeConfig } from '../../src/shared/source-search'
 
-const state = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], runtime: { mode: 'auto', providerName: null, apiKey: null } as { mode: string; providerName: string | null; apiKey: string | null } }))
+const state = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], runtime: { mode: 'auto', providerName: null, apiKey: null } as SourceSearchRuntimeConfig }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ transaction: (callback: () => unknown) => ({ immediate: callback }) }) }))
 vi.mock('./novel.service', () => ({ getNovel: () => state.novel, updateNovel: (_: number, data: Record<string, unknown>) => { state.writes.push(data); Object.assign(state.novel, data, { contextVersion: Number(state.novel.contextVersion) + 1 }) } }))
 vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 5, chapterNum: 2, title: '夜入道观' }] }))
@@ -15,7 +16,7 @@ describe('creative research persistence and subsequent writing material', () => 
   afterEach(() => { vi.unstubAllGlobals() })
   it('uses the configured provider HTTP contract with mocked transport and saves reference-only sources for later chapter selection', async () => {
     state.runtime = { mode: 'auto', providerName: 'tavily', apiKey: 'test-only-placeholder' }
-    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ results: [{ ...source, content: source.snippet }] }) }))
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ results: [{ ...source, content: source.snippet }] }), { status: 200 }))
     vi.stubGlobal('fetch', fetch)
     const result = await searchCreativeResearch(1, '补充道教知识，运用在夜入道观的章节', 2)
     expect(fetch).toHaveBeenCalledTimes(2)
@@ -28,6 +29,65 @@ describe('creative research persistence and subsequent writing material', () => 
     expect(state.novel.sourceLedgerJson).toContain('既有正文证据')
     expect(selectCreativeResearchSources(String(state.novel.sourceLedgerJson), '道士在道观里借灯')).toEqual(result.sources)
     expect(CREATIVE_RESEARCH_USAGE).toContain('不是小说正史或人物已知信息')
+  })
+
+  it.each(['responses', 'chat-completions'] as const)('persists %s structured source titles only, never attributing model-written synthesis as a webpage excerpt or story fact', async protocol => {
+    state.runtime = { mode: 'custom', providerName: 'custom', protocol, baseUrl: 'https://fixture.example/v1', model: 'fixture-search-model', apiKey: 'test-only-placeholder' }
+    const modelText = '检索模型生成的综合观点，不是网页原文，也不能升级为小说中的正史。'
+    const citation = { type: 'url_citation', url: source.url, title: source.title, start_index: 0, end_index: modelText.length }
+    const payload = protocol === 'responses' ? {
+      status: 'completed', output: [
+        { type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [{ type: 'url', url: source.url, title: source.title }] } },
+        { type: 'message', status: 'completed', content: [{ type: 'output_text', text: modelText, annotations: [citation] }] },
+      ],
+    } : { choices: [{ finish_reason: 'stop', message: { content: modelText, annotations: [{ type: 'url_citation', url_citation: citation }] } }] }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await searchCreativeResearch(1, '查询道教典籍，保留原有角色已知信息', 2)
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ updated: true, contextVersion: 8, sources: [expect.objectContaining({
+      title: source.title, url: source.url, excerpt: source.title, excerptKind: 'source_metadata', verificationStatus: 'web_found', canonDecision: 'reference_only',
+    })] })
+    expect(state.writes).toEqual([{ sourceLedgerJson: expect.any(String) }])
+    expect(state.novel.canonFactCardsJson).toBe('[{"cardKey":"keep"}]')
+    expect(state.novel.sourceLedgerJson).toContain('既有正文证据')
+    expect(JSON.stringify(result)).not.toContain(modelText)
+    expect(String(state.novel.sourceLedgerJson)).not.toContain(modelText)
+    expect(String(state.novel.sourceLedgerJson)).not.toContain('test-only-placeholder')
+  })
+
+  it.each([115, 128])('sends a complete %s-code-point DeepSeek request without system expansions exceeding the limit', async size => {
+    state.runtime = { mode: 'deepseek', providerName: 'deepseek', protocol: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: '', apiKey: 'test-only-placeholder' }
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ results: [source] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const request = `服饰资料${'𠮷'.repeat(size - 4)}`
+    const result = await searchCreativeResearch(1, request, 2)
+    expect(result.updated).toBe(true)
+    expect(result.queries).toEqual([request])
+    expect(fetch).toHaveBeenCalledOnce()
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body)).query).toBe(request)
+    expect(Array.from(request)).toHaveLength(size)
+  })
+
+  it('rejects overlong DeepSeek queries explicitly without network access, truncated exclusions or research writes', async () => {
+    state.runtime = { mode: 'deepseek', providerName: 'deepseek', protocol: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: '', apiKey: 'test-only-placeholder' }
+    const fetch = vi.fn(async () => { throw new Error('Unexpected provider request') })
+    vi.stubGlobal('fetch', fetch)
+    const original = { ...state.novel }
+    const exclusion = '排除明清服饰与影视二创设定。'
+    const request = `查询宋代江南行旅衣料；${'优先使用博物馆实物与年代依据。'.repeat(20)}${exclusion}`
+
+    const result = await searchCreativeResearch(1, request, 2)
+
+    expect(result).toMatchObject({ attempted: true, updated: false, sources: [], contextVersion: 7 })
+    expect(result.queries.every(query => query.includes(exclusion))).toBe(true)
+    expect(result.diagnostics.join('\n')).toContain('128')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(state.writes).toEqual([])
+    expect(state.novel).toEqual(original)
   })
   it('reuses exactly the same recent request, but a new topic still searches even with old sources', async () => {
     const search = provider(), options = { provider: search, providerName: 'fixture', now: () => '2026-10-17T00:00:00Z' }

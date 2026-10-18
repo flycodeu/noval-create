@@ -588,6 +588,7 @@ export function runMigrations(sqlite: Database.Database) {
       provider TEXT NOT NULL DEFAULT 'auto',
       tavily_api_key TEXT,
       brave_api_key TEXT,
+      platforms_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -853,6 +854,7 @@ export function runMigrations(sqlite: Database.Database) {
       provider TEXT NOT NULL DEFAULT 'auto',
       tavily_api_key TEXT,
       brave_api_key TEXT,
+      platforms_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -860,6 +862,7 @@ export function runMigrations(sqlite: Database.Database) {
     INSERT OR IGNORE INTO source_search_settings (id, provider)
     VALUES (1, 'auto');
   `)
+  ensureColumn(sqlite, 'source_search_settings', 'platforms_json', 'TEXT')
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS generation_history (
