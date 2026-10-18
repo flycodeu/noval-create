@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import { Button, Empty, Progress, Tag, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage } from '@/utils/user-facing-message'
@@ -14,24 +14,33 @@ function taskTitle(stream: TaskStream): string {
   return `任务 #${stream.taskId}`
 }
 
-function TaskRow({ stream, onNavigate }: { stream: TaskStream; onNavigate: () => void }) {
+function TaskRow({ stream, onNavigate, onRequestNavigate }: { stream: TaskStream; onNavigate: () => void; onRequestNavigate?: (path: string) => void }) {
   const navigate = useNavigate()
+  const [cancelling, setCancelling] = useState(false)
+  const cancelInFlight = useRef(false)
   const stageText = stream.stageLabel || formatStageLabel(stream.stage)
 
   const handleOpen = () => {
+    const requestNavigate = onRequestNavigate || navigate
     if (stream.meta.novelId && stream.meta.chapterId) {
-      navigate(`${buildWorkspaceRoute(stream.meta.novelId, 'writing/editor')}?chapterId=${stream.meta.chapterId}`)
+      requestNavigate(`${buildWorkspaceRoute(stream.meta.novelId, 'writing/editor')}?chapterId=${stream.meta.chapterId}`)
     } else {
-      navigate('/tasks')
+      requestNavigate('/tasks')
     }
     onNavigate()
   }
 
   const handleCancel = async () => {
+    if (cancelInFlight.current) return
+    cancelInFlight.current = true
+    setCancelling(true)
     try {
-      await window.electron.task?.cancel?.(stream.taskId)
+      await window.electron.task.cancel(stream.taskId)
     } catch (error) {
       message.error(getErrorMessage(error, 'taskCenter.cancelFailed'))
+    } finally {
+      cancelInFlight.current = false
+      setCancelling(false)
     }
   }
 
@@ -54,13 +63,13 @@ function TaskRow({ stream, onNavigate }: { stream: TaskStream; onNavigate: () =>
       )}
       <div className="task-indicator-panel__row-actions">
         <Button size="small" onClick={handleOpen}>查看</Button>
-        <Button size="small" danger onClick={handleCancel}>取消</Button>
+        <Button size="small" danger loading={cancelling} onClick={handleCancel}>取消任务</Button>
       </div>
     </div>
   )
 }
 
-export default function TaskIndicatorPanel({ onNavigate }: { onNavigate: () => void }) {
+export default function TaskIndicatorPanel({ onNavigate, onRequestNavigate }: { onNavigate: () => void; onRequestNavigate?: (path: string) => void }) {
   const runningTasks = useRunningTasks()
   const navigate = useNavigate()
 
@@ -70,7 +79,7 @@ export default function TaskIndicatorPanel({ onNavigate }: { onNavigate: () => v
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有进行中的任务" />
       ) : (
         runningTasks.map((stream) => (
-          <TaskRow key={stream.taskId} stream={stream} onNavigate={onNavigate} />
+          <TaskRow key={stream.taskId} stream={stream} onNavigate={onNavigate} onRequestNavigate={onRequestNavigate} />
         ))
       )}
       <div className="task-indicator-panel__footer">
@@ -78,11 +87,12 @@ export default function TaskIndicatorPanel({ onNavigate }: { onNavigate: () => v
           type="link"
           size="small"
           onClick={() => {
-            navigate('/tasks')
+            if (onRequestNavigate) onRequestNavigate('/tasks')
+            else navigate('/tasks')
             onNavigate()
           }}
         >
-          打开任务中心
+          打开运行记录
         </Button>
       </div>
     </div>

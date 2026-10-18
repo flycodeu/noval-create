@@ -30,8 +30,11 @@ import type {
   MapBoardViewportInput,
   NarrativeBoardQueryInput,
   MaintenanceWorkerStatus,
+  ModelDiscoveryRequest,
+  ModelDiscoveryResult,
   NovelCreateInput,
   NovelUpdateOptions,
+  SourceSearchSettingsUpdate,
 } from '../src/types'
 
 interface IpcBridgeErrorPayload {
@@ -560,6 +563,7 @@ const api = {
   // Model APIs
   model: {
     list: () => invokeIpc('model:list'),
+    discover: (input: ModelDiscoveryRequest) => invokeIpc<ModelDiscoveryResult>('model:discover', input),
     create: (data: unknown) => invokeIpc('model:create', data),
     update: (id: number, data: unknown) => invokeIpc('model:update', id, data),
     delete: (id: number) => invokeIpc('model:delete', id),
@@ -577,7 +581,7 @@ const api = {
   sourceSearch: {
     getSettings: () => invokeIpc('sourceSearch:getSettings'),
     updateSettings: (data: unknown) => invokeIpc('sourceSearch:updateSettings', data),
-    test: () => invokeIpc('sourceSearch:test'),
+    test: (data?: SourceSearchSettingsUpdate) => invokeIpc('sourceSearch:test', ...(data === undefined ? [] : [data])),
     research: (novelId: number, request: string, atChapter?: number) => invokeIpc('sourceSearch:research', novelId, request, atChapter),
     listResearch: (novelId: number, query?: string) => invokeIpc('sourceSearch:listResearch', novelId, query),
   },

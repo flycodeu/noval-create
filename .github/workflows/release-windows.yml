@@ -58,12 +58,15 @@ jobs:
       - name: Test and build Windows packages
         run: npm run build:win
 
-      - name: Preserve layout test failure diagnostics
+      - name: Preserve UI test failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: workspace-layout-failure
-          path: outputs/layout-release-*/workspace-layout-ui-failure.*
+          path: |
+            outputs/layout-release-*/workspace-layout-ui-failure.*
+            outputs/global-interface-*/failure.*
+            .tmp-tests/model-manager-ui-*/failure.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -103,7 +106,9 @@ jobs:
           $silentUpdateNote = if ($version -eq '1.0.2') {
             '1.0.2 的安装版在用户确认后静默安装更新并重启，沿用原安装位置。'
           } else { $null }
-          $releaseChangesNote = if ($version -eq '2.4.33') {
+          $releaseChangesNote = if ($version -eq '2.4.34') {
+            '2.4.34 新增模型目录拉取、搜索和选择，保留手工输入；模型与搜索页可配置并测试 Tavily、Brave 密钥，测试未保存配置不会写入设置。按实际六个创作工作区和六个全局页面检查并精简重复备注，保留未保存修改、删除、密钥和候选应用提示。修复异步旧结果覆盖、重复提交、历史草稿无效恢复入口和窄屏操作区，补回小说工作区后台任务入口并保留离开确认。补充真实 React/Electron 的页面、弹窗和流程回归测试。安装更新不会自动修改小说正文、人物或世界设定；真实供应商接口仍需配置本机密钥验证。'
+          } elseif ($version -eq '2.4.33') {
             '2.4.33 修复时间轴事件详情的“更多已保存资料”中，开始章节、结束章节及最近推进章节误显示“关联章节不可用”的问题。已有章节按真实章节 ID 显示章序与章名，确实失效的关联仍保留不可用提示。保留现有时间轴分组、筛选、分页和详情定位，不修改小说正文、人物、头像、设定或规划数据。'
           } elseif ($version -eq '2.4.32') {
             '2.4.32 修复正式 Windows 无边框窗口中，资料和世界规则抽屉顶部关闭按钮被标题栏拖拽区域遮挡的问题。时间轴将已发生事件与作者的卷级、单元和背景规划分开，避免把规划关联章位当成实际发生章节，保留完整详情和查找定位。创作台将要求输入和开始操作移到顶部，集中创作选项、模型设置与作品进展；移除参考资料页的固定说明。现有小说正文、人物、头像、关系与规划数据保留。'
@@ -190,7 +195,7 @@ jobs:
             $releaseChangesNote,
             $startupFixNote,
             $silentUpdateNote,
-            '本版通过工程验证；真实模型资料生成仅覆盖已实测的小批次，百万字连续写作与真人读者验收尚未完成。',
+            '工程测试使用隔离数据和受控服务，不能替代本机真实模型、搜索与朱雀接口验证；百万字连续写作与真人读者验收尚未完成。',
             '',
             '当前安装包未进行 Windows 代码签名，首次安装可能出现 SmartScreen 提示。SHA256SUMS.txt 可用于核对下载文件。',
             $upgradeNote

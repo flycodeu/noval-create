@@ -23,18 +23,15 @@ import {
   StarFilled,
   StarOutlined,
 } from '@ant-design/icons'
-import type {
-  ModelConfig,
-  SourceSearchProviderMode,
-  SourceSearchSettingsUpdate,
-  SourceSearchSettingsView,
-  SourceSearchTestResult,
-} from '../../types'
+import type { ModelConfig } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import { DEEPSEEK_V4_MAX_OUTPUT_TOKENS, getProviderMaxOutputTokens } from '../../shared/model-token-limits'
 import './index.css'
 import ZhuqueSettings from './ZhuqueSettings'
+import ModelIdPicker from './ModelIdPicker'
+import SourceSearchSettings, { type SourceSearchSettingsHandle } from './SourceSearchSettings'
+import { hasModelFormChanges, parseModelExtraParams } from './model-form'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
 const MASKED_KEY = '已设置'
@@ -63,32 +60,6 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   claude_code: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'sonnet', maxContextTokens: 200000 },
 }
 
-const SOURCE_PROVIDER_OPTIONS = [
-  { value: 'auto', label: '自动选择' },
-  { value: 'tavily', label: 'Tavily' },
-  { value: 'brave', label: 'Brave Search' },
-  { value: 'disabled', label: '关闭来源检索' },
-]
-
-const SOURCE_PROVIDER_GUIDE: Record<SourceSearchProviderMode, { title: string; detail: string }> = {
-  auto: {
-    title: '自动选择可用检索',
-    detail: '系统会按当前可用配置选择检索来源。',
-  },
-  tavily: {
-    title: '固定使用 Tavily',
-    detail: '用于网页摘要和来源补充。',
-  },
-  brave: {
-    title: '固定使用 Brave Search',
-    detail: '用于通用网页检索结果。',
-  },
-  disabled: {
-    title: '关闭来源检索',
-    detail: '不会自动补充网页资料。',
-  },
-}
-
 function providerRequiresApiKey(provider?: string): boolean {
   return provider !== 'custom' && provider !== 'codex' && provider !== 'claude_code'
 }
@@ -97,20 +68,6 @@ function isNativeAgentProvider(provider?: string): boolean {
   return provider === 'codex' || provider === 'claude_code'
 }
 
-function parseModelExtraParams(raw?: string | null): { kimiThinking?: 'enabled' | 'disabled'; deepseekReasoningEffort?: 'none' | 'low' | 'high' | 'max' } {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    const record = parsed as Record<string, unknown>
-    return {
-      ...(record.kimiThinking === 'enabled' || record.kimiThinking === 'disabled' ? { kimiThinking: record.kimiThinking } : {}),
-      ...(['none', 'low', 'high', 'max'].includes(String(record.deepseekReasoningEffort)) ? { deepseekReasoningEffort: record.deepseekReasoningEffort as 'none' | 'low' | 'high' | 'max' } : {}),
-    }
-  } catch {
-    return {}
-  }
-}
 
 function getKimiContextWindow(modelId?: string): number | undefined {
   const normalized = (modelId || '').trim().toLowerCase()
@@ -153,53 +110,31 @@ function buildModelSavePayload(values: Record<string, unknown>): Record<string, 
   }
 }
 
-function getSourceProviderLabel(provider?: string | null) {
-  if (provider === 'tavily') return 'Tavily'
-  if (provider === 'brave') return 'Brave'
-  if (provider === 'disabled') return '已关闭'
-  return '自动'
-}
-
-function getSourceKeyStatus(saved?: boolean, env?: boolean) {
-  if (saved && env) return '已保存 + 环境变量'
-  if (saved) return '已保存'
-  if (env) return '环境变量'
-  return '未配置'
-}
-
-function formatSavedAt(value?: string | null) {
-  if (!value) return '未保存'
-  try {
-    return new Date(value).toLocaleString()
-  } catch {
-    return value
-  }
-}
-
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<ModelConfig | null>(null)
   const [form] = Form.useForm()
-  const [sourceForm] = Form.useForm<SourceSearchSettingsUpdate>()
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; latency: number; info: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [isNew, setIsNew] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
-  const [sourceEditorOpen, setSourceEditorOpen] = useState(false)
-  const [sourceSettings, setSourceSettings] = useState<SourceSearchSettingsView | null>(null)
-  const [sourceSaving, setSourceSaving] = useState(false)
-  const [sourceTesting, setSourceTesting] = useState(false)
-  const [sourceTestResult, setSourceTestResult] = useState<SourceSearchTestResult | null>(null)
+  const sourceSettingsRef = useRef<SourceSearchSettingsHandle>(null)
+  const [sourceReady, setSourceReady] = useState(false)
 
   const selectedProvider = Form.useWatch('provider', form)
   const selectedModelId = Form.useWatch('modelId', form)
+  const selectedApiKey = Form.useWatch('apiKey', form)
+  const selectedBaseUrl = Form.useWatch('baseUrl', form)
   const selectedConfigProvider = selected?.provider
-  const selectedSourceProvider = Form.useWatch('provider', sourceForm)
 
   const configsRequestRef = useRef(0)
   const loadingRequestRef = useRef(0)
+  const saveInFlightRef = useRef(false)
+  const testRequestRef = useRef(0)
+  const testInFlightRef = useRef<number | null>(null)
+  const dirtyRef = useRef(false)
 
   const refreshConfigs = useCallback(async () => {
     const requestId = ++configsRequestRef.current
@@ -222,24 +157,14 @@ export default function ModelManager() {
     }
   }, [])
 
-  const loadSourceSettings = useCallback(async () => {
-    try {
-      const settings = await window.electron.sourceSearch.getSettings()
-      setSourceSettings(settings)
-      sourceForm.setFieldsValue({
-        provider: settings.provider,
-        tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
-        braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
-      })
-    } catch (error) {
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    }
-  }, [sourceForm])
-
   useEffect(() => {
     void loadConfigs()
-    void loadSourceSettings()
-  }, [loadConfigs, loadSourceSettings])
+    return () => {
+      configsRequestRef.current += 1
+      loadingRequestRef.current += 1
+      testRequestRef.current += 1
+    }
+  }, [loadConfigs])
 
   const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai
@@ -273,6 +198,10 @@ export default function ModelManager() {
   }, [form])
 
   const selectConfig = (config: ModelConfig) => {
+    if (saveInFlightRef.current) return
+    testRequestRef.current += 1
+    setTesting(false)
+    dirtyRef.current = false
     setSelected(config)
     setIsNew(false)
     setTestResult(null)
@@ -280,11 +209,16 @@ export default function ModelManager() {
   }
 
   const openModelEditor = (config: ModelConfig) => {
+    if (saveInFlightRef.current) return
     selectConfig(config)
     setEditorOpen(true)
   }
 
   const handleNew = () => {
+    if (saveInFlightRef.current) return
+    testRequestRef.current += 1
+    setTesting(false)
+    dirtyRef.current = false
     setSelected(null)
     setIsNew(true)
     setTestResult(null)
@@ -295,46 +229,59 @@ export default function ModelManager() {
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields().catch(() => null)
-    if (!values) return
-    const payload = buildModelSavePayload(values)
+    if (saveInFlightRef.current || (!isNew && !selected)) return
+    saveInFlightRef.current = true
     setSaving(true)
     try {
-      if (isNew) {
-        const id = await window.electron.model.create(payload)
+      const values = await form.validateFields().catch(() => null)
+      if (!values) return
+      const payload = buildModelSavePayload({ ...values, name: values.name.trim(), modelId: values.modelId.trim() })
+      const id = isNew ? await window.electron.model.create(payload) : selected!.id
+      if (!isNew) await window.electron.model.update(id, payload)
+      dirtyRef.current = false
+      setEditorOpen(false)
+      setIsNew(false)
+      testRequestRef.current += 1
+      setTesting(false)
+      setTestResult(null)
+      message.success(getUserFacingMessage(isNew ? 'model.created' : 'model.saved'))
+      try {
         const nextConfigs = await refreshConfigs()
-        const newConfig = nextConfigs.find((config) => config.id === id)
-        message.success(getUserFacingMessage('model.created'))
-        if (newConfig) {
-          setSelected(newConfig)
-          hydrateModelForm(newConfig)
-          setIsNew(false)
-          setEditorOpen(false)
-        } else {
-          message.warning(getUserFacingMessage('model.saveListNotRefreshed'))
-        }
-        return
-      }
-
-      if (selected) {
-        await window.electron.model.update(selected.id, payload)
-        const nextConfigs = await refreshConfigs()
-        const updated = nextConfigs.find((config) => config.id === selected.id)
+        const updated = nextConfigs.find((config) => config.id === id)
         if (updated) {
           setSelected(updated)
           hydrateModelForm(updated)
+        } else {
+          message.warning(getUserFacingMessage('model.saveListNotRefreshed'))
         }
-        message.success(getUserFacingMessage('model.saved'))
-        setEditorOpen(false)
+      } catch {
+        message.warning(getUserFacingMessage('model.saveListNotRefreshed'))
       }
     } catch (error) {
       message.error(getErrorMessage(error, 'model.saveFailed'))
     } finally {
+      saveInFlightRef.current = false
       setSaving(false)
     }
   }
 
+  const closeEditor = () => {
+    if (saveInFlightRef.current) return
+    const close = () => {
+      testRequestRef.current += 1
+      setTesting(false)
+      dirtyRef.current = false
+      setEditorOpen(false)
+      if (selected) hydrateModelForm(selected)
+      else form.resetFields()
+    }
+    if (dirtyRef.current) {
+      Modal.confirm({ title: '放弃尚未保存的模型修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: close })
+    } else close()
+  }
+
   const handleDelete = async (config: ModelConfig) => {
+    if (saveInFlightRef.current) return
     Modal.confirm({
       title: `确认删除「${config.name}」？`,
       okType: 'danger',
@@ -358,6 +305,7 @@ export default function ModelManager() {
   }
 
   const handleSetDefault = async (config: ModelConfig) => {
+    if (saveInFlightRef.current) return
     try {
       await window.electron.model.setDefault(config.id)
       const nextConfigs = await refreshConfigs()
@@ -373,119 +321,42 @@ export default function ModelManager() {
   }
 
   const handleTest = async () => {
+    if (testInFlightRef.current === testRequestRef.current || saveInFlightRef.current) return
     if (!selected && !isNew) return
     if (isNew) {
       message.info(getUserFacingMessage('model.saveFirst'))
       return
     }
     const values = form.getFieldsValue(true)
-    const apiKeyChanged = Boolean(values.apiKey && values.apiKey !== MASKED_KEY)
-    const formChanged = selected && (
-      values.name !== selected.name
-      || values.provider !== selected.provider
-      || values.modelId !== selected.modelId
-      || values.baseUrl !== selected.baseUrl
-      || values.temperature !== selected.temperature
-      || values.maxTokens !== selected.maxTokens
-      || (values.maxContextTokens ?? undefined) !== (selected.maxContextTokens ?? undefined)
-      || values.maxConcurrency !== selected.maxConcurrency
-      || (values.provider === 'deepseek' && values.deepseekReasoningEffort !== (parseModelExtraParams(selected.extraParamsJson).deepseekReasoningEffort || 'low'))
-      || (values.provider === 'kimi' && values.kimiThinking !== (parseModelExtraParams(selected.extraParamsJson).kimiThinking || 'disabled'))
-      || apiKeyChanged
-    )
+    const formChanged = selected && hasModelFormChanges(selected, values)
     if (formChanged) {
+      setTestResult(null)
       message.info(getUserFacingMessage('model.saveFirst'))
       return
     }
     setTesting(true)
+    const requestId = ++testRequestRef.current
+    testInFlightRef.current = requestId
     setTestResult(null)
     try {
       const result = await window.electron.model.test(selected!.id)
-      setTestResult(result)
+      if (requestId === testRequestRef.current) setTestResult(result)
     } catch {
-      setTestResult({ success: false, latency: 0, info: getUserFacingMessage('model.testFailed') })
+      if (requestId === testRequestRef.current) setTestResult({ success: false, latency: 0, info: getUserFacingMessage('model.testFailed') })
     } finally {
-      setTesting(false)
-    }
-  }
-
-  const openSourceEditor = () => {
-    if (sourceSettings) {
-      sourceForm.setFieldsValue({
-        provider: sourceSettings.provider,
-        tavilyApiKey: sourceSettings.tavilyApiKeySet ? MASKED_KEY : '',
-        braveApiKey: sourceSettings.braveApiKeySet ? MASKED_KEY : '',
-      })
-    }
-    setSourceEditorOpen(true)
-  }
-
-  const handleSourceSave = async () => {
-    const values = await sourceForm.validateFields().catch(() => null)
-    if (!values) return
-    setSourceSaving(true)
-    try {
-      const settings = await window.electron.sourceSearch.updateSettings(values)
-      setSourceSettings(settings)
-      sourceForm.setFieldsValue({
-        provider: settings.provider,
-        tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
-        braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
-      })
-      setSourceTestResult(null)
-      setSourceEditorOpen(false)
-      message.success(getUserFacingMessage('model.sourceSearchSaved'))
-    } catch (error) {
-      message.error(getErrorMessage(error, 'common.saveFailed'))
-    } finally {
-      setSourceSaving(false)
-    }
-  }
-
-  const handleSourceTest = async () => {
-    const values = await sourceForm.validateFields().catch(() => null)
-    if (!values) return
-    const tavilyChanged = Boolean(values.tavilyApiKey && values.tavilyApiKey !== MASKED_KEY)
-    const braveChanged = Boolean(values.braveApiKey && values.braveApiKey !== MASKED_KEY)
-    const providerChanged = values.provider !== sourceSettings?.provider
-    setSourceTesting(true)
-    setSourceTestResult(null)
-    try {
-      if (tavilyChanged || braveChanged || providerChanged) {
-        const settings = await window.electron.sourceSearch.updateSettings(values)
-        setSourceSettings(settings)
-        sourceForm.setFieldsValue({
-          provider: settings.provider,
-          tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
-          braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
-        })
-      }
-      setSourceTestResult(await window.electron.sourceSearch.test())
-    } catch (error) {
-      setSourceTestResult({
-        success: false,
-        providerName: null,
-        latency: 0,
-        info: error instanceof Error ? error.message : getErrorMessage(error, 'model.testFailed'),
-      })
-    } finally {
-      setSourceTesting(false)
+      if (testInFlightRef.current === requestId) testInFlightRef.current = null
+      if (requestId === testRequestRef.current) setTesting(false)
     }
   }
 
   const currentProviderModels = PROVIDER_OPTIONS.find((provider) => provider.value === selectedProvider)?.models || []
   const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
   const selectedDefaultContextWindow = getProviderDefaultContextWindow(selectedProvider, selectedModelId)
-  const currentSourceMode = (selectedSourceProvider || sourceSettings?.provider || 'auto') as SourceSearchProviderMode
-  const sourceGuide = SOURCE_PROVIDER_GUIDE[currentSourceMode] || SOURCE_PROVIDER_GUIDE.auto
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
-  const activeSourceLabel = sourceSettings?.activeProvider
-    ? getSourceProviderLabel(sourceSettings.activeProvider)
-    : getSourceProviderLabel(sourceSettings?.provider)
 
   const refreshAll = () => {
     void loadConfigs()
-    void loadSourceSettings()
+    sourceSettingsRef.current?.refresh()
   }
 
   return (
@@ -499,13 +370,13 @@ export default function ModelManager() {
           <div className="admin-toolbar">
             <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
             <div className="admin-toolbar__actions">
-              <Button icon={<SearchOutlined />} onClick={openSourceEditor}>
-                搜索 API
+              <Button icon={<SearchOutlined />} disabled={!sourceReady} onClick={() => sourceSettingsRef.current?.open()}>
+                联网搜索配置
               </Button>
-              <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading}>
+              <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading} disabled={saving}>
                 刷新
               </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
+              <Button type="primary" icon={<PlusOutlined />} disabled={saving} onClick={handleNew}>
                 新建配置
               </Button>
             </div>
@@ -530,7 +401,8 @@ export default function ModelManager() {
                   <div
                     key={config.id}
                     role="button"
-                    tabIndex={0}
+                    tabIndex={saving ? -1 : 0}
+                    aria-disabled={saving}
                     data-model-config-card
                     className={`admin-sidebar-item model-manager-config-card ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
                     onClick={() => selectConfig(config)}
@@ -594,19 +466,20 @@ export default function ModelManager() {
                   </div>
                 </div>
                 <div className="model-manager-status-actions">
-                  <Button type="primary" icon={<EditOutlined />} onClick={() => openModelEditor(selected)}>
+                  <Button type="primary" icon={<EditOutlined />} disabled={saving} onClick={() => openModelEditor(selected)}>
                     编辑模型
                   </Button>
                   <Button
                     icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
+                    disabled={saving || selected.isDefault === 1}
                     onClick={() => void handleSetDefault(selected)}
                   >
                     {selected.isDefault ? '已设为默认' : '设为默认'}
                   </Button>
-                  <Button loading={testing} onClick={() => void handleTest()}>
+                  <Button loading={testing} disabled={saving} onClick={() => void handleTest()}>
                     测试连接
                   </Button>
-                  <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete(selected)}>
+                  <Button danger icon={<DeleteOutlined />} disabled={saving} onClick={() => void handleDelete(selected)}>
                     删除模型
                   </Button>
                   {testResult ? (
@@ -624,59 +497,8 @@ export default function ModelManager() {
           </WorkspacePanel>
         </div>
 
-        <WorkspacePanel title="正文检测"><ZhuqueSettings /></WorkspacePanel>
-        <details className="model-manager-source-disclosure" data-model-source-disclosure>
-          <summary><strong>来源检索与 API Key</strong></summary>
-          <WorkspacePanel
-            className="model-manager-source-panel"
-          >
-          <div className="admin-detail-stack source-search-config">
-            <div className="source-search-config__summary">
-              <div className="source-search-config__summary-copy">
-                <span className="source-search-config__eyebrow">来源检索</span>
-                <strong>{sourceGuide.title}</strong>
-
-              </div>
-              <div className="source-search-config__status-grid">
-                <div className="source-search-config__status">
-                  <span>当前模式</span>
-                  <strong>{getSourceProviderLabel(sourceSettings?.provider)}</strong>
-                </div>
-                <div className="source-search-config__status">
-                  <span>实际使用来源</span>
-                  <strong>{activeSourceLabel}</strong>
-                </div>
-                <div className="source-search-config__status">
-                  <span>Tavily Key</span>
-                  <strong>{getSourceKeyStatus(sourceSettings?.tavilyApiKeySet, sourceSettings?.tavilyEnvSet)}</strong>
-                </div>
-                <div className="source-search-config__status">
-                  <span>Brave Key</span>
-                  <strong>{getSourceKeyStatus(sourceSettings?.braveApiKeySet, sourceSettings?.braveEnvSet)}</strong>
-                </div>
-              </div>
-            </div>
-            <div className="source-search-config__actions">
-              <Button type="primary" icon={<EditOutlined />} onClick={openSourceEditor}>
-                编辑来源检索
-              </Button>
-              <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
-                测试连接
-              </Button>
-              <span className="source-search-config__test-result">
-                {`最近保存：${formatSavedAt(sourceSettings?.updatedAt)}`}
-              </span>
-              {sourceTestResult ? (
-                <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
-                  {sourceTestResult.success
-                    ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
-                    : sourceTestResult.info}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          </WorkspacePanel>
-        </details>
+        <SourceSearchSettings ref={sourceSettingsRef} onAvailabilityChange={setSourceReady} />
+        <WorkspacePanel className="model-manager-detection-panel" title="正文检测"><ZhuqueSettings /></WorkspacePanel>
       </WorkspacePage>
 
       <Modal
@@ -685,33 +507,22 @@ export default function ModelManager() {
         forceRender
         width={760}
         maskClosable={!saving}
-        onCancel={() => setEditorOpen(false)}
+        closable={!saving}
+        keyboard={!saving}
+        onCancel={closeEditor}
         destroyOnHidden={false}
         footer={(
           <Space wrap>
-            {!isNew && selected ? (
-              <>
-                <Button
-                  icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
-                  onClick={() => void handleSetDefault(selected)}
-                >
-                  {selected.isDefault ? '已设为默认' : '设为默认'}
-                </Button>
-                <Button icon={<DeleteOutlined />} danger onClick={() => void handleDelete(selected)}>
-                  删除
-                </Button>
-              </>
-            ) : null}
-            <Button onClick={() => setEditorOpen(false)}>取消</Button>
+            <Button disabled={saving} onClick={closeEditor}>取消</Button>
             <Button loading={saving} type="primary" onClick={() => void handleSave()}>
               保存
             </Button>
           </Space>
         )}
       >
-        <Form form={form} layout="vertical" className="model-manager-modal-form">
-          <div className="admin-form-grid admin-form-grid--three">
-            <Form.Item name="name" label="配置名称" rules={[{ required: true }]}>
+        <Form form={form} layout="vertical" disabled={saving} className="model-manager-modal-form" onValuesChange={() => { dirtyRef.current = true; testRequestRef.current += 1; setTesting(false); setTestResult(null) }}>
+          <div className="admin-form-grid model-manager-identity-grid">
+            <Form.Item name="name" label="配置名称" rules={[{ required: true, whitespace: true }]}>
               <Input placeholder="例如：GPT-4o 主力模型" />
             </Form.Item>
 
@@ -725,33 +536,6 @@ export default function ModelManager() {
               />
             </Form.Item>
 
-            <Form.Item name="modelId" label="模型 ID" rules={[{ required: true }]}>
-              {currentProviderModels.length > 0 ? (
-                <Select
-                  options={currentProviderModels.map((model) => ({ value: model, label: model }))}
-                  showSearch
-                  allowClear
-                  onChange={(value) => {
-                    if (selectedProvider === 'kimi') {
-                      const contextWindow = getKimiContextWindow(value)
-                      form.setFieldValue('maxContextTokens', contextWindow)
-                    }
-                  }}
-                />
-              ) : (
-                <Input
-                  placeholder={selectedProvider === 'deepseek'
-                    ? '输入模型名称，例如：deepseek-v4-flash'
-                    : selectedProvider === 'kimi'
-                      ? '输入模型 ID，例如：kimi-k2.6'
-                      : selectedProvider === 'codex'
-                        ? '输入 Codex 模型 ID，例如：gpt-5'
-                        : selectedProvider === 'claude_code'
-                          ? '输入 Claude 模型 ID，例如：sonnet / opus'
-                      : '输入模型名称，例如：llama3:latest'}
-                />
-              )}
-            </Form.Item>
           </div>
 
           {!isNativeAgentProvider(selectedProvider) ? (
@@ -791,6 +575,21 @@ export default function ModelManager() {
               />
             </Form.Item>
           )}
+
+          <Form.Item name="modelId" label="模型 ID" rules={[{ required: true, whitespace: true, message: '请选择或输入模型 ID' }]}>
+            <ModelIdPicker
+              provider={selectedProvider}
+              apiKey={selectedApiKey}
+              baseUrl={selectedBaseUrl}
+              configId={!isNew && selected ? selected.id : undefined}
+              active={editorOpen}
+              disabled={saving}
+              suggestedModels={currentProviderModels}
+              onSelect={(value) => {
+                if (selectedProvider === 'kimi') form.setFieldValue('maxContextTokens', getKimiContextWindow(value))
+              }}
+            />
+          </Form.Item>
 
           {selectedProvider === 'kimi' && (
             <Form.Item
@@ -873,82 +672,6 @@ export default function ModelManager() {
         </Form>
       </Modal>
 
-      <Modal
-        title="来源检索配置"
-        open={sourceEditorOpen}
-        forceRender
-        width={720}
-        maskClosable={!sourceSaving}
-        onCancel={() => setSourceEditorOpen(false)}
-        destroyOnHidden={false}
-        footer={(
-          <Space wrap>
-            <Button onClick={() => setSourceEditorOpen(false)}>取消</Button>
-            <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
-              测试连接
-            </Button>
-            <Button type="primary" loading={sourceSaving} onClick={() => void handleSourceSave()}>
-              保存
-            </Button>
-          </Space>
-        )}
-      >
-        <div className="admin-detail-stack source-search-config">
-          <div className="source-search-config__summary">
-            <div className="source-search-config__summary-copy">
-              <span className="source-search-config__eyebrow">来源检索</span>
-              <strong>{sourceGuide.title}</strong>
-
-            </div>
-            <div className="source-search-config__status-grid">
-              <div className="source-search-config__status">
-                <span>Tavily Key</span>
-                <strong>{getSourceKeyStatus(sourceSettings?.tavilyApiKeySet, sourceSettings?.tavilyEnvSet)}</strong>
-              </div>
-              <div className="source-search-config__status">
-                <span>Brave Key</span>
-                <strong>{getSourceKeyStatus(sourceSettings?.braveApiKeySet, sourceSettings?.braveEnvSet)}</strong>
-              </div>
-            </div>
-          </div>
-
-          <Form form={sourceForm} layout="vertical" className="admin-source-form">
-            <div className="admin-form-grid admin-form-grid--source">
-              <Form.Item name="provider" label="检索来源" initialValue="auto">
-                <Select options={SOURCE_PROVIDER_OPTIONS} />
-              </Form.Item>
-              <Form.Item
-                name="tavilyApiKey"
-                label="Tavily API Key"
-
-              >
-                <Input.Password
-                  disabled={currentSourceMode === 'disabled'}
-                  placeholder={sourceSettings?.tavilyApiKeySet ? MASKED_KEY : '输入 Tavily API Key'}
-                />
-              </Form.Item>
-              <Form.Item
-                name="braveApiKey"
-                label="Brave Search API Key"
-
-              >
-                <Input.Password
-                  disabled={currentSourceMode === 'disabled'}
-                  placeholder={sourceSettings?.braveApiKeySet ? MASKED_KEY : '输入 Brave Search API Key'}
-                />
-              </Form.Item>
-            </div>
-          </Form>
-
-          {sourceTestResult ? (
-            <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
-              {sourceTestResult.success
-                ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
-                : sourceTestResult.info}
-            </span>
-          ) : null}
-        </div>
-      </Modal>
     </>
   )
 }

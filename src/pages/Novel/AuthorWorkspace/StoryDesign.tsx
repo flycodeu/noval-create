@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { Button, Modal, Spin, message } from 'antd'
+import { Button, ConfigProvider, Modal, Spin, message } from 'antd'
 import { ArrowRightOutlined, EditOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -40,6 +40,8 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const [saving, setSaving] = useState(false)
   const [arrangementDirty, setArrangementDirty] = useState(false)
   const [task, setTask] = useState<ObjectTaskTarget | null>(null)
+  const loadEpoch = useRef(0)
+  const saveInFlight = useRef(false)
   const dirty = arrangementDirty || Boolean(editing) && JSON.stringify(draft) !== JSON.stringify(editing?.value)
   useRegisterWorkspaceLeaveGuard(dirty || saving)
   const story = parseStorySettingsDocument(novel?.settingsJson)
@@ -49,6 +51,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const world = recordOf(parseDocument(novel?.worldRulesJson))
   const chronology = { dynastyName: '', storyStartLabel: '', currentTimeLabel: '', currentTimeChapterNum: null, currentTimeEvidence: '', ...recordOf(world.timelineConfig) }
   const load = useCallback(async () => {
+    const epoch = ++loadEpoch.current
     setLoading(true)
     let referenceError = ''
     try {
@@ -56,16 +59,21 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
         window.electron.chapter.list(novelId), window.electron.structure.getTree(novelId),
         loadDocumentNames(novelId, value => { referenceError = value }), window.electron.novel.get(novelId),
       ])
+      if (epoch !== loadEpoch.current) return
       setChapters(rows); setTree(structure); setNames(references); setError(referenceError)
       if (latest && useNovelStore.getState().currentNovel?.id === novelId) setNovel(latest)
     }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '读取结构失败') }
-    finally { setLoading(false) }
+    catch (cause) { if (epoch === loadEpoch.current) setError(cause instanceof Error ? cause.message : '读取结构失败') }
+    finally { if (epoch === loadEpoch.current) setLoading(false) }
   }, [novelId, setNovel])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    setChapters([]); setTree(null); setNames({})
+    void load()
+    return () => { loadEpoch.current += 1 }
+  }, [load])
   useEffect(() => { const refresh = () => { void load() }; window.addEventListener('novelforge:creative-completed', refresh); return () => window.removeEventListener('novelforge:creative-completed', refresh) }, [load])
   const changeView = (change: () => void) => {
-    if (saving) return
+    if (saveInFlight.current) return
     if (!dirty) { change(); return }
     Modal.confirm({
       title: '当前内容还有未保存的修改', okText: '放弃并切换', cancelText: '继续编辑',
@@ -86,7 +94,8 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   ] : ['genreProfile', 'powerSystems', 'speciesSystem', 'factionSystem', 'characterEcology', 'mapBlueprint', 'worldDynamics', 'timelineConfig'].map(key => ({ key: `world:${key}`, title: ({ genreProfile: '世界基调', powerSystems: '能力、限制与代价', speciesSystem: '种属规则', factionSystem: '组织与社会', characterEcology: '人物生态', mapBlueprint: '地域层级', worldDynamics: '环境、生计与资源', timelineConfig: '朝代与时间' } as Record<string, string>)[key], value: key === 'timelineConfig' ? chronology : world[key], stage: 'world_rules' as const }))
   const section = sections.find(item => item.key === topic)
   const save = async () => {
-    if (!novel || !editing) return
+    if (!novel || !editing || saveInFlight.current) return
+    saveInFlight.current = true
     setSaving(true)
     try {
       const latest = await window.electron.novel.get(novelId)
@@ -94,9 +103,9 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
       await window.electron.novel.update(novelId, buildStoryDesignPatch(latest, editing.key, draft), { expectedContextVersion: editing.contextVersion })
       const updated = await window.electron.novel.get(novelId)
       if (updated && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
-      setEditing(null); message.success('已保存这一部分')
+      setEditing(null); setError(''); message.success('已保存这一部分')
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败') }
-    finally { setSaving(false) }
+    finally { saveInFlight.current = false; setSaving(false) }
   }
   const chapter = chapters.find(item => item.id === selectedChapter)
   const assigned = new Set(tree?.volumes.flatMap(volume => volume.parts.flatMap(part => part.chapters.map(item => item.id))) || [])
@@ -112,10 +121,10 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
       {loading ? <Spin /> : chapters.length || tree?.volumes.length ? <div className="author-structure-layout"><nav className="author-structure-tree" aria-label="卷章结构">{tree?.volumes.map(volume => <details open key={volume.id}><summary>卷 {volume.volumeNumber} · {volume.title || '未命名'}</summary>{volume.summary && <p>{volume.summary}</p>}{volume.parts.map(part => <details open key={part.id}><summary>{part.title || `单元 ${part.partNumber}`}</summary>{part.summary && <p>{part.summary}</p>}{part.chapters.map(chapterButton)}</details>)}</details>)}{chapters.filter(item => !assigned.has(item.id)).length > 0 && <details open><summary>尚未归入单元</summary>{chapters.filter(item => !assigned.has(item.id)).map(chapterButton)}</details>}</nav><section className="author-paper">{chapter ? <><Button onClick={() => navigate(buildWorkspaceRoute(novelId, `writing/editor?chapterId=${chapter.id}`))}>打开本章正文</Button><ChapterArrangement key={chapter.id} chapter={chapter} onDirtyChange={setArrangementDirty} onSaved={() => void load()} /></> : <EmptyWork title="选择一章" />}</section></div> : <EmptyWork title="尚未安排卷与章节" action={() => discuss('outline', '根据背景与人物设计首个单元及章节场景安排。')} />}
     </>}
     <Modal width={850} title={`编辑 · ${editing?.title || ''}`} open={Boolean(editing)} closable={!saving} keyboard={!saving} cancelButtonProps={{ disabled: saving }} onCancel={() => {
-      if (saving) return
+      if (saveInFlight.current) return
       if (JSON.stringify(draft) === JSON.stringify(editing?.value)) setEditing(null)
       else Modal.confirm({ title: '放弃这一部分的修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: () => setEditing(null) })
-    }} okText="保存这一部分" cancelText="取消" confirmLoading={saving} onOk={() => void save()}><DocumentEditor value={draft} names={names} onChange={setDraft} /></Modal>
+    }} okText="保存这一部分" cancelText="取消" confirmLoading={saving} onOk={() => void save()}><ConfigProvider componentDisabled={saving}><DocumentEditor value={draft} names={names} onChange={setDraft} /></ConfigProvider></Modal>
     <ObjectTaskPanel novelId={novelId} target={task} onClose={() => setTask(null)} onApplied={() => void load()} />
   </AuthorPage>
 }

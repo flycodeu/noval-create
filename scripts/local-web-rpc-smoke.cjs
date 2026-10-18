@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { createServer } = require('node:http')
 
 const BACKEND_URL = process.env.NOVELFORGE_LOCAL_BACKEND || 'http://127.0.0.1:8787/rpc'
 const EVENT_STREAM_URL = BACKEND_URL.replace(/\/rpc$/, '/events')
@@ -73,6 +74,56 @@ async function assertConcurrentHttpClients(novelId) {
   })
 }
 
+async function assertModelAndSearchSettingsRpc() {
+  const requests = []
+  const testKey = 'test-only-model-discovery-rpc-key'
+  const server = createServer((request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization })
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ data: [{ id: 'rpc-model-b' }, { id: 'rpc-model-a' }] }))
+  })
+  let configId = 0
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}/v1`
+    const before = await rpc('model', 'list')
+    const input = { provider: 'custom', apiKey: testKey, baseUrl }
+    const expected = { models: ['rpc-model-a', 'rpc-model-b'] }
+    assert.deepEqual(await rpc('model', 'discover', [input]), expected)
+    assert.deepEqual(await rpc('model', 'list'), before, 'unsaved model discovery must not create a configuration')
+
+    configId = Number(await rpc('model', 'create', [{ ...input, name: 'Model discovery RPC fixture', modelId: 'rpc-model-a' }]))
+    const saved = (await rpc('model', 'list')).find(config => config.id === configId)
+    assert.equal(saved.apiKey, '已设置', 'saved model keys must stay masked across RPC')
+    assert.deepEqual(await rpc('model', 'discover', [{ ...input, apiKey: '已设置', configId }]), expected)
+    assert.deepEqual(requests, [
+      { url: '/v1/models', authorization: `Bearer ${testKey}` },
+      { url: '/v1/models', authorization: `Bearer ${testKey}` },
+    ])
+    await expectRpcError('model', 'discover', [{ ...input, apiKey: '已设置', configId, baseUrl: `${baseUrl}/changed` }], 'modelDiscovery.credentialsChanged')
+    assert.equal(requests.length, 2, 'changing a URL must not forward the saved key')
+    await rpc('model', 'discover', [{ ...input, apiKey: '' }])
+    assert.deepEqual(requests.at(-1), { url: '/v1/models', authorization: undefined }, 'an explicitly cleared custom key is not silently reused')
+
+    const disabled = await rpc('sourceSearch', 'updateSettings', [{ provider: 'disabled' }])
+    assert.equal((await rpc('sourceSearch', 'test')).success, false, 'no-argument search tests must cross JSON RPC without a null payload')
+    const draft = await rpc('sourceSearch', 'test', [{ provider: 'disabled', tavilyApiKey: 'test-only-unsaved-search-key' }])
+    assert.equal(draft.success, false)
+    assert.deepEqual(await rpc('sourceSearch', 'getSettings'), disabled, 'testing a draft must not save its provider or keys')
+    console.log('PASS model/search RPC: real loopback model list, unsaved discovery, masked key reuse, URL guard, cleared key and non-persisting search draft')
+  } finally {
+    try {
+      if (configId > 0) await rpc('model', 'delete', [configId])
+    } finally {
+      server.closeAllConnections()
+      await new Promise(resolve => server.close(resolve))
+    }
+  }
+}
+
 async function main() {
   const stamp = Date.now().toString()
   let novelId = 0
@@ -86,6 +137,7 @@ async function main() {
     assert.deepEqual(disabled, { enabled: false, autoDetect: false, apiKeySet: false })
     assert.equal((await rpc('zhuque', 'test')).success, false)
     await expectRpcError('zhuque', 'localKey', [], 'runtime.methodNotAllowed')
+    await assertModelAndSearchSettingsRpc()
 
     novelId = Number(await rpc('novel', 'create', [{
       title: `Web RPC smoke ${stamp}`,

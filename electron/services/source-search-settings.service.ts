@@ -65,9 +65,18 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function readSettingsRow(): SourceSearchSettingsRow {
-  ensureSettingsTable()
-  const row = getSqlite().prepare(`
+function readSettingsRow(initialize = true): SourceSearchSettingsRow {
+  const sqlite = getSqlite()
+  if (initialize) {
+    ensureSettingsTable()
+  } else {
+    const table = sqlite.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'source_search_settings'
+    `).get()
+    if (!table) return emptySettingsRow()
+  }
+  const row = sqlite.prepare(`
     SELECT id, provider, tavily_api_key, brave_api_key, updated_at
     FROM source_search_settings
     WHERE id = ?
@@ -75,11 +84,17 @@ function readSettingsRow(): SourceSearchSettingsRow {
 
   if (row) return row
 
-  getSqlite().prepare(`
-    INSERT OR IGNORE INTO source_search_settings (id, provider)
-    VALUES (?, 'auto')
-  `).run(SETTINGS_ID)
+  if (initialize) {
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO source_search_settings (id, provider)
+      VALUES (?, 'auto')
+    `).run(SETTINGS_ID)
+  }
 
+  return emptySettingsRow()
+}
+
+function emptySettingsRow(): SourceSearchSettingsRow {
   return {
     id: SETTINGS_ID,
     provider: 'auto',
@@ -93,8 +108,8 @@ function decryptStoredKey(value?: string | null): string {
   if (!value) return ''
   try {
     return decryptApiKey(value).trim()
-  } catch (error) {
-    console.warn('[sourceSearch] API Key 解密失败:', error)
+  } catch {
+    console.warn('[sourceSearch] API Key 解密失败，请重新配置。')
     return ''
   }
 }
@@ -107,14 +122,19 @@ function normalizeKeyPatch(current: string | null, value: unknown): string | nul
   return encryptApiKey(text)
 }
 
-function selectRuntimeProvider(row: SourceSearchSettingsRow): SourceSearchRuntimeConfig {
-  const mode = normalizeProvider(row.provider)
+function resolveRuntimeKey(current: string | null, value: unknown): string {
+  if (value === undefined || asText(value) === MASKED_KEY) return decryptStoredKey(current)
+  return asText(value)
+}
+
+function selectRuntimeProvider(row: SourceSearchSettingsRow, input?: Record<string, unknown>): SourceSearchRuntimeConfig {
+  const mode = normalizeProvider(input?.provider ?? row.provider)
   if (mode === 'disabled') {
     return { mode, providerName: null, apiKey: null }
   }
 
-  const savedTavilyKey = decryptStoredKey(row.tavily_api_key)
-  const savedBraveKey = decryptStoredKey(row.brave_api_key)
+  const savedTavilyKey = resolveRuntimeKey(row.tavily_api_key, input?.tavilyApiKey)
+  const savedBraveKey = resolveRuntimeKey(row.brave_api_key, input?.braveApiKey)
   const envTavilyKey = process.env.TAVILY_API_KEY?.trim() || ''
   const envBraveKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || ''
 
@@ -148,15 +168,22 @@ function toSettingsView(row: SourceSearchSettingsRow): SourceSearchSettingsView 
   }
 }
 
+class SourceSearchHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+  }
+}
+
 async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, {
       ...init,
+      redirect: 'error',
       signal: controller.signal,
     })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    if (!response.ok) throw new SourceSearchHttpError(response.status)
     return await response.json() as unknown
   } finally {
     clearTimeout(timeout)
@@ -233,8 +260,9 @@ export function getSourceSearchRuntimeConfig(): SourceSearchRuntimeConfig {
   return selectRuntimeProvider(readSettingsRow())
 }
 
-export async function testSourceSearchSettings(): Promise<SourceSearchTestResult> {
-  const runtime = getSourceSearchRuntimeConfig()
+export async function testSourceSearchSettings(input?: Record<string, unknown>): Promise<SourceSearchTestResult> {
+  // A connection test must not create a settings row or persist draft credentials.
+  const runtime = selectRuntimeProvider(readSettingsRow(false), input)
   if (!runtime.providerName || !runtime.apiKey) {
     return {
       success: false,
@@ -261,7 +289,12 @@ export async function testSourceSearchSettings(): Promise<SourceSearchTestResult
       success: false,
       providerName: runtime.providerName,
       latency: Date.now() - startedAt,
-      info: error instanceof Error ? error.message : String(error),
+      // Never echo upstream errors, response bodies or headers containing credentials.
+      info: error instanceof SourceSearchHttpError
+        ? `连接失败（HTTP ${error.status}），请检查 API Key、服务权限或额度。`
+        : error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')
+          ? '连接超时，请检查网络后重试。'
+          : '连接失败，请检查 API Key、网络和服务状态后重试。',
     }
   }
 }

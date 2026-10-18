@@ -27,7 +27,7 @@ export default function CloseWindowDialog() {
   return <Modal open={open} centered width={440} className="close-window-dialog" title={unsaved ? '先保存，再退出' : '结束本次创作？'}
     onCancel={() => setOpen(false)} maskClosable={false} afterOpenChange={(visible) => { if (visible) continueButton.current?.focus() }}
     footer={<Button ref={continueButton} onClick={() => setOpen(false)}>继续编辑</Button>}>
-    <p className="close-window-dialog__intro">{unsaved ? '还有未保存的修改。返回编辑器保存后，再退出软件。' : '暂时离开可以最小化，稍后从任务栏继续。'}</p>
+    {unsaved && <p className="close-window-dialog__intro">还有未保存的修改。返回编辑器保存后，再退出软件。</p>}
     <div className="close-window-dialog__choices">
       <button type="button" disabled={busy} onClick={() => void choose('minimize')} className="close-window-dialog__choice">
         <MinusOutlined /><span><strong>最小化到任务栏</strong><small>保留编辑内容，正在运行的任务继续。</small></span>

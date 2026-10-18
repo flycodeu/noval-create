@@ -44,12 +44,19 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   const [versions, setVersions] = useState<ChapterVersion[]>([])
   const [selectedVersion, setSelectedVersion] = useState<ChapterVersion | null>(null)
   const [creating, setCreating] = useState(false)
+  const [creatingChapter, setCreatingChapter] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newNumber, setNewNumber] = useState(1)
   const draftRef = useRef('')
   const baselineRef = useRef('')
   const selectedId = useRef<number | null>(null)
   const loadEpoch = useRef(0)
+  const listEpoch = useRef(0)
+  const structureEpoch = useRef(0)
+  const saveInFlight = useRef(false)
+  const createInFlight = useRef(false)
+  const sessionEpoch = useRef(0)
+  useEffect(() => () => { sessionEpoch.current += 1 }, [novelId])
   const workflow = useCreativeWorkflow(novelId)
   const screens = Grid.useBreakpoint()
   const { registerSaveHandler, registerLeaveGuard, registerViewLeaveGuard, notifyWorkspaceMutation } = useNovelWorkspaceActions()
@@ -87,15 +94,17 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     finally { if (epoch === loadEpoch.current) setLoading(false) }
   }, [installChapter, novelId])
   const reloadList = useCallback(async () => {
+    const epoch = ++listEpoch.current
     const rows = await window.electron.chapter.list(novelId)
-    setChapters(rows)
+    if (epoch === listEpoch.current) setChapters(rows)
     return rows
   }, [novelId])
   const reloadStructure = useCallback(async () => {
-    try { setTree(await window.electron.structure.getTree(novelId)); setStructureError('') }
-    catch (cause) { setStructureError(cause instanceof Error ? cause.message : '读取卷章结构失败') }
+    const epoch = ++structureEpoch.current
+    try { const next = await window.electron.structure.getTree(novelId); if (epoch === structureEpoch.current) { setTree(next); setStructureError('') } }
+    catch (cause) { if (epoch === structureEpoch.current) setStructureError(cause instanceof Error ? cause.message : '读取卷章结构失败') }
   }, [novelId])
-  useEffect(() => { void reloadStructure() }, [reloadStructure])
+  useEffect(() => { void reloadStructure(); return () => { structureEpoch.current += 1 } }, [reloadStructure])
 
   useEffect(() => {
     let alive = true
@@ -105,24 +114,27 @@ export default function Manuscript({ novelId }: { novelId: number }) {
       if (id && id !== selectedId.current && draftRef.current === baselineRef.current) void loadChapter(id)
       else setLoading(false)
     }).catch((cause) => { if (alive) { setError(cause instanceof Error ? cause.message : '读取章节失败'); setLoading(false) } })
-    return () => { alive = false; loadEpoch.current += 1 }
+    return () => { alive = false; loadEpoch.current += 1; listEpoch.current += 1 }
   }, [chapterParam, loadChapter, reloadList])
 
   const save = useCallback(async () => {
-    if (!chapter || saving) return false
+    if (!chapter || saveInFlight.current) return false
     if (draftRef.current === baselineRef.current) return true
+    const session = sessionEpoch.current
+    saveInFlight.current = true
     setSaving(true)
     try {
       const content = draftRef.current
       const wordCount = countChapterWords(content)
       await window.electron.chapter.update(chapter.id, { content, wordCount }, { expectedContent: baselineRef.current, versionSource: 'manual-save' })
+      if (session !== sessionEpoch.current) return true
       baselineRef.current = content; setBaseline(content)
       setChapter((current) => current && { ...current, content, wordCount })
       setError(''); await reloadList(); notifyWorkspaceMutation()
       return true
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，正文仍保留在编辑器中'); return false }
-    finally { setSaving(false) }
-  }, [chapter, notifyWorkspaceMutation, reloadList, saving])
+    } catch (cause) { if (session === sessionEpoch.current) setError(cause instanceof Error ? cause.message : '保存失败，正文仍保留在编辑器中'); return false }
+    finally { saveInFlight.current = false; if (session === sessionEpoch.current) setSaving(false) }
+  }, [chapter, notifyWorkspaceMutation, reloadList])
   useEffect(() => { registerSaveHandler(() => { void save() }); return () => registerSaveHandler(null) }, [registerSaveHandler, save])
   useLayoutEffect(() => { registerLeaveGuard(() => arrangementDirty || draftRef.current !== baselineRef.current); return () => registerLeaveGuard(null) }, [registerLeaveGuard, arrangementDirty])
   useLayoutEffect(() => { registerViewLeaveGuard?.(() => arrangementDirty); return () => registerViewLeaveGuard?.(null) }, [registerViewLeaveGuard, arrangementDirty])
@@ -160,11 +172,19 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     } })
   }
   const createChapter = async () => {
+    if (createInFlight.current) return
+    const session = sessionEpoch.current
+    createInFlight.current = true; setCreatingChapter(true)
     try {
       if (chapter && !await save()) return
+      if (session !== sessionEpoch.current) return
       const id = await window.electron.chapter.create(novelId, { chapterNum: newNumber, title: newTitle.trim() || undefined, targetWords: 3200, status: 'outline' })
-      await reloadList(); setCreating(false); setNewTitle(''); setParams({ chapterId: String(id) }); notifyWorkspaceMutation()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '创建章节失败') }
+      if (session !== sessionEpoch.current) return
+      await reloadList()
+      if (session !== sessionEpoch.current) return
+      setCreating(false); setNewTitle(''); setParams({ chapterId: String(id) }); notifyWorkspaceMutation()
+    } catch (cause) { if (session === sessionEpoch.current) setError(cause instanceof Error ? cause.message : '创建章节失败') }
+    finally { createInFlight.current = false; if (session === sessionEpoch.current) setCreatingChapter(false) }
   }
   const changePanel = (next: string) => {
     const change = () => { registerViewLeaveGuard?.(null); const search = new URLSearchParams(params); if (next === 'text') search.delete('panel'); else search.set('panel', next); if (chapter) search.set('chapterId', String(chapter.id)); setParams(search); setArrangementDirty(false) }
@@ -215,6 +235,6 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     <Drawer rootClassName={`manuscript-context-drawer${screens.xl ? ' manuscript-context-drawer--inline' : ''}`} rootStyle={screens.xl ? { position: 'relative', height: '100%', minWidth: 0, zIndex: 1 } : { position: 'fixed' }} getContainer={false} mask={!screens.xl} autoFocus={!screens.xl} title={activeContext?.label || '本章辅助'} width={screens.xl ? '100%' : 540} open={Boolean(activeContext)} destroyOnClose onClose={() => changePanel('text')}><div aria-label={`本章辅助 · ${activeContext?.label || ''}`}>{context}</div></Drawer>
     <Drawer title="卷章目录" width={340} open={directoryOpen} onClose={() => setDirectoryOpen(false)} destroyOnClose className="manuscript-directory-drawer">{directory}</Drawer>
     <ObjectTaskPanel novelId={novelId} target={taskTarget} onClose={() => setTaskTarget(null)} onApplied={afterApplied} />
-    <Modal title="添加章节" open={creating} onCancel={() => setCreating(false)} onOk={() => void createChapter()} okText="添加"><div className="author-new-chapter"><label>章节序号<InputNumber min={1} precision={0} value={newNumber} onChange={(value) => setNewNumber(value || 1)} /></label><label>章节标题<Input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="可以暂不填写" /></label></div></Modal>
+    <Modal title="添加章节" open={creating} closable={!creatingChapter} keyboard={!creatingChapter} cancelButtonProps={{ disabled: creatingChapter }} confirmLoading={creatingChapter} onCancel={() => { if (!createInFlight.current) setCreating(false) }} onOk={() => void createChapter()} okText="添加"><div className="author-new-chapter"><label>章节序号<InputNumber aria-label="新章节序号" min={1} precision={0} value={newNumber} disabled={creatingChapter} onChange={(value) => setNewNumber(value || 1)} /></label><label>章节标题<Input aria-label="新章节标题" value={newTitle} disabled={creatingChapter} onChange={(event) => setNewTitle(event.target.value)} placeholder="可以暂不填写" /></label></div></Modal>
   </div>
 }

@@ -40,6 +40,8 @@ export default function AppSettings() {
   const [models, setModels] = useState<ModelConfig[]>([])
   const [modelError, setModelError] = useState('')
   const copiedTimer = useRef<number | undefined>()
+  const mcpInFlight = useRef(false)
+  const updateInFlight = useRef(false)
   const desktopRuntime = isElectronRuntime()
 
   useEffect(() => {
@@ -65,12 +67,14 @@ export default function AppSettings() {
     return () => { active = false }
   }, [desktopRuntime])
   const refreshMcp = async (configure = false) => {
+    if (mcpInFlight.current) return
+    mcpInFlight.current = true
     setMcpBusy(true); setMcpError(''); setCopied(false)
     try {
       const value = await (configure ? window.electron.app.configureCodexMcp : window.electron.app.getCodexMcpSetupStatus)(codexCliPath.trim() || undefined)
       setMcpStatus(value); setCodexCliPath(value.codexCliPath ?? '')
     } catch (cause) { setMcpError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setMcpBusy(false) }
+    finally { mcpInFlight.current = false; setMcpBusy(false) }
   }
   const copyMcpCommand = async () => {
     if (!mcpStatus?.command) return
@@ -81,16 +85,20 @@ export default function AppSettings() {
     } catch (cause) { setMcpError(cause instanceof Error ? cause.message : String(cause)) }
   }
   const check = async () => {
+    if (updateInFlight.current) return
+    updateInFlight.current = true
     setBusy(true); setLoadError('')
     try { setStatus(await window.electron.app.checkForUpdates()) }
     catch (cause) { setLoadError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setBusy(false) }
+    finally { updateInFlight.current = false; setBusy(false) }
   }
   const install = async () => {
+    if (updateInFlight.current) return
+    updateInFlight.current = true
     setBusy(true); setLoadError('')
     try { if (!await window.electron.app.installUpdate()) setStatus(await window.electron.app.getUpdateStatus()) }
     catch (cause) { setLoadError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setBusy(false) }
+    finally { updateInFlight.current = false; setBusy(false) }
   }
   const openReleasePage = async () => {
     try { await window.electron.app.openReleasePage() }

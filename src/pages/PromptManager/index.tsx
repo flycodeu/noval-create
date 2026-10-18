@@ -427,6 +427,8 @@ export default function PromptManager() {
   const [searchText, setSearchText] = useState('')
   const [selectedPromptKey, setSelectedPromptKey] = useState<string>('')
   const [editingTemplate, setEditingTemplate] = useState('')
+  const [editingPromptKey, setEditingPromptKey] = useState('')
+  const [editingError, setEditingError] = useState('')
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -435,6 +437,8 @@ export default function PromptManager() {
   const [customOverrides, setCustomOverrides] = useState<Record<string, string>>({})
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const savingRef = useRef(false)
+  const editingInitialRef = useRef('')
 
   const loadPrompts = React.useCallback(async (showLoading = false) => {
     const requestId = ++loadRequestRef.current
@@ -461,6 +465,7 @@ export default function PromptManager() {
 
   useEffect(() => {
     void loadPrompts(true)
+    return () => { loadRequestRef.current += 1 }
   }, [loadPrompts])
 
   const promptRows = useMemo(() => {
@@ -505,13 +510,9 @@ export default function PromptManager() {
     [filteredPrompts, selectedPromptKey],
   )
   const selectedPromptProtected = Boolean(selectedPromptRow && PROTECTED_PROMPT_KEYS.has(selectedPromptRow.prompt.key))
+  const editingPromptRow = promptRows.find(({ prompt }) => prompt.key === editingPromptKey)
 
-  const overrideCount = useMemo(() => Object.keys(customOverrides).length, [customOverrides])
-  const qualityPromptCount = useMemo(() => promptRows.filter(({ meta }) => meta.lane === '质量评审').length, [promptRows])
-  const chineseBaseCount = useMemo(
-    () => promptRows.filter(({ layers }) => layers.includes('公共中文底板')).length,
-    [promptRows],
-  )
+  const overrideCount = promptRows.filter(({ hasOverride }) => hasOverride).length
   const selectedPromptTemplateStats = useMemo(() => {
     if (!selectedPromptRow) return null
     const text = sanitizePromptText(selectedPromptRow.currentTemplate)
@@ -535,19 +536,42 @@ export default function PromptManager() {
   }
 
   const handleEditSave = async () => {
-    if (!selectedPromptRow) return
+    if (!editingPromptRow || savingRef.current) return
     const normalized = normalizePromptText(editingTemplate)
+    if (!normalized.trim()) {
+      setEditingError('提示词不能为空；如需使用内置模板，请选择“恢复默认”。')
+      return
+    }
+    savingRef.current = true
+    setEditingError('')
     setSaving(true)
     try {
-      await window.electron.prompt.save(selectedPromptRow.prompt.key, normalized)
+      await window.electron.prompt.save(editingPromptRow.prompt.key, normalized)
       setEditModalOpen(false)
       await loadPrompts()
       message.success(getUserFacingMessage('prompt.runtimeSaved'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
+  }
+
+  const openEditor = () => {
+    if (!selectedPromptRow || savingRef.current) return
+    setEditingPromptKey(selectedPromptRow.prompt.key)
+    editingInitialRef.current = selectedPromptRow.currentTemplate
+    setEditingTemplate(selectedPromptRow.currentTemplate)
+    setEditingError('')
+    setEditModalOpen(true)
+  }
+
+  const closeEditor = () => {
+    if (savingRef.current) return
+    if (editingTemplate !== editingInitialRef.current) {
+      Modal.confirm({ title: '放弃尚未保存的提示词修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: () => setEditModalOpen(false) })
+    } else setEditModalOpen(false)
   }
 
   const handleResetOverride = (key: string, name: string) => {
@@ -558,6 +582,8 @@ export default function PromptManager() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
+        if (savingRef.current) return
+        savingRef.current = true
         setSaving(true)
         try {
           await window.electron.prompt.delete(key)
@@ -567,6 +593,7 @@ export default function PromptManager() {
           message.error(getErrorMessage(error, 'common.saveFailed'))
           throw error
         } finally {
+          savingRef.current = false
           setSaving(false)
         }
       },
@@ -577,7 +604,7 @@ export default function PromptManager() {
     <WorkspacePage
       className="prompt-manager-page"
       layout="wide"
-      title="提示词控制台"
+      title="提示词管理"
       heroVariant="compact"
       actions={(
         <div className="prompt-manager-toolbar">
@@ -598,8 +625,6 @@ export default function PromptManager() {
         <>
           <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" />
           <WorkspaceMetric label="运行时覆盖" value={overrideCount} />
-          <WorkspaceMetric label="中文底板接入" value={chineseBaseCount} tone="cool" />
-          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" />
         </>
       )}
     >
@@ -675,7 +700,6 @@ export default function PromptManager() {
                     <Tag>{`${prompt.params.length} 个参数`}</Tag>
                   </div>
 
-                  <div className="prompt-manager-card__summary">{meta.goal}</div>
                 </button>
               ))}
             </div>
@@ -694,15 +718,13 @@ export default function PromptManager() {
                   size="small"
                   type="primary"
                   icon={<EditOutlined />}
-                  onClick={() => {
-                    setEditingTemplate(selectedPromptRow.currentTemplate)
-                    setEditModalOpen(true)
-                  }}
+                  disabled={saving}
+                  onClick={openEditor}
                 >
                   编辑
                 </Button>
                 {selectedPromptRow.hasOverride ? (
-                  <Button size="small" onClick={() => handleResetOverride(selectedPromptRow.prompt.key, selectedPromptRow.prompt.name)}>恢复默认</Button>
+                  <Button size="small" disabled={saving} onClick={() => handleResetOverride(selectedPromptRow.prompt.key, selectedPromptRow.prompt.name)}>恢复默认</Button>
                 ) : null}
               </div>
             ) : null}
@@ -769,8 +791,6 @@ export default function PromptManager() {
                   {selectedPromptProtected ? (
                     <div className="prompt-manager-inspector-section">
                       <div className="prompt-manager-inspector-section__title">系统保留规则</div>
-                      <div className="prompt-manager-inspector-section__copy">
-                        章节提示词保留系统规则</div>
                       <div className="prompt-manager-param-list">
                         {PROTECTED_PROMPT_RULES.map((rule) => (
                           <Tag key={rule} style={{ fontSize: 11 }}>
@@ -792,24 +812,28 @@ export default function PromptManager() {
       </div>
 
       <Modal
-        title={`编辑运行时提示词：${selectedPromptRow?.prompt.name || ''}`}
+        title={`编辑运行时提示词：${editingPromptRow?.prompt.name || ''}`}
         open={editModalOpen}
-        onCancel={() => setEditModalOpen(false)}
+        onCancel={closeEditor}
         onOk={() => void handleEditSave()}
         okText="保存并生效"
         confirmLoading={saving}
+        cancelButtonProps={{ disabled: saving }}
+        closable={!saving}
+        maskClosable={!saving}
+        keyboard={!saving}
         width="min(880px, calc(100vw - 32px))"
         destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-          保存后新的提示词会立即在生成时生效。使用 `{`参数名`}` 可以引用上下文字段。
+          保存后立即用于新生成。使用 {`{参数名}`} 引用上下文字段。
         </div>
         <div style={{ marginBottom: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {selectedPromptRow?.prompt.params.map((param) => (
+          {editingPromptRow?.prompt.params.map((param) => (
             <Tag
               key={param.key}
               style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-blue-light)' }}
-              onClick={() => setEditingTemplate((prev) => `${prev}{${param.key}}`)}
+              onClick={() => { if (!savingRef.current) setEditingTemplate((prev) => `${prev}{${param.key}}`) }}
             >
               + {`{${param.key}}`}
             </Tag>
@@ -817,10 +841,14 @@ export default function PromptManager() {
         </div>
         <Input.TextArea
           value={editingTemplate}
-          onChange={(e) => setEditingTemplate(e.target.value)}
-          autoSize={{ minRows: 22, maxRows: 36 }}
+          disabled={saving}
+          aria-label="运行时提示词内容"
+          aria-invalid={Boolean(editingError)}
+          onChange={(e) => { setEditingTemplate(e.target.value); setEditingError('') }}
+          autoSize={{ minRows: 12, maxRows: 24 }}
           style={{ fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
         />
+        {editingError ? <p role="alert" className="prompt-manager-edit-error">{editingError}</p> : null}
       </Modal>
 
       <Modal
@@ -837,8 +865,7 @@ export default function PromptManager() {
             icon={<EditOutlined />}
             onClick={() => {
               setPreviewModalOpen(false)
-              setEditingTemplate(selectedPromptRow.currentTemplate)
-              setEditModalOpen(true)
+              openEditor()
             }}
           >
             编辑

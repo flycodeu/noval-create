@@ -47,10 +47,7 @@ export default class AppErrorBoundary extends React.Component<Props, State> {
             type="error"
             showIcon
             message="页面渲染失败"
-            description={
-              this.state.error.message ||
-              '页面渲染时出现异常，已阻止整个应用白屏。可以尝试重试或重新加载。'
-            }
+            description={this.state.error.message || undefined}
           />
           <Space wrap style={{ marginTop: 16 }}>
             <Button type="primary" onClick={() => this.setState({ error: null })}>

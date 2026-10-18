@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from '../../src/App'
 import { useNovelStore } from '../../src/stores/novel.store'
+import { useTaskStore } from '../../src/stores/task.store'
 import '../../src/styles/global.css'
 import '../../src/styles/ui-simplification.css'
 
@@ -46,14 +47,21 @@ const controls: any = {
   readiness: { ready: false, chapterId: 683, blockers: ['隔离合同尚未补齐'] },
   holdStart: false, releaseStart: null, nextRunState: null,
   holdNovelUpdate: false, releaseNovelUpdate: null,
+  holdChapterUpdate: false, releaseChapterUpdate: null,
+  holdChapterCreate: false, releaseChapterCreate: null,
+  holdIssueUpdate: false, releaseIssueUpdate: null,
+  holdRunControl: false, releaseRunControl: null,
+  holdWorkflowLists: 0, pendingWorkflowLists: [],
+  holdStructureLoads: 0, pendingStructureLoads: [],
 }
 win.calls = []
 win.unexpected = []
-win.fixture = { novel, otherNovel, chapters, entities, sources, artifacts, runs, issues, controls, currentNovelId: () => useNovelStore.getState().currentNovel?.id }
+const taskListeners = new Map<string, Set<(value: unknown) => void>>()
+win.fixture = { novel, otherNovel, chapters, entities, sources, artifacts, runs, issues, controls, currentNovelId: () => useNovelStore.getState().currentNovel?.id, emit: (channel: string, value: unknown) => taskListeners.get(channel)?.forEach(listener => listener(value)), startTask: (id: number, meta: object) => useTaskStore.getState().addStream(id, meta), finishTask: (id: number) => useTaskStore.getState().completeStream(id, 'cancelled') }
 const record = (kind: string, input: unknown) => win.calls.push({ kind, input: clone(input) })
 const empty = async () => []
 win.electron = {
-  on: () => () => {}, off: () => {},
+  on: (channel: string, listener: (value: unknown) => void) => { const listeners = taskListeners.get(channel) || new Set(); listeners.add(listener); taskListeners.set(channel, listeners); return () => listeners.delete(listener) }, off: () => {},
   app: { getRuntimeInfo: async () => ({ environment: 'test', source: 'source', version: 'layout-fixture', executable: 'isolated-electron', dataDirectory: 'isolated-ui-fixture' }) },
   windowControls: { minimize: async () => {}, toggleMaximize: async () => false, isMaximized: async () => false, onMaximizedStateChange: () => () => {}, onCloseRequested: () => () => {}, close: async () => {}, confirmClose: async () => {} },
   novel: {
@@ -70,9 +78,10 @@ win.electron = {
   model: { list: async () => clone(controls.models) },
   chapter: {
     list: async (id: number) => clone(chapters.filter(chapter => chapter.novelId === id)), get: async (id: number) => clone(chapters.find(c => c.id === id)), listVersions: async () => [],
-    update: async (id: number, patch: any, options: any) => { const chapter = chapters.find(c => c.id === id); if (options?.expectedContent !== undefined && options.expectedContent !== chapter.content) throw Error('隔离版本已变化'); record('chapter.update', { id, patch, options }); Object.assign(chapter, clone(patch)); return clone(chapter) },
-    create: async (_id: number, input: any) => { const created = { id: 684, novelId: 292, content: '', outline: '', summary: '', wordCount: 0, ...input }; chapters.push(created); record('chapter.create', input); return created.id },
+    update: async (id: number, patch: any, options: any) => { const chapter = chapters.find(c => c.id === id); if (options?.expectedContent !== undefined && options.expectedContent !== chapter.content) throw Error('隔离版本已变化'); record('chapter.update', { id, patch, options }); if (controls.holdChapterUpdate) await new Promise<void>(resolve => { controls.releaseChapterUpdate = () => { controls.holdChapterUpdate = false; controls.releaseChapterUpdate = null; resolve() } }); Object.assign(chapter, clone(patch)); return clone(chapter) },
+    create: async (id: number, input: any) => { record('chapter.create', input); if (controls.holdChapterCreate) await new Promise<void>(resolve => { controls.releaseChapterCreate = () => { controls.holdChapterCreate = false; controls.releaseChapterCreate = null; resolve() } }); const created = { id: Math.max(683, ...chapters.map(chapter => chapter.id)) + 1, novelId: id, content: '', outline: '', summary: '', wordCount: 0, ...input }; chapters.push(created); return created.id },
   },
+  task: { list: empty, get: async () => null, query: async (input: any) => ({ items: [], page: input.page || 1, pageSize: input.pageSize || 10, total: 0, hasMore: false }), getStats: async () => ({ total: 0, pendingCount: 0, runningCount: 0, cancelRequestedCount: 0, pausedCount: 0, successCount: 0, failedCount: 0, cancelledCount: 0 }), cancel: async (id: number) => { record('task.cancel', { id }); useTaskStore.getState().completeStream(id, 'cancelled') } },
   storyAtlas: {
     query: async (input: any) => { record('atlas.query', input); return { novelId: input.novelId, contextVersion: novels.find(item => item.id === input.novelId)?.contextVersion, entities: input.novelId === 292 ? clone(entities.filter(e => input.includePlanned || e.status !== 'planned')) : [], relations: [], diagnostics: [], atChapter: input.atChapter ?? null } },
     apply: async (input: any) => { record('atlas.apply', input); if (input.expectedContextVersion !== novel.contextVersion) throw Error('隔离资料版本已变化'); for (const change of input.changes) { const current = entities.find(e => e.id === change.id); if (current) Object.assign(current, clone(change), { attributes: change.attributeMode === 'replace' ? clone(change.attributes) : { ...current.attributes, ...clone(change.attributes) } }) } novel.contextVersion += 1; return { contextVersion: novel.contextVersion, idMap: {}, appliedIds: input.changes.map((c: any) => c.id) } },
@@ -80,7 +89,11 @@ win.electron = {
   character: { list: async () => entities.filter(e => e.kind === 'character').map(e => ({ id: e.nativeId, fullName: e.name })) },
   storyFact: { list: empty }, foreshadow: { listLedger: empty }, thread: { list: empty },
   characterArc: { listCharacterArcs: empty, listRelationshipArcs: empty }, resistance: { listTracks: empty }, endgameAsset: { listCommitments: empty },
-  revision: { list: async (id: number) => clone(issues.filter(issue => issue.novelId === id)) }, structure: { getTree: async (id: number) => ({ volumes: [], unassignedChapters: clone(chapters.filter(chapter => chapter.novelId === id)) }) },
+  revision: {
+    list: async (id: number) => clone(issues.filter(issue => issue.novelId === id)),
+    update: async (id: number, input: any) => { record('revision.update', { id, input }); if (controls.holdIssueUpdate) await new Promise<void>(resolve => { controls.releaseIssueUpdate = () => { controls.holdIssueUpdate = false; controls.releaseIssueUpdate = null; resolve() } }); Object.assign(issues.find(issue => issue.id === id), clone(input)) },
+  },
+  structure: { getTree: async (id: number) => { const data = { volumes: [], unassignedChapters: clone(chapters.filter(chapter => chapter.novelId === id)) }; if (controls.holdStructureLoads > 0) { controls.holdStructureLoads -= 1; await new Promise<void>(resolve => controls.pendingStructureLoads.push({ novelId: id, release: resolve })) } return data } },
   contract: { getChapter: async () => null, listScenes: empty, upsertChapter: async (_id: number, input: any) => { record('contract.upsertChapter', input); return input }, upsertScene: async (_id: number, _segment: unknown, input: any) => { record('contract.upsertScene', input); return input } },
   writeback: { getCenterData: async () => ({ diffs: [], activeRun: null }) },
   zhuque: { getChapterResult: async () => ({ enabled: false, autoDetect: false, apiKeySet: false, status: 'not_checked' }) },
@@ -92,8 +105,11 @@ win.electron = {
     let data: any
     switch (toolId) {
       case 'novelforge.workflows.get': data = { run: clone(input.novelId === 293 ? null : input.runId ? runs.find(item => item.runId === input.runId) || null : run) }; break
-      case 'novelforge.workflows.list': data = { runs: clone(runs) }; break
-      case 'novelforge.artifacts.list': data = { artifacts: clone(artifacts.filter(a => !input.kind || a.kind === input.kind)) }; break
+      case 'novelforge.workflows.list':
+        data = { runs: clone(runs.filter(item => item.novelId === input.novelId)) }
+        if (controls.holdWorkflowLists > 0) { controls.holdWorkflowLists -= 1; await new Promise<void>(resolve => controls.pendingWorkflowLists.push({ novelId: input.novelId, release: resolve })) }
+        break
+      case 'novelforge.artifacts.list': data = { artifacts: clone(artifacts.filter(a => a.novelId === input.novelId && (!input.kind || a.kind === input.kind))) }; break
       case 'novelforge.artifacts.get': data = { artifact: clone(artifacts.find(a => a.id === input.artifactId)) }; break
       case 'novelforge.assets.query': data = { facts: [], assets: [] }; break
       case 'novelforge.chapters.index_status': data = { novelId: input.novelId, savedChapterCount: input.novelId === 293 ? 0 : 1, keywordIndexedChapterCount: input.novelId === 293 ? 0 : 1, vectorIndexedChapterCount: 0, queue: { pending: 0, processing: 0, failed: 0, dead_letter: 0 }, errors: [] }; break
@@ -108,6 +124,10 @@ win.electron = {
         data = { run: clone(run) }; break
       case 'novelforge.workflows.apply':
         record('candidate.apply', input); Object.assign(run, { status: 'completed', step: 'completed', result: { appliedIds: ['character:314'] }, updatedAt: stamp + '1' }); artifacts.find(a => a.id === run.artifactId).status = 'committed'; entities[0].summary = '隔离候选的独立修订。'; data = { run: clone(run) }; break
+      case 'novelforge.workflows.cancel':
+      case 'novelforge.workflows.resume':
+        if (controls.holdRunControl) await new Promise<void>(resolve => { controls.releaseRunControl = () => { controls.holdRunControl = false; controls.releaseRunControl = null; resolve() } })
+        Object.assign(runs.find(item => item.runId === input.runId), { status: toolId.endsWith('cancel') ? 'cancelled' : 'running', step: toolId.endsWith('cancel') ? 'cancelled' : 'generating' }); data = { run: clone(runs.find(item => item.runId === input.runId)) }; break
       default: win.unexpected.push(toolId); throw Error('Unimplemented isolated service: ' + toolId)
     }
     return { ok: true, data }

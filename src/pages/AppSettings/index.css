@@ -53,5 +53,9 @@
 .app-settings__error { color: #b95750; font-size: 12px; line-height: 1.8; }
 .app-settings .ant-alert { margin-top: 16px; overflow-wrap: anywhere; }
 .app-settings .ant-progress { margin-top: 15px; }
+.app-settings > .app-settings__section + .app-settings__section { margin-top: 20px; }
+.app-settings__embedding .ant-select { min-width: min(100%, 190px); flex: 1 1 190px; }
+.app-settings__embedding .ant-input { min-width: 0; flex: 1 1 200px; }
+.app-settings__embedding [role="alert"] { margin: 12px 0 0; color: var(--color-error, #b95750); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .app-settings { padding: 28px 22px 60px; } .app-settings__section { padding: 23px; } .app-settings__preferences { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .app-settings { padding: 24px 14px 50px; } .app-settings__section { padding: 22px 18px; } .app-settings__heading h1 { font-size: 27px; } .app-settings__diagnostics > div { grid-template-columns: 1fr; gap: 3px; } .app-settings__connection-state { font-size: 10px; } .app-settings__version { font-size: 20px; } }

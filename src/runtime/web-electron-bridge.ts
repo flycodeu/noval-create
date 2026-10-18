@@ -1063,6 +1063,7 @@ export function installWebElectronBridge(): void {
     }),
     model: createService('model', {
       list: async () => withLocalBackend('model', 'list', [], async () => readWebModelConfigs().map(exposeWebModelConfig)),
+      discover: async (input?: unknown) => withLocalBackend('model', 'discover', [input], async () => { throw new Error(getLocalBackendUnavailableMessage()) }),
       create: async (data?: unknown) => withLocalBackend('model', 'create', [data], async () => {
         const configs = readWebModelConfigs()
         const nextIdValue = configs.reduce((maxId, config) => Math.max(maxId, Number(config.id) || 0), 0) + 1
@@ -1132,7 +1133,7 @@ export function installWebElectronBridge(): void {
         writeJsonToStorage(WEB_SOURCE_SEARCH_KEY, nextSettings)
         return exposeWebSourceSearchSettings(nextSettings)
       }),
-      test: async () => withLocalBackend('sourceSearch', 'test', [], async () => ({
+      test: async (data?: unknown) => withLocalBackend('sourceSearch', 'test', data === undefined ? [] : [data], async () => ({
         success: false,
         providerName: null,
         latency: 0,

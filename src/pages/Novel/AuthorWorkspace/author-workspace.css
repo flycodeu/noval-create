@@ -4,7 +4,7 @@
 .author-shell-header__identity { display: flex; align-items: center; gap: 13px; min-width: 0; flex: 1; }
 .author-shell-header__identity > strong { font-family: "STSong", "Songti SC", "SimSun", serif; font-size: 19px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .author-shell-header__identity > span { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
-.author-shell-header__actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.author-shell-header__actions { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 0; }
 .author-shell-header__information { display: none; }
 .author-shell-header__actions > div:first-child { display: flex; max-width: 55vw; overflow: auto; }
 .author-shell-sidebar { min-height: 0; border-right: 1px solid var(--border-default); background: var(--bg-surface); padding: 0 10px; }
@@ -163,6 +163,9 @@
 .author-problem-list > article { display: flex; align-items: start; gap: 22px; padding: 22px 0; border-bottom: 1px solid var(--border-default); }
 .author-problem-list > article:last-child { border: 0; }
 .author-problem-list > article > div { flex: 1; min-width: 0; }
+.author-problem-list > article > .author-problem-actions { flex: 0 1 380px; flex-wrap: wrap; justify-content: flex-end; padding-top: 0; }
+.author-version-toolbar { flex-wrap: wrap; }
+.author-version-toolbar > .author-tabs { min-width: 0; }
 .author-problem-list small { color: #a98147; font-size: 10px; }
 .author-problem-list h2 { margin: 7px 0; font-size: 14px; font-weight: 600; }
 .author-problem-list p { font-size: 12px; color: var(--text-secondary); line-height: 1.8; white-space: pre-wrap; }
@@ -204,6 +207,7 @@
   .author-design-notes { padding: 8px 8px 24px; }
   .author-run__steps { flex-wrap: wrap; justify-content: start; }
   .author-problem-list > article { flex-direction: column; gap: 8px; }
+  .author-problem-list > article > .author-problem-actions { flex-basis: auto; justify-content: flex-start; }
   .author-composer__options { gap: 12px; }
   .author-composer__options > .ant-btn { width: 100%; }
   .author-chapter-list > button { gap: 12px; }
@@ -278,7 +282,7 @@
 .author-document-editor .ant-select { width: 100%; }
 .author-missing { color: var(--text-muted); font-size: 12px; line-height: 1.9; }
 .author-structure-layout { display: grid; grid-template-columns: minmax(190px, 250px) minmax(0, 1fr); gap: 20px; }
-.author-structure-tree { background: var(--bg-surface); border: 1px solid var(--border-default); padding: 18px 14px; align-self: start; }
+.author-structure-tree { background: var(--bg-surface); border: 1px solid var(--border-default); padding: 18px 14px; align-self: start; max-height: calc(100dvh - 260px); overflow: auto; overscroll-behavior: contain; }
 .author-structure-tree details { margin: 12px 0; }
 .author-structure-tree details details { margin-left: 12px; }
 .author-structure-tree summary { cursor: pointer; font-size: 13px; line-height: 1.9; }

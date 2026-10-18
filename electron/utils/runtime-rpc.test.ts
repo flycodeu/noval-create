@@ -8,6 +8,8 @@ describe('runtime browser RPC allowlist', () => {
     expect(resolveRuntimeRpcChannel('agentTools', 'call')).toBe('agentTool:call')
     expect(resolveRuntimeRpcChannel('sourceSearch', 'research')).toBe('sourceSearch:research')
     expect(resolveRuntimeRpcChannel('sourceSearch', 'listResearch')).toBe('sourceSearch:listResearch')
+    expect(resolveRuntimeRpcChannel('sourceSearch', 'test')).toBe('sourceSearch:test')
+    expect(resolveRuntimeRpcChannel('model', 'discover')).toBe('model:discover')
     expect(resolveRuntimeRpcChannel('app', 'getCodexMcpSetupStatus')).toBe('app:getCodexMcpSetupStatus')
   })
   it('rejects native shell, window, approval-dialog and malformed channels', () => {

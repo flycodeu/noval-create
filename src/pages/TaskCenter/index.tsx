@@ -270,6 +270,10 @@ export default function TaskCenter() {
   const [modelAttemptsError, setModelAttemptsError] = useState(false)
   const [selectedContextStatus, setSelectedContextStatus] = useState<NovelContextStatus | null>(null)
   const [selectedContextStatusError, setSelectedContextStatusError] = useState(false)
+  const [pendingActionId, setPendingActionId] = useState<number | null>(null)
+  const [draftOpen, setDraftOpen] = useState(false)
+  const actionInFlightRef = useRef(false)
+  const clearingHistoryRef = useRef(false)
   const { streams, clearStream } = useTaskStore()
 
   const buildTaskQueryInput = useCallback((overrides: Partial<TaskQueryInput> = {}): TaskQueryInput => ({
@@ -300,6 +304,9 @@ export default function TaskCenter() {
       if (requestId !== loadVersionRef.current) return null
       setPageData(result)
       setStats(nextStats)
+      if (result.page > 1 && result.items.length === 0) {
+        setPage(Math.max(1, Math.ceil(result.total / result.pageSize)))
+      }
       return result
     } catch (error) {
       if (requestId !== loadVersionRef.current) return null
@@ -320,6 +327,9 @@ export default function TaskCenter() {
   useEffect(() => {
     void loadTasks()
   }, [loadTasks])
+
+  useEffect(() => () => { loadVersionRef.current += 1 }, [])
+  useEffect(() => { setDraftOpen(false) }, [selectedId])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -348,6 +358,7 @@ export default function TaskCenter() {
     if (!selectedId) {
       setModelAttempts([])
       setModelAttemptsError(false)
+      setModelAttemptsLoading(false)
       return () => { active = false }
     }
     setModelAttemptsLoading(true)
@@ -369,97 +380,34 @@ export default function TaskCenter() {
     [selectedTask],
   )
   const selectedStream = selectedTask ? streams[selectedTask.id] : undefined
-  const isPausedWorkflowTask = Boolean(selectedTask && selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused')
   const selectedStaleAssetTags = getFreshnessTags(selectedContextStatus?.staleAssetLabels || [])
-  const selectedFreshnessCards = selectedTask?.novelId
-    ? [
-        {
-          title: '章节同步',
-          value: selectedContextStatusError
-            ? '无法读取'
-            : selectedContextStatus
-              ? selectedContextStatus.staleChapterCount > 0
-                ? `${selectedContextStatus.staleChapterCount} 章待同步`
-                : selectedContextStatus.totalChapterCount > 0
-                  ? `已同步到第 ${selectedContextStatus.totalChapterCount} 章`
-                  : '尚未生成章节'
-              : '加载中',
-          desc: selectedContextStatusError
-            ? '上下文健康状态读取失败。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleChapterCount > 0
-                ? '当前任务关联小说里仍有章节挂着旧上下文。'
-                : '当前正文与最新设定保持一致。'
-              : '正在读取当前小说的章节同步状态。',
-          hint: selectedContextStatusError
-            ? '请稍后重试，或回到对应功能页查看。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleChapterCount > 0
-                ? '需要先回查相关章节。'
-                : '章节层不需要额外回补，可以继续当前任务。'
-              : '稍后会自动补全状态。',
-          tone: selectedContextStatus?.staleChapterCount ? 'stale' : 'ok',
-          tags: [] as string[],
-        },
-        {
-          title: '记忆检查点',
-          value: selectedContextStatusError
-            ? '无法读取'
-            : selectedContextStatus
-              ? selectedContextStatus.staleCheckpointCount > 0
-                ? `${selectedContextStatus.staleCheckpointCount} 份待刷新`
-                : '检查点已同步'
-              : '加载中',
-          desc: selectedContextStatusError
-            ? '上下文健康状态读取失败。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleCheckpointCount > 0
-                ? '长期记忆还是旧版本，恢复流程后会继续引用旧长程记忆。'
-                : '长期记忆检查点已跟上当前设定。'
-              : '正在读取长期记忆检查点状态。',
-          hint: selectedContextStatusError
-            ? '请稍后重试，或回到对应功能页查看。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleCheckpointCount > 0
-                ? '需要先刷新故事记忆。'
-                : '当前可以直接继续恢复或查看后续结果。'
-              : '稍后会自动补全状态。',
-          tone: selectedContextStatus?.staleCheckpointCount
-            ? (isPausedWorkflowTask ? 'stale' : 'warn')
-            : 'ok',
-          tags: [] as string[],
-        },
-        {
-          title: '资产校准',
-          value: selectedContextStatusError
-            ? '无法读取'
-            : selectedContextStatus
-              ? selectedContextStatus.staleAssetCount > 0
-                ? `${selectedContextStatus.staleAssetCount} 类待校准`
-                : '资产状态最新'
-              : '加载中',
-          desc: selectedContextStatusError
-            ? '上下文健康状态读取失败。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleAssetCount > 0
-                ? '相关世界资产可能还挂着旧设定，继续流程会把旧资产带进后续结果。'
-                : '关键世界资产没有发现明显的设定滞后。'
-              : '正在读取资产新鲜度状态。',
-          hint: selectedContextStatusError
-            ? '请稍后重试，或回到对应功能页查看。'
-            : selectedContextStatus
-              ? selectedContextStatus.staleAssetCount > 0
-                ? '需要先处理相关资产。'
-                : '当前资产可以继续支撑该任务。'
-              : '稍后会自动补全状态。',
-          tone: selectedContextStatus?.staleAssetCount
-            ? (isPausedWorkflowTask ? 'stale' : 'warn')
-            : 'ok',
-          tags: selectedContextStatus?.staleAssetCount ? selectedStaleAssetTags : [],
-        },
-      ]
-    : []
-
+  const selectedFreshnessCards = selectedTask?.novelId ? [
+    {
+      title: '章节同步',
+      value: !selectedContextStatus ? selectedContextStatusError ? '无法读取' : '加载中'
+        : selectedContextStatus.staleChapterCount ? `${selectedContextStatus.staleChapterCount} 章待同步`
+          : selectedContextStatus.totalChapterCount ? '已同步' : '尚无章节',
+      desc: selectedContextStatus?.staleChapterCount ? '相关章节仍使用旧上下文，需回查。' : '',
+      tone: selectedContextStatus?.staleChapterCount ? 'stale' : 'ok',
+      tags: [] as string[],
+    },
+    {
+      title: '记忆检查点',
+      value: !selectedContextStatus ? selectedContextStatusError ? '无法读取' : '加载中'
+        : selectedContextStatus.staleCheckpointCount ? `${selectedContextStatus.staleCheckpointCount} 份待刷新` : '已同步',
+      desc: selectedContextStatus?.staleCheckpointCount ? '恢复前请刷新长期记忆，避免沿用旧设定。' : '',
+      tone: selectedContextStatus?.staleCheckpointCount ? 'warn' : 'ok',
+      tags: [] as string[],
+    },
+    {
+      title: '资产校准',
+      value: !selectedContextStatus ? selectedContextStatusError ? '无法读取' : '加载中'
+        : selectedContextStatus.staleAssetCount ? `${selectedContextStatus.staleAssetCount} 类待校准` : '已同步',
+      desc: selectedContextStatus?.staleAssetCount ? '相关资产仍使用旧设定，继续执行前需核对。' : '',
+      tone: selectedContextStatus?.staleAssetCount ? 'warn' : 'ok',
+      tags: selectedContextStatus?.staleAssetCount ? selectedStaleAssetTags : [],
+    },
+  ] : []
   useEffect(() => {
     let active = true
     const novelId = selectedTask?.novelId
@@ -509,26 +457,26 @@ export default function TaskCenter() {
     setPage(nextPage)
   }
 
-  const handleCancel = async (taskId: number) => {
+  const runTaskAction = async (taskId: number, operation: () => Promise<unknown>, errorKey: Parameters<typeof getErrorMessage>[1]) => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
+    setPendingActionId(taskId)
     try {
-      await window.electron.task.cancel(taskId)
+      await operation()
       await loadTasks({ silent: true })
     } catch (error) {
-      message.error(getErrorMessage(error, 'taskCenter.cancelFailed'))
+      message.error(getErrorMessage(error, errorKey))
+    } finally {
+      actionInFlightRef.current = false
+      setPendingActionId(null)
     }
   }
 
-  const handleRetry = async (taskId: number) => {
-    try {
-      await window.electron.task.retry(taskId)
-      await loadTasks({ silent: true })
-    } catch (error) {
-      message.error(getErrorMessage(error, 'taskCenter.retryFailed'))
-    }
-  }
+  const handleCancel = (taskId: number) => runTaskAction(taskId, () => window.electron.task.cancel(taskId), 'taskCenter.cancelFailed')
+  const handleRetry = (taskId: number) => runTaskAction(taskId, () => window.electron.task.retry(taskId), 'taskCenter.retryFailed')
 
   const handleResume = async (task: Task, recoveryAction?: ReturnType<typeof buildTaskRecoveryAction> | null) => {
-    try {
+    await runTaskAction(task.id, async () => {
       if (isChapterPipelineResumeSupported(task, recoveryAction || null)) {
         await window.electron.chapter.resumeContent(task.id)
       } else if (task.runnerType === 'workflow' && (task.status === 'paused' || task.status === 'blocked') && isWorkflowResumable(task)) {
@@ -537,10 +485,7 @@ export default function TaskCenter() {
         return
       }
       message.success(getUserFacingMessage('taskCenter.resumed'))
-      await loadTasks({ silent: true })
-    } catch (error) {
-      message.error(getErrorMessage(error, 'taskCenter.resumeFailed'))
-    }
+    }, 'taskCenter.resumeFailed')
   }
 
   const handleClearHistory = useCallback(() => {
@@ -551,6 +496,10 @@ export default function TaskCenter() {
       cancelText: '取消',
       okButtonProps: { danger: true },
       onOk: async () => {
+        if (clearingHistoryRef.current) return
+        clearingHistoryRef.current = true
+        foregroundLoadRef.current = true
+        loadVersionRef.current += 1
         setClearingHistory(true)
         try {
           const result = await window.electron.task.clearHistory({
@@ -580,7 +529,11 @@ export default function TaskCenter() {
           )
         } catch (error) {
           message.error(getErrorMessage(error, 'taskCenter.clearHistoryFailed'))
+          throw error
         } finally {
+          clearingHistoryRef.current = false
+          foregroundLoadRef.current = false
+          setLoading(false)
           setClearingHistory(false)
         }
       },
@@ -745,11 +698,11 @@ export default function TaskCenter() {
   return (
     <WorkspacePage
       className="task-center-page"
-      title="任务中心"
+      title="运行记录"
       heroVariant="compact"
       actions={(
         <div className="task-center-toolbar">
-          <Button icon={<ReloadOutlined />} loading={loading && !clearingHistory} onClick={() => void loadTasks()}>
+          <Button icon={<ReloadOutlined />} disabled={clearingHistory} loading={loading && !clearingHistory} onClick={() => void loadTasks()}>
             刷新
           </Button>
           <Button
@@ -782,6 +735,8 @@ export default function TaskCenter() {
                 <Select
                   className="task-center-filter-control"
                   value={statusFilter}
+                  disabled={clearingHistory}
+                  aria-label="任务状态"
                   onChange={handleStatusFilterChange}
                   options={[
                     { value: 'all', label: '全部状态' },
@@ -797,6 +752,8 @@ export default function TaskCenter() {
                 <Select
                   className="task-center-filter-control"
                   value={typeFilter}
+                  disabled={clearingHistory}
+                  aria-label="任务类型"
                   onChange={handleTypeFilterChange}
                   options={[
                     { value: 'all', label: '全部类型' },
@@ -816,8 +773,8 @@ export default function TaskCenter() {
             <Empty
               description={
                 statusFilter !== 'all' || typeFilter !== 'all'
-                  ? '当前筛选下没有匹配任务，清空筛选后再看完整记录。'
-                  : '这里还没有任务记录，去创作页发起生成、审校或批处理后会在这里汇总。'
+                  ? '没有匹配任务'
+                  : '暂无任务记录'
               }
               style={{ paddingTop: 40 }}
             >
@@ -890,6 +847,7 @@ export default function TaskCenter() {
                 pageSize={pageData.pageSize}
                 total={pageData.total}
                 showSizeChanger
+                disabled={clearingHistory}
                 pageSizeOptions={PAGE_SIZE_OPTIONS}
                 onChange={handlePageChange}
                 showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`}
@@ -905,13 +863,13 @@ export default function TaskCenter() {
           extra={selectedTask ? (
             <div className="task-center-detail__actions">
               {selectedTask.status === 'running' ? (
-                <Button danger icon={<StopOutlined />} onClick={() => void handleCancel(selectedTask.id)}>
+                <Button danger disabled={pendingActionId !== null} loading={pendingActionId === selectedTask.id} icon={<StopOutlined />} onClick={() => void handleCancel(selectedTask.id)}>
                   取消
                 </Button>
               ) : null}
               {((selectedTask.status === 'paused' || selectedTask.status === 'blocked') && isWorkflowResumable(selectedTask))
                 || isChapterPipelineResumeSupported(selectedTask, selectedRecoveryAction) ? (
-                <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask, selectedRecoveryAction)}>
+                <Button disabled={pendingActionId !== null} loading={pendingActionId === selectedTask.id} icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask, selectedRecoveryAction)}>
                   继续
                 </Button>
               ) : null}
@@ -920,8 +878,9 @@ export default function TaskCenter() {
                   {selectedRecoveryAction.label}
                 </Button>
               ) : null}
+              {selectedRecoveryAction?.kind === 'view_draft' ? <Button onClick={() => setDraftOpen(true)}>{selectedRecoveryAction.label}</Button> : null}
               {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
-                <Button icon={<ReloadOutlined />} onClick={() => void handleRetry(selectedTask.id)}>
+                <Button disabled={pendingActionId !== null} loading={pendingActionId === selectedTask.id} icon={<ReloadOutlined />} onClick={() => void handleRetry(selectedTask.id)}>
                   重试
                 </Button>
               ) : null}
@@ -971,15 +930,6 @@ export default function TaskCenter() {
                 />
               ) : null}
 
-              {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
-                <Alert
-                  type="success"
-                  showIcon
-                  message="当前任务支持安全重试"
-
-                />
-              ) : null}
-
               {selectedRecoveryAction?.kind === 'recover_draft' || selectedRecoveryAction?.kind === 'open_page' ? (
                 <Alert
                   type="info"
@@ -1007,7 +957,7 @@ export default function TaskCenter() {
                 />
               ) : null}
 
-              <div className="novel-note-list">
+              <details className="task-center-diagnostics"><summary>执行参数与诊断</summary><div className="novel-note-list">
                 <div className="novel-note-list__item">{`任务 ID：${selectedTask.id}`}</div>
                 <div className="novel-note-list__item">{`执行方式：${getTaskRunnerLabel(selectedTask)}`}</div>
                 {selectedTask.pipelineRole ? <div className="novel-note-list__item">{`角色：${getTaskPipelineRoleLabel(selectedTask)}`}</div> : null}
@@ -1019,7 +969,7 @@ export default function TaskCenter() {
                 <div className="novel-note-list__item">{`模型配置：${selectedTask.modelConfigId || '-'}`}</div>
                 <div className="novel-note-list__item">{`耗时：${selectedTask.durationMs ? `${(selectedTask.durationMs / 1000).toFixed(1)}s` : '-'}`}</div>
                 <div className="novel-note-list__item">{`Token 消耗：${selectedTask.tokensUsed || '-'}`}</div>
-              </div>
+              </div></details>
 
               {selectedTask.novelId ? (
                 <div className="task-context-health-card">
@@ -1027,7 +977,7 @@ export default function TaskCenter() {
                     <div className="task-context-health-card__title">上下文健康</div>
                     <div className="task-context-health-card__meta">
                       <span>{`上下文版本 v${selectedContextStatus?.contextVersion ?? '--'}`}</span>
-                      <span>{selectedContextStatus?.totalChapterCount ? `已纳入 ${selectedContextStatus.totalChapterCount} 章正文` : '尚未生成正文章节'}</span>
+                      <span>{!selectedContextStatus ? selectedContextStatusError ? '状态无法读取' : '读取中…' : selectedContextStatus.totalChapterCount ? `已纳入 ${selectedContextStatus.totalChapterCount} 章正文` : '尚无正文章节'}</span>
                     </div>
                   </div>
                   <div className="novel-freshness-grid novel-freshness-grid--compact">
@@ -1035,7 +985,7 @@ export default function TaskCenter() {
                       <section key={card.title} className={`novel-freshness-card novel-freshness-card--${card.tone}`}>
                         <div className="novel-freshness-card__title">{card.title}</div>
                         <strong className="novel-freshness-card__value">{card.value}</strong>
-                        <div className="novel-freshness-card__desc">{card.desc}</div>
+                        {card.desc ? <div className="novel-freshness-card__desc">{card.desc}</div> : null}
                         {card.tags.length > 0 ? (
                           <div className="novel-freshness-card__tags">
                             {card.tags.map((tag) => (
@@ -1043,17 +993,9 @@ export default function TaskCenter() {
                             ))}
                           </div>
                         ) : null}
-                        <div className="novel-freshness-card__hint">{card.hint}</div>
                       </section>
                     ))}
                   </div>
-                  {isPausedWorkflowTask ? (
-                    <div className="task-context-health-card__recovery">
-                      {selectedContextStatus?.staleCheckpointCount || selectedContextStatus?.staleAssetCount || selectedContextStatus?.staleChapterCount
-                        ? '当前流程已暂停，恢复前最好先处理上面的滞后项，避免继续沿用旧上下文。'
-                        : '当前流程已暂停，但上下文仍稳定，可以直接恢复继续执行。'}
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
 
@@ -1066,6 +1008,10 @@ export default function TaskCenter() {
           )}
         </WorkspacePanel>
       </div>
+      <Modal title={`历史草稿 · 任务 #${selectedTask?.id ?? ''}`} open={draftOpen} onCancel={() => setDraftOpen(false)} footer={<Button onClick={() => setDraftOpen(false)}>关闭</Button>} width="min(880px, calc(100vw - 32px))" className="task-center-draft-modal" destroyOnHidden>
+        <p>此草稿只读，不会写回故事设计或正文。</p>
+        <pre>{JSON.stringify(parseTaskProgress(selectedTask?.progressJson).draft ?? {}, null, 2)}</pre>
+      </Modal>
     </WorkspacePage>
   )
 }

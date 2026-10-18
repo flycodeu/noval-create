@@ -93,6 +93,7 @@ import * as mapService from './services/map.service'
 import * as narrativeBoardService from './services/narrative-board.service'
 import * as creativeStageService from './services/creative-stage.service'
 import * as modelService from './services/model.service'
+import { discoverModels } from './services/model-discovery.service'
 import { encryptApiKey } from './services/model.service'
 import * as sourceSearchSettingsService from './services/source-search-settings.service'
 import { listCreativeResearch, searchCreativeResearch } from './services/creative-research.service'
@@ -1401,6 +1402,7 @@ function registerHistoryAndModelIpcHandlers(handle: IpcHandle) {
   })
 
   handle('model:test', (_, id) => modelService.testAdapter(id))
+  handle('model:discover', (_, input) => discoverModels(input))
 }
 
 function registerRuntimeIpcHandlers(handle: IpcHandle) {
@@ -1414,7 +1416,10 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
     requireObject(data, 'data')
     return sourceSearchSettingsService.updateSourceSearchSettings(data)
   })
-  handle('sourceSearch:test', () => sourceSearchSettingsService.testSourceSearchSettings())
+  handle('sourceSearch:test', (_, data) => {
+    if (data !== undefined) requireObject(data, 'data')
+    return sourceSearchSettingsService.testSourceSearchSettings(data)
+  })
   handle('sourceSearch:research', (_, novelId, request, atChapter) => searchCreativeResearch(requireId(novelId, 'novelId'), requireString(request, 'request'), atChapter))
   handle('sourceSearch:listResearch', (_, novelId, query) => listCreativeResearch(requireId(novelId, 'novelId'), typeof query === 'string' ? query : ''))
 

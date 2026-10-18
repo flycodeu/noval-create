@@ -73,6 +73,7 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
   const [dataError, setDataError] = useState('')
   const [models, setModels] = useState<ModelConfig[]>([])
   const [savingModel, setSavingModel] = useState(false)
+  const modelSaveInFlight = useRef(false)
   const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const workflow = useCreativeWorkflow(novelId)
   useLayoutEffect(() => { rememberStudioDraft(draftKey, { stage, request, autoApply, count, sourceArtifactId, chapterScope, repairTargetActive, atChapter }) }, [draftKey, stage, request, autoApply, count, sourceArtifactId, chapterScope, repairTargetActive, atChapter])
@@ -85,6 +86,8 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
   const effectiveModel = novel?.modelConfigId ? models.find(model => model.id === novel.modelConfigId) : models.find(model => model.isDefault === 1)
   const reviewerId = parseStorySettingsDocument(novel?.settingsJson).aiEngine.reviewModelConfigId
   const changeReviewer = async (reviewModelConfigId: number) => {
+    if (modelSaveInFlight.current || workflow.active || workflow.submitting) return
+    modelSaveInFlight.current = true
     setSavingModel(true)
     try {
       const latest = await window.electron.novel.get(novelId)
@@ -92,10 +95,13 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
       await window.electron.novel.update(novelId, { settingsJson: JSON.stringify(buildStorySettingsPayload({ aiEngine: { reviewModelConfigId: reviewModelConfigId || null } }, latest.settingsJson)) }, { expectedContextVersion: latest.contextVersion })
       const updated = await window.electron.novel.get(novelId)
       if (updated?.id === novelId && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
+      setDataError('')
     } catch (cause) { setDataError(cause instanceof Error ? cause.message : '保存审校模型失败') }
-    finally { setSavingModel(false) }
+    finally { modelSaveInFlight.current = false; setSavingModel(false) }
   }
   const changeModel = async (modelConfigId: number) => {
+    if (modelSaveInFlight.current || workflow.active || workflow.submitting) return
+    modelSaveInFlight.current = true
     setSavingModel(true)
     try {
       const latest = await window.electron.novel.get(novelId)
@@ -104,10 +110,10 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
       const updated = await window.electron.novel.get(novelId)
       if (updated?.id === novelId && useNovelStore.getState().currentNovel?.id === novelId) {
         setNovel(updated)
-        message.success('项目模型已更新，下一轮创作与 Codex 调用会使用此配置')
+        setDataError(''); message.success('项目模型已更新')
       }
     } catch (cause) { setDataError(cause instanceof Error ? cause.message : '保存项目模型失败') }
-    finally { setSavingModel(false) }
+    finally { modelSaveInFlight.current = false; setSavingModel(false) }
   }
 
   useEffect(() => {
@@ -178,9 +184,9 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
         }}>开始这一轮</Button>
       </div>
       <details className="author-disclosure studio-model-settings" open={!effectiveModel || Boolean(reviewerId && !models.some(model => model.id === reviewerId))}><summary>模型与审校设置{effectiveModel ? ` · ${effectiveModel.name}` : ' · 尚未配置'}</summary>
-        <div className="author-model-route"><div className="author-model-route__field"><label htmlFor="author-project-model">生成模型</label><Select id="author-project-model" aria-label="生成模型" value={effectiveModel?.id} placeholder="选择已配置的模型" disabled={workflow.active || savingModel || !models.length} loading={savingModel} onChange={(value) => void changeModel(value)} options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></div>
-          <div className="author-model-route__field"><label htmlFor="author-review-model">审校模型</label><Select id="author-review-model" aria-label="审校模型" value={reviewerId || 0} disabled={workflow.active || savingModel} loading={savingModel} onChange={value => void changeReviewer(value)} options={[{ value: 0, label: '跟随生成模型' }, ...models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))]} /></div>
-          <span>{workflow.active ? '当前任务的模型已固定' : reviewerId && !models.some(model => model.id === reviewerId) ? '原审校模型已不可用，请重新选择' : novel?.modelConfigId && !effectiveModel ? '原项目模型已不可用，请重新选择' : novel?.modelConfigId ? '已用于本项目及 Codex 调用' : effectiveModel ? '生成模型跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div>
+        <div className="author-model-route"><div className="author-model-route__field"><label htmlFor="author-project-model">生成模型</label><Select id="author-project-model" aria-label="生成模型" value={effectiveModel?.id} placeholder="选择已配置的模型" disabled={workflow.active || workflow.submitting || savingModel || !models.length} loading={savingModel} onChange={(value) => void changeModel(value)} options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></div>
+          <div className="author-model-route__field"><label htmlFor="author-review-model">审校模型</label><Select id="author-review-model" aria-label="审校模型" value={reviewerId || 0} disabled={workflow.active || workflow.submitting || savingModel} loading={savingModel} onChange={value => void changeReviewer(value)} options={[{ value: 0, label: '跟随生成模型' }, ...models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))]} /></div>
+          <span>{workflow.active ? '当前任务的模型已固定' : reviewerId && !models.some(model => model.id === reviewerId) ? '原审校模型已不可用，请重新选择' : novel?.modelConfigId && !effectiveModel ? '原项目模型已不可用，请重新选择' : novel?.modelConfigId ? '本项目使用所选模型' : effectiveModel ? '生成模型跟随全局默认' : '先添加模型配置'}</span><Button type="link" onClick={() => navigate('/models')}>管理模型</Button></div>
       </details>
     </section>
     {dataError && <p className="author-error" role="alert">{dataError}</p>}

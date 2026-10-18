@@ -11,8 +11,8 @@ const SECTION_LABELS = [
   { key: '/novels', label: '我的小说' },
   { key: '/models', label: '模型与搜索' },
   { key: '/templates', label: '风格模板' },
-  { key: '/prompts', label: '提示词' },
-  { key: '/tasks', label: '任务中心' },
+  { key: '/prompts', label: '提示词管理' },
+  { key: '/tasks', label: '运行记录' },
   { key: '/settings', label: '应用设置' },
 ]
 

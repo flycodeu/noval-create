@@ -81,7 +81,7 @@ const tests = [
     },
   },
   {
-    name: 'task recovery distinguishes paused workflows from recoverable drafts',
+    name: 'task recovery distinguishes resumable workflows from read-only historical drafts',
     run() {
       const pausedWorkflow = navigation.buildTaskRecoveryAction({
         id: 1,
@@ -114,10 +114,10 @@ const tests = [
       })
 
       assert.equal(pausedWorkflow.kind, 'resume')
-      assert.equal(planningDraft.kind, 'recover_draft')
-      assert.match(planningDraft.path, /\/novels\/7\/timeline/u)
-      assert.equal(premiseDraft.kind, 'recover_draft')
-      assert.match(premiseDraft.path, /\/novels\/7\/core-settings/u)
+      assert.equal(planningDraft.kind, 'view_draft')
+      assert.equal(planningDraft.path, undefined)
+      assert.equal(premiseDraft.kind, 'view_draft')
+      assert.equal(premiseDraft.path, undefined)
     },
   },
   {

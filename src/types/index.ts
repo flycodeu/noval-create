@@ -1547,6 +1547,17 @@ export interface ModelConfig {
   createdAt: string
 }
 
+export interface ModelDiscoveryRequest {
+  provider: string
+  apiKey?: string
+  baseUrl?: string
+  configId?: number
+}
+
+export interface ModelDiscoveryResult {
+  models: string[]
+}
+
 export type SourceSearchProviderMode = 'auto' | 'tavily' | 'brave' | 'disabled'
 export type SourceSearchProviderName = 'tavily' | 'brave'
 
@@ -6413,6 +6424,7 @@ declare global {
       }
       model: {
         list: () => Promise<ModelConfig[]>
+        discover: (input: ModelDiscoveryRequest) => Promise<ModelDiscoveryResult>
         create: (data: Partial<ModelConfig>) => Promise<number>
         update: (id: number, data: Partial<ModelConfig>) => Promise<void>
         delete: (id: number) => Promise<void>
@@ -6429,7 +6441,7 @@ declare global {
       sourceSearch: {
         getSettings: () => Promise<SourceSearchSettingsView>
         updateSettings: (data: SourceSearchSettingsUpdate) => Promise<SourceSearchSettingsView>
-        test: () => Promise<SourceSearchTestResult>
+        test: (data?: SourceSearchSettingsUpdate) => Promise<SourceSearchTestResult>
         research: (novelId: number, request: string, atChapter?: number) => Promise<import('../shared/creative-research').CreativeResearchResult>
         listResearch: (novelId: number, query?: string) => Promise<import('../shared/creative-research').CreativeResearchSource[]>
       }
