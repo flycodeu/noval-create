@@ -38,7 +38,8 @@ vi.mock('./model.service', () => ({
   })),
 }))
 
-vi.mock('../utils/user-facing-error', () => ({
+vi.mock('../utils/user-facing-error', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../utils/user-facing-error')>(),
   throwUserFacingError: vi.fn((key: string) => {
     throw new Error(key)
   }),
