@@ -4,6 +4,7 @@ const path = require('node:path')
 const { randomUUID } = require('node:crypto')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempBase = path.resolve(workspaceRoot, '.tmp-tests')
@@ -419,7 +420,7 @@ async function main() {
     assert.throws(() => queryStoryAtlas({ novelId: timingNovel, boundary: 'start' }))
 
     process.stdout.write('PASS story atlas: hierarchy, native projections, shared graph, validation without writes, chapter history, future filtering, version/idempotency, cross-project protection, cycle/travel validation, outer transaction rollback, source migration, manual replacement and clearing, migrated reference preservation, current/future position guards\n')
-  } finally { closeDb(); fs.rmSync(tempRoot, { recursive: true, force: true }) }
+  } finally { closeDb(); cleanupElectronFixture(tempRoot, 'story-atlas') }
   app.exit(0)
 }
 main().catch((error) => { console.error(error); app.exit(1) })

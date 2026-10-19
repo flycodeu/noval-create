@@ -4,6 +4,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'agent-conflict-stress')
@@ -222,7 +223,7 @@ async function runMain() {
     console.log('PASS concurrent dual-agent conflict stress: replay is single-row and different-content collision is rejected')
   } finally {
     closeDb()
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    cleanupElectronFixture(tempRoot, 'agent-conflict-stress')
     await app.quit()
   }
 }

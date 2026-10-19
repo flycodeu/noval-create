@@ -4,6 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf-policy-'))
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
 process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath
@@ -108,7 +109,7 @@ app.whenReady().then(async () => {
     assert.throws(() => updateNovel(novelId, { settingsJson: '{"readerFirst":{"schemaVersion":1,"policyVersion":"reader-first-v1","revision":1}}' }), /请刷新设置/)
     console.log(JSON.stringify({ status: 'PASS', cases: ['RF-05-01', 'RF-05-02', 'RF-05-03', 'RF-05-04'], reopenedDatabase: true, workflowTaskId: runtime.workflowTaskId, userData: isolatedPath, realModelCalls: 0 }))
     closeDb()
-    fs.rmSync(isolatedPath, { recursive: true, force: true })
+    cleanupElectronFixture(isolatedPath, 'reader-first-policy-storage')
     app.exit(0)
   } catch (error) { console.error(error); closeDb(); app.exit(1) }
 }).catch((error) => { console.error(error); app.exit(1) })

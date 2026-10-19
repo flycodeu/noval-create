@@ -4,6 +4,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'chapter-writeback-idempotency')
@@ -193,7 +194,7 @@ async function runMain() {
     console.log('PASS chapter writeback idempotency: concurrent apply is one-shot, replay is stable, and retry preserves partial failure state')
   } finally {
     closeDb()
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    cleanupElectronFixture(tempRoot, 'chapter-writeback-idempotency')
     await app.quit()
   }
 }

@@ -12,7 +12,10 @@ const workspaceRoot = path.resolve(__dirname, '..')
 const testRoot = path.join(workspaceRoot, '.tmp-tests')
 const testUserData = path.join(testRoot, `packaged-mcp-${process.pid}-${randomUUID()}`)
 const bundled = process.argv.includes('--bundled') || process.argv.includes('--bundle')
-const executable = bundled ? require('electron') : path.join(workspaceRoot, 'release/win-unpacked/NovelForge.exe')
+const executableArg = process.argv.find((arg) => arg.startsWith('--executable='))
+const executable = bundled ? require('electron') : executableArg
+  ? path.resolve(executableArg.slice('--executable='.length))
+  : path.join(workspaceRoot, 'release/win-unpacked/NovelForge.exe')
 const args = bundled ? [path.join(__dirname, 'novelforge-mcp.cjs'), '--mcp'] : ['--mcp']
 const discoveryPath = path.join(testUserData, 'novelforge-runtime.json')
 const lockPath = path.join(testUserData, 'novelforge.single-writer.lock')
@@ -100,7 +103,7 @@ async function connect() {
 }
 function verifyInstallFilesReleased() {
   if (bundled) return
-  const installRoot = fs.realpathSync(path.join(workspaceRoot, 'release/win-unpacked'))
+  const installRoot = fs.realpathSync(path.dirname(executable))
   const files = [executable, path.join(installRoot, 'resources/app.asar')].map((file) => fs.realpathSync(file))
   for (const file of files) {
     const relative = path.relative(installRoot, file)

@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'chapter-boundary-'))
 app.setPath('userData', temp)
@@ -247,7 +248,7 @@ async function main() {
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET', 'rewriting cannot silently discard most of the saved chapter')
     assert.ok(known > 0)
     process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, chapter introduction plans without current end-state leakage, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
-  } finally { closeDb(); fs.rmSync(temp, { recursive: true, force: true }) }
+  } finally { closeDb(); cleanupElectronFixture(temp, 'creative-chapter-context') }
   app.exit(0)
 }
 main().catch(error => { console.error(error); app.exit(1) })

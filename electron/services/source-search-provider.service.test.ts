@@ -24,7 +24,7 @@ function jsonResponse(value: unknown, headers: Record<string, string> = {}): Res
 }
 
 function mockPayload(value: unknown) {
-  const mock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonResponse(value))
+  const mock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(value))
   vi.stubGlobal('fetch', mock)
   return mock
 }
@@ -62,7 +62,7 @@ async function expectSafeFailure(pending: Promise<unknown>, code: string, status
 
 beforeEach(() => {
   // Every request is explicitly mocked; this suite cannot call providers or load an author profile.
-  vi.stubGlobal('fetch', vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockRejectedValue(new Error('Unexpected provider request in isolated unit test')))
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(new Error('Unexpected provider request in isolated unit test')))
 })
 
 afterEach(() => {
@@ -389,7 +389,7 @@ describe('source filtering and bounded safe transport', () => {
 
   it('ends an unresponsive request on its deadline even if fetch ignores AbortSignal', async () => {
     vi.useFakeTimers()
-    const mock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockImplementation(() => new Promise(() => undefined))
+    const mock = vi.fn<typeof fetch>().mockImplementation(() => new Promise(() => undefined))
     vi.stubGlobal('fetch', mock)
     const rejected = expectSafeFailure(executeSourceSearch(runtime('deepseek'), QUERY, { ...OPTIONS, timeoutMs: 25 }), 'TIMEOUT')
     await vi.advanceTimersByTimeAsync(25)
@@ -410,7 +410,7 @@ describe('source filtering and bounded safe transport', () => {
 
   it.each(['responses', 'chat-completions'] as const)('gives model-backed %s searches at least 30 seconds without an unbounded deadline', async protocol => {
     vi.useFakeTimers()
-    vi.stubGlobal('fetch', vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockImplementation(() => new Promise(() => undefined)))
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(() => new Promise(() => undefined)))
     const rejected = expectSafeFailure(executeSourceSearch(runtime(protocol), QUERY, OPTIONS), 'TIMEOUT')
     await vi.advanceTimersByTimeAsync(8000)
     expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(false)

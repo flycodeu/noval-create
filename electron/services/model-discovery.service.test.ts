@@ -45,7 +45,7 @@ describe('model discovery', () => {
     ['kimi', 'https://api.moonshot.ai/v1/models'],
     ['moonshot', 'https://api.moonshot.ai/v1/models'],
   ])('fetches real %s model IDs without saving a config', async (provider, endpoint) => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('z-model', 'a-model', 'a-model'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('z-model', 'a-model', 'a-model'))
     const result = await discoverModels({ provider, apiKey: API_KEY }, { fetch: fetchModels })
     expect(result).toEqual({ models: ['a-model', 'z-model'] })
     expect(fetchModels).toHaveBeenCalledOnce()
@@ -59,7 +59,7 @@ describe('model discovery', () => {
   })
 
   it('uses Anthropic authentication and fetches subsequent pages', async () => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'claude-a' }], has_more: true, last_id: 'claude-a' }))
       .mockResolvedValueOnce(jsonModels('claude-b'))
     expect(await discoverModels({ provider: 'anthropic', apiKey: API_KEY }, { fetch: fetchModels }))
@@ -71,7 +71,7 @@ describe('model discovery', () => {
   })
 
   it('uses the documented native Aliyun catalogue, model field and numbered pagination', async () => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ output: { total: 3, page_no: 1, models: [{ model: 'qwen-a' }, { model: 'qwen-b' }] } }))
       .mockResolvedValueOnce(jsonResponse({ output: { total: 3, page_no: 2, models: [{ model: 'qwen-c' }] } }))
     expect(await discoverModels({ provider: 'aliyun', apiKey: API_KEY }, { fetch: fetchModels }))
@@ -83,7 +83,7 @@ describe('model discovery', () => {
   })
 
   it('preserves explicitly configured Aliyun OpenAI-compatible endpoints and their real response', async () => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('qwen-compatible'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('qwen-compatible'))
     expect(await discoverModels({ provider: 'aliyun', apiKey: API_KEY, baseUrl: 'https://coding.dashscope.aliyuncs.com/v1' }, { fetch: fetchModels }))
       .toEqual({ models: ['qwen-compatible'] })
     expect(fetchModels).toHaveBeenCalledWith('https://coding.dashscope.aliyuncs.com/v1/models', expect.any(Object))
@@ -91,7 +91,7 @@ describe('model discovery', () => {
 
   it('reports an empty native Aliyun catalogue and rejects malformed or excessive native pagination', async () => {
     expect(await discoverModels({ provider: 'aliyun', apiKey: API_KEY }, {
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonResponse({ output: { total: 0, models: [] } })),
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ output: { total: 0, models: [] } })),
     })).toEqual({ models: [] })
     const invalidPayloads = [
       { data: [{ id: 'wrong-shape' }] },
@@ -102,16 +102,16 @@ describe('model discovery', () => {
     ]
     for (const payload of invalidPayloads) {
       await expect(discoverModels({ provider: 'aliyun', apiKey: API_KEY }, {
-        fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonResponse(payload)),
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload)),
       })).rejects.toMatchObject({ code: 'modelDiscovery.invalidResponse' })
     }
     await expect(discoverModels({ provider: 'aliyun', apiKey: API_KEY }, {
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonResponse({ output: { total: 10_001, models: [] } })),
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ output: { total: 10_001, models: [] } })),
     })).rejects.toMatchObject({ code: 'modelDiscovery.tooLarge' })
   })
 
   it('normalizes trailing slashes and permits keyless local OpenAI-compatible models', async () => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('local-model'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('local-model'))
     await discoverModels({ provider: 'custom', baseUrl: 'http://localhost:11434/v1///' }, { fetch: fetchModels })
     expect(fetchModels).toHaveBeenCalledWith('http://localhost:11434/v1/models', expect.objectContaining({
       headers: { Accept: 'application/json' },
@@ -121,7 +121,7 @@ describe('model discovery', () => {
   it('uses a new unsaved key and URL without accessing saved credentials', async () => {
     const getConfig = vi.fn()
     const decryptKey = vi.fn()
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('new-model'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('new-model'))
     await discoverModels({
       provider: 'openai', apiKey: API_KEY, baseUrl: 'https://new.example/custom/v1', configId: 12,
     }, { fetch: fetchModels, getConfig, decryptKey })
@@ -133,7 +133,7 @@ describe('model discovery', () => {
   it.each([undefined, '已设置'])('reuses a masked saved key only for exactly matching provider and normalized URL (%s)', async (apiKey) => {
     const getConfig = vi.fn(() => ({ provider: 'openai', baseUrl: 'https://proxy.example:443/v1/', apiKey: 'encrypted-key' }))
     const decryptKey = vi.fn(() => API_KEY)
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('saved-model'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('saved-model'))
     expect(await discoverModels({
       provider: 'openai', apiKey, configId: 12, baseUrl: 'https://proxy.example/v1',
     }, { fetch: fetchModels, getConfig, decryptKey })).toEqual({ models: ['saved-model'] })
@@ -152,7 +152,7 @@ describe('model discovery', () => {
   ])('does not decrypt or forward a saved key after changing provider or URL (%s, %s)', async (provider, baseUrl) => {
     const getConfig = vi.fn(() => ({ provider: 'openai', baseUrl: 'https://proxy.example/v1', apiKey: 'encrypted-key' }))
     const decryptKey = vi.fn(() => API_KEY)
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
     await expect(discoverModels({ provider, apiKey: '已设置', configId: 12, baseUrl }, {
       fetch: fetchModels, getConfig, decryptKey,
     })).rejects.toMatchObject({ code: 'modelDiscovery.credentialsChanged' })
@@ -162,7 +162,7 @@ describe('model discovery', () => {
 
   it('does not reuse a saved key after the user explicitly clears it', async () => {
     const getConfig = vi.fn()
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
     await expect(discoverModels({ provider: 'openai', apiKey: '', configId: 12 }, { fetch: fetchModels, getConfig }))
       .rejects.toMatchObject({ code: 'model.apiKeyRequired' })
     expect(getConfig).not.toHaveBeenCalled()
@@ -172,7 +172,7 @@ describe('model discovery', () => {
   it('supports a saved keyless custom config without trying to decrypt a key', async () => {
     const getConfig = vi.fn(() => ({ provider: 'custom', baseUrl: null, apiKey: null }))
     const decryptKey = vi.fn()
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels('local-model'))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(jsonModels('local-model'))
     expect(await discoverModels({ provider: 'custom', configId: 12 }, { fetch: fetchModels, getConfig, decryptKey }))
       .toEqual({ models: ['local-model'] })
     expect(decryptKey).not.toHaveBeenCalled()
@@ -189,7 +189,7 @@ describe('model discovery', () => {
   })
 
   it.each(['baidu', 'codex', 'claude_code', 'unknown', '__proto__'])('rejects %s rather than returning a fabricated list', async (provider) => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
     await expect(discoverModels({ provider, apiKey: API_KEY }, { fetch: fetchModels }))
       .rejects.toMatchObject({ code: 'modelDiscovery.unsupportedProvider' })
     expect(fetchModels).not.toHaveBeenCalled()
@@ -201,14 +201,14 @@ describe('model discovery', () => {
     'https://example.test/v1?key=private', 'https://example.test/v1#private',
     'https://example.test/\nsecret',
   ])('rejects invalid URLs or URL credentials (%s)', async (baseUrl) => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
     await expect(discoverModels({ provider: 'custom', baseUrl }, { fetch: fetchModels }))
       .rejects.toMatchObject({ code: 'modelDiscovery.invalidUrl' })
     expect(fetchModels).not.toHaveBeenCalled()
   })
 
   it('requires a remote API key and rejects malformed requests', async () => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    const fetchModels = vi.fn<typeof fetch>()
     await expect(discoverModels({ provider: 'openai' }, { fetch: fetchModels })).rejects.toMatchObject({ code: 'model.apiKeyRequired' })
     await expect(discoverModels({ provider: 'openai', apiKey: '已设置' }, { fetch: fetchModels })).rejects.toMatchObject({ code: 'model.apiKeyRequired' })
     await expect(discoverModels({ provider: '' }, { fetch: fetchModels })).rejects.toMatchObject({ code: 'modelDiscovery.invalidInput' })
@@ -222,7 +222,7 @@ describe('model discovery', () => {
     [401, 'modelDiscovery.unauthorized'], [403, 'modelDiscovery.unauthorized'],
     [404, 'modelDiscovery.noEndpoint'], [405, 'modelDiscovery.noEndpoint'], [429, 'modelDiscovery.httpError'],
   ])('reports HTTP %s without displaying provider bodies or credentials', async (status, code) => {
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(new Response(`Key ${API_KEY} from https://secret.example/`, { status }))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(new Response(`Key ${API_KEY} from https://secret.example/`, { status }))
     const error = await discoverModels({ provider: 'openai', apiKey: API_KEY }, { fetch: fetchModels }).catch((cause) => cause)
     expect(error).toMatchObject({ code })
     expect(error.message).toContain(String(status))
@@ -232,15 +232,15 @@ describe('model discovery', () => {
 
   it('returns empty catalogues truthfully and rejects malformed responses', async () => {
     expect(await discoverModels({ provider: 'openai', apiKey: API_KEY }, {
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels()),
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonModels()),
     })).toEqual({ models: [] })
     for (const payload of [{ error: API_KEY }, { data: null }, { data: [{ name: 'not-an-id' }] }, { data: [], error: { message: API_KEY } }]) {
       await expect(discoverModels({ provider: 'openai', apiKey: API_KEY }, {
-        fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonResponse(payload)),
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload)),
       })).rejects.toMatchObject({ code: 'modelDiscovery.invalidResponse' })
     }
     await expect(discoverModels({ provider: 'openai', apiKey: API_KEY }, {
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(new Response(API_KEY)),
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(API_KEY)),
     })).rejects.toMatchObject({ code: 'modelDiscovery.invalidResponse' })
   })
 
@@ -248,7 +248,7 @@ describe('model discovery', () => {
     await expect(discoverModels({ provider: 'openai', configId: 12 }, {
       getConfig: () => ({ provider: 'openai', apiKey: 'ciphertext' }),
       decryptKey: () => API_KEY,
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(jsonModels(`echo-${API_KEY}`)),
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonModels(`echo-${API_KEY}`)),
     })).rejects.toMatchObject({ code: 'modelDiscovery.invalidResponse' })
   })
 
@@ -260,20 +260,20 @@ describe('model discovery', () => {
     ]
     for (const response of cases) {
       await expect(discoverModels({ provider: 'openai', apiKey: API_KEY }, {
-        fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(response),
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(response),
       })).rejects.toMatchObject({ code: 'modelDiscovery.tooLarge' })
     }
   })
 
   it('rejects cyclic pagination and bounds excessive page counts', async () => {
-    const cycle = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockImplementation(async () => jsonResponse({
+    const cycle = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({
       data: [{ id: 'same-id' }], has_more: true, last_id: 'same-id',
     }))
     await expect(discoverModels({ provider: 'openai', apiKey: API_KEY }, { fetch: cycle }))
       .rejects.toMatchObject({ code: 'modelDiscovery.invalidResponse' })
     expect(cycle).toHaveBeenCalledTimes(2)
     let counter = 0
-    const excessive = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockImplementation(async () => {
+    const excessive = vi.fn<typeof fetch>().mockImplementation(async () => {
       const id = `model-${++counter}`
       return jsonResponse({ data: [{ id }], has_more: true, last_id: id })
     })
@@ -284,7 +284,7 @@ describe('model discovery', () => {
 
   it('removes fetch errors that might echo credentials or URLs', async () => {
     const error = await discoverModels({ provider: 'openai', apiKey: API_KEY }, {
-      fetch: vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockRejectedValue(new Error(`Bearer ${API_KEY} at https://secret.example/`)),
+      fetch: vi.fn<typeof fetch>().mockRejectedValue(new Error(`Bearer ${API_KEY} at https://secret.example/`)),
     }).catch((cause) => cause)
     expect(error).toMatchObject({ code: 'modelDiscovery.networkError' })
     expect(error.message).not.toContain(API_KEY)
@@ -293,7 +293,7 @@ describe('model discovery', () => {
 
   it('times out hung requests even when a fetch implementation ignores abort', async () => {
     vi.useFakeTimers()
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockImplementation(() => new Promise(() => undefined))
+    const fetchModels = vi.fn<typeof fetch>().mockImplementation(() => new Promise(() => undefined))
     const result = discoverModels({ provider: 'openai', apiKey: API_KEY }, { fetch: fetchModels, timeoutMs: 40 })
     const assertion = expect(result).rejects.toMatchObject({ code: 'modelDiscovery.timeout' })
     await vi.advanceTimersByTimeAsync(40)
@@ -303,7 +303,7 @@ describe('model discovery', () => {
 
   it('bounds a body stream that stalls after response headers', async () => {
     vi.useFakeTimers()
-    const fetchModels = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(new Response(new ReadableStream({ start() {} })))
+    const fetchModels = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream({ start() {} })))
     const result = discoverModels({ provider: 'openai', apiKey: API_KEY }, { fetch: fetchModels, timeoutMs: 40 })
     const assertion = expect(result).rejects.toMatchObject({ code: 'modelDiscovery.timeout' })
     await vi.advanceTimersByTimeAsync(40)

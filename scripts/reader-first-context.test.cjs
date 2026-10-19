@@ -7,6 +7,7 @@ const crypto = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf07-'))
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
@@ -143,7 +144,7 @@ app.whenReady().then(async () => {
     closeDb()
     await new Promise((resolve) => server.close(resolve))
     globalThis.fetch = nativeFetch
-    fs.rmSync(isolatedPath, { recursive: true, force: true })
+    cleanupElectronFixture(isolatedPath, 'reader-first-context')
     app.exit(report.status === 'PASS' ? 0 : 1)
   }
 }).catch((error) => { console.error(error); app.exit(1) })

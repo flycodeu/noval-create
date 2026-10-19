@@ -4,6 +4,7 @@ const path = require('node:path')
 const http = require('node:http')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'creative-'))
 const realModelSource = process.env.NOVELFORGE_REAL_MODEL_SOURCE
@@ -858,7 +859,7 @@ async function main() {
   } finally {
     heldResponse?.destroy(); server.closeAllConnections(); server.close(); closeDb()
     if (!path.resolve(temp).startsWith(path.resolve(root, '.tmp-tests') + path.sep)) throw new Error('unsafe cleanup')
-    fs.rmSync(temp, { recursive: true, force: true })
+    cleanupElectronFixture(temp, 'creative-workflow')
   }
 }
 main().then(() => app.exit(0), error => { console.error(error); app.exit(1) })

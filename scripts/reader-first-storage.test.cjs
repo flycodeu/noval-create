@@ -4,6 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 // A new userData path is selected before readiness; never use the desktop database.
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf-storage-'))
@@ -60,7 +61,7 @@ app.whenReady().then(() => {
     assert.equal(style.resolveActiveStyleFingerprint(novelId), null, 'deleted source must not fall back')
     console.log(JSON.stringify({ status: 'PASS', cases: ['RF-03-02', 'RF-03-03', 'RF-03-04'], userData: isolatedPath, realModelCalls: 0 }))
     sqlite.close()
-    fs.rmSync(isolatedPath, { recursive: true, force: true })
+    cleanupElectronFixture(isolatedPath, 'reader-first-storage')
     app.exit(0)
   } catch (error) {
     console.error(error)

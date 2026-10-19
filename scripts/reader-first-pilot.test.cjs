@@ -7,6 +7,7 @@ const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { app } = require('electron')
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const { pilotDrafts, pilotScene, pilotStory } = require('./reader-first-fixtures.cjs')
 
 const root = path.resolve(__dirname, '..')
@@ -515,13 +516,13 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ status: report.status, cases: report.cases, loopbackCalls: captures.length, interruptedTaskId: runResults.readerFirst[1].interruptedTaskId, output }))
     closeDb()
     await new Promise((resolve) => server.close(resolve))
-    fs.rmSync(isolatedPath, { recursive: true, force: true })
+    cleanupElectronFixture(isolatedPath, 'reader-first-pilot')
     app.exit(0)
   } catch (error) {
     console.error(error)
     try { closeDb() } catch { /* no-op */ }
     try { await new Promise((resolve) => server.close(resolve)) } catch { /* no-op */ }
-    if (path.resolve(isolatedPath).startsWith(path.resolve(os.tmpdir()))) fs.rmSync(isolatedPath, { recursive: true, force: true })
+    if (path.resolve(isolatedPath).startsWith(path.resolve(os.tmpdir()))) cleanupElectronFixture(isolatedPath, 'reader-first-pilot')
     app.exit(1)
   }
 })
