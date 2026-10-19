@@ -4,6 +4,7 @@ import {
   getGroundingSourceLedgerEntries,
   isChapterWritebackSourceLedgerEntry,
 } from '../../src/shared/genre-system'
+import { isCreativeResearchEntry, preserveCreativeResearchEntriesWhenTrimming } from '../../src/shared/creative-research'
 import { getSourceSearchRuntimeConfig } from './source-search-settings.service'
 import { executeSourceSearch, SourceSearchError, type WebSearchResult } from './source-search-provider.service'
 export type { WebSearchResult } from './source-search-provider.service'
@@ -113,7 +114,7 @@ function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
 }
 
 function hasSourceGroundingEntries(input: SourceGroundingEnrichmentInput): boolean {
-  return getGroundingSourceLedgerEntries(input).some((entry) => !isChapterWritebackSourceLedgerEntry(entry))
+  return getGroundingSourceLedgerEntries(input).some((entry) => !isChapterWritebackSourceLedgerEntry(entry) && !isCreativeResearchEntry(entry))
     || parseJsonRecordArray(input.canonFactCardsJson).length > 0
 }
 
@@ -137,7 +138,9 @@ function upsertJsonRecordArray(
     if (key) byKey.set(key, entry)
   }
 
-  return stringifyJsonRecordArray([...byKey.values()].slice(-limit))
+  const records = [...byKey.values()]
+  // Keep author cards intact when a bounded web-search refresh appends newer sources.
+  return stringifyJsonRecordArray(preserveCreativeResearchEntriesWhenTrimming(records, limit))
 }
 
 function extractSearchTerms(values: Array<string | undefined>, limit = 10): string[] {

@@ -26,7 +26,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set', 'research.query', 'research.search',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set', 'research.get', 'research.list', 'research.query', 'research.search', 'research.upsert',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 let fixtureOwner

@@ -56,8 +56,8 @@ export default function ResearchLibrary({ novelId, disabled }: { novelId: number
       if (current === epoch.current) setError(cause instanceof Error ? cause.message : '检索资料失败')
     } finally { if (current === epoch.current) { busy.current = false; setSearching(false) } }
   }
-  return <section className="author-paper research-library" aria-label="创作资料">
-    <div className="author-section-heading"><h2>创作资料</h2><small>{sources.length} 条来源</small></div>
+  return <section className="author-paper research-library" aria-label="联网参考">
+    <div className="author-section-heading"><h2>联网参考</h2><small>{sources.length} 条来源</small></div>
     <div className="research-library__search">
       <Input aria-label="需要查找的创作资料" placeholder="例如：查找适合本书的道教观念、行旅服饰与民间生活资料" value={request} maxLength={2000} disabled={disabled || searching} onChange={event => setRequest(event.target.value)} onPressEnter={() => void search()} />
       <Button onClick={() => void search()} loading={searching} disabled={disabled || !request.trim()}>搜索并保存参考</Button>

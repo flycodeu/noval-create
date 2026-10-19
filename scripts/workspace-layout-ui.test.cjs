@@ -156,7 +156,7 @@ async function main() {
   await run('document.querySelector(".ant-drawer-close").click()')
   await wait('!document.querySelector(".ant-drawer-body")')
   assert.equal(await run('new URLSearchParams(location.hash.split("?")[1]).get("entity")'), new URLSearchParams(entityHash.split('?')[1]).get('entity'), 'reference view keeps current person selected')
-  await click('查参考资料')
+  await click('查联网参考')
   await wait('document.querySelectorAll(".research-library__sources article").length===5')
   const drawerHitConfig = await run('Object.fromEntries(["close","header"].map(name=>{const el=document.querySelector(".ant-drawer-"+name),rect=el.getBoundingClientRect();return [name,{appRegion:getComputedStyle(el).getPropertyValue("-webkit-app-region"),top:rect.top,bottom:rect.bottom}]}))')
   for (const [part, config] of Object.entries(drawerHitConfig)) {

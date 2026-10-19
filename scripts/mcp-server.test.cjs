@@ -113,6 +113,21 @@ async function main() {
     assert.equal(listedModels.find((model) => model.id === modelId).apiKey, '已设置')
     assert(!JSON.stringify(listedModels).includes('fixture-secret-only'), 'RPC must mask configured provider keys')
     const novelId = await rpc('novel', 'create', [{ title: 'Exit cancellation fixture', userBackground: '渡口的两名船工。', modelConfigId: modelId, launchMode: 'fast_launch' }])
+    assert(listed.tools.some((tool) => tool.name === 'novelforge.research.upsert'))
+    assert(!listed.tools.some((tool) => tool.name === 'novelforge.research.delete'), 'MCP must not advertise a destructive tool without an approval grant path')
+    const card = { category: 'daoism', title: '不争与权力边界', sourceTitle: '道家思想', tags: ['道教', '人物抉择'],
+      content: '主角拒绝垄断渡口救命药，代价是失去军中晋升。', interpretation: '克制不是无欲，而是不把他人困境换成自己的权力。',
+      novelConnection: '在饥荒粮药分配上放弃短期胜利，承担后续朝廷问责。' }
+    const savedCard = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, entries: [card] } })
+    assert(!savedCard.isError, JSON.stringify(savedCard))
+    assert.equal(savedCard.structuredContent.entries[0].canonDecision, 'reference_only')
+    const authorCards = await second.callTool({ name: 'novelforge.research.list', arguments: { novelId, query: '渡口' } })
+    assert(!authorCards.isError, JSON.stringify(authorCards))
+    assert.equal(authorCards.structuredContent.count, 1)
+    const completeCard = await second.callTool({ name: 'novelforge.research.get', arguments: { novelId, sourceKey: savedCard.structuredContent.entries[0].sourceKey } })
+    assert(!completeCard.isError, JSON.stringify(completeCard))
+    assert.equal(completeCard.structuredContent.entry.novelConnection, card.novelConnection)
+    assert.equal((await second.callTool({ name: 'novelforge.research.list', arguments: { novelId } })).structuredContent.count, 1)
     const atlasBefore = (await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas
     const savedGeography = { boundary: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 100 }, { x: 0, y: 100 }], areaKm2: 40, development: 'outlined' }
     const mapChange = { novelId, expectedContextVersion: atlasBefore.contextVersion, idempotencyKey: 'runtime-geography-roundtrip', effectiveFromChapter: 0, source: { kind: 'test', id: 'mcp-map-fixture' }, changes: [

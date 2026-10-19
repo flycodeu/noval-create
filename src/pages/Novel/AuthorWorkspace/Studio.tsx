@@ -204,7 +204,7 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
       <section className="author-paper studio-issues"><div className="author-section-heading"><h2>需要留意</h2><Button type="text" size="small" onClick={() => open('revision?view=issues')}>查看全部 <ArrowRightOutlined /></Button></div>
         {pendingIssues.length ? <ul className="author-issue-preview">{pendingIssues.slice(0, 3).map((issue) => <li key={issue.id}><button onClick={() => open(`revision?issue=${issue.id}`)}>{issue.title}</button></li>)}</ul> : <p className="author-muted">暂无待处理问题</p>}
       </section>
-      <div className="studio-quick-links"><Button type="text" onClick={() => open('narrative-board?tab=research')}>参考资料</Button><Button type="text" onClick={() => open('narrative-board?tab=rules')}>世界规则</Button></div>
+      <div className="studio-quick-links"><Button type="text" onClick={() => open('story-design?section=sources')}>作者资料卡</Button><Button type="text" onClick={() => open('narrative-board?tab=research')}>联网参考</Button><Button type="text" onClick={() => open('narrative-board?tab=rules')}>世界规则</Button></div>
     </aside>
     </div><ObjectTaskPanel novelId={novelId} target={task} onClose={() => setTask(null)} />
   </AuthorPage>

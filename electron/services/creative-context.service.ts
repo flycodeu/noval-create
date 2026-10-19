@@ -1,6 +1,14 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { estimateTokens } from '../../src/shared/token-budget'
-import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
+import {
+  CREATIVE_AUTHOR_RESEARCH_USAGE,
+  CREATIVE_RESEARCH_USAGE,
+  buildCreativeResearchContext,
+  needsCreativeResearch,
+  parseCreativeResearchEntries,
+  selectCreativeResearchSources,
+  selectRelevantCreativeResearchEntries,
+} from '../../src/shared/creative-research'
 import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import { listChapters } from './chapter.service'
@@ -216,6 +224,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const candidates: Array<{ id: string; text: string; required: boolean; priority: number }> = []
   const seen = new Map<string, typeof candidates[number]>()
   let used = 0
+  const escapeSourceBoundary = (value: string) => value.replace(/<\/source/giu, '&lt;/source')
   const reviewedValue = (value: unknown): unknown => {
     const original = typeof value === 'string' ? value : JSON.stringify(value)
     const reference = snapshotValues.get(original)
@@ -256,6 +265,11 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   if (research.length) {
     add('research:usage', CREATIVE_RESEARCH_USAGE, true)
     for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 15)
+  }
+  const authorResearch = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchText, 3)
+  if (authorResearch.length) {
+    add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 14)
+    for (const [index, entry] of authorResearch.entries()) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 14 - index)
   }
   const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
@@ -391,7 +405,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   }
   const ranked = [...candidates].sort((a, b) => Number(b.required) - Number(a.required) || a.priority - b.priority)
   for (const { id, text, required } of ranked) {
-    const section = `<source id="${id}">\n${text}\n</source>`
+    const section = `<source id="${id}">\n${escapeSourceBoundary(text)}\n</source>`
     const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
     if (used + size > maxInputTokens) {
       if (required) throw new Error(formatUserFacingMessage('services.creativeContext.requiredAssetOverBudget', { id: `${id}` }))

@@ -1,4 +1,5 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import { preserveCreativeResearchEntriesWhenTrimming } from '../../src/shared/creative-research'
 import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
@@ -396,7 +397,8 @@ function upsertJsonRecordArray(
     if (merged.has(key)) merged.delete(key)
     merged.set(key, entry)
   })
-  return safeStringify(Array.from(merged.values()).slice(-limit))
+  // Chapter provenance is bounded separately, but must not silently delete author-created references.
+  return safeStringify(preserveCreativeResearchEntriesWhenTrimming(Array.from(merged.values()), limit))
 }
 
 function pairKey(charAId: number, charBId: number): string {

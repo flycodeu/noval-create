@@ -196,6 +196,31 @@ describe('source-grounding-search service', () => {
     expect(canonCards[0].sourceKeys).toEqual([sourceLedger[0].sourceKey])
   })
 
+  it('does not treat author inspiration cards as verified grounding and keeps them during web refresh', async () => {
+    const authorCard = {
+      sourceKey: 'author:inspiration', sourceType: 'author_created', assetType: 'creative_reference',
+      category: 'daoism', title: '不争与权力边界', factTitle: '不争与权力边界', sourceText: '拒绝垄断救命药。',
+      content: '主角放弃垄断渡口救命药。', interpretation: '克制不是无欲，而是不把他人困境换成权力。',
+      novelConnection: '映照饥荒中的粮药分配。', verificationStatus: 'pending', canonDecision: 'reference_only',
+      recordedAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T00:00:00.000Z',
+    }
+    const provider = vi.fn(async () => [{ title: '驿站递送制度', url: 'https://example.test/post-road', snippet: '驿站与官道用于递送公文。' }])
+    const result = await enrichSourceGroundingFromWeb({
+      novelId: 1, chapterId: 10, chapterNum: 3, genre: '历史正剧',
+      chapterTitle: '渡口药材争夺', chapterGoal: '按宋代背景核对驿递制度与军中升迁。',
+      backgroundText: '故事发生在架空宋代，主角在渡口处理粮药分配。',
+      sourceLedgerJson: JSON.stringify([authorCard]),
+    }, { provider, providerName: 'mock-search', now: () => '2026-06-07T00:00:00.000Z' })
+
+    expect(provider).toHaveBeenCalled()
+    expect(result.updated).toBe(true)
+    const ledger = JSON.parse(result.sourceLedgerJson) as Array<Record<string, unknown>>
+    expect(ledger).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceKey: authorCard.sourceKey, canonDecision: 'reference_only' }),
+      expect.objectContaining({ sourceType: 'web_search', verificationStatus: 'web_found' }),
+    ]))
+  })
+
   it('falls back without pretending to search when no provider is configured', async () => {
     vi.stubEnv('TAVILY_API_KEY', '')
     vi.stubEnv('BRAVE_SEARCH_API_KEY', '')

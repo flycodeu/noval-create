@@ -6,12 +6,13 @@ import { mergeCanonicalDocument, parseDocument, recordOf } from './content-docum
 
 export const STORY_DESIGN_TABS = [
   { key: 'background', label: '背景与定位' }, { key: 'story', label: '故事方向' },
-  { key: 'constraints', label: '写作边界' }, { key: 'style', label: '叙事与文风' },
+  { key: 'sources', label: '作者资料卡' }, { key: 'constraints', label: '写作边界' }, { key: 'style', label: '叙事与文风' },
 ]
 
 export const STORY_DESIGN_TOPICS: Record<string, Array<{ key: string; label: string }>> = {
   background: [{ key: 'background', label: '故事背景' }, { key: 'brief', label: '作品定位' }],
   story: [{ key: 'premise', label: '故事起点' }, { key: 'storyDesign', label: '主线与支线' }, { key: 'endgameDesign', label: '结局与兑现' }, { key: 'facts', label: '信息点与秘密' }],
+  sources: [],
   world: [
     { key: 'world:genreProfile', label: '世界基调' }, { key: 'world:powerSystems', label: '能力与限制' },
     { key: 'world:speciesSystem', label: '种属规则' }, { key: 'world:factionSystem', label: '组织与社会' },

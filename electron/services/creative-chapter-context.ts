@@ -5,7 +5,15 @@ import { selectStyleParagraphs } from '../../src/shared/scene-fact-boundary'
 import { compileContextPack, stableHash, type ContextPackSource } from '../../src/shared/context-pack'
 import { hasHardContractValidationBlocker } from '../../src/shared/contract-validation'
 import { estimateTokens } from '../../src/shared/token-budget'
-import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
+import {
+  CREATIVE_AUTHOR_RESEARCH_USAGE,
+  CREATIVE_RESEARCH_USAGE,
+  buildCreativeResearchContext,
+  needsCreativeResearch,
+  parseCreativeResearchEntries,
+  selectCreativeResearchSources,
+  selectRelevantCreativeResearchEntries,
+} from '../../src/shared/creative-research'
 import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasChange, StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
@@ -353,10 +361,16 @@ export async function compileCreativeChapterContext(
     if (introductionIds.has(entity.id)) add(`chapter_introduction:${entity.id}`, value, true, 'plan')
     else add(entity.id, value, entityRequired)
   }
-  const research = selectCreativeResearchSources(novel.sourceLedgerJson, `${dependency}\n${JSON.stringify(safeEntities.map(entity => ({ name: entity.name, summary: entity.summary, attributes: entity.attributes })))}`)
+  const researchQuery = `${dependency}\n${JSON.stringify(safeEntities.map(entity => ({ name: entity.name, summary: entity.summary, attributes: entity.attributes })))}`
+  const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchQuery)
   if (research.length) {
     add('research:usage', CREATIVE_RESEARCH_USAGE, true, 'plan')
     for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 'plan')
+  }
+  const authorResearch = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 3)
+  if (authorResearch.length) {
+    add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 'plan')
+    for (const entry of authorResearch) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 'plan')
   }
   const povSeedIds = new Set(atlas.entities.filter(entity => seedIds.has(entity.id) && povNames.includes(entity.name)).map(entity => entity.id))
   const relationRequired = (edge: StoryAtlasRelation) => seedIds.has(edge.fromId) && seedIds.has(edge.toId)

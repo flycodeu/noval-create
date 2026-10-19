@@ -555,6 +555,7 @@ function registerIpcHandlers() {
       typeof input.draftArtifactId === 'string' ? `草稿：${input.draftArtifactId}` : '',
       typeof input.preflightRunId === 'number' ? `预检记录 ID：${input.preflightRunId}` : '',
       typeof input.candidateId === 'number' ? `候选稿 ID：${input.candidateId}` : '',
+      typeof input.sourceKey === 'string' ? `资料编号：${input.sourceKey}` : '',
       typeof input.source === 'string'
         ? `评估来源：${input.source === 'author_requested' ? '作者主动' : input.source === 'platform_auto' ? '平台自动' : input.source}`
         : '',

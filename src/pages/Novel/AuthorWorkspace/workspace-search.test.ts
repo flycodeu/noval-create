@@ -16,6 +16,7 @@ describe('workspace object search', () => {
     const rows = workspaceSearchEntries([{ id: 688, chapterNum: 7, title: '她自己带了灯芯' } as Chapter], [])
     expect(rows.find(row => row.key === 'chapter:688')?.route).toBe('writing/editor?chapterId=688')
     expect(rows.find(row => row.label === '世界规则')?.route).toBe('narrative-board?tab=rules')
-    expect(rows.find(row => row.label === '参考资料')?.route).toBe('narrative-board?tab=research')
+    expect(rows.find(row => row.label === '联网参考')?.route).toBe('narrative-board?tab=research')
+    expect(rows.find(row => row.label === '作者资料卡')?.route).toBe('story-design?section=sources')
   })
 })

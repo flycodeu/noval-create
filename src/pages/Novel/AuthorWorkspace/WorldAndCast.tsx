@@ -104,7 +104,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
       {editing && <AtlasEntityEditor key={editing.id} entity={editing} snapshot={snapshot} atChapter={atChapter} onClose={() => setEditing(null)} onSaved={() => void load()} />}
     </>}
     </>}
-    <Drawer className="world-reference-drawer" title={`${selected?.name ? `${selected.name} · ` : ''}${reference === 'rules' ? '世界规则' : '参考资料'}`} open={Boolean(reference)} width={720} destroyOnClose onClose={() => changeView(() => setReference(null))}>{reference === 'rules' ? <WorldRules novelId={novelId} onDiscuss={discussRules} onEditStateChange={setRulesEdit} /> : reference === 'research' ? <ResearchLibrary novelId={novelId} /> : null}</Drawer>
+    <Drawer className="world-reference-drawer" title={`${selected?.name ? `${selected.name} · ` : ''}${reference === 'rules' ? '世界规则' : '联网参考'}`} open={Boolean(reference)} width={720} destroyOnClose onClose={() => changeView(() => setReference(null))}>{reference === 'rules' ? <WorldRules novelId={novelId} onDiscuss={discussRules} onEditStateChange={setRulesEdit} /> : reference === 'research' ? <ResearchLibrary novelId={novelId} /> : null}</Drawer>
     <ObjectTaskPanel novelId={novelId} target={task} onClose={() => setTask(null)} onApplied={() => void load()} />
   </div></AuthorPage>
 }

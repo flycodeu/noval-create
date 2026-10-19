@@ -1,6 +1,6 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { searchCreativeResearch, listCreativeResearch } from './creative-research.service'
+import { deleteAuthorCreativeResearch, getAuthorCreativeResearch, listAuthorCreativeResearch, searchCreativeResearch, listCreativeResearch, upsertAuthorCreativeResearch } from './creative-research.service'
 import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
 import type { SourceSearchRuntimeConfig } from '../../src/shared/source-search'
 
@@ -123,5 +123,41 @@ describe('creative research persistence and subsequent writing material', () => 
     expect(needsCreativeResearch('继续第七章：陆闻查找钱三留下的物品，杨嫂安排住客休息。')).toBe(false)
     expect(needsCreativeResearch('写一段陆闻收集证据后去查找失踪者的剧情。')).toBe(false)
     expect(needsCreativeResearch('不要联网搜索，只用已有道教知识')).toBe(false)
+  })
+
+  it('stores concise author-created cards without changing Canon or external source records', () => {
+    state.novel.sourceLedgerJson = JSON.stringify([
+      { sourceKey: 'web:verified', sourceType: 'web_search', factTitle: '宋代驿站', sourceText: '既有网页资料。', verificationStatus: 'web_found' },
+    ])
+    state.novel.canonFactCardsJson = '[{"cardKey":"canon:existing"}]'
+    const draft = { category: 'daoism' as const, title: '不争作为权力约束', sourceTitle: '道家思想', tags: ['道教', '抉择'],
+      content: '人物拒绝垄断渡口的救命药，代价是失去军中晋升。', interpretation: '克制不是无欲，而是拒绝把他人困境换成自己的权力。',
+      novelConnection: '让主角在饥荒中的粮药分配上放弃短期胜利，留下后续政治代价。' }
+    const [saved] = upsertAuthorCreativeResearch(1, [draft])
+    expect(saved).toMatchObject({ sourceType: 'author_created', assetType: 'creative_reference', canonDecision: 'reference_only' })
+    expect(state.novel.canonFactCardsJson).toBe('[{"cardKey":"canon:existing"}]')
+    expect(JSON.parse(String(state.novel.sourceLedgerJson))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceKey: 'web:verified', sourceText: '既有网页资料。' }),
+      expect.objectContaining({ sourceKey: saved.sourceKey, sourceType: 'author_created', sourceText: expect.stringContaining('深层含义：') }),
+    ]))
+    expect(getAuthorCreativeResearch(1, saved.sourceKey)).toMatchObject({ title: draft.title, novelConnection: draft.novelConnection })
+    expect(listAuthorCreativeResearch(1, { category: 'daoism', query: '渡口' })).toHaveLength(1)
+
+    const [updated] = upsertAuthorCreativeResearch(1, [{ ...draft, sourceKey: saved.sourceKey, content: '更新后的机制说明。' }])
+    expect(updated.sourceKey).toBe(saved.sourceKey)
+    expect(updated.recordedAt).toBe(saved.recordedAt)
+    expect(updated.content).toBe('更新后的机制说明。')
+    deleteAuthorCreativeResearch(1, saved.sourceKey)
+    expect(listAuthorCreativeResearch(1)).toEqual([])
+    expect(JSON.parse(String(state.novel.sourceLedgerJson))).toEqual([expect.objectContaining({ sourceKey: 'web:verified' })])
+  })
+
+  it('accepts a 100-card batch and refuses to overwrite another source kind', () => {
+    const drafts = Array.from({ length: 100 }, (_, index) => ({ category: 'humanity' as const, title: `伦理机制${index}`,
+      content: `人物选择和代价${index}`, interpretation: '选择带来的伦理含义。', novelConnection: '连接本作的饥荒背景。' }))
+    expect(upsertAuthorCreativeResearch(1, drafts)).toHaveLength(100)
+    expect(listAuthorCreativeResearch(1, { limit: 200 })).toHaveLength(100)
+    state.novel.sourceLedgerJson = JSON.stringify([{ sourceKey: 'author:collision', sourceType: 'web_search', factTitle: '外部来源', sourceText: '不可覆盖' }])
+    expect(() => upsertAuthorCreativeResearch(1, [{ ...drafts[0], sourceKey: 'author:collision' }])).toThrow('不能覆盖')
   })
 })

@@ -2375,6 +2375,7 @@ export function assessHistoricalGrounding(input: {
   const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
   const sourceLedgerEntries = getGroundingSourceLedgerEntries(input)
+    .filter(entry => entry.sourceType !== 'author_created' && entry.assetType !== 'creative_reference')
   const canonFactCardEntries = parseJsonRecordArray(input.canonFactCardsJson)
   const historicalProfileText = collectJsonTextLeaves(historicalProfile).join('\n')
   const projectCanonProfileText = collectJsonTextLeaves(projectCanonProfile).join('\n')

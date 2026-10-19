@@ -81,4 +81,18 @@ describe('genre-system historical packs', () => {
 
     expect(assessment.sourceSignals).not.toContain('source_ledger')
   })
+
+  it('does not treat an author-created inspiration card as historical evidence', () => {
+    const assessment = assessHistoricalGrounding({
+      genreName: '历史正剧',
+      sourceLedgerJson: JSON.stringify([{
+        sourceKey: 'author:inspiration', sourceType: 'author_created', assetType: 'creative_reference',
+        category: 'daoism', title: '不争与权力', factTitle: '不争与权力', sourceText: '作者对人物选择的解释。',
+        content: '拒绝垄断救命药。', interpretation: '克制是一种权力边界。', novelConnection: '映照本书的粮药分配。',
+        verificationStatus: 'pending', canonDecision: 'reference_only',
+      }]),
+    })
+
+    expect(assessment.sourceSignals).not.toContain('source_ledger')
+  })
 })

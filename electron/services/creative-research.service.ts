@@ -1,6 +1,18 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
-import { creativeResearchTopics, readCreativeResearchSources, selectCreativeResearchSources, type CreativeResearchResult } from '../../src/shared/creative-research'
+import {
+  creativeResearchTopics,
+  getCreativeResearchSourceKey,
+  isCreativeResearchEntry,
+  parseCreativeResearchEntries,
+  readCreativeResearchSources,
+  removeCreativeResearchEntry,
+  selectCreativeResearchSources,
+  upsertCreativeResearchEntries,
+  type CreativeResearchDraft,
+  type CreativeResearchEntry,
+  type CreativeResearchResult,
+} from '../../src/shared/creative-research'
 import { getSqlite } from '../database/db'
 import { getNovel, updateNovel } from './novel.service'
 import { listChapters } from './chapter.service'
@@ -13,6 +25,56 @@ export function listCreativeResearch(novelId: number, query = '') {
   const novel = getNovel(novelId)
   if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   return query.trim() ? selectCreativeResearchSources(novel.sourceLedgerJson, query, 12) : readCreativeResearchSources(novel.sourceLedgerJson).reverse()
+}
+
+export interface AuthorCreativeResearchQuery {
+  query?: string
+  category?: string
+  limit?: number
+}
+
+export function listAuthorCreativeResearch(novelId: number, query: AuthorCreativeResearchQuery = {}): CreativeResearchEntry[] {
+  const novel = getNovel(novelId)
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
+  const keyword = query.query?.trim().toLocaleLowerCase() || ''
+  const category = query.category?.trim() || ''
+  const limit = Number.isInteger(query.limit) ? Math.max(1, Math.min(200, query.limit!)) : 100
+  return parseCreativeResearchEntries(novel.sourceLedgerJson)
+    .filter(entry => !category || entry.category === category)
+    .filter(entry => !keyword || [entry.title, entry.sourceTitle, entry.content, entry.interpretation, entry.novelConnection, ...(entry.tags || [])]
+      .some(value => typeof value === 'string' && value.toLocaleLowerCase().includes(keyword)))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, limit)
+}
+
+export function getAuthorCreativeResearch(novelId: number, sourceKey: string): CreativeResearchEntry {
+  const novel = getNovel(novelId)
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
+  const entry = parseCreativeResearchEntries(novel.sourceLedgerJson).find(item => item.sourceKey === sourceKey)
+  if (!entry) throw new Error(formatUserFacingMessage('services.creativeResearch.notFound'))
+  return entry
+}
+
+export function upsertAuthorCreativeResearch(novelId: number, drafts: CreativeResearchDraft[]): CreativeResearchEntry[] {
+  if (!Number.isSafeInteger(novelId) || novelId < 1) throw new Error(formatUserFacingMessage('services.research.projectIdInvalid'))
+  if (!Array.isArray(drafts) || drafts.length < 1 || drafts.length > 100) throw new Error(formatUserFacingMessage('services.creativeResearch.batchInvalid'))
+  const novel = getNovel(novelId)
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
+  const ledger = upsertCreativeResearchEntries(novel.sourceLedgerJson, drafts)
+  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: Math.max(1, novel.contextVersion || 1) })
+  const savedKeys = new Set(drafts.map(getCreativeResearchSourceKey))
+  const updated = getNovel(novelId)
+  return parseCreativeResearchEntries(updated?.sourceLedgerJson).filter(entry => savedKeys.has(entry.sourceKey))
+}
+
+export function deleteAuthorCreativeResearch(novelId: number, sourceKey: string): void {
+  if (!Number.isSafeInteger(novelId) || novelId < 1) throw new Error(formatUserFacingMessage('services.research.projectIdInvalid'))
+  const novel = getNovel(novelId)
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
+  const existing = parseCreativeResearchEntries(novel.sourceLedgerJson).find(entry => entry.sourceKey === sourceKey)
+  if (!existing || !isCreativeResearchEntry(existing)) throw new Error(formatUserFacingMessage('services.creativeResearch.notFound'))
+  const ledger = removeCreativeResearchEntry(novel.sourceLedgerJson, sourceKey)
+  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: Math.max(1, novel.contextVersion || 1) })
 }
 
 /** The only persisted field is the source ledger; no Canon, prose or atlas records are changed. */

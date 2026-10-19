@@ -59,6 +59,6 @@ export function AtlasEntityProfile(props: Props) {
     {entity.kind === 'location' && <>{(['faction', 'character', 'event'] as const).map(kind => <Connections key={kind} title={{ faction: '本区域涉及的组织', character: '本区域的人物', event: '本区域的事件' }[kind]} links={regionLinks.filter(item => item.entity.kind === kind)} empty="当前章位尚无已记录的关联。" onOpen={onOpen} onRelation={onRelation} />)}</>}
     {['item', 'event'].includes(entity.kind) && <Connections title="相关人物与地点" links={links} empty="尚未记录关联资料。" onOpen={onOpen} onRelation={onRelation} />}
     </>}
-    <footer className="atlas-profile-footer"><Button disabled={props.editingDisabled} onClick={onDiscuss}>讨论与完善{entity.kind === 'faction' ? '组织' : ATLAS_KIND_LABELS[entity.kind]}</Button>{entity.kind === 'location' && <Button onClick={() => onDrill(entity)}>查看下级地点 <ArrowRightOutlined /></Button>}{props.onShowRules && <Button type="text" onClick={props.onShowRules}>查世界规则</Button>}{props.onShowResearch && <Button type="text" onClick={props.onShowResearch}>查参考资料</Button>}</footer>
+    <footer className="atlas-profile-footer"><Button disabled={props.editingDisabled} onClick={onDiscuss}>讨论与完善{entity.kind === 'faction' ? '组织' : ATLAS_KIND_LABELS[entity.kind]}</Button>{entity.kind === 'location' && <Button onClick={() => onDrill(entity)}>查看下级地点 <ArrowRightOutlined /></Button>}{props.onShowRules && <Button type="text" onClick={props.onShowRules}>查世界规则</Button>}{props.onShowResearch && <Button type="text" onClick={props.onShowResearch}>查联网参考</Button>}</footer>
   </article>
 }

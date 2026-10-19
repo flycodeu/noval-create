@@ -13,6 +13,9 @@ const descriptor: AgentToolDescriptor = {
   inputSchema: { type: 'object' }, outputSchema: { type: 'object', properties: { projects: { type: 'array' } }, required: ['projects'] },
   effect: 'read', approval: 'never', scopes: ['novel:read'], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: [],
 }
+const approvalRequiredDescriptor: AgentToolDescriptor = {
+  ...descriptor, id: 'novelforge.research.delete', title: 'Delete reference', approval: 'always',
+}
 let directory: string
 let runtime: RuntimeHandle
 let reads: number
@@ -27,7 +30,7 @@ beforeEach(async () => {
     directory, version: 'test', modelConfigured: () => true, openDesktop: () => { opened += 1 },
     invokeRpc: async () => { rpcInvocations += 1; return { ok: true } },
     registry: {
-      list: () => [descriptor],
+      list: () => [descriptor, approvalRequiredDescriptor],
       async invoke(request, context) {
         reads += 1
         expect(context.scopes).toContain('canon:write')
@@ -81,6 +84,7 @@ describe('shared MCP runtime', () => {
   it('serves two MCP clients and an open desktop from the same owner', async () => {
     const first = await connect()
     const second = await connect()
+    expect((await first.listTools()).tools.map(tool => tool.name)).toEqual([descriptor.id])
     expect((await runtimeRequest(runtime.connection, '/desktop/open', { method: 'POST' })).ok).toBe(true)
     expect(opened).toBe(1)
     const results = await Promise.all([first.callTool({ name: descriptor.id, arguments: {} }), second.callTool({ name: descriptor.id, arguments: {} })])

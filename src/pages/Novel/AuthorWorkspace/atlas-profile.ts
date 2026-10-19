@@ -8,7 +8,7 @@ export const ATLAS_TABS = [
   { key: 'items', label: '物品', kind: 'item' }, { key: 'events', label: '事件', kind: 'event' },
 ] as const
 export type AtlasTab = typeof ATLAS_TABS[number]['key']
-export const WORLD_WORKSPACE_TABS = [...ATLAS_TABS, { key: 'rules', label: '世界规则' }, { key: 'research', label: '参考资料' }] as const
+export const WORLD_WORKSPACE_TABS = [...ATLAS_TABS, { key: 'rules', label: '世界规则' }, { key: 'research', label: '联网参考' }] as const
 export type WorldWorkspaceTab = typeof WORLD_WORKSPACE_TABS[number]['key']
 export function resolveWorldWorkspaceTab(params: URLSearchParams): WorldWorkspaceTab {
   const tab = params.get('tab')

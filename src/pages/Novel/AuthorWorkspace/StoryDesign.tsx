@@ -16,6 +16,7 @@ import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { parseDocument, recordOf } from './content-document'
 import { loadDocumentNames } from './document-references'
 import { buildStoryDesignPatch, resolveStoryDesignLocation, STORY_DESIGN_TABS, STORY_VOICE_FIELDS, storyDesignParams } from './story-design-navigation'
+import CreativeResearchLibrary from './CreativeResearchLibrary'
 import ChapterArrangement from './ChapterArrangement'
 import StoryFacts from './StoryFacts'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
@@ -82,7 +83,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
     })
   }
   const discuss = (stage: CreativeStage, request: string) => changeView(() => setTask({ title: section?.title || '故事设计', stage, request }))
-  const sections: Section[] = tab === 'background' ? [
+  const sections: Section[] = tab === 'sources' ? [] : tab === 'background' ? [
     { key: 'background', title: '背景与简介', value: { title: novel?.title || '', synopsis: novel?.synopsis || '', userBackground: novel?.userBackground || '', expandedBackground: novel?.expandedBackground || '' }, stage: 'background' },
     { key: 'brief', title: '作品定位与读者承诺', value: brief, stage: 'story' },
   ] : tab === 'story' ? [
@@ -115,7 +116,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
     <div className="author-tabs author-section-tabs story-design-tabs" role="tablist" aria-label="故事设计分类">{STORY_DESIGN_TABS.map(item => <button key={item.key} role="tab" aria-selected={tab === item.key} disabled={saving} onClick={() => { if (tab !== item.key) changeView(() => setParams(storyDesignParams(params, item.key))) }}>{item.label}</button>)}</div>
     {topics.length > 0 && <div className="story-design-topics" role="tablist" aria-label={`${STORY_DESIGN_TABS.find(item => item.key === tab)?.label}主题`}>{topics.map(item => <button key={item.key} id={`story-topic-${item.key}`} role="tab" aria-selected={topic === item.key} aria-controls="story-design-panel" disabled={saving} onClick={() => { if (topic !== item.key) changeView(() => setParams(storyDesignParams(params, tab, item.key))) }}>{item.label}</button>)}</div>}
     {error && <LoadFailure message={error} retry={() => void load()} />}
-    {tab !== 'structure' ? <div id="story-design-panel" role="tabpanel" aria-labelledby={`story-topic-${topic}`}>
+    {tab === 'sources' ? <div role="tabpanel" aria-label="作者资料卡"><CreativeResearchLibrary novelId={novelId} /></div> : tab !== 'structure' ? <div id="story-design-panel" role="tabpanel" aria-labelledby={`story-topic-${topic}`}>
       {topic === 'facts' ? <StoryFacts novelId={novelId} chapters={chapters} /> : section && <section className="author-paper author-design-section" key={section.key}><div className="author-section-heading"><h2>{section.title}</h2><div className="author-heading-actions"><Button type="text" icon={<EditOutlined />} disabled={section.value == null} onClick={() => { setEditing({ ...section, contextVersion: novel?.contextVersion }); setDraft(structuredClone(section.value)) }}>编辑</Button><Button onClick={() => discuss(section.stage, `结合现有作品，检查并完善“${section.title}”。保留已确定内容，指出依据不足与冲突，输出可讨论候选。`)}>AI 完善 <ArrowRightOutlined /></Button></div></div><ContentDocument value={section.value} names={names} /></section>}
     </div> : <>
       <div className="author-section-heading"><h2>卷 → 单元 → 章节 → 场景</h2><Button onClick={() => discuss('outline', '结合已有作品规划接下来一个单元，保留已有卷、单元和章节；明确每章目标、场景、承接与约束。')}>规划下一单元</Button></div>
