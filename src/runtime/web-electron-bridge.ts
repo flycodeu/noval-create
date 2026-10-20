@@ -17,6 +17,7 @@ import {
 import { normalizeWritebackSyncStatus } from '../shared/writeback-status'
 import { SOURCE_SEARCH_PLATFORM_DEFAULTS, SOURCE_SEARCH_PLATFORM_NAMES } from '../shared/source-search'
 import { formatUserFacingMessage } from '../shared/user-facing-messages'
+import { WEB_EVENT_STREAM_CONNECTED_EVENT } from '../shared/runtime-events'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
 type BridgeService = Record<string, BridgeMethod>
@@ -29,6 +30,7 @@ function ensureWebEventSource() {
   if (typeof window === 'undefined' || typeof window.EventSource !== 'function' || webEventSource) return
 
   webEventSource = new window.EventSource('/events')
+  webEventSource.onopen = () => { window.dispatchEvent(new Event(WEB_EVENT_STREAM_CONNECTED_EVENT)) }
   webEventSource.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data) as { channel?: unknown; args?: unknown[] }

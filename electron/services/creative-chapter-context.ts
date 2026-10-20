@@ -12,7 +12,7 @@ import {
   needsCreativeResearch,
   parseCreativeResearchEntries,
   selectCreativeResearchSources,
-  selectRelevantCreativeResearchEntries,
+  rankRelevantCreativeResearchEntries,
 } from '../../src/shared/creative-research'
 import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
@@ -361,16 +361,17 @@ export async function compileCreativeChapterContext(
     if (introductionIds.has(entity.id)) add(`chapter_introduction:${entity.id}`, value, true, 'plan')
     else add(entity.id, value, entityRequired)
   }
-  const researchQuery = `${dependency}\n${JSON.stringify(safeEntities.map(entity => ({ name: entity.name, summary: entity.summary, attributes: entity.attributes })))}`
+  const researchQuery = { request: input.request, background: `${JSON.stringify(context.sceneSnapshots)}\n${JSON.stringify(context.chapterContract)}\n${context.chapter.title}\n${context.chapter.outline || ''}\n${JSON.stringify(safeEntities.map(entity => ({ name: entity.name, summary: entity.summary, attributes: entity.attributes })))}` }
   const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchQuery)
   if (research.length) {
     add('research:usage', CREATIVE_RESEARCH_USAGE, true, 'plan')
     for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 'plan')
   }
-  const authorResearch = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 3)
+  const authorResearch = rankRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 3)
+  const authorResearchRanks = new Map(authorResearch.map((match, rank) => [`research:author:${match.entry.sourceKey}`, { ...match, rank }]))
   if (authorResearch.length) {
-    add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 'plan')
-    for (const entry of authorResearch) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 'plan')
+    for (const { entry } of authorResearch) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry, { compact: true }), false, 'plan')
+    if (sources.some(source => source.key?.startsWith('research:author:'))) add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 'plan')
   }
   const povSeedIds = new Set(atlas.entities.filter(entity => seedIds.has(entity.id) && povNames.includes(entity.name)).map(entity => entity.id))
   const relationRequired = (edge: StoryAtlasRelation) => seedIds.has(edge.fromId) && seedIds.has(edge.toId)
@@ -417,12 +418,19 @@ export async function compileCreativeChapterContext(
   // Whole-book checkpoints have no per-scene knowledge provenance. Use scoped facts and verified prior prose recall.
   omitted.push('story_memory:unscoped_checkpoint_excluded')
   // Include rendering overhead in selection; compiler otherwise counts payload text alone.
-  const packed = sources.map(source => ({ ...source, selectionPriority: chapterMaterialPriority(source, previous?.content?.trimEnd().length), text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
-  const compiled = await compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',
+  const packed = sources.map(source => ({ ...source, selectionPriority: chapterMaterialPriority(source, previous?.content?.trimEnd().length, authorResearchRanks.get(source.key || '')), text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
+  const compileSources = (packSources: typeof packed) => compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',
     contextVersion: novel.contextVersion || 1, contractVersion: stableHash({ contract: context.chapterContractRow, scenes: context.sceneSnapshots }),
     outputReserve: limits.outputReserve, budget: limits.maxInputTokens,
-    sources: packed,
+    sources: packSources,
   })
+  let compiled = await compileSources(packed)
+  if (packed.some(source => source.key?.startsWith('research:author:')) && !compiled.pack.sources.some(source => source.included && source.key.startsWith('research:author:'))) {
+    omitted.push('research:author:all:budget_insufficient')
+    // Usage and at least one card form a budget group. Do not let an unused required
+    // usage section crowd out evidence when no card fits; retry the other material.
+    compiled = await compileSources(packed.filter(source => source.key !== 'research:author-usage').map(source => source.key?.startsWith('research:author:') ? { ...source, included: false, reason: 'budget_insufficient' } : source))
+  }
   if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) {
     const requiredSourceKeys = compiled.pack.sources.filter(source => source.included && source.required).map(source => source.key)
     const factKeys = requiredSourceKeys.filter(key => key.startsWith('fact:'))

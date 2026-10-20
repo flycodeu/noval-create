@@ -51,7 +51,8 @@ export default function ResearchLibrary({ novelId, disabled }: { novelId: number
       ])
       if (current !== epoch.current) return
       setSources(rows); setPage(1)
-      if (novel) setNovel(novel)
+      const saved = useNovelStore.getState()
+      if (novel?.id === novelId && saved.currentNovelId === novelId && (novel.contextVersion || 0) >= (saved.currentNovel?.contextVersion || 0)) setNovel(novel)
     } catch (cause) {
       if (current === epoch.current) setError(cause instanceof Error ? cause.message : '检索资料失败')
     } finally { if (current === epoch.current) { busy.current = false; setSearching(false) } }

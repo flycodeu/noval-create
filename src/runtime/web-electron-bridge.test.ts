@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SourceSearchSettingsUpdate, SourceSearchSettingsView } from '../types'
+import { NOVEL_RESEARCH_CHANGED_CHANNEL } from '../shared/novel-research-events'
+import { WEB_EVENT_STREAM_CONNECTED_EVENT } from '../shared/runtime-events'
 
 const SOURCE_SETTINGS: SourceSearchSettingsView = {
   provider: 'custom', tavilyApiKeySet: false, braveApiKeySet: false,
@@ -11,13 +13,14 @@ function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
 }
 
-async function installBridge(demo = false) {
+async function installBridge(demo = false, extraWindow: object = {}) {
   const storage = new Map<string, string>()
   const setItem = vi.fn((key: string, value: string) => { storage.set(key, value) })
   vi.stubGlobal('window', {
     location: { search: demo ? '?demo=1' : '' },
     localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem },
     setTimeout, clearTimeout,
+    ...extraWindow,
   })
   const { installWebElectronBridge } = await import('./web-electron-bridge')
   installWebElectronBridge()
@@ -37,6 +40,39 @@ afterEach(() => {
 })
 
 describe('Web search settings bridge', () => {
+  it('delivers research invalidations over SSE and signals connection recovery without polling', async () => {
+    const streams: EventSourceFixture[] = []
+    class EventSourceFixture {
+      onmessage: ((event: { data: string }) => void) | null = null
+      onopen: (() => void) | null = null
+      close = vi.fn()
+      constructor(readonly url: string) { streams.push(this) }
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })))
+    const dispatchEvent = vi.fn()
+    await installBridge(false, { EventSource: EventSourceFixture, dispatchEvent })
+    const callback = vi.fn()
+    const other = vi.fn()
+    const dispose = window.electron.on(NOVEL_RESEARCH_CHANGED_CHANNEL, callback)
+    const disposeOther = window.electron.on('task:update', other)
+    expect(streams).toHaveLength(1)
+    expect(streams[0].url).toBe('/events')
+    streams[0].onopen?.()
+    streams[0].onopen?.()
+    expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toEqual([WEB_EVENT_STREAM_CONNECTED_EVENT, WEB_EVENT_STREAM_CONNECTED_EVENT])
+    streams[0].onmessage?.({ data: JSON.stringify({ channel: NOVEL_RESEARCH_CHANGED_CHANNEL, args: [{ novelId: 1 }] }) })
+    expect(callback).toHaveBeenCalledExactlyOnceWith({ novelId: 1 })
+    expect(other).not.toHaveBeenCalled()
+    for (const data of ['bad frame', JSON.stringify({ channel: NOVEL_RESEARCH_CHANGED_CHANNEL, args: null })]) streams[0].onmessage?.({ data })
+    expect(callback).toHaveBeenCalledTimes(1)
+    dispose()
+    streams[0].onmessage?.({ data: JSON.stringify({ channel: NOVEL_RESEARCH_CHANGED_CHANNEL, args: [{ novelId: 1 }] }) })
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(streams[0].close).not.toHaveBeenCalled()
+    disposeOther()
+    expect(streams[0].close).toHaveBeenCalledTimes(1)
+  })
+
   it('forwards all platform fields unchanged to the real local RPC and never persists a browser copy', async () => {
     const calls: { service: string; method: string; args: unknown[] }[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

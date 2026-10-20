@@ -260,7 +260,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
-  const researchText = [input.request, novel.userBackground, novel.expandedBackground].filter(Boolean).join('\n')
+  const researchText = { request: input.request, background: [novel.userBackground, novel.expandedBackground].filter(Boolean).join('\n') }
   const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchText)
   if (research.length) {
     add('research:usage', CREATIVE_RESEARCH_USAGE, true)
@@ -405,15 +405,31 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary }, false, 20 + Math.abs(chapter.chapterNum - target))
   }
   const ranked = [...candidates].sort((a, b) => Number(b.required) - Number(a.required) || a.priority - b.priority)
-  for (const { id, text, required } of ranked) {
-    const section = `<source id="${id}">\n${escapeSourceBoundary(text)}\n</source>`
-    const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
-    if (used + size > maxInputTokens) {
-      if (required) throw new Error(formatUserFacingMessage('services.creativeContext.requiredAssetOverBudget', { id: `${id}` }))
-      omittedSources.push(id); continue
+  const omittedBeforeBudget = omittedSources.length
+  const selectBudget = (includeAuthorResearch = true): string | undefined => {
+    sources.length = 0; pieces.length = 0; used = 0
+    omittedSources.length = omittedBeforeBudget
+    for (const { id, text, required } of ranked) {
+      if (!includeAuthorResearch && (id === 'research:author-usage' || id.startsWith('research:author:'))) {
+        if (id.startsWith('research:author:')) omittedSources.push(id)
+        continue
+      }
+      const section = `<source id="${id}">\n${escapeSourceBoundary(text)}\n</source>`
+      const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
+      if (used + size > maxInputTokens) {
+        if (required) return id
+        omittedSources.push(id); continue
+      }
+      used += size; sources.push(id); pieces.push(section)
     }
-    used += size; sources.push(id); pieces.push(section)
+    return undefined
   }
+  let requiredOverflow = selectBudget()
+  if (authorResearch.length && !sources.some(id => id.startsWith('research:author:'))) {
+    requiredOverflow = selectBudget(false)
+    omittedSources.push('research:author:all:budget_insufficient')
+  }
+  if (requiredOverflow) throw new Error(formatUserFacingMessage('services.creativeContext.requiredAssetOverBudget', { id: requiredOverflow }))
   return { text: pieces.join('\n\n'), estimatedTokens: used, maxInputTokens, outputReserve, reviewOutputReserve, sources, omittedSources }
 }
 

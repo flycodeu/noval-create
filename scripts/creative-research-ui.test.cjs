@@ -12,19 +12,22 @@ app.commandLine.appendSwitch('force-device-scale-factor', '1')
 async function main() {
   await app.whenReady()
   await build({ stdin: { contents: `
-    import React from 'react';import{createRoot}from'react-dom/client';import{ConfigProvider}from'antd';
+    import React from 'react';import{createRoot}from'react-dom/client';import{ConfigProvider}from'antd';import{MemoryRouter}from'react-router-dom';
     import ResearchLibrary from './src/pages/Novel/AuthorWorkspace/ResearchLibrary';
     import CreativeResearchLibrary from './src/pages/Novel/AuthorWorkspace/CreativeResearchLibrary';
+    import StoryDesign from './src/pages/Novel/AuthorWorkspace/StoryDesign';
     import{getCreativeResearchSourceKey}from'./src/shared/creative-research';
     import{useNovelStore}from'./src/stores/novel.store';
     import{getAntdThemeConfig}from'./src/theme/antd-tokens';
     import './src/styles/global.css';import './src/pages/Novel/AuthorWorkspace/author-workspace.css';
     ConfigProvider.config({theme:{token:{motion:false}}});
-    window.requests=[];window.agentCalls=[];window.approvalRequests=[];window.currentNovel={id:1,title:'界面测试作品',contextVersion:2,sourceLedgerJson:'[]'};useNovelStore.getState().setCurrentNovel(window.currentNovel);
+    window.requests=[];window.agentCalls=[];window.approvalRequests=[];window.novelUpdates=[];window.researchHandlers=new Map();window.currentNovel={id:1,title:'界面测试作品',synopsis:'原始故事简介',contextVersion:2,sourceLedgerJson:'[]'};useNovelStore.getState().setCurrentNovel(window.currentNovel);
     window.rows=Array.from({length:7},(_,i)=>({sourceKey:'s'+i,title:'资料来源 '+i,url:'https://example.org/source/'+i,excerpt:'示例来源摘要，仅用于界面验证。可用于人物抉择和生活细节，仍须核对本书设定。',topics:['道教'],query:'道教行旅资料',recordedAt:'2026-10-17T00:00:00Z',verificationStatus:'web_found',canonDecision:'reference_only'}));
     window.electron={
+      on:(channel,callback)=>{const handlers=window.researchHandlers.get(channel)||new Set();handlers.add(callback);window.researchHandlers.set(channel,handlers);return()=>{handlers.delete(callback);if(!handlers.size)window.researchHandlers.delete(channel)}},
       sourceSearch:{listResearch:async id=>id===1?structuredClone(window.rows):[],research:(id,request)=>new Promise((resolve,reject)=>window.requests.push({id,request,resolve,reject}))},
-      novel:{get:async id=>{const result=id===1?structuredClone(window.currentNovel):{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'};if(window.deferNovelGet)return new Promise(resolve=>{window.pendingNovelSnapshot=result;window.resolveNovelGet=()=>resolve(result)});return result}},
+      novel:{get:async id=>{const result=id===1?structuredClone(window.currentNovel):{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'};if(window.deferNovelGet)return new Promise(resolve=>{window.pendingNovelSnapshot=result;window.resolveNovelGet=()=>resolve(result)});return result},update:async(id,patch,options)=>{window.novelUpdates.push({id,patch,options});if(options.expectedContextVersion!==window.currentNovel.contextVersion)throw Error('作品版本已更新');Object.assign(window.currentNovel,patch);window.currentNovel.contextVersion++}},
+      chapter:{list:async()=>[]},structure:{getTree:async()=>({volumes:[]})},storyAtlas:{query:async()=>({entities:[]})},character:{list:async()=>[]},storyFact:{list:async()=>[]},foreshadow:{listLedger:async()=>[]},thread:{list:async()=>[]},characterArc:{listCharacterArcs:async()=>[],listRelationshipArcs:async()=>[]},resistance:{listTracks:async()=>[]},endgameAsset:{listCommitments:async()=>[]},
       agentTools:{
         approve:async request=>{window.approvalRequests.push(request);if(window.deferApproval)return new Promise(resolve=>window.resolveApproval=resolve);return{approved:true,approvalId:'ui-approval'}},
         call:async request=>{
@@ -43,9 +46,10 @@ async function main() {
         }
       }
     };
-    window.publishNovel=()=>useNovelStore.getState().setCurrentNovel(window.currentNovel);window.storedVersion=()=>useNovelStore.getState().currentNovel?.contextVersion;
+    window.publishNovel=()=>useNovelStore.getState().setCurrentNovel(window.currentNovel);window.storedVersion=()=>useNovelStore.getState().currentNovel?.contextVersion;window.storedNovel=()=>useNovelStore.getState().currentNovel;window.emitResearch=(id=1)=>window.researchHandlers.get('novel:research-changed')?.forEach(callback=>callback({novelId:id}));
     const theme=getAntdThemeConfig('light');theme.token={...theme.token,motion:false};
     const root=createRoot(document.getElementById('root'));window.paint=(id=1,disabled=false)=>{if(useNovelStore.getState().currentNovelId!==id)useNovelStore.getState().setCurrentNovel(id===1?window.currentNovel:{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'});root.render(<ConfigProvider theme={theme}><div className="author-workspace"><ResearchLibrary novelId={id} disabled={disabled}/><CreativeResearchLibrary novelId={id}/></div></ConfigProvider>)};window.paint();
+    window.paintDesign=(id=1)=>{if(useNovelStore.getState().currentNovelId!==id)useNovelStore.getState().setCurrentNovel(id===1?window.currentNovel:{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'});root.render(<ConfigProvider theme={theme}><MemoryRouter><div className="author-workspace"><StoryDesign novelId={id}/></div></MemoryRouter></ConfigProvider>)};window.unmount=()=>root.unmount();
   `, loader: 'tsx', resolveDir: root }, outfile: path.join(dir, 'fixture.js'), bundle: true, platform: 'browser' })
   fs.writeFileSync(path.join(dir, 'index.html'), '<meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   const win = new BrowserWindow({ show: false, width: 1280, height: 1000, webPreferences: { contextIsolation: false, nodeIntegration: false, backgroundThrottling: false } })
@@ -131,11 +135,15 @@ async function main() {
   assert.equal(await run('document.querySelector(".creative-research__source a")?.getAttribute("href")'), 'https://example.org/reference', 'a URL-only source remains visible')
   await run("document.querySelector('button[aria-label=\\\"编辑只有链接的出处\\\"]').click()")
   await fill('textarea[maxlength="2000"]', '旧表单不能覆盖他人新保存的资料')
-  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.find(card=>card.title==='只有链接的出处').content='另一任务刚更新的资料';window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++}")
+  const originalEditVersion = await run('window.storedVersion()')
+  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.find(card=>card.title==='只有链接的出处').content='另一任务刚更新的资料';window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch()}")
+  await wait('document.querySelector(".creative-research__grid").textContent.includes("另一任务刚更新的资料")')
+  assert.equal(await run('document.querySelector("textarea[maxlength=\\\"2000\\\"]").value'), '旧表单不能覆盖他人新保存的资料', 'external refresh must preserve an open author draft')
   await clickAuthorSave()
   await wait('document.body.textContent.includes("作品已被其他任务修改") && !document.querySelector("textarea[maxlength=\\\"2000\\\"]").disabled')
   assert.equal(await run('document.querySelector("textarea[maxlength=\\\"2000\\\"]").value'), '旧表单不能覆盖他人新保存的资料', 'conflict preserves author draft')
   assert.equal(await run("JSON.parse(window.currentNovel.sourceLedgerJson).find(card=>card.title==='只有链接的出处').content"), '另一任务刚更新的资料')
+  assert.equal(await run('window.agentCalls.at(-1).input.expectedContextVersion'), originalEditVersion, 'external refresh must preserve the edit session CAS version')
   await cancelAuthor()
   await wait('!document.querySelector("textarea[maxlength=\\\"2000\\\"]")')
   await createDraft('延迟读取版本校验')
@@ -176,7 +184,52 @@ async function main() {
   assert.equal(await run('window.approvalRequests.at(-1).request.input.sourceKey'), await run('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert" && call.input.entries[0].sourceKey).find(call=>call.input.entries[0].title==="不争与权力边界").input.entries[0].sourceKey'))
   assert.equal(await run('window.agentCalls.at(-1).approvalId'), 'ui-approval')
   await wait('!document.body.textContent.includes("不争与权力边界")')
-  console.log('PASS research UI: external search, author cards, hidden duplicates, frozen submissions, URL-only provenance, stale edit conflicts, stale readback, approval-protected deletion, project switch, error retention, 720/1280 responsive layout. Screenshots: ' + dir)
+  await input('检索读回不覆盖新快照')
+  await clickSearch()
+  await wait('window.requests.length===4')
+  await run("window.resolveNovelGet=null;window.deferNovelGet=true;window.requests[3].resolve({diagnostics:['检索已完成']})")
+  await wait('Boolean(window.resolveNovelGet)')
+  await run('window.currentNovel.contextVersion++;window.publishNovel();window.deferNovelGet=false;window.resolveNovelGet()')
+  await wait('!document.querySelector("input").disabled')
+  assert.equal(await run('window.storedVersion()'), await run('window.currentNovel.contextVersion'), 'search readback must not overwrite a newer saved snapshot')
+  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.push({...cards[0],sourceKey:'author:external',title:'MCP外部新增资料',content:'通过外部工具保存的新资料',updatedAt:'2026-10-20T00:00:00Z'});window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch(2)}")
+  await pause(100)
+  assert(!(await run('document.querySelector(".creative-research__grid").textContent')).includes('MCP外部新增资料'), 'other-book notifications must not refresh this book')
+  await run('window.emitResearch()')
+  await wait('document.querySelector(".creative-research__grid").textContent.includes("MCP外部新增资料")')
+  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);window.currentNovel.sourceLedgerJson=JSON.stringify(cards.filter(card=>card.title!=='MCP外部新增资料'));window.currentNovel.contextVersion++;window.emitResearch()}")
+  await wait('!document.querySelector(".creative-research__grid").textContent.includes("MCP外部新增资料")')
+  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.push({...cards[0],sourceKey:'author:focus',title:'焦点恢复补读资料',updatedAt:'2026-10-20T01:00:00Z'});window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.dispatchEvent(new Event('focus'))}")
+  await wait('document.querySelector(".creative-research__grid").textContent.includes("焦点恢复补读资料")')
+  await run("{window.beforePaginationCards=JSON.parse(window.currentNovel.sourceLedgerJson);const cards=[...window.beforePaginationCards,...Array.from({length:21},(_,i)=>({...window.beforePaginationCards[0],sourceKey:'author:page-'+i,title:'外部批量资料'+i,updatedAt:'2026-10-20T02:00:00Z'}))];window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch()}")
+  await wait('Boolean(document.querySelector(".creative-research .ant-pagination-item-2"))')
+  await run('document.querySelector(".creative-research .ant-pagination-item-2").click()')
+  await wait('Boolean(document.querySelector(".creative-research .ant-pagination-item-2.ant-pagination-item-active"))')
+  await run('window.currentNovel.sourceLedgerJson=JSON.stringify(window.beforePaginationCards);window.currentNovel.contextVersion++;window.emitResearch()')
+  await wait('!document.querySelector(".creative-research .ant-pagination") && document.querySelectorAll(".creative-research__card").length===window.beforePaginationCards.length')
+  await run('window.deferNovelGet=true;window.emitResearch()')
+  await wait('Boolean(window.resolveNovelGet)')
+  await run('window.paint(2);window.deferNovelGet=false;window.resolveNovelGet()')
+  await wait('window.storedNovel()?.id===2 && document.querySelectorAll(".creative-research__card").length===0')
+  assert.equal(await run('window.storedNovel().id'), 2, 'external refresh cannot publish the previous book after switching')
+  await run('window.paintDesign(1)')
+  await wait('document.querySelector(".author-design-section")?.textContent.includes("原始故事简介")')
+  assert.equal(await run('window.researchHandlers.get("novel:research-changed").size'), 1, 'old view listeners are removed on view switch')
+  await run("[...document.querySelectorAll('.author-heading-actions button')].find(button=>button.textContent.includes('编辑')).click()")
+  await wait('Boolean(document.querySelector("textarea[aria-label=\\\" 简介\\\"]"))')
+  await fill('textarea[aria-label=" 简介"]', '故事设计未保存的简介草稿')
+  await run("window.currentNovel.synopsis='外部保存的新简介';window.currentNovel.contextVersion++;window.emitResearch()")
+  await wait('document.querySelector(".author-design-section").textContent.includes("外部保存的新简介")')
+  assert.equal(await run('document.querySelector("textarea[aria-label=\\\" 简介\\\"]").value'), '故事设计未保存的简介草稿', 'research refresh cannot replace an open story design draft')
+  await run("[...document.querySelectorAll('.ant-modal-footer button')].find(button=>button.textContent.includes('保存这一部分')).click()")
+  await wait('document.body.textContent.includes("作品已被其他任务修改") || document.body.textContent.includes("版本")')
+  assert.equal(await run('window.novelUpdates.length'), 0, 'story design uses the original edit version after an external refresh')
+  assert.equal(await run('document.querySelector("textarea[aria-label=\\\" 简介\\\"]").value'), '故事设计未保存的简介草稿')
+  await run('window.paintDesign(2)')
+  await wait('document.querySelector(".author-design-section")?.textContent.includes("另一作品") && ![...document.querySelectorAll(".ant-modal-wrap")].some(el=>getComputedStyle(el).display!=="none")')
+  await run('window.unmount()')
+  assert.equal(await run('window.researchHandlers.size'), 0, 'unmount removes all event subscriptions')
+  console.log('PASS research UI: external search, author cards, hidden duplicates, frozen submissions, URL-only provenance, stale edit conflicts, stale readback, approval-protected deletion, external add/update/delete, focus recovery, author/story draft CAS protection, listener cleanup, project switch, error retention, 720/1280 responsive layout. Screenshots: ' + dir)
   win.destroy()
 }
 main().then(() => app.exit(0)).catch(error => { console.error(error); app.exit(1) })

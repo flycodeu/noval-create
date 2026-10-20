@@ -11,6 +11,7 @@ import {
 } from '../../../shared/creative-research'
 import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import { useNovelStore } from '../../../stores/novel.store'
+import { useNovelResearchRefresh } from '../../../hooks/useNovelResearchRefresh'
 import './creative-research.css'
 
 const { Paragraph, Text } = Typography
@@ -20,6 +21,7 @@ function toolError(result: Awaited<ReturnType<typeof window.electron.agentTools.
 }
 
 export default function CreativeResearchLibrary({ novelId }: { novelId: number }) {
+  useNovelResearchRefresh(novelId)
   const novel = useNovelStore(state => state.currentNovel)
   const setNovel = useNovelStore(state => state.setCurrentNovel)
   const [form] = Form.useForm<CreativeResearchDraft>()
@@ -43,6 +45,10 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   }, [allEntries, category, keyword])
   const pageEntries = entries.slice((page - 1) * 20, page * 20)
+
+  useEffect(() => {
+    setPage(current => Math.min(current, Math.max(1, Math.ceil(entries.length / 20))))
+  }, [entries.length])
 
   useEffect(() => {
     operationId.current += 1
@@ -92,7 +98,7 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
 
   const refreshNovel = async (currentOperation: number) => {
     const updated = await window.electron.novel.get(novelId)
-    if (!updated || !isCurrent(currentOperation)) return false
+    if (updated?.id !== novelId || !isCurrent(currentOperation)) return false
     const currentVersion = useNovelStore.getState().currentNovel?.contextVersion || 0
     if ((updated.contextVersion || 0) >= currentVersion) setNovel(updated)
     return true

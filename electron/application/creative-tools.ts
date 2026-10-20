@@ -16,7 +16,19 @@ import { parseStorySettingsDocument, buildStorySettingsPayload } from '../../src
 import { queryCreativeFacts } from '../services/creative-facts'
 import { getChapter, listChapters } from '../services/chapter.service'
 import { getChapterContract, listSceneContracts } from '../services/endgame-asset.service'
-import { inspectCreativeChapterPrerequisites } from '../services/creative-chapter-context'
+import { CreativeChapterContextError, inspectCreativeChapterPrerequisites } from '../services/creative-chapter-context'
+import { CreativeReviewTargetError } from '../services/creative-review-issues'
+import { ContextPackValidationError } from '../../src/shared/context-pack'
+import { ArtifactServiceError } from './artifact-error'
+import { GenericAssetWorkflowError } from './generic-asset-workflow-error'
+import { RevisionPatchValidationError } from '../../src/shared/revision-patch'
+import { ReaderFeedbackError } from '../../src/shared/reader-feedback'
+import { CanonLedgerError } from '../services/canon-ledger.service'
+import { WorkflowNodeError } from '../services/workflow-node.service'
+import { ContextCompilerStaleError } from '../services/context-compiler'
+import { InvalidContextBudgetError, HardConstraintOverflowError } from '../services/context.service'
+import { RequestBudgetExceededError } from '../services/request-budget'
+import { RevisionBudgetError } from '../services/revision-budget'
 import { chapterRevisionParagraphs } from '../../src/shared/chapter-revision'
 import { registerChapterIndexTools } from './chapter-index-tools'
 import { registerAtlasJourneyTools } from './atlas-journey-tools'
@@ -37,7 +49,14 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   function add(id: string, title: string, description: string, properties: Record<string, AgentToolJsonSchema>, required: string[], effect: AgentToolDescriptor['effect'], handler: (input: Record<string, unknown>) => unknown | Promise<unknown>, options: { scopes?: string[]; approval?: AgentToolDescriptor['approval'] } = {}): void {
     registry.register({ descriptor: { id: `novelforge.${id}`, version: '2.0.0', domain: id.split('.')[0], title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: true }, effect, approval: options.approval ?? 'policy', scopes: options.scopes ?? (effect === 'read' ? [AGENT_TOOL_SCOPES.novelRead] : [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite]), idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['creative-workspace'] }, handler: async input => {
       try { return await handler(input) } catch (error) {
-        if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new AgentToolInvocationError(error.code, error.message)
+        if (error instanceof CreativeChapterContextError || error instanceof atlas.StoryAtlasError
+          || error instanceof CreativeReviewTargetError || error instanceof ContextPackValidationError
+          || error instanceof ArtifactServiceError || error instanceof GenericAssetWorkflowError
+          || error instanceof RevisionPatchValidationError || error instanceof ReaderFeedbackError
+          || error instanceof CanonLedgerError || error instanceof WorkflowNodeError
+          || error instanceof ContextCompilerStaleError || error instanceof InvalidContextBudgetError
+          || error instanceof HardConstraintOverflowError || error instanceof RequestBudgetExceededError
+          || error instanceof RevisionBudgetError) throw new AgentToolInvocationError(error.code, error.message)
         throw error
       }
     } })

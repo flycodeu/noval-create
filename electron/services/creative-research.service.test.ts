@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deleteAuthorCreativeResearch, getAuthorCreativeResearch, listAuthorCreativeResearch, searchCreativeResearch, listCreativeResearch, upsertAuthorCreativeResearch } from './creative-research.service'
 import { CREATIVE_RESEARCH_USAGE, needsCreativeResearch, selectCreativeResearchSources } from '../../src/shared/creative-research'
 import type { SourceSearchRuntimeConfig } from '../../src/shared/source-search'
+import { notifyNovelResearchChanged } from '../utils/novel-research-events'
 
 const state = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], runtime: { mode: 'auto', providerName: null, apiKey: null } as SourceSearchRuntimeConfig }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ transaction: (callback: () => unknown) => ({ immediate: callback }) }) }))
+vi.mock('../utils/novel-research-events', () => ({ notifyNovelResearchChanged: vi.fn() }))
 vi.mock('./novel.service', () => ({ getNovel: () => state.novel, updateNovel: (_: number, data: Record<string, unknown>, options: { expectedContextVersion?: number } = {}) => {
   if (options.expectedContextVersion !== undefined && options.expectedContextVersion !== state.novel.contextVersion) throw new Error(formatUserFacingMessage('novel.contextVersionConflict'))
+  if (data.sourceLedgerJson === state.novel.sourceLedgerJson && Object.keys(data).length === 1) return
   state.writes.push(data); Object.assign(state.novel, data, { contextVersion: Number(state.novel.contextVersion) + 1 })
 } }))
 vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 5, chapterNum: 2, title: '夜入道观' }] }))
@@ -17,7 +20,22 @@ const source = { title: '道德經', url: 'https://ctext.org/dao-de-jing/zh', sn
 const provider = () => vi.fn(async () => [source])
 describe('creative research persistence and subsequent writing material', () => {
   beforeEach(() => { state.novel = { id: 1, contextVersion: 7, sourceLedgerJson: JSON.stringify([{ sourceKey: 'chapter:old', supportingDiffIds: [3], sourceText: '既有正文证据' }]), canonFactCardsJson: '[{"cardKey":"keep"}]' }; state.writes = []; state.runtime = { mode: 'auto', providerName: null, apiKey: null } })
-  afterEach(() => { vi.unstubAllGlobals() })
+  afterEach(() => { vi.unstubAllGlobals(); vi.mocked(notifyNovelResearchChanged).mockClear() })
+  it('replays normalized identical cards without a write or notification while still rejecting stale CAS', () => {
+    const draft = { category: 'humanity' as const, title: '代价归谁承担', content: '核心机制', interpretation: '利益与责任', novelConnection: '连接本作的粮药争夺' }
+    const [saved] = upsertAuthorCreativeResearch(1, [draft], 7)
+    expect(notifyNovelResearchChanged).toHaveBeenCalledOnce()
+    vi.mocked(notifyNovelResearchChanged).mockClear()
+    const before = JSON.stringify(state.novel), writesBefore = state.writes.length
+    const [again] = upsertAuthorCreativeResearch(1, [{ ...draft, sourceKey: saved.sourceKey, title: ` ${draft.title} ` }], 8)
+    expect(again).toEqual(saved)
+    expect(JSON.stringify(state.novel)).toBe(before)
+    expect(state.writes).toHaveLength(writesBefore)
+    expect(notifyNovelResearchChanged).not.toHaveBeenCalled()
+    expect(() => upsertAuthorCreativeResearch(1, [{ ...draft, sourceKey: saved.sourceKey }], 7)).toThrow('作品已被其他任务修改')
+    expect(JSON.stringify(state.novel)).toBe(before)
+    expect(notifyNovelResearchChanged).not.toHaveBeenCalled()
+  })
   it('uses the configured provider HTTP contract with mocked transport and saves reference-only sources for later chapter selection', async () => {
     state.runtime = { mode: 'auto', providerName: 'tavily', apiKey: 'test-only-placeholder' }
     const fetch = vi.fn(async () => new Response(JSON.stringify({ results: [{ ...source, content: source.snippet }] }), { status: 200 }))

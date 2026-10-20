@@ -733,6 +733,7 @@ const api = {
       'ai:world-rules-progress',
       'chapter:generation-progress',
       'app:update-status',
+      'novel:research-changed',
     ]
     if (validChannels.includes(channel)) {
       const subscription: EventSubscription = (_event, ...args) => callback(...args)

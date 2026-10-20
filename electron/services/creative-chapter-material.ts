@@ -1,4 +1,7 @@
 import type { ContextPackSource } from '../../src/shared/context-pack'
+import type { CreativeResearchMatch } from '../../src/shared/creative-research'
+
+export type ChapterResearchRelevance = Pick<CreativeResearchMatch, 'requestScore' | 'backgroundScore'> & { rank: number }
 
 /** Drop only exact duplicate aliases; differing segment constraints remain intact. */
 export function compactChapterScenes<T extends object>(scenes: T[]): Record<string, unknown>[] {
@@ -12,7 +15,7 @@ export function compactChapterScenes<T extends object>(scenes: T[]): Record<stri
 }
 
 /** Select causal/character material before incidental prose; this never sets reading order. */
-export function chapterMaterialPriority(source: Pick<Partial<ContextPackSource>, 'key' | 'sourceKind' | 'start' | 'end'>, previousLength = 0): number {
+export function chapterMaterialPriority(source: Pick<Partial<ContextPackSource>, 'key' | 'sourceKind' | 'start' | 'end'>, previousLength = 0, research?: ChapterResearchRelevance): number {
   const key = source.key || ''
   if (key.startsWith('fact:')) return 120
   // Keep the immediate handoff before optional setting detail, without making it a hard budget gate.
@@ -22,6 +25,9 @@ export function chapterMaterialPriority(source: Pick<Partial<ContextPackSource>,
     return 20 + (previousLength > 0 ? Math.min(1, offset / previousLength) : 0)
   }
   if (/^(?:characters?:|relation:)/u.test(key)) return 100
+  // At most three short references follow facts, people and prose handoff. Preserve retrieval
+  // rank instead of letting source-key alphabetical order choose which card survives.
+  if (key.startsWith('research:author:') && research) return (research.requestScore > 0 ? 95 : 85) - Math.min(5, Math.max(0, research.rank))
   if (/^(?:voice:|world_rules:|writing_rules:|premise:|story_design:)/u.test(key)) return 80
   if (key.startsWith('author_reference:')) return 60
   if (source.sourceKind === 'recalled_chapter_original') return 40

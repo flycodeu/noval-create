@@ -36,4 +36,21 @@ describe('chapter material selection', () => {
     const result = await compileContextPack({ novelId: 1, chapterId: 4, chapterNum: 4, stage: 'draft', contextVersion: 1, budget: 10, sources })
     expect(result.pack.sources.filter(source => source.included).map(source => source.text)).toEqual(['干布还未落下，借感尚未开始'])
   })
+
+  it('preserves relevance rank for optional cards after necessary evidence and before optional detail', async () => {
+    const sources = [
+      { key: 'task', text: '必需合同', required: true },
+      { key: 'fact:known', text: '既有事实' },
+      { key: 'character:1', text: '视角人物' },
+      { key: 'chapter:3:original:3500', sourceKind: 'previous_chapter_original', end: 4000, text: '紧接上章正文' },
+      { key: 'world_rules:worldDynamics:economyLoops', text: '可选长背景' },
+      { key: 'research:author:author:a-lower', text: '次相关卡', visibility: 'plan' as const, relevance: { requestScore: 10, backgroundScore: 0, rank: 1 } },
+      { key: 'research:author:author:z-top', text: '最相关卡', visibility: 'plan' as const, relevance: { requestScore: 20, backgroundScore: 0, rank: 0 } },
+    ].map(source => ({ ...source, selectionPriority: chapterMaterialPriority(source, 4000, 'relevance' in source ? source.relevance : undefined), estimatedTokens: 10 }))
+    const result = await compileContextPack({ novelId: 1, chapterId: 4, chapterNum: 4, stage: 'draft', contextVersion: 1, budget: 50, sources })
+    const included = result.pack.sources.filter(source => source.included)
+    expect(included.map(source => source.key)).toEqual(['task', 'fact:known', 'character:1', 'chapter:3:original:3500', 'research:author:author:z-top'])
+    expect(included.find(source => source.key.startsWith('research:author:'))).toMatchObject({ visibility: 'plan', required: false })
+    expect(chapterMaterialPriority({ key: 'research:author:author:fallback' }, 0, { requestScore: 0, backgroundScore: 80, rank: 2 })).toBeGreaterThan(chapterMaterialPriority({ key: 'world_rules:worldDynamics:economyLoops' }))
+  })
 })

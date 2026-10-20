@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { CreativeResearchValidationError } from '../../src/shared/creative-research'
+import { UserFacingError } from '../utils/user-facing-error'
 import type {
   AgentToolCallContext,
   AgentToolCallMeta,
@@ -56,6 +58,28 @@ export class AgentToolInvocationError extends Error {
     this.retryable = options.retryable === true
     this.detail = options.detail
   }
+}
+
+/** Only explicitly public domain errors may cross the tool boundary with their message. */
+function publicInvocationError(error: unknown): AgentToolInvocationError | null {
+  if (error instanceof AgentToolInvocationError) return error
+  if (error instanceof CreativeResearchValidationError) return new AgentToolInvocationError(error.code, error.message)
+  if (!(error instanceof UserFacingError)) return null
+  const codes: Partial<Record<UserFacingError['messageKey'], string>> = {
+    'novel.contextVersionConflict': 'CONTEXT_VERSION_CONFLICT',
+    'novel.invalidExpectedContextVersion': 'EXPECTED_CONTEXT_VERSION_INVALID',
+    'novel.notFound': 'PROJECT_NOT_FOUND',
+    'services.projectNotFound': 'PROJECT_NOT_FOUND',
+    'services.creativeResearch.notFound': 'CREATIVE_RESEARCH_NOT_FOUND',
+    'services.creativeResearch.batchInvalid': 'CREATIVE_RESEARCH_BATCH_INVALID',
+    'services.research.projectIdInvalid': 'PROJECT_ID_INVALID',
+    'services.research.requestLengthInvalid': 'CREATIVE_RESEARCH_REQUEST_INVALID',
+    'services.chapterPositionInvalid': 'CHAPTER_POSITION_INVALID',
+    'services.research.contextChangedBeforeSearch': 'CONTEXT_VERSION_CONFLICT',
+    'services.research.contextChangedDuringSearch': 'CONTEXT_VERSION_CONFLICT',
+  }
+  // Version conflicts require a fresh read and deliberate merge, never an automatic write retry.
+  return new AgentToolInvocationError(codes[error.messageKey] || error.code, error.message)
 }
 
 function cloneDescriptor(descriptor: AgentToolDescriptor): AgentToolDescriptor {
@@ -269,12 +293,13 @@ export class AgentToolRegistry {
       }
       return finalize({ ok: true, data: output, meta: buildMeta(metaParams) })
     } catch (error) {
-      if (error instanceof AgentToolInvocationError) {
+      const publicError = publicInvocationError(error)
+      if (publicError) {
         return finalize({
           ok: false,
-          error: errorPayload(error.code, error.message, {
-            detail: error.detail,
-            retryable: error.retryable,
+          error: errorPayload(publicError.code, publicError.message, {
+            detail: publicError.detail,
+            retryable: publicError.retryable,
           }),
           meta: buildMeta(metaParams),
         })

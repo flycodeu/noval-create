@@ -5,6 +5,8 @@ import { execSync, spawn } from 'child_process'
 import { applicationVersion, formalDataDirectory, installedExecutable, isTestProfile, registerFormalInstallation, runtimeIdentity, sameDirectory } from './utils/desktop-profile'
 import { restoreWindowBounds } from './utils/window-placement'
 import { assertMcpDesktopOwner } from './utils/mcp-owner-policy'
+import { NOVEL_RESEARCH_CHANGED_CHANNEL } from '../src/shared/novel-research-events'
+import { onNovelResearchChanged } from './utils/novel-research-events'
 
 // Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码。
 // 启动时把当前控制台切到 UTF-8，仅影响显示。
@@ -157,6 +159,7 @@ import {
 let mainWindow: BrowserWindow | null = null
 let writerLock: SingleWriterLockHandle | null = null
 let runtimeHandle: RuntimeHandle | null = null
+let stopResearchNotifications: (() => void) | null = null
 let runtimeTray: Tray | null = null
 let databaseReady = false
 const runtimeRpcHandlers = new Map<string, (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
@@ -376,6 +379,15 @@ app.whenReady().then(async () => {
   databaseReady = true
   taskService.recoverOrphanedTasks()
   registerIpcHandlers()
+  stopResearchNotifications = onNovelResearchChanged((event) => {
+    try { runtimeHandle?.publishEvent(NOVEL_RESEARCH_CHANGED_CHANNEL, event) }
+    catch (error) { console.warn('[main] web research notification failed:', error) }
+    for (const window of BrowserWindow.getAllWindows()) {
+      try {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(NOVEL_RESEARCH_CHANGED_CHANNEL, event)
+      } catch (error) { console.warn('[main] desktop research notification failed:', error) }
+    }
+  })
   runtimeHandle = await startMcpRuntime({
     directory: app.getPath('userData'), version: applicationVersion(), identity: runtimeIdentity(), registry: novelForgeToolRegistry,
     modelConfigured: () => { try { return Boolean(modelService.getDefaultModelConfigRecord()) } catch { return false } },
@@ -419,6 +431,8 @@ function shutdownApplication(): Promise<void> {
     let failure: unknown
     try {
       await runtimeHandle?.close()
+      stopResearchNotifications?.()
+      stopResearchNotifications = null
       runtimeHandle = null
       if (databaseReady) {
         const active = getDb().select().from(tasks).all().filter((task) => ['pending', 'running', 'cancel_requested'].includes(task.status || ''))

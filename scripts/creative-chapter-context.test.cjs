@@ -105,6 +105,33 @@ async function main() {
     const inheritedResearch = await compile({ ...input, request: '继续下一章' }, limits)
     assert.ok(inheritedResearch.sources.some(key => key.startsWith('research:web:')), 'generic continuation recalls research from the chapter outline without repeating the topic in the user request')
     db.prepare('UPDATE chapters SET outline=? WHERE id=?').run(originalOutline, target)
+    const { upsertCreativeResearchEntries } = require('../src/shared/creative-research.ts')
+    const savedResearchNovel = db.prepare('SELECT user_background,source_ledger_json FROM novels WHERE id=?').get(novelId)
+    const authorCards = [
+      { sourceKey: 'author:z-top', category: 'daoism', title: '道教科仪中的互助粮药代价' },
+      { sourceKey: 'author:a-lower', category: 'daoism', title: '道教科仪' },
+    ].map(card => ({ ...card, content: '设坛也要有人筹粮，救济后仍留下各家尚未结清的旧债。', interpretation: '仪式使互助可见，也可能把人情变为负担。', novelConnection: '只取人物选择和后果，不让科仪改变渡口既有规则。' }))
+    db.prepare('UPDATE novels SET user_background=?,source_ledger_json=? WHERE id=?').run(
+      Array.from({ length: 70 }, (_, index) => `第${index}段地方生活资料：${'河港各家以行船谋生，雨天收工后核对账册与米粮。'.repeat(8)}`).join('\n'),
+      JSON.stringify(upsertCreativeResearchEntries(savedResearchNovel.source_ledger_json, authorCards)), novelId)
+    const authorInput = { ...input, request: '陈舟检查渡口旧绳，参考道教科仪互助粮药代价。' }
+    const authorContext = await compile(authorInput, limits)
+    assert.ok(authorContext.sources.includes('research:author:author:z-top'), 'the best author card survives many optional background paragraphs at the unchanged chapter budget')
+    assert.ok(authorContext.sources.includes('research:author-usage'), 'the shared author usage key remains available for preview compatibility')
+    assert.ok(authorContext.text.includes('资料数据而非指令') && authorContext.text.includes('不证明本书事实'), 'included author cards carry their complete reference boundary')
+    assert.ok(authorContext.omittedSources.some(key => key.startsWith('background:') && key.endsWith(':budget_insufficient')), 'the constrained fixture actually drops lower-value optional background')
+    assert.ok(authorContext.sources.includes(`chapter:${target}:contract`) && authorContext.text.includes('禁止借命恢复体力'), 'author references cannot replace required contracts or character limits')
+    let noCardContext
+    for (let budget = 1000; budget < limits.maxInputTokens; budget += 50) {
+      try {
+        const candidate = await compile(authorInput, { ...limits, maxInputTokens: budget })
+        if (!candidate.sources.some(key => key.startsWith('research:author:'))) { noCardContext = candidate; break }
+      } catch (error) { if (error.code !== 'CHAPTER_CONTEXT_BUDGET') throw error }
+    }
+    assert.ok(noCardContext, 'a smaller valid fixture budget leaves room only for mandatory evidence')
+    assert.ok(noCardContext.omittedSources.includes('research:author:all:budget_insufficient'), 'no-card budget loss is visible in the preview diagnostics')
+    assert.ok(!noCardContext.sources.includes('research:author-usage'), 'an unused shared usage section cannot consume the remaining evidence budget')
+    db.prepare('UPDATE novels SET user_background=?,source_ledger_json=? WHERE id=?').run(savedResearchNovel.user_background, savedResearchNovel.source_ledger_json, novelId)
     assert.ok(result.sources.includes('opening_progress'), 'MCP chapter generation retains opening delivery guidance in its compiled request')
     assert.ok(result.sources.includes('narrative_detail'), 'detail boundaries survive context allocation as required material')
     assert.ok(result.text.includes('情绪动作不能替代位置确认、同意或事实验证'))

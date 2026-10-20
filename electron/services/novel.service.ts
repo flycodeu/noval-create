@@ -1,5 +1,7 @@
 ﻿import { preserveStyleApproval } from '../../src/shared/style-source'
 import { desc, eq } from 'drizzle-orm'
+import { classifyCreativeResearchLedgerChange } from '../../src/shared/creative-research-change'
+import { referenceNarrativeUpdatedAt } from './creative-research-impact'
 import { randomUUID } from 'node:crypto'
 import { mergeNarrativePolicySettings } from '../../src/shared/narrative-policy'
 import {
@@ -21,7 +23,7 @@ import { getDb, getSqlite } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { recordAssetChangeEvent } from './asset-impact.service'
-import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
+import { getNovelContextStatus, markNovelContextChanged, rebaseReferenceOnlyMemoryContext } from './context-impact.service'
 import { describeNovelLifecycle, syncNovelLifecycleStatus, syncNovelLifecycleStatuses } from './novel-lifecycle.service'
 import type { NovelUpdateOptions } from '../../src/types'
 
@@ -216,7 +218,8 @@ function deriveNovelChangeReasons(
     reasons.add('World rules changed')
   }
 
-  if (NOVEL_SOURCE_CANON_FIELD_KEYS.some((field) => Object.prototype.hasOwnProperty.call(next, field))) {
+  if (NOVEL_SOURCE_CANON_FIELD_KEYS.some((field) => Object.prototype.hasOwnProperty.call(next, field)
+    && (field !== 'sourceLedgerJson' || classifyCreativeResearchLedgerChange(current.sourceLedgerJson, next.sourceLedgerJson) === 'context'))) {
     reasons.add('Historical/source/canon data changed')
   }
 
@@ -400,6 +403,11 @@ function updateNovelRecord(id: number, data: NovelUpdateData, options: NovelUpda
     throwUserFacingError('novel.contextVersionConflict')
   }
 
+  const researchChange = Object.prototype.hasOwnProperty.call(data, 'sourceLedgerJson')
+    ? classifyCreativeResearchLedgerChange(current.sourceLedgerJson, data.sourceLedgerJson) : undefined
+  // Even a semantic no-op must pass CAS inside this writer transaction first.
+  if (researchChange === 'unchanged' && Object.keys(data).length === 1) return
+
   const nextGenreId = typeof data.genreId === 'number' ? data.genreId : current.genreId || undefined
   const nextGenre = nextGenreId
     ? db.select().from(genres).where(eq(genres.id, nextGenreId)).all()[0]
@@ -427,6 +435,12 @@ function updateNovelRecord(id: number, data: NovelUpdateData, options: NovelUpda
   const feedbackProtectedSettings = normalizedSettingsJson === undefined
     ? undefined
     : preserveReaderFeedbackSettings(current.settingsJson, normalizedSettingsJson)
+  const previousVersion = Math.max(1, current.contextVersion || 1)
+  const referencesOnly = researchChange === 'references_only' && changeReasons.length === 0
+    && Object.keys(data).every(key => key === 'sourceLedgerJson')
+  const narrativeUpdatedAt = referencesOnly ? referenceNarrativeUpdatedAt(id, previousVersion, current.updatedAt) : undefined
+  const previousTimestamp = Date.parse(current.updatedAt || '')
+  const updatedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTimestamp) ? previousTimestamp + 1 : 0)).toISOString()
 
   db.update(novels).set({
     ...dbData,
@@ -434,8 +448,20 @@ function updateNovelRecord(id: number, data: NovelUpdateData, options: NovelUpda
     settingsJson: feedbackProtectedSettings === undefined ? undefined : preserveStyleApproval(current.settingsJson,
       mergeNarrativePolicySettings(current.settingsJson, feedbackProtectedSettings)),
     worldRulesJson: normalizedWorldRules,
-    updatedAt: new Date().toISOString(),
+    ...(researchChange === 'references_only' && changeReasons.length === 0 ? { contextVersion: Math.max(1, current.contextVersion || 1) + 1 } : {}),
+    updatedAt,
   }).where(eq(novels.id, id)).run()
+
+  if (researchChange === 'references_only' && changeReasons.length === 0) {
+    if (referencesOnly) {
+      rebaseReferenceOnlyMemoryContext(id, previousVersion, previousVersion + 1)
+      recordAssetChangeEvent({
+        novelId: id, assetType: 'creative_reference', assetId: id, assetLabel: current.title,
+        operation: 'update', impactLevel: 'low', triggeredBy: 'novel.service',
+        payload: { schemaVersion: 1, previousContextVersion: previousVersion, contextVersion: previousVersion + 1, novelUpdatedAt: updatedAt, narrativeUpdatedAt },
+      })
+    }
+  }
 
   if (changeReasons.length > 0) {
     markNovelContextChanged(id, changeReasons)

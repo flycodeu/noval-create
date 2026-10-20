@@ -155,9 +155,10 @@ describe('creative project context budget and saved constraints', () => {
       { sourceKey: 'author:middle', category: 'daoism', title: '道教科仪与互助' },
       { sourceKey: 'author:lower', category: 'daoism', title: '道教科仪' },
     ].map(entry => ({ ...entry, content: '作者记录。'.repeat(100), interpretation: '群体压力。', novelConnection: '渡口处境。' }))))
-    const selected = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(String(mock.novel.sourceLedgerJson)), `${request}\n${mock.novel.userBackground}`)
+    const selected = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(String(mock.novel.sourceLedgerJson)), { request, background: String(mock.novel.userBackground) })
     expect(selected.map(entry => entry.sourceKey)).toEqual(['author:top', 'author:middle', 'author:lower'])
     const report = await compileCreativeContext({ ...input('style'), request })
+    expect(report.sources).toContain('research:author-usage')
     expect(report.sources.filter(key => key.startsWith('research:author:'))).toEqual(selected.map(entry => `research:author:${entry.sourceKey}`))
     const droppedCardTokens = ['author:middle', 'author:lower'].reduce((total, key) => {
       const start = report.text.indexOf(`<source id="research:author:${key}">`)
@@ -167,8 +168,28 @@ describe('creative project context budget and saved constraints', () => {
     const budget = report.estimatedTokens - droppedCardTokens
     mock.model = { maxTokens: 256, maxContextTokens: Math.ceil((budget + 2000 + 512) / 0.85) }
     const limited = await compileCreativeContext({ ...input('style'), request })
+    expect(limited.sources).toContain('research:author-usage')
     expect(limited.sources.filter(key => key.startsWith('research:author:'))).toEqual(['research:author:author:top'])
     expect(limited.omittedSources).toEqual(expect.arrayContaining(['research:author:author:middle', 'research:author:author:lower']))
+  })
+
+  it('keeps requested cards ahead of a long background and reports when no optional card fits', async () => {
+    const request = '借鉴杨朱贵己'
+    mock.novel.userBackground = '渡口故事，雨后各家核对旧债。'.repeat(100)
+    mock.novel.expandedBackground = Array.from({ length: 2000 }, (_, index) => `第${index}处官府核账与乡里赈济，保住账册再去交接。`).join('\n')
+    mock.novel.sourceLedgerJson = JSON.stringify(upsertCreativeResearchEntries('[]', [
+      { sourceKey: 'author:request', category: 'daoism', title: '杨朱贵己的取舍', content: '先保住此身再谈救人。', interpretation: '救人也有自己的限度。', novelConnection: '让渡工拒绝一次无谓冒险。' },
+      { sourceKey: 'author:background', category: 'politics', title: '官府核账与乡里赈济', content: '保住账册再去交接。', interpretation: '公事也牵涉私情。', novelConnection: '赈济时维护证人。' },
+    ]))
+    const report = await compileCreativeContext({ ...input('style'), request })
+    expect(report.sources.filter(id => id.startsWith('research:author:'))).toEqual(['research:author:author:request', 'research:author:author:background'])
+    const requiredIds = new Set(['task', 'background', 'atlas_coverage', ...creativeProjectSources(mock.novel as never).filter(source => source.required).map(source => source.key)])
+    const requiredTokens = report.text.split('\n\n').filter(section => requiredIds.has(section.match(/^<source id="([^"]+)">/u)?.[1] || '')).reduce((total, section) => total + estimateTokens(`${total ? '\n\n' : ''}${section}`), 0)
+    mock.model = { maxTokens: 256, maxContextTokens: Math.ceil((Math.max(1000, requiredTokens + 20) + 2000 + 512) / 0.85) }
+    const limited = await compileCreativeContext({ ...input('style'), request })
+    expect(limited.sources.some(id => id.startsWith('research:author:'))).toBe(false)
+    expect(limited.sources).not.toContain('research:author-usage')
+    expect(limited.omittedSources).toEqual(expect.arrayContaining(['research:author:all:budget_insufficient', 'research:author:author:request', 'research:author:author:background']))
   })
   it('excludes portrait media and visual prompts from planning, review budgets and existing draft baselines', async () => {
     const portraitImage = 'data:image/png;base64,' + 'A'.repeat(200000)

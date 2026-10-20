@@ -4,6 +4,7 @@ import { Button, ConfigProvider, Modal, Spin, message } from 'antd'
 import { ArrowRightOutlined, EditOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
+import { useNovelResearchRefresh } from '../../../hooks/useNovelResearchRefresh'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getUserFacingMessage } from '../../../utils/user-facing-message'
 import { parseProjectBriefDocument } from '../../../shared/project-brief'
@@ -31,6 +32,7 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const { section: tab, topic, topics } = resolveStoryDesignLocation(params)
+  useNovelResearchRefresh(novelId, tab !== 'sources')
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [tree, setTree] = useState<StoryStructureTree | null>(null)
   const selectedChapter = Number(params.get('chapterId')) || null
@@ -43,6 +45,9 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const [arrangementDirty, setArrangementDirty] = useState(false)
   const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const loadEpoch = useRef(0)
+  const saveEpoch = useRef(0)
+  const activeNovelId = useRef(novelId)
+  activeNovelId.current = novelId
   const saveInFlight = useRef(false)
   const dirty = arrangementDirty || Boolean(editing) && JSON.stringify(draft) !== JSON.stringify(editing?.value)
   useRegisterWorkspaceLeaveGuard(dirty || saving)
@@ -63,15 +68,19 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
       ])
       if (epoch !== loadEpoch.current) return
       setChapters(rows); setTree(structure); setNames(references); setError(referenceError)
-      if (latest && useNovelStore.getState().currentNovel?.id === novelId) setNovel(latest)
+      const current = useNovelStore.getState().currentNovel
+      if (latest?.id === novelId && current?.id === novelId && (latest.contextVersion || 0) >= (current.contextVersion || 0)) setNovel(latest)
     }
     catch (cause) { if (epoch === loadEpoch.current) setError(cause instanceof Error ? cause.message : '读取结构失败') }
     finally { if (epoch === loadEpoch.current) setLoading(false) }
   }, [novelId, setNovel])
   useEffect(() => {
+    saveEpoch.current += 1
+    saveInFlight.current = false
+    setSaving(false); setEditing(null); setDraft(null); setArrangementDirty(false); setTask(null)
     setChapters([]); setTree(null); setNames({})
     void load()
-    return () => { loadEpoch.current += 1 }
+    return () => { loadEpoch.current += 1; saveEpoch.current += 1 }
   }, [load])
   useEffect(() => { const refresh = () => { void load() }; window.addEventListener('novelforge:creative-completed', refresh); return () => window.removeEventListener('novelforge:creative-completed', refresh) }, [load])
   const changeView = (change: () => void) => {
@@ -98,16 +107,20 @@ export default function StoryDesign({ novelId }: { novelId: number }) {
   const save = async () => {
     if (!novel || !editing || saveInFlight.current) return
     saveInFlight.current = true
+    const epoch = ++saveEpoch.current
+    const isCurrent = () => epoch === saveEpoch.current && activeNovelId.current === novelId && useNovelStore.getState().currentNovelId === novelId
     setSaving(true)
     try {
       const latest = await window.electron.novel.get(novelId)
-      if (!latest || latest.contextVersion !== editing.contextVersion) throw new Error(getUserFacingMessage('novel.contextVersionConflict'))
+      if (!isCurrent()) return
+      if (latest?.id !== novelId || latest.contextVersion !== editing.contextVersion) throw new Error(getUserFacingMessage('novel.contextVersionConflict'))
       await window.electron.novel.update(novelId, buildStoryDesignPatch(latest, editing.key, draft), { expectedContextVersion: editing.contextVersion })
       const updated = await window.electron.novel.get(novelId)
-      if (updated && useNovelStore.getState().currentNovel?.id === novelId) setNovel(updated)
+      if (!isCurrent()) return
+      if (updated?.id === novelId && (updated.contextVersion || 0) >= (useNovelStore.getState().currentNovel?.contextVersion || 0)) setNovel(updated)
       setEditing(null); setError(''); message.success(getUserFacingMessage('workspace.sectionSaved'))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败') }
-    finally { saveInFlight.current = false; setSaving(false) }
+    } catch (cause) { if (isCurrent()) setError(cause instanceof Error ? cause.message : '保存失败') }
+    finally { if (isCurrent()) { saveInFlight.current = false; setSaving(false) } }
   }
   const chapter = chapters.find(item => item.id === selectedChapter)
   const assigned = new Set(tree?.volumes.flatMap(volume => volume.parts.flatMap(part => part.chapters.map(item => item.id))) || [])

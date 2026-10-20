@@ -11,6 +11,7 @@ const root = path.resolve(__dirname, '..')
 const directory = path.join(root, '.tmp-tests', `mcp-runtime-${process.pid}-${randomUUID()}`)
 const env = { ...process.env, NOVELFORGE_USER_DATA_DIR: directory, NOVELFORGE_DISABLE_LEGACY_DB_COPY: '1', ELECTRON_RENDERER_URL: 'data:text/html,<title>NovelForge runtime integration</title><p>Isolated desktop host</p>' }
 const clients = []
+const eventStreams = []
 let stderr = ''
 let webProxy
 let fixtureServer
@@ -18,6 +19,31 @@ let modelRequestReceived = false
 let modelRequestClosed = false
 const discoveryPath = path.join(directory, 'novelforge-runtime.json')
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+async function observeResearchEvents(url, headers = {}) {
+  const controller = new AbortController()
+  const events = []
+  const response = await fetch(url, { headers, signal: controller.signal })
+  assert.equal(response.status, 200)
+  const consuming = (async () => {
+    const decoder = new TextDecoder()
+    let pending = ''
+    for await (const chunk of response.body) {
+      pending += decoder.decode(chunk, { stream: true })
+      let end
+      while ((end = pending.indexOf('\n\n')) >= 0) {
+        const block = pending.slice(0, end)
+        pending = pending.slice(end + 2)
+        for (const line of block.split('\n')) if (line.startsWith('data: ')) {
+          const event = JSON.parse(line.slice(6))
+          if (event.channel === 'novel:research-changed') events.push(event)
+        }
+      }
+    }
+  })().catch(error => { if (!controller.signal.aborted) throw error })
+  const stream = { events, async close() { controller.abort(); await consuming } }
+  eventStreams.push(stream)
+  return stream
+}
 function discovery() { return JSON.parse(fs.readFileSync(discoveryPath, 'utf8')) }
 async function request(route, method = 'GET', body, timeoutMs = 3_000) {
   const live = discovery()
@@ -113,6 +139,15 @@ async function main() {
     assert.equal(listedModels.find((model) => model.id === modelId).apiKey, '已设置')
     assert(!JSON.stringify(listedModels).includes('fixture-secret-only'), 'RPC must mask configured provider keys')
     const novelId = await rpc('novel', 'create', [{ title: 'Exit cancellation fixture', userBackground: '渡口的两名船工。', modelConfigId: modelId, launchMode: 'fast_launch' }])
+    // Exercise the real MCP commit -> owner SSE -> Web proxy path, alongside UI component tests.
+    webProxy = spawn(require('electron'), [path.join(__dirname, 'local-web-backend.cjs')], { cwd: root, env: { ...env, NOVELFORGE_WEB_BACKEND_PORT: String(webPort) }, windowsHide: true, stdio: 'ignore' })
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try { if ((await fetch(`http://127.0.0.1:${webPort}/health`)).ok) break } catch { /* Starting the isolated proxy. */ }
+      await wait(100)
+    }
+    const liveEvents = discovery()
+    const ownerEvents = await observeResearchEvents(new URL('/events', liveEvents.url), { Authorization: `Bearer ${liveEvents.token}` })
+    const webEvents = await observeResearchEvents(`http://127.0.0.1:${webPort}/events`)
     assert(listed.tools.some((tool) => tool.name === 'novelforge.research.upsert'))
     assert(!listed.tools.some((tool) => tool.name === 'novelforge.research.delete'), 'MCP must not advertise a destructive tool without an approval grant path')
     const card = { category: 'daoism', title: '不争与权力边界', sourceTitle: '道家思想', tags: ['道教', '人物抉择'],
@@ -121,6 +156,8 @@ async function main() {
     const savedCard = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, entries: [card] } })
     assert(!savedCard.isError, JSON.stringify(savedCard))
     assert.equal(savedCard.structuredContent.entries[0].canonDecision, 'reference_only')
+    for (let attempt = 0; attempt < 100 && (!ownerEvents.events.length || !webEvents.events.length); attempt += 1) await wait(20)
+    for (const stream of [ownerEvents, webEvents]) assert.deepEqual(stream.events, [{ channel: 'novel:research-changed', args: [{ novelId }] }], 'A real MCP commit broadcasts only the project identity')
     const authorCards = await second.callTool({ name: 'novelforge.research.list', arguments: { novelId, query: '渡口' } })
     assert(!authorCards.isError, JSON.stringify(authorCards))
     assert.equal(authorCards.structuredContent.count, 1)
@@ -135,8 +172,32 @@ async function main() {
     assert(!revisedCard.isError, JSON.stringify(revisedCard))
     const staleCard = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, expectedContextVersion: beforeCardUpdate.contextVersion, entries: [{ ...card, sourceKey }] } })
     assert(staleCard.isError, 'MCP must reject the version captured before another saved edit')
+    const errorPayload = result => JSON.parse(result.content.find(block => block.type === 'text').text).error
+    assert.equal(errorPayload(staleCard).code, 'CONTEXT_VERSION_CONFLICT')
+    assert.equal(errorPayload(staleCard).retryable, false, 'A stale write requires rereading and deliberate merging')
     const afterConflict = await second.callTool({ name: 'novelforge.research.get', arguments: { novelId, sourceKey } })
     assert.equal(afterConflict.structuredContent.entry.content, revisedContent, 'real SQLite storage retains the newer card after a conflict')
+    const beforeReplay = await rpc('novel', 'get', [novelId])
+    const noOp = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, expectedContextVersion: beforeReplay.contextVersion, entries: [{ ...card, sourceKey, content: revisedContent }] } })
+    assert(!noOp.isError, JSON.stringify(noOp))
+    const afterReplay = await rpc('novel', 'get', [novelId])
+    assert.equal(afterReplay.contextVersion, beforeReplay.contextVersion, 'Identical MCP replay must not increment the project version')
+    assert.equal(afterReplay.updatedAt, beforeReplay.updatedAt, 'Identical MCP replay must not change the project timestamp')
+    assert.equal(noOp.structuredContent.entries[0].updatedAt, revisedCard.structuredContent.entries[0].updatedAt)
+    const duplicateCards = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, entries: [{ ...card, sourceKey }, { ...card, sourceKey }] } })
+    assert(duplicateCards.isError)
+    assert.equal(errorPayload(duplicateCards).code, 'CREATIVE_RESEARCH_DUPLICATE_KEY')
+    const missingCard = await second.callTool({ name: 'novelforge.research.get', arguments: { novelId, sourceKey: 'author:missing-card' } })
+    assert(missingCard.isError)
+    assert.equal(errorPayload(missingCard).code, 'CREATIVE_RESEARCH_NOT_FOUND')
+    await wait(100)
+    for (const stream of [ownerEvents, webEvents]) {
+      assert.equal(stream.events.length, 2, 'Only add and edit commits notify; stale CAS, no-op, duplicates and missing reads do not')
+      await stream.close()
+    }
+    webProxy.kill()
+    await new Promise(resolve => webProxy.once('exit', resolve))
+    webProxy = null
     const atlasBefore = (await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas
     const savedGeography = { boundary: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 100 }, { x: 0, y: 100 }], areaKm2: 40, development: 'outlined' }
     const mapChange = { novelId, expectedContextVersion: atlasBefore.contextVersion, idempotencyKey: 'runtime-geography-roundtrip', effectiveFromChapter: 0, source: { kind: 'test', id: 'mcp-map-fixture' }, changes: [
@@ -187,6 +248,7 @@ async function main() {
     if (stderr.trim()) process.stderr.write(stderr)
     throw error
   } finally {
+    await Promise.allSettled(eventStreams.map(stream => stream.close()))
     webProxy?.kill()
     fixtureServer?.closeAllConnections()
     if (fixtureServer) await new Promise((resolve) => fixtureServer.close(resolve))

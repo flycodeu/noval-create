@@ -94,7 +94,9 @@ export default function NovelRouter() {
     void window.electron.novel.get(novelId).then((result) => {
       if (!alive) return
       if (!result) { setError('这部作品不存在。'); return }
-      setNovel(result); setError('')
+      const current = useNovelStore.getState().currentNovel
+      if (!current || current.id !== novelId || (result.contextVersion || 0) >= (current.contextVersion || 0)) setNovel(result)
+      setError('')
     }).catch((cause) => { if (alive) setError(cause instanceof Error ? cause.message : '读取作品失败') })
     return () => { alive = false }
   }, [novelId, currentPage, mutationToken, setNovel])
