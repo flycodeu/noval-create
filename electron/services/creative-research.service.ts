@@ -16,7 +16,7 @@ import {
 import { getSqlite } from '../database/db'
 import { getNovel, updateNovel } from './novel.service'
 import { listChapters } from './chapter.service'
-import { enrichSourceGroundingFromWeb, type SourceGroundingSearchProvider } from './source-grounding-search.service'
+import { enrichSourceGroundingFromWeb, mergeSourceGroundingEnrichmentIntoCurrent, type SourceGroundingSearchProvider } from './source-grounding-search.service'
 
 function ledger(raw?: string | null): Record<string, unknown>[] {
   try { const value: unknown = JSON.parse(raw || '[]'); return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object' && !Array.isArray(row)) : [] } catch { return [] }
@@ -55,26 +55,26 @@ export function getAuthorCreativeResearch(novelId: number, sourceKey: string): C
   return entry
 }
 
-export function upsertAuthorCreativeResearch(novelId: number, drafts: CreativeResearchDraft[]): CreativeResearchEntry[] {
+export function upsertAuthorCreativeResearch(novelId: number, drafts: CreativeResearchDraft[], expectedContextVersion?: number): CreativeResearchEntry[] {
   if (!Number.isSafeInteger(novelId) || novelId < 1) throw new Error(formatUserFacingMessage('services.research.projectIdInvalid'))
   if (!Array.isArray(drafts) || drafts.length < 1 || drafts.length > 100) throw new Error(formatUserFacingMessage('services.creativeResearch.batchInvalid'))
   const novel = getNovel(novelId)
   if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   const ledger = upsertCreativeResearchEntries(novel.sourceLedgerJson, drafts)
-  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: Math.max(1, novel.contextVersion || 1) })
+  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: expectedContextVersion ?? Math.max(1, novel.contextVersion || 1) })
   const savedKeys = new Set(drafts.map(getCreativeResearchSourceKey))
   const updated = getNovel(novelId)
   return parseCreativeResearchEntries(updated?.sourceLedgerJson).filter(entry => savedKeys.has(entry.sourceKey))
 }
 
-export function deleteAuthorCreativeResearch(novelId: number, sourceKey: string): void {
+export function deleteAuthorCreativeResearch(novelId: number, sourceKey: string, expectedContextVersion?: number): void {
   if (!Number.isSafeInteger(novelId) || novelId < 1) throw new Error(formatUserFacingMessage('services.research.projectIdInvalid'))
   const novel = getNovel(novelId)
   if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   const existing = parseCreativeResearchEntries(novel.sourceLedgerJson).find(entry => entry.sourceKey === sourceKey)
   if (!existing || !isCreativeResearchEntry(existing)) throw new Error(formatUserFacingMessage('services.creativeResearch.notFound'))
   const ledger = removeCreativeResearchEntry(novel.sourceLedgerJson, sourceKey)
-  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: Math.max(1, novel.contextVersion || 1) })
+  updateNovel(novelId, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: expectedContextVersion ?? Math.max(1, novel.contextVersion || 1) })
 }
 
 /** The only persisted field is the source ledger; no Canon, prose or atlas records are changed. */
@@ -106,21 +106,17 @@ export async function searchCreativeResearch(
   return getSqlite().transaction(() => {
     const current = getNovel(novelId)
     if (!current || (current.contextVersion || 1) !== version) throw new Error(formatUserFacingMessage('services.research.contextChangedDuringSearch'))
-    const byKey = new Map<string, Record<string, unknown>>()
-    const other: Record<string, unknown>[] = []
-    for (const row of ledger(current.sourceLedgerJson)) {
-      if (typeof row.sourceKey === 'string') byKey.set(row.sourceKey, row)
-      else other.push(row)
-    }
-    for (const row of result.discoveredSourceLedgerEntries) {
-      const key = String(row.sourceKey), previous = byKey.get(key)
+    const existing = ledger(current.sourceLedgerJson)
+    const discoveredSourceLedgerEntries = result.discoveredSourceLedgerEntries.map(row => {
+      const previous = existing.find(entry => entry.sourceKey === row.sourceKey)
       const previousTopics = Array.isArray(previous?.researchTopics) ? previous.researchTopics : []
       const previousKeys = Array.isArray(previous?.researchRequestKeys) ? previous.researchRequestKeys : []
-      byKey.set(key, { ...previous, ...row, researchTopics: [...new Set([...previousTopics, ...topics])],
-        researchRequestKeys: [...new Set([...previousKeys, requestKey])].slice(-20), canonDecision: 'reference_only' })
-    }
+      return { ...row, researchTopics: [...new Set([...previousTopics, ...topics])],
+        researchRequestKeys: [...new Set([...previousKeys, requestKey])].slice(-20), canonDecision: 'reference_only' }
+    })
     // Preserve all existing story provenance; research must never evict chapter writeback evidence.
-    updateNovel(novelId, { sourceLedgerJson: JSON.stringify([...other, ...byKey.values()]) })
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({ sourceLedgerJson: current.sourceLedgerJson }, { discoveredSourceLedgerEntries, discoveredCanonFactCards: [] })
+    updateNovel(novelId, { sourceLedgerJson: merged.sourceLedgerJson })
     const saved = getNovel(novelId)!
     const resultKeys = new Set(result.discoveredSourceLedgerEntries.map(row => row.sourceKey))
     return { attempted: true, updated: true, cached: false, queries: result.queries, diagnostics: result.diagnostics,

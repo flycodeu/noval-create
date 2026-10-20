@@ -21,13 +21,13 @@ import type {
   WriterOrchestratedTimelinePackEntry,
   WriterOrchestratedWorldStatePack,
 } from '../../src/types'
-import { assessHistoricalGrounding, getGroundingSourceLedgerEntries } from '../../src/shared/genre-system'
+import { assessHistoricalGrounding, getGroundingSourceLedgerEntries, isConfirmedGroundingEntry } from '../../src/shared/genre-system'
 import {
   buildCreativeResearchContext,
   getCreativeResearchCategoryLabel,
   isCreativeResearchEntry,
+  parseCreativeResearchEntries,
   selectRelevantCreativeResearchEntries,
-  type CreativeResearchEntry,
 } from '../../src/shared/creative-research'
 import { getCharacterDetailContext, listCharacters } from './character.service'
 import type { CharacterStateSummary as ServiceCharacterStateSummary } from './character-state.service'
@@ -614,19 +614,9 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
   const projectCanonProfile = parseJsonRecord(signals.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(signals.canonConstraintSetJson)
   const allSourceLedgerEntries = getGroundingSourceLedgerEntries(signals)
-  const authorReferences = allSourceLedgerEntries.filter(isCreativeResearchEntry) as CreativeResearchEntry[]
+  const authorReferences = parseCreativeResearchEntries(JSON.stringify(allSourceLedgerEntries))
   const sourceLedgerEntries = allSourceLedgerEntries.filter(entry => !isCreativeResearchEntry(entry))
-  const isAcceptedSource = (entry: Record<string, unknown>) =>
-    entry.canonDecision === 'accepted'
-    || entry.canonDecision === 'edited'
-    || Array.isArray(entry.supportingDiffIds) && entry.supportingDiffIds.some(value => Number.isFinite(Number(value)) && Number(value) > 0)
-  const canonFactCards = parseJsonRecordArray(signals.canonFactCardsJson).filter((entry) =>
-    entry.canonDecision !== 'reference_only'
-    && entry.canonDecision !== 'pending'
-    && entry.canonDecision !== 'rejected'
-    && entry.verificationStatus !== 'web_found'
-    && entry.verificationStatus !== 'pending',
-  )
+  const canonFactCards = parseJsonRecordArray(signals.canonFactCardsJson).filter(isConfirmedGroundingEntry)
 
   const profileLines = [
     historicalProfile.mode ? `历史模式：${renderJsonValueSummary(historicalProfile.mode, 40)}` : '',
@@ -654,11 +644,11 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
       const sourceDate = asText(entry.publishedAt) || asText(entry.recordedAt) || asText(entry.updatedAt)
       const meta = [
         sourceUrl ? `url=${safeSourceText(sourceUrl, 80)}` : '',
-        verificationStatus ? `status=${verificationStatus}` : '',
-        sourceDate ? `date=${sourceDate.slice(0, 10)}` : '',
+        verificationStatus ? `status=${safeSourceText(verificationStatus, 32)}` : '',
+        sourceDate ? `date=${safeSourceText(sourceDate.slice(0, 10), 10)}` : '',
       ].filter(Boolean).join('；')
       const body = [title, safeSourceText(sourceText, 72)].filter(Boolean).join('：')
-      const trustLabel = isAcceptedSource(entry) ? '已采纳来源' : '待核参考'
+      const trustLabel = isConfirmedGroundingEntry(entry) ? '已采纳来源' : '待核参考'
       return `${trustLabel}：${meta ? `${body}（${meta}）` : body}`
     })
     .filter(Boolean)
@@ -675,11 +665,11 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
     .map((entry) => {
       const title = asText(entry.title) || asText(entry.cardKey)
       const summary = asText(entry.summary) || collectJsonTextLeaves(entry).join('；')
-      return [title, summarizeText(summary, 96)].filter(Boolean).join('：')
+      return [safeSourceText(title, 72), safeSourceText(summary, 96)].filter(Boolean).join('：')
     })
     .filter(Boolean)
     .slice(-8)
-  const hasConfirmedProjectSources = sourceLedgerEntries.some(isAcceptedSource) || canonFactLines.length > 0
+  const hasConfirmedProjectSources = sourceLedgerEntries.some(isConfirmedGroundingEntry) || canonFactLines.length > 0
   const hasUnconfirmedExternalSources = externalSourceLines.some(line => line.startsWith('待核参考：'))
   const assessmentSummary = assessment.mode !== 'none'
     ? assessment.summary
@@ -1181,12 +1171,10 @@ function buildRenderedOverrides(
         ? '保守 fallback：缺少来源支持的真实历史、制度、官称、器物、地理和纪年细节不得写成定论；只能写成待确认、传闻或低承诺描述。'
         : '',
     ].filter(Boolean)
-    result.worldRules = mergePreservingBase(
-      baseContextParts?.worldRules,
-      compactLines(groundingLines, 12, 1800),
-      16,
-      3600,
-    )
+    // Keep the original rules intact and append the bounded reference pack.
+    // The context allocator applies the token budget; a prefix cut here can
+    // silently erase every reference and its trust boundary after a long base.
+    result.worldRules = [baseContextParts?.worldRules, compactLines(groundingLines, 12, 1800)].filter(Boolean).join('\n')
   }
   if (characters.length > 0) {
     result.characterStates = compactLines(

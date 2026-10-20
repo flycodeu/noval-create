@@ -19,15 +19,18 @@ async function main() {
     import{useNovelStore}from'./src/stores/novel.store';
     import{getAntdThemeConfig}from'./src/theme/antd-tokens';
     import './src/styles/global.css';import './src/pages/Novel/AuthorWorkspace/author-workspace.css';
+    ConfigProvider.config({theme:{token:{motion:false}}});
     window.requests=[];window.agentCalls=[];window.approvalRequests=[];window.currentNovel={id:1,title:'界面测试作品',contextVersion:2,sourceLedgerJson:'[]'};useNovelStore.getState().setCurrentNovel(window.currentNovel);
     window.rows=Array.from({length:7},(_,i)=>({sourceKey:'s'+i,title:'资料来源 '+i,url:'https://example.org/source/'+i,excerpt:'示例来源摘要，仅用于界面验证。可用于人物抉择和生活细节，仍须核对本书设定。',topics:['道教'],query:'道教行旅资料',recordedAt:'2026-10-17T00:00:00Z',verificationStatus:'web_found',canonDecision:'reference_only'}));
     window.electron={
       sourceSearch:{listResearch:async id=>id===1?structuredClone(window.rows):[],research:(id,request)=>new Promise((resolve,reject)=>window.requests.push({id,request,resolve,reject}))},
-      novel:{get:async id=>id===1?structuredClone(window.currentNovel):{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'}},
+      novel:{get:async id=>{const result=id===1?structuredClone(window.currentNovel):{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'};if(window.deferNovelGet)return new Promise(resolve=>{window.pendingNovelSnapshot=result;window.resolveNovelGet=()=>resolve(result)});return result}},
       agentTools:{
         approve:async request=>{window.approvalRequests.push(request);if(window.deferApproval)return new Promise(resolve=>window.resolveApproval=resolve);return{approved:true,approvalId:'ui-approval'}},
         call:async request=>{
           window.agentCalls.push(request)
+          if(window.deferSave&&request.toolId==='novelforge.research.upsert')await new Promise(resolve=>window.resolveSave=resolve)
+          if(request.input.expectedContextVersion!==undefined&&request.input.expectedContextVersion!==window.currentNovel.contextVersion)return{ok:false,error:{message:'作品已被其他任务修改，请刷新后再编辑；当前编辑内容仍保留。'}}
           if(request.toolId==='novelforge.research.upsert'){
             const draft=request.input.entries[0],entries=JSON.parse(window.currentNovel.sourceLedgerJson),sourceKey=draft.sourceKey||getCreativeResearchSourceKey(draft)
             const saved={...draft,sourceKey,sourceType:'author_created',assetType:'creative_reference',factTitle:draft.title,sourceText:'界面测试参考卡',verificationStatus:'pending',canonDecision:'reference_only',recordedAt:'2026-10-19T00:00:00.000Z',updatedAt:'2026-10-19T00:00:00.000Z'}
@@ -35,11 +38,14 @@ async function main() {
             window.currentNovel.sourceLedgerJson=JSON.stringify(entries)
           }
           if(request.toolId==='novelforge.research.delete')window.currentNovel.sourceLedgerJson=JSON.stringify(JSON.parse(window.currentNovel.sourceLedgerJson).filter(entry=>entry.sourceKey!==request.input.sourceKey))
+          window.currentNovel.contextVersion++
           return{ok:true,data:{count:1}}
         }
       }
     };
-    const root=createRoot(document.getElementById('root'));window.paint=(id=1,disabled=false)=>{if(useNovelStore.getState().currentNovelId!==id)useNovelStore.getState().setCurrentNovel(id===1?window.currentNovel:{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'});root.render(<ConfigProvider theme={getAntdThemeConfig('light')}><div className="author-workspace"><ResearchLibrary novelId={id} disabled={disabled}/><CreativeResearchLibrary novelId={id}/></div></ConfigProvider>)};window.paint();
+    window.publishNovel=()=>useNovelStore.getState().setCurrentNovel(window.currentNovel);window.storedVersion=()=>useNovelStore.getState().currentNovel?.contextVersion;
+    const theme=getAntdThemeConfig('light');theme.token={...theme.token,motion:false};
+    const root=createRoot(document.getElementById('root'));window.paint=(id=1,disabled=false)=>{if(useNovelStore.getState().currentNovelId!==id)useNovelStore.getState().setCurrentNovel(id===1?window.currentNovel:{id,title:'另一作品',contextVersion:1,sourceLedgerJson:'[]'});root.render(<ConfigProvider theme={theme}><div className="author-workspace"><ResearchLibrary novelId={id} disabled={disabled}/><CreativeResearchLibrary novelId={id}/></div></ConfigProvider>)};window.paint();
   `, loader: 'tsx', resolveDir: root }, outfile: path.join(dir, 'fixture.js'), bundle: true, platform: 'browser' })
   fs.writeFileSync(path.join(dir, 'index.html'), '<meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   const win = new BrowserWindow({ show: false, width: 1280, height: 1000, webPreferences: { contextIsolation: false, nodeIntegration: false, backgroundThrottling: false } })
@@ -94,6 +100,51 @@ async function main() {
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='更新现有卡片').click()")
   await wait('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert").length===2')
   await wait('document.querySelectorAll(".creative-research__card").length===1')
+  const clickAuthorSave = () => run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存到创作参考').click()")
+  const createDraft = async title => {
+    await run("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('新建资料卡')).click()")
+    await fill('input[placeholder="例如：赎罪为何会变成新的权力"]', title)
+    await fill('textarea[maxlength="2000"]', '权力来自互助，也可能转移代价。')
+    await fill('textarea[placeholder="表层事件之外，它让读者重新理解什么？"]', '善行的名义不能代替具体责任。')
+    await fill('textarea[placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？"]', '在本作粮药分配中追问由谁承担损失。')
+  }
+  const cancelAuthor = () => run("[...document.querySelectorAll('.ant-modal-content')].find(el=>el.textContent.includes('保存到创作参考')).querySelector('.ant-modal-footer button').click()")
+  await fill('input[placeholder="搜索标题、内容或标签"]', '隐藏已有卡片')
+  await wait('document.querySelectorAll(".creative-research__card").length===0')
+  await createDraft('不争与权力边界')
+  await clickAuthorSave()
+  await wait('document.body.textContent.includes("相同标题、分类和出处的资料卡已存在")')
+  assert.equal(await run('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert").length'), 2, 'hidden duplicate still requires confirmation')
+  await run('window.paint(2)')
+  await wait('!document.body.textContent.includes("相同标题、分类和出处的资料卡已存在")')
+  await run('window.paint(1)')
+  await wait('document.querySelectorAll(".creative-research__card").length===1')
+  await fill('input[placeholder="搜索标题、内容或标签"]', '暂不匹配')
+  await createDraft('只有链接的出处')
+  await fill('input[placeholder="https://..."]', 'https://example.org/reference')
+  await run('window.deferSave=true')
+  await clickAuthorSave()
+  await wait('Boolean(window.resolveSave)')
+  assert.equal(await run('document.querySelector("textarea[maxlength=\\\"2000\\\"]").disabled'), true, 'pending save freezes the submitted form')
+  await run('window.deferSave=false;window.resolveSave()')
+  await wait('document.querySelectorAll(".creative-research__card").length===2')
+  assert.equal(await run('document.querySelector(".creative-research__source a")?.getAttribute("href")'), 'https://example.org/reference', 'a URL-only source remains visible')
+  await run("document.querySelector('button[aria-label=\\\"编辑只有链接的出处\\\"]').click()")
+  await fill('textarea[maxlength="2000"]', '旧表单不能覆盖他人新保存的资料')
+  await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.find(card=>card.title==='只有链接的出处').content='另一任务刚更新的资料';window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++}")
+  await clickAuthorSave()
+  await wait('document.body.textContent.includes("作品已被其他任务修改") && !document.querySelector("textarea[maxlength=\\\"2000\\\"]").disabled')
+  assert.equal(await run('document.querySelector("textarea[maxlength=\\\"2000\\\"]").value'), '旧表单不能覆盖他人新保存的资料', 'conflict preserves author draft')
+  assert.equal(await run("JSON.parse(window.currentNovel.sourceLedgerJson).find(card=>card.title==='只有链接的出处').content"), '另一任务刚更新的资料')
+  await cancelAuthor()
+  await wait('!document.querySelector("textarea[maxlength=\\\"2000\\\"]")')
+  await createDraft('延迟读取版本校验')
+  await run('window.deferNovelGet=true')
+  await clickAuthorSave()
+  await wait('Boolean(window.resolveNovelGet)')
+  await run('window.currentNovel.contextVersion++;window.publishNovel();window.deferNovelGet=false;window.resolveNovelGet()')
+  await wait('!document.querySelector("textarea[maxlength=\\\"2000\\\"]")')
+  assert.equal(await run('window.storedVersion()'), await run('window.currentNovel.contextVersion'), 'older readback must not replace newer store data')
   await input('延迟结果')
   await clickSearch()
   await wait('window.requests.length===3')
@@ -122,10 +173,10 @@ async function main() {
   await wait('Boolean(document.querySelector("button[aria-label=\\\"删除不争与权力边界\\\"]"))')
   await run("document.querySelector('button[aria-label=\\\"删除不争与权力边界\\\"]').click()")
   await wait('window.agentCalls.some(call=>call.toolId==="novelforge.research.delete")')
-  assert.equal(await run('window.approvalRequests.at(-1).request.input.sourceKey'), await run('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert").at(-1).input.entries[0].sourceKey'))
+  assert.equal(await run('window.approvalRequests.at(-1).request.input.sourceKey'), await run('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert" && call.input.entries[0].sourceKey).find(call=>call.input.entries[0].title==="不争与权力边界").input.entries[0].sourceKey'))
   assert.equal(await run('window.agentCalls.at(-1).approvalId'), 'ui-approval')
   await wait('!document.body.textContent.includes("不争与权力边界")')
-  console.log('PASS research UI: external search, author card create/readback, reference-only boundary, approval-protected deletion, project switch, error retention, 720/1280 responsive layout. Screenshots: ' + dir)
+  console.log('PASS research UI: external search, author cards, hidden duplicates, frozen submissions, URL-only provenance, stale edit conflicts, stale readback, approval-protected deletion, project switch, error retention, 720/1280 responsive layout. Screenshots: ' + dir)
   win.destroy()
 }
 main().then(() => app.exit(0)).catch(error => { console.error(error); app.exit(1) })

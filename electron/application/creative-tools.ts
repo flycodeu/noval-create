@@ -158,14 +158,16 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   }, ['novelId', 'sourceKey'], 'read', input => ({ entry: getAuthorCreativeResearch(Number(input.novelId), String(input.sourceKey)) }))
   add('research.upsert', '创作或批量导入资料卡', '按1到100条批量新建或更新自由创作资料；每条写清机制及其代价、深层含义、结合本作背景的原创转化。支持参考出处和标签。只存为reference_only，不改Canon。省略sourceKey时按标题、分类和出处生成稳定编号；重复导入会更新原卡。单项目最多200条。', {
     novelId: number, entries: { type: 'array', minItems: 1, maxItems: 100, items: researchEntry },
+    expectedContextVersion: { type: 'integer', minimum: 1, description: '编辑前读取的作品版本；版本已变化时拒绝覆盖，请重新读取后确认修改。' },
   }, ['novelId', 'entries'], 'draft_write', input => {
-    const entries = upsertAuthorCreativeResearch(Number(input.novelId), input.entries as CreativeResearchDraft[])
+    const entries = upsertAuthorCreativeResearch(Number(input.novelId), input.entries as CreativeResearchDraft[], input.expectedContextVersion as number | undefined)
     return { count: entries.length, entries: entries.map(entry => ({ sourceKey: entry.sourceKey, title: entry.title, category: entry.category, updatedAt: entry.updatedAt, canonDecision: entry.canonDecision })) }
   }, { scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.draftCreate], approval: 'never' })
   add('research.delete', '删除作者创作资料卡', '删除一条作者自建创作参考卡；不能删除联网来源或其他来源账本记录。此操作需单次显式批准，未批准不会修改资料。', {
     novelId: number, sourceKey: { type: 'string', minLength: 1, maxLength: 160, pattern: '^author:[A-Za-z0-9._:-]+$' },
+    expectedContextVersion: { type: 'integer', minimum: 1 },
   }, ['novelId', 'sourceKey'], 'draft_write', input => {
-    deleteAuthorCreativeResearch(Number(input.novelId), String(input.sourceKey))
+    deleteAuthorCreativeResearch(Number(input.novelId), String(input.sourceKey), input.expectedContextVersion as number | undefined)
     return { deleted: true, sourceKey: input.sourceKey }
   }, { scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.draftCreate], approval: 'always' })
   registerAtlasJourneyTools(registry)

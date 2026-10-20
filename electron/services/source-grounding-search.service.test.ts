@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import {
   buildSourceGroundingQueries,
   enrichSourceGroundingFromWeb,
@@ -19,6 +20,14 @@ describe('source-grounding-search service', () => {
       expect(query).toContain('宋代江南普通行旅者衣料')
       expect(query).toContain('排除道袍')
     }
+  })
+
+  it('preserves an explicit rejection when refreshing the same source', () => {
+    const rejected = { sourceKey: 'web:rejected', sourceType: 'web_search', factTitle: '已否决资料', sourceText: '作者认为不适用', verificationStatus: 'web_found', canonDecision: 'rejected' }
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({ sourceLedgerJson: JSON.stringify([rejected]) }, {
+      discoveredSourceLedgerEntries: [{ ...rejected, sourceText: '新网页摘要', canonDecision: 'reference_only' }], discoveredCanonFactCards: [],
+    })
+    expect(JSON.parse(merged.sourceLedgerJson)).toEqual([rejected])
   })
 
   it('preserves a long explicit research request including its trailing exclusions instead of silently truncating', () => {
@@ -145,6 +154,74 @@ describe('source-grounding-search service', () => {
       expect.objectContaining({ cardKey: 'concurrent-card' }),
       expect.objectContaining({ cardKey: 'web:new' }),
     ]))
+  })
+
+  it('preserves keyless legacy records and duplicate existing provenance during search merges', () => {
+    const legacy = { factTitle: '旧版手工史料', sourceText: '没有编号也必须保留。' }
+    const duplicateFirst = { sourceKey: 'web:duplicate', sourceText: '重复编号的第一条旧证据。' }
+    const duplicateSecond = { sourceKey: 'web:duplicate', sourceText: '重复编号的第二条旧证据。' }
+    const legacyCard = { title: '旧版事实卡', summary: '没有 cardKey。' }
+    const discovered = { sourceKey: 'web:new', sourceType: 'web_search', canonDecision: 'reference_only', sourceText: '新参考。' }
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({
+      sourceLedgerJson: JSON.stringify([legacy, duplicateFirst, duplicateSecond]),
+      canonSourceLedgerJson: JSON.stringify([legacy]),
+      canonFactCardsJson: JSON.stringify([legacyCard]),
+    }, {
+      discoveredSourceLedgerEntries: [discovered, { ...discovered, sourceKey: 'web:duplicate' }],
+      discoveredCanonFactCards: [],
+    })
+
+    expect(JSON.parse(merged.sourceLedgerJson)).toEqual([legacy, duplicateFirst, duplicateSecond, discovered])
+    expect(JSON.parse(merged.canonSourceLedgerJson)).toEqual([legacy, discovered, { ...discovered, sourceKey: 'web:duplicate' }])
+    expect(JSON.parse(merged.canonFactCardsJson)).toEqual([legacyCard])
+  })
+
+  it('does not replace adopted sources or fact cards with unapproved refreshed results', () => {
+    const accepted = { sourceKey: 'web:accepted', sourceType: 'web_search', canonDecision: 'accepted', sourceText: '已采纳的内容。' }
+    const supported = { sourceKey: 'web:supported', sourceType: 'web_search', canonDecision: 'reference_only', supportingDiffIds: [3], sourceText: '正文引用过的内容。' }
+    const editedCard = { cardKey: 'web:accepted', assetType: 'external_web', entityType: 'source_grounding', canonDecision: 'edited', summary: '人工编辑后的内容。' }
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({
+      sourceLedgerJson: JSON.stringify([accepted, supported]),
+      canonFactCardsJson: JSON.stringify([editedCard]),
+    }, {
+      discoveredSourceLedgerEntries: [accepted, supported].map(entry => ({ ...entry, supportingDiffIds: [], canonDecision: 'reference_only', sourceText: '新的未核验搜索摘要。' })),
+      discoveredCanonFactCards: [{ ...editedCard, canonDecision: 'reference_only', summary: '新的未核验搜索摘要。' }],
+    })
+
+    expect(JSON.parse(merged.sourceLedgerJson)).toEqual([accepted, supported])
+    expect(JSON.parse(merged.canonFactCardsJson)).toEqual([editedCard])
+  })
+
+  it('caps only replaceable web caches and retains chapter evidence above the normal ledger limit', () => {
+    const chapterEntries = Array.from({ length: 401 }, (_, index) => ({
+      sourceKey: `chapter:${index}`, runId: index + 1, supportingDiffIds: [index + 1], sourceText: `正文证据${index}`,
+    }))
+    const cache = { sourceKey: 'web:old', sourceType: 'web_search', canonDecision: 'reference_only' }
+    const discovered = { ...cache, sourceKey: 'web:new' }
+    const merged = mergeSourceGroundingEnrichmentIntoCurrent({
+      sourceLedgerJson: JSON.stringify([...chapterEntries, cache]),
+    }, { discoveredSourceLedgerEntries: [discovered], discoveredCanonFactCards: [] })
+    expect(JSON.parse(merged.sourceLedgerJson)).toEqual([...chapterEntries, cache, discovered])
+
+    const caches = Array.from({ length: 400 }, (_, index) => ({ ...cache, sourceKey: `web:cache:${index}` }))
+    const withinLimit = mergeSourceGroundingEnrichmentIntoCurrent({
+      sourceLedgerJson: JSON.stringify([...chapterEntries, ...caches]),
+    }, { discoveredSourceLedgerEntries: [discovered], discoveredCanonFactCards: [] })
+    expect(JSON.parse(withinLimit.sourceLedgerJson)).toEqual([...chapterEntries, ...caches.slice(1), discovered])
+  })
+
+  it('refuses to replace nonempty malformed or non-array ledgers during a write merge', () => {
+    const enrichment = {
+      discoveredSourceLedgerEntries: [{ sourceKey: 'web:new', sourceType: 'web_search', canonDecision: 'reference_only' }],
+      discoveredCanonFactCards: [],
+    }
+    for (const field of ['sourceLedgerJson', 'canonSourceLedgerJson', 'canonFactCardsJson']) {
+      for (const invalid of ['{broken', '{}', 'null', '"legacy text"']) {
+        expect(() => mergeSourceGroundingEnrichmentIntoCurrent({ [field]: invalid }, enrichment))
+          .toThrow(formatUserFacingMessage('services.creativeResearch.ledgerSaveInvalid'))
+      }
+    }
+    expect(() => mergeSourceGroundingEnrichmentIntoCurrent({ sourceLedgerJson: '' }, enrichment)).not.toThrow()
   })
 
   it('writes provider results into source ledger and canon fact cards', async () => {

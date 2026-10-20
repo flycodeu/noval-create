@@ -4,7 +4,8 @@ import {
   getGroundingSourceLedgerEntries,
   isChapterWritebackSourceLedgerEntry,
 } from '../../src/shared/genre-system'
-import { isCreativeResearchEntry, preserveCreativeResearchEntriesWhenTrimming } from '../../src/shared/creative-research'
+import { isCreativeResearchEntry, isReplaceableWebResearchEntry, preserveCreativeResearchEntriesWhenTrimming } from '../../src/shared/creative-research'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { getSourceSearchRuntimeConfig } from './source-search-settings.service'
 import { executeSourceSearch, SourceSearchError, type WebSearchResult } from './source-search-provider.service'
 export type { WebSearchResult } from './source-search-provider.service'
@@ -101,16 +102,14 @@ function stableHash(value: string): string {
   return createHash('sha1').update(value).digest('hex').slice(0, 16)
 }
 
-function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
+function parseJsonRecordArray(raw?: string | null, rejectInvalid = false): Record<string, unknown>[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
-      : []
-  } catch {
-    return []
-  }
+    if (Array.isArray(parsed)) return parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+  } catch { /* Read-only callers tolerate legacy data; mutations must preserve it. */ }
+  if (rejectInvalid) throw new Error(formatUserFacingMessage('services.creativeResearch.ledgerSaveInvalid'))
+  return []
 }
 
 function hasSourceGroundingEntries(input: SourceGroundingEnrichmentInput): boolean {
@@ -128,18 +127,30 @@ function upsertJsonRecordArray(
   keyField: string,
   limit: number,
 ): string {
-  const byKey = new Map<string, Record<string, unknown>>()
-  for (const entry of parseJsonRecordArray(currentJson)) {
+  const records: Record<string, unknown>[] = []
+  const indicesByKey = new Map<string, number[]>()
+  for (const entry of parseJsonRecordArray(currentJson, true)) {
     const key = asText(entry[keyField])
-    if (key) byKey.set(key, entry)
+    if (key) indicesByKey.set(key, [...(indicesByKey.get(key) || []), records.length])
+    records.push(entry)
   }
   for (const entry of nextEntries) {
     const key = asText(entry[keyField])
-    if (key) byKey.set(key, entry)
+    if (!key) continue
+    const indices = indicesByKey.get(key)
+    if (indices) {
+      // A web refresh cannot downgrade adopted facts or overwrite legacy provenance.
+      // Preserve ambiguous duplicate keys instead of silently collapsing old records.
+      if (indices.length !== 1 || !isReplaceableWebResearchEntry(records[indices[0]])) continue
+      const index = indices[0]
+      records[index] = { ...records[index], ...entry }
+    } else {
+      indicesByKey.set(key, [records.length])
+      records.push(entry)
+    }
   }
 
-  const records = [...byKey.values()]
-  // Keep author cards intact when a bounded web-search refresh appends newer sources.
+  // Bounds apply only by evicting replaceable web caches; story and legacy evidence survive.
   return stringifyJsonRecordArray(preserveCreativeResearchEntriesWhenTrimming(records, limit))
 }
 

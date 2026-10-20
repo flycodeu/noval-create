@@ -7,6 +7,7 @@ import {
   normalizeCreativeResearchDraft,
   parseCreativeResearchEntries,
   preserveCreativeResearchEntriesWhenTrimming,
+  readCreativeResearchSources,
   selectRelevantCreativeResearchEntries,
   needsCreativeResearch,
   upsertCreativeResearchEntries,
@@ -35,6 +36,12 @@ describe('author-created creative research', () => {
     expect(() => normalizeCreativeResearchDraft({ ...daoismCard, sourceUrl: 'https://user:secret@example.org/source' })).toThrow('无嵌入凭据')
     expect(() => normalizeCreativeResearchDraft({ ...daoismCard, content: '过长'.repeat(1001) })).toThrow('2000')
     expect(() => normalizeCreativeResearchDraft({ ...daoismCard, category: 'unknown' })).toThrow('分类')
+  })
+
+  it('excludes rejected web sources from future reference recall', () => {
+    const source = { sourceKey: 'web:rejected', sourceType: 'web_search', factTitle: '已否决的民俗解释', sourceUrl: 'https://example.org/source', sourceText: '不能再作为本作参考。', verificationStatus: 'web_found', canonDecision: 'rejected' }
+    expect(readCreativeResearchSources(JSON.stringify([source]))).toEqual([])
+    expect(preserveCreativeResearchEntriesWhenTrimming([source], 0)).toEqual([source])
   })
 
   it('creates stable reference-only records while preserving external provenance', () => {
@@ -70,10 +77,47 @@ describe('author-created creative research', () => {
     expect(selectRelevantCreativeResearchEntries(cards, '完全无关的海上钟表', 3)).toEqual([])
     expect(String(buildCreativeResearchContext(cards[0]).usageBoundary)).toContain('不证明本书事实')
 
-    const padded = Array.from({ length: 5 }, (_, index) => ({ sourceKey: `web:${index}`, sourceText: `source ${index}` }))
+    const padded = Array.from({ length: 5 }, (_, index) => ({ sourceKey: `web:${index}`, sourceType: 'web_search', canonDecision: 'reference_only', sourceText: `source ${index}` }))
     const trimmed = preserveCreativeResearchEntriesWhenTrimming([...padded, cards[0]], 5)
-    expect(trimmed).toHaveLength(5)
+    expect(trimmed).toHaveLength(6)
     expect(trimmed).toEqual(expect.arrayContaining([expect.objectContaining({ sourceKey: cards[0].sourceKey })]))
+  })
+
+  it('gives unadopted web caches an independent budget and handles a zero cache budget', () => {
+    const [card] = upsertCreativeResearchEntries('[]', [daoismCard])
+    const legacy = { sourceText: '旧版手工史料，没有编号。' }
+    const accepted = { sourceKey: 'web:accepted', sourceType: 'web_search', canonDecision: 'accepted', sourceText: '已采纳史料。' }
+    const edited = { sourceKey: 'web:edited', sourceType: 'web_search', canonDecision: 'edited', sourceText: '已编辑史料。' }
+    const supported = { sourceKey: 'web:supported', sourceType: 'web_search', canonDecision: 'reference_only', supportingDiffIds: [3] }
+    const chapter = { sourceKey: 'chapter:1', sourceType: 'web_search', canonDecision: 'pending', runId: 5, supportingDiffIds: [], sourceText: '待审正文抽取。' }
+    const cache = { sourceKey: 'web:cache', sourceType: 'web_search', canonDecision: 'reference_only' }
+    const entries = [legacy, cache, card, accepted, edited, supported, chapter]
+
+    expect(preserveCreativeResearchEntriesWhenTrimming(entries, 2)).toEqual(entries)
+    expect(preserveCreativeResearchEntriesWhenTrimming([cache, card, legacy], 1)).toEqual([cache, card, legacy])
+    expect(preserveCreativeResearchEntriesWhenTrimming([cache, card, legacy], 0)).toEqual([card, legacy])
+    expect(preserveCreativeResearchEntriesWhenTrimming([cache, card, { ...cache, sourceKey: 'web:new' }, legacy], 1)).toEqual([card, { ...cache, sourceKey: 'web:new' }, legacy])
+  })
+
+  it('normalizes legacy metadata for readers without changing or discarding the stored card', () => {
+    const [card] = upsertCreativeResearchEntries('[]', [daoismCard])
+    const legacy = { ...card, recordedAt: '2026-10-19T08:00:00+08:00', updatedAt: null,
+      sourceTitle: { invalid: true }, sourceUrl: 'javascript:alert(1)', tags: [' 道教 ', 42, null] }
+    const undated = { ...card, sourceKey: 'author:undated', recordedAt: 42, updatedAt: 'invalid', sourceTitle: 42, sourceUrl: { invalid: true } }
+    const raw = JSON.stringify([legacy, undated])
+    const entries = parseCreativeResearchEntries(raw)
+
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({ content: daoismCard.content, tags: ['道教'], recordedAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:00:00.000Z' })
+    expect(entries[0].sourceTitle).toBeUndefined()
+    expect(entries[0].sourceUrl).toBeUndefined()
+    expect(entries[1]).toMatchObject({ recordedAt: '', updatedAt: '' })
+    expect(() => entries.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))).not.toThrow()
+    expect(JSON.parse(raw)).toEqual([legacy, undated])
+
+    const updated = parseCreativeResearchEntries(JSON.stringify(upsertCreativeResearchEntries(raw, [{ ...daoismCard, sourceKey: 'author:undated' }], '2026-10-20T00:00:00.000Z')))
+    expect(updated[0].sourceKey).toBe(card.sourceKey)
+    expect(updated[1].recordedAt).toBe('2026-10-20T00:00:00.000Z')
   })
 
   it('matches Chinese topic requests to category aliases without requiring a matching title', () => {

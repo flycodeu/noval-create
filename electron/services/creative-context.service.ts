@@ -269,7 +269,8 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const authorResearch = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchText, 3)
   if (authorResearch.length) {
     add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 14)
-    for (const [index, entry] of authorResearch.entries()) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 14 - index)
+    // Selection already ranks by relevance; smaller priorities survive the budget first.
+    for (const [index, entry] of authorResearch.entries()) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 12 + index)
   }
   const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)

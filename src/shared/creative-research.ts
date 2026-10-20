@@ -55,7 +55,7 @@ function records(raw?: string | null): Record<string, unknown>[] {
 }
 export function readCreativeResearchSources(raw?: string | null): CreativeResearchSource[] {
   return records(raw).flatMap(row => {
-    if (row.sourceType !== 'web_search' || row.verificationStatus !== 'web_found') return []
+    if (row.sourceType !== 'web_search' || row.verificationStatus !== 'web_found' || row.canonDecision === 'rejected') return []
     const url = text(row.sourceUrl)
     try { const parsed = new URL(url); if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return [] } catch { return [] }
     const sourceKey = text(row.sourceKey), title = text(row.factTitle), excerpt = text(row.sourceText)
@@ -156,7 +156,10 @@ function boundedText(value: unknown, field: string, maxLength: number, required 
   return normalized
 }
 
-export function isCreativeResearchEntry(value: unknown): value is Record<string, unknown> & CreativeResearchEntry {
+type CreativeResearchRecord = Omit<CreativeResearchEntry, 'recordedAt' | 'updatedAt' | 'sourceTitle' | 'sourceUrl' | 'tags'> & Record<string, unknown>
+
+/** Identifies the card body; legacy metadata is normalized by the read boundary below. */
+export function isCreativeResearchEntry(value: unknown): value is CreativeResearchRecord {
   const entry = recordOf(value)
   return entry?.sourceType === 'author_created'
     && entry.assetType === 'creative_reference'
@@ -168,10 +171,27 @@ export function isCreativeResearchEntry(value: unknown): value is Record<string,
     && entry.verificationStatus === 'pending' && entry.canonDecision === 'reference_only'
 }
 
+/** Only unadopted web caches may be evicted or replaced by another search result. */
+export function isReplaceableWebResearchEntry(entry: Record<string, unknown>): boolean {
+  if (!['reference_only', 'pending'].includes(cleanText(entry.canonDecision)) || cleanText(entry.verificationStatus) === 'rejected') return false
+  // Even an empty list marks a pending chapter observation, which is audit evidence.
+  if (Array.isArray(entry.supportingDiffIds)) return false
+  const source = entry.sourceType === 'web_search' && Boolean(cleanText(entry.sourceKey))
+  const factCard = entry.assetType === 'external_web' && entry.entityType === 'source_grounding' && Boolean(cleanText(entry.cardKey))
+  return source || factCard
+}
+
 export function preserveCreativeResearchEntriesWhenTrimming<T extends Record<string, unknown>>(entries: T[], limit: number): T[] {
-  const authorReferences = entries.filter(isCreativeResearchEntry)
-  const otherRecords = entries.filter(entry => !isCreativeResearchEntry(entry))
-  return [...otherRecords.slice(-Math.max(0, limit - authorReferences.length)), ...authorReferences]
+  // Provenance and authored cards do not consume the replaceable web-cache budget.
+  const cacheSlots = Math.max(0, Math.floor(limit))
+  let cachesToDrop = Math.max(0, entries.filter(isReplaceableWebResearchEntry).length - cacheSlots)
+  return entries.filter(entry => {
+    if (cachesToDrop > 0 && isReplaceableWebResearchEntry(entry)) {
+      cachesToDrop -= 1
+      return false
+    }
+    return true
+  })
 }
 
 export function normalizeCreativeResearchDraft(value: unknown): CreativeResearchDraft {
@@ -207,10 +227,31 @@ export function parseCreativeResearchEntries(sourceLedgerJson?: string | null): 
   if (!sourceLedgerJson?.trim()) return []
   try {
     const parsed: unknown = JSON.parse(sourceLedgerJson)
-    return Array.isArray(parsed) ? parsed.filter(isCreativeResearchEntry).map(entry => ({
-      ...entry, tags: Array.isArray(entry.tags) ? entry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
-    })) : []
+    return Array.isArray(parsed) ? parsed.filter(isCreativeResearchEntry).map(entry => {
+      const recordedAt = normalizeCreativeResearchDate(entry.recordedAt) || normalizeCreativeResearchDate(entry.updatedAt)
+      const sourceUrl = cleanText(entry.sourceUrl)
+      return {
+        ...entry,
+        sourceTitle: cleanText(entry.sourceTitle) || undefined,
+        sourceUrl: isSafeCreativeResearchUrl(sourceUrl) ? sourceUrl : undefined,
+        tags: Array.isArray(entry.tags) ? entry.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.trim()).filter(Boolean) : [],
+        recordedAt,
+        updatedAt: normalizeCreativeResearchDate(entry.updatedAt) || recordedAt,
+      }
+    }) : []
   } catch { return [] }
+}
+
+function normalizeCreativeResearchDate(value: unknown): string {
+  const timestamp = typeof value === 'string' ? Date.parse(value) : NaN
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : ''
+}
+
+function isSafeCreativeResearchUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+  } catch { return false }
 }
 
 export function getCreativeResearchCategoryLabel(category: string): string {
@@ -257,7 +298,8 @@ export function upsertCreativeResearchEntries(sourceLedgerJson: string | null | 
     const entry: CreativeResearchEntry = {
       ...draft, sourceKey, sourceType: 'author_created', assetType: 'creative_reference',
       factTitle: draft.title, sourceText: creativeResearchBody(draft), verificationStatus: 'pending', canonDecision: 'reference_only',
-      recordedAt: isCreativeResearchEntry(previous?.item) ? previous.item.recordedAt : recordedAt, updatedAt: recordedAt,
+      recordedAt: isCreativeResearchEntry(previous?.item) ? normalizeCreativeResearchDate(previous.item.recordedAt) || normalizeCreativeResearchDate(previous.item.updatedAt) || recordedAt : recordedAt,
+      updatedAt: recordedAt,
     }
     if (previous) ledger[previous.index] = entry
     else ledger.push(entry)

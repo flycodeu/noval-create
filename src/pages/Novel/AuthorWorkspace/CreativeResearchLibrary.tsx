@@ -30,26 +30,47 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const operationId = useRef(0)
+  const busy = useRef(false)
+  const editingVersion = useRef<number>()
+  const confirmation = useRef<ReturnType<typeof Modal.confirm> | null>(null)
+  const allEntries = useMemo(() => parseCreativeResearchEntries(novel?.id === novelId ? novel.sourceLedgerJson : undefined), [novel?.id, novel?.sourceLedgerJson, novelId])
   const entries = useMemo(() => {
     const query = keyword.trim().toLocaleLowerCase()
-    return parseCreativeResearchEntries(novel?.id === novelId ? novel.sourceLedgerJson : undefined)
+    return allEntries
       .filter(entry => category === 'all' || entry.category === category)
       .filter(entry => !query || [entry.title, entry.sourceTitle, entry.content, entry.interpretation, entry.novelConnection, ...(entry.tags || [])]
         .some(value => typeof value === 'string' && value.toLocaleLowerCase().includes(query)))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-  }, [category, keyword, novel?.id, novel?.sourceLedgerJson, novelId])
+  }, [allEntries, category, keyword])
   const pageEntries = entries.slice((page - 1) * 20, page * 20)
 
   useEffect(() => {
     operationId.current += 1
+    busy.current = false
     setSaving(false)
     setOpen(false)
     setEditing(null)
     setPage(1)
+    setKeyword('')
+    setCategory('all')
     form.resetFields()
+    return () => {
+      operationId.current += 1
+      busy.current = false
+      confirmation.current?.destroy()
+      confirmation.current = null
+    }
   }, [form, novelId])
 
+  const beginEditing = () => {
+    operationId.current += 1
+    editingVersion.current = useNovelStore.getState().currentNovel?.contextVersion
+    confirmation.current?.destroy()
+    confirmation.current = null
+  }
+
   const startCreate = () => {
+    beginEditing()
     setEditing(null)
     form.resetFields()
     form.setFieldsValue({ category: 'humanity', tags: [] })
@@ -57,6 +78,7 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
   }
 
   const startEdit = (entry: CreativeResearchEntry) => {
+    beginEditing()
     setEditing(entry)
     form.setFieldsValue({
       category: entry.category, title: entry.title, sourceTitle: entry.sourceTitle,
@@ -66,65 +88,99 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
     setOpen(true)
   }
 
-  const refreshNovel = async () => {
+  const isCurrent = (currentOperation: number) => currentOperation === operationId.current && useNovelStore.getState().currentNovelId === novelId
+
+  const refreshNovel = async (currentOperation: number) => {
     const updated = await window.electron.novel.get(novelId)
-    if (updated && useNovelStore.getState().currentNovelId === novelId) setNovel(updated)
-    return Boolean(updated && useNovelStore.getState().currentNovelId === novelId)
+    if (!updated || !isCurrent(currentOperation)) return false
+    const currentVersion = useNovelStore.getState().currentNovel?.contextVersion || 0
+    if ((updated.contextVersion || 0) >= currentVersion) setNovel(updated)
+    return true
   }
 
-  const save = async (duplicateToUpdate?: CreativeResearchEntry) => {
+  const persist = async (entry: CreativeResearchDraft, expectedContextVersion: number | undefined, currentOperation: number, updated: boolean) => {
+    if (!isCurrent(currentOperation) || busy.current) return
+    busy.current = true
+    setSaving(true)
     try {
-      const values = await form.validateFields()
-      if (!editing && !duplicateToUpdate) {
-        const sourceKey = getCreativeResearchSourceKey(values)
-        const duplicate = entries.find(item => item.sourceKey === sourceKey)
-        if (duplicate) {
-          Modal.confirm({
-            title: '相同标题、分类和出处的资料卡已存在',
-            content: `继续保存会更新「${duplicate.title}」这张卡片。`,
-            okText: '更新现有卡片',
-            cancelText: '继续编辑',
-            onOk: () => save(duplicate),
-          })
-          return
-        }
-      }
-      const entry: CreativeResearchDraft = { ...values, ...((editing || duplicateToUpdate) ? { sourceKey: (editing || duplicateToUpdate)!.sourceKey } : {}) }
-      const currentOperation = ++operationId.current
-      setSaving(true)
       const result = await window.electron.agentTools.call({
         toolId: 'novelforge.research.upsert',
-        input: { novelId, entries: [entry] },
+        input: { novelId, entries: [entry], expectedContextVersion },
       })
       toolError(result)
-      if (!await refreshNovel() || currentOperation !== operationId.current) return
+      if (!isCurrent(currentOperation) || !await refreshNovel(currentOperation)) return
       setPage(1)
+      setKeyword('')
+      setCategory('all')
       setOpen(false)
-      message.success(formatUserFacingMessage(editing || duplicateToUpdate ? 'workspace.creativeResearch.updated' : 'workspace.creativeResearch.saved'))
+      message.success(formatUserFacingMessage(updated ? 'workspace.creativeResearch.updated' : 'workspace.creativeResearch.saved'))
+    } catch (error) {
+      if (isCurrent(currentOperation)) {
+        // Refresh the library while retaining the draft and its original version.
+        // Reopening the editor is the author's decision to use the newer data.
+        await refreshNovel(currentOperation).catch(() => false)
+        if (isCurrent(currentOperation)) message.error(error instanceof Error ? error.message : formatUserFacingMessage('workspace.creativeResearch.saveFailed'))
+      }
+    } finally {
+      if (isCurrent(currentOperation)) { busy.current = false; setSaving(false) }
+    }
+  }
+
+  const save = async () => {
+    if (busy.current || confirmation.current) return
+    const currentOperation = ++operationId.current
+    const expectedContextVersion = editingVersion.current
+    busy.current = true
+    try {
+      const values = await form.validateFields()
+      if (!isCurrent(currentOperation)) return
+      const entry: CreativeResearchDraft = { ...values, tags: [...(values.tags || [])], ...(editing ? { sourceKey: editing.sourceKey } : {}) }
+      const sourceKey = getCreativeResearchSourceKey(entry)
+      const duplicate = !editing && allEntries.find(item => item.sourceKey === sourceKey)
+      busy.current = false
+      if (duplicate) {
+        confirmation.current = Modal.confirm({
+          title: '相同标题、分类和出处的资料卡已存在',
+          content: `继续保存会更新「${duplicate.title}」这张卡片。`,
+          okText: '更新现有卡片', cancelText: '继续编辑',
+          onOk: () => {
+            confirmation.current = null
+            return persist({ ...entry, sourceKey: duplicate.sourceKey }, expectedContextVersion, currentOperation, true)
+          },
+          onCancel: () => { confirmation.current = null },
+        })
+        return
+      }
+      await persist(entry, expectedContextVersion, currentOperation, Boolean(editing))
     } catch (error) {
       if (error && typeof error === 'object' && 'errorFields' in error) return
-      if (useNovelStore.getState().currentNovelId === novelId) message.error(error instanceof Error ? error.message : formatUserFacingMessage('workspace.creativeResearch.saveFailed'))
+      if (isCurrent(currentOperation)) message.error(error instanceof Error ? error.message : formatUserFacingMessage('workspace.creativeResearch.saveFailed'))
     } finally {
-      if (useNovelStore.getState().currentNovelId === novelId) setSaving(false)
+      if (isCurrent(currentOperation)) busy.current = false
     }
   }
 
   const remove = async (entry: CreativeResearchEntry) => {
+    if (busy.current || confirmation.current) return
     const currentOperation = ++operationId.current
+    busy.current = true
+    setSaving(true)
     try {
-      const request = { toolId: 'novelforge.research.delete', input: { novelId, sourceKey: entry.sourceKey } }
+      const request = { toolId: 'novelforge.research.delete', input: { novelId, sourceKey: entry.sourceKey, expectedContextVersion: novel?.contextVersion } }
       const approval = await window.electron.agentTools.approve({ request })
       if (!approval.approved || !approval.approvalId) return
-      if (useNovelStore.getState().currentNovelId !== novelId || currentOperation !== operationId.current) return
+      if (!isCurrent(currentOperation)) return
       const result = await window.electron.agentTools.call({
         ...request, approvalId: approval.approvalId,
       })
       toolError(result)
-      if (!await refreshNovel() || currentOperation !== operationId.current) return
+      if (!isCurrent(currentOperation) || !await refreshNovel(currentOperation)) return
       setPage(1)
       message.success(formatUserFacingMessage('workspace.creativeResearch.deleted'))
     } catch (error) {
-      if (useNovelStore.getState().currentNovelId === novelId && currentOperation === operationId.current) message.error(error instanceof Error ? error.message : formatUserFacingMessage('workspace.creativeResearch.deleteFailed'))
+      if (isCurrent(currentOperation)) message.error(error instanceof Error ? error.message : formatUserFacingMessage('workspace.creativeResearch.deleteFailed'))
+    } finally {
+      if (isCurrent(currentOperation)) { busy.current = false; setSaving(false) }
     }
   }
 
@@ -135,7 +191,7 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
         <h2>把参考转成可用的创作机制</h2>
         <p>记录概念如何运作、冲突由谁承担、它揭示了什么；再写清怎样转化到本作。资料只作灵感参考，不会自动成为世界设定或人物已知事实。</p>
       </div>
-      <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>新建资料卡</Button>
+      <Button type="primary" icon={<PlusOutlined />} disabled={saving} onClick={startCreate}>新建资料卡</Button>
     </section>
 
     <div className="creative-research__toolbar">
@@ -149,12 +205,12 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
         <div className="creative-research__card-heading">
           <div><Tag>{getCreativeResearchCategoryLabel(entry.category)}</Tag><Tag color="blue">仅供启发</Tag></div>
           <Space size={4}>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label={`编辑${entry.title}`} onClick={() => startEdit(entry)} />
-            <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={`删除${entry.title}`} onClick={() => void remove(entry)} />
+            <Button type="text" size="small" disabled={saving} icon={<EditOutlined />} aria-label={`编辑${entry.title}`} onClick={() => startEdit(entry)} />
+            <Button type="text" danger size="small" disabled={saving} icon={<DeleteOutlined />} aria-label={`删除${entry.title}`} onClick={() => void remove(entry)} />
           </Space>
         </div>
         <h3>{entry.title}</h3>
-        {entry.sourceTitle && <Text type="secondary" className="creative-research__source">参考：{entry.sourceTitle}{entry.sourceUrl ? <> · <a href={entry.sourceUrl} target="_blank" rel="noreferrer">出处</a></> : null}</Text>}
+        {(entry.sourceTitle || entry.sourceUrl) && <Text type="secondary" className="creative-research__source">参考：{entry.sourceTitle}{entry.sourceUrl ? <>{entry.sourceTitle ? ' · ' : ''}<a href={entry.sourceUrl} target="_blank" rel="noreferrer">出处</a></> : null}</Text>}
         <Paragraph className="creative-research__body" ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>{entry.content}</Paragraph>
         {entry.interpretation && <div className="creative-research__meaning"><Text strong>深层含义</Text><Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{entry.interpretation}</Paragraph></div>}
         {entry.novelConnection && <div className="creative-research__adaptation"><Text strong>本作转化</Text><Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{entry.novelConnection}</Paragraph></div>}
@@ -162,8 +218,8 @@ export default function CreativeResearchLibrary({ novelId }: { novelId: number }
       </Card>)}</div>}
     {entries.length > 20 ? <Pagination className="creative-research__pagination" current={page} pageSize={20} total={entries.length} showSizeChanger={false} onChange={setPage} /> : null}
 
-    <Modal title={editing ? `编辑资料卡 · ${editing.title}` : '新建创作资料卡'} open={open} onCancel={() => { if (!saving) setOpen(false) }} onOk={() => void save()} confirmLoading={saving} okText="保存到创作参考" cancelText="取消" width={760} destroyOnClose>
-      <Form form={form} layout="vertical" requiredMark={false} className="creative-research__form">
+    <Modal title={editing ? `编辑资料卡 · ${editing.title}` : '新建创作资料卡'} open={open} onCancel={() => { if (!busy.current) { beginEditing(); setOpen(false) } }} onOk={() => void save()} confirmLoading={saving} okText="保存到创作参考" cancelText="取消" width={760} destroyOnClose>
+      <Form form={form} disabled={saving} layout="vertical" requiredMark={false} className="creative-research__form">
         <div className="creative-research__form-row">
           <Form.Item name="title" label="标题" rules={[{ required: true, whitespace: true, message: '请填写一个能说明机制或问题的标题' }, { max: 120, message: '标题最多 120 个字符' }]}><Input maxLength={120} placeholder="例如：赎罪为何会变成新的权力" /></Form.Item>
           <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}><Select options={CREATIVE_RESEARCH_CATEGORIES.map(item => ({ value: item.value, label: item.label }))} /></Form.Item>

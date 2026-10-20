@@ -128,6 +128,15 @@ async function main() {
     assert(!completeCard.isError, JSON.stringify(completeCard))
     assert.equal(completeCard.structuredContent.entry.novelConnection, card.novelConnection)
     assert.equal((await second.callTool({ name: 'novelforge.research.list', arguments: { novelId } })).structuredContent.count, 1)
+    const beforeCardUpdate = await rpc('novel', 'get', [novelId])
+    const sourceKey = savedCard.structuredContent.entries[0].sourceKey
+    const revisedContent = '新任务已保存的机制与代价，旧编辑不得覆盖。'
+    const revisedCard = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, expectedContextVersion: beforeCardUpdate.contextVersion, entries: [{ ...card, sourceKey, content: revisedContent }] } })
+    assert(!revisedCard.isError, JSON.stringify(revisedCard))
+    const staleCard = await second.callTool({ name: 'novelforge.research.upsert', arguments: { novelId, expectedContextVersion: beforeCardUpdate.contextVersion, entries: [{ ...card, sourceKey }] } })
+    assert(staleCard.isError, 'MCP must reject the version captured before another saved edit')
+    const afterConflict = await second.callTool({ name: 'novelforge.research.get', arguments: { novelId, sourceKey } })
+    assert.equal(afterConflict.structuredContent.entry.content, revisedContent, 'real SQLite storage retains the newer card after a conflict')
     const atlasBefore = (await second.callTool({ name: 'novelforge.atlas.query', arguments: { novelId } })).structuredContent.atlas
     const savedGeography = { boundary: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 100 }, { x: 0, y: 100 }], areaKm2: 40, development: 'outlined' }
     const mapChange = { novelId, expectedContextVersion: atlasBefore.contextVersion, idempotencyKey: 'runtime-geography-roundtrip', effectiveFromChapter: 0, source: { kind: 'test', id: 'mcp-map-fixture' }, changes: [

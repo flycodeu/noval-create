@@ -6,7 +6,10 @@ import type { SourceSearchRuntimeConfig } from '../../src/shared/source-search'
 
 const state = vi.hoisted(() => ({ novel: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], runtime: { mode: 'auto', providerName: null, apiKey: null } as SourceSearchRuntimeConfig }))
 vi.mock('../database/db', () => ({ getSqlite: () => ({ transaction: (callback: () => unknown) => ({ immediate: callback }) }) }))
-vi.mock('./novel.service', () => ({ getNovel: () => state.novel, updateNovel: (_: number, data: Record<string, unknown>) => { state.writes.push(data); Object.assign(state.novel, data, { contextVersion: Number(state.novel.contextVersion) + 1 }) } }))
+vi.mock('./novel.service', () => ({ getNovel: () => state.novel, updateNovel: (_: number, data: Record<string, unknown>, options: { expectedContextVersion?: number } = {}) => {
+  if (options.expectedContextVersion !== undefined && options.expectedContextVersion !== state.novel.contextVersion) throw new Error(formatUserFacingMessage('novel.contextVersionConflict'))
+  state.writes.push(data); Object.assign(state.novel, data, { contextVersion: Number(state.novel.contextVersion) + 1 })
+} }))
 vi.mock('./chapter.service', () => ({ listChapters: () => [{ id: 5, chapterNum: 2, title: '夜入道观' }] }))
 vi.mock('./source-search-settings.service', () => ({ getSourceSearchRuntimeConfig: () => state.runtime }))
 
@@ -159,5 +162,32 @@ describe('creative research persistence and subsequent writing material', () => 
     expect(listAuthorCreativeResearch(1, { limit: 200 })).toHaveLength(100)
     state.novel.sourceLedgerJson = JSON.stringify([{ sourceKey: 'author:collision', sourceType: 'web_search', factTitle: '外部来源', sourceText: '不可覆盖' }])
     expect(() => upsertAuthorCreativeResearch(1, [{ ...drafts[0], sourceKey: 'author:collision' }])).toThrow('不能覆盖')
+  })
+
+  it('rejects stale author edits and deletions while preserving the newer card', () => {
+    const draft = { category: 'humanity' as const, title: '代价归谁承担', content: '旧核心机制', interpretation: '利益与责任的冲突', novelConnection: '连接本作的粮药争夺' }
+    const [saved] = upsertAuthorCreativeResearch(1, [draft], 7)
+    const [newer] = upsertAuthorCreativeResearch(1, [{ ...draft, sourceKey: saved.sourceKey, content: '另一任务刚保存的核心机制' }], 8)
+    const ledgerBefore = state.novel.sourceLedgerJson
+    const writesBefore = state.writes.length
+    expect(() => upsertAuthorCreativeResearch(1, [{ ...draft, sourceKey: saved.sourceKey }], 8)).toThrow('作品已被其他任务修改')
+    expect(() => deleteAuthorCreativeResearch(1, saved.sourceKey, 8)).toThrow('作品已被其他任务修改')
+    expect(state.writes).toHaveLength(writesBefore)
+    expect(state.novel.sourceLedgerJson).toBe(ledgerBefore)
+    expect(getAuthorCreativeResearch(1, saved.sourceKey).content).toBe(newer.content)
+    deleteAuthorCreativeResearch(1, saved.sourceKey, 9)
+    expect(listAuthorCreativeResearch(1)).toEqual([])
+  })
+
+  it('preserves adopted source text, keyless records and duplicate provenance during explicit search', async () => {
+    await searchCreativeResearch(1, '搜索道教知识', 2, { provider: provider(), providerName: 'fixture' })
+    const rows = JSON.parse(String(state.novel.sourceLedgerJson))
+    const adopted = { ...rows.find((row: Record<string, unknown>) => row.sourceType === 'web_search'), canonDecision: 'accepted', sourceText: '人工采纳并校正的原始资料', supportingDiffIds: [8] }
+    const other = [{ factTitle: '无编号史料', sourceText: '旧证据' }, { sourceKey: 'chapter:duplicate', runId: 3, supportingDiffIds: [4], sourceText: '旧正文证据一' }, { sourceKey: 'chapter:duplicate', runId: 3, supportingDiffIds: [5], sourceText: '旧正文证据二' }]
+    state.novel.sourceLedgerJson = JSON.stringify([adopted, ...other])
+    await searchCreativeResearch(1, '搜索道教思想与仪式的知识', 2, { provider: provider(), providerName: 'fixture' })
+    const saved = JSON.parse(String(state.novel.sourceLedgerJson))
+    expect(saved).toEqual(expect.arrayContaining([adopted, ...other]))
+    expect(saved.filter((row: Record<string, unknown>) => row.sourceKey === adopted.sourceKey)).toEqual([adopted])
   })
 })
