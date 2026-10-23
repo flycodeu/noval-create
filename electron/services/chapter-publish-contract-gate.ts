@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { asc, eq } from 'drizzle-orm'
 import type { ChapterContractValidationResult } from '../../src/types'
 import { getDb } from '../database/db'
@@ -259,7 +260,7 @@ export function getChapterContractBlockers(chapterId: number): string[] {
 export function validateChapterContractsForGeneration(chapterId: number): void {
   const blockers = getChapterContractBlockers(chapterId)
   if (blockers.length > 0) {
-    throw new Error(`章节流水线启动前合同校验未通过：${blockers.join('；')}`)
+    throw new Error(formatUserFacingMessage('services.chapterPublish.startContractBlocked', { blockers: `${blockers.join('；')}` }))
   }
 }
 

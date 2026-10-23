@@ -129,7 +129,7 @@ function ChapterGatePanel({
   onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.coveredChapterCount === 0 || trend.length === 0) {
-    return <Empty description="先跑一轮章节验收门，历史快照会从这里累计" />
+    return <Empty description="暂无验收快照" />
   }
 
   const { averageVisibleScore, bandCounts, levelCounts } = summarizeChapterGateTrend(trend)
@@ -287,7 +287,7 @@ function StoryDynamicsPanel({
   volumeEntries: QualityDashboardData['volumeStoryDynamics']
 }) {
   if (protagonistSummary.chapterCount === 0) {
-    return <Empty description="先积累主角受挫与高潮样本，再看节奏跟踪" />
+    return <Empty description="暂无节奏样本" />
   }
 
   const latestPressure = trend[trend.length - 1]?.pressure ?? 0
@@ -391,7 +391,7 @@ function ChapterFunctionPanel({
   volumeEntries: QualityDashboardData['volumeChapterFunctions']
 }) {
   if (summary.trackedChapterCount === 0 && alerts.length === 0) {
-    return <Empty description="先完成章节功能分析，节奏分布会在这里展开" />
+    return <Empty description="暂无章节功能分析" />
   }
 
   return (
@@ -532,7 +532,7 @@ function StoryArcProgressPanel({
   volumeEntries: QualityDashboardData['storyArcProgressVolumes']
 }) {
   if (summary.trackedArcCount === 0 && alerts.length === 0) {
-    return <Empty description="先积累故事弧推进样本，再看覆盖情况" />
+    return <Empty description="暂无故事弧推进样本" />
   }
 
   return (

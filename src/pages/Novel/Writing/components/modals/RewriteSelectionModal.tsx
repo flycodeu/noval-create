@@ -42,7 +42,7 @@ export default function RewriteSelectionModal({
       zIndex={1100}
     >
       {candidate?.stale ? <p role="alert">原稿已变化，候选已失效，请关闭后重新选择。</p> : null}
-      <p>仅修订选中文段，保留事件、人物和叙事视角；采纳前请对照原稿。</p>
+
       <div className="writing-passage-comparison">
         <label>原稿<Input.TextArea aria-label="选区原稿" value={candidate?.original ?? selectedText} rows={6} readOnly /></label>
         {candidate ? <label>候选<Input.TextArea aria-label="选区候选" value={candidate.replacement} rows={6} readOnly /></label> : null}

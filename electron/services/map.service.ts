@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { atlasRouteOpen } from '../../src/shared/story-atlas'
 import type { ProgressSink } from '../utils/progress-sink'
 import { asc, eq } from 'drizzle-orm'
@@ -127,7 +128,7 @@ function assertMapContextVersion(novelId: number, expectedContextVersion: number
   if (currentContextVersion === expectedContextVersion) return
 
   const error = new Error(
-    `地图生成期间项目上下文已从 v${expectedContextVersion} 变为 v${currentContextVersion}，本批结果未写入，请重新生成。`,
+    formatUserFacingMessage('services.map.contextChanged', { expectedVersion: `${expectedContextVersion}`, currentVersion: `${currentContextVersion}` }),
   ) as MapContextVersionConflict
   error.name = 'MapContextVersionConflictError'
   error.code = 'CONTEXT_VERSION_CONFLICT'
@@ -277,7 +278,7 @@ function formatGeneratedNodeBatchTarget(context: ParseGeneratedNodeBatchContext)
 
 function buildGeneratedNodeBatchError(context: ParseGeneratedNodeBatchContext, message: string): Error {
   const target = formatGeneratedNodeBatchTarget(context)
-  return new Error(`${target} 当前批次返回的 JSON 无法解析：${message}。系统会按当前批次重试策略处理。`)
+  return new Error(formatUserFacingMessage('services.map.batchJsonInvalid', { target: `${target}`, message: `${message}` }))
 }
 
 function sanitizeMapErrorMessage(error: unknown, fallback = '地图生成失败'): string {
@@ -342,7 +343,7 @@ function parseGeneratedNodeBatch(raw: string, context: ParseGeneratedNodeBatchCo
     if (fallback.length > 0) return fallback
   }
 
-  throw buildGeneratedNodeBatchError(context, `返回结果不是长度为 ${context.expectedCount} 的节点数组`)
+  throw buildGeneratedNodeBatchError(context, formatUserFacingMessage('services.map.nodeArrayLengthInvalid', { count: `${context.expectedCount}` }))
 }
 
 async function runMapPromptTaskWithJsonRepair<T>(
@@ -388,7 +389,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
         chatOpts: params.chatOpts,
       })
     } catch (repairTaskError) {
-      throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，自动修复步骤执行失败：${sanitizeMapErrorMessage(repairTaskError)}。原始输出片段：${previewText(raw)}`)
+      throw new Error(formatUserFacingMessage('services.map.jsonRepairFailed', { target: `${formatGeneratedNodeBatchTarget(params.context)}`, detail: `${sanitizeMapErrorMessage(repairTaskError)}`, preview: `${previewText(raw)}` }))
     }
 
     try {
@@ -397,7 +398,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
       repaired = true
     } catch (repairError) {
       throw new Error(
-        `${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，已自动修复一次仍未成功。首轮原因：${initialMessage}。修复后原因：${sanitizeMapErrorMessage(repairError)}。原始输出片段：${previewText(raw)}`,
+        formatUserFacingMessage('services.map.jsonRepairInvalid', { target: `${formatGeneratedNodeBatchTarget(params.context)}`, initialMessage: `${initialMessage}`, repairMessage: `${sanitizeMapErrorMessage(repairError)}`, preview: `${previewText(raw)}` }),
       )
     }
   }
@@ -418,7 +419,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
     chatOpts: params.chatOpts,
   })
   if (quality.stage === 'rejected') {
-    throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} 审校拒收：${summarizeAssetQualityWarnings(quality) || quality.review.summary}`)
+    throw new Error(formatUserFacingMessage('services.map.qualityRejected', { target: `${formatGeneratedNodeBatchTarget(params.context)}`, summary: `${summarizeAssetQualityWarnings(quality) || quality.review.summary}` }))
   }
 
   return {
@@ -430,7 +431,7 @@ async function runMapPromptTaskWithJsonRepair<T>(
 
 function validateGeneratedNodes(nodes: GeneratedMapNode[], expectedCount: number, label: string, existingNames: string[]) {
   if (nodes.length !== expectedCount) {
-    throw new Error(`${label} 需要 ${expectedCount} 个节点，实际生成 ${nodes.length} 个`)
+    throw new Error(formatUserFacingMessage('services.map.nodeCountMismatch', { label: `${label}`, expectedCount: `${expectedCount}`, actualCount: `${nodes.length}` }))
   }
 
   const seen = new Set<string>()
@@ -438,13 +439,13 @@ function validateGeneratedNodes(nodes: GeneratedMapNode[], expectedCount: number
   for (let index = 0; index < nodes.length; index += 1) {
     const node = cleanAiValue(nodes[index])
     const name = asText(node.name)
-    if (!name) throw new Error(`${label} 第 ${index + 1} 个节点缺少名称`)
+    if (!name) throw new Error(formatUserFacingMessage('services.map.nodeNameMissing', { label: `${label}`, index: `${index + 1}` }))
     const key = normalizeNameKey(name)
     if (seen.has(key) || existing.has(key)) {
-      throw new Error(`${label} 出现重名节点：${name}`)
+      throw new Error(formatUserFacingMessage('services.map.nodeNameDuplicate', { label: `${label}`, name: `${name}` }))
     }
     if (!asText(node.description) && !asText(node.plot_relevance)) {
-      throw new Error(`${label} 中的节点 ${name} 缺少描述或剧情作用`)
+      throw new Error(formatUserFacingMessage('services.map.nodeDescriptionMissing', { label: `${label}`, name: `${name}` }))
     }
     seen.add(key)
   }
@@ -869,7 +870,7 @@ export function createMapItem(novelId: number, data: Partial<typeof worldMap.$in
 }
 
 function sanitizeMapRelationInput(data: MapRelationInput): MapRelationInput {
-  if (data.routeOpen != null && atlasRouteOpen(data.routeOpen) === null) throw new Error('通行状态必须是已开通、已关闭或未确认。')
+  if (data.routeOpen != null && atlasRouteOpen(data.routeOpen) === null) throw new Error(formatUserFacingMessage('services.map.passageStatusInvalid'))
   return {
     id: typeof data.id === 'number' ? data.id : undefined,
     novelId: Number(data.novelId),
@@ -1118,7 +1119,7 @@ function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worl
 }
 
 function createAbortError() {
-  const error = new Error('用户已取消')
+  const error = new Error(formatUserFacingMessage('services.chapterRuntime.userCancelled'))
   error.name = 'AbortError'
   return error
 }
@@ -1156,7 +1157,7 @@ async function runBatchWithRetries<T>(
   }
 
   if (lastError instanceof Error) throw lastError
-  throw new Error(`${label}执行失败`)
+  throw new Error(formatUserFacingMessage('services.map.executionFailed', { label: `${label}` }))
 }
 
 async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: ProgressSink; chatOpts?: Partial<ChatOptions> }) {

@@ -18,7 +18,7 @@ app.whenReady().then(() => {
     const novelId = novels.createNovel({ title: '旧库升级与合并验证', operatingMode: 'creative_workflow' })
     const chapterId = chapters.createChapter(novelId, { chapterNum: 1, title: '旧欠条' })
     chapters.updateChapter(chapterId, { content: body })
-    const card = research.upsertCreativeResearch(novelId, [{ category: 'narrative', title: '作者原有参考', content: '物件承担承诺的代价。', interpretation: '承诺通过具体损失体现。', novelConnection: '本作欠条作为抵押。' }])[0]
+    const card = research.upsertAuthorCreativeResearch(novelId, [{ category: 'narrative', title: '作者原有参考', content: '物件承担承诺的代价。', interpretation: '承诺通过具体损失体现。', novelConnection: '本作欠条作为抵押。' }])[0]
     const insert = detail => Number(sql.prepare('INSERT INTO foreshadow_ledger(novel_id,title,detail,status,required_evidence) VALUES(?,?,?,?,?)').run(novelId, '旧欠条', detail, 'planted', '作者旧依据').lastInsertRowid)
     const keepId = insert('欠条留在柜台。'), sourceId = insert('同一张欠条的重复记录。')
     assets.upsertChapterContract(chapterId, { requiredForeshadowIds: [keepId, sourceId] })

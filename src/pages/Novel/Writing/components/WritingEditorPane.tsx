@@ -129,7 +129,7 @@ export default function WritingEditorPane(props: WritingEditorPaneProps) {
               {hasMultiSegments ? (
                 <Alert showIcon type="info" message="多场景结构模式" description={(
                   <div className="novel-writing-shell__segment-alert">
-                    <div className="novel-writing-shell__segment-alert-copy">该章节包含多个场景片段，请在结构页维护场景后重新编译。</div>
+                    <div className="novel-writing-shell__segment-alert-copy">含多个场景，请在结构页编译</div>
                     <div className="novel-writing-shell__segment-alert-actions">
                       <Button size="small" icon={<ApartmentOutlined />} onClick={onOpenStructure}>结构页</Button>
                       <Button size="small" icon={<BranchesOutlined />} onClick={onCompile}>重新编译</Button>

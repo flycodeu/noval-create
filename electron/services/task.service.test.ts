@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({}))
@@ -153,7 +154,7 @@ describe('task service transient retry policy', () => {
   })
 
   it('does not retry non-network business failures', () => {
-    expect(shouldRetryTransientModelTaskError(new Error('AI JSON 解析失败'), {
+    expect(shouldRetryTransientModelTaskError(new Error(formatUserFacingMessage('services.test.aiJsonParseFailed')), {
       retryable: true,
       attemptNumber: 0,
     })).toBe(false)

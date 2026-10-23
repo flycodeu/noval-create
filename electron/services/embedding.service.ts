@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { createHash } from 'node:crypto'
 import { app } from 'electron'
 import fs from 'node:fs'
@@ -18,10 +19,20 @@ const MAX_RETRIEVAL_CANDIDATES = 512
 
 let embeddingPipeline: any = null
 
+// The local Web RPC backend loads TypeScript through a CommonJS runtime. Its
+// transpiler rewrites a normal `import()` to `require()`, which cannot load the
+// ESM-only transformers package. Keeping the native import behind a function
+// constructor makes Node perform the ESM boundary at runtime in both Web RPC
+// and packaged Electron builds. The specifier below is a fixed project value,
+// never user input.
+const importEsmModule = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<typeof import('@huggingface/transformers')>
+
 async function getLocalEmbeddingPipeline() {
   if (!embeddingPipeline) {
     embeddingPipeline = (async () => {
-      const { pipeline, env } = await import('@huggingface/transformers')
+      const { pipeline, env } = await importEsmModule('@huggingface/transformers')
       const cache = path.join(app.getPath('userData'), 'models', 'embeddings')
       fs.mkdirSync(cache, { recursive: true })
       env.cacheDir = cache
@@ -29,7 +40,9 @@ async function getLocalEmbeddingPipeline() {
       env.allowLocalModels = true
       env.useBrowserCache = false
       env.useFSCache = true
-      return pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', { dtype: 'q8' })
+      // Reuse the existing model files and q8 weights. The runtime-versioned
+      // LOCAL_EMBEDDING_MODEL_ID prevents mixing old and new chapter vectors.
+      return pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', { dtype: 'q8', device: 'cpu' })
     })()
   }
   try { return await embeddingPipeline } catch (error) { embeddingPipeline = null; throw error }
@@ -85,13 +98,13 @@ const embeddingCandidateSelection = {
 function resolveBeforeChapterNum(options?: SimilarFragmentSearchOptions): number | undefined {
   if (options === undefined) return undefined
   if (options === null || typeof options !== 'object') {
-    throwUserFacingError('common.invalidParameter', { parameter: 'beforeChapterNum 必须是正整数' })
+    throwUserFacingError('common.invalidParameter', { parameter: formatUserFacingMessage('services.embedding.beforeChapterNumRequirement') })
   }
   if (!Object.prototype.hasOwnProperty.call(options, 'beforeChapterNum')) return undefined
 
   const value = options.beforeChapterNum
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throwUserFacingError('common.invalidParameter', { parameter: 'beforeChapterNum 必须是正整数' })
+    throwUserFacingError('common.invalidParameter', { parameter: formatUserFacingMessage('services.embedding.beforeChapterNumRequirement') })
   }
   return value
 }
@@ -414,7 +427,7 @@ export function indexChapterForKeywordRecall(novelId: number, chapterId: number,
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) return
-  if (chapter.novelId !== novelId) throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  if (chapter.novelId !== novelId) throw new Error(formatUserFacingMessage('services.embedding.chapterWrongNovel', { chapterId: `${chapterId}`, novelId: `${novelId}` }))
   const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
   let configKey = 'keyword-only'
   try { configKey = resolveEmbeddingConfigCacheKey(modelConfigId) } catch { /* Text repair is independent of vector credentials. */ }
@@ -462,7 +475,7 @@ export async function generateChapterEmbeddings(
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) return { applied: false, documentCount: 0, vectorizedCount: 0, source: 'unavailable' }
   if (chapter.novelId !== novelId) {
-    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+    throw new Error(formatUserFacingMessage('services.embedding.chapterWrongNovel', { chapterId: `${chapterId}`, novelId: `${novelId}` }))
   }
   const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
 

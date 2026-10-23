@@ -149,7 +149,7 @@ async function versionRetry() {
   const retry = [...document.querySelectorAll('button')].find(b => b.textContent?.includes('重试'))
   check(retry, 'version retry exists')
   await click(retry)
-  check(detailReads === 2 && listReads === 2 && !document.body.textContent?.includes('temporary detail failure') && document.body.textContent?.includes('recovered version'), 'version retry reloads detail and recovers a transient failure')
+  check(detailReads === 2 && listReads === 3 && !document.body.textContent?.includes('temporary detail failure') && document.body.textContent?.includes('recovered version'), 'version retry reloads detail and recovers a transient failure')
   check(document.body.textContent?.includes('frozen original') && document.body.textContent?.includes('frozen candidate'), 'recovered version uses the stored comparison snapshot')
 }
 
@@ -191,7 +191,7 @@ async function manuscriptInitialRetry() {
   await click(button('重试'))
   check(reads === 2 && !!document.querySelector('textarea.author-manuscript__editor') && !document.body.textContent?.includes('temporary manuscript read failure'), 'manuscript initial detail failure can recover through retry')
   f.chapter.listVersions = async () => { throw new Error('temporary history failure') }
-  await click(button('版本'))
+  await click(button('本章历史'))
   await click(document.querySelector('.ant-drawer-close'))
   const pending = deferred<any[]>()
   f.chapter.list = () => pending.promise

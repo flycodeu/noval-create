@@ -9,7 +9,7 @@ import './TaskIndicator.css'
  * Global running-task badge. Mounted in both the app shell bar and the novel
  * workspace topbar so background generations stay visible across pages.
  */
-export default function TaskIndicator({ className }: { className?: string }) {
+export default function TaskIndicator({ className, onRequestNavigate }: { className?: string; onRequestNavigate?: (path: string) => void }) {
   const runningCount = useRunningTaskCount()
   const [open, setOpen] = useState(false)
 
@@ -20,7 +20,7 @@ export default function TaskIndicator({ className }: { className?: string }) {
       trigger="click"
       placement="bottomRight"
       overlayClassName="task-indicator-popover"
-      content={<TaskIndicatorPanel onNavigate={() => setOpen(false)} />}
+      content={<TaskIndicatorPanel onNavigate={() => setOpen(false)} onRequestNavigate={onRequestNavigate} />}
     >
       <button
         type="button"

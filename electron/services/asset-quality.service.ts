@@ -1,5 +1,7 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { classifyQualityIssueLevels } from './quality-issue-policy'
 import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
+import { buildProseFluencyGuidance, buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
@@ -146,18 +148,18 @@ export function parseAssetReviewResult(raw: string, content?: string, policyVers
   const parsed = safeParseJson<Record<string, unknown>>(raw)
   if (!parsed || typeof parsed !== 'object' || typeof parsed.summary !== 'string' || !parsed.summary.trim()
     || typeof parsed.rewrite_required !== 'boolean' || typeof parsed.reject_required !== 'boolean') {
-    throw new Error('审校结果缺少有效摘要或明确的修订、拒收判断。')
+    throw new Error(formatUserFacingMessage('services.assetQuality.decisionMissing'))
   }
   const issues = policyVersion === 'reader-first-v1' ? (() => {
-    if (!Array.isArray(parsed.issues)) throw new Error('审校结果不完整：必须返回 issues 数组，无问题时返回空数组。')
-    if (!parsed.issues.length && (parsed.reject_required || parsed.rewrite_required)) throw new Error('审校结果不完整：拒收或修订判断缺少对应问题与证据。')
+    if (!Array.isArray(parsed.issues)) throw new Error(formatUserFacingMessage('services.assetQuality.issuesMissing'))
+    if (!parsed.issues.length && (parsed.reject_required || parsed.rewrite_required)) throw new Error(formatUserFacingMessage('services.assetQuality.decisionEvidenceMissing'))
     return parsed.issues.map((rawIssue) => {
       const issue = normalizeQualityIssue(rawIssue && typeof rawIssue === 'object' ? { ...rawIssue, detector: 'model' } : rawIssue)
       const spec = issue && getQualityIssueRuleSpec(issue.ruleId)
-      if (!issue || !spec) throw new Error('审校结果不完整：问题缺少有效规则或说明。')
+      if (!issue || !spec) throw new Error(formatUserFacingMessage('services.assetQuality.issueRuleMissing'))
       const verified = validateQualityIssuesForContent([issue], content || '')[0]
       if ((spec.requiresEvidence && !verified.evidence.length) || verified.evidence.length !== issue.evidence.length) {
-        throw new Error(`审校结果不完整：${issue.ruleId} 缺少当前候选的有效原文证据。`)
+        throw new Error(formatUserFacingMessage('services.assetQuality.issueEvidenceMissing', { ruleId: `${issue.ruleId}` }))
       }
       return verified
     })
@@ -309,7 +311,10 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
       contextSummary: options.reviewContextSummary?.(options.generatedOutput) ?? options.contextSummary,
       generatedOutput: options.generatedOutput,
       schemaHint: options.schemaHint,
-      reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
+      reviewFocus: [...(options.reviewFocus || []),
+        ...(['chapter', 'outline'].includes(options.targetType) ? buildStoryQualityGuidance('review') : []),
+        ...(options.targetType === 'chapter' ? buildProseFluencyGuidance('review') : []),
+        ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
         '阅读问题按 fact/format/narrative/style 与 blocker/repair/advice 分级；风格偏好仅为 advice，不因数量或模型布尔判断强制改写。',
         `必须返回 issues 数组，无问题返回 []；拒收/修订判断必须有对应问题。每项含 id、ruleId、category、level、detector=model、confidence、scope、message、evidence。evidence 是数组，每项含 artifactHash=${qualityIssueArtifactHash(options.generatedOutput)}、start、end（JS UTF-16 索引）、quote（逐字原文，不清洗）。没有证据不补造。`,
         `ruleId 只能使用以下规则，分类/默认级别为：${JSON.stringify(QUALITY_ISSUE_RULE_SPECS)}。`,
@@ -345,6 +350,8 @@ export async function rewriteGeneratedAsset(
       schemaHint: options.schemaHint,
       rewriteConstraints: uniqueLines([
         ...(options.rewriteConstraints || []),
+        ...(['chapter', 'outline'].includes(options.targetType) ? buildStoryQualityGuidance('write') : []),
+        ...(options.targetType === 'chapter' ? buildProseFluencyGuidance('rewrite') : []),
         ...(options.validateOutput ? ['结构校验指出的不支持字段必须删除或按契约放到正确位置；不能为保持原字段而保留非法结构，已有有效事实仍须保留。'] : []),
       ]),
     }),

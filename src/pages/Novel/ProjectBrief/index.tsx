@@ -206,10 +206,10 @@ export default function ProjectBriefPage({ novelId }: Props) {
         const artifact = (result.data as { artifact: AgentArtifact<GenericAssetDraftContent> }).artifact
         if (artifact.novelId !== novelId || artifact.kind !== 'generic_draft' || artifact.producerType !== 'api_client'
           || artifact.content.assetType !== 'project_brief' || artifact.content.outputFormat !== 'json') {
-          throw new Error('这份工件不是当前作品的 JSON 项目立项草稿。')
+          throw new Error(getUserFacingMessage('projectBrief.importArtifactInvalid'))
         }
         if (artifact.status !== 'draft' && artifact.status !== 'reviewed') {
-          throw new Error('这份草稿已被阻断或取代，不能回填。请重新导入当前版本。')
+          throw new Error(getUserFacingMessage('projectBrief.importArtifactUnavailable'))
         }
         assertDraftContextCurrent(artifact.contextVersion, currentNovel.contextVersion || 1)
         let reviewSummary = ''
@@ -224,9 +224,9 @@ export default function ProjectBriefPage({ novelId }: Props) {
           const review = reviewArtifact.content
           if (reviewArtifact.novelId !== novelId || reviewArtifact.kind !== 'quality_report'
             || (review.effectiveArtifactId !== artifact.id && review.draftArtifactId !== artifact.id)) {
-            throw new Error('草稿的审校报告与当前工件不匹配。')
+            throw new Error(getUserFacingMessage('projectBrief.importReviewMismatch'))
           }
-          if (review.status === 'blocked') throw new Error('这份草稿已被审校阻断，不能回填。')
+          if (review.status === 'blocked') throw new Error(getUserFacingMessage('projectBrief.importReviewBlocked'))
           reviewSummary = review.summary
         }
         const patch = parseImportableProjectBriefDraft(artifact.content.output)
@@ -261,7 +261,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
           },
         })
       } catch (error) {
-        if (active) message.error(error instanceof Error ? error.message : '导入草稿读取失败')
+        if (active) message.error(error instanceof Error ? error.message : getUserFacingMessage('projectBrief.importReadFailed'))
       }
     })()
     return () => { active = false }
@@ -743,7 +743,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         width={520}
       >
         <div className="project-brief__ai-assist">
-          <p>选择本轮对项目立项的作用方式；分区定向生成仍保留在对应区标题。</p>
+
           <div className="project-brief__ai-assist-actions">
             <Button
               type="primary"

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { AtlasFields } from './AtlasFields'
-import { atlasEntityMatchesSearch, atlasEntitySummary, atlasFieldLabel, atlasLinks, atlasLocationScope, atlasRegionLinks, atlasScalarText, profileFieldGroups, resolveAtlasTab } from './atlas-profile'
+import { atlasEntityMatchesSearch, atlasEntitySummary, atlasFieldLabel, atlasLinks, atlasLocationScope, atlasRegionLinks, atlasScalarText, profileFieldGroups, resolveAtlasTab, resolveWorldWorkspaceTab } from './atlas-profile'
 
 const entity = (id: string, kind: StoryAtlasEntity['kind'], name: string, attributes: Record<string, unknown> = {}): StoryAtlasEntity => ({ id, kind, name, attributes, summary: '', parentId: null, status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
 describe('atlas dossiers', () => {
@@ -54,6 +54,19 @@ describe('atlas dossiers', () => {
     expect(resolveAtlasTab(new URLSearchParams('kind=faction'))).toBe('factions')
     expect(resolveAtlasTab(new URLSearchParams('kind=item'))).toBe('items')
     expect(resolveAtlasTab(new URLSearchParams('kind=event'))).toBe('events')
+    expect(resolveWorldWorkspaceTab(new URLSearchParams('tab=rules&entity=character%3A1'))).toBe('rules')
+    expect(resolveWorldWorkspaceTab(new URLSearchParams('tab=research&atChapter=6'))).toBe('research')
+    expect(resolveWorldWorkspaceTab(new URLSearchParams('kind=faction'))).toBe('factions')
+  })
+  it('separates daily appearance and author plans without dropping saved extension fields', () => {
+    const character = entity('character:1', 'character', '阿烛', { publicSummary: '当前仍是灯蛾。', appearance: '人形参考外貌', authorPlanning: { futureForm: '首案之后凝形' }, characterArc: '逐步自立', customLaterPlan: '二卷补充', abilityCosts: '耗油' })
+    const groups = profileFieldGroups(character)
+    expect(groups.find(group => 'appearance' in group.values)?.section).toBe('appearance')
+    expect(groups.find(group => 'authorPlanning' in group.values)?.section).toBe('planning')
+    expect(groups.find(group => 'characterArc' in group.values)?.section).toBe('planning')
+    expect(groups.find(group => 'customLaterPlan' in group.values)?.section).toBe('planning')
+    expect(groups.find(group => 'abilityCosts' in group.values)?.section).toBe('abilities')
+    expect(groups.some(group => 'publicSummary' in group.values)).toBe(false)
   })
   it('renders saved references by their typed names and omits empty fields and migration metadata', () => {
     const entities = [entity('faction:7', 'faction', '渡务会'), entity('character:7', 'character', '同号人物')]
@@ -69,7 +82,7 @@ describe('atlas dossiers', () => {
   })
   it('consolidates missing profile data into groups without deleting meaningful zero or false values', () => {
     const groups = profileFieldGroups(entity('character:1', 'character', '陆闻', { personalityTraits: [], flaws: '', campFactionIds: [], sourceContext: { imported: true }, sortOrder: 0 }))
-    expect(groups).toHaveLength(4)
+    expect(groups).toHaveLength(6)
     expect(groups.every(group => Object.keys(group.values).length === 0)).toBe(true)
     expect(atlasFieldLabel('dailyRoutine')).toBe('职业日常')
     expect(atlasScalarText('routeOpen', false, [], [])).toBe('否')

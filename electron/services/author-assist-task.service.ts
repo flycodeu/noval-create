@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { AuthorAssistKind, AuthorAssistRun } from '../../src/shared/author-assist'
 import { getSqlite } from '../database/db'
 import { createArtifact, hashArtifactContent } from './artifact.service'
@@ -9,14 +10,14 @@ const starting = new Map<string, Promise<AuthorAssistRun>>()
 
 export function requireAssistNovel(novelId: number) {
   const novel = getNovel(novelId)
-  if (!novel) throw new Error('作品不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('author.project.notFound'))
   return novel
 }
 
 export function getAuthorAssistRun(novelId: number, taskId: number): AuthorAssistRun {
   const task = getTaskRecord(taskId)
   if (!task || task.novelId !== novelId || !['reference_extraction', 'selection_revision'].includes(task.relatedEntityType || '')) {
-    throw new Error('找不到当前作品的辅助任务。')
+    throw new Error(formatUserFacingMessage('author.assist.notFound'))
   }
   const progress = parseTaskProgress<{ artifactId?: string }>(task)
   return { taskId, kind: task.relatedEntityType as AuthorAssistKind, status: task.status || 'failed', artifactId: progress.artifactId, error: task.errorMessage || undefined, createdAt: task.createdAt }
@@ -41,13 +42,13 @@ export function startAuthorAssistTask(input: {
   prepare: (modelId: number) => Pick<RunTaskOptions, 'messages' | 'chatOpts'> | Promise<Pick<RunTaskOptions, 'messages' | 'chatOpts'>>
   result: (raw: string) => unknown
 }): Promise<AuthorAssistRun> {
-  if (!input.idempotencyKey?.trim() || input.idempotencyKey.length > 200) throw new Error('请提供有效的任务幂等键。')
+  if (!input.idempotencyKey?.trim() || input.idempotencyKey.length > 200) throw new Error(formatUserFacingMessage('author.assist.invalidIdempotencyKey'))
   const key = `author-assist:${input.novelId}:${input.kind}:${input.idempotencyKey}`
   const fingerprint = hashArtifactContent(input.request)
   const run = async () => {
     const existing = getSqlite().prepare('SELECT id,input_json FROM tasks WHERE idempotency_key=?').get(key) as { id: number; input_json: string } | undefined
     if (existing) {
-      if (JSON.parse(existing.input_json).fingerprint !== fingerprint) throw new Error('幂等键已用于另一份需求。')
+      if (JSON.parse(existing.input_json).fingerprint !== fingerprint) throw new Error(formatUserFacingMessage('author.assist.idempotencyConflict'))
       return getAuthorAssistRun(input.novelId, existing.id)
     }
     const novel = requireAssistNovel(input.novelId)
@@ -59,7 +60,7 @@ export function startAuthorAssistTask(input: {
       modelConfigId: model.id, idempotencyKey: key, retryable: false,
       inputJson: JSON.stringify({ kind: input.kind, fingerprint, request: input.request }), ...prepared,
       prepareInput: request => {
-        if (hashArtifactContent(getModelConfigRecord(model.id)) !== modelHash) throw new Error('模型配置已变化，请重新启动任务。')
+        if (hashArtifactContent(getModelConfigRecord(model.id)) !== modelHash) throw new Error(formatUserFacingMessage('author.assist.modelChanged'))
         return { messages: [...request.messages] }
       },
       onSuccess: (raw, id) => {
@@ -75,7 +76,7 @@ export function startAuthorAssistTask(input: {
   const pending = starting.get(key)
   if (pending) return pending.then(result => {
     const task = getTaskRecord(result.taskId)!
-    if (JSON.parse(task.inputJson || '{}').fingerprint !== fingerprint) throw new Error('幂等键已用于另一份需求。')
+    if (JSON.parse(task.inputJson || '{}').fingerprint !== fingerprint) throw new Error(formatUserFacingMessage('author.assist.idempotencyConflict'))
     return result
   })
   const promise = run().finally(() => { starting.delete(key) })

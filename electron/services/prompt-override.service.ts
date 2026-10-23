@@ -1,6 +1,7 @@
 ﻿import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { stableHash } from '../../src/shared/context-pack'
+import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance } from '../../src/shared/prompts/prompt-common'
 import { promptOverrideAudits, promptOverrides } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
@@ -96,9 +97,13 @@ function recordAudit(key: string, action: 'save' | 'delete' | 'apply', contentPr
 
 export function buildProtectedFooter(key: string, params: Record<string, unknown> = {}, policyVersion?: 'reader-first-v1'): string {
   if (!CHAPTER_PROMPT_KEYS.has(key)) return ''
+  const stage = key === 'scenePlan' ? 'scenePlan' : key === 'chapterReview' ? 'review' : key === 'chapterRewrite' ? 'rewrite' : key === 'chapterDraft' ? 'draft' : 'writing'
+  const detailGuidance = buildNarrativeDetailGuidance(stage)
   if (policyVersion === 'reader-first-v1') {
     return ['【系统保留的事实与稿件边界】',
       '已确认事实、当前视角知识边界和明确作者合同不得被覆盖；锁定段落逐字保留。',
+      buildReaderFirstOpeningGuidance(Number(params.chapterNum), key === 'scenePlan' ? 'scenePlan' : key === 'chapterReview' ? 'review' : key === 'chapterRewrite' ? 'rewrite' : 'writing'),
+      detailGuidance,
       ...['hardConstraintContext', 'chapterBridgePlan', 'scenePlan', 'protagonistRule', 'lockedParagraphs'].map((key) => stringifyParam(params[key])).filter(Boolean),
     ].join('\n\n')
   }
@@ -111,6 +116,7 @@ export function buildProtectedFooter(key: string, params: Record<string, unknown
   return [
     '【系统保留规则】',
     ...PROTECTED_RULES.map((item) => `- ${item}`),
+    `\n${detailGuidance}`,
     runtimeLines.length > 0
       ? `\n【系统强制接力上下文】\n${runtimeLines.join('\n\n')}`
       : '',

@@ -4,6 +4,7 @@ const path = require('node:path')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'chapter-boundary-'))
 app.setPath('userData', temp)
@@ -41,7 +42,7 @@ async function main() {
     const atlasNpc = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '邱账房')
     const atlasGhost = queryStoryAtlas({ novelId }).entities.find(entity => entity.name === '旧井影鬼')
     applyStoryAtlasChanges({ novelId, expectedContextVersion: 2, effectiveFromChapter: 0, idempotencyKey: 'geography-and-work', source: { kind: 'test' }, changes: [
-      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语。' + '限制必须完整保留。'.repeat(35) + '禁止借命恢复体力' } },
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '守住渡船', habits: ['逐结检查缆绳'], dailyRoutine: '清晨巡视石阶', motivation: '履行渡工职责', innerConflict: '想歇工又怕失约', relationshipTension: '不愿再欠掌柜人情', abilityCosts: '久站耗费体力', abilityLimits: '无法听清对岸低语。' + '限制必须完整保留。'.repeat(35) + '禁止借命恢复体力' } },
       { op: 'upsert_entity', id: atlasNpc.id, kind: 'character', name: '邱账房', attributes: { publicSummary: '店中负责客账登记的人', publicGoal: '尽快核对客账', firstImpression: '讲话稳妥', motivation: '灭口保身', abilities: ['暗中催眠'], abilityLimits: '只能催眠熟人', abilityCosts: '损失记忆', habits: ['说话前扶眼镜'] } },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '对账协助' },
       { op: 'upsert_relation', kind: 'relationship', fromId: atlasPerson.id, toId: atlasGhost.id, label: '调查涉及' },
@@ -87,12 +88,92 @@ async function main() {
     db.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'ready')").run(novelId, target, '检查系船绳')
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
     db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId, target, '陈舟', '检查系船绳', '河水暴涨，旧绳磨断', '换上新绳，渡船停稳')
+    const priorCanon = db.prepare('SELECT canon_fact_cards_json FROM novels WHERE id=?').get(novelId).canon_fact_cards_json
+    const research = await require('../electron/services/creative-research.service.ts').searchCreativeResearch(novelId, '搜索道教知识作为有出处的创作参考', 2, {
+      providerName: 'fixture', provider: async () => [{ title: '道德經', url: 'https://ctext.org/dao-de-jing/zh', snippet: '知止与克制的原典参考，用于选择和代价，不能当作人物已经知道的秘密。' }],
+    })
+    assert.equal(research.updated, true)
+    assert.equal(db.prepare('SELECT canon_fact_cards_json FROM novels WHERE id=?').get(novelId).canon_fact_cards_json, priorCanon, 'research references never become Canon')
     const before = db.prepare('SELECT context_version FROM novels WHERE id=?').get(novelId).context_version
     const futureMemory = '第3章师父遇害，凶手是邱账房。'
     db.prepare("INSERT INTO story_memory_checkpoints(novel_id,scope_type,summary,source_range_end,source_context_version,stale) VALUES(?,'novel',?,3,1,1)").run(novelId, futureMemory)
-    const result = await compile(input, limits)
+    const result = await compile({ ...input, request: input.request + '；参考已保存的道教知识资料' }, limits)
+    assert.ok(result.sources.some(key => key.startsWith('research:web:')), 'the real SQLite research ledger reaches the chapter writer')
+    assert.ok(result.text.includes('https://ctext.org/dao-de-jing/zh'), 'writing material retains the reference URL')
+    assert.ok(result.text.includes('不是小说正史或人物已知信息'), 'research does not grant fictional knowledge or override Canon')
+    const originalOutline = db.prepare('SELECT outline FROM chapters WHERE id=?').get(target).outline
+    db.prepare('UPDATE chapters SET outline=? WHERE id=?').run('陈舟在道观外检查系船绳。', target)
+    const inheritedResearch = await compile({ ...input, request: '继续下一章' }, limits)
+    assert.ok(inheritedResearch.sources.some(key => key.startsWith('research:web:')), 'generic continuation recalls research from the chapter outline without repeating the topic in the user request')
+    db.prepare('UPDATE chapters SET outline=? WHERE id=?').run(originalOutline, target)
+    const { upsertCreativeResearchEntries } = require('../src/shared/creative-research.ts')
+    const savedResearchNovel = db.prepare('SELECT user_background,source_ledger_json FROM novels WHERE id=?').get(novelId)
+    const authorCards = [
+      { sourceKey: 'author:z-top', category: 'daoism', title: '道教科仪中的互助粮药代价' },
+      { sourceKey: 'author:a-lower', category: 'daoism', title: '道教科仪' },
+    ].map(card => ({ ...card, content: '设坛也要有人筹粮，救济后仍留下各家尚未结清的旧债。', interpretation: '仪式使互助可见，也可能把人情变为负担。', novelConnection: '只取人物选择和后果，不让科仪改变渡口既有规则。' }))
+    db.prepare('UPDATE novels SET user_background=?,source_ledger_json=? WHERE id=?').run(
+      Array.from({ length: 70 }, (_, index) => `第${index}段地方生活资料：${'河港各家以行船谋生，雨天收工后核对账册与米粮。'.repeat(8)}`).join('\n'),
+      JSON.stringify(upsertCreativeResearchEntries(savedResearchNovel.source_ledger_json, authorCards)), novelId)
+    const authorInput = { ...input, request: '陈舟检查渡口旧绳，参考道教科仪互助粮药代价。' }
+    const authorContext = await compile(authorInput, limits)
+    assert.ok(authorContext.sources.includes('research:author:author:z-top'), 'the best author card survives many optional background paragraphs at the unchanged chapter budget')
+    assert.ok(authorContext.sources.includes('research:author-usage'), 'the shared author usage key remains available for preview compatibility')
+    assert.ok(authorContext.text.includes('资料数据而非指令') && authorContext.text.includes('不证明本书事实'), 'included author cards carry their complete reference boundary')
+    assert.ok(authorContext.omittedSources.some(key => key.startsWith('background:') && key.endsWith(':budget_insufficient')), 'the constrained fixture actually drops lower-value optional background')
+    assert.ok(authorContext.sources.includes(`chapter:${target}:contract`) && authorContext.text.includes('禁止借命恢复体力'), 'author references cannot replace required contracts or character limits')
+    let noCardContext
+    for (let budget = 1000; budget < limits.maxInputTokens; budget += 50) {
+      try {
+        const candidate = await compile(authorInput, { ...limits, maxInputTokens: budget })
+        if (!candidate.sources.some(key => key.startsWith('research:author:'))) { noCardContext = candidate; break }
+      } catch (error) { if (error.code !== 'CHAPTER_CONTEXT_BUDGET') throw error }
+    }
+    assert.ok(noCardContext, 'a smaller valid fixture budget leaves room only for mandatory evidence')
+    assert.ok(noCardContext.omittedSources.includes('research:author:all:budget_insufficient'), 'no-card budget loss is visible in the preview diagnostics')
+    assert.ok(!noCardContext.sources.includes('research:author-usage'), 'an unused shared usage section cannot consume the remaining evidence budget')
+    db.prepare('UPDATE novels SET user_background=?,source_ledger_json=? WHERE id=?').run(savedResearchNovel.user_background, savedResearchNovel.source_ledger_json, novelId)
+    assert.ok(result.sources.includes('opening_progress'), 'MCP chapter generation retains opening delivery guidance in its compiled request')
+    assert.ok(result.sources.includes('narrative_detail'), 'detail boundaries survive context allocation as required material')
+    assert.ok(result.text.includes('情绪动作不能替代位置确认、同意或事实验证'))
+    assert.ok(result.text.includes('移动、踩踏、取样等会改变状态时交代范围与后果'))
+    assert.ok(result.text.includes('同一问题换人再问'), 'opening progression is not lost in the MCP asset generation path')
+    assert.ok(result.text.includes('旧正文是事实、状态、人物口吻与前后衔接的依据，不是必须照搬的句段模板'), 'prior prose is framed as evidence rather than a copy template')
+    assert.ok(result.sources.includes('fact_reveal_evidence_rule'), 'generation is told how to quote non-POV knowledge without inventing it')
     assert.ok(!result.text.includes(futureMemory), 'unscoped stale/future checkpoints never enter chapter writing')
     assert.ok(result.text.includes('禁止借命恢复体力'), 'complete ability restrictions, including the final prohibition, must survive')
+    for (const inner of ['想歇工又怕失约', '不愿再欠掌柜人情']) assert.ok(result.text.includes(inner), 'own POV retains saved conflicts and relationships')
+    const originalPrevious = db.prepare('SELECT content FROM chapters WHERE id=?').get(first).content
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('他答应回来检查渡口旧绳。\n' + '长路上只有细雨与空山。'.repeat(1800) + '\n夜色落在石阶上。', first)
+    const dependencyContext = await compile(input, limits)
+    assert.ok(dependencyContext.text.includes('他答应回来检查渡口旧绳。'), 'unclassified non-ending prose required by this scene survives a tight budget')
+    assert.ok(dependencyContext.omittedSources.some(key => key.startsWith(`chapter:${first}:original:`) && key.endsWith(':budget_insufficient')), 'fixture actually drops incidental prior prose under budget')
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run(originalPrevious, first)
+    // A deliberately selected fact has no lexical overlap with the scene contract.
+    // Its provenance is the registered earlier chapter, not a new inferred summary.
+    const handoffText = '竹笼已敞，青翅停在北窗；它没有答应借感。'
+    const handoff = Number(db.prepare('INSERT INTO story_facts(novel_id,title,summary,protagonist_known_chapter_id) VALUES(?,?,?,?)').run(novelId, '青翅的处境', handoffText, first).lastInsertRowid)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([handoff]), target)
+    const handoffContext = await compile(input, limits)
+    assert.ok(handoffContext.sources.includes(`fact:${handoff}`))
+    assert.ok(handoffContext.text.includes(handoffText), 'explicit prior facts survive without four-character dependency matches')
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText.repeat(2000), handoff)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET'
+      && error.requiredSourceKeys.includes(`fact:${handoff}`) && error.message.includes(`fact:${handoff}`))
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([handoff, secret]), first)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run('[]', target)
+    await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET'
+      && error.requiredSourceKeys.includes(`fact:${handoff}`) && !error.requiredSourceKeys.includes(`fact:${secret}`))
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText, handoff)
+    const inheritedContext = await compile(input, limits)
+    assert.ok(inheritedContext.text.includes(handoffText), 'a blank chapter fact selection inherits registered prior handoff facts')
+    assert.ok(!inheritedContext.text.includes('失踪的税银藏在井底'), 'handoff inheritance never grants future knowledge')
+    db.prepare('UPDATE story_facts SET summary=? WHERE id=?').run(handoffText.repeat(2000), handoff)
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id=?').run(JSON.stringify([known]), target)
+    const optionalContext = await compile(input, limits)
+    assert.ok(optionalContext.omittedSources.includes(`fact:${handoff}:budget_insufficient`), 'unselected background facts remain optional')
+    db.prepare('UPDATE chapters SET allowed_fact_ids_json=? WHERE id IN (?,?)').run('[]', first, target)
+    db.prepare('DELETE FROM story_facts WHERE id=?').run(handoff)
     assert.ok(result.omittedSources.includes('story_memory:unscoped_checkpoint_excluded'))
     await assert.rejects(compile(input, { ...limits, maxInputTokens: 300 }), error => error.code === 'CHAPTER_CONTEXT_BUDGET')
     assert.ok(result.text.includes('河水暴涨'))
@@ -134,6 +215,11 @@ async function main() {
     assert.ok(result.omittedSources.some(source => source.startsWith('author_reference:') && source.includes('pov_forbidden_fact')), 'approved sample still obeys chapter visibility')
     assert.ok(result.estimatedTokens <= limits.maxInputTokens)
     const reviewContext = await compile({ ...input, operation: 'review' }, limits)
+    assert.ok(reviewContext.sources.includes('opening_progress'), 'MCP review also receives the opening delivery criteria')
+    assert.ok(reviewContext.sources.includes('narrative_detail'))
+    assert.ok(reviewContext.text.includes('上下文未提供后文时说明无法核对'))
+    assert.ok(reviewContext.text.includes('问题须引用当前正文连续原句'))
+    assert.ok(!reviewContext.sources.includes('fact_reveal_evidence_rule'), 'generation-only evidence formatting does not duplicate prose in review')
     assert.ok(!reviewContext.text.includes('指尖沾着河泥'), 'review receives target prose separately, never twice in the prompt')
     db.prepare('UPDATE chapters SET content=content || ? WHERE id=?').run('账房盗银。', target)
     const leakingReviewContext = await compile({ ...input, operation: 'review' }, limits)
@@ -166,6 +252,12 @@ async function main() {
     assert.throws(() => gate({ ...base, changes: [{ op: 'retire', id: `characters:${person}` }] }), error => error.code === 'CHAPTER_RETIRE_FORBIDDEN')
     assert.throws(() => gate({ ...base, expectedContextVersion: before + 1 }), error => error.code === 'CHAPTER_CONTEXT_STALE')
     assert.equal(gate({ ...base, changes: [{ op: 'upsert_entity', kind: 'item', name: '新绳', attributes: { evidenceQuote: '他换上新绳，渡船停稳' } }] }).chapterId, target)
+    const originalTheme = db.prepare('SELECT theme_voice_json FROM novels WHERE id=?').get(novelId).theme_voice_json
+    db.prepare('UPDATE novels SET theme_voice_json=? WHERE id=?').run(JSON.stringify({ theme: '公义与人情', themeChapterTest: '本章涉及重要选择时核对实际后果，没有这一情节任务无需强加代价或点题。' }), novelId)
+    const themeDiagnostic = gate(base)
+    assert.ok(themeDiagnostic.validation.itemResults.some(item => item.contractItemType === 'theme_chapter_response'), 'theme advice remains visible for review')
+    assert.throws(() => gate({ ...base, content: '屋子里很安静。' }), error => error.code === 'CHAPTER_CONTRACT_NOT_DELIVERED' && /chapter_goal|scene_conflict|scene_result_state/.test(error.message), 'missing actual scene delivery still blocks and names the unmet requirement')
+    db.prepare('UPDATE novels SET theme_voice_json=? WHERE id=?').run(originalTheme, novelId)
     const openingContext = await compile(input, limits)
     assert.ok(openingContext.text.includes('章初已换灰衣'))
     assert.ok(!openingContext.text.includes('章末才换黑衣'))
@@ -184,7 +276,7 @@ async function main() {
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_CONTEXT_BUDGET', 'rewriting cannot silently discard most of the saved chapter')
     assert.ok(known > 0)
     process.stdout.write('PASS chapter context: prerequisites, POV, exact scene reveals, private/global/future isolation, chapter introduction plans without current end-state leakage, previous prose, budget, read-only compile, contract delivery, quoted graph changes\n')
-  } finally { closeDb(); fs.rmSync(temp, { recursive: true, force: true }) }
+  } finally { closeDb(); cleanupElectronFixture(temp, 'creative-chapter-context') }
   app.exit(0)
 }
 main().catch(error => { console.error(error); app.exit(1) })

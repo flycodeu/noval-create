@@ -123,6 +123,28 @@
   overflow-wrap: anywhere;
 }
 
+.task-center-draft-modal pre {
+  max-height: 60dvh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.task-center-diagnostics {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.task-center-diagnostics > summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.task-center-diagnostics .novel-note-list {
+  margin-top: 10px;
+}
+
 .app-layout .task-center-page .task-center-model-attempts,
 .app-layout .task-center-page .task-center-model-attempt {
   display: grid;

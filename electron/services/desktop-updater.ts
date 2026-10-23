@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import path from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
 import electronUpdater, { type NsisUpdater } from 'electron-updater'
@@ -63,7 +64,7 @@ async function beginInstall(version: string): Promise<boolean> {
   if (installing || updateState.phase !== 'ready') return false
   installing = true
   try {
-    if (!prepareUpdate) throw new Error('更新准备流程尚未就绪，请重新启动 NovelForge。')
+    if (!prepareUpdate) throw new Error(formatUserFacingMessage('services.updater.preparationNotReady'))
     updateMaintenance = beginUpdateMaintenance(app.getPath('userData'), app.getVersion())
     // NSIS must not run until storage and background requests have actually stopped.
     await prepareUpdate()

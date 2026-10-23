@@ -1,3 +1,12 @@
+/* Body portal drawers can overlap the native frameless titlebar. Exclude the
+   overlay from drag hit testing so its close button receives real mouse input. */
+.ant-drawer,
+.ant-drawer-content-wrapper,
+.ant-drawer-header,
+.ant-drawer-close {
+  -webkit-app-region: no-drag;
+}
+
 /* ============================================================
    Core theme variables and global application styles
    ============================================================ */

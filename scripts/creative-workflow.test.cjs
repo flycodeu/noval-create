@@ -5,6 +5,7 @@ const http = require('node:http')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'creative-'))
 const realModelSource = process.env.NOVELFORGE_REAL_MODEL_SOURCE
@@ -29,7 +30,7 @@ const server = http.createServer(async (req, res) => {
   requests.push(payload)
   const prompt = payload.messages?.map(message => typeof message.content === 'string' ? message.content : '').join('\n') || ''
   if (prompt.includes('[creative_evidence]')) {
-    const line = prompt.split('\n').find(text => text.startsWith('{"prose":'))
+    const line = prompt.split('\n').find(text => text.startsWith('{"sourceParagraphs":'))
     const evidence = JSON.parse(line)
     let scripted
     try { scripted = JSON.parse(replies[0]) } catch { /* No explicit certificate queued. */ }
@@ -39,7 +40,7 @@ const server = http.createServer(async (req, res) => {
     // certificates stay negative; new visibility checks receive a controlled certificate.
     const assessments = evidence.claims.map(claim => overrides.get(claim.id) || {
       id: claim.id, support: scripted?.assessments?.[0]?.support || 'supported',
-      evidenceQuote: evidence.prose.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
+      evidenceQuote: evidence.sourceParagraphs[0].text.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
     })
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ assessments }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100 } }))
@@ -202,6 +203,18 @@ async function main() {
     const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
+    assert.equal(written.message, '已写入草稿。')
+    const writtenReport = (await call('artifacts.get', { artifactId: written.reviewArtifactId })).artifact.content
+    assert.ok(writtenReport.summary.includes('审校与生成使用同一模型配置。'))
+    assert.equal(sqlite.prepare('SELECT status FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId).status, 'draft')
+    const prosePrompt = requests[beforeFirst + 2].messages.map(message => message.content).join('\n')
+    assert.ok(prosePrompt.includes('changes必须为空数组[]'), 'prose-only generation must not invite graph changes')
+    assert.ok(prosePrompt.includes('factId必须是已有信息点的数值整数'), 'fact ID format is explicit before generation and repair')
+    const { creativeSchemaHint, parseCreativeCandidate } = require('../electron/services/creative-workflow.service.ts')
+    const fencedCandidate = { chapterNum: 1, title: '渡口', content: prose, summary: '船停稳了。', changes: [], factReveals: [] }
+    assert.deepEqual(parseCreativeCandidate('chapter', '```json\n' + JSON.stringify(fencedCandidate) + '\n```'), fencedCandidate)
+    assert.throws(() => parseCreativeCandidate('chapter', '解释\n```json\n' + JSON.stringify(fencedCandidate) + '\n```'))
+    assert.ok(creativeSchemaHint('chapter', { existingEntityIds: ['character:1'] }).includes('upsert_entity'), 'explicitly allowed graph edits retain their schema')
     assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')
     const chapter = sqlite.prepare('SELECT content, summary FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId)
     assert.equal(chapter.content, prose)
@@ -216,6 +229,7 @@ async function main() {
     const reviewed = await finish(reviewRun.runId)
     assert.equal(reviewed.status, 'success', JSON.stringify(reviewed))
     assert.equal(reviewed.reviewStatus, 'passed')
+    assert.ok(reviewed.message.includes('本次审校使用当前生成模型配置。'))
     assert.equal(requests.length, beforeReview + 1, 'review does not regenerate or rewrite')
     assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content, prose)
     assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: reviewed.runId } }, context)).ok, false, 'a report is not an applicable prose candidate')
@@ -472,6 +486,9 @@ async function main() {
     const foreignFactId = require('../electron/services/story-fact.service.ts').createStoryFact(novelId, { title: '别的小说信息点', summary: secret })
     const validReveal = { factId: secretFact.id, characterIds: [shen.id], evidenceQuote: `他辨出最后一行字：${secret}。` }
     const chapterCandidate = factReveals => ({ chapterNum: 2, title: '旧信', content: revealProse, summary: '沈墨读信知道割绳者。', changes: [], factReveals })
+    const multilineProse = `沈墨读信，信被泥水浸湿。\n\n他辨出最后一行字：${secret}。`
+    const flattenedQuote = multilineProse.replace(/\s+/gu, ' ')
+    assert.doesNotThrow(() => require('../electron/services/creative-facts.ts').validateCreativeFactReveals(mysteryId, 2, multilineProse, [{ ...validReveal, evidenceQuote: flattenedQuote }]), 'whitespace-only quote serialization remains auditable')
     for (const [label, badReveal] of [
       ['bad-quote', { ...validReveal, evidenceQuote: '这句话不在正文里面' }],
       ['bad-character', { ...validReveal, characterIds: ['character:missing'] }],
@@ -602,6 +619,9 @@ async function main() {
       const historical = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '只更新简介', autoApply: false, idempotencyKey: 'history-candidate' })).run.runId)
       assert.equal(historical.status, 'paused', JSON.stringify(historical))
       assert.equal(historical.reviewModelConfigId, reviewerId)
+      const historicalReview = (await isolatedCall('artifacts.get', { artifactId: historical.reviewArtifactId })).artifact.content
+      assert.ok(!historicalReview.summary.includes('同一模型配置'))
+      assert.ok(!historicalReview.summary.includes('模型标识相同'))
       assert.deepEqual(requests.slice(beforeRoutes).map(request => request.model), ['creative-fixture', 'review-fixture'])
       assert.ok(historical.context.maxInputTokens < 10000, 'smaller reviewer window bounds shared context')
       const comparison = (await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts
@@ -840,7 +860,7 @@ async function main() {
   } finally {
     heldResponse?.destroy(); server.closeAllConnections(); server.close(); closeDb()
     if (!path.resolve(temp).startsWith(path.resolve(root, '.tmp-tests') + path.sep)) throw new Error('unsafe cleanup')
-    fs.rmSync(temp, { recursive: true, force: true })
+    cleanupElectronFixture(temp, 'creative-workflow')
   }
 }
 main().then(() => app.exit(0), error => { console.error(error); app.exit(1) })

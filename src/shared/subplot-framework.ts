@@ -1,3 +1,5 @@
+import { formatUserFacingMessage } from './user-facing-messages'
+
 export interface SubPlotDraft {
   name: string
   characters: string
@@ -435,7 +437,7 @@ function buildParsePreview(text: string): string {
 }
 
 function createParseError(text: string, reason: string): SyntaxError {
-  return new SyntaxError(`\u652f\u7ebf JSON \u89e3\u6790\u5931\u8d25\uff1a${reason}\u3002\u7247\u6bb5\uff1a${buildParsePreview(text)}`)
+  return new SyntaxError(formatUserFacingMessage('subplot.parseFailed', { reason, preview: buildParsePreview(text) }))
 }
 
 export function parseSubPlotFrameworkResponseDetailed(raw: string): ParsedSubplotFrameworkResponse {
@@ -470,10 +472,10 @@ export function parseSubPlotFrameworkResponseDetailed(raw: string): ParsedSubplo
 
   const target = fragment || cleaned
   if (!target.trim()) {
-    throw createParseError(raw, 'AI \u672a\u8fd4\u56de\u53ef\u89e3\u6790\u5185\u5bb9')
+    throw createParseError(raw, formatUserFacingMessage('subplot.emptyResponse'))
   }
 
-  throw createParseError(target, '\u672a\u627e\u5230\u53ef\u6062\u590d\u7684\u652f\u7ebf\u5bf9\u8c61')
+  throw createParseError(target, formatUserFacingMessage('subplot.noRecoverableObject'))
 }
 
 export function parseSubPlotFrameworkResponse(raw: string): SubPlotDraft[] {

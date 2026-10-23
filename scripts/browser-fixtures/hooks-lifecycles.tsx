@@ -41,7 +41,8 @@ function readFixtures(): any {
     thread: { getStats: stats, list: rows }, sceneTemplate: { getStats: stats }, revision: { getStats: stats, list: rows },
     outline: { getArcs: rows }, timeline: { getStats: stats, getFilterOptions: async () => ({ eventTypes: [] }) },
     storyAtlas: { query: async () => ({ entities: [], relations: [] }) },
-    structure: { listVolumes: rows }, creativeStage: { list: rows }, chapter: { list: rows }, storyFact: { list: rows }, foreshadow: { listLedger: rows },
+    zhuque: { getChapterResult: async () => ({ enabled: false, status: 'not_checked' }) },
+    structure: { listVolumes: rows, getTree: async () => ({ volumes: [], unassignedChapters: [] }) }, creativeStage: { list: rows }, chapter: { list: rows }, storyFact: { list: rows }, foreshadow: { listLedger: rows },
     characterArc: { getArcDashboard: async () => ({ characterArcs: [], relationshipArcs: [] }), listCharacterArcs: rows, listRelationshipArcs: rows },
     resistance: { getDashboard: async () => ({ tracks: [] }), listTracks: rows }, endgameAsset: { listCommitments: rows },
     task: { getPipelineStats: async () => ({}) }, on: () => () => {},
@@ -125,14 +126,14 @@ async function versionsLifecycle(root: Root) {
   await act(async () => navigate('/?artifact=b'))
   const artifact = (id: string) => ({ artifact: { id, novelId: 1, kind: 'quality_report', version: 1, status: 'reviewed', content: { summary: id === 'b' ? 'active report content' : 'stale report content' } } })
   await act(async () => details.get('b')!.resolve(artifact('b')))
-  check(document.querySelector('#version-feedback'), 'version feedback rendered: ' + text().slice(0, 1300))
-  await type(document.querySelector<HTMLTextAreaElement>('#version-feedback'), 'keep revision request')
+  check(document.querySelector('#object-version-feedback'), 'version feedback rendered: ' + text().slice(0, 1300))
+  await type(document.querySelector<HTMLTextAreaElement>('#object-version-feedback'), 'keep revision request')
   await act(async () => details.get('a')!.resolve(artifact('a')))
   check(text().includes('active report content') && !text().includes('stale report content'), 'late artifact cannot replace the routed version')
   await act(async () => navigate('/?artifact=b&panel=details'))
-  check(document.querySelector<HTMLTextAreaElement>('#version-feedback')?.value === 'keep revision request' && details.size === 2, 'unrelated version route keeps feedback without rereading')
+  check(document.querySelector<HTMLTextAreaElement>('#object-version-feedback')?.value === 'keep revision request' && details.size === 2, 'unrelated version route keeps feedback without rereading')
   await click(button('刷新'))
-  check(document.querySelector<HTMLTextAreaElement>('#version-feedback')?.value === 'keep revision request', 'version list refresh preserves feedback')
+  check(document.querySelector<HTMLTextAreaElement>('#object-version-feedback')?.value === 'keep revision request', 'version list refresh preserves feedback')
   await act(async () => root.render(null))
 }
 

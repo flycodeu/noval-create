@@ -105,6 +105,10 @@ async function main() {
     NOVELFORGE_WEB_BACKEND_PORT: String(port),
     NOVELFORGE_USER_DATA_DIR: testDataRoot,
     NOVELFORGE_DISABLE_LEGACY_DB_COPY: '1',
+    TAVILY_API_KEY: '',
+    BRAVE_SEARCH_API_KEY: '',
+    DEEPSEEK_SEARCH_API_KEY: '',
+    OPENAI_SEARCH_API_KEY: '',
   }
   const backend = spawnElectron(['scripts/local-web-backend.cjs'], backendEnv)
   let smokeCode = 1

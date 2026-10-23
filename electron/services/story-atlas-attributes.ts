@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { isDeepStrictEqual } from 'node:util'
 import { STORY_ATLAS_ATTRIBUTE_SCHEMAS, type StoryAtlasAttributeMode, type StoryAtlasEntityKind, type StoryAtlasGeography, type StoryAtlasMapPoint, type StoryAtlasPosition, type StoryAtlasRelationKind } from '../../src/shared/story-atlas'
 import { validateJsonSchema } from '../../src/shared/tool-contracts'
@@ -21,13 +22,13 @@ function replacementValue(value: unknown): unknown {
 }
 
 export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryAtlasRelationKind, raw: Record<string, unknown> = {}, current: Record<string, unknown> = {}, mode: StoryAtlasAttributeMode = 'merge'): Record<string, unknown> {
-  if (raw.stateTiming !== undefined && !['chapter_start', 'chapter_end'].includes(String(raw.stateTiming))) throw new Error('stateTiming 必须是 chapter_start 或 chapter_end。')
+  if (raw.stateTiming !== undefined && !['chapter_start', 'chapter_end'].includes(String(raw.stateTiming))) throw new Error(formatUserFacingMessage('services.atlas.stateTimingInvalid'))
   const patch: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(raw)) {
     if (referenceAttributes.has(key)) {
       // Old native snapshots contain these references. Echoing them is harmless, but all changes must use validated graph edges.
       if (isDeepStrictEqual(value, current[key]) || !meaningfulAtlasValue(value) && !meaningfulAtlasValue(current[key])) continue
-      throw new Error(`${key} 请改用明确的 presence 或 membership 关系与图谱ID，不能把未校验ID放在属性中。`)
+      throw new Error(formatUserFacingMessage('services.atlas.unvalidatedReference', { key: `${key}` }))
     }
     if (mode === 'replace') patch[key] = replacementValue(value)
     else if (meaningfulAtlasValue(value)) patch[key] = value
@@ -35,11 +36,11 @@ export function normalizeAtlasAttributePatch(kind: StoryAtlasEntityKind | StoryA
   const schema = STORY_ATLAS_ATTRIBUTE_SCHEMAS[kind]
   if (schema) {
     const result = validateJsonSchema(Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null)), schema)
-    if (!result.valid) throw new Error(`${kind} 属性结构错误：${result.issues.join('；')}`)
+    if (!result.valid) throw new Error(formatUserFacingMessage('services.atlas.structureInvalid', { kind: `${kind}`, issues: `${result.issues.join('；')}` }))
   }
   if (kind === 'faction' && Array.isArray(patch.positions)) {
     const ids = patch.positions.map(position => (position as StoryAtlasPosition).id)
-    if (new Set(ids).size !== ids.length) throw new Error('同一批岗位补丁不能重复使用岗位ID。')
+    if (new Set(ids).size !== ids.length) throw new Error(formatUserFacingMessage('services.atlas.duplicatePositionPatches'))
   }
   if (kind === 'location' && patch.geography) validateAtlasGeography(patch.geography)
   return patch
@@ -89,28 +90,28 @@ function polygonAreaTwice(points: StoryAtlasMapPoint[]): number {
 export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | undefined {
   if (raw === undefined) return undefined
   const result = validateJsonSchema({ geography: raw }, STORY_ATLAS_ATTRIBUTE_SCHEMAS.location!)
-  if (!result.valid) throw new Error(`地图地理属性结构错误：${result.issues.join('；')}`)
+  if (!result.valid) throw new Error(formatUserFacingMessage('services.atlas.mapGeographyInvalid', { issues: `${result.issues.join('；')}` }))
   const geography = raw as StoryAtlasGeography
   for (const value of [geography.areaKm2, geography.mapFrame?.widthKm, geography.mapFrame?.heightKm]) {
-    if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('地图面积与比例范围必须为大于零的有限数字；未知数值请省略。')
+    if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error(formatUserFacingMessage('services.atlas.areaScaleInvalid'))
   }
-  if (geography.mapFrame && !Number.isFinite(geography.mapFrame.widthKm * geography.mapFrame.heightKm)) throw new Error('地图公里尺度超出可计算范围，请缩小宽度或高度。')
+  if (geography.mapFrame && !Number.isFinite(geography.mapFrame.widthKm * geography.mapFrame.heightKm)) throw new Error(formatUserFacingMessage('services.atlas.scaleOutOfRange'))
   if (geography.areaKm2 && geography.mapFrame && geography.areaKm2 > geography.mapFrame.widthKm * geography.mapFrame.heightKm) {
-    throw new Error('地图设定面积不能超过内部地图宽度与高度围成的范围，请校正面积或公里尺度。')
+    throw new Error(formatUserFacingMessage('services.atlas.areaExceedsBounds'))
   }
   for (const point of [...(geography.boundary || []), ...(geography.position ? [geography.position] : [])]) {
-    if (![point.x, point.y].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) throw new Error('地图坐标必须为 0 到 100 之间的有限数字。')
+    if (![point.x, point.y].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) throw new Error(formatUserFacingMessage('services.atlas.coordinatesInvalid'))
   }
   const points = geography.boundary
   if (!points) return geography
-  if (new Set(points.map(point => `${point.x},${point.y}`)).size !== points.length) throw new Error('区域边界不能重复顶点，闭合线由系统连接。')
-  if (Math.abs(polygonAreaTwice(points)) < geometryEpsilon) throw new Error('区域边界须围成非零面积，不能全部落在直线上。')
+  if (new Set(points.map(point => `${point.x},${point.y}`)).size !== points.length) throw new Error(formatUserFacingMessage('services.atlas.duplicateBoundaryPoints'))
+  if (Math.abs(polygonAreaTwice(points)) < geometryEpsilon) throw new Error(formatUserFacingMessage('services.atlas.boundaryAreaEmpty'))
   for (let index = 0; index < points.length; index++) {
     const a = points[index], b = points[(index + 1) % points.length], previous = points[(index + points.length - 1) % points.length]
-    if (Math.abs(cross(previous, a, b)) < geometryEpsilon && (onSegment(b, previous, a) || onSegment(previous, a, b))) throw new Error('区域边界不能沿相邻边折返重叠。')
+    if (Math.abs(cross(previous, a, b)) < geometryEpsilon && (onSegment(b, previous, a) || onSegment(previous, a, b))) throw new Error(formatUserFacingMessage('services.atlas.boundaryEdgesOverlap'))
     for (let other = index + 1; other < points.length; other++) {
       if (other === index + 1 || index === 0 && other === points.length - 1) continue
-      if (segmentsCross(a, b, points[other], points[(other + 1) % points.length], true)) throw new Error('区域边界不能自相交。')
+      if (segmentsCross(a, b, points[other], points[(other + 1) % points.length], true)) throw new Error(formatUserFacingMessage('services.atlas.boundarySelfIntersection'))
     }
   }
   return geography
@@ -118,12 +119,12 @@ export function validateAtlasGeography(raw: unknown): StoryAtlasGeography | unde
 
 export function validateAtlasPositions(raw: unknown): StoryAtlasPosition[] {
   if (raw === undefined) return []
-  if (!Array.isArray(raw)) throw new Error('组织岗位必须为数组。')
+  if (!Array.isArray(raw)) throw new Error(formatUserFacingMessage('services.atlas.positionsArrayRequired'))
   const positions = raw as StoryAtlasPosition[]
   const ids = new Set<string>()
   for (const position of positions) {
-    if (!position.id?.trim() || ids.has(position.id)) throw new Error('组织岗位须使用唯一且非空的稳定ID。')
-    if (!position.title?.trim() || !['planned', 'established'].includes(position.status)) throw new Error('新岗位必须明确名称和计划/已设状态，不能把空岗位当作实际人物。')
+    if (!position.id?.trim() || ids.has(position.id)) throw new Error(formatUserFacingMessage('services.atlas.positionIdInvalid'))
+    if (!position.title?.trim() || !['planned', 'established'].includes(position.status)) throw new Error(formatUserFacingMessage('services.atlas.positionIdentityMissing'))
     ids.add(position.id)
   }
   const byId = new Map(positions.map(position => [position.id, position]))
@@ -132,9 +133,9 @@ export function validateAtlasPositions(raw: unknown): StoryAtlasPosition[] {
     const seen = new Set([position.id])
     while (parentId) {
       const parent = byId.get(parentId)
-      if (!parent) throw new Error('岗位的上级必须属于同一组织；跨组织层级使用组织 parentId。')
-      if (seen.has(parentId)) throw new Error('组织岗位汇报层级不能循环。')
-      if (position.status === 'established' && parent.status === 'planned') throw new Error('已设岗位不能隶属尚未设立的上级岗位。')
+      if (!parent) throw new Error(formatUserFacingMessage('services.atlas.parentPositionWrongOrganization'))
+      if (seen.has(parentId)) throw new Error(formatUserFacingMessage('services.atlas.positionHierarchyCycle'))
+      if (position.status === 'established' && parent.status === 'planned') throw new Error(formatUserFacingMessage('services.atlas.parentPositionNotEstablished'))
       seen.add(parentId)
       parentId = parent.reportsToPositionId
     }

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ChatOptions } from '../adapters/base.adapter'
 import { createArtifact, findArtifactByIdempotency, hashArtifactContent } from './artifact.service'
 
@@ -46,7 +47,7 @@ export function createCreativeModelCheckpoint(input: {
   return {
     begin(request, taskId) {
       input.assertCurrent()
-      if (!Number.isInteger(taskId) || taskId < 1) throw new Error('不能记录无效的模型请求。')
+      if (!Number.isInteger(taskId) || taskId < 1) throw new Error(formatUserFacingMessage('services.modelCheckpoint.requestInvalid'))
       const { requestHash, key } = describe(request)
       const requestKey = `${key}:request`
       const existing = findArtifactByIdempotency<RequestCheckpointContent>(input.novelId, 'creative_model_checkpoint', requestKey)
@@ -54,7 +55,7 @@ export function createCreativeModelCheckpoint(input: {
         || existing.contentHash !== hashArtifactContent(existing.content) || existing.content.schemaVersion !== 'creative-model-request-v1'
         || existing.content.identityHash !== input.identityHash || existing.content.requestHash !== requestHash
         || existing.content.phase !== request.phase || !Number.isInteger(existing.content.taskId) || existing.content.taskId < 1)) {
-        throw new Error('创作恢复请求与当前需求、模型或资料不一致，请新建任务。')
+        throw new Error(formatUserFacingMessage('services.modelCheckpoint.requestIdentityChanged'))
       }
       const artifact = existing || createArtifact({ novelId: input.novelId, kind: 'creative_model_checkpoint', status: 'draft',
         content: { schemaVersion: 'creative-model-request-v1', identityHash: input.identityHash, requestHash, phase: request.phase, taskId },
@@ -72,13 +73,13 @@ export function createCreativeModelCheckpoint(input: {
         || artifact.contentHash !== hashArtifactContent(content) || content.schemaVersion !== 'creative-model-checkpoint-v1'
         || content.identityHash !== input.identityHash || content.requestHash !== requestHash || content.phase !== request.phase
         || !content.output?.trim() || content.outputHash !== hashArtifactContent(content.output)
-        || !Number.isInteger(content.taskId) || content.taskId < 1) throw new Error('创作恢复检查点与当前需求、模型或资料不一致，请新建任务。')
+        || !Number.isInteger(content.taskId) || content.taskId < 1) throw new Error(formatUserFacingMessage('services.modelCheckpoint.checkpointIdentityChanged'))
       input.onSaved({ schemaVersion: content.schemaVersion, artifactId: artifact.id, attempt: input.attempt, identityHash: input.identityHash })
       return { output: content.output, taskId: content.taskId }
     },
     save(request, output, taskId) {
       input.assertCurrent()
-      if (!output.trim() || !Number.isInteger(taskId) || taskId < 1) throw new Error('不能保存未完成的模型响应检查点。')
+      if (!output.trim() || !Number.isInteger(taskId) || taskId < 1) throw new Error(formatUserFacingMessage('services.modelCheckpoint.responseIncomplete'))
       const { requestHash, key } = describe(request)
       const content: CheckpointContent = { schemaVersion: 'creative-model-checkpoint-v1', identityHash: input.identityHash,
         requestHash, phase: request.phase, output, outputHash: hashArtifactContent(output), taskId }

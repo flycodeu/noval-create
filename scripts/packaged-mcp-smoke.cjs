@@ -3,9 +3,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
 const { randomUUID } = require('node:crypto')
-const { execFileSync } = require('node:child_process')
+const { execFileSync, spawn } = require('node:child_process')
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js')
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js')
+const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js')
 const { seedPackagedMcpSmoke } = require('./seed-packaged-mcp-smoke.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
@@ -28,7 +28,7 @@ const expectedTools = [
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
   'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set',
-  'research.list', 'research.get', 'research.upsert', 'research.delete',
+  'research.list', 'research.get', 'research.upsert',
   'research.extract_preview', 'research.extract', 'research.adopt',
   'assist.get', 'assist.list', 'assist.cancel', 'chapters.review_view',
   'chapters.selection_preview', 'chapters.rewrite_selection', 'chapters.edit_selection', 'chapters.apply_selection',
@@ -36,9 +36,10 @@ const expectedTools = [
   'ledger.get', 'ledger.correct_character', 'ledger.correct_clue', 'ledger.merge_preview', 'ledger.merge_clues',
   'style.list', 'style.get', 'style.analyze', 'style.copy_sample', 'style.approve', 'style.trial', 'style.approve_trial',
   'writing.complete', 'writing.cancel_completion', 'inspiration.generate', 'inspiration.get', 'inspiration.cancel', 'projects.creation_status',
+  'research.query', 'research.search',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
-const bridgePids = new Map()
+let fixtureOwner
 let stderr = ''
 let owner
 let fixtureServer
@@ -76,14 +77,38 @@ async function rpc(service, method, args = []) {
   assert.equal(result.ok, true, result.error?.message)
   return result.data
 }
-async function connect(timeout = 60_000) {
-  const transport = new StdioClientTransport({ command: executable, args, cwd: workspaceRoot, env, stderr: 'pipe' })
-  transport.stderr?.on('data', (chunk) => { stderr += String(chunk) })
-  const client = new Client({ name: 'packaged-mcp-smoke', version: '2.0.0' })
+async function rejectIsolatedStdio() {
+  const rejectedProfile = path.join(testUserData, 'must-not-be-created')
+  assert(!fs.existsSync(rejectedProfile))
+  const child = spawn(executable, args, { cwd: workspaceRoot, env: { ...env, NOVELFORGE_USER_DATA_DIR: rejectedProfile }, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] })
+  let errorText = ''
+  child.stderr.on('data', chunk => { errorText += String(chunk) })
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill(); reject(Error('Isolated MCP did not exit')) }, 15000)
+    child.once('error', error => { clearTimeout(timer); reject(error) })
+    child.once('exit', code => { clearTimeout(timer); resolve(code) })
+  })
+  assert.equal(code, 1, errorText)
+  assert.match(errorText, /手动打开|临时数据目录/)
+  assert(!fs.existsSync(rejectedProfile), 'Rejected MCP must not create a temporary profile')
+  assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'MCP must never create an isolated owner')
+}
+async function startFixtureOwner() {
+  // The test controller explicitly owns this fixture; production MCP never starts it.
+  const ownerArgs = bundled ? [path.join(__dirname, 'novelforge-mcp.cjs'), '--runtime'] : ['--runtime']
+  fixtureOwner = spawn(executable, ownerArgs, { cwd: workspaceRoot, env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+  fixtureOwner.stderr.on('data', chunk => { stderr += String(chunk) })
+  await until(() => {
+    if (fixtureOwner.exitCode != null) throw Error('Fixture owner exited: '+stderr)
+    return fs.existsSync(discoveryPath)
+  }, 'Explicit fixture startup', 60000)
+}
+async function connect() {
+  const live = discovery()
+  const transport = new StreamableHTTPClientTransport(new URL('/mcp', live.url), { requestInit: { headers: { Authorization: `Bearer ${live.token}` } } })
+  const client = new Client({ name: 'packaged-runtime-smoke', version: require('../package.json').version })
   clients.push(client)
-  const connecting = client.connect(transport, { timeout })
-  bridgePids.set(client, transport.pid)
-  await connecting
+  await client.connect(transport, { timeout: 60000 })
   return client
 }
 function verifyInstallFilesReleased() {
@@ -138,8 +163,12 @@ async function main() {
   if (bundled) assert(fs.existsSync(path.join(workspaceRoot, 'out/main/main.js')), 'Run npm run build:app first.')
   fs.mkdirSync(testUserData, { recursive: true })
   verifyTestDirectory()
-  const localModelCache = path.join(workspaceRoot, 'node_modules/@huggingface/transformers/.cache/Xenova/bge-small-zh-v1.5')
+  const modelCacheRoot = process.env.NOVELFORGE_EMBEDDING_FIXTURE_CACHE
+    || path.join(workspaceRoot, '.tmp-tests/embedding-runtime-model-cache')
+  const localModelCache = path.join(modelCacheRoot, 'Xenova/bge-small-zh-v1.5')
   const hasLocalModelFixture = fs.existsSync(path.join(localModelCache, 'onnx/model_quantized.onnx'))
+  assert(hasLocalModelFixture || !process.argv.includes('--require-local-model'),
+    'Run npm run test:local-embedding -- --download-model before the mandatory packaged model check')
   if (hasLocalModelFixture) {
     const fixtureCache = path.join(testUserData, 'models/embeddings/Xenova/bge-small-zh-v1.5')
     fs.mkdirSync(path.dirname(fixtureCache), { recursive: true })
@@ -147,7 +176,9 @@ async function main() {
   }
   const version = require('../package.json').version
   try {
+    await rejectIsolatedStdio()
     const upgrade = process.argv.includes('--author-upgrade') ? JSON.parse(execFileSync(require('electron'), [path.join(__dirname, 'seed-author-upgrade-fixture.cjs')], { cwd: workspaceRoot, env: { ...env, NOVELFORGE_UPGRADE_FIXTURE_PATH: testUserData }, windowsHide: true, encoding: 'utf8', timeout: 30_000 }).trim()) : null
+    await startFixtureOwner()
     const first = await connect()
     owner = discovery()
     const listed = await first.listTools()
@@ -178,6 +209,22 @@ async function main() {
       process.stdout.write('PASS packaged pre-0075 upgrade: original prose/cards/clues preserved; new merge tools migrate contract refs and retain source history.\n')
     }
 
+    assert.deepEqual(await rpc('zhuque', 'getSettings'), { enabled: false, autoDetect: true, apiKeySet: false }, 'packaged detector must default off')
+    const zhuqueFixtureKey = 'packaged-zhuque-fixture-not-a-real-key'
+    const zhuqueSettings = await rpc('zhuque', 'updateSettings', [{ enabled: false, autoDetect: false, apiKey: zhuqueFixtureKey }])
+    assert.deepEqual(zhuqueSettings, { enabled: false, autoDetect: false, apiKeySet: true })
+    const zhuqueLocalFile = path.join(testUserData, 'local-zhuque', 'credentials.json')
+    assert(fs.existsSync(zhuqueLocalFile), 'packaged local credential file must exist')
+    assert.equal(fs.readFileSync(zhuqueLocalFile, 'utf8').includes(zhuqueFixtureKey), false, 'packaged credentials must be encrypted')
+    assert.equal(JSON.stringify(zhuqueSettings).includes(zhuqueFixtureKey), false, 'RPC must not return saved keys')
+    // Connection tests may run while chapter detection is disabled. Remove the
+    // storage fixture before testing so this smoke never submits an external request.
+    assert.deepEqual(await rpc('zhuque', 'updateSettings', [{ apiKey: '' }]), { enabled: false, autoDetect: false, apiKeySet: false })
+    const zhuqueTest = await rpc('zhuque', 'test')
+    assert.equal(zhuqueTest.success, false)
+    assert(zhuqueTest.info.includes('密钥不可用'), 'missing-key packaged test must stop before transport')
+    assert.deepEqual(await rpc('zhuque', 'getSettings'), { enabled: false, autoDetect: false, apiKeySet: false }, 'connection test must preserve disabled chapter detection')
+
     const second = await connect()
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')
     assert.equal(discovery().pid, owner.pid)
@@ -187,6 +234,13 @@ async function main() {
     const projectLists = await Promise.all([first, second].map((client) => call(client, 'projects.list', {})))
     assert(projectLists.every((result) => result.projects.some((project) => project.id === novelId && project.title === title)))
     const project = (await call(first, 'projects.get', { novelId })).project
+    assert.deepEqual((await call(first, 'research.query', { novelId })).sources, [])
+    assert.deepEqual(await rpc('sourceSearch', 'listResearch', [novelId]), [])
+    const missingSearch = await call(first, 'research.search', { novelId, request: '搜索道教知识' })
+    assert.equal(missingSearch.updated, false, 'missing search configuration cannot invent references')
+    assert.deepEqual(missingSearch.sources, [])
+    assert(missingSearch.diagnostics.length > 0, 'missing search service must return a useful diagnosis')
+    assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, project.contextVersion, 'failed research does not change story data')
 
     const changes = {
       novelId, expectedContextVersion: project.contextVersion, idempotencyKey: `packaged-atlas-${randomUUID()}`,
@@ -252,24 +306,13 @@ async function main() {
     assert.equal((await (await request('/health')).json()).instanceId, owner.instanceId, 'Disconnecting a bridge must preserve the owner')
     assert((await call(second, 'projects.list', {})).projects.some((row) => row.id === novelId))
     const third = await connect()
-    const connectedPids = [second, third].map((client) => bridgePids.get(client))
-    assert(connectedPids.every((pid) => Number.isInteger(pid) && processAlive(pid)), 'Both stdio bridges must remain connected before owner shutdown')
+    assert((await third.listTools()).tools.length > 0)
     assert.equal((await request('/shutdown', 'POST')).status, 200)
-    try {
-      await until(() => !processAlive(owner.pid) && connectedPids.every((pid) => !processAlive(pid)), 'Owner and both idle bridges exit without closing client stdin')
-    } catch (error) {
-      throw new Error(`${error.message}; ownerAlive=${processAlive(owner.pid)}; bridgeAlive=${connectedPids.map(processAlive).join(',')}; discoveryExists=${fs.existsSync(discoveryPath)}`, { cause: error })
-    }
-    await assert.rejects(second.listTools(), 'A stopped bridge cannot silently reconnect')
-    await wait(1_500)
-    assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'Established bridges must not resurrect the owner')
-
-    fs.writeFileSync(path.join(testUserData, 'novelforge-update.json'), JSON.stringify({ id: randomUUID(), version: health.version, expiresAt: Date.now() + 60_000 }))
-    await assert.rejects(connect(10_000), 'Update maintenance must reject a new old-version bridge')
-    const blockedPid = bridgePids.get(clients.at(-1))
-    assert(Number.isInteger(blockedPid), 'The rejected bridge must have been launched')
-    await until(() => !processAlive(blockedPid), 'Update-blocked bridge exit')
-    assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'Maintenance must prevent owner restart')
+    await until(() => !processAlive(owner.pid), 'Explicit fixture owner shutdown')
+    await assert.rejects(second.listTools(), 'A stopped owner cannot silently reconnect')
+    await wait(1500)
+    assert(!fs.existsSync(discoveryPath) && !fs.existsSync(lockPath), 'Clients must not resurrect the owner')
+    await rejectIsolatedStdio()
     await until(() => profileProcessIds().length === 0, 'All Chromium children using the isolated profile exit')
     verifyInstallFilesReleased()
   } catch (error) {
@@ -278,7 +321,7 @@ async function main() {
   } finally {
     await cleanup()
   }
-  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: ${expectedTools.length} tools; 2 clients / 1 owner; project + atlas apply/query + model error + workflow start/cancel; owner-first shutdown releases both bridges and Chromium children; maintenance prevents restart${bundled ? '' : '; executable and app.asar exclusive ReadWrite access (no bytes written)'}; isolated profile removed\n`)
+  process.stdout.write(`PASS ${bundled ? 'bundled' : 'packaged'} MCP ${version}: ${expectedTools.length} tools; 2 HTTP clients / 1 explicit fixture owner; project + atlas apply/query + model error + workflow start/cancel; explicit owner shutdown releases storage and Chromium children; production stdio refuses isolated profiles without startup${bundled ? '' : '; executable and app.asar exclusive ReadWrite access (no bytes written)'}; isolated profile removed\n`)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

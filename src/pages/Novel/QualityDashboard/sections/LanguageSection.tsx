@@ -87,7 +87,7 @@ function LanguageDriftPanel({
 }) {
   const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
   if (!hasAnyData) {
-    return <Empty description="先生成 AI 味分解，才能判断问题来源" />
+    return <Empty description="暂无文风分析" />
   }
   const cards = LANGUAGE_DRIFT_LABELS.map(({ key, label }) => ({ key, label, value: averages[key] }))
   const topRiskMetrics = novelSummary.topRiskMetrics.slice(0, 3)
@@ -491,7 +491,7 @@ function DialogueFingerprintPanel({
   voiceLockCandidates: QualityDashboardData['requiredDialogueVoiceLocks']
 }) {
   if (stats.eligibleCharacterCount === 0) {
-    return <Empty description="对白样本还不够，继续累积章节后再比对" />
+    return <Empty description="对白样本不足" />
   }
 
   return (

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../database/db', () => ({
@@ -146,7 +147,7 @@ describe('summary-decay.service', () => {
   it('falls back to deterministic recompression when semantic model request fails', async () => {
     const rows = createRows('')
     vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
-    vi.mocked(runChatTask).mockRejectedValue(new Error('模型超时'))
+    vi.mocked(runChatTask).mockRejectedValue(new Error(formatUserFacingMessage('services.test.modelTimeout')))
 
     const report = await refreshSummaryHealthSemantic(8)
     const chapter = rows.get(chapters)?.[0]

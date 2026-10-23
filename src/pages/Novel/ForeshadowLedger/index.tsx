@@ -490,7 +490,7 @@ function ForeshadowLedgerWorkspace({ novelId }: Props) {
           showIcon
           type="info"
           message="当前尚未建立章节"
-          description="你仍可先建伏笔草稿，但建议先在结构规划里建立章节，便于绑定埋设位置和目标回收章位。"
+
         />
       ) : null}
 

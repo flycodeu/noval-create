@@ -6,6 +6,20 @@ import { ContentDocument, DocumentEditor } from './ContentDocument'
 import { documentReferenceLabel, documentReferenceOptions, loadDocumentNames } from './document-references'
 
 describe('author document edits', () => {
+  it('labels the workflow score and pass only within process reports, including nested and JSON reports', () => {
+    const report = { schemaVersion: 'generic-asset-review-v1', score: 100, status: 'passed' }
+    for (const value of [report, JSON.stringify(report), { review: report }]) {
+      const html = renderToStaticMarkup(React.createElement(ContentDocument, { value }))
+      expect(html).toContain('流程检查分')
+      expect(html).toContain('流程检查通过')
+      expect(html).not.toContain('>评分<')
+      expect(html).not.toContain('>通过<')
+    }
+    const unrelated = renderToStaticMarkup(React.createElement(ContentDocument, { value: { score: 80, status: 'passed', content: '评分与通过仍是正文原话。' } }))
+    expect(unrelated).toContain('>评分<')
+    expect(unrelated).toContain('>通过<')
+    expect(unrelated).toContain('评分与通过仍是正文原话。')
+  })
   it('clears known fields while retaining unexposed extension data at each level', () => {
     expect(mergeCanonicalDocument({ rules: { known: 'old', extension: 'keep' }, custom: [1] }, { rules: { known: 'old' } }, { rules: {} })).toEqual({ rules: { extension: 'keep' }, custom: [1] })
   })

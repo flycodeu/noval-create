@@ -1,11 +1,13 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select, Skeleton, Space, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import type { ModelConfig, Novel } from '../../types'
+import type { Novel } from '../../types'
 import { useNovelStore } from '../../stores/novel.store'
 import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
+import { getUserFacingMessage } from '../../utils/user-facing-message'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
 import './index.css'
 import InspirationWizard from './InspirationWizard'
@@ -35,8 +37,10 @@ export default function NovelList() {
   const [saving, setSaving] = useState(false)
   const [inspiration, setInspiration] = useState<{ initial: InspirationInitial; resume: boolean } | null>(null)
   const [savedIdea, setSavedIdea] = useState(() => Boolean(readInspirationDraft()))
-  const [models, setModels] = useState<ModelConfig[]>([])
-  const [modelError, setModelError] = useState('')
+  const readModels = useCallback(async () => creating ? window.electron.model.list() : [], [creating])
+  const { data: modelRows, loading: modelsLoading, error: modelLoadError, reload: reloadModels } = useAsyncSnapshot(readModels)
+  const models = modelRows ?? []
+  const modelError = modelLoadError ? (modelLoadError instanceof Error ? modelLoadError.message : '读取模型失败') : ''
   const [form] = Form.useForm<NewBook>()
   const createInFlight = useRef(false)
   const loadVersion = useRef(0)
@@ -47,12 +51,6 @@ export default function NovelList() {
       .finally(() => { if (version === loadVersion.current) setLoading(false) })
   }, [setNovels])
   useEffect(() => { void load(); return () => { loadVersion.current += 1 } }, [load])
-  useEffect(() => {
-    if (!creating) return
-    let current = true
-    void window.electron.model.list().then(rows => { if (current) { setModels(rows); setModelError('') } }).catch(cause => { if (current) setModelError(cause instanceof Error ? cause.message : '读取模型失败') })
-    return () => { current = false }
-  }, [creating])
   const create = async () => {
     if (createInFlight.current) return
     createInFlight.current = true
@@ -68,17 +66,20 @@ export default function NovelList() {
       setCreating(false); form.resetFields()
       navigate(buildWorkspaceRoute(id, 'guide'))
     } catch (cause) {
-      if (!(typeof cause === 'object' && cause !== null && 'errorFields' in cause)) message.error(cause instanceof Error ? cause.message : '创建作品失败')
+      if (!(typeof cause === 'object' && cause !== null && 'errorFields' in cause)) message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.createFailed'))
     } finally { createInFlight.current = false; setSaving(false) }
   }
-  const remove = (novel: Novel) => Modal.confirm({ title: `删除《${novel.title}》？`, content: '章节、人物、地图及历史版本都会删除，无法恢复。', okText: '删除作品', okButtonProps: { danger: true }, cancelText: '取消', onOk: async () => { await window.electron.novel.delete(novel.id); await load() } })
+  const remove = (novel: Novel) => Modal.confirm({ title: `删除《${novel.title}》？`, content: '章节、人物、地图及历史版本都会删除，无法恢复。', okText: '删除作品', okButtonProps: { danger: true }, cancelText: '取消', onOk: async () => {
+    try { await window.electron.novel.delete(novel.id); await load() }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.deleteFailed')); throw cause }
+  } })
   const updateStatus = async (id: number, next: Novel['status']) => {
     try { await window.electron.novel.update(id, { status: next }); await load() }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '保存状态失败') }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.statusSaveFailed')) }
   }
   const exportBook = async (id: number, format: string) => {
-    try { const destination = await window.electron.novel.export(id, format); if (destination) message.success(`已导出到 ${destination}`) }
-    catch (cause) { message.error(cause instanceof Error ? cause.message : '导出失败') }
+    try { const destination = await window.electron.novel.export(id, format); if (destination) message.success(getUserFacingMessage('novel.exportedTo', { path: destination })) }
+    catch (cause) { message.error(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.exportFailed')) }
   }
   const filtered = novels.filter(novel => (status === 'all' || novel.status === status) && `${novel.title} ${novel.synopsis || ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).sort((a, b) => {
     if (sort === 'title') return a.title.localeCompare(b.title, 'zh-CN')
@@ -95,14 +96,14 @@ export default function NovelList() {
     </div>
     {error && <Alert type="error" message={error} action={<Button onClick={() => void load()}>重试</Button>} />}
     {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : !filtered.length ? <Empty description={novels.length ? '没有匹配的作品。' : '给你的第一个故事留一个位置。'}>{!novels.length && <Button onClick={() => setCreating(true)}>新建小说</Button>}</Empty> : <div className="novel-list-page__grid">{filtered.map(novel => <ProjectCard key={novel.id} novel={novel} onOpen={() => navigate(buildWorkspaceRoute(novel.id, 'guide'))} onDelete={() => remove(novel)} onExport={format => void exportBook(novel.id, format)} onStatusChange={next => void updateStatus(novel.id, next)} />)}</div>}
-    <Modal title="开始一部小说" open={creating} onCancel={() => { if (!saving) setCreating(false) }} onOk={() => void create().catch(() => undefined)} okText="创建并进入创作台" cancelText="取消" confirmLoading={saving} closable={!saving} maskClosable={!saving} width={720}>
-      <Space wrap style={{ marginBottom: 16 }}><Button disabled={saving} onClick={() => { setInspiration({ initial: form.getFieldsValue(), resume: false }); setCreating(false) }}>{savedIdea ? "从当前输入开始新构思" : "先讨论方向"}</Button>{savedIdea && <Button disabled={saving} onClick={() => { setInspiration({ initial: {}, resume: true }); setCreating(false) }}>继续上次构思</Button>}</Space><Form form={form} layout="vertical" className="novel-create-form">
+    <Modal title="开始一部小说" open={creating} onCancel={() => { if (!createInFlight.current) setCreating(false) }} onOk={() => void create().catch(() => undefined)} okText="创建并进入创作台" cancelText="取消" confirmLoading={saving} cancelButtonProps={{ disabled: saving }} keyboard={!saving} closable={!saving} maskClosable={!saving} width="min(720px, calc(100vw - 32px))">
+      <Space wrap style={{ marginBottom: 16 }}><Button disabled={saving} onClick={() => { setInspiration({ initial: form.getFieldsValue(), resume: false }); setCreating(false) }}>{savedIdea ? "从当前输入开始新构思" : "先讨论方向"}</Button>{savedIdea && <Button disabled={saving} onClick={() => { setInspiration({ initial: {}, resume: true }); setCreating(false) }}>继续上次构思</Button>}</Space><Form form={form} layout="vertical" disabled={saving} className="novel-create-form">
         <Form.Item name="title" label="书名" rules={[{ required: true, whitespace: true, message: '先给作品一个名字，之后可以修改。' }]}><Input maxLength={100} placeholder="可以先用暂定名" /></Form.Item>
-        <Form.Item name="userBackground" label="故事起点" extra="填写已经确定的时代、人物处境或已有故事；其余内容可以在创作台逐步生成。"><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} placeholder="故事发生在哪里？主角目前面临什么？也可以暂时留空。" /></Form.Item>
+        <Form.Item name="userBackground" label="故事起点" ><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} placeholder="故事发生在哪里？主角目前面临什么？也可以暂时留空。" /></Form.Item>
         <Form.Item name="constraints" label="创作要求与限制"><Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="例如：主角是普通人；不改已有关系；第三人称限知。" /></Form.Item>
         <div className="novel-create-pair"><Form.Item name="genreId" label="题材"><Select allowClear placeholder="暂不指定" options={GENRES.map((label, index) => ({ value: index + 1, label }))} /></Form.Item><Form.Item name="targetWords" label="预计总字数（可选）"><InputNumber min={1000} max={10000000} step={10000} placeholder="仅作为规划参考" style={{ width: '100%' }} /></Form.Item></div>
-        <Form.Item name="modelConfigId" label="创作模型"><Select allowClear placeholder={models.find(model => model.isDefault)?.name ? `跟随默认：${models.find(model => model.isDefault)?.name}` : '稍后配置模型也可以创建'} options={models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></Form.Item>
-        {modelError && <Alert type="warning" message={modelError} />}
+        <Form.Item name="modelConfigId" label="创作模型"><Select allowClear loading={modelsLoading} disabled={modelsLoading || saving} placeholder={modelsLoading ? '正在读取模型…' : models.find(model => model.isDefault)?.name ? `跟随默认：${models.find(model => model.isDefault)?.name}` : '稍后配置模型也可以创建'} options={models.map(model => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))} /></Form.Item>
+        {modelError && <Alert type="warning" message={modelError} action={<Button disabled={saving} onClick={() => void reloadModels()}>重试</Button>} />}
       </Form>
     </Modal>
     {inspiration && <InspirationWizard initial={inspiration.initial} resume={inspiration.resume} onClose={() => { setInspiration(null); setSavedIdea(Boolean(readInspirationDraft())); setCreating(true) }} onCreated={id => { setInspiration(null); setSavedIdea(false); form.resetFields(); navigate(buildWorkspaceRoute(id, "guide")) }} />}

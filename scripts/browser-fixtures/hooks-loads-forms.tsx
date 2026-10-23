@@ -195,14 +195,16 @@ async function importedDraftTests(root: Root) {
 async function modelDraftTests(root: Root) {
   const settings = deferred<any>()
   const savedSettings = { provider: 'auto', tavilyApiKeySet: false, braveApiKeySet: false }
-  Object.assign(window, { electron: { model: { list: async () => [] }, sourceSearch: { getSettings: () => settings.promise } } })
+  let reads = 0
+  Object.assign(window, { electron: { model: { list: async () => [] }, zhuque: { getSettings: async () => ({ enabled: false, autoDetect: false, apiKeySet: false }) }, sourceSearch: { getSettings: () => ++reads === 1 ? Promise.resolve(savedSettings) : settings.promise } } })
   await act(async () => root.render(<ModelManager />))
-  // Open the independent search-key editor before the initial settings IPC settles.
-  const sourceButton = button('搜索API')
+  // Refresh settings while an independent search-key draft is open.
+  const sourceButton = button('联网搜索配置')
   check(sourceButton, 'source search configuration is visible')
   await click(sourceButton)
   const input = document.querySelector<HTMLInputElement>('input[id$="tavilyApiKey"]')
   await type(input, 'unsaved-fixture-key')
+  await click(button('刷新'))
   await act(async () => settings.resolve(savedSettings))
   check(input?.value === 'unsaved-fixture-key', 'late initial settings cannot replace an edited search key')
   await act(async () => root.render(null))

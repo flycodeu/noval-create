@@ -173,7 +173,7 @@ export function ChapterForeshadowWritebackCard({
         </div>
       </div>
       {chapterEntries.length <= 0 ? (
-        <div className="novel-copy-block">当前章节还没有回写伏笔。你可以先新增，或去账本页导入现有伏笔。</div>
+        <div className="novel-copy-block">暂无回写伏笔</div>
       ) : (
         <div className="novel-note-list">
           {chapterEntries.map((entry) => {

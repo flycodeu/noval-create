@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAssetQualityLoop } from './asset-quality.service'
+import { reviewGeneratedAsset, runAssetQualityLoop } from './asset-quality.service'
+import type { AssetReviewPromptInput, AssetRewritePromptInput } from './prompts'
 
-const mock = vi.hoisted(() => ({ chat: vi.fn(), reviewPrompt: vi.fn((input: { contextSummary: string }) => { void input; return 'review' }), rewritePrompt: vi.fn((input: { contextSummary: string }) => { void input; return 'rewrite' }) }))
+const mock = vi.hoisted(() => ({ chat: vi.fn(), reviewPrompt: vi.fn((input: AssetReviewPromptInput) => { void input; return 'review' }), rewritePrompt: vi.fn((input: AssetRewritePromptInput) => { void input; return 'rewrite' }) }))
 vi.mock('./task.service', () => ({ runChatTask: mock.chat }))
 vi.mock('./prompts', () => ({ assetReviewPrompt: mock.reviewPrompt, assetRewritePrompt: mock.rewritePrompt }))
 const base = { targetType: 'chapter' as const, novelId: 1, contextSummary: '已有事实', generatedOutput: '待审原文' }
@@ -28,6 +29,33 @@ describe('asset quality loop completion gate', () => {
   it('approves only a completed clean recheck', async () => {
     mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('修订稿').mockResolvedValueOnce(review())
     expect(await runAssetQualityLoop(base)).toMatchObject({ stage: 'rewritten', finalOutput: '修订稿', warnings: [] })
+  })
+  it('applies the same evidence and applicability criteria to direct chapter review and repaired prose', async () => {
+    mock.chat.mockResolvedValueOnce(review())
+    await reviewGeneratedAsset({ ...base, narrativePolicyVersion: 'legacy', reviewFocus: ['仅核对第二段及衔接。'] })
+    const direct = mock.reviewPrompt.mock.calls[0][0].reviewFocus || []
+    expect(direct).toEqual(expect.arrayContaining([
+      '仅核对第二段及衔接。',
+      expect.stringContaining('重大选择要符合当事人已知信息'),
+      expect.stringContaining('不要求每章都有损失、反转或新危险'),
+      expect.stringContaining('未核实不冒充通行事实'),
+      expect.stringContaining('引用候选连续原句'),
+      expect.stringContaining('不适用或依据不足明说'),
+    ]))
+    mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('修订稿').mockResolvedValueOnce(review())
+    await runAssetQualityLoop({ ...base, rewriteConstraints: ['只改第二段。'] })
+    expect(mock.reviewPrompt.mock.calls[2][0].reviewFocus).toEqual(expect.arrayContaining(direct.slice(1)))
+    expect(mock.rewritePrompt.mock.calls[0][0].rewriteConstraints).toEqual(expect.arrayContaining([
+      '只改第二段。', expect.stringContaining('不临时补造旧伤、动机或解围规则'),
+      expect.stringContaining('局部修订只处理选中范围'),
+    ]))
+  })
+  it.each(['outline', 'map'] as const)('limits story review criteria to the applicable %s target', async targetType => {
+    mock.chat.mockResolvedValueOnce(review())
+    await reviewGeneratedAsset({ ...base, targetType })
+    const focus = (mock.reviewPrompt.mock.calls[0][0].reviewFocus || []).join('\n')
+    expect(focus.includes('重大选择要符合当事人已知信息')).toBe(targetType === 'outline')
+    expect(focus.includes('配角按自己的生计')).toBe(targetType === 'outline')
   })
   it('uses the selected reviewer for review and recheck, and the writer for repair', async () => {
     mock.chat.mockResolvedValueOnce(review(true)).mockResolvedValueOnce('修订稿').mockResolvedValueOnce(review())

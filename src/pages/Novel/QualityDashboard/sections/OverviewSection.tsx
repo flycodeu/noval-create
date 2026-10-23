@@ -87,11 +87,9 @@ export default function OverviewSection({
       <WorkspacePanel title="正文质量待评估">
         <div className="quality-dashboard-page__stack">
           <div className="quality-dashboard-page__body-copy">
-            当前没有已分析章节，无法判断 AI 味、节奏、连续性或全书健康。请先确认章节依据、保存正文并完成质量评估。
-          </div>
+            尚无正文分析</div>
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
-            已有设定和章节草案中的风险仍可在“重点风险”查看；这些风险不代表成稿质量。
-          </div>
+            当前风险来自设定与草案</div>
         </div>
       </WorkspacePanel>
     )
@@ -204,7 +202,7 @@ export default function OverviewSection({
             <div className="quality-dashboard-page__note-list">
               {data.repairActionSummary.topPriorityActions.length > 0
                 ? data.repairActionSummary.topPriorityActions.map((item) => <div key={item}>{item}</div>)
-                : <div>当前总灯允许继续推进，先盯住新增章节和最新批次即可。</div>}
+                : <div>当前可继续推进</div>}
             </div>
           </div>
         </div>
@@ -357,7 +355,7 @@ export default function OverviewSection({
                       format={() => entry.overallScore.toFixed(1)}
                     />
                     <Tag color={entry.aiLikeRate > 50 ? 'red' : entry.aiLikeRate > 30 ? 'orange' : 'green'}>
-                      AI 味 {entry.aiLikeRate}%
+                      文风风险（站内）{entry.aiLikeRate} 分
                     </Tag>
                     {entry.weakDimensions.length > 0 ? (
                       <Tag color="warning">{`薄弱：${entry.weakDimensions.join('、')}`}</Tag>
@@ -398,7 +396,7 @@ function AgentQualityObservabilityPanel({
   snapshot: NonNullable<QualityDashboardData['agentQualityObservability']>
 }) {
   if (snapshot.summary.artifactCount === 0) {
-    return <Empty description="还没有智能体质量工件；运行一次质量评审或修复流程后，这里会显示完整证据链。" />
+    return <Empty description="暂无质量评审记录" />
   }
 
   return (
@@ -580,9 +578,7 @@ function NovelHealthOverviewPanel({
     .map((volume) => volume.volumeId))
   return (
     <div className="quality-dashboard-page__stack">
-      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
-        质量面板会优先展示章节级召回快照：先读真实运行快照，其次读旧任务兼容快照；老章节若无历史任务快照，会先回填当前状态快照，并显式标记来源。只有结构化快照完全缺失时才回退到启发式诊断。
-      </div>
+
       <div className="quality-dashboard-page__metric-grid-180">
         <div className="quality-dashboard-page__stat-card">
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">正文健康分</div>
@@ -747,8 +743,8 @@ function VolumeHealthPanel({
                 <div className="quality-dashboard-page__medium-number">{volume.analyzedChapterCount > 0 ? volume.averageOverallScore : '—'}</div>
               </div>
               <div className="quality-dashboard-page__ghost-card">
-                <div className="quality-dashboard-page__body-copy--soft-strong">平均 AI 味</div>
-                <div className="quality-dashboard-page__medium-number">{volume.analyzedChapterCount > 0 ? `${volume.averageAiLikeRate}%` : '—'}</div>
+                <div className="quality-dashboard-page__body-copy--soft-strong">平均文风风险（站内）</div>
+                <div className="quality-dashboard-page__medium-number">{volume.analyzedChapterCount > 0 ? `${volume.averageAiLikeRate} 分` : '—'}</div>
               </div>
             </div>
 
@@ -788,7 +784,7 @@ function VolumeHealthPanel({
                   repairingActionId={repairingActionId}
                   compact
                 />
-              )) : <div className="quality-dashboard-page__body-copy">该卷暂未暴露高优先风险，适合继续写作或做局部修订。</div>}
+              )) : <div className="quality-dashboard-page__body-copy">未发现高优先风险</div>}
             </div>
           </div>
         )
@@ -904,7 +900,7 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
     <div className="quality-dashboard-page__chart-scroll">
       <div className="quality-dashboard-page__chart-legend">
         <span className="quality-dashboard-page__chart-legend-item"><span className="quality-dashboard-page__chart-legend-swatch" style={{ background: '#52c41a' }} />总分 (0-10)</span>
-        <span className="quality-dashboard-page__chart-legend-item"><span className="quality-dashboard-page__chart-legend-swatch" style={{ background: '#f5222d' }} />AI 味率 (0-100%)</span>
+        <span className="quality-dashboard-page__chart-legend-item"><span className="quality-dashboard-page__chart-legend-swatch" style={{ background: '#f5222d' }} />文风风险（站内，0-100 分）</span>
       </div>
       <svg width={chartWidth} height={chartHeight + 20} className="quality-dashboard-page__chart-svg">
         <path d={overallPath} fill="none" stroke="#52c41a" strokeWidth={2} />
@@ -1124,9 +1120,7 @@ function LongformSoakAcceptancePanel({ novelId, data }: { novelId: number; data:
           {runtime ? `召回降级 ${runtime.recallDegradedChapterCount}` : `召回降级 ${data.continuityHealth.recallDegradedChapterCount}`}
         </Tag>
       </div>
-      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
-        真实百万字稳定性需要用已生成项目导出报告再校验；这里把验收入口放进工作台，避免只依赖模拟单测判断生产稳定性。
-      </div>
+
       <div className="quality-dashboard-page__grid-280">
         <div className="quality-card">
           <div className="quality-dashboard-page__card-head">
@@ -1148,9 +1142,7 @@ function LongformSoakAcceptancePanel({ novelId, data }: { novelId: number; data:
           <div className="quality-dashboard-page__command-block">
             <code className="quality-dashboard-page__command-text">{validateCommand}</code>
           </div>
-          <div className="quality-dashboard-page__role-meta">
-            验收脚本会检查空正文、上下文命中、重复度、门禁失败和召回退化。
-          </div>
+
         </div>
       </div>
       <div className="quality-dashboard-page__note-list">

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { foreshadowLedger } from '../database/schema'
@@ -15,7 +16,7 @@ const fieldLabels = { title: '标题', detail: '内容', status: '状态', sourc
 
 function normalizeSelection<T extends MergeSelection>(input: T) {
   const sourceIds = [...new Set(input.sourceIds)].sort((a, b) => a - b)
-  if (!Number.isSafeInteger(input.keepId) || input.keepId < 1 || !sourceIds.length || sourceIds.length > 20 || sourceIds.some(id => !Number.isSafeInteger(id) || id < 1 || id === input.keepId)) throw new AuthorLibraryError('请选择一个保留项和 1–20 个其他待合并项。')
+  if (!Number.isSafeInteger(input.keepId) || input.keepId < 1 || !sourceIds.length || sourceIds.length > 20 || sourceIds.some(id => !Number.isSafeInteger(id) || id < 1 || id === input.keepId)) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.invalidSelection'))
   return { ...input, sourceIds }
 }
 
@@ -27,8 +28,8 @@ function collectReferences(novelId: number, sources: Set<number>, keepId: number
     for (const row of rows) for (const field of fields) {
       if (row[field] === null || row[field] === '') continue
       let values: unknown
-      try { values = JSON.parse(String(row[field])) } catch { throw new AuthorLibraryError(`合同 #${row.id} 的引用格式损坏，请先更正后合并。`) }
-      if (!Array.isArray(values)) throw new AuthorLibraryError(`合同 #${row.id} 的引用不是数组，请先更正后合并。`)
+      try { values = JSON.parse(String(row[field])) } catch { throw new AuthorLibraryError(formatUserFacingMessage('author.merge.invalidReferenceJson', { id: row.id })) }
+      if (!Array.isArray(values)) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.invalidReferenceArray', { id: row.id }))
       const mapped = remapForeshadowReferences(values, sources, keepId, field === 'required_asset_refs_json')
       if (JSON.stringify(mapped) !== JSON.stringify(values)) result.push({ table, id: Number(row.id), chapterId: Number(row.chapter_id), field, before: String(row[field]), after: JSON.stringify(mapped) })
     }
@@ -45,11 +46,11 @@ function collectReferences(novelId: number, sources: Set<number>, keepId: number
 
 export function previewClueMerge(selection: MergeSelection): ClueMergePreview {
   const input = normalizeSelection(selection), novel = getNovel(input.novelId)
-  if (!novel) throw new AuthorLibraryError('作品不存在。')
+  if (!novel) throw new AuthorLibraryError(formatUserFacingMessage('author.project.notFound'))
   const rows = getDb().select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, input.novelId)).all()
   const keep = rows.find(row => row.id === input.keepId), sources = input.sourceIds.map(id => rows.find(row => row.id === id))
-  if (!keep || sources.some(row => !row)) throw new AuthorLibraryError('线索不属于当前作品。')
-  if (keep.mergedIntoId || sources.some(row => row?.mergedIntoId)) throw new AuthorLibraryError('选择中包含已合并的历史项，请刷新账本后使用当前保留项。')
+  if (!keep || sources.some(row => !row)) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.wrongProject'))
+  if (keep.mergedIntoId || sources.some(row => row?.mergedIntoId)) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.historySelected'))
   const sourceRows = sources.filter((row): row is NonNullable<typeof row> => Boolean(row))
   const blockers: string[] = [], inheritedLinks: Record<string, number | null> = {}
   for (const field of linkFields) {
@@ -66,17 +67,17 @@ export function previewClueMerge(selection: MergeSelection): ClueMergePreview {
 
 export function mergeAuthorClues(raw: MergeInput) {
   const input = { ...normalizeSelection(raw), reason: raw.reason.trim() }
-  if (!input.reason || input.reason.length > 1200) throw new AuthorLibraryError('请填写合并依据，不超过 1200 字。')
+  if (!input.reason || input.reason.length > 1200) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.invalidReason'))
   const sql = getSqlite(), inputHash = hashArtifactContent(input)
   return sql.transaction(() => {
     const prior = sql.prepare("SELECT merge_info_json FROM foreshadow_ledger WHERE novel_id=? AND json_valid(merge_info_json) AND json_extract(merge_info_json,'$.idempotencyKey')=? LIMIT 1").get(input.novelId, input.idempotencyKey) as { merge_info_json: string } | undefined
     if (prior) {
       const record = JSON.parse(prior.merge_info_json)
-      if (record.inputHash !== inputHash) throw new AuthorLibraryError('本次合并编号已用于其他内容。')
+      if (record.inputHash !== inputHash) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.idempotencyConflict'))
       return { keepId: record.keepId as number, idempotentReplay: true }
     }
     const preview = previewClueMerge(input)
-    if (preview.contextVersion !== input.expectedContextVersion || preview.fingerprint !== input.previewFingerprint) throw new AuthorLibraryError('账本或引用已变化，请重新预览；尚未修改任何线索。')
+    if (preview.contextVersion !== input.expectedContextVersion || preview.fingerprint !== input.previewFingerprint) throw new AuthorLibraryError(formatUserFacingMessage('author.merge.stalePreview'))
     if (preview.blockers.length) throw new AuthorLibraryError(preview.blockers.join('；'))
     const timestamp = new Date().toISOString()
     const record = { inputHash, idempotencyKey: input.idempotencyKey, keepId: input.keepId, sourceIds: input.sourceIds, reason: input.reason, mergedAt: timestamp, keepBefore: preview.keep, sourcesBefore: preview.sources, references: preview.references }

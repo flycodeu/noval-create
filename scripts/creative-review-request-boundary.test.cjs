@@ -4,6 +4,7 @@ const path = require('node:path')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(root, '.tmp-tests', 'review-request-boundary-'))
 app.setPath('userData', temp)
@@ -50,7 +51,7 @@ async function main() {
   } finally {
     closeDb()
     if (!path.resolve(temp).startsWith(path.resolve(root, '.tmp-tests') + path.sep)) throw new Error('unsafe cleanup')
-    fs.rmSync(temp, { recursive: true, force: true })
+    cleanupElectronFixture(temp, 'creative-review-request-boundary')
   }
 }
 main().then(() => app.exit(0), error => { console.error(error); app.exit(1) })

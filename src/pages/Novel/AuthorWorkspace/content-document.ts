@@ -32,6 +32,7 @@ export function mergeCanonicalDocument(original: unknown, previous: unknown, nex
 }
 
 export const CONTENT_LABELS: Record<string, string> = {
+  modelOriginNote: '审校模型来源',
   paragraphs: '修订段落', index: '段落序号', text: '段落内容',
   stage: '资料类别', atChapter: '复核章位', snapshot: '本次评审的正式资料', failureStage: '未通过的环节', contractValidation: '结构校验', initialIssues: '首次结构问题', finalIssues: '修订后仍存在的结构问题', initialModelReviewSkipped: '初次模型审校未执行',
   volumeId: '所属卷', partId: '所属单元', targetWords: '目标字数', humanLanguageRepairs: '表达修改建议', languageRisks: '语言风险', rejectRequired: '需要退回', rewriteRequired: '需要修订', severity: '严重程度', topFixes: '优先修改建议',
@@ -91,6 +92,7 @@ export const DOCUMENT_OPTIONS: Record<string, Record<string, string>> = {
 }
 const DOCUMENT_VALUE_LABELS: Record<string, Record<string, string>> = {
   ...DOCUMENT_OPTIONS,
+  processReviewStatus: { passed: '流程检查通过', needs_revision: '流程检查需复核', blocked: '流程检查未通过' },
   stage: { ...CREATIVE_STAGE_LABELS, accepted: '已通过', rewritten: '已定向修订', rejected: '未通过' },
   failureStage: { contract: '结构校验', review: '模型审校请求', rewrite: '模型修订请求', recheck: '修订后复检' },
   severity: { low: '低', medium: '中', high: '高' },

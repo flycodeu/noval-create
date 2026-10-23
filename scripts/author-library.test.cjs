@@ -50,7 +50,7 @@ async function main() {
   const version = id => novels.getNovel(id).contextVersion
   const draft = { category: 'narrative', title: '抵押与承诺', content: '工具抵押使承诺产生可见成本。', interpretation: '信任也需要承担后果。', novelConnection: '本作私有转化不应发布。' }
   try {
-    const entry = research.upsertCreativeResearch(a, [draft])[0]
+    const entry = research.upsertAuthorCreativeResearch(a, [draft])[0]
     const provenance = { artifactId: 'source-artifact', candidateId: 'one', sourceHash: 'source-hash', sourceLabel: '测试段落', start: 0, end: 4, quote: '船工抵押' }
     const novel = novels.getNovel(a)
     const rows = JSON.parse(novel.sourceLedgerJson); rows[0].provenance = provenance
@@ -64,14 +64,14 @@ async function main() {
     const adopt = card => call('research.reference', { novelId: b, cardId: card.id, expectedRevision: card.revision, expectedContextVersion: version(b), novelConnection: '第二部的原创转化。' })
     const first = (await adopt(published)).entry
     await adopt(published)
-    assert.equal(research.listCreativeResearch(b).length, 1)
-    research.upsertCreativeResearch(b, [{ ...first, novelConnection: '作者在第二部中独立调整。' }])
+    assert.equal(research.listAuthorCreativeResearch(b).length, 1)
+    research.upsertAuthorCreativeResearch(b, [{ ...first, novelConnection: '作者在第二部中独立调整。' }])
     const next = personal.updatePersonalResearch(published.id, 1, { ...published.content, content: '新版通用内容。' }, false)
-    assert.equal(research.getCreativeResearch(b, first.sourceKey).content, draft.content)
+    assert.equal(research.getAuthorCreativeResearch(b, first.sourceKey).content, draft.content)
     assert.equal(personal.publishPersonalResearch(a, entry.sourceKey).revision, 2, 'repeat publish cannot overwrite')
     assert.throws(() => personal.updatePersonalResearch(published.id, 1, published.content, false), /新版/)
     await adopt(next)
-    const updated = research.getCreativeResearch(b, first.sourceKey)
+    const updated = research.getAuthorCreativeResearch(b, first.sourceKey)
     assert.equal(updated.content, '新版通用内容。')
     assert.equal(updated.novelConnection, '作者在第二部中独立调整。')
     const staleVersion = version(b)
@@ -82,7 +82,7 @@ async function main() {
     assert.equal(personal.listPersonalResearch().length, 0)
     assert.equal(personal.listPersonalResearch('', true).length, 1)
     await assert.rejects(() => adopt(archived), /归档/)
-    assert.deepEqual(research.getCreativeResearch(b, first.sourceKey).provenance, provenance)
+    assert.deepEqual(research.getAuthorCreativeResearch(b, first.sourceKey).provenance, provenance)
 
     const atlasInput = changes => ({ novelId: b, expectedContextVersion: version(b), effectiveFromChapter: 0, idempotencyKey: randomUUID(), source: { kind: 'fixture' }, changes })
     const made = atlas.applyStoryAtlasChanges(atlasInput([{ op: 'upsert_entity', clientId: 'hero', kind: 'character', name: '陆闻', attributes: { origin: '渡口', abilityLimits: '不能隔墙识物' } }]))

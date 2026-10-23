@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { parseStyleSettings, readStyleApproval, styleSourceDigest, styleSourceInvalidReason, type ApprovedStyleSample } from '../../src/shared/style-source'
 import { qualityIssueArtifactHash } from '../../src/shared/quality-issue'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
@@ -312,7 +313,7 @@ export async function createStyleFingerprint(
   options: { sourceType?: 'pasted' | 'chapters' | 'genre-default'; sourceChapterIds?: number[]; genreId?: number } = {},
 ): Promise<number> {
   const fingerprint = await analyzeReferenceText(text, modelConfigId)
-  if (![fingerprint.narrativeTechniques, fingerprint.dialogueStyle, fingerprint.paceProfile].some(value => typeof value === 'string' && value.trim())) throw new AuthorLibraryError('文风分析没有返回有效特征，请重试；未创建样稿记录。')
+  if (![fingerprint.narrativeTechniques, fingerprint.dialogueStyle, fingerprint.paceProfile].some(value => typeof value === 'string' && value.trim())) throw new AuthorLibraryError(formatUserFacingMessage('author.style.invalidAnalysis'))
   fingerprint.exampleExcerpts = fingerprint.exampleExcerpts.filter(excerpt => text.includes(excerpt))
   const stats = computeStyleStats(text)
   const db = getDb()
@@ -399,7 +400,7 @@ export function setActiveStyleFingerprint(novelId: number, fingerprintId: number
       const ids = sourceChapterDigests(record, novelId).map(item => item.chapterId)
       const text = db.select().from(chapters).where(and(eq(chapters.novelId, novelId), inArray(chapters.id, ids))).all()
         .sort((left, right) => left.chapterNum - right.chapterNum).map(row => row.content || '').join('\n\n').slice(0, 48000)
-      if (text !== record.sourceText) throw new AuthorLibraryError('来源章节已变化，请重新分析后认可，不能认可旧样稿。')
+      if (text !== record.sourceText) throw new AuthorLibraryError(formatUserFacingMessage('author.style.sourceChanged'))
     }
     const settings = parseStyleSettings(novel.settingsJson)
     settings.styleSourceApproval = { version: 1, status: record ? 'approved' : 'revoked',

@@ -29,6 +29,7 @@
 import type { AssetReviewTarget } from '../../src/types'
 import { getBuiltinGenreRules } from '../../src/shared/genre-system'
 import { applyPromptOverride } from './prompt-override.service'
+import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
 
 export { GLOBAL_WRITING_RULES }
 
@@ -640,7 +641,7 @@ export function chapterWritingPrompt(params: ChapterWritingPromptParams): string
   const fallback = appendPromptSection(rawChapterWritingPrompt(params), '生产补充要求', [
     '- 正文必须像最终交付给读者的小说片段，不能露出提示词味和说明书味。',
   ])
-  return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
+  return applyPromptOverride('chapterWriting', `${fallback}\n\n${buildNarrativeDetailGuidance('writing')}`, params as unknown as Record<string, unknown>)
 }
 
 export function chapterSummaryPrompt(chapterContent: string): string {

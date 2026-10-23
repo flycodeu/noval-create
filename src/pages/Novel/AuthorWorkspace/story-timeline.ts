@@ -43,6 +43,10 @@ export function storyTimelineClock(raw: string | undefined, chapters: Chapter[])
 export interface StoryTimelineLink { entity: StoryAtlasEntity; planned: boolean; label: string }
 export interface StoryTimelineEntry {
   entity: StoryAtlasEntity
+  /** The saved atlas association can indicate when planning became available, not when it occurs. */
+  recordedChapterNum: number | null
+  planningKind: 'volume' | 'unit' | 'background' | 'other' | null
+  plannedVolume: number | null
   chapterNum: number | null
   chapter: Chapter | null
   state: StoryTimelineState
@@ -56,6 +60,27 @@ export interface StoryTimelineEntry {
   timeMode: string
   precision: string
   links: StoryTimelineLink[]
+}
+
+function authorPlanningKind(entity: StoryAtlasEntity): StoryTimelineEntry['planningKind'] {
+  const type = text(entity.attributes.eventType)
+  const explicitPlan = type === '叙事单元规划' || type === '短篇日常规划' || /^作者.*(?:规划|计划)$/u.test(type)
+  const planned = entity.status === 'planned' || ['planned', 'seeded'].includes(text(entity.attributes.status))
+  const authorOnly = entity.attributes.authorOnly === true || entity.attributes.doesNotRepresentReaderKnowledge === true
+  // Visibility is not occurrence state: a hidden or unrevealed event can already have happened.
+  if (!explicitPlan && !(authorOnly && planned)) return null
+  if (type.includes('卷级')) return 'volume'
+  if (type.includes('单元') || type === '短篇日常规划') return 'unit'
+  if (/历史|年龄|纪年|出生/.test(type)) return 'background'
+  return 'other'
+}
+
+function plannedVolume(entity: StoryAtlasEntity, kind: StoryTimelineEntry['planningKind']): number | null {
+  const explicit = nonnegativeInt(entity.attributes.plannedVolume) ?? nonnegativeInt(entity.attributes.volumeNumber)
+  if (explicit != null && explicit > 0) return explicit
+  // This is the volume explicitly named by a volume planning record, not an inferred occurrence chapter/date.
+  const named = kind === 'volume' ? /^第\s*(\d+)\s*卷/u.exec(entity.name) : null
+  return named && Number(named[1]) > 0 ? Number(named[1]) : null
 }
 
 /** Only complete, validated Gregorian dates have a common sortable calendar basis. */
@@ -116,10 +141,12 @@ function eventLinks(entity: StoryAtlasEntity, snapshot: StoryAtlasSnapshot): Sto
 
 export function buildStoryTimelineEntries(snapshot: StoryAtlasSnapshot, chapters: Chapter[]): StoryTimelineEntry[] {
   return snapshot.entities.filter(entity => entity.kind === 'event').map(entity => {
-    const chapterNum = chapterAnchor(entity, chapters)
+    const recordedChapterNum = chapterAnchor(entity, chapters)
+    const planningKind = authorPlanningKind(entity)
+    const chapterNum = planningKind ? null : recordedChapterNum
     const chapter = chapters.find(item => item.chapterNum === chapterNum) || null
     const status = text(entity.attributes.status)
-    const isPlanned = entity.status === 'planned' || ['planned', 'seeded'].includes(status)
+    const isPlanned = Boolean(planningKind) || entity.status === 'planned' || ['planned', 'seeded'].includes(status)
     // Confirmed facts anchored to unwritten chapters are still future plans from the reader's position.
     const state: StoryTimelineState = isPlanned || chapterNum != null && chapterNum > 0 && (!chapter || !chapterHasProse(chapter)) ? 'planned'
       : chapter && chapterHasProse(chapter) || ['written', 'resolved'].includes(status) ? 'occurred' : 'unplaced'
@@ -128,7 +155,7 @@ export function buildStoryTimelineEntries(snapshot: StoryAtlasSnapshot, chapters
     const hasRelativeDay = typeof relativeDay === 'number' && Number.isFinite(relativeDay)
     const timeMode = text(entity.attributes.timeMode)
     const date = !hasRelativeDay && ['gregorian', 'modern-date', 'future-date'].includes(timeMode) ? calendarDate(timeLabel) : null
-    return { entity, chapterNum, chapter, state, timeLabel,
+    return { entity, chapterNum, recordedChapterNum, planningKind, plannedVolume: plannedVolume(entity, planningKind), chapter, state, timeLabel,
       timeSort: hasRelativeDay ? relativeDay : date?.sort ?? null,
       timeBasis: hasRelativeDay ? 'relative' : date ? 'date' : null,
       sequenceInDay: hasRelativeDay ? nonnegativeInt(entity.attributes.sequenceInDay) : date?.sequence ?? null,
@@ -138,7 +165,7 @@ export function buildStoryTimelineEntries(snapshot: StoryAtlasSnapshot, chapters
   })
 }
 
-export interface StoryTimelineGroup { key: string; title: string; chapter?: Chapter; entries: StoryTimelineEntry[] }
+export interface StoryTimelineGroup { key: string; title: string; chapter?: Chapter; planning?: boolean; entries: StoryTimelineEntry[] }
 function compareChapterEvents(a: StoryTimelineEntry, b: StoryTimelineEntry): number {
   const keys = (entry: StoryTimelineEntry) => [
     entry.chronologyOrder ?? Infinity,
@@ -151,7 +178,43 @@ function compareChapterEvents(a: StoryTimelineEntry, b: StoryTimelineEntry): num
   }
   return a.entity.id.localeCompare(b.entity.id)
 }
-export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Chapter[], mode: 'chapter' | 'time', showEmptyChapters = false): StoryTimelineGroup[] {
+function authorPlanningGroups(entries: StoryTimelineEntry[]): StoryTimelineGroup[] {
+  const kinds: Array<{ key: NonNullable<StoryTimelineEntry['planningKind']>; title: string }> = [
+    { key: 'volume', title: '卷级时间规划' }, { key: 'unit', title: '单元规划' },
+    { key: 'background', title: '背景与纪年规划' }, { key: 'other', title: '其他作者规划' },
+  ]
+  return kinds.flatMap(kind => {
+    const rows = entries.filter(entry => entry.planningKind === kind.key)
+    if (!rows.length) return []
+    rows.sort((a, b) => {
+      if (a.plannedVolume !== b.plannedVolume) return (a.plannedVolume ?? Infinity) - (b.plannedVolume ?? Infinity)
+      // Custom calendar years are comparable only when the records explicitly use the same era.
+      const leftEra = text(a.entity.attributes.calendarEra), rightEra = text(b.entity.attributes.calendarEra)
+      const leftYear = nonnegativeInt(a.entity.attributes.calendarYear), rightYear = nonnegativeInt(b.entity.attributes.calendarYear)
+      const leftHasCalendar = Boolean(leftEra && leftYear != null), rightHasCalendar = Boolean(rightEra && rightYear != null)
+      if (leftHasCalendar !== rightHasCalendar) return leftHasCalendar ? -1 : 1
+      if (leftHasCalendar && rightHasCalendar) {
+        // Different era names are archive groups, never a claim about which calendar came first.
+        if (leftEra !== rightEra) return leftEra.localeCompare(rightEra)
+        if (leftYear !== rightYear) return leftYear! - rightYear!
+      }
+      return compareChapterEvents(a, b)
+    })
+    return [{ key: `planning:${kind.key}`, title: kind.title, planning: true, entries: rows }]
+  })
+}
+
+export function storyTimelineMatchesSearch(entry: StoryTimelineEntry, keyword: string): boolean {
+  const strings = (value: unknown): string[] => typeof value === 'string' ? [value]
+    : Array.isArray(value) ? value.flatMap(strings) : value && typeof value === 'object' ? Object.values(value).flatMap(strings) : []
+  return [entry.entity.id, entry.entity.name, entry.entity.summary, entry.timeLabel, ...entry.links.map(link => link.entity.name),
+    ...strings(entry.entity.attributes)]
+    .join(' ').toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase())
+}
+
+export function storyTimelineGroups(allEntries: StoryTimelineEntry[], chapters: Chapter[], mode: 'chapter' | 'time', showEmptyChapters = false): StoryTimelineGroup[] {
+  const entries = allEntries.filter(entry => !entry.planningKind)
+  const planning = authorPlanningGroups(allEntries)
   if (mode === 'time') {
     // An evidenced sequence can include an uncertain night without assigning it a calendar day.
     const chronology = entries.filter(entry => entry.chronologyOrder != null).sort((a, b) => a.chronologyOrder! - b.chronologyOrder!)
@@ -166,7 +229,7 @@ export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Cha
     const basisOrder = (entry: StoryTimelineEntry) => entry.timeBasis === 'relative' ? 0 : entry.timeBasis === 'date' ? 1 : 2
     const datedGroups = [...groups.values()].sort((a, b) => basisOrder(a.entries[0]) - basisOrder(b.entries[0]) || (a.entries[0].timeSort ?? Infinity) - (b.entries[0].timeSort ?? Infinity))
       .map(group => ({ ...group, entries: group.entries.sort((a, b) => (a.sequenceInDay ?? 0) - (b.sequenceInDay ?? 0)) }))
-    return [...(chronology.length ? [{ key: 'chronology', title: '已知事件先后', entries: chronology }] : []), ...datedGroups]
+    return [...(chronology.length ? [{ key: 'chronology', title: '已知事件先后', entries: chronology }] : []), ...datedGroups, ...planning]
   }
   const byChapter = new Map<number | null, StoryTimelineEntry[]>()
   if (showEmptyChapters) for (const chapter of chapters) byChapter.set(chapter.chapterNum, [])
@@ -174,10 +237,10 @@ export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Cha
     if (!byChapter.has(entry.chapterNum)) byChapter.set(entry.chapterNum, [])
     byChapter.get(entry.chapterNum)!.push(entry)
   }
-  return [...byChapter.entries()].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity)).map(([number, events]) => {
+  return [...byChapter.entries()].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity)).map<StoryTimelineGroup>(([number, events]) => {
     const chapter = chapters.find(item => item.chapterNum === number)
     return { key: number == null ? 'unplaced' : `chapter:${number}`, title: number == null ? '章节待定位' : number === 0 ? '背景事件' : `第 ${number} 章${chapter?.title ? ` · ${chapter.title}` : ''}`, chapter, entries: events.sort(compareChapterEvents) }
-  })
+  }).concat(planning)
 }
 
 export function timelineEntityRoute(entity: StoryAtlasEntity): string {

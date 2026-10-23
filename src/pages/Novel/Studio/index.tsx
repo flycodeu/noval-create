@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
@@ -34,7 +35,7 @@ import {
   WorkspacePage,
 } from '../components/WorkspaceShell'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../workflow'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getStudioNextStep, getRecentStudioChapter, getStudioSceneLabel } from './studio-next-step'
 import { isExternalImportedDraft } from './imported-drafts'
 import './index.css'
@@ -100,7 +101,7 @@ function StudioWorkspace({ novelId }: Props) {
     })
     if (!result.ok) throw new Error(result.error.message)
     const artifact = (result.data as { artifact: ImportedDraft }).artifact
-    if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error('草稿不属于当前作品或不是外部导入')
+    if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error(formatUserFacingMessage('workspace.import.wrongNovelOrSource'))
     return artifact
   }, [importDrawerOpen, importedId, novelId])
   const { data: selectedImportedDraft, loading: importDetailLoading, error: importDetailError, reload: reloadImportedDraft } = useAsyncSnapshot(readImportedDraft)
@@ -517,8 +518,8 @@ function StudioWorkspace({ novelId }: Props) {
                   <div className="studio-page__imported-actions">
                     <Button icon={<CopyOutlined />} onClick={() => {
                       void (navigator.clipboard?.writeText(selectedImportedDraft.content.output) || Promise.reject(new Error('Clipboard unavailable')))
-                        .then(() => message.success('已复制草稿全文'))
-                        .catch(() => message.error('复制失败，请手动选中正文复制'))
+                        .then(() => message.success(getUserFacingMessage('workspace.import.draftCopied')))
+                        .catch(() => message.error(getUserFacingMessage('workspace.import.copyFailed')))
                     }}>复制全文</Button>
                     {selectedImportedDraft.content.assetType === 'project_brief' && selectedImportedDraft.content.outputFormat === 'json' ? (
                       <Button type="primary" disabled={importedDraftStale} onClick={() => {

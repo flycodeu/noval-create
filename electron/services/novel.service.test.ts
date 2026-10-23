@@ -18,6 +18,7 @@ vi.mock('./asset-impact.service', () => ({
 vi.mock('./context-impact.service', () => ({
   getNovelContextStatus: vi.fn(),
   markNovelContextChanged: vi.fn(),
+  rebaseReferenceOnlyMemoryContext: vi.fn(),
 }))
 
 import { getDb, getSqlite } from '../database/db'
@@ -25,8 +26,14 @@ import { chapters, genres, novels } from '../database/schema'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { createNovel, deleteNovel, getNovel, listNovels, updateNovel } from './novel.service'
+import { upsertCreativeResearchEntries } from '../../src/shared/creative-research'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
+
+function transactionMock(callback: () => unknown) {
+  const run = vi.fn(callback)
+  return Object.assign(run, { immediate: run })
+}
 
 function toCamelCase(value: string): string {
   return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase())
@@ -51,11 +58,13 @@ function createQuery(
   const query: {
     where: (condition: any) => typeof query
     orderBy: () => typeof query
+    limit: () => typeof query
     leftJoin: (table: unknown) => typeof query
     all: () => Array<Record<string, unknown>>
   } = {
     where: (condition: any) => createQuery(rowsByTable, table, [...conditions, condition], joinedTable),
     orderBy: () => query,
+    limit: () => query,
     leftJoin: (nextJoinedTable: unknown) => createQuery(rowsByTable, table, conditions, nextJoinedTable),
     all: () => {
       const baseRows = (rowsByTable.get(table) || []).filter((row) => conditions.every((condition) => matchesWhereClause(row, condition)))
@@ -170,9 +179,7 @@ function createSqliteDeleteMock(tables: Record<string, Array<Record<string, unkn
 
       throw new Error(`Unexpected SQL in sqlite mock: ${sql}`)
     }),
-    transaction: vi.fn((callback: () => void) => {
-      return () => callback()
-    }),
+    transaction: vi.fn(transactionMock),
     __tableInfoCalls: tableInfoCalls,
     __deleteCalls: deleteCalls,
   }
@@ -183,11 +190,47 @@ function createSqliteDeleteMock(tables: Record<string, Array<Record<string, unkn
 describe('novel source/canon fields', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getSqlite).mockReturnValue({ transaction: vi.fn(transactionMock) } as never)
   })
 
   afterEach(() => {
     vi.mocked(getDb).mockReset()
     vi.mocked(getSqlite).mockReset()
+  })
+
+  it('advances reference-only CAS without chapter invalidation and treats replay as a guarded no-op', () => {
+    const rows = createRows(), db = createDbMock(rows)
+    rows.set(novels, [{ id: 1, title: '照夜行', contextVersion: 8, sourceLedgerJson: '[]', updatedAt: 'unchanged' }])
+    vi.mocked(getDb).mockReturnValue(db as never)
+    const ledger = upsertCreativeResearchEntries('[]', [{ category: 'humanity', title: '拒绝权', content: '自愿选择', interpretation: '利益代价', novelConnection: '同行者有自己的目标' }])
+    updateNovel(1, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: 8 })
+    expect(rows.get(novels)?.[0].contextVersion).toBe(9)
+    expect(markNovelContextChanged).not.toHaveBeenCalled()
+    expect(recordAssetChangeEvent).toHaveBeenCalledWith(expect.objectContaining({ assetType: 'creative_reference', impactLevel: 'low' }))
+    const before = JSON.stringify(rows.get(novels)), writes = db.update.mock.calls.length
+    updateNovel(1, { sourceLedgerJson: JSON.stringify(ledger, null, 2) }, { expectedContextVersion: 9 })
+    expect(JSON.stringify(rows.get(novels))).toBe(before)
+    expect(db.update).toHaveBeenCalledTimes(writes)
+    expect(() => updateNovel(1, { sourceLedgerJson: JSON.stringify(ledger) }, { expectedContextVersion: 8 })).toThrow('其他任务修改')
+    expect(JSON.stringify(rows.get(novels))).toBe(before)
+  })
+
+  it('retains full invalidation for adoption, changed provenance, malformed ledgers and mixed Canon updates', () => {
+    const [author] = upsertCreativeResearchEntries('[]', [{ category: 'humanity', title: '拒绝权', content: '自愿选择', interpretation: '利益代价', novelConnection: '同行者有自己的目标' }])
+    for (const data of [
+      { sourceLedgerJson: JSON.stringify([{ ...author, canonDecision: 'accepted' }]) },
+      { sourceLedgerJson: JSON.stringify([{ ...author, supportingDiffIds: [3] }]) },
+      { sourceLedgerJson: '{}' },
+      { sourceLedgerJson: JSON.stringify([author]), canonFactCardsJson: '[{"cardKey":"new-canon"}]' },
+    ]) {
+      vi.mocked(markNovelContextChanged).mockClear(); vi.mocked(recordAssetChangeEvent).mockClear()
+      const rows = createRows()
+      rows.set(novels, [{ id: 1, title: '照夜行', contextVersion: 8, sourceLedgerJson: '[]' }])
+      vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+      updateNovel(1, data, { expectedContextVersion: 8 })
+      expect(markNovelContextChanged).toHaveBeenCalledWith(1, ['Historical/source/canon data changed'])
+      expect(recordAssetChangeEvent).toHaveBeenCalledOnce()
+    }
   })
 
   it('declares the new source/canon columns in schema and migration sources', () => {

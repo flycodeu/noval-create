@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getSingleWriterLockPath } from './single-writer-lock'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 const execFileAsync = promisify(execFile)
 
@@ -15,7 +16,7 @@ export interface UpdateMaintenance { release(): void }
 export class UpdateInProgressError extends Error {
   readonly code = 'UPDATE_IN_PROGRESS'
   constructor() {
-    super('NovelForge 正在准备安装更新，当前版本暂时不能启动或重新连接。请等待安装完成后重启 Codex 的 MCP 连接；若安装已取消，请在 10 分钟后重试。')
+    super(formatUserFacingMessage('update.inProgress'))
     this.name = 'UpdateInProgressError'
   }
 }
@@ -59,7 +60,7 @@ export function beginUpdateMaintenance(directory: string, version: string): Upda
 
 export function assertUpdateStorageReleased(directory: string): void {
   if (fs.existsSync(getSingleWriterLockPath(directory))) {
-    throw new Error('后台服务仍持有数据库，请退出后台后重新启动 NovelForge 再更新。')
+    throw new Error(formatUserFacingMessage('update.storageNotReleased'))
   }
 }
 
@@ -74,9 +75,9 @@ export async function waitForMcpBridgesToExit(executablePath: string, timeoutMs 
       env: { ...process.env, NOVELFORGE_UPDATE_EXECUTABLE: executablePath },
     })
     const pids: unknown = JSON.parse(result.stdout.trim())
-    if (!Array.isArray(pids) || pids.some(pid => !Number.isInteger(pid) || pid <= 0)) throw new Error('无法确认 MCP 后台是否已退出，请关闭 Codex 后重新启动 NovelForge 再更新。')
+    if (!Array.isArray(pids) || pids.some(pid => !Number.isInteger(pid) || pid <= 0)) throw new Error(formatUserFacingMessage('update.bridgeStateUnknown'))
     if (!pids.length) return
-    if (Date.now() >= deadline) throw new Error('等待 MCP 后台退出超时，请关闭 Codex 后重新启动 NovelForge 再更新。')
+    if (Date.now() >= deadline) throw new Error(formatUserFacingMessage('update.bridgeExitTimeout'))
     await new Promise(resolve => setTimeout(resolve, 200))
   }
 }

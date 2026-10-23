@@ -13,19 +13,24 @@ const descriptor: AgentToolDescriptor = {
   inputSchema: { type: 'object' }, outputSchema: { type: 'object', properties: { projects: { type: 'array' } }, required: ['projects'] },
   effect: 'read', approval: 'never', scopes: ['novel:read'], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: [],
 }
+const approvalRequiredDescriptor: AgentToolDescriptor = {
+  ...descriptor, id: 'novelforge.research.delete', title: 'Delete reference', approval: 'always',
+}
 let directory: string
 let runtime: RuntimeHandle
 let reads: number
 let opened: number
+let rpcInvocations: number
 const clients: Client[] = []
 
 beforeEach(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-runtime-test-'))
-  reads = 0; opened = 0
+  reads = 0; opened = 0; rpcInvocations = 0
   runtime = await startMcpRuntime({
     directory, version: 'test', modelConfigured: () => true, openDesktop: () => { opened += 1 },
+    invokeRpc: async () => { rpcInvocations += 1; return { ok: true } },
     registry: {
-      list: () => [descriptor],
+      list: () => [descriptor, approvalRequiredDescriptor],
       async invoke(request, context) {
         reads += 1
         expect(context.scopes).toContain('canon:write')
@@ -79,6 +84,7 @@ describe('shared MCP runtime', () => {
   it('serves two MCP clients and an open desktop from the same owner', async () => {
     const first = await connect()
     const second = await connect()
+    expect((await first.listTools()).tools.map(tool => tool.name)).toEqual([descriptor.id])
     expect((await runtimeRequest(runtime.connection, '/desktop/open', { method: 'POST' })).ok).toBe(true)
     expect(opened).toBe(1)
     const results = await Promise.all([first.callTool({ name: descriptor.id, arguments: {} }), second.callTool({ name: descriptor.id, arguments: {} })])
@@ -142,6 +148,20 @@ describe('shared MCP runtime', () => {
     expect(await probeRuntime(directory, 'new-package')).toBeNull()
   })
 
+  it('keeps desktop opening failures as ordinary errors with the original actionable message', async () => {
+    const fetchRequest = globalThis.fetch
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => {
+      if (new URL(String(input)).pathname === '/desktop/open') return Promise.resolve(new Response(null, { status: 409 }))
+      return fetchRequest(input, options)
+    })
+
+    const error = await attachToExistingRuntime(directory, 'test', true).catch(error => error)
+    expect(error?.constructor).toBe(Error)
+    expect(error.message).toBe('已运行的服务无法打开桌面，请先退出该开发服务。')
+    expect(opened).toBe(0)
+    expect((await probeRuntime(directory))?.connection.instanceId).toBe(runtime.connection.instanceId)
+  })
+
   it('rejects unpaired requests and browser origin or host spoofing', async () => {
     expect((await fetch(new URL('/health', runtime.connection.url))).status).toBe(401)
     const headers = { Authorization: `Bearer ${runtime.connection.token}`, Origin: 'https://untrusted.example' }
@@ -152,6 +172,16 @@ describe('shared MCP runtime', () => {
       }).on('error', reject)
     })
     expect(spoofedHostStatus).toBe(403)
+  })
+
+  it('keeps oversized RPC errors public, bounded and keyed without invoking a service', async () => {
+    const response = await runtimeRequest(runtime.connection, '/rpc', { method: 'POST', body: 'x'.repeat(4 * 1024 * 1024 + 1) })
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: { code: 'runtime.payloadTooLarge', message: '请求内容超过 4 MiB。' },
+    })
+    expect(rpcInvocations).toBe(0)
   })
 
   it('removes discovery on explicit service shutdown without leaving a stale owner', async () => {

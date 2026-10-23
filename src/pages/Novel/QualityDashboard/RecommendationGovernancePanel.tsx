@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
@@ -52,7 +53,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
   })), [novelId])
   const { data: snapshot, loading, error, reload: load } = useAsyncSnapshot(read)
   useEffect(() => {
-    if (error) message.error(error instanceof Error ? error.message : '推荐治理状态读取失败。')
+    if (error) message.error(error instanceof Error ? error.message : formatUserFacingMessage('recommendation.loadFailed'))
   }, [error])
 
   const matchingCandidate = useMemo(() => {
@@ -74,7 +75,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.preflightCompleted'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '推荐预检失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.preflightFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)
@@ -106,7 +107,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.candidateLocked'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '候选稿锁定失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.lockFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)
@@ -150,7 +151,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       message.success(getUserFacingMessage('recommendation.externalResultRecorded'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '外部评估结果记录失败。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('recommendation.recordFailed'))
     } finally {
       actionInFlightRef.current = false
       setRunning(null)
@@ -243,7 +244,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
               <FileProtectOutlined />
               <div><strong>已锁定 Run #{recordCandidate.preflightRunId}</strong><span>Context v{recordCandidate.contextVersion}</span><code>{recordCandidate.contentHash}</code></div>
             </div>
-          ) : <p className="recommendation-governance__empty">预检通过后可锁定候选版本，锁定不计入外部评估次数。</p>}
+          ) : <p className="recommendation-governance__empty">尚无预检结果</p>}
           <Space wrap>
             <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={running !== null || !latestPreflight || latestPreflight.status !== 'ready' || Boolean(matchingCandidate) || state.status === 'recommendation_locked' || state.status === 'passed' || state.status === 'attempts_exhausted'} onClick={() => void lockCandidate()}>
               锁定当前候选
@@ -261,7 +262,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       </div>
 
       <Modal title="追加记录真实外部评估" open={recordOpen} destroyOnHidden onCancel={() => { if (running !== 'record') setRecordOpen(false) }} onOk={() => void recordEvaluation()} okText="原生确认后记录" confirmLoading={running === 'record'} cancelButtonProps={{ disabled: running === 'record' }} maskClosable={running !== 'record'}>
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="这会消耗一次真实评估额度" description="仅在作者主动评估或平台自动评估已经真实发生、结果已经人工核对后记录。内部模型审校、重试和预检不能填在这里。" />
+        <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="这会消耗一次真实评估额度" description="仅记录已发生的外部评估。" />
         <Form form={form} layout="vertical">
           <Form.Item name="source" label="评估来源" rules={[{ required: true }]}><Select options={[{ value: 'author_requested', label: '作者主动发起' }, { value: 'platform_auto', label: '平台自动评估' }]} /></Form.Item>
           <Form.Item name="outcome" label="实际结果" rules={[{ required: true }]}><Select options={[{ value: 'passed', label: '通过' }, { value: 'failed', label: '未通过' }]} /></Form.Item>

@@ -1,3 +1,5 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import { preserveCreativeResearchEntriesWhenTrimming } from '../../src/shared/creative-research'
 import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
@@ -395,7 +397,8 @@ function upsertJsonRecordArray(
     if (merged.has(key)) merged.delete(key)
     merged.set(key, entry)
   })
-  return safeStringify(Array.from(merged.values()).slice(-limit))
+  // Chapter provenance is bounded separately, but must not silently delete author-created references.
+  return safeStringify(preserveCreativeResearchEntriesWhenTrimming(Array.from(merged.values()), limit))
 }
 
 function pairKey(charAId: number, charBId: number): string {
@@ -519,7 +522,7 @@ function isWritebackApplyClaimStale(run: ChapterWritebackRunRow): boolean {
 }
 
 function createWritebackIdempotencyConflict(runId: number, key: string): Error {
-  const error = new Error(`回写幂等键已被其它运行占用：${key}`) as Error & { code?: string }
+  const error = new Error(formatUserFacingMessage('services.chapterWriteback.idempotencyOccupied', { key: `${key}` })) as Error & { code?: string }
   error.code = 'IDEMPOTENCY_KEY_CONFLICT'
   error.name = `WritebackIdempotencyConflict:${runId}`
   return error
@@ -923,7 +926,7 @@ function explicitAiPatch<T extends object>(raw: Record<string, unknown>, normali
 
 function explicitScopedId(raw: unknown, allowed: Set<number>, field: string): number | null {
   if (raw == null) return null
-  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0 || !allowed.has(raw)) throw new Error(`${field} 必须是本项目中的有效ID；只有明确 null 才能清空。`)
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0 || !allowed.has(raw)) throw new Error(formatUserFacingMessage('services.chapterWriteback.referenceInvalid', { field: `${field}` }))
   return raw
 }
 
@@ -1166,7 +1169,7 @@ async function buildAiDraft(context: ExistingAssetContext): Promise<{ extracts: 
     }
     return { extracts, diffs }
   } catch (error) {
-    throw new Error(`回写抽取失败，尚未确认是否无增量：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(formatUserFacingMessage('services.chapterWriteback.extractionFailed', { detail: `${error instanceof Error ? error.message : String(error)}` }))
   }
 }
 
@@ -1687,7 +1690,7 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
       writebackError: null,
       updatedAt: new Date().toISOString(),
     }).where(eq(chapterWritebackDiffs.id, row.id)).run()
-    if (!result.changes) throw new Error(`回写候选 ${row.id} 未能记录应用状态`)
+    if (!result.changes) throw new Error(formatUserFacingMessage('services.chapterWriteback.appliedStateMissing', { id: `${row.id}` }))
     return entityId
   })
 }
@@ -2065,7 +2068,7 @@ async function executeRunApply(
       applySingleDiffAtomically(row, chapter)
       appliedCount += 1
     } catch (error) {
-      const rendererError = error instanceof Error ? error : new Error('写回失败')
+      const rendererError = error instanceof Error ? error : new Error(formatUserFacingMessage('services.chapterWriteback.failed'))
       db.update(chapterWritebackDiffs).set({
         writebackStatus: 'failed',
         writebackError: rendererError.message,

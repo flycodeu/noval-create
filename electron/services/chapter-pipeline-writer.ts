@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { formatScenePlan, type ScenePlanStep } from './chapter-scene-plan'
 import { compileNarrativeTechniques } from '../../src/shared/narrative-techniques'
 import type { ProgressSink } from '../utils/progress-sink'
@@ -297,7 +298,7 @@ export async function runChapterWriterStage(input: {
   if (!input.shouldRun) {
     const output = resolveWriterDraftOutput(input.initialContent, input.chapterNum, input.chapterTitle)
     if (!output.content.trim()) {
-      throw new ChapterPipelineStageError('empty_output', '没有可复用的 Writer 正文快照，无法从当前节点重试。', {
+      throw new ChapterPipelineStageError('empty_output', formatUserFacingMessage('services.chapterWriter.snapshotMissing'), {
         blocked: true,
         outputText: buildPipelineFailureOutput('empty_output', '没有可复用的 Writer 正文快照。'),
       })
@@ -347,7 +348,7 @@ export async function runChapterWriterStage(input: {
   if (!output.content.trim()) {
     input.failRole(taskId, new ChapterPipelineStageError(
       'empty_output',
-      'Writer 未返回可用正文，已阻断后续审校与回写；请重试或检查模型输出。',
+      formatUserFacingMessage('services.chapterWriter.proseMissing'),
       { outputText: buildPipelineFailureOutput('empty_output', 'Writer 未返回可用正文，已阻断后续审校与回写。') },
     ))
   }

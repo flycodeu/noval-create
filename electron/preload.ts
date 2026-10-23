@@ -30,7 +30,11 @@ import type {
   MapBoardViewportInput,
   NarrativeBoardQueryInput,
   MaintenanceWorkerStatus,
+  ModelDiscoveryRequest,
+  ModelDiscoveryResult,
   NovelCreateInput,
+  NovelUpdateOptions,
+  SourceSearchSettingsUpdate,
 } from '../src/types'
 
 interface IpcBridgeErrorPayload {
@@ -90,6 +94,12 @@ const api = {
     minimize: () => invokeIpc('window:minimize'),
     toggleMaximize: () => invokeIpc<boolean>('window:toggleMaximize'),
     close: () => invokeIpc('window:close'),
+    confirmClose: (choice: 'minimize' | 'exit') => invokeIpc('window:confirmClose', choice),
+    onCloseRequested: (callback: (hasUnsavedChanges: boolean) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, hasUnsavedChanges: boolean) => callback(hasUnsavedChanges)
+      ipcRenderer.on('window:close-requested', subscription)
+      return () => ipcRenderer.removeListener('window:close-requested', subscription)
+    },
     isMaximized: () => invokeIpc<boolean>('window:isMaximized'),
     onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => {
       const subscription = (_event: Electron.IpcRendererEvent, isMaximized: boolean) => callback(isMaximized)
@@ -99,6 +109,7 @@ const api = {
   },
 
   app: {
+    getRuntimeInfo: () => invokeIpc<import('../src/shared/runtime-identity').RuntimeIdentity>('app:getRuntimeInfo'),
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
     getMaintenanceStatus: () => invokeIpc<MaintenanceWorkerStatus>('app:getMaintenanceStatus'),
     getUpdateStatus: () => invokeIpc<DesktopUpdateStatus>('app:getUpdateStatus'),
@@ -128,7 +139,7 @@ const api = {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),
     get: (id: number) => invokeIpc('novel:get', id),
     create: (data: NovelCreateInput) => invokeIpc('novel:create', data),
-    update: (id: number, data: unknown) => invokeIpc('novel:update', id, data),
+    update: (id: number, data: unknown, options?: NovelUpdateOptions) => invokeIpc('novel:update', id, data, options),
     delete: (id: number) => invokeIpc('novel:delete', id),
     export: (id: number, format: string) => invokeIpc('novel:export', id, format),
     formatForPlatform: (id: number, options: unknown) => invokeIpc('novel:formatForPlatform', id, options),
@@ -552,6 +563,7 @@ const api = {
   // Model APIs
   model: {
     list: () => invokeIpc('model:list'),
+    discover: (input: ModelDiscoveryRequest) => invokeIpc<ModelDiscoveryResult>('model:discover', input),
     create: (data: unknown) => invokeIpc('model:create', data),
     update: (id: number, data: unknown) => invokeIpc('model:update', id, data),
     delete: (id: number) => invokeIpc('model:delete', id),
@@ -559,10 +571,19 @@ const api = {
     test: (id: number) => invokeIpc('model:test', id),
   },
 
+  zhuque: {
+    getSettings: () => invokeIpc('zhuque:getSettings'),
+    updateSettings: (data: unknown) => invokeIpc('zhuque:updateSettings', data),
+    test: () => invokeIpc('zhuque:test'),
+    getChapterResult: (id: number) => invokeIpc('zhuque:getChapterResult', id),
+    detectChapter: (id: number, expectedContent?: string) => invokeIpc('zhuque:detectChapter', id, expectedContent),
+  },
   sourceSearch: {
     getSettings: () => invokeIpc('sourceSearch:getSettings'),
     updateSettings: (data: unknown) => invokeIpc('sourceSearch:updateSettings', data),
-    test: () => invokeIpc('sourceSearch:test'),
+    test: (data?: SourceSearchSettingsUpdate) => invokeIpc('sourceSearch:test', ...(data === undefined ? [] : [data])),
+    research: (novelId: number, request: string, atChapter?: number) => invokeIpc('sourceSearch:research', novelId, request, atChapter),
+    listResearch: (novelId: number, query?: string) => invokeIpc('sourceSearch:listResearch', novelId, query),
   },
 
   // Template APIs
@@ -712,6 +733,7 @@ const api = {
       'ai:world-rules-progress',
       'chapter:generation-progress',
       'app:update-status',
+      'novel:research-changed',
     ]
     if (validChannels.includes(channel)) {
       const subscription: EventSubscription = (_event, ...args) => callback(...args)

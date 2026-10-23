@@ -27,7 +27,7 @@ export default function ReaderFeedbackPanel({ novelId, onSave }: { novelId: numb
   }
   return <details className="writing-contract-disclosure">
     <summary>记录选区阅读偏好</summary>
-    <p>默认只对本段生效；不同意见会并列保留，可随时撤销。原文改变后旧意见不再注入。</p>
+
     <div className="writing-feedback-controls">
       <Select aria-label="反馈倾向" value={sentiment} onChange={setSentiment} options={[{ value: 'keep', label: '保留' }, { value: 'reduce', label: '减少' }]} />
       <Select aria-label="反馈范围" value={scope} onChange={setScope} options={[{ value: 'passage', label: '本段' }, { value: 'scene', label: '本场景' }, { value: 'character', label: '指定角色' }, { value: 'book', label: '本书' }]} />

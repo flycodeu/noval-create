@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Chapter } from '../../../types'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
-import { buildStoryTimelineEntries, chapterHasProse, storyTimeLabel, storyTimelineClock, storyTimelineGroups, timelineEntityRoute } from './story-timeline'
+import { buildStoryTimelineEntries, chapterHasProse, storyTimeLabel, storyTimelineClock, storyTimelineGroups, storyTimelineMatchesSearch, timelineEntityRoute } from './story-timeline'
 
 function chapter(number: number, words = 0): Chapter {
   return { id: number + 100, novelId: 1, chapterNum: number, title: `章 ${number}`, wordCount: words, targetWords: 3000, status: words ? 'draft' : 'outline', createdAt: '2026-01-01', updatedAt: '2026-01-01' }
@@ -189,5 +189,61 @@ describe('story timeline evidence boundaries', () => {
     const groups = storyTimelineGroups([], chapters, 'chapter', true)
     expect(groups.map(group => group.chapter?.chapterNum)).toEqual([1, 2])
     expect(groups.every(group => group.entries.length === 0)).toBe(true)
+  })
+  it('separates the shared chapter-7 registration anchor on author planning from actual chapter events', () => {
+    const chapters = Array.from({ length: 7 }, (_, index) => chapter(index + 1, index < 6 ? 1000 : 0))
+    const recorded = Array.from({ length: 19 }, (_, index) => event(`event:written-${index}`, index % 6 + 1, { chronologyOrder: index + 1 }))
+    const volumes = Array.from({ length: 8 }, (_, index) => ({ ...event(`event:volume-${index + 1}`, 7, { chapterStartId: 107, eventType: '作者卷级时间规划', authorOnly: true }, 'planned'), name: `第${index + 1}卷作者时间锚点` }))
+    const units = Array.from({ length: 10 }, (_, index) => event(`event:unit-${index + 1}`, 7, { chapterStartId: 107, eventType: index === 0 ? '短篇日常规划' : '叙事单元规划', authorOnly: true, plannedVolume: index % 4 + 1 }, 'planned'))
+    const history = [event('event:birth', 7, { chapterStartId: 107, eventType: '作者年龄纪年锚点', authorOnly: true, calendarEra: '承宁', calendarYear: 1 }, 'planned'), event('event:flood', 7, { chapterStartId: 107, eventType: '作者历史纪年锚点', authorOnly: true, calendarEra: '承宁', calendarYear: 5 }, 'planned')]
+    const entries = buildStoryTimelineEntries(atlas([...recorded, ...volumes.reverse(), ...units, ...history.reverse()]), chapters)
+    expect(entries.filter(entry => entry.state === 'occurred')).toHaveLength(19)
+    expect(entries.filter(entry => entry.planningKind).every(entry => entry.chapterNum === null && entry.recordedChapterNum === 7 && entry.state === 'planned')).toBe(true)
+    const groups = storyTimelineGroups(entries, chapters, 'chapter', true)
+    expect(groups.find(group => group.key === 'chapter:7')?.entries).toEqual([])
+    expect(groups.filter(group => group.planning).map(group => [group.key, group.entries.length])).toEqual([['planning:volume', 8], ['planning:unit', 10], ['planning:background', 2]])
+    expect(groups.find(group => group.key === 'planning:volume')?.entries.map(entry => entry.plannedVolume)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(groups.find(group => group.key === 'planning:background')?.entries.map(entry => entry.entity.id)).toEqual(['event:birth', 'event:flood'])
+    for (const mode of ['chapter', 'time'] as const) {
+      const ids = storyTimelineGroups(entries, chapters, mode, true).flatMap(group => group.entries.map(entry => entry.entity.id))
+      expect(ids).toHaveLength(39)
+      expect(new Set(ids).size).toBe(39)
+    }
+  })
+  it('retains genuine future chapter anchors and keeps author-planned records separate from reveal constraints', () => {
+    const entries = buildStoryTimelineEntries(atlas([
+      event('event:future-scene', 7, { chapterStartId: 107 }, 'planned'),
+      event('event:author-only', 1, { chapterStartId: 101, doesNotRepresentReaderKnowledge: true, forbiddenBeforeVolume: 8 }, 'planned'),
+    ]), [chapter(1, 1000), chapter(7)])
+    expect(entries[0]).toMatchObject({ chapterNum: 7, recordedChapterNum: 7, planningKind: null, state: 'planned' })
+    expect(entries[1]).toMatchObject({ chapterNum: null, recordedChapterNum: 1, planningKind: 'other', plannedVolume: null, state: 'planned' })
+    expect(storyTimelineGroups(entries, [chapter(1, 1000), chapter(7)], 'chapter').map(group => group.key)).toEqual(['chapter:7', 'planning:other'])
+  })
+  it('does not mistake author visibility or unrevealed resolved history for future planning', () => {
+    const entries = buildStoryTimelineEntries(atlas([
+      event('event:hidden-resolved', 1, { chapterStartId: 101, authorOnly: true, status: 'resolved', eventType: '幕后访客', timeLabel: '此前一夜' }),
+      event('event:unrevealed-written', 1, { chapterStartId: 101, doesNotRepresentReaderKnowledge: true, status: 'written' }),
+      event('event:confirmed-author-only', 1, { chapterStartId: 101, authorOnly: true }),
+      event('event:seeded-author-plan', 1, { chapterStartId: 101, authorOnly: true, status: 'seeded' }),
+      event('event:explicit-unit-plan', 1, { chapterStartId: 101, eventType: '叙事单元规划' }),
+    ]), [chapter(1, 1000)])
+    expect(entries.slice(0, 3).map(entry => [entry.chapterNum, entry.state, entry.planningKind])).toEqual([[1, 'occurred', null], [1, 'occurred', null], [1, 'occurred', null]])
+    expect(entries.slice(3).map(entry => [entry.chapterNum, entry.state, entry.planningKind])).toEqual([[null, 'planned', 'other'], [null, 'planned', 'unit']])
+    const groups = storyTimelineGroups(entries, [chapter(1, 1000)], 'chapter')
+    expect(groups.find(group => group.key === 'chapter:1')?.entries.map(entry => entry.entity.id)).toEqual(['event:confirmed-author-only', 'event:hidden-resolved', 'event:unrevealed-written'])
+  })
+  it('searches full event details and linked people without changing chronology or the stored entity', () => {
+    const character = { ...event('character:1', 0), kind: 'character' as const, name: '阿烛' }
+    const source = event('event:plan', 7, { authorOnly: true, eventType: '叙事单元规划', eventProcess: '先交付灯罩，再计算修补工钱。', plannedLocation: '纸寮村', authorScene: { dailyBeat: '自己接了新活' } }, 'planned')
+    const [entry] = buildStoryTimelineEntries(atlas([source, character], [{ id: 'participation:plan', kind: 'participation', fromId: source.id, toId: character.id, label: '同行', attributes: {}, status: 'planned', effectiveFromChapter: 7, source: { kind: 'test' } }]), [chapter(7)])
+    expect(storyTimelineMatchesSearch(entry, '修补工钱')).toBe(true)
+    expect(storyTimelineMatchesSearch(entry, '  阿烛  ')).toBe(true)
+    expect(storyTimelineMatchesSearch(entry, '纸寮村')).toBe(true)
+    expect(storyTimelineMatchesSearch(entry, '自己接了新活')).toBe(true)
+    expect(storyTimelineMatchesSearch(entry, '不存在的词')).toBe(false)
+    expect(entry.entity).toBe(source)
+    expect(source.attributes.chapterNum).toBe(7)
+    expect(entry.timeSort).toBeNull()
+    expect(timelineEntityRoute(source)).toContain('entity=event%3Aplan')
   })
 })

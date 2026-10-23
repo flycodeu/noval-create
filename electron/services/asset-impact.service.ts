@@ -535,6 +535,8 @@ export function recordAssetChangeEvent(input: AssetChangeEventInput): AppAssetCh
   if (!eventRow) {
     throw new Error('asset change event insert failed')
   }
+  // Reference-only edits are audit records and never schedule narrative impact work.
+  if (input.assetType === 'creative_reference') return mapEventRow(eventRow)
 
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, input.novelId)).all()
   const chapterMap = new Map(chapterRows.map((row) => [row.id, row] as const))

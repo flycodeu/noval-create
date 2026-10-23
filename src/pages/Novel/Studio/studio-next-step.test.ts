@@ -26,7 +26,7 @@ describe('RF-15 author launch navigation', () => {
     const input = [{ key: 'original', title: '原组', items }]
     const result = organizeAuthorNavigation(input)
     expect(result).toHaveLength(1)
-    expect(result[0].items.map((item) => item.label)).toEqual(['创作台', '故事设计', '世界与人物', '时间轴', '正文', '版本与问题'])
+    expect(result[0].items.map((item) => item.label)).toEqual(['创作台', '故事设计', '世界与人物', '时间轴', '卷章与正文', '版本与问题'])
     expect(result[0].items.every((item) => item.status === 'not_started')).toBe(true)
     expect(input[0].items).toHaveLength(7)
   })

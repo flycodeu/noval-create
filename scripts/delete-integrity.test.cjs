@@ -4,6 +4,7 @@ const path = require('node:path')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'delete-integrity')
@@ -257,7 +258,7 @@ async function run() {
     console.log('PASS delete integrity: asset clear rollback, novel-scoped rows, chapter/writeback children, and survivor isolation')
   } finally {
     closeDb()
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    cleanupElectronFixture(tempRoot, 'delete-integrity')
     await app.quit()
   }
 }

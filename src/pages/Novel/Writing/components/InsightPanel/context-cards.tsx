@@ -21,13 +21,13 @@ export function ConstraintInjectionCard({
   onPreserveConstraintChange: (labels: HardConstraintSourceLabel[]) => void
 }) {
   if (!preview || preview.stages.length === 0) {
-    return <div className="novel-copy-block">先切到具体章节并生成上下文预览，再核对四个阶段的约束注入状态。</div>
+    return <div className="novel-copy-block">暂无约束预览</div>
   }
 
   return (
     <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="writing-layout-stack writing-layout-stack--sm">
-        <div className="novel-copy-block">手动保留后，预览与正式生成都会优先保障这些硬约束不先被踢出。</div>
+
         <Select
           mode="multiple"
           allowClear
@@ -116,7 +116,7 @@ export function ConstraintInjectionCard({
 
 export function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">先生成上下文预览，再核对上一章承接采样、覆盖率和实际喂给模型的文本。</div>
+    return <div className="novel-copy-block">暂无承接预览</div>
   }
 
   const report = preview.previousChapterSampleReport
@@ -142,7 +142,7 @@ export function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPr
 
 export function ChapterBridgeMemoryCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">先生成上下文预览，再核对本章开头会怎样承接上一章的时间、地点、情绪和视角。</div>
+    return <div className="novel-copy-block">暂无开篇预览</div>
   }
 
   const bridgeLines = (preview.chapterBridgePlan || '')
@@ -181,7 +181,7 @@ export function ChapterBridgeMemoryCard({ preview }: { preview: ChapterContextPr
 
 export function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">先生成上下文预览，再核对召回来源、过期拦截和依赖率。</div>
+    return <div className="novel-copy-block">暂无召回预览</div>
   }
 
   const diagnostics = preview.recallDiagnostics
@@ -242,7 +242,7 @@ export function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPrev
 
 export function ContextUsageImpactCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">先生成上下文预览，再核对本次真正用了哪些资产、合同约束，以及当前章节挂着哪些待同步影响。</div>
+    return <div className="novel-copy-block">暂无上下文预览</div>
   }
 
   const snapshot = preview.usageSnapshot
@@ -286,7 +286,7 @@ export function ContextUsageImpactCard({ preview }: { preview: ChapterContextPre
 export function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | null }) {
   const explainability = preview?.generationExplainability
   if (!preview || !explainability) {
-    return <div className="novel-copy-block">先生成上下文预览，再查看模型路由、结构化输出、风格锁和低置信度事实。</div>
+    return <div className="novel-copy-block">暂无上下文预览</div>
   }
 
   const routeLines = explainability.stageReports.map((stage) => {
@@ -340,7 +340,7 @@ export function AiExplainabilityCard({ preview }: { preview: ChapterContextPrevi
 export function WriterToolsTraceCard({ preview }: { preview: ChapterContextPreview | null }) {
   const resolution = preview?.writerContextResolution
   if (!preview || !resolution) {
-    return <div className="novel-copy-block">当前章节还没有写作调度追踪，先刷新上下文预览或执行一次生成。</div>
+    return <div className="novel-copy-block">暂无调度记录</div>
   }
 
   const planLines = resolution.queryPlan.map((step) => {
@@ -408,7 +408,7 @@ export function ChapterFocusCard({
           {hasContinuity ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">连续性提醒</div><div className="novel-insight-list">{continuityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
           {hasQuality ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">健康提示</div><div className="novel-insight-list">{qualityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
         </div>
-      ) : <div className="novel-copy-block">章节流水线完成后，会在这里收束本章摘要、承接提醒与下一章引子。</div>}
+      ) : <div className="novel-copy-block">暂无章末交接</div>}
     </InsightCard>
   )
 }

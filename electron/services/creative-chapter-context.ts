@@ -1,8 +1,20 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { formatChapterVoice } from '../../src/shared/chapter-voice'
+import { buildNarrativeDetailGuidance, buildReaderFirstOpeningGuidance } from '../../src/shared/prompts/prompt-common'
 import { selectStyleParagraphs } from '../../src/shared/scene-fact-boundary'
 import { compileContextPack, stableHash, type ContextPackSource } from '../../src/shared/context-pack'
 import { hasHardContractValidationBlocker } from '../../src/shared/contract-validation'
 import { estimateTokens } from '../../src/shared/token-budget'
+import {
+  CREATIVE_AUTHOR_RESEARCH_USAGE,
+  CREATIVE_RESEARCH_USAGE,
+  buildCreativeResearchContext,
+  needsCreativeResearch,
+  parseCreativeResearchEntries,
+  selectCreativeResearchSources,
+  rankRelevantCreativeResearchEntries,
+} from '../../src/shared/creative-research'
+import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import type { StoryAtlasChange, StoryAtlasEntity, StoryAtlasRelation } from '../../src/shared/story-atlas'
 import type { GenericAssetDraftContent } from '../../src/shared/generic-asset-workflow'
@@ -21,14 +33,14 @@ import { creativeAtlasCoverage, creativePublicAttributes, selectChapterAtlasIntr
 import { chapterRevisionGenerationMaterial, type ChapterRevisionBase } from './creative-chapter-revision'
 import { getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
 import { creativeRevisionIssueSources } from './creative-review-issues'
+import { chapterMaterialPriority, compactChapterScenes } from './creative-chapter-material'
 import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
 } from './context-visibility'
-import { buildCreativeResearchContext, parseCreativeResearchEntries, selectRelevantCreativeResearchEntries } from '../../src/shared/creative-research'
 
 export class CreativeChapterContextError extends Error {
-  constructor(readonly code: string, message: string) { super(message); this.name = 'CreativeChapterContextError' }
+  constructor(readonly code: string, message: string, readonly requiredSourceKeys: string[] = []) { super(message); this.name = 'CreativeChapterContextError' }
 }
 function fail(code: string, message: string): never { throw new CreativeChapterContextError(code, message) }
 function ids(raw?: string | null): number[] {
@@ -177,7 +189,7 @@ export function creativeRevisionSource(input: CreativeWorkflowInput): string | u
   // is not story evidence and can otherwise consume the entire local planning margin.
   try {
     const value: unknown = JSON.parse(artifact.content.output)
-    if (value && typeof value === 'object') return JSON.stringify(value)
+    if (value && typeof value === 'object') return JSON.stringify(creativeTextProjection(value))
   } catch { /* A textual candidate remains intact, including a malformed JSON draft to repair. */ }
   return artifact.content.output
 }
@@ -219,6 +231,7 @@ export async function compileCreativeChapterContext(
   }
   const chapterRows = listChapters(input.novelId)
   const chapterNum = input.atChapter ?? chapterRows.filter(row => row.content?.trim()).reduce((n, row) => Math.max(n, row.chapterNum), 0) + 1
+  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
   const { context, policy, povNames } = loadChapterBoundary(input.novelId, chapterNum)
   const novel = getNovel(input.novelId)
   if (!novel) fail('PROJECT_NOT_FOUND', '项目不存在。')
@@ -238,41 +251,50 @@ export async function compileCreativeChapterContext(
   const revealIds = new Set(policy.revealDirectives.map(directive => directive.factId))
   const contractPolicy = { ...policy, deniedFacts: policy.deniedFacts.filter(item => !revealIds.has(item.fact.id)) }
   add('task', { chapterNum, request: input.request, rule: '只使用本章已知资料。人物内在目标、动机和自身能力只限本人视角使用，不能移入其他人物视角；其他人物公开目标以 publicGoal 或已知信息点为准。场景限定揭示不得提前或移入其他视角。新增图谱事实必须逐条附 attributes.evidenceQuote，引用本次正文原句；不改写既往事实。' }, true, 'plan', contractPolicy)
+  // Summary patches have already returned; prose and its review share this scoped material.
+  if (!revisionBase) add('opening_progress', buildReaderFirstOpeningGuidance(chapterNum, input.operation === 'review' ? 'review' : 'writing'), true, 'plan', contractPolicy)
+  add('narrative_detail', buildNarrativeDetailGuidance(input.operation === 'review' ? 'review' : revisionBase ? 'rewrite' : 'writing'), true, 'plan', contractPolicy)
+  if (input.operation !== 'review' && !revisionBase) add('fact_reveal_evidence_rule', 'factReveals 的 evidenceQuote 必须连续摘录本章实际获知的原句，逐字保留标点与正文中的段落换行，不能把换行压成空格或自行改写。非本场视角人物若登记知情，引文要覆盖该人物姓名及其说出、听到或看到的具体过程；不要只截匿名对白。人物在附近不表示知道，原文没支持就不登记，不能为了补引文新增人物认知。', true, 'plan', contractPolicy)
   for (const source of creativeProjectSources(novel, true, omitted)) {
     const text = typeof source.value === 'string' ? source.value : JSON.stringify(source.value)
     if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')
     else omitted.push(`${source.key}:pov_forbidden_fact`)
   }
-  const researchQuery = [input.request, context.chapter.title, context.chapter.outline, context.chapterContract, context.sceneSnapshots]
-    .map(value => typeof value === 'string' ? value : JSON.stringify(value))
-    .filter(Boolean).join('\n')
-  for (const entry of selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 4)) {
-    add(`creative_reference:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 'plan', contractPolicy)
-  }
   // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
   for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
-  if (limits.includeDraft !== false && !revisionBase && input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  if (limits.includeDraft !== false && !revisionBase && input.operation !== 'review' && context.chapter.content?.trim()) {
+    add('original_prose_usage', '本章旧正文是事实、状态、人物口吻与前后衔接的依据，不是必须照搬的句段模板。按本次请求确定修改范围：要求重写或重新生成时，可在合同内重组重复问答、记录与转场，保留有效表达；仅要求局部修订或逐字保留时遵守指定范围。降低 AI 味或改善流畅度不能只改错字、替换同义词，也不能为了显示变化改写无问题的句子。不得改事实、知识边界、事件顺序、同意关系和揭示章位，不输出改稿分析。', true, 'plan', contractPolicy)
+    add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  }
   const revisionSource = revisionBase ? undefined : creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
   if (revisionBase) add('chapter_revision', chapterRevisionGenerationMaterial(revisionBase), true, 'draft', contractPolicy)
   add(`chapter:${context.chapter.id}:contract`, {
     chapterNum, title: context.chapter.title, outline: context.chapter.outline, ...context.chapterContract,
     forbiddenActions: context.chapterContractRow?.forbiddenActionsJson,
-    scenes: context.sceneSnapshots,
+    scenes: compactChapterScenes(context.sceneSnapshots),
   }, true, 'plan', contractPolicy)
   const sceneFacts = policy.sceneLimitedFacts.flatMap(limited => {
     const text = sceneLimitedBody(limited.fact.fact)
     if (!text) return []
     return limited.scenes.map(scene => ({ sceneOrder: scene.sceneOrder, text }))
   })
-  const obligations = formatChapterVoice({ scenes: context.sceneSnapshots, recurringAvoids: recurringVoiceAvoids(input.novelId, chapterNum) })
+  // Goals, obstacles and outcomes already appear in the required contract; do not repeat them.
+  const obligations = formatChapterVoice({ scenes: context.sceneSnapshots.map(({ segmentOrder, pov }) => ({ segmentOrder, pov })), recurringAvoids: recurringVoiceAvoids(input.novelId, chapterNum) })
   if (obligations) add('scene_obligations', obligations, true, 'plan', contractPolicy)
   sceneFacts.forEach((fact, index) => {
     const body = visibleText(fact.text, contractPolicy)
     if (!body) { omitted.push(`scene_fact:${fact.sceneOrder}:${index}:pov_forbidden_fact`); return }
     add(`scene_fact:${fact.sceneOrder}:${index}`, `场景${fact.sceneOrder}本场已知：${body}`, true, 'plan', { ...contractPolicy, deniedFacts: [] })
   })
-  for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'))
+  // Explicit chapter fact references are a contract dependency, not keyword recall.
+  // A blank selection inherits the last written chapter's declared handoff, not
+  // every known fact in the book. An explicit selection can narrow that scope.
+  // Only facts already admitted by the POV/chronology policy reach this loop;
+  // planned reveals remain scoped to their authorized scenes above.
+  const selectedFactIds = ids(context.chapter.allowedFactIdsJson)
+  const requiredFactIds = new Set(selectedFactIds.length ? selectedFactIds : [...ids(previous?.allowedFactIdsJson), ...ids(previous?.revealedFactIdsJson)])
+  for (const fact of policy.allowedFacts) add(`fact:${fact.fact.id}`, [fact.fact.title, fact.fact.summary].filter(Boolean).join('：'), requiredFactIds.has(fact.fact.id))
   for (const issue of creativeRevisionIssueSources(input)) add(`revision_issue:${issue.id}`, issue, true, 'draft', { ...policy, deniedFacts: [] })
   for (const limited of policy.sceneLimitedFacts) {
     const scenes = limited.scenes.map(scene => `场景${scene.sceneOrder}（${scene.povName}）`).join('、')
@@ -294,7 +316,6 @@ export async function compileCreativeChapterContext(
   }
   const safeEntityIds = new Set<string>()
   const dependency = `${input.request}\n${JSON.stringify(context.sceneSnapshots)}\n${JSON.stringify(context.chapterContract)}\n${context.chapter.title}\n${context.chapter.outline || ''}`
-  const previous = chapterRows.filter(row => row.chapterNum < chapterNum && row.content?.trim()).sort((a, b) => b.chapterNum - a.chapterNum)[0]
   const { seedIds, entityIds: relevant, relationIds: relevantEdges } = selectCreativeAtlas(atlas, {
     request: input.request, anchorText: dependency, povNames,
     fallbackText: previous?.summary || previous?.content?.slice(-2000),
@@ -340,6 +361,18 @@ export async function compileCreativeChapterContext(
     if (introductionIds.has(entity.id)) add(`chapter_introduction:${entity.id}`, value, true, 'plan')
     else add(entity.id, value, entityRequired)
   }
+  const researchQuery = { request: input.request, background: `${JSON.stringify(context.sceneSnapshots)}\n${JSON.stringify(context.chapterContract)}\n${context.chapter.title}\n${context.chapter.outline || ''}\n${JSON.stringify(safeEntities.map(entity => ({ name: entity.name, summary: entity.summary, attributes: entity.attributes })))}` }
+  const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchQuery)
+  if (research.length) {
+    add('research:usage', CREATIVE_RESEARCH_USAGE, true, 'plan')
+    for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 'plan')
+  }
+  const authorResearch = rankRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 3)
+  const authorResearchRanks = new Map(authorResearch.map((match, rank) => [`research:author:${match.entry.sourceKey}`, { ...match, rank }]))
+  if (authorResearch.length) {
+    for (const { entry } of authorResearch) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry, { compact: true }), false, 'plan')
+    if (sources.some(source => source.key?.startsWith('research:author:'))) add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 'plan')
+  }
   const povSeedIds = new Set(atlas.entities.filter(entity => seedIds.has(entity.id) && povNames.includes(entity.name)).map(entity => entity.id))
   const relationRequired = (edge: StoryAtlasRelation) => seedIds.has(edge.fromId) && seedIds.has(edge.toId)
     || (povSeedIds.has(edge.fromId) || povSeedIds.has(edge.toId)) && ['presence', 'membership', 'relationship', 'ownership'].includes(edge.kind)
@@ -356,7 +389,7 @@ export async function compileCreativeChapterContext(
     safeRelations.push({ ...edge, ...value })
     add(`relation:${edge.id}`, value, relationRequired(edge))
   }
-  add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id)))), true, 'plan')
+  add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id))), new Set(safeEntities.filter(entity => povNames.includes(entity.name)).map(entity => entity.id))), true, 'plan')
   if (previous) {
     const projected = projectPreviousChapterSources(previous, policy, dependency)
     // Actual prose is already reader-visible. Preserve paragraphs without forbidden facts even when no
@@ -364,8 +397,8 @@ export async function compileCreativeChapterContext(
     for (const source of projected) {
       if (source.reason === 'unclassified_visibility') {
         const text = previous.content!.slice(source.start!, source.end!)
-        sources.push({ ...source, text, included: true, reason: 'previous_prose_without_forbidden_fact', required: source.end === previous.content!.trimEnd().length, estimatedTokens: estimateTokens(text) })
-      } else if (source.included) sources.push(source)
+        sources.push({ ...source, text, included: true, reason: 'previous_prose_without_forbidden_fact', required: source.required || source.end === previous.content!.trimEnd().length, estimatedTokens: estimateTokens(text) })
+      } else if (source.included) sources.push({ ...source, required: source.required || source.end === previous.content!.trimEnd().length })
       else omitted.push(`${source.key}:${source.reason}`)
     }
   }
@@ -385,13 +418,24 @@ export async function compileCreativeChapterContext(
   // Whole-book checkpoints have no per-scene knowledge provenance. Use scoped facts and verified prior prose recall.
   omitted.push('story_memory:unscoped_checkpoint_excluded')
   // Include rendering overhead in selection; compiler otherwise counts payload text alone.
-  const packed = sources.map(source => ({ ...source, text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
-  const compiled = await compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',
+  const packed = sources.map(source => ({ ...source, selectionPriority: chapterMaterialPriority(source, previous?.content?.trimEnd().length, authorResearchRanks.get(source.key || '')), text: source.text || '', estimatedTokens: estimateTokens(`[${source.visibility}] ${source.key}: ${source.text}\n`) }))
+  const compileSources = (packSources: typeof packed) => compileContextPack({ novelId: input.novelId, chapterId: context.chapter.id, chapterNum, stage: 'draft',
     contextVersion: novel.contextVersion || 1, contractVersion: stableHash({ contract: context.chapterContractRow, scenes: context.sceneSnapshots }),
     outputReserve: limits.outputReserve, budget: limits.maxInputTokens,
-    sources: packed,
+    sources: packSources,
   })
-  if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) fail('CHAPTER_CONTEXT_BUDGET', '本章必要资料超过输入预算，需要缩小场景范围或切换模型。')
+  let compiled = await compileSources(packed)
+  if (packed.some(source => source.key?.startsWith('research:author:')) && !compiled.pack.sources.some(source => source.included && source.key.startsWith('research:author:'))) {
+    omitted.push('research:author:all:budget_insufficient')
+    // Usage and at least one card form a budget group. Do not let an unused required
+    // usage section crowd out evidence when no card fits; retry the other material.
+    compiled = await compileSources(packed.filter(source => source.key !== 'research:author-usage').map(source => source.key?.startsWith('research:author:') ? { ...source, included: false, reason: 'budget_insufficient' } : source))
+  }
+  if (compiled.diagnostics.requiredOverflow || estimateTokens(compiled.rendered) > limits.maxInputTokens) {
+    const requiredSourceKeys = compiled.pack.sources.filter(source => source.included && source.required).map(source => source.key)
+    const factKeys = requiredSourceKeys.filter(key => key.startsWith('fact:'))
+    throw new CreativeChapterContextError('CHAPTER_CONTEXT_BUDGET', formatUserFacingMessage('services.chapterContext.requiredInputOverflow', { detail: `${factKeys.length ? formatUserFacingMessage('services.chapterContext.selectedFactsRequired', { factKeys: `${factKeys.join('、')}` }) : ''}` }), requiredSourceKeys)
+  }
   return { text: compiled.rendered, estimatedTokens: estimateTokens(compiled.rendered), ...limits,
     sources: compiled.pack.sources.filter(source => source.included).map(source => source.key),
     omittedSources: [...omitted, ...compiled.pack.sources.filter(source => !source.included).map(source => `${source.key}:${source.reason}`)],
@@ -433,8 +477,15 @@ export function assertCreativeChapterCandidate(input: {
   // Keep their diagnostics for review, but do not force new plot consequences into a quiet scene.
   const contractedValidation = { ...validation, itemResults: validation.itemResults.filter(item =>
     item.contractItemType !== 'golden_three_state_delivery'
+    // Book-level theme keywords cannot prove that a chapter lacks a meaningful
+    // choice. Keep this diagnostic for semantic review; explicit chapter/scene
+    // goals and results remain mandatory below.
+    && item.contractItemType !== 'theme_chapter_response'
     && (item.contractItemType !== 'chapter_hook' || Boolean(context.chapterContract.hookType)),
   ) }
-  if (hasHardContractValidationBlocker(contractedValidation)) fail('CHAPTER_CONTRACT_NOT_DELIVERED', `正文未兑现必要合同：${validation.summary}`)
+  if (hasHardContractValidationBlocker(contractedValidation)) {
+    const blockers = contractedValidation.itemResults.filter(item => hasHardContractValidationBlocker({ ...contractedValidation, itemResults: [item] }))
+    fail('CHAPTER_CONTRACT_NOT_DELIVERED', `正文未兑现必要合同：${blockers.map(item => `${item.contractItemType}：${item.expected}；${item.rewriteHint}`).join('；')}`)
+  }
   return { chapterId: context.chapter.id, validation }
 }

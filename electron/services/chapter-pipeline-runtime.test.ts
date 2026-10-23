@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -290,7 +291,7 @@ describe('chapter pipeline runtime', () => {
     expect(() => bindings.failRole(
       'critic',
       taskId,
-      new ChapterPipelineStageError('invalid_output', '审校结构无效'),
+      new ChapterPipelineStageError('invalid_output', formatUserFacingMessage('services.test.reviewStructureInvalid')),
     )).toThrow('审校结构无效')
     expect(persistUsableDraft).toHaveBeenCalledWith(
       '第二章可用稿',
@@ -338,7 +339,7 @@ describe('failed Writer recovery candidates', () => {
       buildRecoveryHint: () => ({ kind: 'open_page', label: '恢复', description: '保留候选后处理失败' }),
     })
     const taskId = await bindings.startRole(role, role === 'writer' ? 'chapter_writer' : 'chapter_critic', '执行')
-    const failure = Object.assign(new Error('模型或提交失败'), { code, outputText: output })
+    const failure = Object.assign(new Error(formatUserFacingMessage('services.test.modelOrCommitFailed')), { code, outputText: output })
     expect(() => bindings.failRole(role, taskId, failure)).toThrow(failure)
     expect(snapshot.partialContent).toBe(expected)
     if (expected !== undefined) expect(snapshot.resumeSourceTaskId).toBe(taskId)

@@ -30,6 +30,8 @@ describe('narrative naturalness prompt', () => {
     expect(prompt).toContain('已确认的事实与状态 > 章节/场景合同')
     expect(prompt).toContain('不得复刻样章中的句子')
     expect(prompt).toContain('首稿就按可直接阅读的正文完成')
+    expect(prompt).toContain('不反复补“没应声、没接话、没答”')
+    expect(prompt).toContain('不要对每个人重复“姓名—所见—称呼—动作”的四步问答')
   })
 
   it('adds cautious reader-review criteria instead of an authorship detector claim', () => {

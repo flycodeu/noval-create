@@ -2,11 +2,13 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
+import type { RuntimeIdentity } from '../../src/shared/runtime-identity'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { DESKTOP_AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
 import type { AgentToolCallContext, AgentToolCallRequest, AgentToolCallResult, AgentToolDescriptor } from '../../src/shared/tool-contracts'
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 
 const DISCOVERY_FILE = 'novelforge-runtime.json'
 export interface RuntimeConnection {
@@ -17,6 +19,7 @@ export interface RuntimeConnection {
   token: string
 }
 export interface RuntimeHealth {
+  identity?: RuntimeIdentity
   instanceId: string
   version: string
   storage: 'ready'
@@ -67,7 +70,7 @@ export async function probeRuntime(directory: string, expectedVersion?: string):
   } catch { return null }
   // An incompatible live owner must never be mistaken for an absent owner.
   if (expectedVersion !== undefined && health.version !== expectedVersion) {
-    throw new Error(`NovelForge 后台版本 ${health.version || '未知'} 与当前程序 ${expectedVersion} 不一致。请先保存内容，在 NovelForge 托盘菜单选择“退出并停止创作服务”，再启动当前版本并重启 Codex 的 MCP 连接。`)
+    throw new Error(formatUserFacingMessage('runtime.versionMismatch', { runtimeVersion: health.version || '未知', expectedVersion }))
   }
   return { connection, health }
 }
@@ -77,7 +80,7 @@ export async function attachToExistingRuntime(directory: string, expectedVersion
   if (!existing) return false
   if (openDesktop) {
     const response = await runtimeRequest(existing.connection, '/desktop/open', { method: 'POST', timeoutMs: 30_000 })
-    if (!response.ok) throw new Error('已运行的服务无法打开桌面，请先退出该开发服务。')
+    if (!response.ok) throw new Error(formatUserFacingMessage('runtime.desktopOpenFailed'))
   }
   return true
 }
@@ -99,7 +102,7 @@ function descriptorForMcp(descriptor: AgentToolDescriptor) {
     },
     // Application runs are durable. Do not create a second, in-memory MCP task lifecycle.
     execution: { taskSupport: 'forbidden' as const },
-    _meta: { 'novelforge/effect': descriptor.effect, 'novelforge/scopes': descriptor.scopes },
+    _meta: { 'novelforge/effect': descriptor.effect, 'novelforge/scopes': descriptor.scopes, 'novelforge/approval': descriptor.approval },
   }
 }
 
@@ -115,6 +118,7 @@ function toolResult(result: AgentToolCallResult) {
 
 /** The caller already owns and initialized storage. This transport never opens SQLite. */
 export async function startMcpRuntime(options: {
+  identity?: RuntimeIdentity
   directory: string
   version: string
   registry: Registry
@@ -126,6 +130,9 @@ export async function startMcpRuntime(options: {
 }): Promise<RuntimeHandle> {
   const connection: RuntimeConnection = { protocol: 1, instanceId: randomUUID(), pid: process.pid, url: '', token: randomBytes(32).toString('hex') }
   const scopes = [...DESKTOP_AGENT_TOOL_SCOPES]
+  // The MCP transport has no human approval grant exchange. Do not advertise
+  // tools that require one; the desktop UI remains the approved path for them.
+  const listMcpTools = () => options.registry.list().filter(descriptor => descriptor.approval !== 'always')
   const transports = new Set<Server>()
   const eventClients = new Set<http.ServerResponse>()
   let closing = false
@@ -142,8 +149,9 @@ export async function startMcpRuntime(options: {
     if (closing) { json(503, { error: 'Runtime is stopping' }); return }
     if (request.method === 'GET' && request.url === '/health') {
       json(200, {
+        identity: options.identity,
         instanceId: connection.instanceId, version: options.version, storage: 'ready',
-        tools: options.registry.list().length, activeRequests: transports.size,
+        tools: listMcpTools().length, activeRequests: transports.size,
         modelConfigured: options.modelConfigured?.() ?? false, desktopAvailable: Boolean(options.openDesktop), desktopOpen: options.isDesktopOpen?.() ?? false,
       } satisfies RuntimeHealth)
       return
@@ -168,7 +176,7 @@ export async function startMcpRuntime(options: {
         const chunks: Buffer[] = []
         for await (const chunk of request) {
           length += Buffer.byteLength(chunk)
-          if (length > 4 * 1024 * 1024) { json(413, { ok: false, error: { code: 'runtime.payloadTooLarge', message: '请求内容超过 4 MiB。' } }); return }
+          if (length > 4 * 1024 * 1024) { json(413, { ok: false, error: { code: 'runtime.payloadTooLarge', message: formatUserFacingMessage('runtime.payloadTooLarge') } }); return }
           chunks.push(Buffer.from(chunk))
         }
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { service?: unknown; method?: unknown; args?: unknown }
@@ -183,9 +191,9 @@ export async function startMcpRuntime(options: {
     if (request.method !== 'POST') { json(405, { error: 'Use MCP POST requests; poll durable runs for progress' }); return }
     const mcp = new Server({ name: 'novelforge', version: options.version }, {
       capabilities: { tools: {}, resources: {} },
-      instructions: 'Select and read the project first; projects.create creates a new book only when requested. Query relevant assets and atlas records, and inspect context.preview for coverage, constraints and budget. Use research.list/get/upsert to read, create or batch-import free-form creative reference cards; author-created cards remain reference_only, are not Canon or historical evidence, and can be transformed into original themes or conflicts. Before adding cards, read this project’s background and story direction. Each card must explain the mechanism and its cost, the deeper meaning, and how it can be transformed to fit this book; avoid bare lists and copied plots or wording. research.upsert accepts up to 100 concise cards at a time. Build missing locations, character profiles and organizations from approved story material before prose needs them. Preserve unknown facts and distinguish confirmed records, planned characters and unfilled organization positions. Character residence, activity and current position use presence.locationRole; organizations use headquarters, outpost and jurisdiction, faction.parentId and positions; membership.positionId links an actual member to a position. Empty positions are not invented people. For generation, use workflows.start with the project-configured model, an explicit stage, a bounded count and the intended atChapter. Use autoApply:false for new character or prose designs that need discussion. Use chapters.review to review existing prose without changing it. Poll workflows.get and read the returned candidate and review artifacts; preserve atChapter and sourceArtifactId for a targeted revision. Use atlas.apply for reviewed factual corrections. Do not copy candidates into desktop forms. Missing facts remain unknown until a generated candidate is accepted.',
+      instructions: (options.identity ? `Runtime: ${options.identity.environment === 'test' ? 'TEST COPY; changes do not update formal manuscripts' : 'FORMAL INSTANCE'}. Data directory: ${options.identity.dataDirectory}. Version: ${options.identity.version}. ` : '') + 'Select and read the project first; projects.create creates a new book only when requested. Query relevant assets and atlas records, and inspect context.preview for coverage, constraints and budget. Use research.list/get/upsert for author-created reference cards; delete cards through the desktop UI, which provides the required explicit approval. Read the project background and story direction first, and give each card a concise mechanism and cost, deeper meaning, and original connection to this novel. These cards stay reference_only, never become Canon or historical evidence, and must not copy source plots, settings or wording. research.upsert accepts up to 100 cards per call and a project stores up to 200. Build missing locations, character profiles and organizations from approved story material before prose needs them. Preserve unknown facts and distinguish confirmed records, planned characters and unfilled organization positions. Character residence, activity and current position use presence.locationRole; organizations use headquarters, outpost and jurisdiction, faction.parentId and positions; membership.positionId links an actual member to a position. Empty positions are not invented people. For generation, use workflows.start with the project-configured model, an explicit stage, a bounded count and the intended atChapter. Use autoApply:false for new character or prose designs that need discussion. Use chapters.review to review existing prose without changing it. Poll workflows.get and read the returned candidate and review artifacts; preserve atChapter and sourceArtifactId for a targeted revision. Use atlas.apply for reviewed factual corrections. Do not copy candidates into desktop forms. Missing facts remain unknown until a generated candidate is accepted.',
     })
-    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: options.registry.list().map(descriptorForMcp) }))
+    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listMcpTools().map(descriptorForMcp) }))
     mcp.setRequestHandler(CallToolRequestSchema, async (call) => {
       return toolResult(await options.registry.invoke({
         toolId: call.params.name, input: call.params.arguments as Record<string, unknown> || {},
@@ -197,7 +205,7 @@ export async function startMcpRuntime(options: {
     mcp.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: 'novelforge://capabilities', name: 'NovelForge capabilities', mimeType: 'application/json' }] }))
     mcp.setRequestHandler(ReadResourceRequestSchema, async (call) => {
       if (call.params.uri !== 'novelforge://capabilities') throw new Error('Unknown resource')
-      return { contents: [{ uri: call.params.uri, mimeType: 'application/json', text: JSON.stringify({ server: { name: 'novelforge', version: options.version }, grantedScopes: scopes, tools: options.registry.list() }) }] }
+      return { contents: [{ uri: call.params.uri, mimeType: 'application/json', text: JSON.stringify({ server: { name: 'novelforge', version: options.version }, grantedScopes: scopes, tools: listMcpTools() }) }] }
     })
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     transports.add(mcp)

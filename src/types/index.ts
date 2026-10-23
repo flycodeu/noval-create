@@ -1,4 +1,11 @@
 import type { GenreWorldRules } from '../shared/genre-system'
+import type { SourceSearchSettingsView, SourceSearchSettingsUpdate, SourceSearchTestResult } from '../shared/source-search'
+export type {
+  SourceSearchPlatformName, SourceSearchProviderMode, SourceSearchProviderName, SourceSearchProtocol,
+  SourceSearchPlatformConfig, SourceSearchPlatformView, SourceSearchSettingsView,
+  SourceSearchSettingsUpdate, SourceSearchTestResult,
+} from '../shared/source-search'
+import type { ZhuqueSettingsView, ZhuqueSettingsUpdate, ZhuqueChapterView, ZhuqueTestResult } from '../shared/zhuque-detection'
 import type { NovelOperatingMode } from '../shared/operating-mode'
 import type { StyleStats } from '../shared/style-fingerprint-stats'
 import type { SemanticMemorySourceType } from '../shared/semantic-memory'
@@ -240,6 +247,10 @@ export interface Novel extends NovelSourceCanonFields {
 }
 
 export type NovelLaunchMode = 'professional_longform' | 'fast_launch'
+
+export interface NovelUpdateOptions {
+  expectedContextVersion?: number
+}
 
 export interface NovelCreateInput extends NovelSourceCanonFields {
   title: string
@@ -1542,30 +1553,15 @@ export interface ModelConfig {
   createdAt: string
 }
 
-export type SourceSearchProviderMode = 'auto' | 'tavily' | 'brave' | 'disabled'
-export type SourceSearchProviderName = 'tavily' | 'brave'
-
-export interface SourceSearchSettingsView {
-  provider: SourceSearchProviderMode
-  tavilyApiKeySet: boolean
-  braveApiKeySet: boolean
-  tavilyEnvSet: boolean
-  braveEnvSet: boolean
-  activeProvider: SourceSearchProviderName | null
-  updatedAt?: string | null
+export interface ModelDiscoveryRequest {
+  provider: string
+  apiKey?: string
+  baseUrl?: string
+  configId?: number
 }
 
-export interface SourceSearchSettingsUpdate {
-  provider?: SourceSearchProviderMode
-  tavilyApiKey?: string
-  braveApiKey?: string
-}
-
-export interface SourceSearchTestResult {
-  success: boolean
-  providerName: SourceSearchProviderName | null
-  latency: number
-  info: string
+export interface ModelDiscoveryResult {
+  models: string[]
 }
 
 export interface Template {
@@ -5931,10 +5927,13 @@ declare global {
         minimize: () => Promise<void>
         toggleMaximize: () => Promise<boolean>
         close: () => Promise<void>
+        confirmClose: (choice: 'minimize' | 'exit') => Promise<void>
+        onCloseRequested: (callback: (hasUnsavedChanges: boolean) => void) => () => void
         isMaximized: () => Promise<boolean>
         onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => () => void
       }
       app: {
+        getRuntimeInfo?: () => Promise<import('../shared/runtime-identity').RuntimeIdentity>
         getDatabasePath: () => Promise<string>
         getMaintenanceStatus: () => Promise<MaintenanceWorkerStatus>
         getUpdateStatus: () => Promise<import('../shared/desktop-update').DesktopUpdateStatus>
@@ -5976,7 +5975,7 @@ declare global {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>
         create: (data: NovelCreateInput) => Promise<number>
-        update: (id: number, data: Partial<Novel>) => Promise<void>
+        update: (id: number, data: Partial<Novel>, options?: NovelUpdateOptions) => Promise<void>
         delete: (id: number) => Promise<void>
         export: (id: number, format: string) => Promise<string>
         formatForPlatform: (id: number, options: PlatformFormatOptions) => Promise<PlatformFormatResult>
@@ -6407,16 +6406,26 @@ declare global {
       }
       model: {
         list: () => Promise<ModelConfig[]>
+        discover: (input: ModelDiscoveryRequest) => Promise<ModelDiscoveryResult>
         create: (data: Partial<ModelConfig>) => Promise<number>
         update: (id: number, data: Partial<ModelConfig>) => Promise<void>
         delete: (id: number) => Promise<void>
         setDefault: (id: number) => Promise<void>
         test: (id: number) => Promise<{ success: boolean; latency: number; info: string }>
       }
+      zhuque: {
+        getSettings: () => Promise<ZhuqueSettingsView>
+        updateSettings: (data: ZhuqueSettingsUpdate) => Promise<ZhuqueSettingsView>
+        test: () => Promise<ZhuqueTestResult>
+        getChapterResult: (chapterId: number) => Promise<ZhuqueChapterView>
+        detectChapter: (chapterId: number, expectedContent?: string) => Promise<ZhuqueChapterView>
+      }
       sourceSearch: {
         getSettings: () => Promise<SourceSearchSettingsView>
         updateSettings: (data: SourceSearchSettingsUpdate) => Promise<SourceSearchSettingsView>
-        test: () => Promise<SourceSearchTestResult>
+        test: (data?: SourceSearchSettingsUpdate) => Promise<SourceSearchTestResult>
+        research: (novelId: number, request: string, atChapter?: number) => Promise<import('../shared/creative-research').CreativeResearchResult>
+        listResearch: (novelId: number, query?: string) => Promise<import('../shared/creative-research').CreativeResearchSource[]>
       }
       template: {
         list: (type?: string) => Promise<Template[]>

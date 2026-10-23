@@ -756,7 +756,7 @@ export function SegmentEditorPanel({
               showIcon
               type="info"
               message="当前场景不在本页窗口中。"
-              description="编辑面板已经定位到目标场景，场景列表可翻页继续查看它所在的窗口。"
+
             />
           ) : null}
         </>

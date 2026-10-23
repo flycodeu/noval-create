@@ -20,6 +20,8 @@ export interface ContextPackSource {
   estimatedTokens: number
   projectionKind?: 'full_text' | 'scene_excerpt' | 'required_evidence'
   knowledgeLayer?: 'pov_experience' | 'reader_known' | 'unclassified'
+  /** Budget selection only: higher values win among optional sources; omitted means 0. */
+  selectionPriority?: number
 }
 
 export interface ContextPackV1 {
@@ -109,6 +111,9 @@ function sourceIdentity(source: ContextPackSource): string {
 }
 
 function normalizeSource(source: ContextPackCompileInput['sources'][number], index: number): ContextPackSource {
+  if (source.selectionPriority !== undefined && !Number.isFinite(source.selectionPriority)) {
+    throw new ContextPackValidationError('selectionPriority must be a finite number')
+  }
   const text = typeof source.text === 'string' ? source.text.trim() : ''
   const key = String(source.key || `legacy:${index}:${stableHash(text)}`)
   const sourceVersion = String(source.sourceVersion || 'legacy')
@@ -128,7 +133,30 @@ function normalizeSource(source: ContextPackCompileInput['sources'][number], ind
     estimatedTokens: Number.isFinite(source.estimatedTokens) ? Number(source.estimatedTokens) : estimateTokens(text),
     ...(source.projectionKind ? { projectionKind: source.projectionKind } : {}),
     ...(source.knowledgeLayer ? { knowledgeLayer: source.knowledgeLayer } : {}),
+    ...(source.selectionPriority !== undefined ? { selectionPriority: source.selectionPriority } : {}),
   }
+}
+
+/** Restore prose offsets within each source without moving unrelated author material. */
+function orderSourcesForRendering(sources: ContextPackSource[]): ContextPackSource[] {
+  const groups = new Map<string, { positions: number[]; sources: ContextPackSource[] }>()
+  sources.forEach((source, index) => {
+    if (!Number.isFinite(source.start)) return
+    const key = stableSerialize([source.sourceKind, source.sourceId])
+    const group = groups.get(key) || { positions: [], sources: [] }
+    group.positions.push(index)
+    group.sources.push(source)
+    groups.set(key, group)
+  })
+  const rendered = [...sources]
+  for (const group of groups.values()) {
+    group.sources.sort((left, right) => (
+      left.start! - right.start!
+      || (Number.isFinite(left.end) && Number.isFinite(right.end) ? left.end! - right.end! : 0)
+    ))
+    group.positions.forEach((position, index) => { rendered[position] = group.sources[index] })
+  }
+  return rendered
 }
 
 export function selectContextSources(
@@ -136,7 +164,7 @@ export function selectContextSources(
   budget?: number,
 ): ContextPackCompileResult['diagnostics'] & { sources: ContextPackSource[] } {
   const normalized = sources.map(normalizeSource).filter((source) => source.text.length > 0)
-  const selected: ContextPackSource[] = []
+  const selected = new Map<ContextPackSource, ContextPackSource>()
   const droppedOptional: string[] = []
   const deduped: string[] = []
   const seen = new Set<string>()
@@ -144,6 +172,7 @@ export function selectContextSources(
   let requiredTokens = 0
   const ordered = [...normalized].sort((left, right) => (
     Number(right.required) - Number(left.required)
+    || (left.required ? 0 : (right.selectionPriority ?? 0) - (left.selectionPriority ?? 0))
     || left.key.localeCompare(right.key)
     || left.sourceVersion.localeCompare(right.sourceVersion)
     || (left.start ?? -1) - (right.start ?? -1)
@@ -153,30 +182,30 @@ export function selectContextSources(
     const identity = sourceIdentity(source)
     if (seen.has(identity)) {
       deduped.push(source.key)
-      selected.push({ ...source, included: false, reason: 'deduped_same_source' })
+      selected.set(source, { ...source, included: false, reason: 'deduped_same_source' })
       continue
     }
     seen.add(identity)
     if (!source.included) {
-      selected.push(source)
+      selected.set(source, source)
       continue
     }
     if (source.required) {
       requiredTokens += source.estimatedTokens
       used += source.estimatedTokens
-      selected.push({ ...source, included: true, reason: 'required' })
+      selected.set(source, { ...source, included: true, reason: 'required' })
       continue
     }
     if (budget !== undefined && Number.isFinite(budget) && used + source.estimatedTokens > Math.max(0, budget)) {
       droppedOptional.push(source.key)
-      selected.push({ ...source, included: false, reason: 'budget_insufficient' })
+      selected.set(source, { ...source, included: false, reason: 'budget_insufficient' })
       continue
     }
     used += source.estimatedTokens
-    selected.push({ ...source, included: true, reason: 'budget_fit' })
+    selected.set(source, { ...source, included: true, reason: 'budget_fit' })
   }
   return {
-    sources: selected,
+    sources: orderSourcesForRendering(normalized.map((source) => selected.get(source)!)),
     droppedOptional,
     deduped,
     requiredOverflow: budget !== undefined && requiredTokens > Math.max(0, budget),

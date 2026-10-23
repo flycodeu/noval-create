@@ -1,4 +1,15 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { estimateTokens } from '../../src/shared/token-budget'
+import {
+  CREATIVE_AUTHOR_RESEARCH_USAGE,
+  CREATIVE_RESEARCH_USAGE,
+  buildCreativeResearchContext,
+  needsCreativeResearch,
+  parseCreativeResearchEntries,
+  selectCreativeResearchSources,
+  selectRelevantCreativeResearchEntries,
+} from '../../src/shared/creative-research'
+import { creativeTextProjection } from '../../src/shared/creative-text-projection'
 import type { CreativeContextReport, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
 import { listChapters } from './chapter.service'
 import { getNovel } from './novel.service'
@@ -14,7 +25,6 @@ import { getChapterContract, listSceneContracts } from './endgame-asset.service'
 import { creativeRevisionIssueSources } from './creative-review-issues'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { captureChapterRevisionBase, chapterRevisionGenerationMaterial, validateChapterRevision, type ChapterRevisionBase } from './creative-chapter-revision'
-import { buildCreativeResearchContext, parseCreativeResearchEntries, selectRelevantCreativeResearchEntries } from '../../src/shared/creative-research'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -22,7 +32,7 @@ export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): nu
   const chapters = listChapters(input.novelId)
   if (input.stage === 'outline' && input.changeScope?.chapterIds?.length === 1) {
     const chapter = chapters.find(row => row.id === input.changeScope!.chapterIds![0])
-    if (!chapter) throw new Error(`章节 ${input.changeScope.chapterIds[0]} 不属于当前项目。`)
+    if (!chapter) throw new Error(formatUserFacingMessage('services.creativeContext.chapterWrongProject', { chapterId: `${input.changeScope.chapterIds[0]}` }))
     return chapter.chapterNum
   }
   const writtenThrough = chapters.filter(chapter => chapter.content?.trim()).reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0)
@@ -57,14 +67,14 @@ export function assertCreativeContextCoverage(data: Record<string, unknown>, con
       const attributes = change.attributes as Record<string, unknown> | undefined
       if (change.attributeMode === 'replace' || field === 'summary' && Object.prototype.hasOwnProperty.call(change, 'summary')
         || field !== 'summary' && attributes && Object.prototype.hasOwnProperty.call(attributes, field)) {
-        throw new Error(`本次上下文未提供 ${id} 的完整 ${field}，不能覆盖该字段；请缩小范围并读取完整资料后修订。`)
+        throw new Error(formatUserFacingMessage('services.creativeContext.fieldIncomplete', { id: `${id}`, field: `${field}` }))
       }
     }
   }
 }
 const planningNarrativeKeys = new Set(['evidenceQuote', 'eventTitle', 'eventSummary', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'protagonistAction', 'timeLabel', 'timeMode', 'timePrecision', 'relativeDay', 'sequenceInDay', 'chronologyOrder', 'timeOfDayMinutes'])
 function narrativeAttributes(attributes: Record<string, unknown> = {}) {
-  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))
+  return creativeTextProjection(Object.fromEntries(Object.entries(attributes).filter(([key]) => !atlasBookkeeping.has(key)))) as Record<string, unknown>
 }
 
 function clipPlanningValue(value: unknown): unknown {
@@ -159,12 +169,17 @@ function formalSnapshotValues(snapshot: unknown) {
 
 /** A bounded, inspectable projection shared by generation, review and MCP preview. */
 export async function compileCreativeContext(input: CreativeWorkflowInput, modelConfigId?: number, reviewModelConfigId?: number, formalReviewTokens = 0, formalReviewSnapshot?: unknown, frozenRevisionBase?: ChapterRevisionBase): Promise<CreativeContextReport> {
+  if (formalReviewSnapshot !== undefined) {
+    const projected = creativeTextProjection(formalReviewSnapshot)
+    if (JSON.stringify(projected) !== JSON.stringify(formalReviewSnapshot)) formalReviewTokens = estimateTokens(JSON.stringify(projected))
+    formalReviewSnapshot = projected
+  }
   validateCreativeChangeScope(input)
   validateChapterRevision(input)
   input = { ...input, atChapter: resolveCreativeChapterPosition(input) }
   const revisionBase = input.chapterRevision ? frozenRevisionBase || captureChapterRevisionBase(input) : undefined
   const novel = getNovel(input.novelId)
-  if (!novel) throw new Error('项目不存在。')
+  if (!novel) throw new Error(formatUserFacingMessage('services.projectNotFound'))
   const generationBudget = resolveModelRuntimeBudget(modelConfigId || novel.modelConfigId)
   const reviewerId = reviewModelConfigId || parseStorySettingsDocument(novel.settingsJson).aiEngine.reviewModelConfigId
   const reviewBudget = reviewerId ? resolveModelRuntimeBudget(reviewerId) : generationBudget
@@ -173,29 +188,34 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   // so the base also covers changes to existing parents, endpoints and supporting records.
   const structuredAssets = ['characters', 'map', 'relationships', 'factions', 'items', 'events', 'outline'].includes(input.stage)
   const assetCount = Number.isFinite(input.count) ? Math.max(1, Math.min(12, Math.floor(input.count!))) : 3
-  const stageOutputLimit = revisionBase ? revisionBase.revision.target === 'summary' ? 2_000
+  const stageContentLimit = revisionBase ? revisionBase.revision.target === 'summary' ? 2_000
     : Math.min(8_000, Math.max(2_000, Math.ceil(estimateTokens(JSON.stringify(chapterRevisionGenerationMaterial(revisionBase))) * 1.6) + 1_000))
     : input.stage === 'chapter' ? 16_000 : structuredAssets ? Math.min(64_000, 16_000 + assetCount * 4_000) : 12_000
+  // DeepSeek counts hidden reasoning against max_tokens. A small local JSON
+  // patch still needs room to reason before emitting any usable prose.
+  const stageOutputLimit = stageContentLimit + (revisionBase && generationBudget.reasoningEnabled ? 12_000 : 0)
   const outputReserve = Math.min(budget.maxTokens || 12_000, stageOutputLimit, Math.floor((budget.maxContextTokens || 32_768) * 0.22))
   const reviewOutputReserve = revisionBase
-    ? Math.min(reviewBudget.maxTokens || 12_000, 6_000, Math.floor((reviewBudget.maxContextTokens || 32_768) * 0.22))
+    ? Math.min(reviewBudget.maxTokens || 12_000, 6_000 + (reviewBudget.reasoningEnabled ? 12_000 : 0), Math.floor((reviewBudget.maxContextTokens || 32_768) * 0.22))
     : outputReserve
   // Leave room for the candidate and instructions during the independent review request.
   const formalSnapshotTokens = input.operation === 'review' && formalReviewSnapshot !== undefined ? estimateTokens(JSON.stringify(formalReviewSnapshot)) : 0
   const reviewedChapterTokens = input.operation === 'review' && input.stage === 'chapter'
     ? Math.max(formalSnapshotTokens, estimateTokens(listChapters(input.novelId).find(chapter => chapter.chapterNum === input.atChapter)?.content || '')) : Math.max(formalReviewTokens, formalSnapshotTokens)
-  const maxInputTokens = Math.min(24_000, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
-  if (maxInputTokens < 1_000) throw new Error('当前模型窗口不足以完成生成和审校，请降低输出上限或切换模型。')
+  const reviewReserve = revisionBase && revisionBase.revision.target !== 'summary' ? estimateTokens(JSON.stringify(revisionBase.chapter)) + outputReserve + 500 : 0
+  // The 24k context-material cap does not include the merged formal chapter and
+  // patch used by local review. Reserve those once, inside the configured window.
+  const maxInputTokens = Math.min(24_000 + reviewReserve, Math.max(0, Math.floor((budget.maxContextTokens || 32_768) * 0.85) - outputReserve - reviewOutputReserve - 2_000 - Math.max(0, reviewedChapterTokens - outputReserve)))
+  if (maxInputTokens < 1_000) throw new Error(formatUserFacingMessage('services.creativeContext.modelWindowInsufficient'))
   if (input.stage === 'chapter') {
     // Review sees the complete merged chapter; generation only needs the selected ranges.
-    const reviewReserve = revisionBase && revisionBase.revision.target !== 'summary' ? estimateTokens(JSON.stringify(revisionBase.chapter)) + outputReserve + 500 : 0
-    if (maxInputTokens - reviewReserve < 1000) throw new Error('局部修订的合并章评审依据超过当前预算，请降低输出上限或切换模型。')
+    if (maxInputTokens - reviewReserve < 1000) throw new Error(formatUserFacingMessage('services.creativeContext.revisionReviewOverBudget'))
     const result = await compileCreativeChapterContext(input, { maxInputTokens: maxInputTokens - reviewReserve, outputReserve }, revisionBase)
     return { ...result, maxInputTokens, reviewOutputReserve }
   }
   const atlas = queryStoryAtlas({ novelId: input.novelId, atChapter: input.atChapter, includePlanned: true })
-  for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(`资料 ${id} 在当前项目章位不存在。`)
-  for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(`关系 ${id} 在当前项目章位不存在。`)
+  for (const id of input.changeScope?.existingEntityIds || []) if (!atlas.entities.some(entity => entity.id === id)) throw new Error(formatUserFacingMessage('services.creativeContext.entityMissing', { id: `${id}` }))
+  for (const id of input.changeScope?.existingRelationIds || []) if (!atlas.relations.some(edge => edge.id === id)) throw new Error(formatUserFacingMessage('services.creativeContext.relationMissing', { id: `${id}` }))
   const chapterRows = listChapters(input.novelId)
   const sources: string[] = []
   const omittedSources: string[] = []
@@ -204,6 +224,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const candidates: Array<{ id: string; text: string; required: boolean; priority: number }> = []
   const seen = new Map<string, typeof candidates[number]>()
   let used = 0
+  const escapeSourceBoundary = (value: string) => value.replace(/<\/source/giu, '&lt;/source')
   const reviewedValue = (value: unknown): unknown => {
     const original = typeof value === 'string' ? value : JSON.stringify(value)
     const reference = snapshotValues.get(original)
@@ -239,10 +260,17 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
-  const researchAnchor = chapterRows.find(chapter => chapter.chapterNum === input.atChapter)
-  const researchQuery = [input.request, researchAnchor?.title, researchAnchor?.outline, researchAnchor?.summary].filter(Boolean).join('\n')
-  for (const entry of selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 4)) {
-    add(`creative_reference:${entry.sourceKey}`, buildCreativeResearchContext(entry))
+  const researchText = { request: input.request, background: [novel.userBackground, novel.expandedBackground].filter(Boolean).join('\n') }
+  const research = selectCreativeResearchSources(novel.sourceLedgerJson, researchText)
+  if (research.length) {
+    add('research:usage', CREATIVE_RESEARCH_USAGE, true)
+    for (const [index, source] of research.entries()) add(`research:${source.sourceKey}`, source, index === 0 && needsCreativeResearch(input.request), 15)
+  }
+  const authorResearch = selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchText, 3)
+  if (authorResearch.length) {
+    add('research:author-usage', CREATIVE_AUTHOR_RESEARCH_USAGE, true, 14)
+    // Selection already ranks by relevance; smaller priorities survive the budget first.
+    for (const [index, entry] of authorResearch.entries()) add(`research:author:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 12 + index)
   }
   const target = input.atChapter ?? chapterRows.reduce((n, chapter) => Math.max(n, chapter.chapterNum), 0) + 1
   const targetChapter = chapterRows.find(chapter => chapter.chapterNum === target)
@@ -250,7 +278,7 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const localOutline = input.stage === 'outline' && (isCreativeChapterScopedRequest(input.request) || Boolean(input.changeScope?.chapterIds))
   const scopedChapters = input.changeScope?.chapterIds?.map(id => {
     const chapter = chapterRows.find(row => row.id === id)
-    if (!chapter) throw new Error(`章节 ${id} 不属于当前项目。`)
+    if (!chapter) throw new Error(formatUserFacingMessage('services.creativeContext.chapterWrongProject', { chapterId: `${id}` }))
     return chapter
   }) || []
   if (targetChapter) add(`chapter:${targetChapter.id}:target`, {
@@ -377,15 +405,31 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
     add(`chapter:${chapter.id}:plan`, { chapterNum: chapter.chapterNum, title: chapter.title, outline: chapter.outline, summary: chapter.summary }, false, 20 + Math.abs(chapter.chapterNum - target))
   }
   const ranked = [...candidates].sort((a, b) => Number(b.required) - Number(a.required) || a.priority - b.priority)
-  for (const { id, text, required } of ranked) {
-    const section = `<source id="${id}">\n${text}\n</source>`
-    const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
-    if (used + size > maxInputTokens) {
-      if (required) throw new Error(`必要资料 ${id} 超出模型上下文预算，请缩小本阶段范围。`)
-      omittedSources.push(id); continue
+  const omittedBeforeBudget = omittedSources.length
+  const selectBudget = (includeAuthorResearch = true): string | undefined => {
+    sources.length = 0; pieces.length = 0; used = 0
+    omittedSources.length = omittedBeforeBudget
+    for (const { id, text, required } of ranked) {
+      if (!includeAuthorResearch && (id === 'research:author-usage' || id.startsWith('research:author:'))) {
+        if (id.startsWith('research:author:')) omittedSources.push(id)
+        continue
+      }
+      const section = `<source id="${id}">\n${escapeSourceBoundary(text)}\n</source>`
+      const size = estimateTokens(`${pieces.length ? '\n\n' : ''}${section}`)
+      if (used + size > maxInputTokens) {
+        if (required) return id
+        omittedSources.push(id); continue
+      }
+      used += size; sources.push(id); pieces.push(section)
     }
-    used += size; sources.push(id); pieces.push(section)
+    return undefined
   }
+  let requiredOverflow = selectBudget()
+  if (authorResearch.length && !sources.some(id => id.startsWith('research:author:'))) {
+    requiredOverflow = selectBudget(false)
+    omittedSources.push('research:author:all:budget_insufficient')
+  }
+  if (requiredOverflow) throw new Error(formatUserFacingMessage('services.creativeContext.requiredAssetOverBudget', { id: requiredOverflow }))
   return { text: pieces.join('\n\n'), estimatedTokens: used, maxInputTokens, outputReserve, reviewOutputReserve, sources, omittedSources }
 }
 

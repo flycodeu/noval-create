@@ -1,27 +1,9 @@
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
-const Module = require('node:module')
-const ts = require('typescript')
+const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
-function loadTsModule(filePath) {
-  const source = fs.readFileSync(filePath, 'utf8')
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-    },
-    fileName: filePath,
-  })
-
-  const mod = new Module.Module(filePath, module)
-  mod.filename = filePath
-  mod.paths = Module.Module._nodeModulePaths(path.dirname(filePath))
-  mod._compile(outputText, filePath)
-  return mod.exports
-}
-
-const subplot = loadTsModule(path.resolve(__dirname, '../src/shared/subplot-framework.ts'))
+registerProjectTsRuntime(path.resolve(__dirname, '..'))
+const subplot = require('../src/shared/subplot-framework.ts')
 
 const sampleSubplot = {
   name: 'clinic_supply',
@@ -145,6 +127,10 @@ const tests = [
   {
     name: 'throws a preview-rich error when no recoverable subplot object exists',
     run() {
+      assert.throws(
+        () => subplot.parseSubPlotFrameworkResponseDetailed(''),
+        { name: 'SyntaxError', message: '支线 JSON 解析失败：AI 未返回可解析内容。片段：' },
+      )
       assert.throws(
         () => subplot.parseSubPlotFrameworkResponseDetailed('Model only said it could not rewrite this batch.'),
         /\u652f\u7ebf JSON \u89e3\u6790\u5931\u8d25\uff1a\u672a\u627e\u5230\u53ef\u6062\u590d\u7684\u652f\u7ebf\u5bf9\u8c61/u,

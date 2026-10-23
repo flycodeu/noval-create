@@ -7,11 +7,11 @@ const snapshot: StoryAtlasSnapshot = { novelId: 1, contextVersion: 1, atChapter:
 ] }
 
 describe('atlas entry and navigation', () => {
-  it('shows planned geography by default while preserving explicit choices and other tabs', () => {
-    expect(atlasIncludesPlanned(new URLSearchParams(), true)).toBe(true)
-    expect(atlasIncludesPlanned(new URLSearchParams(), false)).toBe(false)
-    expect(atlasIncludesPlanned(new URLSearchParams('includePlanned=false'), true)).toBe(false)
-    expect(atlasIncludesPlanned(new URLSearchParams('includePlanned=true'), false)).toBe(true)
+  it('shows saved planned assets in every section while preserving the explicit author filter', () => {
+    expect(atlasIncludesPlanned(new URLSearchParams())).toBe(true)
+    expect(atlasIncludesPlanned(new URLSearchParams('tab=characters'))).toBe(true)
+    expect(atlasIncludesPlanned(new URLSearchParams('includePlanned=false'))).toBe(false)
+    expect(atlasIncludesPlanned(new URLSearchParams('includePlanned=true'))).toBe(true)
   })
   it('enters a single country but permits returning to the world and following a deep link', () => {
     expect(atlasMapScope(new URLSearchParams(), snapshot, true)).toBe('location:1')

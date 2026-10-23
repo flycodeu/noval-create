@@ -968,6 +968,7 @@ export const sourceSearchSettings = sqliteTable('source_search_settings', {
   provider: text('provider').notNull().default('auto'),
   tavilyApiKey: text('tavily_api_key'),
   braveApiKey: text('brave_api_key'),
+  platformsJson: text('platforms_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })

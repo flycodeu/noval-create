@@ -1,9 +1,11 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CodexMcpSetupStatus } from '../../src/shared/codex-mcp-setup'
 import { probeRuntime, runtimeRequest } from '../utils/mcp-runtime'
+import { isTestProfile } from '../utils/desktop-profile'
 
 const SERVER_NAME = 'novelforge'
 
@@ -18,7 +20,7 @@ export interface CodexMcpRuntimeStatus {
 
 async function getRuntimeStatus(): Promise<CodexMcpRuntimeStatus> {
   const live = await probeRuntime(app.getPath('userData'))
-  if (!live) return { reachable: false, projectReadable: false, modelConfigured: false, toolCount: 0, activeRequests: 0, message: '本地创作服务不可达，MCP 桥接将在首次调用时启动服务。' }
+  if (!live) return { reachable: false, projectReadable: false, modelConfigured: false, toolCount: 0, activeRequests: 0, message: '请先手动打开安装版 NovelForge，再重新连接 MCP；MCP 不会自动启动创作服务。' }
   let projectReadable = false
   try {
     const response = await runtimeRequest(live.connection, '/mcp', {
@@ -48,7 +50,7 @@ function findCodexCli(input?: string): string | null {
   if (input !== undefined) {
     const selected = input.trim()
     if (!path.isAbsolute(selected) || path.basename(selected).toLowerCase() !== 'codex.exe' || !isFile(selected)) {
-      throw new Error('请选择存在的 codex.exe 绝对路径。')
+      throw new Error(formatUserFacingMessage('services.codexSetup.executableInvalid'))
     }
     return selected
   }
@@ -79,7 +81,7 @@ function runCodex(cliPath: string, args: string[]): Promise<string> {
 
 export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMcpSetupStatus & { runtime: CodexMcpRuntimeStatus }> {
   const novelForgePath = app.getPath('exe')
-  const supported = process.platform === 'win32' && Boolean(novelForgePath && isFile(novelForgePath))
+  const supported = process.platform === 'win32' && app.isPackaged && !isTestProfile() && Boolean(novelForgePath && isFile(novelForgePath))
   const codexCliPath = findCodexCli(cliInput)
   const launchArgs = getLaunchArgs()
   const command = supported && novelForgePath
@@ -96,7 +98,7 @@ export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMc
     message: '',
     runtime: await getRuntimeStatus(),
   }
-  if (!supported) return { ...base, message: '请使用 Windows 安装版或便携版 NovelForge 配置 MCP。' }
+  if (!supported) return { ...base, message: '测试副本和源码版不能登记为 Codex 正式入口。请打开安装版的正式实例配置 MCP。' }
   if (!codexCliPath) return { ...base, message: '未找到 Codex CLI，请指定 codex.exe 路径，或复制下方命令手动配置。' }
 
   try {
@@ -130,11 +132,11 @@ export async function getCodexMcpSetupStatus(cliInput?: string): Promise<CodexMc
 
 export async function configureCodexMcp(cliInput?: string): Promise<CodexMcpSetupStatus> {
   const before = await getCodexMcpSetupStatus(cliInput)
-  if (!before.supported || !before.novelForgePath) throw new Error('请从 Windows 安装版或便携版 NovelForge 执行配置。')
-  if (!before.codexCliPath) throw new Error('未找到 Codex CLI，请先指定 codex.exe 路径。')
+  if (!before.supported || !before.novelForgePath) throw new Error(formatUserFacingMessage('services.codexSetup.formalInstanceRequired'))
+  if (!before.codexCliPath) throw new Error(formatUserFacingMessage('services.codexSetup.cliMissing'))
   if (before.registration === 'configured') return before
   await runCodex(before.codexCliPath, ['mcp', 'add', SERVER_NAME, '--', before.novelForgePath, ...getLaunchArgs()])
   const after = await getCodexMcpSetupStatus(before.codexCliPath)
-  if (after.registration !== 'configured') throw new Error(`配置命令已执行，但复核未通过：${after.message}`)
+  if (after.registration !== 'configured') throw new Error(formatUserFacingMessage('services.codexSetup.verificationFailed', { message: `${after.message}` }))
   return after
 }

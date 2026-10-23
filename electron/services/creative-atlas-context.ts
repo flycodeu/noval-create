@@ -170,8 +170,8 @@ export function selectCreativeAtlas(atlas: Atlas, input: {
 }
 
 const publicAttributes = new Set([
-  'roleType', 'entityType', 'age', 'gender', 'occupation', 'appearance', 'personalityTraits', 'flaws', 'speechPattern',
-  'publicSummary', 'firstImpression',
+  'roleType', 'entityType', 'age', 'gender', 'occupation', 'appearance', 'clothing', 'carriedItems', 'physicalHabits', 'personalityTraits', 'flaws', 'speechPattern',
+  'publicSummary', 'firstImpression', 'innerConflict', 'relationshipTension',
   'goals', 'habits', 'dailyRoutine', 'motivation', 'moralLine', 'surfaceDesire', 'abilityLimits', 'abilityCosts',
   'subtype', 'locationType', 'nodeType', 'terrain', 'climate', 'waterSource', 'livelihood', 'access', 'x', 'y',
   'category', 'function', 'abilities', 'limitations', 'culture', 'publicGoal', 'organizationLevel', 'traits', 'ideology', 'methods', 'funding',
@@ -179,8 +179,8 @@ const publicAttributes = new Set([
   'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral', 'transfers', 'seasonAccess',
   'locationRole', 'positionId', 'responsibilities',
 ])
-const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])
-const npcPublicAttributes = new Set(['entityType', 'age', 'gender', 'occupation', 'appearance', 'publicSummary', 'firstImpression', 'publicGoal', 'traits', 'habits', 'speechPattern'])
+const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'innerConflict', 'relationshipTension', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])
+const npcPublicAttributes = new Set(['entityType', 'age', 'gender', 'occupation', 'appearance', 'clothing', 'carriedItems', 'physicalHabits', 'publicSummary', 'firstImpression', 'publicGoal', 'traits', 'habits', 'speechPattern'])
 
 /** Nested author-only keys are never passed through simply because their parent is public. */
 function publicValue(value: unknown): unknown {
@@ -208,15 +208,24 @@ export function creativePublicAttributes(attributes: Record<string, unknown>, sc
 }
 
 /** Gaps guide writing and review; absence is never permission to invent canon or proof of nonexistence. */
-export function creativeAtlasCoverage(atlas: Atlas, selectedIds: Set<string>) {
+export function creativeAtlasCoverage(atlas: Atlas, selectedIds: Set<string>, povIds?: Set<string>) {
   const missing: Array<{ entityId?: string; fields: string[] }> = []
-  const populated = (value: unknown) => value !== undefined && value !== null && value !== '' && (!Array.isArray(value) || value.length > 0)
+  const populated = (value: unknown): boolean => {
+    if (typeof value === 'string') return Boolean(value.trim())
+    if (Array.isArray(value)) return value.some(populated)
+    if (value && typeof value === 'object') return Object.values(value).some(populated)
+    return value !== undefined && value !== null
+  }
   if (!atlas.entities.some(entity => entity.kind === 'location')) missing.push({ fields: ['map_locations'] })
   for (const entity of atlas.entities.filter(entity => selectedIds.has(entity.id))) {
     const fields: string[] = []
     if (entity.kind === 'character') {
       if (!populated(entity.summary) && !populated(entity.attributes.publicSummary) && !populated(entity.attributes.firstImpression)) fields.push('public_description')
-      for (const field of ['occupation', 'goals', 'personalityTraits', 'flaws', 'speechPattern']) if (!populated(entity.attributes[field])) fields.push(field)
+      const characterFields = povIds && !povIds.has(entity.id)
+        ? ['occupation', 'publicGoal', 'speechPattern']
+        : ['occupation', 'goals', 'personalityTraits', 'flaws', 'speechPattern']
+      for (const field of characterFields) if (!populated(entity.attributes[field])) fields.push(field)
+      for (const field of ['appearance', 'clothing', 'carriedItems']) if (!populated(entity.attributes[field])) fields.push(field)
       const places = atlas.relations.filter(edge => edge.kind === 'presence' && edge.fromId === entity.id)
       for (const role of ['residence', 'activity', 'current']) if (!places.some(edge => edge.attributes.locationRole === role)) fields.push(`location_${role}`)
     }

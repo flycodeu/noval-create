@@ -4,6 +4,7 @@ const path = require('node:path')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'chapter-integrity')
@@ -751,7 +752,7 @@ async function run() {
     console.log('PASS chapter integrity: final gate, generation edit lock, arc/thread transactions, invalidation, ownership, cross-novel isolation, reorder remap and locked writeback decisions')
   } finally {
     closeDb()
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    cleanupElectronFixture(tempRoot, 'chapter-integrity')
     await app.quit()
   }
 }

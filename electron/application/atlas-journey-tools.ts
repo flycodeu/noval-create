@@ -1,6 +1,6 @@
 import { AGENT_TOOL_SCOPES } from '../../src/shared/tool-contracts'
 import { calculateAtlasJourney, type AtlasTravelSeason } from '../../src/shared/story-atlas-travel'
-import { queryStoryAtlas } from '../services/story-atlas.service'
+import { queryStoryAtlas, StoryAtlasError } from '../services/story-atlas.service'
 import { AgentToolInvocationError, type AgentToolRegistry } from './tool-registry'
 
 export function registerAtlasJourneyTools(registry: AgentToolRegistry): void {
@@ -23,7 +23,7 @@ export function registerAtlasJourneyTools(registry: AgentToolRegistry): void {
           travelMode: input.travelMode as string | undefined, allowTransfers: input.allowTransfers as boolean | undefined, season: input.season as AtlasTravelSeason | undefined,
         }) }
     } catch (error) {
-      if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new AgentToolInvocationError(error.code, error.message)
+      if (error instanceof StoryAtlasError) throw new AgentToolInvocationError(error.code, error.message)
       throw error
     }
   } })

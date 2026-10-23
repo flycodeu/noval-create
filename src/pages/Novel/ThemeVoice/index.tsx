@@ -501,7 +501,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     form.setFieldsValue(nextValues)
     setSelectedStyleTemplateId(template.id)
     setTemplateOpen(false)
-    message.success(templateApplyMode === 'fill_blanks' ? '模板已补入空白文风字段，现有内容保持不变。' : '模板文风字段已覆盖到表单，保存后生效。')
+    message.success(getUserFacingMessage(templateApplyMode === 'fill_blanks' ? 'themeVoice.templateFilledBlanks' : 'themeVoice.templateOverwritten'))
   }
 
   const navigateWithUnsavedGuard = (target: 'world-rules' | 'style-lab' | 'writing/editor') => {
@@ -697,7 +697,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
           type="info"
           showIcon
           message="已恢复最近一次未保存的 AI 草稿"
-          description="当前主题与文风表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
+
         />
       ) : null}
 
@@ -716,7 +716,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                   <Form.Item
                     name="writingContractTags"
                     label="写作契约"
-                    extra="内置标签会触发强规则；自定义标签只作为弱提示。核心阅读预期“爽文 / 写实”只能选一个。"
+
                     rules={[{
                       validator: async (_, value?: string[]) => {
                         const error = getWritingContractValidationError(normalizeWritingContractTags(value))
@@ -859,7 +859,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
               ]}
             />
           </div>
-          <p>结果先回填到当前表单，不会自动保存；其他区域保持不变。</p>
+
         </div>
       </Modal>
 

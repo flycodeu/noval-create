@@ -5,6 +5,7 @@ export interface NovelWorkspaceActions {
   registerClearHandler: (handler: (() => void) | null) => void
   registerEscapeHandler: (handler: (() => void) | null) => void
   registerLeaveGuard: (isDirty: (() => boolean) | null) => void
+  registerViewLeaveGuard?: (isDirty: (() => boolean) | null) => void
   notifyWorkspaceMutation: () => void
   mutationToken: number
 }

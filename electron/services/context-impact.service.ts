@@ -14,6 +14,8 @@ import {
 import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
 import { type SemanticGateMode } from '../../src/shared/semantic-gate-policy'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { parseMemorySourceManifest } from './memory-source-manifest'
+import { referenceNarrativeUpdatedAt } from './creative-research-impact'
 import { getNovelAssetImpactSummary } from './asset-impact.service'
 import type { ConsistencyIssue } from './consistency.service'
 import {
@@ -275,9 +277,10 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
   const staleCheckpointCount = db.select().from(storyMemoryCheckpoints)
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .all()
-    .filter((checkpoint) => checkpoint.stale === 1 || checkpoint.sourceContextVersion !== (novel.contextVersion || 1))
+    .filter((checkpoint) => checkpoint.stale === 1 || checkpoint.sourceContextVersion !== (novel.contextVersion || 1)
+      || parseMemorySourceManifest(checkpoint.sourceManifestJson, novel.contextVersion || 1).state !== 'verified')
     .length
-  const novelUpdatedAt = parseIsoTime(novel.updatedAt)
+  const novelUpdatedAt = parseIsoTime(referenceNarrativeUpdatedAt(novelId, novel.contextVersion || 1, novel.updatedAt))
   const assetRows = {
     faction: db.select().from(factions).where(eq(factions.novelId, novelId)).all(),
     character: db.select().from(characters).where(eq(characters.novelId, novelId)).all(),
@@ -349,6 +352,56 @@ export function markStoryMemoryCheckpointsDirty(novelId: number, updatedAt = new
     stale: 1,
     updatedAt,
   }).where(eq(storyMemoryCheckpoints.novelId, novelId)).run()
+}
+
+/** Reference edits change CAS, while the verified narrative dependencies remain the same. */
+export function rebaseReferenceOnlyMemoryContext(novelId: number, previousVersion: number, nextVersion: number): void {
+  const db = getDb()
+  const checkpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
+  const sourceKinds = new Set(['novel', 'chapter', 'character', 'character_relation', 'story_item', 'story_thread', 'timeline_event', 'story_arc', 'world_map', 'volume', 'part'])
+  const isIdentifier = (value: unknown): boolean => typeof value === 'number'
+    ? Number.isSafeInteger(value) && value >= 0
+    : typeof value === 'string' && Boolean(value) && value === value.trim()
+  for (const checkpoint of checkpoints) {
+    if (checkpoint.stale !== 0 || checkpoint.sourceContextVersion !== previousVersion) continue
+    let manifest: Record<string, unknown>
+    try {
+      const raw: unknown = JSON.parse(checkpoint.sourceManifestJson || '')
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      manifest = raw as Record<string, unknown>
+    } catch { continue }
+    // Rebase only the original valid representation; the reader's tolerant parser may repair legacy input.
+    if (manifest.schemaVersion !== 1 || manifest.contextVersion !== previousVersion
+      || !Array.isArray(manifest.unresolvedRefs) || manifest.unresolvedRefs.length !== 0
+      || !Array.isArray(manifest.sources) || manifest.sources.length === 0
+      || !manifest.range || typeof manifest.range !== 'object' || Array.isArray(manifest.range)) continue
+    const range = manifest.range as Record<string, unknown>
+    const { startChapterNum: start, endChapterNum: end } = range
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || Number(start) < 0 || Number(end) < Number(start)) continue
+    const sources = manifest.sources as unknown[]
+    if (sources.some(source => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) return true
+      const record = source as Record<string, unknown>
+      return typeof record.sourceKind !== 'string' || !sourceKinds.has(record.sourceKind)
+        || !isIdentifier(record.sourceId) || !isIdentifier(record.sourceVersion)
+        || typeof record.artifactHash !== 'string' || !/^[a-f0-9]{64}$/u.test(record.artifactHash)
+    }) || !sources.some(source => {
+      const record = source as Record<string, unknown>
+      return record.sourceKind === 'novel' && String(record.sourceId) === String(novelId)
+    })) continue
+    const exactRange = Number.isSafeInteger(checkpoint.sourceRangeStart) && Number.isSafeInteger(checkpoint.sourceRangeEnd)
+      && checkpoint.sourceRangeStart === start && checkpoint.sourceRangeEnd === end
+    // The native builder stores an empty 0..0 range as null/null, without chapter sources.
+    const emptyBuilderRange = checkpoint.sourceRangeStart === null && checkpoint.sourceRangeEnd === null
+      && start === 0 && end === 0 && checkpoint.lastRefreshedChapterNum === 0
+      && !sources.some(source => (source as Record<string, unknown>).sourceKind === 'chapter')
+    if (!exactRange && !emptyBuilderRange) continue
+    // Keep every original source, hash, lock, timestamp and audit extension; only CAS equivalence changes.
+    db.update(storyMemoryCheckpoints).set({
+      sourceContextVersion: nextVersion,
+      sourceManifestJson: JSON.stringify({ ...manifest, contextVersion: nextVersion }),
+    }).where(eq(storyMemoryCheckpoints.id, checkpoint.id)).run()
+  }
 }
 
 export function markSubsequentChaptersStale(

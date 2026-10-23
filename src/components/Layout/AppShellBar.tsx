@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { WORKSPACE_MODULE_DEFINITIONS } from '../../shared/novel-workspace'
 import { isElectronRuntime } from '../../runtime/environment'
 import WindowControls from './WindowControls'
+import RuntimeBanner from './RuntimeBanner'
 import TaskIndicator from '../TaskIndicator'
 import './AppLayout.css'
 
@@ -10,8 +11,8 @@ const SECTION_LABELS = [
   { key: '/novels', label: '我的小说' },
   { key: '/models', label: '模型与搜索' },
   { key: '/templates', label: '风格模板' },
-  { key: '/prompts', label: '提示词' },
-  { key: '/tasks', label: '任务中心' },
+  { key: '/prompts', label: '提示词管理' },
+  { key: '/tasks', label: '运行记录' },
   { key: '/settings', label: '应用设置' },
 ]
 
@@ -41,6 +42,7 @@ export default function AppShellBar() {
       <div className="app-shell-bar__content">
         <div className="app-shell-bar__meta">
           <strong className="app-shell-bar__title">{title}</strong>
+          <RuntimeBanner />
         </div>
         <TaskIndicator className="app-shell-bar__task-indicator" />
         {showWindowControls ? (

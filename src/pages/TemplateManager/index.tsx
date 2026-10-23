@@ -1,5 +1,5 @@
 import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Skeleton, Spin
 } from 'antd'
@@ -17,25 +17,19 @@ const TYPE_LABELS: Record<string, string> = {
 const TEMPLATE_USAGE: Record<string, {
   entry: string
   appliedTo: string
-  cardMeta: string
   fieldGuide: string
-  modalDescription: string
   placeholder: string
 }> = {
   style: {
     entry: '新建小说时的「文风模板」下拉框',
     appliedTo: 'AI 写正文、改写章节时的文风参考',
-    cardMeta: '新建小说可选 · 文风参考',
     fieldGuide: '建议写清楚：叙事视角、句式风格、情绪表达、对话风格、描写风格、需要避免的写法。字段名直接用中文即可。',
-    modalDescription: '选好这个文风模板后，AI 写正文时会照着它的风格来写，让全书文风保持统一。',
     placeholder: '{\n  "叙事视角": "第三人称近距",\n  "句式风格": "短句推进，少空泛总结",\n  "避免": ["空泛燃句", "模板化情绪"]\n}',
   },
   world: {
     entry: '新建小说时的「世界模板」下拉框',
     appliedTo: 'AI 生成背景、写章节时的世界设定参考',
-    cardMeta: '新建小说可选 · 世界设定参考',
     fieldGuide: '建议写清楚：时代背景、科技或力量水平、社会结构、常见元素、不允许出现的元素。字段名直接用中文即可。',
-    modalDescription: '选好这个世界模板后，AI 会基于它来生成背景和写章节，让世界设定前后一致。',
     placeholder: '{\n  "时代背景": "当代",\n  "科技水平": "现代城市基础设施",\n  "常见元素": ["职场压力", "社交媒体"]\n}',
   },
 }
@@ -89,6 +83,8 @@ export default function TemplateManager() {
   const [editing, setEditing] = useState<Template | null>(null)
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
+  const saveInFlightRef = useRef(false)
+  const dirtyRef = useRef(false)
 
   const read = useCallback(() => window.electron.template.list(), [])
   const { data, loading: pending, error, reload: loadTemplates } = useAsyncSnapshot(read)
@@ -99,7 +95,6 @@ export default function TemplateManager() {
     if (error) message.error(getErrorMessage(error, 'common.loadFailed'))
   }, [error])
 
-  const filteredTemplates = templates.filter(t => t.type === activeTab)
   const builtinCount = templates.filter((template) => template.isBuiltin === 1).length
   const customCount = templates.length - builtinCount
   const activeUsage = TEMPLATE_USAGE[activeTab]
@@ -127,6 +122,7 @@ export default function TemplateManager() {
   }
 
   const handleNew = () => {
+    dirtyRef.current = false
     setEditing(null)
     form.resetFields()
     form.setFieldsValue({ type: activeTab })
@@ -134,16 +130,18 @@ export default function TemplateManager() {
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (saveInFlightRef.current || editing?.isBuiltin) return
+    saveInFlightRef.current = true
     setSaving(true)
     try {
+      const values = await form.validateFields().catch(() => null)
+      if (!values) return
+      values.name = values.name.trim()
       if (values.contentJson) {
         try {
           JSON.parse(values.contentJson)
         } catch {
           message.error(getUserFacingMessage('common.contentJsonInvalid'))
-          setSaving(false)
           return
         }
       }
@@ -154,6 +152,7 @@ export default function TemplateManager() {
         await window.electron.template.create(values)
       }
       message.success(getUserFacingMessage('template.saved'))
+      dirtyRef.current = false
       setEditOpen(false)
       form.resetFields()
       setEditing(null)
@@ -161,8 +160,22 @@ export default function TemplateManager() {
     } catch (error) {
       message.error(getErrorMessage(error, 'template.saveFailed'))
     } finally {
+      saveInFlightRef.current = false
       setSaving(false)
     }
+  }
+
+  const closeEditor = () => {
+    if (saveInFlightRef.current) return
+    const close = () => {
+      dirtyRef.current = false
+      setEditOpen(false)
+      setEditing(null)
+      form.resetFields()
+    }
+    if (dirtyRef.current && !editing?.isBuiltin) {
+      Modal.confirm({ title: '放弃尚未保存的模板修改？', okText: '放弃修改', cancelText: '继续编辑', onOk: close })
+    } else close()
   }
 
   const handleDelete = async (tmpl: Template) => {
@@ -177,6 +190,7 @@ export default function TemplateManager() {
           message.success(getUserFacingMessage('template.deleted'))
         } catch (e: unknown) {
           message.error(getErrorMessage(e, 'template.deleteFailed'))
+          throw e
         }
       },
     })
@@ -193,12 +207,11 @@ export default function TemplateManager() {
               <Skeleton active paragraph={{ rows: 4 }} />
             </Card>
           ))
-        ) : filteredTemplates.length === 0 ? (
+        ) : templates.filter(t => t.type === key).length === 0 ? (
           <Empty description="暂无模板" style={{ gridColumn: '1/-1' }} />
         ) : (
-          filteredTemplates.map((tmpl) => {
+          templates.filter(t => t.type === key).map((tmpl) => {
             const preview = summarizeTemplateContent(tmpl.contentJson)
-            const usage = TEMPLATE_USAGE[tmpl.type]
 
             return (
               <Card key={tmpl.id} className="template-manager-card" data-template-builtin={tmpl.isBuiltin === 1 ? 'true' : 'false'}>
@@ -212,16 +225,10 @@ export default function TemplateManager() {
                         <Tag className="template-manager-card__tag template-manager-card__tag--custom">自定义</Tag>
                       )}
                     </div>
-                    <div className="template-manager-card__meta">
-                      {TYPE_LABELS[tmpl.type] || tmpl.type}
-                      {usage ? ` · ${usage.cardMeta}` : ''}
-                    </div>
                   </div>
                 </div>
                 <div className="template-manager-card__content">
-                  <p className="template-manager-card__desc">
-                    {tmpl.description || '未填写模板说明，建议补充用途、适用场景和关键约束。'}
-                  </p>
+                  {tmpl.description ? <p className="template-manager-card__desc">{tmpl.description}</p> : null}
                   {preview ? (
                     <div className="template-manager-card__preview">{preview}</div>
                   ) : null}
@@ -232,7 +239,7 @@ export default function TemplateManager() {
                     size="small"
                     icon={tmpl.isBuiltin ? <EyeOutlined /> : <EditOutlined />}
                     aria-label={tmpl.isBuiltin ? `查看内置模板 ${tmpl.name}` : `编辑模板 ${tmpl.name}`}
-                    onClick={() => handleEdit(tmpl)}
+                    onClick={() => { dirtyRef.current = false; handleEdit(tmpl) }}
                   >
                     {tmpl.isBuiltin ? '查看' : '编辑'}
                   </Button>
@@ -265,7 +272,6 @@ export default function TemplateManager() {
         title="文风与世界模板"
         actions={(
           <div className="admin-toolbar">
-            <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
             <div className="admin-toolbar__actions">
               <Button onClick={() => navigate('/novels')}>
                 去新建小说
@@ -284,21 +290,15 @@ export default function TemplateManager() {
             <WorkspaceMetric label="模板总数" value={templates.length} tone="cool" />
             <WorkspaceMetric label="内置模板" value={builtinCount} />
             <WorkspaceMetric label="自定义模板" value={customCount} tone="warm" />
-            <WorkspaceMetric label="应用入口" value="新建小说" />
           </>
         )}
       >
         <WorkspacePanel
           title="模板目录"
         >
-          <div className="template-usage-overview">
-            <span className="template-usage-overview__label">当前应用</span>
-            <strong>{activeUsage.entry}</strong>
-            <span className="template-usage-overview__separator" aria-hidden="true">·</span>
-            <span>{activeUsage.appliedTo}</span>
-          </div>
           <details className="template-usage-details">
-            <summary>查看编辑提示</summary>
+            <summary>用途与编辑提示</summary>
+            <p>{activeUsage.entry} · {activeUsage.appliedTo}</p>
             <p>{activeUsage.fieldGuide}</p>
           </details>
           {refreshing ? (
@@ -319,11 +319,15 @@ export default function TemplateManager() {
         title={editing ? (editing.isBuiltin ? '查看模板' : '编辑模板') : '新建模板'}
         open={editOpen}
         forceRender
-        onCancel={() => { setEditOpen(false); setEditing(null); form.resetFields() }}
-        onOk={editing?.isBuiltin ? () => setEditOpen(false) : handleSave}
+        onCancel={closeEditor}
+        onOk={editing?.isBuiltin ? closeEditor : handleSave}
         okText={editing?.isBuiltin ? '关闭' : '保存'}
         confirmLoading={saving}
-        width={700}
+        cancelButtonProps={{ disabled: saving, style: editing?.isBuiltin ? { display: 'none' } : undefined }}
+        closable={!saving}
+        maskClosable={!saving}
+        keyboard={!saving}
+        width="min(700px, calc(100vw - 32px))"
       >
         {editing?.isBuiltin === 1 ? (
           <Alert
@@ -333,8 +337,8 @@ export default function TemplateManager() {
             message="内置模板为只读资源，不可直接编辑。"
           />
         ) : null}
-        <Form form={form} layout="vertical">
-          <Form.Item name="name" label="模板名称" rules={[{ required: true }]}>
+        <Form form={form} layout="vertical" disabled={saving} onValuesChange={() => { dirtyRef.current = true }}>
+          <Form.Item name="name" label="模板名称" rules={[{ required: true, whitespace: true }]}>
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
           <Form.Item name="type" label="模板类型">

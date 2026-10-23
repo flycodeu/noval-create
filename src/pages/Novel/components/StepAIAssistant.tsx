@@ -153,37 +153,37 @@ function normalizeDraft(
     throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
   }
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: '根节点必须是 JSON 对象' }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.rootObjectRequired') }))
   }
   const parsed = candidate as Record<string, unknown>
   const requiredKeys = ['assistantMessage', 'draftPatch', 'checks', 'suggestions']
   const missingKey = requiredKeys.find((key) => !Object.prototype.hasOwnProperty.call(parsed, key))
   if (missingKey) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `缺少字段“${missingKey}”` }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.fieldMissing', { field: missingKey }) }))
   }
   const unknownRootKey = Object.keys(parsed).find((key) => ![...requiredKeys, 'toolCalls'].includes(key))
   if (unknownRootKey) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `出现未要求的字段“${unknownRootKey}”` }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.fieldUnknown', { field: unknownRootKey }) }))
   }
   if (typeof parsed.assistantMessage !== 'string') {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'assistantMessage 必须是字符串' }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.assistantMessageStringRequired') }))
   }
   if (!Array.isArray(parsed.checks) || parsed.checks.some((item) => typeof item !== 'string')) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'checks 必须是字符串数组' }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.checksStringArrayRequired') }))
   }
   if (!Array.isArray(parsed.suggestions) || parsed.suggestions.some((item) => typeof item !== 'string')) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'suggestions 必须是字符串数组' }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.suggestionsStringArrayRequired') }))
   }
   const rawPatch = parsed.draftPatch && typeof parsed.draftPatch === 'object'
     ? parsed.draftPatch as Record<string, unknown>
     : null
   if (!rawPatch || Array.isArray(parsed.draftPatch)) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: 'draftPatch 必须是 JSON 对象' }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.draftPatchObjectRequired') }))
   }
   const fieldByKey = new Map(fields.map((field) => [field.key, field]))
   const unknownPatchKey = Object.keys(rawPatch).find((key) => !fieldByKey.has(key))
   if (unknownPatchKey) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `draftPatch 出现未要求的字段“${unknownPatchKey}”` }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.draftPatchFieldUnknown', { field: unknownPatchKey }) }))
   }
   const isValidFieldValue = (value: unknown, field: DraftFieldDefinition) => {
     if (value === null || value === undefined) return true
@@ -197,7 +197,7 @@ function normalizeDraft(
     return !field || !isValidFieldValue(value, field)
   })?.[0]
   if (invalidPatchKey) {
-    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: `draftPatch 字段“${invalidPatchKey}”类型不正确` }))
+    throw new Error(getUserFacingMessage('common.aiJsonShapeInvalid', { detail: getUserFacingMessage('guidedStep.validation.draftPatchFieldTypeInvalid', { field: invalidPatchKey }) }))
   }
   const draftPatch = pickChangedDraftFields(rawPatch, currentValues) as StepAIAssistantPatch
   const qualityChecks = inspectDraftQuality(draftPatch)
@@ -358,7 +358,7 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
     )
     const patch = pickChangedDraftFields(selectedPatch, values) as Partial<TPatch>
     if (Object.keys(patch).length === 0) {
-      message.info('没有可回填的新内容。')
+      message.info(getUserFacingMessage('guidedStep.noChangesToApply'))
       return
     }
     onApplyDraft(patch)

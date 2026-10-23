@@ -393,7 +393,7 @@ function VolumeDesignWorkspace({ novelId }: Props) {
           type="warning"
           showIcon
           message="还没有可引用的终局承诺"
-          description="先到终局设计页保存并同步承诺，再回来把各卷绑定到具体终局压力。"
+
         />
       ) : null}
 
@@ -435,7 +435,7 @@ function VolumeDesignWorkspace({ novelId }: Props) {
             })}
           </div>
         ) : (
-          <Alert type="info" showIcon message="还没有卷结构" description="请先到结构页创建卷、部、章，再回来维护卷级闭环。" />
+          <Alert type="info" showIcon message="还没有卷结构"  />
         )}
         {activeVolume ? (
           <div className="volume-design-page__active-strip">
@@ -725,7 +725,7 @@ function VolumeDesignWorkspace({ novelId }: Props) {
             type="info"
             showIcon
             message="尚未执行卷后审计"
-            description="点击顶部“卷后审计”后，这里会展示发现清单与自动任务回执。"
+
           />
         )}
       </WorkspacePanel>
@@ -750,7 +750,7 @@ function VolumeDesignWorkspace({ novelId }: Props) {
             type="info"
             showIcon
             message="尚未执行硬约束同步"
-            description="点击顶部“同步为章节硬约束”后，这里会展示写入回执。"
+
           />
         )}
       </WorkspacePanel>

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ProgressSink } from '../utils/progress-sink'
 import { desc, eq } from 'drizzle-orm'
 import {
@@ -277,14 +278,14 @@ async function runPromptTaskWithJsonRepair<T>(
         buildJsonRepairPrompt(label, raw, allowedKeys),
       )
     } catch (repairTaskError) {
-      throw new Error(`${label} JSON 解析失败，自动修复步骤执行失败：${sanitizeErrorMessage(repairTaskError)}。原始输出片段：${previewText(raw)}`)
+      throw new Error(formatUserFacingMessage('services.premise.jsonRepairFailed', { label: `${label}`, detail: `${sanitizeErrorMessage(repairTaskError)}`, preview: `${previewText(raw)}` }))
     }
 
     try {
       return { value: parser(repairedRaw), repaired: true }
     } catch (repairError) {
       throw new Error(
-        `${label} JSON 解析失败，已自动修复一次仍未成功。首轮原因：${initialMessage}。修复后原因：${sanitizeErrorMessage(repairError)}。原始输出片段：${previewText(raw)}`,
+        formatUserFacingMessage('services.premise.jsonRepairInvalid', { label: `${label}`, initialMessage: `${initialMessage}`, repairMessage: `${sanitizeErrorMessage(repairError)}`, preview: `${previewText(raw)}` }),
       )
     }
   }

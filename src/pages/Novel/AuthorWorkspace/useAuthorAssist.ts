@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthorAssistKind, AuthorAssistRun } from '../../../shared/author-assist'
 import { isAssistActive } from '../../../shared/author-assist'
@@ -41,7 +42,7 @@ export function useAuthorAssist<T>(novelId: number, kind: AuthorAssistKind, chap
     let cancelled = false
     void callAuthorTool<{ artifact: { novelId: number; kind: string; content: T } }>('novelforge.artifacts.get', { artifactId: run.artifactId })
       .then(data => {
-        if (data.artifact.novelId !== novelId || data.artifact.kind !== kind) throw new Error('任务结果不属于当前作品。')
+        if (data.artifact.novelId !== novelId || data.artifact.kind !== kind) throw new Error(formatUserFacingMessage('author.assist.wrongProject'))
         if (!cancelled) setLoaded({ id, content: data.artifact.content })
       }).catch(cause => { if (!cancelled) setError(String(cause)) })
     return () => { cancelled = true }

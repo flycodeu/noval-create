@@ -16,6 +16,7 @@ import {
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
 import AppShellBar from './AppShellBar'
+import CloseWindowDialog from './CloseWindowDialog'
 import './AppLayout.css'
 
 const { Sider, Content } = Layout
@@ -60,6 +61,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { theme, setTheme } = useThemeStore()
 
   const selectedKey = [...primaryItems, ...advancedItems].find(item => location.pathname.startsWith(item.key))?.key || '/novels'
+  const activeAdvancedItem = advancedItems.find(item => item.key === selectedKey)
+  const [openMenuKeys, setOpenMenuKeys] = React.useState<string[]>(activeAdvancedItem ? ['advanced'] : [])
+  const [menuRoute, setMenuRoute] = React.useState(selectedKey)
+  if (menuRoute !== selectedKey) {
+    setMenuRoute(selectedKey)
+    if (activeAdvancedItem) setOpenMenuKeys(keys => keys.includes('advanced') ? keys : [...keys, 'advanced'])
+  }
   const isNovelWorkspace = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
   const hideAppSidebar = isNovelWorkspace
   const novelWorkspaceResetKey = React.useMemo(() => {
@@ -72,6 +80,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <Layout className="app-layout" data-ui-system="quiet-workspace">
+      <CloseWindowDialog />
       {!isNovelWorkspace ? <AppShellBar /> : null}
 
       {!isNovelWorkspace ? (
@@ -81,13 +90,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
               key={item.key}
               type="button"
               className={`app-layout__mobile-nav-item${selectedKey === item.key ? ' is-active' : ''}`}
+              aria-current={selectedKey === item.key ? 'page' : undefined}
               onClick={() => navigate(item.key)}
             >
               <span className="app-layout__mobile-nav-icon">{item.icon}</span>
               <span>{item.label}</span>
             </button>
           ))}
-          <Dropdown trigger={['click']} menu={{ items: advancedItems, onClick: ({ key }) => navigate(key) }}><Button type="text" icon={<MoreOutlined />}>更多工具</Button></Dropdown>
+          <Dropdown trigger={['click']} menu={{ items: advancedItems, selectedKeys: [selectedKey], onClick: ({ key }) => navigate(key) }}><Button type="text" className={activeAdvancedItem ? 'is-active' : undefined} icon={<MoreOutlined />} aria-label="更多工具" aria-current={activeAdvancedItem ? 'page' : undefined}>{activeAdvancedItem?.label || '更多工具'}</Button></Dropdown>
         </nav>
       ) : null}
 
@@ -98,6 +108,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
               className="app-layout-menu"
               mode="inline"
               selectedKeys={[selectedKey]}
+              openKeys={openMenuKeys}
+              onOpenChange={setOpenMenuKeys}
               items={menuItems}
               onClick={({ key }) => navigate(key)}
             />
@@ -111,6 +123,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     onClick={() => setTheme(opt.value)}
                     className={`app-layout__theme-pill${theme === opt.value ? ' is-active' : ''}`}
                     title={`切换为${opt.label}主题`}
+                    aria-label={`切换为${opt.label}主题`}
+                    aria-pressed={theme === opt.value}
                   >
                     <span className="app-layout__theme-pill-icon">{opt.icon}</span>
                     <span>{opt.label}</span>

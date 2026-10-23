@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { and, asc, eq } from 'drizzle-orm'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions, Message } from '../adapters/base.adapter'
@@ -221,7 +222,7 @@ export function parseCriticReviewOutput(
   if (!parsed.success) {
     throw new ChapterPipelineStageError(
       'invalid_output',
-      'Critic 未返回可验证的结构化审校结果，Writer 初稿已保留；请重试审校流水线。',
+      formatUserFacingMessage('services.chapterReview.structuredResultMissing'),
       {
         outputText: buildPipelineFailureOutput(
           'invalid_output',
@@ -234,7 +235,7 @@ export function parseCriticReviewOutput(
   if (!hasReviewNotes(reviewNotes)) {
     throw new ChapterPipelineStageError(
       'invalid_output',
-      'Critic 返回了空审校结果，Writer 初稿已保留；请重试审校流水线。',
+      formatUserFacingMessage('services.chapterReview.emptyResult'),
       {
         outputText: buildPipelineFailureOutput(
           'invalid_output',
@@ -473,7 +474,7 @@ export async function runChapterEnforcerStage(input: {
     input.finishRole(taskId)
     return { reviewNotes, taskId, reused: false }
   } catch (error) {
-    input.failRole(taskId, error instanceof Error ? error : new Error('Enforcer 环节异常'))
+    input.failRole(taskId, error instanceof Error ? error : new Error(formatUserFacingMessage('services.chapterReview.enforcerFailed')))
   }
 }
 
@@ -497,7 +498,7 @@ export async function runChapterCriticStage(input: {
 }): Promise<CriticExecutionOutput> {
   if (!input.shouldRun) {
     if (!hasReviewNotes(input.initialReviewNotes)) {
-      throw new ChapterPipelineStageError('invalid_output', '没有可复用的 Critic 审校快照，无法从当前节点重试。', {
+      throw new ChapterPipelineStageError('invalid_output', formatUserFacingMessage('services.chapterReview.snapshotMissing'), {
         blocked: true,
         outputText: buildPipelineFailureOutput('invalid_output', '没有可复用的 Critic 审校快照。'),
       })

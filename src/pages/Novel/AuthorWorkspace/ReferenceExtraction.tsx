@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import React, { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Input, Modal, Select, Space, message } from 'antd'
 import type { AuthorAssistRun } from '../../../shared/author-assist'
@@ -49,7 +50,7 @@ export default function ReferenceExtraction({ novelId, open, onClose, onSaved }:
   }
   const upload = async (file: File) => {
     try {
-      if (file.size > 2 * 1024 * 1024 || !/\.(txt|md|markdown)$/i.test(file.name)) throw new Error('文件大小或类型不支持。')
+      if (file.size > 2 * 1024 * 1024 || !/\.(txt|md|markdown)$/i.test(file.name)) throw new Error(formatUserFacingMessage('author.upload.unsupported'))
       const value = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer())
       if (alive.current) { setText(value); setRange(null); setSourceTitle(file.name); setError('') }
     } catch { if (alive.current) setError('请选择不超过 2 MiB、UTF-8 编码的 TXT 或 Markdown 文件。') }
@@ -59,12 +60,12 @@ export default function ReferenceExtraction({ novelId, open, onClose, onSaved }:
     setBusy(true); setError('')
     try {
       const novel = await window.electron.novel.get(novelId)
-      if (!novel) throw new Error('作品不存在。')
+      if (!novel) throw new Error(formatUserFacingMessage('author.project.notFound'))
       const entries = selected.map(candidateId => ({ candidateId, draft: edits[candidateId] || assist.result!.candidates.find(card => card.id === candidateId)!.draft }))
       const key = JSON.stringify({ artifactId: assist.run.artifactId, entries, expectedContextVersion: novel.contextVersion })
       if (submission.current?.signature !== key) submission.current = { signature: key, input: { novelId, artifactId: assist.run.artifactId, entries, expectedContextVersion: novel.contextVersion, idempotencyKey: `adopt:${crypto.randomUUID()}` } }
       await callAuthorTool('novelforge.research.adopt', submission.current.input)
-      if (alive.current) { await onSaved(); setSelected([]); message.success('所选卡片已保存到创作资料') }
+      if (alive.current) { await onSaved(); setSelected([]); message.success(formatUserFacingMessage('author.research.adopted')) }
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { if (alive.current) setBusy(false) }
   }

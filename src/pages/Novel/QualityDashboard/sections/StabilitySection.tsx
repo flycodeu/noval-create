@@ -61,7 +61,7 @@ function RecallReliabilityPanel({
   onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.analyzedChapterCount === 0 && alerts.length === 0) {
-    return <Empty description="先产出召回样本，可靠性数据会在这里汇总" />
+    return <Empty description="暂无召回样本" />
   }
 
   return (
@@ -197,7 +197,7 @@ function WorldStateStabilityPanel({
   onLocateChapter: (chapterNum?: number, volumeId?: number | null, chapterId?: number) => void
 }) {
   if (summary.trackedEntityCount === 0 && alerts.length === 0) {
-    return <Empty description="先积累状态回写样本，再看稳定性数据" />
+    return <Empty description="暂无状态回写样本" />
   }
 
   return (

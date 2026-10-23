@@ -1,7 +1,8 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { AuthorLibraryError } from './author-library-error'
 import { getSqlite } from '../database/db'
 import { getNovel, updateNovel } from './novel.service'
-import { getCreativeResearch } from './creative-research.service'
+import { getAuthorCreativeResearch } from './creative-research.service'
 import { hashArtifactContent } from './artifact.service'
 import { CREATIVE_RESEARCH_CATEGORIES, parseCreativeResearchEntries, upsertCreativeResearchEntries } from '../../src/shared/creative-research'
 import { personalResearchContent, type PersonalResearchCard } from '../../src/shared/personal-research'
@@ -10,19 +11,19 @@ interface Row { id: string; revision: number; content_json: string; archived: nu
 const card = (row: Row): PersonalResearchCard => ({ id: row.id, revision: row.revision, content: JSON.parse(row.content_json), archived: Boolean(row.archived), createdAt: row.created_at, updatedAt: row.updated_at })
 export function getPersonalResearch(id: string) {
   const row = getSqlite().prepare('SELECT * FROM personal_research WHERE id=?').get(id) as Row | undefined
-  if (!row) throw new AuthorLibraryError('个人资料不存在。')
+  if (!row) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.notFound'))
   return card(row)
 }
 export function listPersonalResearch(query = '', includeArchived = false, category = ''): PersonalResearchCard[] {
-  if (query.length > 200) throw new AuthorLibraryError('搜索词最多 200 字。')
-  if (category && !CREATIVE_RESEARCH_CATEGORIES.some(item => item.value === category)) throw new AuthorLibraryError('资料分类无效。')
+  if (query.length > 200) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.queryTooLong'))
+  if (category && !CREATIVE_RESEARCH_CATEGORIES.some(item => item.value === category)) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.invalidCategory'))
   // instr treats percent and underscore as literal keywords, unlike LIKE wildcards.
   const rows = getSqlite().prepare('SELECT * FROM personal_research WHERE (?=1 OR archived=0) AND (?=\'\' OR instr(lower(content_json),lower(?))>0) AND (?=\'\' OR json_extract(content_json,\'$.category\')=?) ORDER BY updated_at DESC,id LIMIT 200').all(includeArchived ? 1 : 0, query.trim(), query.trim(), category, category) as Row[]
   return rows.map(card)
 }
 export function publishPersonalResearch(novelId: number, sourceKey: string) {
   return getSqlite().transaction(() => {
-    const entry = getCreativeResearch(novelId, sourceKey)
+    const entry = getAuthorCreativeResearch(novelId, sourceKey)
     const id = hashArtifactContent({ novelId, sourceKey }).replace('sha256:', '')
     const existing = getSqlite().prepare('SELECT * FROM personal_research WHERE id=?').get(id) as Row | undefined
     if (existing) return card(existing) // Repeated publication must never overwrite later personal edits.
@@ -35,7 +36,7 @@ export function publishPersonalResearch(novelId: number, sourceKey: string) {
 export function updatePersonalResearch(id: string, expectedRevision: number, value: unknown, archived: boolean) {
   return getSqlite().transaction(() => {
     const current = getPersonalResearch(id)
-    if (current.revision !== expectedRevision) throw new AuthorLibraryError('个人资料已有新版，请重新打开后编辑。当前修改尚未保存。')
+    if (current.revision !== expectedRevision) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.editConflict'))
     // Provenance is an immutable source snapshot, independent of the originating novel/artifact.
     const content = { ...personalResearchContent(value), ...(current.content.provenance ? { provenance: current.content.provenance } : {}) }
     if (hashArtifactContent(content) === hashArtifactContent(current.content) && archived === current.archived) return current
@@ -47,14 +48,14 @@ export function updatePersonalResearch(id: string, expectedRevision: number, val
 export function referencePersonalResearch(input: { novelId: number; cardId: string; expectedRevision: number; expectedContextVersion: number; novelConnection: string }) {
   return getSqlite().transaction(() => {
     const novel = getNovel(input.novelId)
-    if (!novel) throw new AuthorLibraryError('作品不存在。')
+    if (!novel) throw new AuthorLibraryError(formatUserFacingMessage('author.project.notFound'))
     const shared = getPersonalResearch(input.cardId)
-    if (shared.archived) throw new AuthorLibraryError('这条个人资料已归档，不能新增或更新引用。')
-    if (shared.revision !== input.expectedRevision) throw new AuthorLibraryError('个人资料已有新版，请重新查看后采用。')
+    if (shared.archived) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.archived'))
+    if (shared.revision !== input.expectedRevision) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.revisionChanged'))
     const sourceKey = `author:shared:${shared.id}`
     const current = parseCreativeResearchEntries(novel.sourceLedgerJson).find(entry => entry.sourceKey === sourceKey)
     if (current?.sharedReference?.revision === shared.revision) return current
-    if (novel.contextVersion !== input.expectedContextVersion) throw new AuthorLibraryError('作品资料已变化，请刷新后再采用。')
+    if (novel.contextVersion !== input.expectedContextVersion) throw new AuthorLibraryError(formatUserFacingMessage('author.personal.contextChanged'))
     const entries = upsertCreativeResearchEntries(novel.sourceLedgerJson, [{ ...shared.content, sourceKey, novelConnection: current?.novelConnection || input.novelConnection }])
     const entry = entries.find(item => item.sourceKey === sourceKey)!
     entry.sharedReference = { cardId: shared.id, revision: shared.revision }

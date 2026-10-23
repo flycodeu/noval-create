@@ -15,7 +15,7 @@ import {
 
 export function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySnapshot | null }) {
   if (!storyMemory) {
-    return <div className="novel-copy-block">先运行章节流水线或刷新记忆，再核对人物与世界实体的当前状态、近期跳变和冲突告警。</div>
+    return <div className="novel-copy-block">暂无状态记录</div>
   }
 
   const characterStateItems = storyMemory.characterCurrentStates
@@ -46,7 +46,7 @@ export function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMe
   ]
 
   if (characterStateItems.length === 0 && worldStateItems.length === 0 && alertItems.length === 0 && conflictEntityItems.length === 0) {
-    return <div className="novel-copy-block">状态版本会在章节连续性刷新后写入，这里随后会开始累积“当前状态”“趋势摘要”和“跳变告警”。</div>
+    return
   }
 
   return (
@@ -70,7 +70,7 @@ export function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMe
 
 export function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData | null }) {
   if (!dashboard) {
-    return <div className="novel-copy-block">先加载质量数据，再看跨章节的状态稳定性趋势与近期冲突。</div>
+    return <div className="novel-copy-block">暂无稳定性数据</div>
   }
 
   const alerts = dashboard.recentWorldStateAlerts.slice(0, 4)
@@ -131,7 +131,7 @@ export function LanguageDriftHealthCard({
   currentChapter: Chapter | null
 }) {
   if (!dashboard || dashboard.totalChaptersScored === 0) {
-    return <div className="novel-copy-block">先对多章运行 AI 体检，系统才会积累跨章节语言退化趋势。</div>
+    return <div className="novel-copy-block">暂无跨章体检</div>
   }
 
   const alerts = dashboard.recentLanguageDriftAlerts.slice(0, 3)
@@ -200,7 +200,7 @@ export function HumanizationHealthCard({
   const recentAlerts = dashboard?.feedbackRecurrence.humanization.recentAlerts.slice(0, 3) || []
 
   if (currentSignals.length === 0 && promotedIssues.length === 0 && recentAlerts.length === 0) {
-    return <div className="novel-copy-block">语言风险一旦开始跨章复现，系统会直接提示下一章该避免什么。</div>
+    return <div className="novel-copy-block">暂无跨章语言告警</div>
   }
 
   return (
@@ -260,7 +260,7 @@ export function DialogueFingerprintHealthCard({
     && currentDrifts.length === 0
     && (!dashboard || dashboard.dialogueFingerprintStats.eligibleCharacterCount === 0)
   ) {
-    return <div className="novel-copy-block">等章节里出现稳定对白样本后，就会提示“谁说话太像”以及“谁正在偏离自己的声音”。</div>
+    return <div className="novel-copy-block">暂无对白分析</div>
   }
 
   return (
@@ -377,7 +377,7 @@ export function StoryDynamicsHealthCard({
   ].filter((item): item is string => Boolean(item))
 
   if (currentSignals.length === 0 && (!dashboard || dashboard.protagonistSetbackSummary.chapterCount === 0)) {
-    return <div className="novel-copy-block">运行新版章节审校后，就会累计主角受挫、代价持续和反转节奏告警。</div>
+    return <div className="novel-copy-block">暂无主角审校</div>
   }
 
   const alerts = dashboard?.storyPacingAlerts.slice(0, 3) || []

@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ProgressSink } from '../utils/progress-sink'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
@@ -602,7 +603,7 @@ type ErrorLike = Error & {
 }
 
 function buildIncompleteModelOutputError(completion: CallCompletion, outputText: string): Error {
-  const error = new Error(`模型输出未完整结束（${completion.finish}），已保留候选内容。`) as ErrorLike
+  const error = new Error(formatUserFacingMessage('services.task.outputIncomplete', { finish: `${completion.finish}` })) as ErrorLike
   error.code = 'NF_MODEL_OUTPUT_INCOMPLETE'
   error.outputText = outputText
   return error
@@ -871,7 +872,7 @@ async function executeChatWithRateLimitRetries(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('模型限流后重试仍失败')
+  throw lastError instanceof Error ? lastError : new Error(formatUserFacingMessage('services.task.rateLimitRetryFailed'))
 }
 
 async function executeStreamWithRateLimitRetries(

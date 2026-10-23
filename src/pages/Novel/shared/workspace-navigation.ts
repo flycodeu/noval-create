@@ -1,4 +1,4 @@
-import type { PlanningDraftPageKey, RevisionTask, Task } from '../../../types'
+import type { RevisionTask, Task } from '../../../types'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { AUTHOR_WORKSPACE_PAGES } from '../../../shared/author-workspace'
 
@@ -124,7 +124,7 @@ export function buildRevisionTaskTargetPath(novelId: number, task: RevisionTask)
 }
 
 export interface TaskRecoveryAction {
-  kind: 'resume' | 'recover_draft' | 'open_page'
+  kind: 'resume' | 'recover_draft' | 'view_draft' | 'open_page'
   label: string
   description: string
   path?: string
@@ -172,23 +172,21 @@ export function buildTaskRecoveryAction(task: Task): TaskRecoveryAction | null {
 
   if (task.type === 'planning_draft' && progress.kind === 'planning_draft' && !progress.cleared) {
     const draft = progress.draft as Record<string, unknown> | undefined
-    const pageKey = typeof draft?.pageKey === 'string' ? draft.pageKey as PlanningDraftPageKey : null
-    if (!pageKey) return null
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return null
 
     return {
-      kind: 'recover_draft',
-      label: '恢复规划草稿',
-      description: `打开 ${pageKey} 页面并恢复最近一次未保存的 AI 规划草稿。`,
-      path: buildWorkspacePath(task.novelId, pageKey, new URLSearchParams({ recoverDraft: '1' })),
+      kind: 'view_draft',
+      label: '查看历史规划草稿',
+      description: '只读查看此任务保存的 AI 草稿，不会写回故事设计或正文。',
     }
   }
 
   if (task.type === 'premise_generate' && progress.kind === 'premise_draft' && !progress.cleared) {
+    if (!progress.draft || typeof progress.draft !== 'object' || Array.isArray(progress.draft)) return null
     return {
-      kind: 'recover_draft',
-      label: '恢复基础设定草稿',
-      description: '打开基础设定页，并恢复最近一次未保存的 AI 草稿。',
-      path: buildWorkspacePath(task.novelId, 'core-settings', new URLSearchParams({ recoverDraft: '1' })),
+      kind: 'view_draft',
+      label: '查看历史基础设定草稿',
+      description: '只读查看此任务保存的 AI 草稿，不会写回故事设计或正文。',
     }
   }
 

@@ -1,51 +1,146 @@
-.model-manager-page .model-manager-source-disclosure {
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-l, 14px);
-  background: var(--bg-surface);
+.model-manager-modal-form .model-manager-identity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.model-manager-page .model-manager-source-disclosure > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-height: 56px;
-  padding: 14px 18px;
-  color: var(--text-primary);
-  cursor: pointer;
-  list-style: none;
+.model-manager-modal-form .admin-form-grid--three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.model-manager-page .model-manager-source-disclosure > summary::-webkit-details-marker {
-  display: none;
+.model-manager-modal-form .admin-form-grid > * {
+  min-width: 0;
 }
 
-.model-manager-page .model-manager-source-disclosure > summary::after {
-  content: '+';
-  color: var(--accent);
-  font-size: 18px;
+.model-manager-source-modal .admin-detail-stack {
+  display: grid;
+  gap: 16px;
 }
 
-.model-manager-page .model-manager-source-disclosure[open] > summary::after {
-  content: '−';
+.model-manager-source-modal {
+  top: 32px;
+  max-width: calc(100vw - 32px);
+  padding-bottom: 32px;
 }
 
-.model-manager-page .model-manager-source-disclosure > summary span {
+.model-manager-source-modal .ant-modal-body {
+  max-height: calc(100dvh - 190px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.model-manager-source-form,
+.model-manager-source-platform {
+  min-width: 0;
+}
+
+.model-manager-source-form .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+.model-manager-source-key-reset {
+  margin-top: 12px;
+  align-items: flex-start;
+}
+
+.model-manager-source-modal .source-search-config__test-result {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.model-manager-source-modal .source-search-config__test-result.is-success {
+  color: var(--color-success, #3e8260);
+}
+
+.model-manager-source-modal .source-search-config__test-result.is-error {
+  color: var(--color-error, #d84a3e);
+}
+
+.model-id-picker__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.model-id-picker__controls > .ant-select,
+.model-manager-source-form .ant-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.model-id-picker__status,
+.model-manager-source-note,
+.model-manager-page .model-manager-source-description {
+  margin: 6px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
-.model-manager-page .model-manager-source-disclosure > .novel-panel {
-  border: 0;
-  border-top: 1px solid var(--border-default);
-  border-radius: 0;
+.model-id-picker__status.is-error {
+  color: var(--color-error, #d84a3e);
 }
 
-@media (max-width: 720px) {
-  .model-manager-page .model-manager-source-disclosure > summary {
-    align-items: flex-start;
-    flex-direction: column;
+.model-manager-page .model-manager-source-description {
+  margin: 0;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status strong {
+  overflow-wrap: anywhere;
+}
+
+.app-layout .model-manager-page .model-manager-detection-panel {
+  order: 4;
+}
+
+.app-layout .model-manager-page .model-manager-overview-panel .admin-empty-panel {
+  min-height: 140px;
+  padding: 24px;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__header {
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__copy {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__extra {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+@media (max-width: 560px) {
+  .model-manager-modal-form .model-manager-identity-grid,
+  .model-manager-modal-form .admin-form-grid--three,
+  .app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-id-picker__controls {
+    gap: 6px;
+  }
+
+  .model-manager-source-key-reset {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .model-manager-source-key-reset .ant-alert-action {
+    margin-left: 24px;
   }
 }
 

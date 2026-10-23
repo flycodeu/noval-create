@@ -1,4 +1,7 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
+import { buildNarrativeDetailGuidance } from '../../src/shared/prompts/prompt-common'
+import { buildProseFluencyGuidance, buildStoryQualityGuidance } from '../../src/shared/narrative-naturalness'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -28,6 +31,8 @@ import * as novelService from './novel.service'
 import { createTask, executeChatTask, updateTask } from './task.service'
 import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
 import { getSqlite } from '../database/db'
+import { getModelConfigRecord } from './model.service'
+import { reviewModelOriginNote } from './review-model-origin'
 
 const OUTPUT_PREVIEW_LIMIT = 900
 const PROCESS_LEAK_PATTERN = /(?:作为(?:一个)?AI|我是(?:一个)?(?:AI|人工智能)|下面是(?:我为你|生成的)|希望(?:以上|这些)内容|如果你(?:还)?需要|以下是(?:根据|为你))/iu
@@ -63,7 +68,7 @@ function qualitySnapshot(result: AssetQualityLoopResult): GenericAssetQualitySna
 
 function requireNovel(novelId: number) {
   const novel = novelService.getNovel(novelId)
-  if (!novel) throw new GenericAssetWorkflowError('PROJECT_NOT_FOUND', `未找到项目 #${novelId}。`)
+  if (!novel) throw new GenericAssetWorkflowError('PROJECT_NOT_FOUND', formatUserFacingMessage('services.genericAssets.projectMissing', { novelId: `${novelId}` }))
   return novel
 }
 
@@ -95,6 +100,8 @@ function buildGenerationPrompt(input: GenerateGenericAssetDraftInput, contextSum
     `类型：${input.assetType}`,
     `标题：${input.title.trim()}`,
     requirements.length > 0 ? `要求：\n${requirements.map((line) => `- ${line}`).join('\n')}` : '要求：在不新增无依据事实的前提下，产出完整、具体、可审阅的草稿。',
+    ...(['chapter', 'outline'].includes(input.assetType) ? ['【故事质量取舍】', ...buildStoryQualityGuidance('write')] : []),
+    ...(input.assetType === 'chapter' ? ['【正文流畅度】', ...buildProseFluencyGuidance('write')] : []),
     '',
     '【输出契约】',
     outputInstruction(format, input.schemaHint?.trim() || ''),
@@ -111,6 +118,7 @@ function isJsonShapeValid(output: string): boolean {
 }
 
 export function assessGenericAssetDraftQuality(params: {
+  modelOriginNote?: string
   draftArtifactId: string
   draftContentHash: string
   effectiveArtifactId: string
@@ -153,7 +161,7 @@ export function assessGenericAssetDraftQuality(params: {
     : failureLabel
     ? { code: 'model_review', status: 'fail', message: `${failureLabel}未完成：${params.quality.warnings.join('；') || '请重试'}。候选已保留，未应用。` }
     : params.quality.initialModelReviewSkipped && !params.quality.rewrittenReview
-      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，独立模型复检尚未完成。' }
+      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，模型复检尚未完成。' }
       : reviewFailedOpen
       ? { code: 'model_review', status: 'fail', message: '模型审校未完整执行，候选已保留，须重新审校。' }
       : effectiveModelReview.rejectRequired
@@ -174,6 +182,11 @@ export function assessGenericAssetDraftQuality(params: {
   ])
   const score = Math.max(0, 100 - hardBlockers.length * 45 - warnings.length * 8)
   const status = hardBlockers.length > 0 ? 'blocked' : warnings.length > 0 ? 'needs_revision' : 'passed'
+  const outcomeSummary = status === 'blocked'
+    ? `审校阻断：${hardBlockers.join('；')}`
+    : status === 'needs_revision'
+      ? `草稿已保存，但仍需复核：${warnings.join('；')}`
+      : '结构检查与模型审校均通过，可按本轮设置应用。'
   return {
     schemaVersion: 'generic-asset-review-v1',
     draftArtifactId: params.draftArtifactId,
@@ -183,11 +196,7 @@ export function assessGenericAssetDraftQuality(params: {
     status,
     score,
     readyForHumanApply: status === 'passed',
-    summary: status === 'blocked'
-      ? `审校阻断：${hardBlockers.join('；')}`
-      : status === 'needs_revision'
-        ? `草稿已保存，但仍需复核：${warnings.join('；')}`
-        : '结构检查与独立模型审校均通过，可按本轮设置应用。',
+    summary: [outcomeSummary, params.modelOriginNote, `流程检查分 ${score}/100 仅表示本轮检查状态，不代表文学质量评分或 AI 检测结果。`].filter(Boolean).join(' '),
     hardBlockers,
     warnings,
     checks,
@@ -238,13 +247,13 @@ function readReplay(
   const draft = findArtifactByIdempotency<GenericAssetDraftContent>(input.novelId, 'generic_draft', input.idempotencyKey)
   if (!draft) return null
   if (draft.content.schemaVersion !== 'generic-asset-draft-v1' || draft.content.requestFingerprint !== fingerprint) {
-    throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产草稿请求。')
+    throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', formatUserFacingMessage('services.genericAssets.idempotencyRequestConflict'))
   }
   if (!draft.content.taskId) {
-    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '该幂等键已用于外部导入草稿。')
+    throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', formatUserFacingMessage('services.genericAssets.idempotencyImportConflict'))
   }
   if (!draft.reviewArtifactId) {
-    throw new GenericAssetWorkflowError('ARTIFACT_REVIEW_MISSING', '幂等草稿缺少审校工件，无法安全重放。')
+    throw new GenericAssetWorkflowError('ARTIFACT_REVIEW_MISSING', formatUserFacingMessage('services.genericAssets.replayReviewMissing'))
   }
   const reviewArtifact = requireArtifact<GenericAssetReviewContent>(draft.reviewArtifactId)
   const effectiveArtifact = requireArtifact<GenericAssetDraftContent>(reviewArtifact.content.effectiveArtifactId)
@@ -318,7 +327,7 @@ export async function generateGenericAssetDraft(
     retryable: true,
   })
   if (!taskId || !rawOutput.trim()) {
-    throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', '模型未返回可用的资产草稿。')
+    throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', formatUserFacingMessage('services.genericAssets.modelDraftMissing'))
   }
   if (!cached) runtime.modelCheckpoint?.save(checkpointRequest, rawOutput, taskId)
 
@@ -360,6 +369,11 @@ export async function generateGenericAssetDraft(
     reviewFocus: uniqueLines([
       '核对输出是否完全满足用户给定的资产标题、要求和输出格式。',
       '信息不足时应明确待确认，不得伪造为项目既有事实。',
+      ...(['chapter', 'outline'].includes(input.assetType) ? [
+        buildNarrativeDetailGuidance('review'),
+        '若上下文含开篇进度与阅读期待，核对首章的具体期待、次章的行动后果、第三章的阶段回报；引用候选中的实际结果，只有准备、同义问询或新谜团须指出空转。作者合同限制兑现时报告设计缺口，不擅自改揭示边界，也不因缺反转或爆点否定合法日常。',
+        '指出重复解释谨慎与善意、同质问答、无功能微动作填充的具体段落，保留有效心理与生活体验；不能用换词掩盖因果或人物选择的问题。',
+      ] : []),
       ...(['map', 'faction', 'character'].includes(input.assetType) ? [
         '简介、特点、日常和岗位职责应是小说资料；检查并移除文件路径、生成操作说明、不虚构等作者指令。未知字段省略，不用重复空值或待补充填满档案。',
         '区分固定设定与现场变化。未来计划、未查明事项及证言不能变成已发生的事实，具体变化须保持原章位。',
@@ -423,6 +437,7 @@ export async function generateGenericAssetDraft(
       return mapArtifactError(error)
     }
     const review = assessGenericAssetDraftQuality({
+      modelOriginNote: reviewModelOriginNote(route.modelConfigId ? getModelConfigRecord(route.modelConfigId) : undefined, qualityRoute.modelConfigId ? getModelConfigRecord(qualityRoute.modelConfigId) : undefined),
       draftArtifactId: draftArtifact.id,
       draftContentHash: draftArtifact.contentHash,
       effectiveArtifactId: draftArtifact.id,

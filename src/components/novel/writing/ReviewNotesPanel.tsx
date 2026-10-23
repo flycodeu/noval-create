@@ -30,7 +30,7 @@ export default function ReviewNotesPanel({ notes }: ReviewNotesPanelProps) {
 
   const total = model.critical.length + model.advisory.length + model.reference.length
   if (total === 0) {
-    return <div className="novel-copy-block">先运行审校流水线，这里会分别显示事实连续性、人物声音和语言读感。</div>
+    return <div className="novel-copy-block">暂无审校意见</div>
   }
 
   return (

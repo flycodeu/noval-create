@@ -211,3 +211,25 @@
   font-size: 12px;
   line-height: 1.2;
 }
+
+.prompt-manager-edit-error {
+  color: var(--color-error, #b95750);
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .app-layout .prompt-manager-page .novel-hero {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "copy" "actions";
+  }
+
+  .app-layout .prompt-manager-page .novel-hero__copy,
+  .app-layout .prompt-manager-page .novel-hero__title-row {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .app-layout .prompt-manager-page .novel-hero__actions {
+    width: 100%;
+  }
+}

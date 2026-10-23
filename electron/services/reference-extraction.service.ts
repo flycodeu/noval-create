@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { getSqlite } from '../database/db'
 import { estimateTokens } from '../../src/shared/token-budget'
 import { normalizeCreativeResearchDraft, upsertCreativeResearchEntries, type CreativeResearchDraft } from '../../src/shared/creative-research'
@@ -9,9 +10,9 @@ import { resolveModelRuntimeBudget, getDefaultModelConfigRecord } from './model.
 import { updateNovel } from './novel.service'
 
 function validate(input: ReferenceExtractionInput) {
-  if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > REFERENCE_TEXT_LIMIT) throw new Error('请选择 1–20000 字符的原文。')
-  if (!input.sourceTitle?.trim() || input.sourceTitle.length > 160 || (input.sourceLabel || '').length > 160) throw new Error('请填写不超过 160 字的来源标题和章段说明。')
-  if (!input.request?.trim() || input.request.length > 2000) throw new Error('请填写不超过 2000 字的提炼要求。')
+  if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > REFERENCE_TEXT_LIMIT) throw new Error(formatUserFacingMessage('author.extraction.invalidText'))
+  if (!input.sourceTitle?.trim() || input.sourceTitle.length > 160 || (input.sourceLabel || '').length > 160) throw new Error(formatUserFacingMessage('author.extraction.invalidSourceLabel'))
+  if (!input.request?.trim() || input.request.length > 2000) throw new Error(formatUserFacingMessage('author.extraction.invalidRequest'))
 }
 
 function extractionPrompt(input: ReferenceExtractionInput) {
@@ -34,7 +35,7 @@ export function startReferenceExtraction(input: ReferenceExtractionInput) {
   return startAuthorAssistTask({ novelId: input.novelId, kind: 'reference_extraction', idempotencyKey: input.idempotencyKey, request: input,
     prepare: modelId => {
       const budget = previewReferenceExtraction(input, modelId)
-      if (!budget.fits) throw new Error('所选原文超过当前模型输入预算，请缩小范围。')
+      if (!budget.fits) throw new Error(formatUserFacingMessage('author.extraction.budgetExceeded'))
       return { messages: [{ role: 'user', content: extractionPrompt(input) }], chatOpts: { maxTokens: budget.outputReserve, temperature: 0.35 } }
     },
     result: raw => ({ source: { text: input.text, hash: hashArtifactContent(input.text), title: input.sourceTitle, label: input.sourceLabel || '' },
@@ -50,28 +51,28 @@ export function adoptReferenceCandidates(input: {
     const fingerprint = hashArtifactContent(input)
     const prior = findArtifactByIdempotency<{ fingerprint: string; sourceKeys: string[] }>(input.novelId, 'reference_extraction_apply', input.idempotencyKey)
     if (prior) {
-      if (prior.content.fingerprint !== fingerprint) throw new Error('幂等键已用于另一份采用请求。')
+      if (prior.content.fingerprint !== fingerprint) throw new Error(formatUserFacingMessage('author.extraction.idempotencyConflict'))
       return { sourceKeys: prior.content.sourceKeys, idempotentReplay: true }
     }
     const novel = requireAssistNovel(input.novelId)
-    if (novel.contextVersion !== input.expectedContextVersion) throw new Error('作品资料已变化，请刷新后再保存所选卡片。')
+    if (novel.contextVersion !== input.expectedContextVersion) throw new Error(formatUserFacingMessage('author.extraction.contextChanged'))
     const artifact = requireArtifact<ReferenceExtractionResult>(input.artifactId)
     if (artifact.novelId !== input.novelId || artifact.kind !== 'reference_extraction' || !artifact.taskId
-      || getAuthorAssistRun(input.novelId, artifact.taskId).status !== 'success') throw new Error('请选择当前作品已完成的提炼结果。')
-    if (!input.entries.length || input.entries.length > 10 || new Set(input.entries.map(entry => entry.candidateId)).size !== input.entries.length) throw new Error('请选择 1–10 张不同的卡片。')
+      || getAuthorAssistRun(input.novelId, artifact.taskId).status !== 'success') throw new Error(formatUserFacingMessage('author.extraction.resultNotReady'))
+    if (!input.entries.length || input.entries.length > 10 || new Set(input.entries.map(entry => entry.candidateId)).size !== input.entries.length) throw new Error(formatUserFacingMessage('author.extraction.invalidSelection'))
     const sourceKeys: string[] = []
     const provenance = new Map<string, unknown>()
     const drafts = input.entries.map(entry => {
       const candidate = artifact.content.candidates.find(card => card.id === entry.candidateId)
       const source = artifact.content.source
-      if (!candidate || candidate.error || source.hash !== hashArtifactContent(source.text) || source.text.slice(candidate.start, candidate.end) !== candidate.quote) throw new Error('来源证据无效，未保存资料。')
+      if (!candidate || candidate.error || source.hash !== hashArtifactContent(source.text) || source.text.slice(candidate.start, candidate.end) !== candidate.quote) throw new Error(formatUserFacingMessage('author.extraction.invalidEvidence'))
       const sourceKey = `author:extract:${artifact.id}:${candidate.id}`
       sourceKeys.push(sourceKey)
       provenance.set(sourceKey, { artifactId: artifact.id, candidateId: candidate.id, sourceHash: source.hash, sourceLabel: source.label, start: candidate.start, end: candidate.end, quote: candidate.quote })
       return normalizeCreativeResearchDraft({ ...entry.draft, sourceKey, sourceTitle: source.title })
     })
     const existing = JSON.parse(novel.sourceLedgerJson || '[]') as Array<{ sourceKey?: string }>
-    if (sourceKeys.some(key => existing.some(entry => entry.sourceKey === key))) throw new Error('所选卡片已有采用记录，请到资料库编辑，避免覆盖后续修改。')
+    if (sourceKeys.some(key => existing.some(entry => entry.sourceKey === key))) throw new Error(formatUserFacingMessage('author.extraction.alreadyAdopted'))
     const ledger = upsertCreativeResearchEntries(novel.sourceLedgerJson, drafts).map(entry => provenance.has(String(entry.sourceKey)) ? { ...entry, provenance: provenance.get(String(entry.sourceKey)) } : entry)
     updateNovel(input.novelId, { sourceLedgerJson: JSON.stringify(ledger) })
     createArtifact({ novelId: novel.id, kind: 'reference_extraction_apply', content: { fingerprint, sourceKeys }, contextVersion: novel.contextVersion || 1,

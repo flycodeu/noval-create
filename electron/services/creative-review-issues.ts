@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { getSqlite } from '../database/db'
 import { listChapters } from './chapter.service'
 import { hashArtifactContent } from './artifact.service'
@@ -47,18 +48,18 @@ function isRepairDescendant(input: CreativeWorkflowInput, issueId: number, sourc
 export function validateCreativeRevisionTargets(input: CreativeWorkflowInput): void {
   const ids = input.revisionIssueIds
   if (!ids) return
-  if (!Array.isArray(ids) || ids.length > 50 || ids.some(id => !Number.isInteger(id) || id < 1) || new Set(ids).size !== ids.length) throw new CreativeReviewTargetError('修订问题 ID 必须为不重复的正整数，最多50项。')
+  if (!Array.isArray(ids) || ids.length > 50 || ids.some(id => !Number.isInteger(id) || id < 1) || new Set(ids).size !== ids.length) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.idsInvalid'))
   for (const id of ids) {
     const row = getSqlite().prepare('SELECT novel_id,origin_meta_json FROM revision_tasks WHERE id=?').get(id) as { novel_id: number; origin_meta_json: string } | undefined
-    if (!row || row.novel_id !== input.novelId) throw new CreativeReviewTargetError(`修订问题 ${id} 不属于当前项目。`)
+    if (!row || row.novel_id !== input.novelId) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.wrongProject', { id: `${id}` }))
     const meta = JSON.parse(row.origin_meta_json || '{}')
-    if (meta.issueCategory !== 'creative_review' || meta.stage !== input.stage || meta.atChapter !== input.atChapter) throw new CreativeReviewTargetError(`修订问题 ${id} 的阶段或章位与本次任务不同。`)
-    if (scopeIdentity(meta.changeScope, input.stage === 'chapter') !== scopeIdentity(input.changeScope, input.stage === 'chapter')) throw new CreativeReviewTargetError(`修订问题 ${id} 的保存范围与本次任务不同。`)
+    if (meta.issueCategory !== 'creative_review' || meta.stage !== input.stage || meta.atChapter !== input.atChapter) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.stageMismatch', { id: `${id}` }))
+    if (scopeIdentity(meta.changeScope, input.stage === 'chapter') !== scopeIdentity(input.changeScope, input.stage === 'chapter')) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.scopeMismatch', { id: `${id}` }))
     const sourceId = meta.repairArtifactId || meta.candidateArtifactId
     if (input.operation === 'review') {
-      if (input.sourceArtifactId) throw new CreativeReviewTargetError('正式复核不能将候选作为待评内容。')
-      if (sourceId && getArtifact(sourceId)?.status !== 'committed') throw new CreativeReviewTargetError(`修订问题 ${id} 的候选尚未保存，不能用正式资料将其关闭。`)
-    } else if (sourceId !== input.sourceArtifactId && !(sourceId && isRepairDescendant(input, id, sourceId))) throw new CreativeReviewTargetError(`修订问题 ${id} 必须沿用最新候选依据。`)
+      if (input.sourceArtifactId) throw new CreativeReviewTargetError(formatUserFacingMessage('services.formalReview.candidateBlocked'))
+      if (sourceId && getArtifact(sourceId)?.status !== 'committed') throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.unsavedCandidate', { id: `${id}` }))
+    } else if (sourceId !== input.sourceArtifactId && !(sourceId && isRepairDescendant(input, id, sourceId))) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.latestBasisRequired', { id: `${id}` }))
   }
 }
 export function creativeRevisionIssueSources(input: CreativeWorkflowInput) {
@@ -66,7 +67,7 @@ export function creativeRevisionIssueSources(input: CreativeWorkflowInput) {
   validateCreativeRevisionTargets(input)
   return input.revisionIssueIds.map(id => {
     const row = getSqlite().prepare('SELECT title,description,fix_brief AS fixBrief FROM revision_tasks WHERE novel_id=? AND id=?').get(input.novelId, id) as { title: string; description: string | null; fixBrief: string | null } | undefined
-    if (!row) throw new CreativeReviewTargetError(`修订问题 ${id} 已不存在。`)
+    if (!row) throw new CreativeReviewTargetError(formatUserFacingMessage('services.reviewIssues.missing', { id: `${id}` }))
     return { id, ...row, usage: '评审意见用于定位待修订问题，不是新事实；不能将评审所举错误、推断或未来计划写成正史。' }
   })
 }

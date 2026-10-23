@@ -7,6 +7,7 @@ const { execFileSync } = require('node:child_process')
 const { app } = require('electron')
 require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const root = path.resolve(__dirname, '..')
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf12-'))
@@ -181,7 +182,7 @@ app.whenReady().then(async () => {
   } finally {
     fs.writeFileSync(path.join(output, 'capture.json'), JSON.stringify(report, null, 2))
     closeDb()
-    fs.rmSync(isolatedPath, { recursive: true, force: true })
+    cleanupElectronFixture(isolatedPath, 'reader-first-feedback')
     app.exit(report.status === 'PASS' ? 0 : 1)
   }
 }).catch((error) => { console.error(error); app.exit(1) })

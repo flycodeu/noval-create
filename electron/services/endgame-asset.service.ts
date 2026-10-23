@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { parseStorySettingsDocument } from '../../src/shared/story-settings'
 import { getDb } from '../database/db'
@@ -697,8 +698,8 @@ export function upsertForeshadowLedger(
   if (data.id) {
     const current = db.select().from(foreshadowLedger).where(eq(foreshadowLedger.id, data.id)).all()[0]
     if (!current || current.novelId !== novelId) throwUserFacingError('novel.notFound')
-    if (current.mergedIntoId) throw new Error(`该线索已合并到 #${current.mergedIntoId}，请编辑保留项。`)
-    if (current.authorCorrectedAt && !options.authorCorrection) throw new Error('这条伏笔包含作者更正，请在故事账本明确编辑，不能由同步结果覆盖。')
+    if (current.mergedIntoId) throw new Error(formatUserFacingMessage('author.ledger.mergedClue', { mergedIntoId: current.mergedIntoId }))
+    if (current.authorCorrectedAt && !options.authorCorrection) throw new Error(formatUserFacingMessage('author.ledger.protectedClue'))
     db.update(foreshadowLedger).set({
       title: data.title !== undefined ? asText(data.title) || current.title : current.title,
       detail: data.detail !== undefined ? asText(data.detail) : current.detail,
@@ -760,7 +761,7 @@ export function deleteForeshadowLedger(
   if (!existing || existing.novelId !== novelId) {
     throwUserFacingError('novel.notFound')
   }
-  if (existing.mergedIntoId || db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, novelId)).all().some(row => row.mergedIntoId === foreshadowId)) throw new Error('该线索保留合并追溯，请通过故事账本调整保留项，不直接删除历史。')
+  if (existing.mergedIntoId || db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, novelId)).all().some(row => row.mergedIntoId === foreshadowId)) throw new Error(formatUserFacingMessage('author.ledger.mergeHistoryProtected'))
   db.delete(foreshadowLedger).where(eq(foreshadowLedger.id, foreshadowId)).run()
   refreshCommitmentDerivedState(novelId)
   markNovelContextChanged(novelId, 'Foreshadow ledger deleted')

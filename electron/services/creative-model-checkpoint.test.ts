@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 
@@ -58,6 +59,6 @@ describe('completed creative model checkpoints', () => {
     const artifact = [...rows.values()][0]
     artifact.content.output = '被替换'
     expect(() => createCreativeModelCheckpoint(input).read(request)).toThrow('不一致')
-    expect(() => createCreativeModelCheckpoint({ ...input, assertCurrent: () => { throw new Error('已取消') } }).read(request)).toThrow('已取消')
+    expect(() => createCreativeModelCheckpoint({ ...input, assertCurrent: () => { throw new Error(formatUserFacingMessage('services.cancelled')) } }).read(request)).toThrow('已取消')
   })
 })

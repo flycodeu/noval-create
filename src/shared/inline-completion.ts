@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from './user-facing-messages'
 export type InlineCompletionMode = 'sentence' | 'paragraph'
 export const INLINE_COMPLETION_LIMITS = { sentence: 60, paragraph: 220 } as const
 export interface InlineCompletionInput {
@@ -15,7 +16,7 @@ export function clipInlineCompletion(raw: string, mode: InlineCompletionMode, op
   return { text: chars.slice(0, limit).join(''), stop: Boolean(boundaryComplete) || chars.length >= limit }
 }
 export function insertInlineCompletion(content: string, cursor: number, text: string) {
-  if (!Number.isInteger(cursor) || cursor < 0 || cursor > content.length || !text.trim()) throw new Error('补全位置或文本无效。')
-  if (cursor > 0 && cursor < content.length && /[\uD800-\uDBFF]/u.test(content[cursor - 1]) && /[\uDC00-\uDFFF]/u.test(content[cursor])) throw new Error('光标不能切断完整字符。')
+  if (!Number.isInteger(cursor) || cursor < 0 || cursor > content.length || !text.trim()) throw new Error(formatUserFacingMessage('author.completion.invalidPosition'))
+  if (cursor > 0 && cursor < content.length && /[\uD800-\uDBFF]/u.test(content[cursor - 1]) && /[\uDC00-\uDFFF]/u.test(content[cursor])) throw new Error(formatUserFacingMessage('author.completion.splitCharacter'))
   return content.slice(0, cursor) + text + content.slice(cursor)
 }

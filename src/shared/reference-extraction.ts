@@ -1,3 +1,4 @@
+import { formatUserFacingMessage } from './user-facing-messages'
 import { normalizeCreativeResearchDraft, type CreativeResearchDraft } from './creative-research'
 
 export const REFERENCE_TEXT_LIMIT = 20_000
@@ -30,10 +31,10 @@ export interface ReferenceExtractionResult {
 export function parseReferenceCandidates(value: unknown, source: string): ReferenceCandidate[] {
   const cards = value && typeof value === 'object' && 'cards' in value ? value.cards : null
   if (!Array.isArray(cards) || !cards.length || cards.length > REFERENCE_CARD_LIMIT) {
-    throw new Error(`提炼结果需要包含 1–${REFERENCE_CARD_LIMIT} 张资料卡。`)
+    throw new Error(formatUserFacingMessage('author.extraction.invalidCount', { REFERENCE_CARD_LIMIT: REFERENCE_CARD_LIMIT }))
   }
   return cards.map((raw: unknown, index) => {
-    if (!raw || typeof raw !== 'object') throw new Error('提炼卡片格式不完整。')
+    if (!raw || typeof raw !== 'object') throw new Error(formatUserFacingMessage('author.extraction.invalidCard'))
     const card = raw as Record<string, unknown>
     const quote = typeof card.quote === 'string' ? card.quote : ''
     // Unique literal quotes can be located deterministically; ambiguous quotes need exact offsets.

@@ -6,8 +6,7 @@ import { mergeCanonicalDocument, parseDocument, recordOf } from './content-docum
 
 export const STORY_DESIGN_TABS = [
   { key: 'background', label: '背景与定位' }, { key: 'story', label: '故事方向' },
-  { key: 'world', label: '世界规则' }, { key: 'sources', label: '创作资料' }, { key: 'constraints', label: '写作边界' },
-  { key: 'style', label: '叙事与文风' }, { key: 'structure', label: '卷章与场景' },
+  { key: 'sources', label: '作者资料卡' }, { key: 'constraints', label: '写作边界' }, { key: 'style', label: '叙事与文风' },
 ]
 
 export const STORY_DESIGN_TOPICS: Record<string, Array<{ key: string; label: string }>> = {
@@ -34,7 +33,8 @@ export const STORY_VOICE_FIELDS: Record<string, Array<keyof ThemeVoiceDocument>>
 }
 
 export function resolveStoryDesignLocation(params: URLSearchParams) {
-  const section = STORY_DESIGN_TABS.some(item => item.key === params.get('section')) ? params.get('section')! : 'background'
+  // The router redirects legacy world/structure links; retaining their resolution also protects embedded callers.
+  const section = Object.prototype.hasOwnProperty.call(STORY_DESIGN_TOPICS, params.get('section') || '') ? params.get('section')! : 'background'
   const topics = STORY_DESIGN_TOPICS[section]
   const topic = topics.find(item => item.key === params.get('topic'))?.key || topics[0]?.key || ''
   return { section, topic, topics }
