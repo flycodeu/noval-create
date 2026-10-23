@@ -12,7 +12,7 @@ export function ContentDocument({ value, names = {}, showEmpty = false, fieldKey
   if (value && typeof value === 'object') return <dl className="author-document-fields">{Object.entries(value).filter(([key, item]) => {
     const present = documentHasContent(item)
     return !INTERNAL_FIELDS.has(documentFieldKey(key)) && (present || showEmpty && !documentReferenceType(key))
-  }).map(([key, item]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd><ContentDocument value={item} names={names} showEmpty={showEmpty} fieldKey={key} /></dd></div>)}</dl>
+  }).map(([key, item]) => <div key={key}><dt>{fieldLabel(key, item)}</dt><dd><ContentDocument value={item} names={names} showEmpty={showEmpty} fieldKey={key} /></dd></div>)}</dl>
   const display = documentReferenceLabel(fieldKey, value, names) ?? documentEnumLabel(fieldKey, atlasAttributeValue(documentFieldKey(fieldKey), value))
   return <div className="author-prose">{typeof display === 'boolean' ? display ? '是' : '否' : String(display)}</div>
 }

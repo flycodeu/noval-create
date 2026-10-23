@@ -108,4 +108,12 @@ describe('maintenance worker', () => {
     expect(worker.getStatus().outbox.deadLetterCount).toBe(2)
     expect(worker.getStatus().checkpointNovelCursor).toBe(0)
   })
+  it('checks stale leases after a restart even when only processing rows remain', async () => {
+    const dependencies = buildDependencies({ getOutboxStatus: vi.fn(() => ({ pendingCount: 0, retryingCount: 0, processingCount: 1, deadLetterCount: 0 })) })
+    const worker = createMaintenanceWorker({ initialDelayMs: 300_000, intervalMs: 300_000, dependencies })
+    worker.start()
+    await worker.runNow()
+    await worker.stop()
+    expect(dependencies.processOutbox).toHaveBeenCalledOnce()
+  })
 })

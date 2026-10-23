@@ -134,10 +134,11 @@ async function versionRetry() {
   const f = readFixtures()
   let detailReads = 0
   let listReads = 0
-  f.agentTools = { call: async ({ toolId }: any) => {
+  f.agentTools = { call: async ({ toolId, input }: any) => {
     if (toolId.endsWith('workflows.list')) { listReads++; return { ok: true, data: { runs: [] } } }
-    if (toolId.endsWith('artifacts.list')) return { ok: true, data: { artifacts: [] } }
+    if (toolId.endsWith('artifacts.list')) return { ok: true, data: { artifacts: input.parentArtifactId ? [{ id: 'comparison', parentArtifactId: 'a' }] : [] } }
     if (toolId.endsWith('artifacts.get')) {
+      if (input.artifactId === 'comparison') return { ok: true, data: { artifact: { novelId: 1, content: { history: [{ path: '正文', fieldKey: 'content', before: 'frozen original', after: 'frozen candidate' }] } } } }
       if (++detailReads === 1) throw new Error('temporary detail failure')
       return { ok: true, data: { artifact: { id: 'a', novelId: 1, kind: 'chapter', status: 'draft', version: 1, content: { content: 'recovered version' } } } }
     }
@@ -149,6 +150,7 @@ async function versionRetry() {
   check(retry, 'version retry exists')
   await click(retry)
   check(detailReads === 2 && listReads === 2 && !document.body.textContent?.includes('temporary detail failure') && document.body.textContent?.includes('recovered version'), 'version retry reloads detail and recovers a transient failure')
+  check(document.body.textContent?.includes('frozen original') && document.body.textContent?.includes('frozen candidate'), 'recovered version uses the stored comparison snapshot')
 }
 
 async function arrangementSaving() {

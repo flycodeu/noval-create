@@ -2,6 +2,7 @@ import { classifyQualityIssueLevels } from './quality-issue-policy'
 import { validateQualityIssuesForContent, qualityIssueArtifactHash, normalizeQualityIssue, getQualityIssueRuleSpec, QUALITY_ISSUE_RULE_SPECS } from '../../src/shared/quality-issue'
 import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
+import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray } from '../../src/utils/text'
 import { normalizeContractChecks } from '../../src/shared/chapter-review-view'
@@ -24,19 +25,26 @@ export interface AssetQualityLoopOptions {
   targetType: AssetReviewTarget
   novelId: number
   modelConfigId?: number
+  rewriteModelConfigId?: number
+  rewriteChatOpts?: Partial<ChatOptions>
   relatedEntityType?: string
   relatedEntityId?: number
   parentTaskId?: number
   sender?: ProgressSink
   contextSummary: string
+  /** Review a merged local patch in context without requiring the model to regenerate untouched content. */
+  reviewContextSummary?: (output: string) => string
   generatedOutput: string
   schemaHint?: string
+  /** Machine checks for the exact output contract; model approval cannot override these errors. */
+  validateOutput?: (output: string) => string[]
   reviewFocus?: string[]
   rewriteConstraints?: string[]
   qualityBudgetMs?: number
   maxRewritePasses?: number
   chatOpts?: Partial<ChatOptions>
   onQualityTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
+  modelCheckpoint?: ModelOutputCheckpoint
 }
 
 export interface AssetQualityLoopResult {
@@ -46,7 +54,9 @@ export interface AssetQualityLoopResult {
   rewrittenReview?: AssetReviewResult
   warnings: string[]
   /** The workflow could not finish this operation; distinct from a model rejecting the content. */
-  failureStage?: 'review' | 'rewrite' | 'recheck'
+  failureStage?: 'contract' | 'review' | 'rewrite' | 'recheck'
+  contractValidation?: { initialIssues: string[]; finalIssues: string[] }
+  initialModelReviewSkipped?: boolean
 }
 
 const DEFAULT_ASSET_QUALITY_BUDGET_MS = 240_000
@@ -99,6 +109,25 @@ function fallbackReview(summary: string, warning?: string): AssetReviewResult {
     conflictRisks: [],
     topFixes: [],
     strengths: [],
+  }
+}
+
+function inspectOutputContract(options: AssetQualityLoopOptions, output: string): string[] {
+  if (!options.validateOutput) return []
+  try {
+    return uniqueLines(options.validateOutput(output))
+  } catch (error) {
+    return [`结构校验未完成：${error instanceof Error ? error.message : String(error)}`]
+  }
+}
+
+function contractRepairReview(issues: string[]): AssetReviewResult {
+  return {
+    ...fallbackReview('机器结构校验发现错误，未运行模型审校。'),
+    rewriteRequired: true,
+    rejectRequired: false,
+    topFixes: issues,
+    conflictRisks: issues,
   }
 }
 
@@ -195,7 +224,7 @@ function updateAssetReviewProgress(
   updateTaskProgress(taskId, buildProgressPatch(progress, patch), sender)
 }
 
-async function runNestedReviewTask(params: {
+export async function runNestedReviewTask(params: {
   parentTaskId?: number
   novelId: number
   modelConfigId?: number
@@ -206,8 +235,15 @@ async function runNestedReviewTask(params: {
   chatOpts?: Partial<ChatOptions>
   stage: 'review' | 'rewrite'
   onTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
+  modelCheckpoint?: ModelOutputCheckpoint
 }): Promise<string> {
   const messages = [{ role: 'user' as const, content: params.prompt }]
+  const checkpointRequest: ModelOutputRequest = { phase: params.stage, prompt: params.prompt, modelConfigId: params.modelConfigId, chatOpts: params.chatOpts }
+  const cached = params.modelCheckpoint?.read(checkpointRequest)
+  if (cached) {
+    params.onTaskCreated?.(cached.taskId, params.stage)
+    return cached.output
+  }
 
   if (typeof params.parentTaskId !== 'number') {
     return runChatTask({
@@ -219,7 +255,10 @@ async function runNestedReviewTask(params: {
       messages,
       sender: params.sender,
       chatOpts: params.chatOpts,
-      onSuccess: (_output, taskId) => params.onTaskCreated?.(taskId, params.stage),
+      onSuccess: (output, taskId) => {
+        params.modelCheckpoint?.save(checkpointRequest, output, taskId)
+        params.onTaskCreated?.(taskId, params.stage)
+      },
     })
   }
 
@@ -236,9 +275,10 @@ async function runNestedReviewTask(params: {
   params.onTaskCreated?.(childTaskId, params.stage)
 
   updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
+  params.modelCheckpoint?.begin?.(checkpointRequest, childTaskId)
 
   try {
-    return await executeChatTask(childTaskId, {
+    const output = await executeChatTask(childTaskId, {
       type: 'review',
       novelId: params.novelId,
       modelConfigId: params.modelConfigId,
@@ -249,6 +289,8 @@ async function runNestedReviewTask(params: {
       chatOpts: params.chatOpts,
       sender: params.sender,
     })
+    params.modelCheckpoint?.save(checkpointRequest, output, childTaskId)
+    return output
   } finally {
     updateTask(params.parentTaskId, { currentChildTaskId: null })
   }
@@ -264,7 +306,7 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
     relatedEntityId: options.relatedEntityId,
     prompt: assetReviewPrompt({
       targetType: options.targetType,
-      contextSummary: options.contextSummary,
+      contextSummary: options.reviewContextSummary?.(options.generatedOutput) ?? options.contextSummary,
       generatedOutput: options.generatedOutput,
       schemaHint: options.schemaHint,
       reviewFocus: [...(options.reviewFocus || []), ...(options.narrativePolicyVersion === 'reader-first-v1' ? [
@@ -276,6 +318,7 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
     chatOpts: options.chatOpts,
     stage: 'review',
     onTaskCreated: options.onQualityTaskCreated,
+    modelCheckpoint: options.modelCheckpoint,
   })
 
   return parseAssetReviewResult(raw, options.generatedOutput, options.narrativePolicyVersion)
@@ -288,7 +331,7 @@ export async function rewriteGeneratedAsset(
   return runNestedReviewTask({
     parentTaskId: options.parentTaskId,
     novelId: options.novelId,
-    modelConfigId: options.modelConfigId,
+    modelConfigId: options.rewriteModelConfigId ?? options.modelConfigId,
     sender: options.sender,
     relatedEntityType: options.relatedEntityType,
     relatedEntityId: options.relatedEntityId,
@@ -300,11 +343,15 @@ export async function rewriteGeneratedAsset(
       topFixes: review.topFixes,
       humanLanguageRepairs: review.humanLanguageRepairs,
       schemaHint: options.schemaHint,
-      rewriteConstraints: options.rewriteConstraints,
+      rewriteConstraints: uniqueLines([
+        ...(options.rewriteConstraints || []),
+        ...(options.validateOutput ? ['结构校验指出的不支持字段必须删除或按契约放到正确位置；不能为保持原字段而保留非法结构，已有有效事实仍须保留。'] : []),
+      ]),
     }),
-    chatOpts: options.chatOpts,
+    chatOpts: options.rewriteChatOpts ?? options.chatOpts,
     stage: 'rewrite',
     onTaskCreated: options.onQualityTaskCreated,
+    modelCheckpoint: options.modelCheckpoint,
   })
 }
 
@@ -314,6 +361,29 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
   const maxRewritePasses = typeof options.maxRewritePasses === 'number' && Number.isFinite(options.maxRewritePasses)
     ? Math.max(0, Math.floor(options.maxRewritePasses))
     : DEFAULT_ASSET_QUALITY_MAX_REWRITE_PASSES
+  const initialContractIssues = inspectOutputContract(options, options.generatedOutput)
+  const finish = (result: AssetQualityLoopResult): AssetQualityLoopResult => {
+    if (!options.validateOutput) return result
+    const finalIssues = inspectOutputContract(options, result.finalOutput)
+    if (finalIssues.length > 0 && result.stage !== 'rejected') {
+      updateAssetReviewProgress(options.parentTaskId, options.sender, {
+        targetType: options.targetType,
+        stage: 'rejected',
+        reviewSummary: `最终结构校验未通过：${finalIssues.join('；')}`,
+        rejectRequired: true,
+        topFixes: finalIssues,
+        risks: finalIssues,
+        warnings: finalIssues,
+        message: '最终结构校验未通过，已保留候选并阻止应用。',
+      })
+    }
+    return {
+      ...result,
+      ...(finalIssues.length > 0 && result.stage !== 'rejected' ? { stage: 'rejected', failureStage: 'contract', warnings: uniqueLines([...result.warnings, ...finalIssues]) } as const : {}),
+      contractValidation: { initialIssues: initialContractIssues, finalIssues },
+      initialModelReviewSkipped: initialContractIssues.length > 0,
+    }
+  }
 
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
     targetType: options.targetType,
@@ -329,7 +399,7 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
 
   let review: AssetReviewResult
   try {
-    review = await reviewGeneratedAsset(options)
+    review = initialContractIssues.length > 0 ? contractRepairReview(initialContractIssues) : await reviewGeneratedAsset(options)
   } catch (error) {
     const warning = error instanceof Error ? error.message : '资产审校失败，已保留原始输出。'
     review = fallbackReview('资产审校失败，已保留原始输出。', warning)
@@ -345,13 +415,13 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       warnings: [warning],
       message: '资产审校失败，已保留原始输出。',
     })
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [warning],
       failureStage: 'review',
-    }
+    })
   }
 
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
@@ -371,12 +441,12 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
   })
 
   if (review.rejectRequired) {
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [review.summary],
-    }
+    })
   }
 
   if (!review.rewriteRequired) {
@@ -391,12 +461,12 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       risks: collectReviewRisks(review),
       message: '资产审校通过。',
     })
-    return {
+    return finish({
       stage: 'accepted',
       finalOutput: options.generatedOutput,
       review,
       warnings: [],
-    }
+    })
   }
 
   const skipRewriteWarning = maxRewritePasses <= 0
@@ -417,13 +487,13 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       warnings: [skipRewriteWarning],
       message: '资产审校问题尚未修订，已保留候选并阻止应用。',
     })
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [skipRewriteWarning],
-      failureStage: 'rewrite',
-    }
+      failureStage: initialContractIssues.length > 0 ? 'contract' : 'rewrite',
+    })
   }
 
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
@@ -455,13 +525,39 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       warnings: [warning],
       message: '资产重写失败，已保留原始输出。',
     })
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: options.generatedOutput,
       review,
       warnings: [warning],
       failureStage: 'rewrite',
-    }
+    })
+  }
+
+  const rewrittenContractIssues = inspectOutputContract(options, rewrittenOutput)
+  if (rewrittenContractIssues.length > 0) {
+    const summary = `修订后结构校验未通过：${rewrittenContractIssues.join('；')}`
+    const contractReview = { ...contractRepairReview(rewrittenContractIssues), summary, rejectRequired: true }
+    updateAssetReviewProgress(options.parentTaskId, options.sender, {
+      targetType: options.targetType,
+      stage: 'rejected',
+      reviewSummary: summary,
+      severity: 'medium',
+      rewriteRequired: true,
+      rejectRequired: true,
+      topFixes: rewrittenContractIssues,
+      risks: rewrittenContractIssues,
+      warnings: rewrittenContractIssues,
+      message: '修订后的结构仍不符合契约，已保留候选并阻止应用。',
+    })
+    return finish({
+      stage: 'rejected',
+      finalOutput: rewrittenOutput,
+      review,
+      rewrittenReview: contractReview,
+      warnings: rewrittenContractIssues,
+      failureStage: 'contract',
+    })
   }
 
   if (isQualityBudgetSpent(startedAt, qualityBudgetMs)) {
@@ -478,13 +574,13 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       warnings: [warning],
       message: '资产重写完成，已因预算限制跳过复检。',
     })
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: rewrittenOutput,
       review,
       warnings: [warning],
       failureStage: 'recheck',
-    }
+    })
   }
 
   const recheckOptions: AssetQualityLoopOptions = {
@@ -514,14 +610,14 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       warnings: [warning],
       message: '重写复检失败，已保留候选并阻止应用。',
     })
-    return {
+    return finish({
       stage: 'rejected',
       finalOutput: rewrittenOutput,
       review,
       rewrittenReview: fallback,
       warnings: [warning],
       failureStage: 'recheck',
-    }
+    })
   }
 
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
@@ -538,13 +634,13 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
       : '资产重写完成并通过复检。',
   })
 
-  return {
+  return finish({
     stage: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired ? 'rejected' : 'rewritten',
     finalOutput: rewrittenOutput,
     review,
     rewrittenReview,
     warnings: rewrittenReview.rejectRequired || rewrittenReview.rewriteRequired ? [rewrittenReview.summary] : [],
-  }
+  })
 }
 
 export function summarizeAssetQualityWarnings(result: AssetQualityLoopResult): string | undefined {

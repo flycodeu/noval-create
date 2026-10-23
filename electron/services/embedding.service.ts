@@ -1,32 +1,38 @@
 import { createHash } from 'node:crypto'
+import { app } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
 import { and, desc, eq, isNotNull, like, lt, or } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
-import { getAdapterById, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
-import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
+import { embeddingRuntimeIdentity, embeddingRemoteAdapter } from './embedding-settings.service'
+import { LOCAL_EMBEDDING_MODEL_ID } from '../../src/shared/embedding-settings'
+import { searchChapterVectors } from '../database/chapter-vector-index'
+import { hashQueryText, isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
-const LOCAL_EMBEDDING_MODEL_ID = 'local:Xenova/bge-small-zh-v1.5:q8'
-const REMOTE_EMBEDDING_MODEL_ID = 'text-embedding-3-small'
 const MAX_KEYWORDS = 24
 const MAX_LOOKUP_KEYWORDS = 8
 const MIN_RETRIEVAL_CANDIDATES = 64
 const MAX_RETRIEVAL_CANDIDATES = 512
-const MAX_VECTOR_CANDIDATES = 4096
-const RECENT_VECTOR_CANDIDATES = 768
 
 let embeddingPipeline: any = null
 
 async function getLocalEmbeddingPipeline() {
   if (!embeddingPipeline) {
-    const { pipeline, env } = await import('@huggingface/transformers')
-    env.allowLocalModels = true
-    env.useBrowserCache = false
-    embeddingPipeline = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
-      dtype: 'q8',
-    })
+    embeddingPipeline = (async () => {
+      const { pipeline, env } = await import('@huggingface/transformers')
+      const cache = path.join(app.getPath('userData'), 'models', 'embeddings')
+      fs.mkdirSync(cache, { recursive: true })
+      env.cacheDir = cache
+      env.localModelPath = cache + path.sep
+      env.allowLocalModels = true
+      env.useBrowserCache = false
+      env.useFSCache = true
+      return pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', { dtype: 'q8' })
+    })()
   }
-  return embeddingPipeline
+  try { return await embeddingPipeline } catch (error) { embeddingPipeline = null; throw error }
 }
 
 async function getLocalEmbeddings(texts: string[]): Promise<number[][]> {
@@ -54,11 +60,13 @@ export type SimilarFragmentFallbackReason =
 export interface SimilarFragmentSearchResult {
   hits: SimilarFragmentHit[]
   fallbackReason?: SimilarFragmentFallbackReason
+  preparedQuery?: PreparedQueryEmbedding | null
 }
 
 export interface SimilarFragmentSearchOptions {
   beforeChapterNum?: number
   preparedQuery?: PreparedQueryEmbedding | null
+  proseOnly?: boolean
 }
 
 const embeddingCandidateSelection = {
@@ -106,30 +114,8 @@ export function buildEmbeddingProfile(modelId: string | null | undefined, dimens
   return `${modelId?.trim() || 'unknown'}:${Math.max(0, Math.floor(dimensions))}`
 }
 
-function buildEmbeddingConfigFingerprint(config: {
-  id: number
-  provider?: string | null
-  modelId?: string | null
-  baseUrl?: string | null
-}): string {
-  return createHash('sha256').update(JSON.stringify({
-    id: config.id,
-    provider: config.provider,
-    modelId: config.modelId,
-    baseUrl: config.baseUrl,
-    embeddingModel: REMOTE_EMBEDDING_MODEL_ID,
-  })).digest('hex').slice(0, 16)
-}
-
-export function resolveEmbeddingConfigCacheKey(modelConfigId?: number): string {
-  try {
-    const config = modelConfigId
-      ? getModelConfigRecord(modelConfigId)
-      : getDefaultModelConfigRecord()
-    return `config:${config.id}:${buildEmbeddingConfigFingerprint(config)}`
-  } catch {
-    return 'local:default'
-  }
+export function resolveEmbeddingConfigCacheKey(_modelConfigId?: number): string {
+  return embeddingRuntimeIdentity().key
 }
 
 export function hashEmbeddingSource(
@@ -213,7 +199,8 @@ function buildTextMatch(column: typeof chapterEmbeddings.fragmentText, keywords:
 export function isUsableEmbedding(embedding: unknown): embedding is number[] {
   return Array.isArray(embedding)
     && embedding.length > 0
-    && embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
+    && embedding.every((value) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 3.4e38)
+    && embedding.some((value) => value !== 0)
 }
 
 export function areUsableEmbeddings(embeddings: unknown, expectedCount: number): embeddings is number[][] {
@@ -221,22 +208,6 @@ export function areUsableEmbeddings(embeddings: unknown, expectedCount: number):
   if (!embeddings.every(isUsableEmbedding)) return false
   const dimensions = embeddings[0]?.length || 0
   return dimensions > 0 && embeddings.every((embedding) => embedding.length === dimensions)
-}
-
-async function resolveRemoteEmbeddingRuntime(modelConfigId?: number): Promise<{
-  adapter: Awaited<ReturnType<typeof getAdapterById>>
-  modelId: string
-}> {
-  const config = modelConfigId
-    ? getModelConfigRecord(modelConfigId)
-    : getDefaultModelConfigRecord()
-  const resolvedConfigId = config.id
-  const adapter = await getAdapterById(resolvedConfigId)
-  const configFingerprint = buildEmbeddingConfigFingerprint(config)
-  return {
-    adapter,
-    modelId: `${adapter.id}:config:${resolvedConfigId}:${configFingerprint}:${REMOTE_EMBEDDING_MODEL_ID}`,
-  }
 }
 
 export interface EmbeddingBatchResult {
@@ -253,16 +224,17 @@ export interface EmbeddingRequestOptions {
 
 export async function embedSemanticTexts(
   texts: string[],
-  modelConfigId?: number,
+  _modelConfigId?: number,
   options: EmbeddingRequestOptions = {},
 ): Promise<EmbeddingBatchResult> {
   if (texts.length === 0) return { source: 'unavailable' }
 
-  if (options.allowRemote !== false) {
+  const configured = embeddingRuntimeIdentity()
+  if (configured.settings.mode === 'remote' && options.allowRemote !== false) {
     try {
-      const { adapter, modelId } = await resolveRemoteEmbeddingRuntime(modelConfigId)
+      const { adapter, modelId, settings } = await embeddingRemoteAdapter()
       if (adapter.embed) {
-        const embeddings = await adapter.embed(texts, { model: REMOTE_EMBEDDING_MODEL_ID })
+        const embeddings = await adapter.embed(texts, { model: settings.modelId })
         if (areUsableEmbeddings(embeddings, texts.length)) {
           const dimensions = embeddings[0].length
           return {
@@ -381,20 +353,7 @@ function buildContinuityFragmentText(raw?: string | null): string {
   }
 }
 
-export async function generateChapterEmbeddings(
-  novelId: number,
-  chapterId: number,
-  modelConfigId?: number,
-): Promise<void> {
-  const db = getDb()
-  const chapter = db.select().from(chapters)
-    .where(eq(chapters.id, chapterId))
-    .all()[0]
-  if (!chapter) return
-  if (chapter.novelId !== novelId) {
-    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
-  }
-
+function chapterEmbeddingFragments(chapter: typeof chapters.$inferSelect) {
   const fragments: Array<{ type: string; text: string }> = []
 
   if (chapter.summary) {
@@ -420,10 +379,96 @@ export async function generateChapterEmbeddings(
   if (contentExcerpt) {
     fragments.push({ type: 'content_excerpt', text: contentExcerpt })
   }
+  return fragments
+}
+
+/** Cover the complete saved prose, including the middle of a long chapter. Plans stay out. */
+export function savedProseEmbeddingFragments(content: string): Array<{ type: string; text: string }> {
+  const paragraphs = content.split(/\r?\n\s*\r?\n+/u).map(text => text.trim()).filter(Boolean)
+  const chunks: string[] = []
+  let pending = ''
+  for (const paragraph of paragraphs) {
+    if (pending && pending.length + paragraph.length + 2 > 1600) { chunks.push(pending); pending = '' }
+    if (paragraph.length > 1600) {
+      for (let offset = 0; offset < paragraph.length; offset += 1600) chunks.push(paragraph.slice(offset, offset + 1600))
+    } else pending = pending ? `${pending}\n\n${paragraph}` : paragraph
+  }
+  if (pending) chunks.push(pending)
+  return chunks.map((text, index) => ({ type: index ? `content_excerpt:${index}` : 'content_excerpt', text }))
+}
+
+export function isProseEmbeddingFragment(type: string): boolean {
+  return type === 'content_excerpt' || /^content_excerpt:\d+$/u.test(type)
+}
+
+export interface ChapterEmbeddingRefreshOptions extends EmbeddingRequestOptions { proseOnly?: boolean }
+export interface ChapterEmbeddingRefreshResult {
+  applied: boolean
+  documentCount: number
+  vectorizedCount: number
+  source: EmbeddingBatchResult['source']
+}
+
+/** Save keyword recall before optional vector work; a restart cannot lose the readable index. */
+export function indexChapterForKeywordRecall(novelId: number, chapterId: number, modelConfigId?: number, options: ChapterEmbeddingRefreshOptions = {}): void {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return
+  if (chapter.novelId !== novelId) throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
+  let configKey = 'keyword-only'
+  try { configKey = resolveEmbeddingConfigCacheKey(modelConfigId) } catch { /* Text repair is independent of vector credentials. */ }
+  const sourceHash = hashEmbeddingSource(chapterId, chapter.contextVersion || 1, fragments, configKey)
+  const existing = new Map(db.select().from(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).all().map(row => [row.fragmentType, row]))
+  db.transaction(tx => {
+    tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
+    for (const fragment of fragments) {
+      const cached = existing.get(fragment.type)
+      // A text-only repair must not discard valid vectors just because the selected
+      // provider changed. Keep the old provenance so a later vector repair can detect it.
+      const reusable = cached?.fragmentText === fragment.text ? cached : undefined
+      tx.insert(chapterEmbeddings).values({
+        novelId, chapterId, fragmentType: fragment.type, fragmentText: fragment.text, sourceHash: reusable?.sourceHash || sourceHash,
+        contextVersion: chapter.contextVersion || 1, visibility: 'canon',
+        embeddingJson: reusable?.embeddingJson || null, modelId: reusable?.modelId || null,
+        dimensions: reusable?.dimensions || null, embeddingProfile: reusable?.embeddingProfile || null,
+      }).run()
+    }
+  })
+}
+
+export function scheduleChapterEmbeddingRefresh(novelId: number, chapterId: number, modelConfigId?: number): void {
+  indexChapterForKeywordRecall(novelId, chapterId, modelConfigId, { proseOnly: true })
+  // The existing maintenance worker consumes this durable queue after a restart.
+  // Automatic saves permit local vectors only; a separate explicit rebuild enables remote work.
+  getSqlite().prepare(`
+    INSERT INTO semantic_memory_outbox (novel_id, source_type, source_id, operation, context_version)
+    SELECT novel_id, 'chapter', id, 'upsert', COALESCE(context_version, 1) FROM chapters WHERE id = ? AND novel_id = ?
+    ON CONFLICT(novel_id, source_type, source_id) DO UPDATE SET
+      operation = excluded.operation,
+      revision = semantic_memory_outbox.revision + 1, status = 'pending', attempts = 0,
+      available_at = CURRENT_TIMESTAMP, locked_at = NULL, last_error = NULL,
+      context_version = excluded.context_version, updated_at = CURRENT_TIMESTAMP
+  `).run(chapterId, novelId)
+}
+
+export async function generateChapterEmbeddings(
+  novelId: number,
+  chapterId: number,
+  modelConfigId?: number,
+  options: ChapterEmbeddingRefreshOptions = {},
+): Promise<ChapterEmbeddingRefreshResult> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return { applied: false, documentCount: 0, vectorizedCount: 0, source: 'unavailable' }
+  if (chapter.novelId !== novelId) {
+    throw new Error(`章节 ${chapterId} 不属于小说 ${novelId}，拒绝写入跨小说向量索引。`)
+  }
+  const fragments = options.proseOnly ? savedProseEmbeddingFragments(chapter.content || '') : chapterEmbeddingFragments(chapter)
 
   if (fragments.length === 0) {
     db.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
-    return
+    return { applied: true, documentCount: 0, vectorizedCount: 0, source: 'unavailable' }
   }
 
   const contextVersion = chapter.contextVersion || 1
@@ -439,9 +484,11 @@ export async function generateChapterEmbeddings(
     dimensions?: number
     profile?: string
   }>()
+  const expectedModel = embeddingRuntimeIdentity().modelId
   fragments.forEach((fragment) => {
     const existing = existingByFragmentType.get(fragment.type)
     if (existing?.sourceHash !== sourceHash) return
+    if (options.allowRemote !== false && existing.modelId !== expectedModel) return
     try {
       const embedding = JSON.parse(existing.embeddingJson || '')
       if (!isUsableEmbedding(embedding)) return
@@ -457,14 +504,21 @@ export async function generateChapterEmbeddings(
   })
   const missingFragments = fragments.filter((fragment) => !reusableByFragmentType.has(fragment.type))
   const embeddingBatch = missingFragments.length > 0
-    ? await embedSemanticTexts(missingFragments.map((fragment) => fragment.text), modelConfigId)
+    ? await embedSemanticTexts(missingFragments.map((fragment) => fragment.text), modelConfigId, options)
     : { source: 'unavailable' as const }
   const generatedByFragmentType = new Map(missingFragments.map((fragment, index) => [
     fragment.type,
     embeddingBatch.embeddings?.[index],
   ]))
 
+  let applied = false
+  let vectorizedCount = 0
   db.transaction((tx) => {
+    // Vector generation can outlive an edit or deletion. Re-read the source inside the commit.
+    const current = tx.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+    if (!current || current.novelId !== novelId || sourceHash !== hashEmbeddingSource(
+      chapterId, current.contextVersion || 1, options.proseOnly ? savedProseEmbeddingFragments(current.content || '') : chapterEmbeddingFragments(current), resolveEmbeddingConfigCacheKey(modelConfigId),
+    )) return
     tx.delete(chapterEmbeddings).where(eq(chapterEmbeddings.chapterId, chapterId)).run()
     fragments.forEach((fragment) => {
       const reusable = reusableByFragmentType.get(fragment.type)
@@ -472,6 +526,7 @@ export async function generateChapterEmbeddings(
       const modelId = reusable?.modelId || (embedding ? embeddingBatch.modelId : undefined)
       const dimensions = reusable?.dimensions || (embedding ? embeddingBatch.dimensions : undefined)
       const profile = reusable?.profile || (embedding ? embeddingBatch.profile : undefined)
+      if (embedding) vectorizedCount += 1
       tx.insert(chapterEmbeddings).values({
         novelId,
         chapterId,
@@ -488,7 +543,9 @@ export async function generateChapterEmbeddings(
         visibility: 'canon',
       }).run()
     })
+    applied = true
   })
+  return { applied, documentCount: fragments.length, vectorizedCount, source: embeddingBatch.source }
 }
 
 export async function searchSimilarFragments(
@@ -534,10 +591,12 @@ export async function searchSimilarFragments(
     queryProfile = preparedQuery!.profile
     queryDimensions = preparedQuery!.dimensions
   } else if (!preparedQueryRejected) {
-    const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
-    queryEmbedding = queryBatch.embeddings?.[0]
-    queryProfile = queryBatch.profile
-    queryDimensions = queryBatch.dimensions
+    try {
+      const queryBatch = await embedSemanticTexts([queryText], modelConfigId)
+      queryEmbedding = queryBatch.embeddings?.[0]
+      queryProfile = queryBatch.profile
+      queryDimensions = queryBatch.dimensions
+    } catch { /* A missing vector configuration still permits keyword recall. */ }
   }
 
   if (!queryEmbedding || !queryProfile || !queryDimensions) {
@@ -554,40 +613,24 @@ export async function searchSimilarFragments(
     eq(chapterEmbeddings.dimensions, queryDimensions),
     isNotNull(chapterEmbeddings.embeddingJson),
   ] as const
-  const lookupKeywords = extractEmbeddingKeywords(queryText, MAX_LOOKUP_KEYWORDS)
-  const lexicalRows = lookupKeywords.length > 0
-    ? db.select(embeddingCandidateSelection).from(chapterEmbeddings)
-      .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
-      .where(and(
-        ...compatibilityFilters,
-        eq(chapters.novelId, novelId),
-        ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
-        buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords),
-      ))
-      .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
-      .limit(MAX_VECTOR_CANDIDATES - RECENT_VECTOR_CANDIDATES)
-      .all()
-    : []
-  const recentRows = db.select(embeddingCandidateSelection).from(chapterEmbeddings)
+  const reusableQuery: PreparedQueryEmbedding = { queryHash: hashQueryText(queryText), embedding: queryEmbedding, profile: queryProfile, dimensions: queryDimensions }
+  try {
+    const native = searchChapterVectors(getSqlite(), { novelId, profile: queryProfile, dimensions: queryDimensions,
+      vector: queryEmbedding, topK, beforeChapterNum, proseOnly: options?.proseOnly })
+    if (native.length) return { preparedQuery: reusableQuery, hits: native.map(({ distance, ...row }) => ({ ...row, similarity: 1 - distance, searchMode: 'vector' as const })) }
+  } catch { /* An unavailable extension falls back to a complete scan, never a recent-only shortlist. */ }
+  const compatibleRows = db.select(embeddingCandidateSelection).from(chapterEmbeddings)
     .innerJoin(chapters, eq(chapterEmbeddings.chapterId, chapters.id))
-    .where(and(
-      ...compatibilityFilters,
-      eq(chapters.novelId, novelId),
+    .where(and(...compatibilityFilters, eq(chapters.novelId, novelId),
       ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
-    ))
-    .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
-    .limit(RECENT_VECTOR_CANDIDATES)
-    .all()
-  const compatibleRows = [...new Map(
-    [...lexicalRows, ...recentRows]
-      .filter((row) => isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!))
-      .map((row) => [row.id, row] as const),
-  ).values()].slice(0, MAX_VECTOR_CANDIDATES)
+      ...(options?.proseOnly ? [like(chapterEmbeddings.fragmentType, 'content_excerpt%')] : [])))
+    .all().filter(row => isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!))
 
   if (compatibleRows.length === 0) {
     const hits = fallbackKeywordSearch(novelId, queryText, topK, options)
     return {
       hits,
+      preparedQuery: reusableQuery,
       fallbackReason: hits.length > 0 ? 'embedding_profile_mismatch' : 'no_hits',
     }
   }
@@ -595,7 +638,7 @@ export async function searchSimilarFragments(
   const scored = compatibleRows.flatMap((e) => {
       try {
         const embedding = JSON.parse(e.embeddingJson!) as number[]
-        if (!isCompatibleEmbeddingRow(e, queryProfile!, queryDimensions!)) return []
+        if (!isCompatibleEmbeddingRow(e, queryProfile!, queryDimensions!) || !isUsableEmbedding(embedding) || embedding.length !== queryDimensions) return []
         return [{
           chapterId: e.chapterId,
           chapterNum: e.chapterNum ?? 0,
@@ -613,6 +656,7 @@ export async function searchSimilarFragments(
   const hits = scored.slice(0, topK)
   return {
     hits,
+    preparedQuery: reusableQuery,
     fallbackReason: hits.length > 0 ? undefined : 'no_hits',
   }
 }
@@ -645,9 +689,10 @@ export function fallbackKeywordSearch(
       eq(chapters.novelId, novelId),
       ...(beforeChapterNum === undefined ? [] : [lt(chapters.chapterNum, beforeChapterNum)]),
       ...(lookupKeywords.length > 0 ? [buildTextMatch(chapterEmbeddings.fragmentText, lookupKeywords)] : []),
+      ...(options?.proseOnly ? [like(chapterEmbeddings.fragmentType, 'content_excerpt%')] : []),
     ))
     .orderBy(desc(chapters.chapterNum), desc(chapterEmbeddings.id))
-    .limit(candidateLimit)
+    .limit(options?.proseOnly ? 2147483647 : candidateLimit)
     .all()
 
   const candidates: SimilarFragmentHit[] = candidateEmbeddings.map((e) => ({
@@ -687,7 +732,7 @@ export function fallbackKeywordSearch(
       ...(lookupKeywords.length > 0 ? [or(...chapterMatches)] : []),
     ))
     .orderBy(desc(chapters.chapterNum), desc(chapters.id))
-    .limit(candidateLimit)
+    .limit(options?.proseOnly ? 2147483647 : candidateLimit)
     .all()
 
   const existingKeys = new Set(candidates.map((item) => `${item.chapterId}:${item.fragmentType}:${item.fragmentText}`))
@@ -703,7 +748,7 @@ export function fallbackKeywordSearch(
       },
     ]
     derived.forEach((fragment) => {
-      if (!fragment.text) return
+      if (!fragment.text || options?.proseOnly && !isProseEmbeddingFragment(fragment.type)) return
       const key = `${chapter.id}:${fragment.type}:${fragment.text}`
       if (existingKeys.has(key)) return
       existingKeys.add(key)

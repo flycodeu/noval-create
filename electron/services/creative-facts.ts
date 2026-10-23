@@ -143,6 +143,7 @@ export function validateCreativeFactReveals(novelId: number, chapterNum: number,
     if (quote.length < 4 || !content.includes(quote)) throw new Error(`fact:${fact.id} 缺少逐字匹配正文的揭示证据。`)
     const authorizedScenes = scenes.filter(scene => scene.revealPayload.some(value => [`fact:${fact.id}`, `#${fact.id}`, fact.title, fact.summary].includes(value.trim())))
     if (!authorizedScenes.length) throw new Error(`fact:${fact.id} 缺少场景揭示安排。`)
+    if (new Set(reveal.characterIds).size !== reveal.characterIds.length) throw new Error('获知人物不能重复提交。')
     for (const characterId of reveal.characterIds) {
       const character = cast.get(characterId)
       if (!character) throw new Error('获知人物必须是当前项目截至本章已确认的人物图谱ID。')

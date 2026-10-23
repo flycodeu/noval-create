@@ -84,6 +84,51 @@ export function locationCategory(entity: StoryAtlasEntity): 'country' | 'region'
   return 'site'
 }
 
+/** A single country opens at its internal map. With several countries, keep the world choice visible. */
+export function geographicDefaultScope(snapshot: StoryAtlasSnapshot): string | null {
+  const countries = snapshot.entities.filter(entity => entity.kind === 'location' && locationCategory(entity) === 'country')
+  return countries.length === 1 ? countries[0].id : null
+}
+
+const REGION_COLORS = ['#c9d7ac', '#dcc39b', '#b4d2c7', '#d6b9a9', '#bfc1d3', '#dbcfa9']
+const TERRAIN_COLORS: Array<[RegExp, string]> = [
+  [/山地|山岭|山脉|高山/, '#b6b4a2'], [/低山/, '#b8c09f'], [/丘陵/, '#c7ba96'], [/丘原/, '#d6c99a'],
+  [/台地|高原/, '#dbbe9e'], [/盆地/, '#ced8b4'], [/湖沼|湖泽|沼泽|湿地/, '#abc6cf'],
+  [/冲积|水网|水乡|河网/, '#afcfc4'], [/平原|平地|草原/, '#e0d5a8'], [/森林|林地/, '#aac39e'],
+  [/沙漠|荒漠|戈壁/, '#e4c894'],
+]
+/** Colour is a regional distinction; terrain colour only uses an explicit saved terrain field. */
+export function geographicAppearance(entity: StoryAtlasEntity) {
+  const terrain = typeof entity.attributes.terrain === 'string' ? entity.attributes.terrain.trim() : ''
+  let hash = 0
+  for (const letter of entity.id) hash = (hash * 31 + letter.charCodeAt(0)) >>> 0
+  const firstTerrain = TERRAIN_COLORS.map(([pattern, color]) => ({ index: terrain.search(pattern), color }))
+    .filter(match => match.index >= 0).sort((a, b) => a.index - b.index)[0]
+  const color = firstTerrain?.color || REGION_COLORS[hash % REGION_COLORS.length]
+  return { color, terrain }
+}
+
+/** Place the unassigned-area label inside actual territory and outside every saved child boundary. */
+export function geographicUnmappedAnchor(boundary: MapPoint[], children: MapPoint[][]): MapPoint | undefined {
+  if (!boundary.length) return undefined
+  const polygons = [boundary, ...children.filter(points => points.length >= 3)]
+  let best: MapPoint | undefined, clearance = 0
+  for (let y = 5; y < 100; y += 5) for (let x = 5; x < 100; x += 5) {
+    const point = { x, y }
+    if (!atlasPolygonContainsPoint(boundary, point, false) || children.some(child => atlasPolygonContainsPoint(child, point))) continue
+    let distance = Infinity
+    for (const polygon of polygons) for (let index = 0; index < polygon.length; index++) {
+      const a = polygon[index], b = polygon[(index + 1) % polygon.length]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const lengthSquared = dx * dx + dy * dy
+      const t = lengthSquared ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / lengthSquared)) : 0
+      distance = Math.min(distance, Math.hypot(x - a.x - t * dx, y - a.y - t * dy))
+    }
+    if (distance > clearance) { best = point; clearance = distance }
+  }
+  return clearance >= 10 ? best : undefined
+}
+
 /** Descendant information remains visible even when older records have no cartographic geometry. */
 export function geographicDescendants(snapshot: StoryAtlasSnapshot, parentId: string | null) {
   const result: StoryAtlasEntity[] = []
@@ -115,20 +160,31 @@ export function geographicSettlements(snapshot: StoryAtlasSnapshot, parentId: st
   return result
 }
 
-export type MapLabel = { x: number; y: number; text: string; primary?: boolean; scale?: number }
+export type MapLabel = { x: number; y: number; text: string; primary?: boolean; scale?: number; priority?: number; hidden?: boolean }
 /** Preserve marker positions while choosing a nearby readable label; crowded labels remain in the place index. */
 export function geographicLabelPositions(labels: MapLabel[], markers: MapPoint[] = []) {
   const occupied = markers.map(point => ({ left: point.x - 10, right: point.x + 10, top: point.y - 10, bottom: point.y + 10 }))
-  return labels.map(label => {
+  const positions: Array<MapPoint | undefined> = labels.map(() => undefined)
+  const order = labels.map((label, index) => ({ label, index })).sort((a, b) => (b.label.priority || 0) - (a.label.priority || 0))
+  for (const { label, index } of order) {
+    if (label.hidden) continue
     const scale = label.scale || 1
-    const width = Math.max(34, label.text.length * (label.primary ? 22 : 15)) * scale, height = (label.primary ? 46 : 22) * scale
-    for (const rawOffset of label.primary ? [0, -26, 26, -52, 52] : [-16, 27, -36, 47]) {
-      const offset = rawOffset * scale
-      const box = { left: label.x - width / 2 - 5, right: label.x + width / 2 + 5, top: label.y + offset - 18 * scale, bottom: label.y + offset - 18 * scale + height }
+    const width = Math.max(34, label.text.length * (label.primary ? 24 : 16)) * scale, height = (label.primary ? 28 : 22) * scale
+    const side = width / 2 + 16 * scale
+    const candidates = label.primary ? [0, -30, 30, -60, 60].map(y => ({ x: 0, y: y * scale })) : [
+      { x: 0, y: -17 * scale }, { x: 0, y: 30 * scale },
+      { x: side, y: 5 * scale }, { x: -side, y: 5 * scale },
+      { x: side, y: -20 * scale }, { x: -side, y: -20 * scale },
+      { x: side, y: 30 * scale }, { x: -side, y: 30 * scale },
+      { x: 0, y: -45 * scale }, { x: 0, y: 58 * scale },
+    ]
+    for (const offset of candidates) {
+      const box = { left: label.x + offset.x - width / 2 - 5, right: label.x + offset.x + width / 2 + 5, top: label.y + offset.y - 18 * scale, bottom: label.y + offset.y - 18 * scale + height }
       if (occupied.some(other => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)) continue
       occupied.push(box)
-      return offset
+      positions[index] = offset
+      break
     }
-    return undefined
-  })
+  }
+  return positions
 }

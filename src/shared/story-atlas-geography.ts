@@ -1,4 +1,16 @@
-import type { StoryAtlasEntity, StoryAtlasGeography, StoryAtlasMapPoint } from './story-atlas'
+import type { StoryAtlasEntity, StoryAtlasGeography, StoryAtlasMapPoint, StoryAtlasRelation } from './story-atlas'
+
+/** Indoor connections need connectivity, not fabricated hour-scale travel estimates. */
+export function isAtlasInteriorConnection(route: StoryAtlasRelation, entities: readonly StoryAtlasEntity[]): boolean {
+  const from = entities.find(entity => entity.id === route.fromId)
+  const to = entities.find(entity => entity.id === route.toId)
+  if (!from?.parentId || from.parentId !== to?.parentId) return false
+  const parent = entities.find(entity => entity.id === from.parentId)
+  const interiorTypes = ['interior_space', 'room', 'corridor', 'courtyard']
+  return ['inn', 'house', 'building'].includes(String(parent?.attributes.locationType))
+    && interiorTypes.includes(String(from.attributes.locationType)) && interiorTypes.includes(String(to.attributes.locationType))
+    && !(Number(route.attributes.distanceKm) > 0.1)
+}
 
 type Point = StoryAtlasMapPoint
 type Frame = NonNullable<StoryAtlasGeography['mapFrame']>
@@ -147,4 +159,39 @@ export function atlasGeographicCoverage(parent: StoryAtlasEntity, entities: read
     overlapping, outsideParent, inconsistentScale,
     counts: { children: children.length, withBoundary: regions.length, withoutBoundary: children.length - regions.length },
   }
+}
+
+/** Comparable, explicit place anchors only. This is a straight-line lower bound, never a road length. */
+export function atlasRouteStraightLineKm(route: Pick<StoryAtlasRelation, 'fromId' | 'toId'>, entities: readonly StoryAtlasEntity[]): number | undefined {
+  const byId = new Map(entities.filter(entity => entity.kind === 'location').map(entity => [entity.id, entity]))
+  const anchors = (id: string) => {
+    const result = new Map<string, Point>()
+    const entity = byId.get(id)
+    let point = resolveAtlasGeography(entity, entities).position
+    let parentId = entity?.parentId
+    const seen = new Set<string>([id])
+    while (point && parentId && !seen.has(parentId)) {
+      seen.add(parentId)
+      const parent = byId.get(parentId)
+      if (!parent) break
+      const geometry = resolveAtlasGeography(parent, entities)
+      // Conflicting child scales cannot be used to make a physical distance assertion.
+      if ((geometry.frameDifferenceRatio || 0) > 0.05) return new Map<string, Point>()
+      result.set(parentId, point)
+      const bounds = geometry.boundary && atlasPolygonBounds(geometry.boundary)
+      if (!bounds) break
+      point = { x: bounds.minX + point.x * bounds.width / 100, y: bounds.minY + point.y * bounds.height / 100 }
+      parentId = parent.parentId
+    }
+    return result
+  }
+  const from = anchors(route.fromId), to = anchors(route.toId)
+  for (const [parentId, start] of from) {
+    const end = to.get(parentId), frame = resolveAtlasGeography(byId.get(parentId), entities).frame
+    if (end && frame) {
+      const distance = Math.hypot((start.x - end.x) * frame.widthKm / 100, (start.y - end.y) * frame.heightKm / 100)
+      return Number.isFinite(distance) ? distance : undefined
+    }
+  }
+  return undefined
 }

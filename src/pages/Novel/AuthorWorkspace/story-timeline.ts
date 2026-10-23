@@ -50,6 +50,8 @@ export interface StoryTimelineEntry {
   timeSort: number | null
   timeBasis: 'relative' | 'date' | null
   sequenceInDay: number | null
+  chronologyOrder: number | null
+  listOrder: number | null
   calendarDay: string
   timeMode: string
   precision: string
@@ -72,10 +74,9 @@ function calendarDate(label: string) {
 
 function chapterAnchor(entity: StoryAtlasEntity, chapters: Chapter[]): number | null {
   const attributes = entity.attributes
+  if (attributes.chapterStartId === null) return null
   if (attributes.chapterStartId != null) return chapters.find(chapter => chapter.id === Number(attributes.chapterStartId))?.chapterNum ?? null
-  const explicit = nonnegativeInt(attributes.chapterNum)
-  if (explicit != null) return explicit
-  return nonnegativeInt(entity.effectiveFromChapter)
+  return nonnegativeInt(attributes.chapterNum)
 }
 
 function eventLinks(entity: StoryAtlasEntity, snapshot: StoryAtlasSnapshot): StoryTimelineLink[] {
@@ -131,15 +132,31 @@ export function buildStoryTimelineEntries(snapshot: StoryAtlasSnapshot, chapters
       timeSort: hasRelativeDay ? relativeDay : date?.sort ?? null,
       timeBasis: hasRelativeDay ? 'relative' : date ? 'date' : null,
       sequenceInDay: hasRelativeDay ? nonnegativeInt(entity.attributes.sequenceInDay) : date?.sequence ?? null,
+      chronologyOrder: nonnegativeInt(entity.attributes.chronologyOrder) || null,
+      listOrder: nonnegativeInt(entity.attributes.sortOrder),
       calendarDay: date?.label || '', timeMode, precision: text(entity.attributes.timePrecision), links: eventLinks(entity, snapshot) }
   })
 }
 
 export interface StoryTimelineGroup { key: string; title: string; chapter?: Chapter; entries: StoryTimelineEntry[] }
+function compareChapterEvents(a: StoryTimelineEntry, b: StoryTimelineEntry): number {
+  const keys = (entry: StoryTimelineEntry) => [
+    entry.chronologyOrder ?? Infinity,
+    entry.timeBasis === 'relative' ? 0 : entry.timeBasis === 'date' ? 1 : 2,
+    entry.timeSort ?? Infinity, entry.sequenceInDay ?? Infinity, entry.listOrder ?? Infinity,
+  ]
+  const left = keys(a), right = keys(b)
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1
+  }
+  return a.entity.id.localeCompare(b.entity.id)
+}
 export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Chapter[], mode: 'chapter' | 'time', showEmptyChapters = false): StoryTimelineGroup[] {
   if (mode === 'time') {
+    // An evidenced sequence can include an uncertain night without assigning it a calendar day.
+    const chronology = entries.filter(entry => entry.chronologyOrder != null).sort((a, b) => a.chronologyOrder! - b.chronologyOrder!)
     const groups = new Map<string, StoryTimelineGroup>()
-    for (const entry of entries) {
+    for (const entry of entries.filter(item => item.chronologyOrder == null)) {
       const key = entry.timeBasis ? `${entry.timeBasis}:${entry.timeSort}:${entry.sequenceInDay == null ? 'unordered' : 'ordered'}` : entry.timeLabel ? 'unordered' : 'undated'
       const relativeLabel = entry.timeSort === 0 ? '开篇当日' : `开篇${entry.timeSort! < 0 ? '前' : '后'} ${Math.abs(entry.timeSort!)} 天`
       const title = entry.timeBasis ? `${entry.timeBasis === 'relative' ? relativeLabel : entry.calendarDay}${entry.sequenceInDay == null ? ' · 日内顺序待定' : ''}` : key === 'unordered' ? '时间已描述 · 顺序待定' : '尚未确定故事时间'
@@ -147,8 +164,9 @@ export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Cha
       groups.get(key)!.entries.push(entry)
     }
     const basisOrder = (entry: StoryTimelineEntry) => entry.timeBasis === 'relative' ? 0 : entry.timeBasis === 'date' ? 1 : 2
-    return [...groups.values()].sort((a, b) => basisOrder(a.entries[0]) - basisOrder(b.entries[0]) || (a.entries[0].timeSort ?? Infinity) - (b.entries[0].timeSort ?? Infinity))
+    const datedGroups = [...groups.values()].sort((a, b) => basisOrder(a.entries[0]) - basisOrder(b.entries[0]) || (a.entries[0].timeSort ?? Infinity) - (b.entries[0].timeSort ?? Infinity))
       .map(group => ({ ...group, entries: group.entries.sort((a, b) => (a.sequenceInDay ?? 0) - (b.sequenceInDay ?? 0)) }))
+    return [...(chronology.length ? [{ key: 'chronology', title: '已知事件先后', entries: chronology }] : []), ...datedGroups]
   }
   const byChapter = new Map<number | null, StoryTimelineEntry[]>()
   if (showEmptyChapters) for (const chapter of chapters) byChapter.set(chapter.chapterNum, [])
@@ -158,7 +176,7 @@ export function storyTimelineGroups(entries: StoryTimelineEntry[], chapters: Cha
   }
   return [...byChapter.entries()].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity)).map(([number, events]) => {
     const chapter = chapters.find(item => item.chapterNum === number)
-    return { key: number == null ? 'unplaced' : `chapter:${number}`, title: number == null ? '章节待定位' : number === 0 ? '背景事件' : `第 ${number} 章${chapter?.title ? ` · ${chapter.title}` : ''}`, chapter, entries: events }
+    return { key: number == null ? 'unplaced' : `chapter:${number}`, title: number == null ? '章节待定位' : number === 0 ? '背景事件' : `第 ${number} 章${chapter?.title ? ` · ${chapter.title}` : ''}`, chapter, entries: events.sort(compareChapterEvents) }
   })
 }
 

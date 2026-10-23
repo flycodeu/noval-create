@@ -36,7 +36,7 @@ const FIELD_LABELS: Record<string, string> = {
   name: '名称', summary: '说明', status: '状态', role: '职责', fromId: '起点', toId: '关联对象', kind: '关联类型', effectiveFromChapter: '生效章位',
   note: '说明', notes: '补充说明', traits: '特点', description: '说明', parentId: '上级', ...ATLAS_ATTRIBUTE_LABELS,
 }
-const VALUE_LABELS: Record<string, string> = { instance: '具体物品', template: '物品类别', available: '可用', consumed: '已消耗', destroyed: '已损毁', lost: '下落不明', written: '已写定', human: '人', monster: '妖异', spirit: '精怪', ghost: '鬼魂', faction: '组织', planned: '计划中', established: '已设岗位', confirmed: '已确认', organization: '组织', department: '部门', branch: '分部', male: '男', female: '女', unknown: '尚未明确', protagonist: '主角', supporting: '配角', ally: '盟友', enemy: '对立', neutral: '中立', friend: '朋友', family: '亲属', mentor: '师徒', rival: '竞争', active: '推进中', current: '当前位置', residence: '居住地', activity: '活动区域', birthplace: '出生地', headquarters: '主要驻地', outpost: '分驻点', jurisdiction: '涉及区域', relationship: '人物关系', presence: '地域关联', membership: '组织成员', route: '通路', ownership: '持有', participation: '事件参与' }
+const VALUE_LABELS: Record<string, string> = { chapter_start: '章初已生效', chapter_end: '章内或章末生效', instance: '具体物品', template: '物品类别', available: '可用', consumed: '已消耗', destroyed: '已损毁', lost: '下落不明', written: '已写定', human: '人', monster: '妖异', spirit: '精怪', ghost: '鬼魂', faction: '组织', planned: '计划中', established: '已设岗位', confirmed: '已确认', organization: '组织', department: '部门', branch: '分部', male: '男', female: '女', unknown: '尚未明确', protagonist: '主角', supporting: '配角', ally: '盟友', enemy: '对立', neutral: '中立', friend: '朋友', family: '亲属', mentor: '师徒', rival: '竞争', active: '推进中', current: '当前位置', residence: '居住地', activity: '活动区域', birthplace: '出生地', headquarters: '主要驻地', outpost: '分驻点', jurisdiction: '涉及区域', relationship: '人物关系', presence: '地域关联', membership: '组织成员', route: '通路', ownership: '持有', participation: '事件参与' }
 export function atlasFieldLabel(key: string) {
   const camel = key.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase()).replace(/Json$/, '')
   return FIELD_LABELS[key] || FIELD_LABELS[camel] || (/[\u4e00-\u9fff]/.test(key) ? key : '补充设定')
@@ -50,6 +50,7 @@ export function resolveAtlasReference(key: string, value: unknown, entities: Sto
   return entities.find(item => item.id === id || kind && item.id === `${kind}:${id}`)
 }
 export function atlasScalarText(key: string, value: unknown, entities: StoryAtlasEntity[], chapters: Array<{ id: number; chapterNum: number }>, positions: Array<{ id: string; title: string }> = []): string {
+  if (key === 'timeOfDayMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 1440) return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
   if (['lastProgressChapterId', 'chapterStartId', 'chapterEndId'].includes(key)) return chapters.find(item => item.id === Number(value)) ? `第 ${chapters.find(item => item.id === Number(value))!.chapterNum} 章` : '关联章节不可用'
   if (key === 'positionId' || key === 'reportsToPositionId') return positions.find(item => item.id === String(value))?.title || '关联岗位尚未明确'
   const reference = resolveAtlasReference(key, value, entities)

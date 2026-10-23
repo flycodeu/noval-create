@@ -8,22 +8,24 @@ const workflowSource = fs.readFileSync(
 )
 
 describe('novel workflow ordering', () => {
-  it('keeps items ahead of characters in the guided step order', () => {
+  it('keeps the character roster ahead of items in the guided step order', () => {
     const guidedOrder = workflowSource.slice(
       workflowSource.indexOf('export const GUIDED_STEP_ORDER'),
-      workflowSource.indexOf('export const EMPTY_WORKFLOW_STATS'),
+      workflowSource.indexOf('export const GUIDED_STEP_LABELS'),
     )
 
-    expect(guidedOrder.indexOf("'items-equipment'"))
-      .toBeLessThan(guidedOrder.indexOf("'character-roster'"))
+    expect(guidedOrder.indexOf("'character-roster'"))
+      .toBeLessThan(guidedOrder.indexOf("'items-equipment'"))
   })
 
-  it('blocks character generation until items exist', () => {
+  it('does not require items, the endgame, or a map before character generation', () => {
     const charactersCase = workflowSource.slice(
       workflowSource.indexOf("case 'characters':"),
       workflowSource.indexOf("case 'items':"),
     )
 
-    expect(charactersCase).toContain("requireItems('生成人物')")
+    expect(charactersCase).not.toContain('requireItems(')
+    expect(charactersCase).not.toContain('requireEndgame(')
+    expect(charactersCase).not.toContain('requireMap(')
   })
 })

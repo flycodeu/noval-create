@@ -55,6 +55,7 @@ export interface StoryWritingRulesSettings {
 
 export interface StoryAiEngineSettings {
   defaultMode?: AiExecutionMode
+  reviewModelConfigId?: number | null
 }
 
 export interface StorySettingsDocument {
@@ -255,6 +256,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
 
   const nextAiEngine: StoryAiEngineSettings = {
     defaultMode: normalizeAiExecutionMode(aiEngine.default_mode ?? root.ai_default_mode) || EMPTY_AI_ENGINE.defaultMode,
+    reviewModelConfigId: typeof aiEngine.review_model_config_id === 'number' && Number.isInteger(aiEngine.review_model_config_id) && aiEngine.review_model_config_id > 0 ? aiEngine.review_model_config_id : null,
   }
 
   if (!nextPremise.positioning && nextStoryDesign.storyGoal) {
@@ -381,7 +383,9 @@ export function buildStorySettingsPayload(
       banned_terms: writingRules.bannedTerms,
     }),
     ai_engine: compactObject({
+      ...asRecord(legacyRoot.ai_engine),
       default_mode: aiEngine.defaultMode,
+      review_model_config_id: aiEngine.reviewModelConfigId ?? null,
     }),
     premise_positioning: premise.positioning,
     premise_core_hook: premise.coreHook,

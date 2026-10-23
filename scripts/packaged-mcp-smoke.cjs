@@ -27,7 +27,7 @@ const expectedTools = [
   'capabilities.list', 'projects.list', 'projects.get', 'projects.create', 'characters.list', 'runs.get',
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
-  'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.review',
+  'atlas.query', 'atlas.validate', 'atlas.apply', 'atlas.journey', 'assets.query', 'chapters.readiness', 'chapters.review', 'chapters.index_status', 'chapters.index_rebuild', 'retrieval.settings_get', 'retrieval.settings_set',
   'research.list', 'research.get', 'research.upsert', 'research.delete',
   'research.extract_preview', 'research.extract', 'research.adopt',
   'assist.get', 'assist.list', 'assist.cancel', 'chapters.review_view',
@@ -138,6 +138,13 @@ async function main() {
   if (bundled) assert(fs.existsSync(path.join(workspaceRoot, 'out/main/main.js')), 'Run npm run build:app first.')
   fs.mkdirSync(testUserData, { recursive: true })
   verifyTestDirectory()
+  const localModelCache = path.join(workspaceRoot, 'node_modules/@huggingface/transformers/.cache/Xenova/bge-small-zh-v1.5')
+  const hasLocalModelFixture = fs.existsSync(path.join(localModelCache, 'onnx/model_quantized.onnx'))
+  if (hasLocalModelFixture) {
+    const fixtureCache = path.join(testUserData, 'models/embeddings/Xenova/bge-small-zh-v1.5')
+    fs.mkdirSync(path.dirname(fixtureCache), { recursive: true })
+    fs.cpSync(localModelCache, fixtureCache, { recursive: true })
+  }
   const version = require('../package.json').version
   try {
     const upgrade = process.argv.includes('--author-upgrade') ? JSON.parse(execFileSync(require('electron'), [path.join(__dirname, 'seed-author-upgrade-fixture.cjs')], { cwd: workspaceRoot, env: { ...env, NOVELFORGE_UPGRADE_FIXTURE_PATH: testUserData }, windowsHide: true, encoding: 'utf8', timeout: 30_000 }).trim()) : null
@@ -175,6 +182,8 @@ async function main() {
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')
     assert.equal(discovery().pid, owner.pid)
     const { novelId, title, background } = await seedPackagedMcpSmoke(rpc)
+    const readiness = await call(first, 'chapters.readiness', { novelId, atChapter: 1 })
+    assert.equal(readiness.ready, false, 'a new project cannot start prose without an explicit chapter plan')
     const projectLists = await Promise.all([first, second].map((client) => call(client, 'projects.list', {})))
     assert(projectLists.every((result) => result.projects.some((project) => project.id === novelId && project.title === title)))
     const project = (await call(first, 'projects.get', { novelId })).project
@@ -199,6 +208,28 @@ async function main() {
     assert.equal(village.parentId, applied.idMap.valley)
     assert.equal((await call(second, 'atlas.query', { novelId, locationParentId: applied.idMap.valley })).atlas.locationChildren[0].id, village.id)
     assert.equal((await call(first, 'atlas.apply', changes)).result.idempotentReplay, true)
+    const journey = await call(first, 'atlas.journey', { novelId, fromId: applied.idMap.valley, toId: village.id })
+    assert.equal(journey.journey.status, 'unknown', 'geographical parent is not a travel route')
+    const indexStatus = await call(first, 'chapters.index_status', { novelId })
+    assert.equal(indexStatus.vectorEngine.version, 'v0.1.9', 'packaged sqlite-vec DLL loads in actual runtime')
+    assert.equal((await call(second, 'retrieval.settings_get', {})).mode, 'local')
+    assert.equal(indexStatus.savedChapterCount, 0)
+    assert.equal((await call(second, 'chapters.index_rebuild', { novelId })).savedChapterCount, 0)
+    assert.equal((await call(first, 'projects.get', { novelId })).project.contextVersion, applied.contextVersion, 'read-only journey and index work do not alter story canon')
+
+    if (hasLocalModelFixture) {
+      const chapterId = await rpc('chapter', 'create', [novelId, { chapterNum: 1, title: '本地向量验收' }])
+      await rpc('chapter', 'update', [chapterId, { content: '陈舟把铜铃挂在渡口木桩上。' }])
+      await call(first, 'chapters.index_rebuild', { novelId, vectors: true })
+      let localStatus
+      for (let attempt = 0; attempt < 60; attempt++) {
+        localStatus = await call(first, 'chapters.index_status', { novelId })
+        if (localStatus.vectorIndexedChapterCount === 1) break
+        await wait(500)
+      }
+      assert.equal(localStatus.vectorIndexedChapterCount, 1, 'packaged real local ONNX model runs from user-data cache')
+      console.log('PASS packaged local model: real 512-dimensional vectors from writable user cache, preseeded model weights; no provider calls')
+    }
 
     const missingModel = await first.callTool({ name: 'novelforge.workflows.start', arguments: { novelId, stage: 'background', request: '整理现有背景。', idempotencyKey: 'packaged-no-model' } })
     assert.equal(missingModel.isError, true)

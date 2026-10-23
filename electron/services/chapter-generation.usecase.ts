@@ -60,6 +60,7 @@ import {
 import {
   markChapterContextCurrent,
   markChapterContentChanged,
+  markNovelContextChanged,
   markSubsequentChaptersStale,
   getChapterContractBlockers,
   runChapterPublishCheck,
@@ -1683,6 +1684,7 @@ export function deleteChapter(id: number) {
       }
       syncTimelineStructureAnchors(current.novelId)
     })()
+    markNovelContextChanged(current.novelId, `第${current.chapterNum}章已删除`)
     markSubsequentChaptersStale(
       current.novelId,
       Math.max(0, (affectedStartChapterNum ?? current.chapterNum) - 1),
@@ -1966,6 +1968,7 @@ export function reorderChapters(ids: number[], startChapterNum: number) {
     syncTimelineStructureAnchors(batch.novelId)
   })()
 
+  markNovelContextChanged(batch.novelId, '章节顺序已调整')
   markSubsequentChaptersStale(
     batch.novelId,
     Math.max(0, normalizedStart - 1),

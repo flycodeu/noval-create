@@ -65,9 +65,14 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
     ...textFields('timeLabel', 'timeMode', 'timePrecision', 'eventType', 'eventCause', 'eventProcess', 'eventResult', 'evidenceQuote'),
     relativeDay: { type: 'number', description: '相对开篇零点的天数；负数为开篇前，不等于章序。缺乏依据时省略。' },
     sequenceInDay: { type: 'integer', minimum: 0, description: '同日已知先后顺序；仅有明确先后依据时填写。' },
+    timeOfDayMinutes: { type: 'integer', minimum: 0, maximum: 1439, description: '原文明示精确时分或作者已定时分时才填写距当日零时的分钟数，须保留evidenceQuote依据。早晨、前夜等模糊时间及sequenceInDay不可换算；未知省略。' },
+    chronologyOrder: { type: 'integer', minimum: 1, description: '当前小说中有依据的事件发生先后序号，可跨日期和章位；只表示先后，不表示天数、具体日期或叙述顺序。未知时省略，不从旧sortOrder或timeSortValue推断。' },
     timeSortValue: { type: 'number' },
   }, additionalProperties: true },
   location: { type: 'object', properties: {
+    transfers: { type: 'array', maxItems: 50, description: '在本地点已有依据的换乘安排；逐项登记方向、交通方式与等待办理分钟数。缺项不代表可自由换乘。', items: { type: 'object', required: ['fromMode', 'toMode', 'minutes'], additionalProperties: false, properties: {
+      fromMode: atlasText, toMode: atlasText, minutes: { type: 'number', minimum: 0 },
+    } } },
     geography: { type: 'object', additionalProperties: false, properties: {
       boundary: { type: 'array', minItems: 3, maxItems: 64, items: mapPoint, description: '在上级内部地图的 0..100 坐标内绘制非自交轮廓，须位于上级边界以内。进入本地点后以轮廓的包围框归一化至 0..100，所有下级位置与边界使用此坐标系。' }, position: mapPoint,
       areaKm2: { type: 'number', minimum: 0, description: '严格大于零；沿用已有明确面积，缺失时可按用户地理设计需求提出自洽候选并说明依据，经审校后应用。不仅从示意像素推算，不能超过内部地图宽高范围或已知上级面积。' },
@@ -90,8 +95,15 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
   }, additionalProperties: true },
   presence: { type: 'object', properties: { locationRole: { enum: [...STORY_ATLAS_LOCATION_ROLES] } }, additionalProperties: true },
   membership: { type: 'object', properties: textFields('positionId', 'roleTitle', 'responsibilities'), additionalProperties: true },
+  route: { type: 'object', properties: {
+    seasonAccess: { type: 'object', description: '明确保存的季节通行条件；不得从地形或雨季描述自动推断。查询指定季节时，缺项保持未知。', additionalProperties: false, properties: Object.fromEntries(['spring', 'summer', 'autumn', 'winter'].map(season => [season, { enum: ['open', 'closed', 'unknown'] }])) },
+  }, additionalProperties: true },
 }
 export interface StoryAtlasSource { kind: string; id?: string; note?: string }
+for (const schema of Object.values(STORY_ATLAS_ATTRIBUTE_SCHEMAS)) {
+  schema.properties = { ...schema.properties, stateTiming: { enum: ['chapter_start', 'chapter_end'], description: '仅明确采纳的章初修订使用 chapter_start；省略为章内或章末生效，不提前进入正文。' } }
+}
+
 export interface StoryAtlasEntity {
   id: string
   kind: StoryAtlasEntityKind
@@ -124,6 +136,8 @@ export interface StoryAtlasQuery {
   novelId: number
   /** Story chapter number, not the database chapter ID. Omit for current records. */
   atChapter?: number
+  /** Start includes only explicitly accepted chapter_start revisions from this chapter. */
+  boundary?: 'start' | 'end'
   /** Omit or null for root locations. A location ID selects its direct children. */
   locationParentId?: string | null
   focusEntityId?: string
@@ -185,4 +199,10 @@ export interface StoryAtlasValidationResult {
   novelId: number
   contextVersion: number
   diagnostics: StoryAtlasDiagnostic[]
+  resolvedChanges: Array<{ index: number; id: string; isNew: boolean }>
+}
+
+/** Unknown passage is distinct from a confirmed open or closed route. */
+export function atlasRouteOpen(value: unknown): boolean | null {
+  return value === true || value === 1 ? true : value === false || value === 0 ? false : null
 }

@@ -44,6 +44,24 @@ async function main() {
       { op: 'upsert_relation', kind: 'ownership', fromId: 'yang', toId: 'book' },
       { op: 'upsert_relation', kind: 'participation', fromId: 'lu', toId: 'event' },
     ])
+    const mapNovel = addNovel()
+    const node = name => Number(db.prepare('INSERT INTO world_map(novel_id,level,name) VALUES(?,1,?)').run(mapNovel,name).lastInsertRowid)
+    const from = node('甲镇'), to = node('乙镇')
+    const mapApi = require('../electron/services/map.service.ts')
+    const mapInput = { novelId: mapNovel, mapAId: from, mapBId: to, relationType: 'road', relationLabel: '镇道' }
+    mapApi.upsertMapRelation(mapInput)
+    let oldRoute = mapApi.getMapRelations(mapNovel)[0]
+    assert.equal(oldRoute.routeOpen, null, 'new route without passage evidence is unknown')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: 1, travelHours: 2, travelMode: '步行' })
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, description: '补充沿途景物' })
+    oldRoute = mapApi.getMapRelations(mapNovel)[0]
+    assert.equal(oldRoute.routeOpen, 1, 'omitted passage status preserves an open road')
+    assert.equal(oldRoute.travelHours, 2, 'partial patch preserves known travel time')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: null })
+    assert.equal(mapApi.getMapRelations(mapNovel)[0].routeOpen, null, 'explicit null clears to unknown')
+    mapApi.upsertMapRelation({ ...mapInput, id: oldRoute.id, routeOpen: 0 })
+    assert.equal(mapApi.getMapRelations(mapNovel)[0].routeOpen, 0, 'confirmed closure stays closed')
+    assert.throws(() => mapApi.upsertMapRelation({ ...mapInput, routeOpen: 2 }), /通行状态/)
     const before = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
     assert.equal(validateStoryAtlasChanges(create).valid, true)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, before, 'validation must not write')
@@ -54,6 +72,21 @@ async function main() {
     assert.equal(snapshot.entities.length, 8)
     assert.equal(snapshot.relations.length, 6)
     assert.equal(snapshot.locationChildren[0].id, ids.inn)
+    const { AgentToolRegistry } = require('../electron/application/tool-registry.ts')
+    const { registerAtlasJourneyTools } = require('../electron/application/atlas-journey-tools.ts')
+    const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
+    const journeyRegistry = new AgentToolRegistry()
+    registerAtlasJourneyTools(journeyRegistry)
+    const journeyContext = { actor: { type: 'api_client', actorId: 'journey-test', clientId: 'journey-test' }, scopes: [...DESKTOP_AGENT_TOOL_SCOPES] }
+    const journeyCall = async input => {
+      const result = await journeyRegistry.invoke({ toolId: 'novelforge.atlas.journey', input: { novelId, ...input } }, journeyContext)
+      assert.equal(result.ok, true, JSON.stringify(result.error))
+      return result.data
+    }
+    const beforeJourney = queryStoryAtlas({ novelId }).contextVersion
+    const unknownJourney = await journeyCall({ fromId: ids.town, toId: ids.inn })
+    assert.equal(unknownJourney.journey.status, 'unknown', 'unconfirmed route openness is not invented')
+    assert.equal(queryStoryAtlas({ novelId }).contextVersion, beforeJourney, 'journey is read only')
     assert.equal(db.prepare('SELECT COUNT(*) n FROM world_map WHERE novel_id=?').get(novelId).n, 3)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM character_relations WHERE novel_id=?').get(novelId).n, 1)
     assert.equal(applyStoryAtlasChanges(create).idempotentReplay, true)
@@ -89,6 +122,45 @@ async function main() {
     assert.throws(() => db.transaction(() => { applyStoryAtlasChanges(input([{ op: 'upsert_entity', kind: 'item', name: '外部事务回滚物' }])); throw new Error('rollback') })(), /rollback/)
     assert.equal(queryStoryAtlas({ novelId }).contextVersion, beforeRollback)
     assert.ok(!queryStoryAtlas({ novelId }).entities.some((r) => r.name === '外部事务回滚物'))
+
+    const eventNovel = addNovel()
+    const eventChapters = [1, 2, 3].map(number => Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title) VALUES (?,?,?)').run(eventNovel, number, `第${number}章`).lastInsertRowid))
+    const eventInput = (changes, effectiveFromChapter = 3) => ({ ...input(changes, effectiveFromChapter), novelId: eventNovel, expectedContextVersion: queryStoryAtlas({ novelId: eventNovel }).contextVersion })
+    const eventId = applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', clientId: 'observed', kind: 'event', name: '前夜目击', attributes: { timeLabel: '到店前夜' } }], 1)).idMap.observed
+    const eventRecord = () => queryStoryAtlas({ novelId: eventNovel }).entities.find(entity => entity.id === eventId)
+    const nativeEvent = () => db.prepare('SELECT id,chapter_start_id,event_result FROM timeline_events WHERE novel_id=? AND event_title=?').get(eventNovel, '前夜目击')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[0], 'new events store their narrative anchor independently of revision chapter')
+    // Earlier versions created atlas events without chapterStartId while projecting a native chapter anchor.
+    const legacyEvent = eventRecord()
+    delete legacyEvent.attributes.chapterStartId
+    db.prepare('UPDATE story_atlas_revisions SET snapshot_json=? WHERE novel_id=? AND record_id=?').run(JSON.stringify(legacyEvent), eventNovel, eventId)
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { eventResult: '身份仍待核实', relativeDay: -1 } }]))
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[0], 'later enrichment must preserve the event chapter already projected by older versions')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[0], 'atlas and native projection must agree on the preserved anchor')
+    assert.equal(eventRecord().effectiveFromChapter, 3, 'newly learned details still take effect at their own revision chapter')
+    assert.equal(queryStoryAtlas({ novelId: eventNovel, atChapter: 1 }).entities.find(entity => entity.id === eventId).attributes.eventResult, undefined, 'later details must not leak into earlier snapshots')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { chapterStartId: eventChapters[1] } }]))
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[1], 'an explicit valid anchor correction must reach the native timeline')
+    assert.equal(eventRecord().attributes.chapterStartId, eventChapters[1])
+    const foreignChapter = Number(db.prepare('INSERT INTO chapters(novel_id,chapter_num,title) VALUES (?,1,?)').run(another, '其他小说首章').lastInsertRowid)
+    const beforeEventRejection = queryStoryAtlas({ novelId: eventNovel })
+    for (const chapterStartId of [foreignChapter, 99999999, 0, String(eventChapters[0])]) {
+      assert.throws(() => validateStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributes: { chapterStartId } }])), { code: 'INVALID_EVENT_CHAPTER' })
+    }
+    assert.deepEqual(queryStoryAtlas({ novelId: eventNovel }), beforeEventRejection)
+    assert.equal(nativeEvent().chapter_start_id, eventChapters[1], 'invalid anchor references must not change native data')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', attributeMode: 'replace', attributes: { chapterStartId: null } }]))
+    assert.equal(nativeEvent().chapter_start_id, null, 'an explicit manual clearing remains possible')
+    assert.equal(eventRecord().attributes.chapterStartId, null, 'a cleared anchor remains explicit in the atlas instead of disappearing')
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: eventId, kind: 'event', name: '前夜目击', summary: '仅整理证言' }]))
+    assert.equal(nativeEvent().chapter_start_id, null, 'later text edits do not assign a new anchor to an unanchored event')
+    assert.equal(eventRecord().attributes.chapterStartId, null)
+    const backgroundEventId = applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', clientId: 'history', kind: 'event', name: '旧年水灾', attributes: { timeLabel: '十八年前' } }], 0)).idMap.history
+    applyStoryAtlasChanges(eventInput([{ op: 'upsert_entity', id: backgroundEventId, kind: 'event', name: '旧年水灾', attributes: { eventResult: '补充历史依据' } }]))
+    const backgroundEvent = queryStoryAtlas({ novelId: eventNovel }).entities.find(entity => entity.id === backgroundEventId)
+    assert.equal(backgroundEvent.effectiveFromChapter, 3)
+    assert.equal(backgroundEvent.attributes.chapterStartId, null, 'background evidence added at chapter three must stay unanchored')
+    assert.equal(db.prepare('SELECT chapter_start_id FROM timeline_events WHERE novel_id=? AND event_title=?').get(eventNovel, '旧年水灾').chapter_start_id, null)
 
     const organizationNovel = addNovel()
     const organizationInput = (changes, effectiveFromChapter = 0) => ({ ...input(changes, effectiveFromChapter), novelId: organizationNovel, expectedContextVersion: queryStoryAtlas({ novelId: organizationNovel }).contextVersion })
@@ -279,6 +351,26 @@ async function main() {
     assert.throws(() => applyStoryAtlasChanges(futureBorderInput([{ op: 'upsert_entity', id: futureCountry, kind: 'location', name: '旧疆国', attributes: { geography: { boundary: concave } } }])), /第 4 章.*超出上级/, 'background corrections must keep later regions within their parent borders')
     assert.deepEqual(queryStoryAtlas({ novelId: futureBorderNovel }), beforeBorderCorrection)
 
+    const journeyNovel = addNovel()
+    const journeyInput = changes => ({ ...input(changes, 6), novelId: journeyNovel, expectedContextVersion: queryStoryAtlas({ novelId: journeyNovel }).contextVersion })
+    const journeyIds = applyStoryAtlasChanges(journeyInput([
+      { op: 'upsert_entity', kind: 'location', clientId: 'start', name: '起点镇' },
+      { op: 'upsert_entity', kind: 'location', clientId: 'middle', name: '中途镇' },
+      { op: 'upsert_entity', kind: 'location', clientId: 'end', name: '终点镇' },
+      { op: 'upsert_relation', kind: 'route', clientId: 'first', fromId: 'start', toId: 'middle', attributes: { routeOpen: true, travelMode: 'foot', travelHours: 2, bilateral: false } },
+      { op: 'upsert_relation', kind: 'route', clientId: 'second', fromId: 'middle', toId: 'end', attributes: { routeOpen: true, travelMode: 'foot', travelHours: 3, bilateral: false } },
+    ])).idMap
+    const journeyInvoke = async atChapter => {
+      const result = await journeyRegistry.invoke({ toolId: 'novelforge.atlas.journey', input: { novelId: journeyNovel, fromId: journeyIds.start, toId: journeyIds.end, atChapter } }, journeyContext)
+      assert.equal(result.ok, true)
+      return result.data.journey
+    }
+    assert.equal((await journeyInvoke(5)).status, 'unknown', 'future routes are not visible in earlier chapters')
+    const multiLeg = await journeyInvoke(6)
+    assert.equal(multiLeg.totalHours, 5)
+    assert.deepEqual(multiLeg.steps.map(step => step.routeId), [journeyIds.first, journeyIds.second])
+    assert.equal(multiLeg.totalDistanceKm, undefined, 'known hours do not imply invented kilometres')
+
     const importedNovel = addNovel()
     const a = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '甲').lastInsertRowid)
     const b = Number(db.prepare('INSERT INTO characters(novel_id,full_name) VALUES (?,?)').run(importedNovel, '乙').lastInsertRowid)
@@ -293,6 +385,40 @@ async function main() {
     const migrationCount = db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n
     migrateStoryAtlas(db)
     assert.equal(db.prepare('SELECT COUNT(*) n FROM story_atlas_revisions').get().n, migrationCount, 'migration is idempotent')
+    // Chapter-start projection selects revisions before ranking, preserving a start revision
+    // even after a later end-state update to the same object in the same chapter.
+    const timingNovel = addNovel()
+    const timingApply = (changes, effectiveFromChapter = 0) => applyStoryAtlasChanges({ novelId: timingNovel, expectedContextVersion: queryStoryAtlas({ novelId: timingNovel }).contextVersion, effectiveFromChapter, source: { kind: 'test' }, idempotencyKey: randomUUID(), changes })
+    const timingIds = timingApply([
+      { op: 'upsert_entity', clientId: 'a', kind: 'character', name: '甲', attributes: { appearance: '原衣', speechPattern: '原话' } },
+      { op: 'upsert_entity', clientId: 'b', kind: 'character', name: '乙' },
+      { op: 'upsert_entity', clientId: 'ev', kind: 'event', name: '历史事件', attributes: { timeLabel: '昨天' } },
+    ]).idMap
+    const timingNativeEvent = db.prepare('SELECT id FROM timeline_events WHERE novel_id=? AND event_title=?').get(timingNovel, '历史事件').id
+    db.prepare("UPDATE timeline_events SET status='written' WHERE id=?").run(timingNativeEvent)
+    timingApply([{ op: 'upsert_entity', id: timingIds.ev, kind: 'event', name: '历史事件', summary: '只补摘要' }])
+    assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).status, 'written')
+    assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).time_label, '昨天')
+    const startBond = timingApply([
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章初衣', stateTiming: 'chapter_start' } },
+      { op: 'upsert_relation', clientId: 'bond', kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章初合作', attributes: { stateTiming: 'chapter_start' } },
+    ], 2).idMap.bond
+    timingApply([
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章末衣', speechPattern: '章末话' } },
+      { op: 'upsert_relation', id: startBond, kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章末决裂' },
+      { op: 'upsert_entity', kind: 'character', name: '本章新登场' },
+    ], 2)
+    const opening = queryStoryAtlas({ novelId: timingNovel, atChapter: 2, boundary: 'start' })
+    const ending = queryStoryAtlas({ novelId: timingNovel, atChapter: 2 })
+    assert.equal(opening.entities.find(e => e.id === timingIds.a).attributes.appearance, '章初衣')
+    assert.equal(opening.entities.find(e => e.id === timingIds.a).attributes.speechPattern, '原话')
+    assert.equal(opening.relations.find(e => e.id === startBond).label, '章初合作')
+    assert.equal(ending.entities.find(e => e.id === timingIds.a).attributes.appearance, '章末衣')
+    assert.equal(ending.relations.find(e => e.id === startBond).label, '章末决裂')
+    assert.ok(!opening.entities.some(e => e.name === '本章新登场'))
+    assert.throws(() => timingApply([{ op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '倒写章初', stateTiming: 'chapter_start' } }], 2), error => error.code === 'ATLAS_BOUNDARY_CONFLICT')
+    assert.throws(() => queryStoryAtlas({ novelId: timingNovel, boundary: 'start' }))
+
     process.stdout.write('PASS story atlas: hierarchy, native projections, shared graph, validation without writes, chapter history, future filtering, version/idempotency, cross-project protection, cycle/travel validation, outer transaction rollback, source migration, manual replacement and clearing, migrated reference preservation, current/future position guards\n')
   } finally { closeDb(); fs.rmSync(tempRoot, { recursive: true, force: true }) }
   app.exit(0)

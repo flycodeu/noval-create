@@ -200,28 +200,27 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     protagonistIds.has(row.charAId) || protagonistIds.has(row.charBId),
   )
   const writingContractTagCount = themeVoice.writingContractTags.length
-  const styledRelationCount = relationRows.filter((row) => asText(row.interactionStyle)).length
-  const subtextRelationCount = relationRows.filter((row) => asText(row.subtextRule)).length
-  const ratedRelationCount = relationRows.filter((row) =>
-    typeof row.intimacyLevel === 'number' || typeof row.tensionLevel === 'number',
-  ).length
+  const genericRelationLabels = new Set(['朋友', '家人', '敌对', '陌生人', '友好', '亲属', '同伴', '关系待分类', 'friend', 'family', 'enemy', 'relationship'])
+  const hasRelationDetail = (row: typeof relationRows[number]) => Boolean(asText(row.description) || asText(row.interactionStyle) || asText(row.subtextRule)
+    || asText(row.relationLabel) && !genericRelationLabels.has(asText(row.relationLabel).toLowerCase()))
+  const detailedRelationCount = relationRows.filter(hasRelationDetail).length
+  const styledRelationCount = relationRows.filter(row => asText(row.interactionStyle)).length
+  const subtextRelationCount = relationRows.filter(row => asText(row.subtextRule)).length
+  const ratedRelationCount = relationRows.filter(row => typeof row.intimacyLevel === 'number' || typeof row.tensionLevel === 'number').length
   const protagonistRelationCount = protagonistRelationRows.length
-  const protagonistStyledCount = protagonistRelationRows.filter((row) => asText(row.interactionStyle)).length
-  const protagonistSubtextCount = protagonistRelationRows.filter((row) => asText(row.subtextRule)).length
-  const protagonistRatedCount = protagonistRelationRows.filter((row) =>
-    typeof row.intimacyLevel === 'number' || typeof row.tensionLevel === 'number',
-  ).length
+  const protagonistDetailedCount = protagonistRelationRows.filter(hasRelationDetail).length
 
-  if (writingContractTagCount === 0) {
+  const hasWrittenVoiceRules = Boolean(asText(themeVoice.styleRules) && asText(themeVoice.dialogueRules))
+  if (writingContractTagCount === 0 && !hasWrittenVoiceRules) {
     pushIssue(
       issues,
       'medium',
       'voice',
-      '整本书还没有写作类型锚点',
-      '当前 Theme Voice 里还没有“爽文 / 写实 / 言情”等全书级写作类型，后续生成更容易在节奏、情绪兑现和语言边界上漂移。',
-      '先在主题与文风页补上写作类型标签，再继续批量生成故事设计和正文。',
+      '全书文风与对白边界尚未写清',
+      '当前没有足够的全书级文风与对白规则，后续生成容易在语气和节奏上漂移。',
+      '在主题与文风页写明可执行的叙述及对白规则；写作类型标签可按需要补充。',
     )
-  } else if (!asText(themeVoice.styleRules) || !asText(themeVoice.dialogueRules)) {
+  } else if (writingContractTagCount > 0 && !hasWrittenVoiceRules) {
     pushIssue(
       issues,
       'medium',
@@ -266,39 +265,31 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   } else if (
     protagonists.length > 0
     && protagonistRelationCount > 0
-    && (
-      protagonistStyledCount < protagonistRelationCount
-      || protagonistSubtextCount < Math.ceil(protagonistRelationCount / 2)
-      || protagonistRatedCount < Math.ceil(protagonistRelationCount / 2)
-    )
+    && protagonistDetailedCount < Math.ceil(protagonistRelationCount / 2)
   ) {
     const anchor = protagonists[0]
     pushIssue(
       issues,
-      'medium',
+      'low',
       'relation',
-      '主角关系还没写成可落地对白的模型',
-      `主角已有 ${protagonistRelationCount} 条关系，但只有 ${protagonistStyledCount} 条写了互动方式、${protagonistSubtextCount} 条写了潜台词、${protagonistRatedCount} 条写了强弱等级。`,
-      '优先补主角关键关系的互动方式、潜台词和亲密/张力等级，让不同关系能真正进入对白与场景动作。',
+      '主角关键关系缺少具体说明',
+      `主角已有 ${protagonistRelationCount} 条关系，其中 ${protagonistDetailedCount} 条有具体说明。`,
+      '根据已有设定补充关键关系的实际往来或互动边界；没有依据的潜台词和关系评分可以省略。',
       { entityType: 'character', entityId: anchor.id, entityLabel: anchor.fullName },
     )
   }
 
   if (
     relationRows.length > 0
-    && (
-      styledRelationCount < Math.ceil(relationRows.length / 2)
-      || subtextRelationCount < Math.ceil(relationRows.length / 3)
-      || ratedRelationCount < Math.ceil(relationRows.length / 2)
-    )
+    && detailedRelationCount < Math.ceil(relationRows.length / 2)
   ) {
     pushIssue(
       issues,
-      'medium',
+      'low',
       'relation',
       '人物关系还停留在标签层',
-      `当前共 ${relationRows.length} 条关系，但只有 ${styledRelationCount} 条写了互动方式、${subtextRelationCount} 条写了潜台词、${ratedRelationCount} 条写了强弱等级。`,
-      '把关系从“朋友 / 家人 / 敌对”的标签，补成能直接约束称呼、语气、试探方式和情绪动作的互动模型。',
+      `当前共 ${relationRows.length} 条关系，其中 ${detailedRelationCount} 条有具体说明。`,
+      '优先说明关键关系的实际往来、目标分歧或互动边界；不必为每条关系编造潜台词或数字评分。',
     )
   }
 
@@ -460,14 +451,14 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
         )
       }
 
-      if (activeLike && typeof thread.targetPayoffChapter !== 'number') {
+      if (activeLike && typeof thread.targetPayoffChapter !== 'number' && !asText(thread.payoffCondition)) {
         pushIssue(
           issues,
           'medium',
           'thread',
-          '线程缺少回收章位',
-          `${thread.title} 仍在推进中，但没有目标回收章位。`,
-          '补充 targetPayoffChapter 或至少写清回收条件，避免线程悬空。',
+          '线程缺少回收条件',
+          `${thread.title} 仍在推进中，但尚未写明回收条件或目标章位。`,
+          '写清该线何时算解决；有明确章位时再填写目标章，不必为填空预设日期。',
           { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
         )
       }
@@ -748,6 +739,8 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       && !item.locationMapId
       && linkedEvents.length === 0
       && parseNumberArray(item.linkedCharacterIdsJson).length === 0
+      && !asText(item.usageMethod) && !asText(item.plotFunction)
+      && !chapterRows.some(chapter => chapter.content?.includes(item.itemName))
     ) {
       pushIssue(
         issues,
@@ -755,7 +748,7 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
         'item',
         '物品实例仍然悬空',
         `${item.itemName} 还没有挂到人物、地点或事件上。`,
-        '至少给它一个持有人、地点或关联事件，避免沦为摆设。',
+        '核对它在故事中的用途或已出现的场景；只有明确依据时才登记归属和关联。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
     }

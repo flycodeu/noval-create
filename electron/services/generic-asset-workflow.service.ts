@@ -26,6 +26,8 @@ import {
 } from './ai-engine.service'
 import * as novelService from './novel.service'
 import { createTask, executeChatTask, updateTask } from './task.service'
+import type { ModelOutputCheckpoint, ModelOutputRequest } from './creative-model-checkpoint'
+import { getSqlite } from '../database/db'
 
 const OUTPUT_PREVIEW_LIMIT = 900
 const PROCESS_LEAK_PATTERN = /(?:作为(?:一个)?AI|我是(?:一个)?(?:AI|人工智能)|下面是(?:我为你|生成的)|希望(?:以上|这些)内容|如果你(?:还)?需要|以下是(?:根据|为你))/iu
@@ -53,6 +55,9 @@ function qualitySnapshot(result: AssetQualityLoopResult): GenericAssetQualitySna
     review: result.review,
     ...(result.rewrittenReview ? { rewrittenReview: result.rewrittenReview } : {}),
     warnings: [...result.warnings],
+    ...(result.failureStage ? { failureStage: result.failureStage } : {}),
+    ...(result.contractValidation ? { contractValidation: result.contractValidation } : {}),
+    ...(result.initialModelReviewSkipped !== undefined ? { initialModelReviewSkipped: result.initialModelReviewSkipped } : {}),
   }
 }
 
@@ -128,6 +133,12 @@ export function assessGenericAssetDraftQuality(params: {
   } else {
     checks.push({ code: 'output_shape', status: 'pass', message: `输出符合 ${params.outputFormat} 文本契约。` })
   }
+  if (params.quality.contractValidation) {
+    const { initialIssues, finalIssues } = params.quality.contractValidation
+    checks.push(finalIssues.length > 0
+      ? { code: 'output_contract', status: 'fail', message: `结构契约未通过：${finalIssues.join('；')}` }
+      : { code: 'output_contract', status: 'pass', message: initialIssues.length > 0 ? '初稿结构错误已修复，最终候选通过机器契约校验。' : '最终候选通过机器契约校验。' })
+  }
 
   checks.push(PROCESS_LEAK_PATTERN.test(params.output)
     ? { code: 'process_leak', status: 'warn', message: '正文可能包含模型自述或交付套话，需要人工确认。' }
@@ -136,10 +147,14 @@ export function assessGenericAssetDraftQuality(params: {
   const reviewFailedOpen = [params.quality.review.summary, ...params.quality.warnings]
     .some((warning) => /审校失败|复检失败/u.test(warning))
   const effectiveModelReview = params.quality.rewrittenReview || params.quality.review
-  const failureLabel = params.quality.failureStage && { review: '审校请求', rewrite: '修订请求', recheck: '修订后复检' }[params.quality.failureStage]
-  checks.push(failureLabel
+  const failureLabel = params.quality.failureStage && { contract: '机器结构校验', review: '审校请求', rewrite: '修订请求', recheck: '修订后复检' }[params.quality.failureStage]
+  checks.push(params.quality.failureStage === 'contract'
+    ? { code: 'model_review', status: 'fail', message: '结构契约不合格，候选已保留；模型审校通过不能替代机器校验。' }
+    : failureLabel
     ? { code: 'model_review', status: 'fail', message: `${failureLabel}未完成：${params.quality.warnings.join('；') || '请重试'}。候选已保留，未应用。` }
-    : reviewFailedOpen
+    : params.quality.initialModelReviewSkipped && !params.quality.rewrittenReview
+      ? { code: 'model_review', status: 'fail', message: '初稿由机器结构校验判定须修订，独立模型复检尚未完成。' }
+      : reviewFailedOpen
       ? { code: 'model_review', status: 'fail', message: '模型审校未完整执行，候选已保留，须重新审校。' }
       : effectiveModelReview.rejectRequired
         ? { code: 'model_review', status: 'fail', message: `模型审校拒收：${effectiveModelReview.summary}` }
@@ -248,16 +263,22 @@ export async function generateGenericAssetDraft(
   input: GenerateGenericAssetDraftInput,
   runtime: {
     contextSummary: string
+    reviewContextSummary?: (output: string) => string
     maxTokens?: number
+    reviewMaxTokens?: number
+    reviewModelConfigId?: number
     parentTaskId?: number
     assertActive?: () => void
     onStage?: (stage: 'reviewing' | 'revising') => void
+    validateOutput?: (output: string) => string[]
+    modelCheckpoint?: ModelOutputCheckpoint
   },
 ): Promise<GenerateGenericAssetDraftResult> {
   requireMeaningfulText(input.title, 'VALIDATION_FAILED', '资产标题不能为空。')
   requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
   const novel = requireNovel(input.novelId)
   const fingerprint = requestFingerprint(input)
+  runtime.assertActive?.()
   try {
     const replay = readReplay(input, fingerprint)
     if (replay) return replay
@@ -279,28 +300,34 @@ export async function generateGenericAssetDraft(
     extraReasons: ['通用资产工具只写版本化草稿，并在返回前执行独立质量审校。'],
   })
   runtime.assertActive?.()
-  const taskId = await createTask({ type: 'planning_draft', novelId: input.novelId, modelConfigId: route.modelConfigId, parentTaskId: runtime.parentTaskId })
+  const generationPrompt = buildGenerationPrompt(input, contextSummary)
+  const generationChatOpts = { ...buildChatOptionsFromRoute(route), ...(runtime.maxTokens ? { maxTokens: Math.min(route.maxTokens, runtime.maxTokens) } : {}) }
+  const checkpointRequest: ModelOutputRequest = { phase: 'generate', prompt: generationPrompt, modelConfigId: route.modelConfigId, chatOpts: generationChatOpts }
+  const cached = runtime.modelCheckpoint?.read(checkpointRequest)
+  const taskId = cached?.taskId || await createTask({ type: 'planning_draft', novelId: input.novelId, modelConfigId: route.modelConfigId, parentTaskId: runtime.parentTaskId })
   if (runtime.parentTaskId) updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
-  const rawOutput = await executeChatTask(taskId, {
+  if (!cached) runtime.modelCheckpoint?.begin?.(checkpointRequest, taskId)
+  const rawOutput = cached?.output || await executeChatTask(taskId, {
     type: 'planning_draft',
     novelId: input.novelId,
     modelConfigId: route.modelConfigId,
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
-    messages: [{ role: 'user', content: buildGenerationPrompt(input, contextSummary) }],
-    chatOpts: { ...buildChatOptionsFromRoute(route), ...(runtime.maxTokens ? { maxTokens: Math.min(route.maxTokens, runtime.maxTokens) } : {}) },
+    messages: [{ role: 'user', content: generationPrompt }],
+    chatOpts: generationChatOpts,
     retryable: true,
   })
   if (!taskId || !rawOutput.trim()) {
     throw new GenericAssetWorkflowError('MODEL_OUTPUT_INVALID', '模型未返回可用的资产草稿。')
   }
+  if (!cached) runtime.modelCheckpoint?.save(checkpointRequest, rawOutput, taskId)
 
   const qualityRoute = buildAiModelRouteReport({
     taskKind: 'generic_prompt',
     stageLabel: `Generic Asset Quality · ${input.assetType}`,
     executionMode: mode.mode,
     resolutionSource: mode.source,
-    modelConfigId: route.modelConfigId,
+    modelConfigId: runtime.reviewModelConfigId ?? route.modelConfigId,
     temperatureCap: 0.32,
     reviewDepth: 'deep',
     maxTokensFactor: 1.25,
@@ -314,13 +341,22 @@ export async function generateGenericAssetDraft(
     targetType: input.assetType,
     novelId: input.novelId,
     modelConfigId: qualityRoute.modelConfigId,
+    rewriteModelConfigId: route.modelConfigId,
+    rewriteChatOpts: { ...buildChatOptionsFromRoute(route), ...(runtime.maxTokens ? { maxTokens: Math.min(route.maxTokens, runtime.maxTokens) } : {}) },
     relatedEntityType: input.assetType,
     relatedEntityId: input.novelId,
     parentTaskId: taskId,
-    chatOpts: { ...buildChatOptionsFromRoute(qualityRoute), ...(runtime.maxTokens ? { maxTokens: Math.min(qualityRoute.maxTokens, runtime.maxTokens) } : {}) },
+    chatOpts: { ...buildChatOptionsFromRoute(qualityRoute), ...((runtime.reviewMaxTokens ?? runtime.maxTokens) ? { maxTokens: Math.min(qualityRoute.maxTokens, (runtime.reviewMaxTokens ?? runtime.maxTokens)!) } : {}) },
     contextSummary,
     generatedOutput: rawOutput,
+    reviewContextSummary: runtime.reviewContextSummary,
+    modelCheckpoint: runtime.modelCheckpoint,
     schemaHint: input.schemaHint?.trim() || undefined,
+    validateOutput: (output) => {
+      if (!output.trim()) return ['资产正文为空。']
+      if ((input.outputFormat || 'markdown') === 'json' && !isJsonShapeValid(output)) return ['JSON 输出无法解析为对象或数组。']
+      return runtime.validateOutput?.(output) || []
+    },
     reviewFocus: uniqueLines([
       '核对输出是否完全满足用户给定的资产标题、要求和输出格式。',
       '信息不足时应明确待确认，不得伪造为项目既有事实。',
@@ -330,6 +366,13 @@ export async function generateGenericAssetDraft(
       ] : []),
       ...(input.assetType === 'map' ? [
         '逐条核对路线：相邻或商旅往来不证明具体道路可通行；关闭房门或尚未入内不证明不可通行；水痕不是步行通路。无依据的routeOpen:true/false应删去或修订，不能按任务数量凑路线。',
+      ] : []),
+      ...(input.assetType === 'outline' ? [
+        '逐场核对时间、地点、人物在场、可见动作和物理因果。若新的危险依赖前章已失效的条件，必须展示条件如何再次成立；不得用场景间跳时或无来源的事件跳过关键因果。',
+        '核对安全布置与后续事故是否相容，人员和物品不能无缘由穿过已隔离区域；固定光源或静止人员对照，不能同时被其他角色的移动破坏。仅观察到器物损坏，不能断定是纯意外或排除人为；角色结论须与实际证据相符。',
+        '逐项区分已写正文、人物证言、现场观察、角色推断与作者未来计划。暂时未发生不等于永远不可能发生；一次局部对照只能支持实际观察到的结论，不得宣称完整机制已证实。',
+        '角色同意必须由可辨认的主动选择表达，退避、普通动作或沉默不能自动当作同意。选择及代价须在行动中发生，不能只写在章节目标里。',
+        '若要求保留既有大纲或事实揭示边界，审查候选是否逐字保留相应字段，且场景没有暗改原大纲承诺的事件。审校通过不代表候选已成为正式资料。',
       ] : []),
     ]),
     rewriteConstraints: uniqueLines([
@@ -358,67 +401,70 @@ export async function generateGenericAssetDraft(
     quality: qualitySnapshot(quality),
     createdAt: new Date().toISOString(),
   }
-  let draftArtifact
-  try {
-    draftArtifact = createArtifact({
-      novelId: input.novelId,
-      kind: 'generic_draft',
-      status: 'draft',
-      parentArtifactId: input.parentArtifactId || null,
-      content,
-      contextVersion,
-      producerType: 'novelforge_model',
-      producerId: `task:${taskId}`,
-      producerClient: 'novelforge-generic-asset-workflow',
-      modelConfigId: route.modelConfigId,
-      taskId,
-      idempotencyKey: input.idempotencyKey,
+  // Publish the candidate and its review together, so restart cannot expose a half-linked draft.
+  return getSqlite().transaction(() => {
+    let draftArtifact
+    try {
+      draftArtifact = createArtifact({
+        novelId: input.novelId,
+        kind: 'generic_draft',
+        status: 'draft',
+        parentArtifactId: input.parentArtifactId || null,
+        content,
+        contextVersion,
+        producerType: 'novelforge_model',
+        producerId: `task:${taskId}`,
+        producerClient: 'novelforge-generic-asset-workflow',
+        modelConfigId: route.modelConfigId,
+        taskId,
+        idempotencyKey: input.idempotencyKey,
+      })
+    } catch (error) {
+      return mapArtifactError(error)
+    }
+    const review = assessGenericAssetDraftQuality({
+      draftArtifactId: draftArtifact.id,
+      draftContentHash: draftArtifact.contentHash,
+      effectiveArtifactId: draftArtifact.id,
+      effectiveContentHash: draftArtifact.contentHash,
+      output: content.output,
+      outputFormat: content.outputFormat,
+      quality,
+      artifactContextVersion: contextVersion,
+      currentContextVersion,
     })
-  } catch (error) {
-    return mapArtifactError(error)
-  }
-  const review = assessGenericAssetDraftQuality({
-    draftArtifactId: draftArtifact.id,
-    draftContentHash: draftArtifact.contentHash,
-    effectiveArtifactId: draftArtifact.id,
-    effectiveContentHash: draftArtifact.contentHash,
-    output: content.output,
-    outputFormat: content.outputFormat,
-    quality,
-    artifactContextVersion: contextVersion,
-    currentContextVersion,
-  })
-  review.requestFingerprint = reviewRequestFingerprint({
-    novelId: input.novelId,
-    draftArtifactId: draftArtifact.id,
-    executionMode: mode.mode,
-    modelConfigId: qualityRoute.modelConfigId,
-  })
-  const reviewArtifact = createArtifact({
-    novelId: input.novelId,
-    kind: 'quality_report',
-    status: review.status === 'blocked' ? 'rejected' : 'reviewed',
-    parentArtifactId: draftArtifact.id,
-    content: review,
-    contextVersion: currentContextVersion,
-    producerType: 'system',
-    producerId: 'generic-asset-reviewer-v1',
-    producerClient: 'novelforge-generic-asset-workflow',
-    modelConfigId: route.modelConfigId,
-    taskId: qualityTaskIds.at(-1) || taskId,
-    idempotencyKey: `${input.idempotencyKey}:review`,
-  })
-  draftArtifact = updateArtifactLifecycle(draftArtifact.id, {
-    status: review.status === 'blocked' ? 'rejected' : 'reviewed',
-    reviewArtifactId: reviewArtifact.id,
-  }) as typeof draftArtifact
-  return {
-    draftArtifact,
-    effectiveArtifact: draftArtifact,
-    reviewArtifact,
-    taskId,
-    outputPreview: outputPreview(content.output),
-    review,
-    idempotentReplay: false,
-  }
+    review.requestFingerprint = reviewRequestFingerprint({
+      novelId: input.novelId,
+      draftArtifactId: draftArtifact.id,
+      executionMode: mode.mode,
+      modelConfigId: qualityRoute.modelConfigId,
+    })
+    const reviewArtifact = createArtifact({
+      novelId: input.novelId,
+      kind: 'quality_report',
+      status: review.status === 'blocked' ? 'rejected' : 'reviewed',
+      parentArtifactId: draftArtifact.id,
+      content: review,
+      contextVersion: currentContextVersion,
+      producerType: 'system',
+      producerId: 'generic-asset-reviewer-v1',
+      producerClient: 'novelforge-generic-asset-workflow',
+      modelConfigId: qualityRoute.modelConfigId,
+      taskId: qualityTaskIds.at(-1) || taskId,
+      idempotencyKey: `${input.idempotencyKey}:review`,
+    })
+    draftArtifact = updateArtifactLifecycle(draftArtifact.id, {
+      status: review.status === 'blocked' ? 'rejected' : 'reviewed',
+      reviewArtifactId: reviewArtifact.id,
+    }) as typeof draftArtifact
+    return {
+      draftArtifact,
+      effectiveArtifact: draftArtifact,
+      reviewArtifact,
+      taskId,
+      outputPreview: outputPreview(content.output),
+      review,
+      idempotentReplay: false,
+    }
+  }).immediate()
 }

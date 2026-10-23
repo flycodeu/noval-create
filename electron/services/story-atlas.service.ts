@@ -1,3 +1,4 @@
+import { atlasRouteOpen } from '../../src/shared/story-atlas'
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { getSqlite } from '../database/db'
@@ -6,6 +7,7 @@ import { markNovelContextChanged } from './context-impact.service'
 import { atlasBoundariesOverlap, meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 import { atlasPolygonContainsPoint, atlasPolygonContainsPolygon, resolveAtlasGeography } from '../../src/shared/story-atlas-geography'
 import { protectedValue, readAuthorProtection, validateProtectedFields } from './author-protection'
+import { diagnoseAtlasTravel } from '../../src/shared/story-atlas-travel'
 import type {
   StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasEntityKind,
   StoryAtlasGeography, StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
@@ -83,12 +85,7 @@ function diagnose(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[])
     if (!meaningfulAtlasValue(entity.attributes.goal) && !meaningfulAtlasValue(entity.attributes.traits)) result.push({ severity: 'info', code: 'FACTION_PROFILE_MISSING', message: `${entity.name}尚未登记目标与组织特点。`, entityIds: [entity.id] })
     if (!relations.some(edge => edge.kind === 'presence' && edge.fromId === entity.id)) result.push({ severity: 'info', code: 'FACTION_GEOGRAPHY_MISSING', message: `${entity.name}尚未登记总部、据点或涉及区域。`, entityIds: [entity.id] })
   }
-  for (const route of relations.filter((record) => record.kind === 'route')) {
-    const hours = Number(route.attributes.travelHours)
-    const km = Number(route.attributes.distanceKm)
-    if (route.attributes.travelHours === undefined || route.attributes.travelHours === null) result.push({ severity: 'info', code: 'TRAVEL_TIME_UNKNOWN', message: `${route.label || '路线'}尚未登记通行耗时。`, entityIds: [route.fromId, route.toId] })
-    if (km > 0 && hours > 0 && /步行|foot|walk/i.test(String(route.attributes.travelMode || '')) && km / hours > 8) result.push({ severity: 'warning', code: 'WALKING_SPEED_IMPLAUSIBLE', message: `${route.label || '路线'}的步行速度超过每小时 8 公里，请复核距离、耗时或特殊设定。`, entityIds: [route.fromId, route.toId] })
-  }
+  result.push(...diagnoseAtlasTravel(entities, relations))
   return result
 }
 
@@ -96,12 +93,14 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
   if (input.atChapter !== undefined) chapter(input.atChapter)
-  const all = readAtlasRecords(sqlite, input.novelId, input.atChapter, input.includePlanned === true).filter((item) => !item.retired)
+  if (input.boundary && !['start', 'end'].includes(input.boundary)) fail('INVALID_INPUT', '章内边界必须是 start 或 end。')
+  if (input.boundary === 'start' && (!Number.isInteger(input.atChapter) || !input.atChapter || input.atChapter < 1)) fail('INVALID_INPUT', '查询章初状态必须指定正整数章序。')
+  const all = readAtlasRecords(sqlite, input.novelId, input.atChapter, input.includePlanned === true, input.boundary).filter((item) => !item.retired)
   let entities = all.flatMap((item) => item.recordType === 'entity' ? [item.record as StoryAtlasEntity] : [])
   const ids = new Set(entities.map((entity) => entity.id))
   let relations = all.flatMap((item) => item.recordType === 'relation' ? [item.record as StoryAtlasRelation] : [])
   const hidden = relations.filter((edge) => !ids.has(edge.fromId) || !ids.has(edge.toId))
-  relations = relations.filter((edge) => ids.has(edge.fromId) && ids.has(edge.toId))
+  relations = relations.filter((edge) => ids.has(edge.fromId) && ids.has(edge.toId)).map(edge => edge.kind === 'route' && Object.prototype.hasOwnProperty.call(edge.attributes, 'routeOpen') ? { ...edge, attributes: { ...edge.attributes, routeOpen: atlasRouteOpen(edge.attributes.routeOpen) } } : edge)
   const diagnostics = diagnose(entities, relations)
   if (hidden.length) diagnostics.push({ severity: 'warning', code: 'RELATION_ENDPOINT_UNAVAILABLE', message: `${hidden.length} 条关系的端点在当前章节或状态下不可见。`, entityIds: hidden.map((edge) => edge.id) })
   if (input.locationParentId && !entities.some((entity) => entity.id === input.locationParentId && entity.kind === 'location')) fail('ENTITY_NOT_FOUND', '所选上级地点不在当前小说或章节中。')
@@ -122,7 +121,7 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
   return { novelId: input.novelId, contextVersion, atChapter: input.atChapter ?? null, entities, relations, locationChildren, diagnostics }
 }
 
-interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number }
+interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number; resolvedChanges: StoryAtlasValidationResult['resolvedChanges'] }
 function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, string[]> = {}): Prepared {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
@@ -144,6 +143,10 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
     if (change.attributes !== undefined && (!change.attributes || typeof change.attributes !== 'object' || Array.isArray(change.attributes) || JSON.stringify(change.attributes).length > 32000)) fail('INVALID_INPUT', 'attributes 必须为不超过 32KB 的对象。')
     if (change.attributeMode !== undefined && !['merge', 'replace'].includes(change.attributeMode)) fail('INVALID_INPUT', '属性更新方式只能为 merge 或 replace。')
     if (change.status && !['confirmed', 'planned'].includes(change.status)) fail('INVALID_INPUT', '不支持的资料状态。')
+    if (change.attributes?.stateTiming === 'chapter_start') {
+      const previous = change.id ? byId.get(change.id)?.record : undefined
+      if (previous?.effectiveFromChapter === input.effectiveFromChapter && input.effectiveFromChapter > 0 && previous.attributes.stateTiming !== 'chapter_start') fail('ATLAS_BOUNDARY_CONFLICT', '本章已有章内或章末版本，不能将其整份倒写为章初；请先核对并处理已有变化。')
+    }
     if (change.clientId !== undefined && (typeof change.clientId !== 'string' || !change.clientId.trim() || change.clientId.length > 200)) fail('INVALID_INPUT', '临时 ID 须为 1 至 200 字符。')
     if (!(change.op === 'upsert_entity' ? entityKinds : relationKinds).has(change.kind)) fail('INVALID_INPUT', '不支持的图谱类型。')
     if (change.op === 'upsert_entity' && (typeof change.name !== 'string' || !change.name.trim() || change.name.length > 200)) fail('INVALID_INPUT', '实体名称须为 1 至 200 字符。')
@@ -181,10 +184,28 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
       const old = byId.get(id)
       if (old && (old.recordType !== 'entity' || old.record.kind !== change.kind)) fail('KIND_MISMATCH', '更新不能改变实体类型。')
       const previous = old?.record as StoryAtlasEntity | undefined
+      const attributes = mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode)
+      if (change.kind === 'event') {
+        const clearedChapter = change.attributeMode === 'replace' && Object.hasOwn(change.attributes || {}, 'chapterStartId') && !meaningfulAtlasValue(change.attributes?.chapterStartId)
+        if (clearedChapter) attributes.chapterStartId = null
+        const chapterStartId = attributes.chapterStartId
+        if (chapterStartId !== undefined && chapterStartId !== null) {
+          if (typeof chapterStartId !== 'number' || !Number.isInteger(chapterStartId) || chapterStartId <= 0
+            || !sqlite.prepare('SELECT 1 FROM chapters WHERE novel_id=? AND id=?').get(input.novelId, chapterStartId)) {
+            fail('INVALID_EVENT_CHAPTER', '事件起始章节必须是当前小说中的有效章节。')
+          }
+        } else if (chapterStartId === undefined) {
+          // An edit's effective chapter is a revision boundary, not the event's first appearance.
+          const native = old?.nativeId ? sqlite.prepare('SELECT chapter_start_id FROM timeline_events WHERE novel_id=? AND id=?').get(input.novelId, old.nativeId) as { chapter_start_id: number | null } | undefined : undefined
+          const originalChapter = previous?.effectiveFromChapter ?? input.effectiveFromChapter
+          const originalId = native ? native.chapter_start_id : (sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=?').get(input.novelId, originalChapter) as { id: number } | undefined)?.id
+          attributes.chapterStartId = originalId ?? null
+        }
+      }
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
+        attributes: { ...attributes, stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -226,7 +247,7 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
     const previous = old?.record as StoryAtlasRelation | undefined
     byId.set(id, { recordType: 'relation', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
       id, kind: change.kind, fromId, toId, label: change.label ?? previous?.label ?? '',
-      attributes: mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), status: change.status || previous?.status || 'confirmed',
+      attributes: { ...mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
       effectiveFromChapter: input.effectiveFromChapter, source: input.source,
     } })
   }
@@ -235,11 +256,13 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
     const old = byId.get(id)
     if (!old || old.retired) fail('ENTITY_NOT_FOUND', `无法停用不存在的记录 ${id}。`)
     old.retired = true
+    old.record.attributes = { ...old.record.attributes, stateTiming: 'chapter_end' }
     old.record = { ...old.record, effectiveFromChapter: input.effectiveFromChapter, source: input.source }
     changedIds.add(id)
     if (old.recordType === 'entity') for (const edge of byId.values()) {
       if (!isEntity(edge.record) && (edge.record.fromId === id || edge.record.toId === id)) {
         edge.retired = true
+        edge.record.attributes = { ...edge.record.attributes, stateTiming: 'chapter_end' }
         edge.record = { ...edge.record, effectiveFromChapter: input.effectiveFromChapter, source: input.source }
         changedIds.add(edge.record.id)
       }
@@ -347,12 +370,13 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
     const conflicts = protection.fields.filter(field => item.retired || !isEntity(item.record) || JSON.stringify(protectedValue(item.record, field)) !== JSON.stringify(protectedValue(protection.record, field)))
     if (conflicts.length) fail('AUTHOR_PROTECTED_FIELD', `${protection.record.name}的作者保护字段发生冲突：${conflicts.join('、')}。请在故事账本明确更正或解除保护。`)
   }
-  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations) }
+  return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations),
+    resolvedChanges: [...changeIds].map(([index, id]) => ({ index, id, isNew: !allIds.has(id) })) }
 }
 
 export function validateStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasValidationResult {
   const prepared = prepare(input)
-  return { valid: true, novelId: input.novelId, contextVersion: prepared.contextVersion, diagnostics: prepared.diagnostics }
+  return { valid: true, novelId: input.novelId, contextVersion: prepared.contextVersion, diagnostics: prepared.diagnostics, resolvedChanges: prepared.resolvedChanges }
 }
 
 const entityTables: Record<StoryAtlasEntityKind, string> = { character: 'characters', location: 'world_map', faction: 'factions', item: 'story_items', event: 'timeline_events' }
@@ -395,9 +419,24 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
       values.level = level
     }
     if (record.kind === 'event') {
-      values.time_label ||= record.effectiveFromChapter ? `第 ${record.effectiveFromChapter} 章` : '背景事件'
-      values.status = 'confirmed'
-      values.chapter_start_id = (sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=?').get(novelId, record.effectiveFromChapter) as { id: number } | undefined)?.id || null
+      const rawLabel = values.time_label
+      const explicitLabel = typeof rawLabel === 'string' ? rawLabel.trim() : ''
+      if (explicitLabel) values.time_label = explicitLabel
+      else delete values.time_label
+      const explicitStatus = record.attributes.status
+      const existingEvent = item.nativeId
+        ? sqlite.prepare('SELECT status FROM timeline_events WHERE id=? AND novel_id=?').get(item.nativeId, novelId) as { status?: string | null } | undefined
+        : undefined
+      if (typeof explicitStatus === 'string' && explicitStatus.trim()) values.status = explicitStatus.trim()
+      else if (!existingEvent) values.status = 'planned'
+      values.chapter_start_id = record.attributes.chapterStartId ?? null
+      if (values.time_label === undefined) {
+        const existing = item.nativeId
+          ? sqlite.prepare('SELECT time_label FROM timeline_events WHERE id=? AND novel_id=?').get(item.nativeId, novelId) as { time_label?: string | null } | undefined
+          : undefined
+        // time_label is NOT NULL. Updates keep the stored label; a new row cannot invent a chapter name.
+        if (!existing) values.time_label = ''
+      }
     }
     if (record.kind === 'character' || record.kind === 'item') values.record_status = 'confirmed'
     item.nativeTable = entityTables[record.kind]
@@ -411,7 +450,7 @@ function projectNative(sqlite: Database.Database, novelId: number, item: AtlasSt
     const values: Record<string, unknown> = { novel_id: novelId, relation_label: record.label, relation_type: String(record.attributes.relationType || record.kind),
       bilateral: record.attributes.bilateral === false ? 0 : 1, description: String(record.attributes.description || record.attributes.endState || '') }
     if (record.kind === 'relationship') { values.char_a_id = fromId; values.char_b_id = toId }
-    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = record.attributes.routeOpen === false ? 0 : 1 }
+    else { values.map_a_id = fromId; values.map_b_id = toId; values.travel_hours = record.attributes.travelHours ?? null; values.travel_mode = record.attributes.travelMode ?? null; values.route_open = atlasRouteOpen(record.attributes.routeOpen) === null ? null : atlasRouteOpen(record.attributes.routeOpen) ? 1 : 0 }
     item.nativeId = writeRow(sqlite, table, item.nativeTable === table ? item.nativeId : null, values)
     item.nativeTable = table
   } else if (record.kind === 'ownership' && record.fromId.startsWith('character:')) {

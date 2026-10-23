@@ -42,10 +42,9 @@ import {
   resolveEmbeddingConfigCacheKey,
 } from './embedding.service'
 import { isCompatiblePreparedQuery, type PreparedQueryEmbedding } from './query-embedding'
+import { processChapterIndexClaim } from './chapter-index.service'
 
 const EMBEDDING_BATCH_SIZE = 24
-const MAX_SEARCH_CANDIDATES = 3072
-const RECENT_SEARCH_CANDIDATES = 512
 const MAX_SHORT_KEYWORD_CANDIDATES = 512
 const MAX_LOOKUP_KEYWORDS = 8
 const MIN_FTS_TERM_LENGTH = 3
@@ -72,9 +71,9 @@ interface PreparedSemanticDocument {
 interface SemanticMemoryOutboxClaim {
   id: number
   novelId: number
-  sourceType: SemanticMemorySourceType
+  sourceType: SemanticMemorySourceType | 'chapter'
   sourceId: number
-  operation: 'upsert' | 'delete'
+  operation: 'upsert' | 'delete' | 'upsert_remote'
   revision: number
   attempts: number
   contextVersion: number
@@ -160,12 +159,10 @@ async function resolveSemanticSearchQuery(
       dimensions: options.preparedQuery.dimensions,
     }
   }
-  const batch = await embedSemanticTexts([queryText], options.modelConfigId)
-  return {
-    embedding: batch.embeddings?.[0],
-    profile: batch.profile,
-    dimensions: batch.dimensions,
-  }
+  try {
+    const batch = await embedSemanticTexts([queryText], options.modelConfigId)
+    return { embedding: batch.embeddings?.[0], profile: batch.profile, dimensions: batch.dimensions }
+  } catch { return {} }
 }
 
 export function hashSemanticDocument(
@@ -745,9 +742,10 @@ function claimSemanticMemoryOutbox(options: {
   const transaction = sqlite.transaction(() => {
     sqlite.prepare(`
       UPDATE semantic_memory_outbox
-      SET status = 'pending',
+      SET status = CASE WHEN attempts >= ${MAX_OUTBOX_ATTEMPTS} THEN 'dead_letter' ELSE 'pending' END,
           locked_at = NULL,
-          available_at = CURRENT_TIMESTAMP,
+          available_at = CASE WHEN attempts >= ${MAX_OUTBOX_ATTEMPTS} THEN NULL ELSE CURRENT_TIMESTAMP END,
+          last_error = CASE WHEN attempts >= ${MAX_OUTBOX_ATTEMPTS} THEN '索引多次中断，已停止自动重试；文字检索仍可用，请重新请求补齐索引。' ELSE last_error END,
           updated_at = CURRENT_TIMESTAMP
       WHERE status = 'processing'
         AND datetime(locked_at) <= datetime('now', ?)
@@ -793,7 +791,7 @@ function claimSemanticMemoryOutbox(options: {
         AND status IN ('pending', 'failed')
     `)
     return rows.flatMap((row) => {
-      if (!isIndexedSourceType(row.sourceType)) {
+      if (row.sourceType !== 'chapter' && !isIndexedSourceType(row.sourceType)) {
         sqlite.prepare(`
           DELETE FROM semantic_memory_outbox
           WHERE id = ? AND revision = ?
@@ -805,9 +803,9 @@ function claimSemanticMemoryOutbox(options: {
       return [{
         id: row.id,
         novelId: row.novelId,
-        sourceType: row.sourceType,
+        sourceType: row.sourceType as SemanticMemoryOutboxClaim['sourceType'],
         sourceId: row.sourceId,
-        operation: row.operation === 'delete' ? 'delete' as const : 'upsert' as const,
+        operation: row.operation === 'delete' ? 'delete' as const : row.operation === 'upsert_remote' ? 'upsert_remote' as const : 'upsert' as const,
         revision: row.revision,
         attempts: row.attempts + 1,
         contextVersion: Math.max(1, row.contextVersion || 1),
@@ -871,7 +869,7 @@ async function processOutboxClaimGroup(
 
   const documentsByClaim = claims.map((claim) => ({
     claim,
-    documents: loadSourceDocuments(claim.novelId, claim.sourceType, claim.sourceId),
+    documents: loadSourceDocuments(claim.novelId, claim.sourceType as SemanticMemorySourceType, claim.sourceId),
   }))
   const existingRows: Array<typeof semanticMemoryEntries.$inferSelect> = []
   for (const sourceType of INDEXED_SOURCE_TYPES) {
@@ -982,7 +980,16 @@ export async function processSemanticMemoryOutbox(options: {
       failedCount: 0,
     }
     const claimsByNovel = new Map<number, SemanticMemoryOutboxClaim[]>()
-    claims.forEach((claim) => {
+    for (const claim of claims.filter(item => item.sourceType === 'chapter')) {
+      try {
+        if (await processChapterIndexClaim(claim)) result.processedCount += 1
+        else result.supersededCount += 1
+      } catch (error) {
+        markOutboxClaimFailed(claim, error)
+        result.failedCount += 1
+      }
+    }
+    claims.filter(claim => claim.sourceType !== 'chapter').forEach((claim) => {
       const group = claimsByNovel.get(claim.novelId) || []
       group.push(claim)
       claimsByNovel.set(claim.novelId, group)
@@ -1076,49 +1083,14 @@ export async function searchSemanticMemory(
       cleanProjectionFilter,
       ...validityFilters,
     ]
-    const lexicalCandidateLimit = MAX_SEARCH_CANDIDATES - RECENT_SEARCH_CANDIDATES
-    const ftsCandidateIds = querySemanticMemoryFtsCandidateIds({
-      novelId,
-      keywords: lookupKeywords,
-      sourceTypes,
-      visibility,
-      chapterNum: options.chapterNum,
-      embeddingProfile: queryProfile,
-      dimensions: queryDimensions,
-      limit: lexicalCandidateLimit,
-    })
-    const ftsRows = ftsCandidateIds?.length
-      ? db.select().from(semanticMemoryEntries)
-        .where(and(
-          ...compatibilityFilters,
-          inArray(semanticMemoryEntries.id, ftsCandidateIds),
-        ))
-        .all()
-      : []
-    const likeKeywords = ftsCandidateIds === null
-      ? lookupKeywords
-      : lookupKeywords.filter((keyword) => keyword.length < MIN_FTS_TERM_LENGTH)
-    const textMatches = likeKeywords.map((keyword) => like(semanticMemoryEntries.contentText, `%${keyword}%`))
-    const likeRows = textMatches.length > 0
-      ? db.select().from(semanticMemoryEntries)
-        .where(and(...compatibilityFilters, or(...textMatches)))
-        .orderBy(desc(semanticMemoryEntries.id))
-        .limit(ftsCandidateIds === null ? lexicalCandidateLimit : MAX_SHORT_KEYWORD_CANDIDATES)
-        .all()
-      : []
-    const recentRows = db.select().from(semanticMemoryEntries)
-      .where(and(...compatibilityFilters))
-      .orderBy(desc(semanticMemoryEntries.id))
-      .limit(RECENT_SEARCH_CANDIDATES)
-      .all()
-    const candidates = [...new Map(
-      [...likeRows, ...ftsRows, ...recentRows].map((row) => [row.id, row] as const),
-    ).values()].slice(0, MAX_SEARCH_CANDIDATES)
+    // Structured memory also searches every compatible, clean historical projection.
+    // Lexical overlap and recency cannot decide admission to semantic scoring.
+    const candidates = db.select().from(semanticMemoryEntries).where(and(...compatibilityFilters)).all()
     const vectorHits = candidates.flatMap((row) => {
       if (!isCompatibleEmbeddingRow(row, queryProfile!, queryDimensions!)) return []
       try {
         const embedding = JSON.parse(row.embeddingJson || '')
-        if (!Array.isArray(embedding)) return []
+        if (!Array.isArray(embedding) || embedding.length !== queryDimensions || !embedding.every(value => typeof value === 'number' && Number.isFinite(value)) || !embedding.some(value => value !== 0)) return []
         return [{
           sourceType: row.sourceType as SemanticMemorySourceType,
           sourceId: row.sourceId,

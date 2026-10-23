@@ -842,8 +842,6 @@ export function buildAntiAiHardConstraintContext(options: {
     ...promotedRules.map((rule) => rule.prefer || '').filter(Boolean),
     ...priorityPositiveLines,
     ...promptRules.map((rule) => rule.prefer || '').filter(Boolean),
-    '优先写角色当下在做什么、承受什么、误判什么，而不是替角色总结感悟。',
-    '优先用动作、感官、对话潜台词和现实后果承接情绪。',
   ], 8)
 
   if (layer === 'explicit') {
@@ -864,11 +862,9 @@ export function buildAntiAiHardConstraintContext(options: {
       'ai_pseudo_philosophy',
       'genre_hollowing',
     ]
-    const automaticPrioritySet = new Set(automaticPriorityCodes)
     const automaticAvoidanceLines = [
       ...promotedRules.map((rule) => `本书近章复现：${rule.avoid}（已在第${rule.chapterNums.join('、')}章连续出现）`),
       ...automaticPriorityCodes.map((code) => promptRuleByCode.get(code)?.avoid || '').filter(Boolean),
-      ...promptRules.filter((rule) => !automaticPrioritySet.has(rule.code)).map((rule) => rule.avoid),
     ]
     return [
       buildSection('【自动文风建议-软层】', automaticAvoidanceLines),

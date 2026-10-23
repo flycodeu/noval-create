@@ -103,6 +103,22 @@ export function removeStoryItemFromEvents(itemId: number) {
   })
 }
 
+/** Planned and seeded events stay plans. Only an in-progress event resolves once its end chapter is reached. */
+export function nextTimelineStatus(
+  current: string | null | undefined,
+  chapterNum: number,
+  startNum: number | null | undefined,
+  endNum: number | null | undefined,
+): string | null {
+  if (current === 'planned' || current === 'seeded') return current
+  const inProgress = current === 'written' || current === 'active'
+  const reachedEnd = typeof endNum === 'number' && chapterNum >= endNum
+  if (inProgress && reachedEnd) return 'resolved'
+  // Reaching startNum never promotes an event to written.
+  if (typeof startNum === 'number' && chapterNum >= startNum) return current ?? null
+  return current ?? null
+}
+
 export function syncChapterTimelineStatuses(novelId: number, chapterNum: number) {
   const db = getDb()
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
@@ -112,15 +128,9 @@ export function syncChapterTimelineStatuses(novelId: number, chapterNum: number)
   eventRows.forEach((event) => {
     const startNum = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
     const endNum = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
+    const nextStatus = nextTimelineStatus(event.status, chapterNum, startNum, endNum)
 
-    let nextStatus = event.status
-    if (typeof endNum === 'number' && chapterNum >= endNum) {
-      nextStatus = 'resolved'
-    } else if (typeof startNum === 'number' && chapterNum >= startNum) {
-      nextStatus = 'written'
-    }
-
-    if (nextStatus === event.status) return
+    if (nextStatus == null || nextStatus === event.status) return
 
     db.update(timelineEvents).set({
       status: nextStatus,

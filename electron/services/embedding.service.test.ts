@@ -8,8 +8,17 @@ vi.mock('../database/db', () => ({
 vi.mock('./model.service', () => ({
   getAdapterById: vi.fn(),
   getDefaultModelConfigRecord: vi.fn(() => ({ id: 7 })),
+  getModelConfigRecord: vi.fn(() => ({ id: 7 })),
 }))
 
+vi.mock('./embedding-settings.service', async () => {
+  const { getAdapterById } = await import('./model.service')
+  return {
+    embeddingRuntimeIdentity: vi.fn(() => ({ settings: { mode: 'local' }, modelId: 'local:Xenova/bge-small-zh-v1.5:q8', key: 'local:Xenova/bge-small-zh-v1.5:q8' })),
+    embeddingRemoteAdapter: vi.fn(async () => ({ settings: { mode: 'remote', modelId: 'fixture-vector' }, modelId: 'fixture-vector', adapter: await getAdapterById(7) })),
+  }
+})
+import { embeddingRuntimeIdentity } from './embedding-settings.service'
 import { getDb } from '../database/db'
 import { chapterEmbeddings, chapters } from '../database/schema'
 import { getAdapterById } from './model.service'
@@ -18,9 +27,12 @@ import {
   extractEmbeddingKeywords,
   fallbackKeywordSearch,
   generateChapterEmbeddings,
+  indexChapterForKeywordRecall,
   hashEmbeddingSource,
   resolveEmbeddingConfigCacheKey,
   searchSimilarFragments,
+  savedProseEmbeddingFragments,
+  isProseEmbeddingFragment,
 } from './embedding.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -183,6 +195,7 @@ describe('embedding fallback retrieval', () => {
     expect(areUsableEmbeddings([[0.1], [0.2, 0.3]], 2)).toBe(false)
     expect(areUsableEmbeddings([[Number.NaN]], 1)).toBe(false)
     expect(areUsableEmbeddings([], 0)).toBe(false)
+    expect(areUsableEmbeddings([[0,0]], 1)).toBe(false)
   })
 
   it('keeps source hashes stable across unrelated context version changes', () => {
@@ -195,6 +208,18 @@ describe('embedding fallback retrieval', () => {
       type: 'summary',
       text: '内容已变化',
     }]))
+  })
+
+  it('indexes every saved prose paragraph including the middle without plans', () => {
+    const content = `${'首段'.repeat(810)}\n\n唯一中段线索，铜牌藏在书箱底。\n\n${'尾段'.repeat(810)}`
+    const fragments = savedProseEmbeddingFragments(content)
+    expect(fragments.every(fragment => fragment.text.length <= 1600)).toBe(true)
+    expect(fragments.map(fragment => fragment.text).join('\n\n')).toContain('唯一中段线索')
+    expect(fragments.every(fragment => isProseEmbeddingFragment(fragment.type))).toBe(true)
+    expect(isProseEmbeddingFragment('seed')).toBe(false)
+    const edited = content.replace('铜牌', '玉牌')
+    expect(hashEmbeddingSource(3, 7, fragments)).not.toBe(hashEmbeddingSource(3, 7, savedProseEmbeddingFragments(edited)))
+    expect(savedProseEmbeddingFragments(' \n\n ')).toEqual([])
   })
 
   it('rejects a chapter that belongs to another novel before replacing its index', async () => {
@@ -239,6 +264,7 @@ describe('embedding fallback retrieval', () => {
     vi.mocked(getDb).mockReturnValue({
       ...db,
       transaction: (callback: (tx: unknown) => unknown) => callback({
+        select: db.select,
         delete: () => ({ where: () => ({ run: () => undefined }) }),
         insert: () => ({
           values: (row: Record<string, unknown>) => ({
@@ -253,5 +279,45 @@ describe('embedding fallback retrieval', () => {
     expect(getAdapterById).not.toHaveBeenCalled()
     expect(insertedRows).toHaveLength(1)
     expect(insertedRows[0].embeddingJson).toBe('[0.1,0.2]')
+  })
+
+  it('indexes saved prose immediately without calling a vector provider', () => {
+    const insertedRows: Array<Record<string, unknown>> = []
+    const db = createDbMock(new Map<unknown, Array<Record<string, unknown>>>([
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 4, content: '陆闻将旧铜灯移到干燥石台。', contextVersion: 9 }]],
+      [chapterEmbeddings, []],
+    ]))
+    vi.mocked(getDb).mockReturnValue({ ...db, transaction: (callback: (tx: unknown) => unknown) => callback({
+      delete: () => ({ where: () => ({ run: () => undefined }) }),
+      insert: () => ({ values: (row: Record<string, unknown>) => ({ run: () => insertedRows.push(row) }) }),
+    }) } as never)
+    indexChapterForKeywordRecall(1, 101)
+    expect(getAdapterById).not.toHaveBeenCalled()
+    expect(insertedRows).toHaveLength(1)
+    expect(insertedRows[0]).toMatchObject({ chapterId: 101, fragmentType: 'content_excerpt', embeddingJson: null, visibility: 'canon' })
+    expect(insertedRows[0].fragmentText).toContain('旧铜灯')
+  })
+
+  it('does not replace a newer chapter index when vector work finishes after an edit', async () => {
+    vi.mocked(embeddingRuntimeIdentity).mockReturnValue({ settings: { mode: 'remote', modelId: 'fixture-vector', modelConfigId: 7 }, modelId: 'fixture-vector', key: 'fixture-vector' })
+    const rows = new Map<unknown, Array<Record<string, unknown>>>([
+      [chapters, [{ id: 101, novelId: 1, chapterNum: 4, summary: '旧稿摘要', contextVersion: 9 }]],
+      [chapterEmbeddings, []],
+    ])
+    const db = createDbMock(rows)
+    const remove = vi.fn()
+    const insert = vi.fn()
+    vi.mocked(getDb).mockReturnValue({ ...db, transaction: (callback: (tx: unknown) => unknown) => callback({
+      select: db.select,
+      delete: () => ({ where: () => ({ run: remove }) }),
+      insert: () => ({ values: () => ({ run: insert }) }),
+    }) } as never)
+    vi.mocked(getAdapterById).mockReturnValue({ embed: vi.fn(async () => {
+      rows.set(chapters, [{ id: 101, novelId: 1, chapterNum: 4, summary: '刚保存的新稿', contextVersion: 10 }])
+      return [[0.1, 0.2]]
+    }) } as never)
+    await generateChapterEmbeddings(1, 101, 7)
+    expect(remove).not.toHaveBeenCalled()
+    expect(insert).not.toHaveBeenCalled()
   })
 })

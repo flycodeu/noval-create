@@ -1,8 +1,13 @@
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../src/shared/story-atlas'
+import type { CreativeStage } from '../../src/shared/creative-workflow'
 
 type Atlas = Pick<StoryAtlasSnapshot, 'entities' | 'relations'>
 const namedAtlasEntity = (text: string, entity: StoryAtlasEntity) => text.split(/[^\w:-]+/u).includes(entity.id)
   || (entity.name.trim().length > 1 && text.includes(entity.name))
+
+export function isCreativeChapterScopedRequest(request: string): boolean {
+  return /本章|当前章|这一章|现场|第\s*[\d一二三四五六七八九十百]+\s*章/u.test(request)
+}
 
 /** Asset design has narrower dependencies than a scene: a country does not require every resident's social graph. */
 export function selectCreativeAssetAtlas(atlas: Atlas, input: {
@@ -10,10 +15,8 @@ export function selectCreativeAssetAtlas(atlas: Atlas, input: {
 }) {
   const explicit = atlas.entities.filter(entity => namedAtlasEntity(input.request, entity))
   const anchor = input.anchorText || input.fallbackText || ''
+  // Unnamed map or timeline work stays empty. The caller may still offer an optional identity catalog.
   const seeds = new Set((explicit.length ? explicit : atlas.entities.filter(entity => namedAtlasEntity(anchor, entity))).map(entity => entity.id))
-  if (!seeds.size) for (const entity of atlas.entities) {
-    if (input.stage === 'map' ? entity.kind === 'location' && !entity.parentId : entity.kind === 'event') seeds.add(entity.id)
-  }
   const entityIds = new Set(seeds), relationIds = new Set<string>()
   const byId = new Map(atlas.entities.map(entity => [entity.id, entity]))
   const include = (edge: StoryAtlasRelation) => { relationIds.add(edge.id); entityIds.add(edge.fromId); entityIds.add(edge.toId) }
@@ -47,6 +50,56 @@ export function selectCreativeAssetAtlas(atlas: Atlas, input: {
     }
   }
   return { seedIds: seeds, entityIds, relationIds, constraintEntityIds }
+}
+
+/** A global rules edit is not a scene continuation. Local asset edits retain their actual records and direct links. */
+export function selectCreativePlanningAtlas(atlas: Atlas, input: {
+  stage: CreativeStage; request: string; anchorText?: string; fallbackText?: string
+}) {
+  const globalStage = ['background', 'world_rules', 'style', 'story'].includes(input.stage)
+  const namedEdges = atlas.relations.filter(edge => input.request.split(/[^\w:-]+/u).includes(edge.id))
+  const seeds = new Set(atlas.entities.filter(entity => namedAtlasEntity(input.request, entity)).map(entity => entity.id))
+  for (const edge of namedEdges) { seeds.add(edge.fromId); seeds.add(edge.toId) }
+  const chapterScoped = isCreativeChapterScopedRequest(input.request)
+  if (input.stage === 'outline' && chapterScoped) {
+    // A correction can name only one participant. The saved chapter and preceding handoff
+    // still establish its other participants and physical scene; explicit names do not replace them.
+    const scene = `${input.anchorText || ''}\n${input.fallbackText || ''}`
+    for (const entity of atlas.entities) if (namedAtlasEntity(scene, entity)) seeds.add(entity.id)
+  }
+  if (!seeds.size && !globalStage) {
+    const kind = ({ characters: 'character', relationships: 'character', items: 'item', factions: 'faction' } as Record<string, string>)[input.stage]
+    const anchor = input.anchorText || input.fallbackText || ''
+    for (const entity of atlas.entities) if ((entity.kind === kind || input.stage === 'outline' && chapterScoped) && namedAtlasEntity(anchor, entity)) seeds.add(entity.id)
+    if (!seeds.size && ['characters', 'relationships'].includes(input.stage) && /主角|主人公|主要人物|核心人物/u.test(input.request)) {
+      for (const entity of atlas.entities) if (entity.kind === 'character' && entity.attributes.roleType === 'protagonist') seeds.add(entity.id)
+    }
+  }
+  const byId = new Map(atlas.entities.map(entity => [entity.id, entity]))
+  const entityIds = new Set(seeds), relationIds = new Set<string>()
+  const include = (edge: StoryAtlasRelation) => { relationIds.add(edge.id); entityIds.add(edge.fromId); entityIds.add(edge.toId) }
+  for (const edge of namedEdges) include(edge)
+  const characterSeeds = [...seeds].filter(id => byId.get(id)?.kind === 'character')
+  for (const edge of atlas.relations) {
+    const from = seeds.has(edge.fromId), to = seeds.has(edge.toId)
+    if (!from && !to) continue
+    if (globalStage) { if (from && to) include(edge); continue }
+    if (edge.kind === 'relationship' && (input.stage === 'characters' || input.stage === 'relationships' && (characterSeeds.length < 2 || from && to))) include(edge)
+    if (edge.kind === 'presence' && from) include(edge)
+    if (edge.kind === 'membership' && (from && ['characters', 'relationships', 'factions', 'outline'].includes(input.stage) || to && input.stage === 'factions')) include(edge)
+    if (edge.kind === 'ownership' && ['items', 'characters'].includes(input.stage)) include(edge)
+    if (edge.kind === 'participation' && chapterScoped) include(edge)
+    if (edge.kind === 'route' && input.stage === 'outline') include(edge)
+  }
+  if (input.stage === 'factions') for (const entity of atlas.entities) if (entity.kind === 'faction' && entity.parentId && seeds.has(entity.parentId)) entityIds.add(entity.id)
+  for (const id of [...entityIds]) {
+    const visited = new Set([id])
+    let parent = byId.get(id)?.parentId
+    while (parent && byId.has(parent) && !visited.has(parent)) {
+      entityIds.add(parent); visited.add(parent); parent = byId.get(parent)?.parentId
+    }
+  }
+  return { seedIds: seeds, entityIds, relationIds, constraintEntityIds: new Set<string>() }
 }
 
 /** New chapter participants are introduction plans, never replacements for the preceding chapter's state. */
@@ -123,7 +176,7 @@ const publicAttributes = new Set([
   'subtype', 'locationType', 'nodeType', 'terrain', 'climate', 'waterSource', 'livelihood', 'access', 'x', 'y',
   'category', 'function', 'abilities', 'limitations', 'culture', 'publicGoal', 'organizationLevel', 'traits', 'ideology', 'methods', 'funding',
   'type', 'goal', 'resources', 'memberPolicy', 'currentPhase', 'roleTitle',
-  'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral',
+  'distanceKm', 'travelHours', 'travelMode', 'direction', 'condition', 'relationType', 'routeOpen', 'bilateral', 'transfers', 'seasonAccess',
   'locationRole', 'positionId', 'responsibilities',
 ])
 const povPrivateAttributes = new Set(['goals', 'motivation', 'surfaceDesire', 'moralLine', 'abilities', 'abilityLimits', 'abilityCosts', 'limitations'])

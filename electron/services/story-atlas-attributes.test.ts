@@ -4,7 +4,8 @@ import { atlasBoundariesOverlap, mergeAtlasAttributes, normalizeAtlasAttributePa
 describe('story atlas attributes', () => {
   it('validates explicit story days separately from narrative chapter anchors', () => {
     expect(normalizeAtlasAttributePatch('event', { relativeDay: -2, sequenceInDay: 0, timeLabel: '开篇前两日' })).toMatchObject({ relativeDay: -2, sequenceInDay: 0 })
-    for (const attributes of [{ relativeDay: '前两日' }, { sequenceInDay: -1 }, { sequenceInDay: 0.5 }]) {
+    expect(normalizeAtlasAttributePatch('event', { chronologyOrder: 2, timeLabel: '前夜后半夜' })).toEqual({ chronologyOrder: 2, timeLabel: '前夜后半夜' })
+    for (const attributes of [{ relativeDay: '前两日' }, { sequenceInDay: -1 }, { sequenceInDay: 0.5 }, { chronologyOrder: '2' }, { chronologyOrder: 0 }, { chronologyOrder: 1.5 }]) {
       expect(() => normalizeAtlasAttributePatch('event', attributes)).toThrow('属性结构')
     }
   })
@@ -50,6 +51,12 @@ describe('story atlas attributes', () => {
     expect(() => normalizeAtlasAttributePatch('character', { personalityTraits: '沉稳' })).toThrow('属性结构')
     expect(() => normalizeAtlasAttributePatch('character', { homeLocationId: 'location:other-project' })).toThrow('presence')
     expect(() => normalizeAtlasAttributePatch('presence', { locationRole: 'headquarter-misspelled' })).toThrow('属性结构')
+  })
+  it('requires explicit structured seasonal states and directional transfer times', () => {
+    expect(normalizeAtlasAttributePatch('route', { seasonAccess: { summer: 'closed', winter: 'unknown' } })).toEqual({ seasonAccess: { summer: 'closed', winter: 'unknown' } })
+    expect(normalizeAtlasAttributePatch('location', { transfers: [{ fromMode: '步行', toMode: '舟船', minutes: 30 }] })).toEqual({ transfers: [{ fromMode: '步行', toMode: '舟船', minutes: 30 }] })
+    for (const seasonAccess of ['夏季封路', { summer: true }, { rainy: 'closed' }]) expect(() => normalizeAtlasAttributePatch('route', { seasonAccess })).toThrow('属性结构')
+    for (const transfers of [[{ fromMode: '步行', toMode: '舟船' }], [{ fromMode: '步行', toMode: '舟船', minutes: -1 }], [{ fromMode: '步行', toMode: '舟船', minutes: '30' }]]) expect(() => normalizeAtlasAttributePatch('location', { transfers })).toThrow('属性结构')
   })
   it('allows unchanged migrated references but rejects adding, changing or clearing them', () => {
     const current = { campFactionIds: [4], homeLocationId: 'location:old' }

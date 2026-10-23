@@ -960,17 +960,6 @@ export function getNextStep(
     }
   }
 
-  if (stats.mapCount <= 0) {
-    return {
-      title: '建立地图落点',
-      reason: '地点层级和活动半径还没落地，人物、物品和事件没有可靠发生位置。',
-      targetPage: 'map',
-      priority: viewMode === 'professional' ? 'high' : 'medium',
-      estimatedMinutes: 8,
-      actionLabel: '打开地图落点',
-    }
-  }
-
   if (stats.itemCount <= 0) {
     return {
       title: '建立资源道具链',
@@ -1023,17 +1012,6 @@ export function getNextStep(
       priority: 'high',
       estimatedMinutes: 10,
       actionLabel: '打开故事设计',
-    }
-  }
-
-  if (viewMode === 'professional' && !endgameReady) {
-    return {
-      title: '补终局设计',
-      reason: '主线骨架已经成形，下一步要锁定最终冲突、兑现清单和最后一幕。',
-      targetPage: 'endgame',
-      priority: 'medium',
-      estimatedMinutes: 10,
-      actionLabel: '打开终局设计',
     }
   }
 
@@ -1133,6 +1111,28 @@ export function getNextStep(
       priority: 'medium',
       estimatedMinutes: 10,
       actionLabel: '打开章后回写',
+    }
+  }
+
+  if (stats.mapCount <= 0) {
+    return {
+      title: '建立地图落点',
+      reason: '地点层级和活动半径还没落地，人物、物品和事件没有可靠发生位置。',
+      targetPage: 'map',
+      priority: viewMode === 'professional' ? 'high' : 'medium',
+      estimatedMinutes: 8,
+      actionLabel: '打开地图落点',
+    }
+  }
+
+  if (viewMode === 'professional' && !endgameReady) {
+    return {
+      title: '补终局设计',
+      reason: '主线骨架已经成形，下一步要锁定最终冲突、兑现清单和最后一幕。',
+      targetPage: 'endgame',
+      priority: 'medium',
+      estimatedMinutes: 10,
+      actionLabel: '打开终局设计',
     }
   }
 

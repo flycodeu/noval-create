@@ -80,9 +80,11 @@ DeepSeek 模型配置可选择关闭、低、高或最高推理强度，默认�
 }
 ```
 
-支持阶段：`background`（背景）、`world_rules`（规则与限制）、`story`（故事设计）、`style`（文风）、`outline`（卷章大纲）、`characters`（人物）、`map`（地图）、`relationships`（关系）、`factions`（阵营）、`items`（物品）、`events`（事件）、`chapter`（正文）。
+支持阶段：`background`（背景）、`world_rules`（规则与限制）、`story`（故事设计）、`style`（文风）、`characters`（人物）、`relationships`（关系）、`outline`（卷章大纲）、`map`（地图）、`factions`（阵营）、`items`（物品）、`events`（事件）、`chapter`（正文）。
 
 MCP 的 `autoApply:false` 保留候选供讨论；需要自动推进时显式指定 `autoApply:true`。界面的重要人物设计与正文默认保留候选。旧候选遇到资料版本变化会拒绝覆盖。修订时传递原任务的 `atChapter`、`count` 和候选 `sourceArtifactId`，避免错误地转去生成下一章。
+
+图谱默认按章末状态查询。`atlas.query` 指定正整数 `atChapter` 和 `boundary:"start"` 可读章初状态；只有明确采纳并标记 `attributes.stateTiming:"chapter_start"` 的本章修订会提前生效，省略时按章内或章末处理。已有章末版本不能整份倒写为章初。正式正文页的摘要和选段修订以已保存正文为基线；候选的局部修订在版本页明确选择来源。上下文未展开的描述保持原值，完整来源超预算时不能覆盖该字段。
 
 模型评审与程序结构校验都通过，候选才允许应用。评审缺少结论、明确拒绝、引用不存在或结构无效都会保留问题；失败任务可查看具体原因，修正需求后重新生成。
 

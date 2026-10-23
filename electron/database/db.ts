@@ -7,6 +7,8 @@ import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 import { selectGenreVoiceSeedInserts } from './genre-voice-seeds'
 import { migrateStoryAtlas } from './story-atlas-store'
+import { installChapterIndexTriggers } from './chapter-index-triggers'
+import { vectorExtensionStatus } from './chapter-vector-index'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
 
@@ -38,6 +40,7 @@ export function initDb(): AppDatabase {
   ensureLegacyElectronDatabaseCopied(userDataPath, dbPath)
 
   _sqlite = new Database(dbPath)
+  vectorExtensionStatus(_sqlite)
   _sqlite.pragma('busy_timeout = 5000')
   _sqlite.pragma('journal_mode = WAL')
   _sqlite.pragma('foreign_keys = ON')
@@ -45,6 +48,7 @@ export function initDb(): AppDatabase {
   _db = drizzle(_sqlite, { schema })
 
   runMigrations(_sqlite)
+  _sqlite.exec('CREATE TABLE IF NOT EXISTS embedding_settings (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL, model_config_id INTEGER, model_id TEXT NOT NULL)')
   seedBuiltinData(_db)
   seedGenreVoiceFingerprints(_db)
 
@@ -3074,6 +3078,7 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0071_fact_reveal_plan', () => {
     ensureColumn(sqlite, 'story_facts', 'planned_reveal_chapter_num', 'INTEGER')
   })
+  runMigrationStep(sqlite, '0072_chapter_index_outbox', () => installChapterIndexTriggers(sqlite))
   runMigrationStep(sqlite, '0072_personal_research', () => {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS personal_research (
       id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 1,

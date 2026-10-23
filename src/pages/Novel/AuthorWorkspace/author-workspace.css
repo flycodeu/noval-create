@@ -21,8 +21,9 @@
 .author-eyebrow { display: block; color: var(--text-muted); font-size: 11px; letter-spacing: .08em; line-height: 1.5; }
 .author-heading-actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 10px; }
 .author-model-route { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: -2px 0 18px; }
-.author-model-route > label { font-size: 11px; color: var(--text-secondary); }
-.author-model-route > .ant-select { width: 280px; max-width: 100%; }
+.author-model-route__field { display: flex; align-items: center; gap: 12px; max-width: 100%; }
+.author-model-route__field > label { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.author-model-route__field > .ant-select { width: 280px; max-width: 100%; min-width: 0; }
 .author-model-route > span { font-size: 10px; color: var(--text-muted); }
 .author-model-route > .ant-btn { margin-left: auto; font-size: 11px; }
 .author-paper, .author-composer, .author-run { padding: 26px 28px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-surface); }

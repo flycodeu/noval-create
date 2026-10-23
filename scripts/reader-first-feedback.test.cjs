@@ -15,6 +15,18 @@ process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath
 app.setPath('userData', isolatedPath)
 app.commandLine.appendSwitch('disable-gpu')
 registerProjectTsRuntime(root)
+// Feedback scope and invalidation use real SQLite and keyword recall here.
+// Vector generation has separate coverage and must not download a model while
+// this isolated library is being removed.
+const embeddings = require('../electron/services/embedding.service.ts')
+embeddings.embedSemanticTexts = async () => ({ source: 'unavailable' })
+embeddings.searchSimilarFragments = async (novelId, query, topK, _modelId, options) => ({
+  hits: embeddings.fallbackKeywordSearch(novelId, query, topK, options), fallbackReason: 'disabled_by_config',
+})
+embeddings.generateChapterEmbeddings = async (novelId, chapterId, modelId, options) => {
+  embeddings.indexChapterForKeywordRecall(novelId, chapterId, modelId, options)
+  return { applied: true, documentCount: 1, vectorizedCount: 0, source: 'unavailable' }
+}
 
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex')
 const runId = new Date().toISOString().replace(/[:.]/g, '-')

@@ -264,6 +264,14 @@ async function workflowIsolationTests() {
   check(requests.length === beforeStaleCalls, 'A to B to A must not reactivate a stale workflow refresh')
   await act(async () => requests.at(-1)!.pending.resolve(result(1)))
   check(api.run?.novelId === 1, 'fresh poll survives a stale refresh after returning to the same novel')
+  const pendingPoll = requests.length
+  await act(async () => { void api.refresh() })
+  await act(async () => { void api.start({ stage: 'chapter', request: 'revise the current chapter', autoApply: false }); void api.review(11, 'duplicate mutation') })
+  check(requests.length === pendingPoll + 2 && api.submitting, 'one mutation holds the lock while an earlier poll is pending')
+  await act(async () => requests[pendingPoll].pending.resolve(result(1, 'completed')))
+  check(api.run?.step === 'generating' && completions === 1, 'a pre-mutation poll cannot replace the active run or notify completion')
+  await act(async () => requests[pendingPoll + 1].pending.resolve(result(1)))
+  check(!api.submitting && api.run?.step === 'generating', 'the latest mutation releases its lock and installs its own result')
   await act(async () => root.render(null))
   window.removeEventListener('novelforge:creative-completed', completed)
 }
@@ -373,4 +381,3 @@ Object.assign(window, { runHooksStateTests: async () => {
   await patchIsolationTests()
   return 'Hooks browser regressions passed: scoped pagination, async snapshot refresh, external revision and isolation, growth/arc/resistance draft refresh and save, workflow polling and review isolation, stage context and quality isolation, atlas draft preservation, routed composer, endgame and volume drafts, imported details, source key draft, chat/quality lifecycles, version feedback and races, timeline cascade, contracts, editable lists, routed identity and pending-save drafts, recoverable load failures, batch selection, task polling, task details, AI patch isolation'
 } })
-

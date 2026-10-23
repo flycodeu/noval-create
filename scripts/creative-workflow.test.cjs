@@ -25,7 +25,26 @@ const review = JSON.stringify({ summary: '候选符合需求，引用和剧情�
 let heldResponse
 const server = http.createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk
-  requests.push(JSON.parse(body))
+  const payload = JSON.parse(body)
+  requests.push(payload)
+  const prompt = payload.messages?.map(message => typeof message.content === 'string' ? message.content : '').join('\n') || ''
+  if (prompt.includes('[creative_evidence]')) {
+    const line = prompt.split('\n').find(text => text.startsWith('{"prose":'))
+    const evidence = JSON.parse(line)
+    let scripted
+    try { scripted = JSON.parse(replies[0]) } catch { /* No explicit certificate queued. */ }
+    if (Array.isArray(scripted?.assessments)) replies.shift()
+    const overrides = new Map((scripted?.assessments || []).map(row => [row.id, row]))
+    // The fixture verifies gate wiring, not literary judgments. Explicit negative fact
+    // certificates stay negative; new visibility checks receive a controlled certificate.
+    const assessments = evidence.claims.map(claim => overrides.get(claim.id) || {
+      id: claim.id, support: scripted?.assessments?.[0]?.support || 'supported',
+      evidenceQuote: evidence.prose.slice(0, 60), reason: '隔离测试桩按场景边界返回；不作为真实模型效果证明。',
+    })
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ assessments }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100 } }))
+    return
+  }
   const next = replies.shift()
   if (next === 'HOLD') { heldResponse = res; return }
   if (typeof next !== 'string') { res.writeHead(500).end('unexpected model call'); return }
@@ -39,6 +58,10 @@ async function main() {
   initDb()
   const sqlite = getSqlite()
   const model = require('../electron/services/model.service.ts')
+  const embedding = require('../electron/services/embedding.service.ts')
+  // This fixture exercises immediate write-after-save indexing, not remote vector providers.
+  // Keep optional vector traffic out of the generation/review reply queue.
+  if (!realModelSource) embedding.scheduleChapterEmbeddingRefresh = embedding.indexChapterForKeywordRecall
   const { novelForgeToolRegistry: registry } = require('../electron/application/novelforge-tool-registry.ts')
   const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
   const context = { actor: { type: 'api_client', actorId: 'fixture', clientId: 'fixture' }, scopes: [...DESKTOP_AGENT_TOOL_SCOPES] }
@@ -58,7 +81,7 @@ async function main() {
   }
   const novelId = Number(sqlite.prepare('INSERT INTO novels(title,user_background,model_config_id,context_version) VALUES(?,?,?,1)').run('河谷试验', '两个人在河谷经营渡口。', modelId).lastInsertRowid)
   const call = async (name, input) => {
-    const result = await registry.invoke({ toolId: `novelforge.${name}`, input: { novelId, ...input } }, context)
+    const result = await registry.invoke({ toolId: `novelforge.${name}`, input: name === 'artifacts.get' ? { artifactId: input.artifactId } : { novelId, ...input } }, context)
     assert.equal(result.ok, true, JSON.stringify(result)); return result.data
   }
   const finish = async runId => {
@@ -139,6 +162,9 @@ async function main() {
     const snapshot = (await call('atlas.query', {})).atlas
     assert.equal(snapshot.entities.filter(x => x.kind === 'character').length, 2)
     assert.equal(snapshot.relations.length, 1)
+    const savedEntityIndex = entities => Object.fromEntries(entities.map(({ id, kind, name }) => [id, { kind, name }]))
+    assert.deepEqual(savedEntityIndex(done.result.savedEntities), savedEntityIndex(snapshot.entities), 'completed runs show committed entity names, independent of query ordering')
+    assert.equal(done.result.savedEntities.length, 2, 'a saved relationship must not inflate the entity name list')
     assert.equal((await call('workflows.start', startInput)).run.runId, started.runId)
     assert.equal(requests.length, beforeCharacters + 2, 'idempotent start does not call model again')
     const characterList = (await call('characters.list', {})).characters
@@ -155,18 +181,34 @@ async function main() {
     assert.equal((await finish(next.runId)).status, 'success')
     assert.equal((await call('atlas.query', {})).atlas.entities.length, 3)
 
-    // Writing prepares missing contracts itself, then commits prose and its reviewed summary together.
+    // A prose run must never commit a hidden outline before its own result exists.
     const prose = '陈舟解开旧绳，把磨断的一截放在岸上。林禾抱来一捆新绳，两人把船重新系住。河水擦着木桩过去，渡船终于停稳。'
-    replies.push(JSON.stringify({ chapters: [{ chapterNum: 1, title: '换绳', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review,
-      JSON.stringify({ chapterNum: 1, title: '换绳', content: prose, summary: '陈舟与林禾换上新绳，渡船停稳。', changes: [] }), review)
-    const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, idempotencyKey: 'chapter-first' })).run
+    const firstReadiness = await call('chapters.readiness', { atChapter: 1 })
+    assert.equal(firstReadiness.ready, false)
+    assert.equal(firstReadiness.nextStage, 'outline')
+    const beforeFirst = requests.length
+    const beforeFirstTasks = sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE related_entity_type='creative_workflow' AND novel_id=?").get(novelId).count
+    const blockedFirst = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'chapter', request: '写换绳的短场景。', atChapter: 1, autoApply: true, idempotencyKey: 'chapter-unprepared' } }, context)
+    assert.equal(blockedFirst.ok, false)
+    assert.match(blockedFirst.error.message, /先生成并应用本章的大纲与场景安排/)
+    assert.equal(requests.length, beforeFirst, 'blocked prose never calls the model')
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM chapters WHERE novel_id=?').get(novelId).count, 0, 'blocked prose never creates an outline')
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE related_entity_type='creative_workflow' AND novel_id=?").get(novelId).count, beforeFirstTasks, 'preflight does not create a failed workflow')
+    replies.push(JSON.stringify({ chapters: [{ chapterNum: 1, title: '换绳', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review)
+    const firstOutline = await finish((await call('workflows.start', { stage: 'outline', request: '安排第1章换绳。', atChapter: 1, count: 1, idempotencyKey: 'chapter-first-outline' })).run.runId)
+    assert.equal(firstOutline.status, 'success', JSON.stringify(firstOutline))
+    assert.equal((await call('chapters.readiness', { atChapter: 1 })).ready, true)
+    replies.push(JSON.stringify({ chapterNum: 1, title: '换绳', content: prose, summary: '陈舟与林禾换上新绳，渡船停稳。', changes: [] }), review)
+    const writing = (await call('workflows.start', { stage: 'chapter', request: '写陈舟和林禾检查旧绳并将船重新系稳的短场景。', atChapter: 1, changeScope: { existingEntityIds: [], existingRelationIds: [], newEntityCount: 0, allowNewRelations: false }, idempotencyKey: 'chapter-first' })).run
     const written = await finish(writing.runId)
     assert.equal(written.status, 'success', JSON.stringify(written))
+    assert.equal(requests.length, beforeFirst + 4, 'outline and prose have separate generation and review requests')
     const chapter = sqlite.prepare('SELECT content, summary FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId)
     assert.equal(chapter.content, prose)
     assert.equal(chapter.summary, '陈舟与林禾换上新绳，渡船停稳。', 'content invalidation must not erase the new reviewed summary')
 
     const firstChapterId = sqlite.prepare('SELECT id FROM chapters WHERE novel_id=? AND chapter_num=1').get(novelId).id
+    assert.ok(sqlite.prepare("SELECT count(*) AS n FROM chapter_embeddings WHERE chapter_id=? AND fragment_type='content_excerpt'").get(firstChapterId).n > 0, 'MCP prose apply must save a searchable prose index')
     const beforeReview = requests.length
     replies.push(review)
     const reviewRun = (await call('chapters.review', { chapterId: firstChapterId, idempotencyKey: 'review-existing-chapter' })).run
@@ -178,17 +220,25 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content, prose)
     assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: reviewed.runId } }, context)).ok, false, 'a report is not an applicable prose candidate')
 
-    // Complete-looking draft contracts still need automatic review and activation before writing.
+    // Draft contracts require a separate reviewed outline run; the prose run cannot promote them.
     const secondId = Number(sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,outline) VALUES(?,2,?,?)').run(novelId, '加固', '再次检查新绳是否牢固。').lastInsertRowid)
     sqlite.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'draft')").run(novelId, secondId, '陈舟检查并更换系船绳')
     sqlite.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,time_location,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,?,'draft')").run(novelId, secondId, '陈舟', '清晨，渡口', '检查系船绳', '旧绳磨断', '渡船停稳')
     const beforeSecond = requests.length
-    replies.push(JSON.stringify({ chapters: [{ id: secondId, chapterNum: 2, title: '加固', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review,
-      JSON.stringify({ chapterNum: 2, title: '加固', content: prose, summary: '陈舟与林禾检查绳结，渡船停稳。', changes: [] }), review)
+    assert.equal((await call('chapters.readiness', { atChapter: 2 })).ready, false)
+    const blockedSecond = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'chapter', request: '继续检查渡船。', atChapter: 2, autoApply: true, idempotencyKey: 'chapter-draft-contract-blocked' } }, context)
+    assert.equal(blockedSecond.ok, false)
+    assert.equal(requests.length, beforeSecond)
+    assert.equal(sqlite.prepare('SELECT status FROM chapter_contracts WHERE chapter_id=?').get(secondId).status, 'draft')
+    replies.push(JSON.stringify({ chapters: [{ id: secondId, chapterNum: 2, title: '加固', outline: '陈舟检查并更换系船绳。', chapterContract: { chapterGoal: '陈舟检查并更换系船绳' }, scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳', revealPayload: [] }], allowedFactIds: [], revealedFactIds: [] }] }), review)
+    const secondOutline = await finish((await call('workflows.start', { stage: 'outline', request: '仅补齐第2章安排。', atChapter: 2, count: 1, changeScope: { chapterIds: [secondId] }, idempotencyKey: 'chapter-second-outline' })).run.runId)
+    assert.equal(secondOutline.status, 'success', JSON.stringify(secondOutline))
+    assert.equal((await call('chapters.readiness', { atChapter: 2 })).ready, true)
+    replies.push(JSON.stringify({ chapterNum: 2, title: '加固', content: prose, summary: '陈舟与林禾检查绳结，渡船停稳。', changes: [] }), review)
     const second = (await call('workflows.start', { stage: 'chapter', request: '继续检查渡船。', atChapter: 2, idempotencyKey: 'chapter-draft-contract' })).run
     const secondDone = await finish(second.runId)
     assert.equal(secondDone.status, 'success', JSON.stringify(secondDone))
-    assert.equal(requests.length, beforeSecond + 4, 'draft status cannot skip the reviewed prerequisite workflow')
+    assert.equal(requests.length, beforeSecond + 4, 'outline and prose remain separately reviewed')
     assert.equal(sqlite.prepare('SELECT status FROM chapter_contracts WHERE chapter_id=?').get(secondId).status, 'ready')
     const queriedChapter = await call('assets.query', { chapterId: secondId })
     assert.equal(queriedChapter.chapter.id, secondId)
@@ -208,13 +258,17 @@ async function main() {
     assert.equal(structure.volumes.find(row => row.id === plannedThird.volumeId).title, '渡河')
     assert.equal((await call('assets.query', { chapterId: plannedThird.id })).chapterContract.forbiddenActions[0], '不得出现异能')
 
-    // A model can pass semantic review but fail deterministic validation: resume must repair the
-    // saved candidate using that error, not repeat application of an impossible candidate forever.
-    replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: '不是数组' } } }), review)
+    // Machine contract failures are repaired before semantic review; a still-invalid repair
+    // stays blocked and a later Resume must generate a new reviewed candidate.
+    const malformedRules = JSON.stringify({ worldRules: { writingConstraints: { extraRules: '不是数组' } } })
+    replies.push(malformedRules, malformedRules)
     const invalidRules = (await call('workflows.start', { stage: 'world_rules', request: '补充载货限制。', idempotencyKey: 'repair-structure-error' })).run
     const rejectedShape = await finish(invalidRules.runId)
-    assert.equal(rejectedShape.status, 'failed'); assert.equal(rejectedShape.reviewStatus, 'needs_revision')
+    assert.equal(rejectedShape.status, 'blocked'); assert.equal(rejectedShape.reviewStatus, 'blocked')
     assert.ok(rejectedShape.artifactId)
+    const blockedReport = (await call('artifacts.get', { artifactId: rejectedShape.reviewArtifactId })).artifact.content
+    assert.equal(blockedReport.modelReview.failureStage, 'contract')
+    assert.equal(blockedReport.modelReview.initialModelReviewSkipped, true)
     const beforeRepair = requests.length
     replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['木桩不能承担船身重量'] } } }), review)
     await call('workflows.resume', { runId: invalidRules.runId })
@@ -223,10 +277,35 @@ async function main() {
     assert.ok(JSON.stringify(requests[beforeRepair]).includes('上一候选未能应用'))
     assert.ok(JSON.stringify(requests[beforeRepair]).includes('不是数组'), 'repair receives the prior candidate as a budgeted source')
     const sourceRules = (await call('workflows.get', { runId: invalidRules.runId })).run
+    // Reproduce the real fourth-chapter unsupported-field failure: the valid repair is
+    // checked by the strict creative schema before the independent model recheck.
+    const repairedOutline = { chapters: [{ id: plannedThird.id, chapterNum: 3, title: '查绳', outline: '陈舟检查并更换系船绳。',
+      chapterContract: { chapterGoal: '陈舟检查并更换系船绳' },
+      scenes: [{ pov: '陈舟', timeLocation: '清晨，渡口', sceneGoal: '检查系船绳', obstacle: '旧绳磨断', resultState: '渡船停稳' }] }] }
+    const invalidOutline = structuredClone(repairedOutline)
+    invalidOutline.chapters[0].chapterContract.targetWords = 3200
+    invalidOutline.chapters[0].scenes[0].action = '检查并换绳'
+    invalidOutline.chapters[0].scenes[0].limitedResult = '渡船停稳'
+    const beforeSchemaRepair = requests.length
+    replies.push(JSON.stringify(invalidOutline), JSON.stringify(repairedOutline), review)
+    const repairedSchemaRun = await finish((await call('workflows.start', { stage: 'outline', request: '只修订第三章场景安排，保留章名和大纲。', atChapter: 3, autoApply: false, changeScope: { chapterIds: [plannedThird.id] }, idempotencyKey: 'outline-machine-field-repair' })).run.runId)
+    assert.equal(repairedSchemaRun.status, 'paused', JSON.stringify(repairedSchemaRun))
+    assert.equal(requests.length, beforeSchemaRepair + 3, 'invalid initial schema skips model review, then repairs and rechecks')
+    assert.ok(JSON.stringify(requests[beforeSchemaRepair + 1]).includes('targetWords'))
+    const repairedSchemaReport = (await call('artifacts.get', { artifactId: repairedSchemaRun.reviewArtifactId })).artifact.content
+    assert.equal(repairedSchemaReport.modelReview.initialModelReviewSkipped, true)
+    assert.ok(repairedSchemaReport.modelReview.contractValidation.initialIssues.length)
+    assert.deepEqual(repairedSchemaReport.modelReview.contractValidation.finalIssues, [])
+    await call('workflows.apply', { runId: repairedSchemaRun.runId })
     replies.push(JSON.stringify({ worldRules: { writingConstraints: { extraRules: ['涨水时停航'] } } }), review)
     const followUp = (await call('workflows.start', { stage: 'world_rules', request: '保留有效规则并补充涨水停航。', sourceArtifactId: sourceRules.artifactId, autoApply: false, idempotencyKey: 'source-targeted-revision' })).run
     const revised = await finish(followUp.runId)
     assert.equal(revised.status, 'paused'); assert.equal(revised.sourceArtifactId, sourceRules.artifactId)
+    const beforePausedResume = requests.length
+    const versionBeforePausedResume = sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version
+    assert.equal((await call('workflows.resume', { runId: revised.runId })).run.status, 'paused', 'Resume must not implicitly apply an author-review candidate')
+    assert.equal(requests.length, beforePausedResume)
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, versionBeforePausedResume)
     await call('workflows.apply', { runId: revised.runId })
 
     // Omitted position means the last written chapter for both preview and persisted generation.
@@ -267,6 +346,83 @@ async function main() {
     replies.push(JSON.stringify({ userBackground: '河谷两岸靠渡船运送货物。' }), review)
     await call('workflows.resume', { runId: cancellation.runId })
     assert.equal((await finish(cancellation.runId)).status, 'success', 'cancelled task can resume with cleared cancellation and a new bounded attempt')
+
+    // A passed author-review candidate can be cancelled; neither Resume nor direct service
+    // access may silently save that cancelled candidate. Resume obtains a new reviewed draft.
+    const lifecycleService = require('../electron/services/creative-workflow.service.ts')
+    const taskService = require('../electron/services/task.service.ts')
+    const artifactService = require('../electron/services/artifact.service.ts')
+    const lifecycleBase = sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId)
+    replies.push(JSON.stringify({ synopsis: '取消的候选简介' }), review)
+    const cancelPaused = await finish((await call('workflows.start', { stage: 'background', request: '生成简介候选供作者复核。', autoApply: false, idempotencyKey: 'cancel-paused-candidate' })).run.runId)
+    assert.equal(cancelPaused.status, 'paused')
+    const resumePausedRequests = requests.length
+    assert.equal((await call('workflows.resume', { runId: cancelPaused.runId })).run.status, 'paused')
+    assert.equal(requests.length, resumePausedRequests, 'resume of paused candidate neither calls models nor writes canon')
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lifecycleBase)
+    for (const status of ['failed', 'blocked', 'pending', 'success']) {
+      taskService.updateTask(cancelPaused.runId, { status })
+      assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: cancelPaused.runId }), /当前任务状态/, `direct apply must honor ${status} state`)
+    }
+    taskService.updateTask(cancelPaused.runId, { status: 'paused' })
+    assert.equal((await call('workflows.cancel', { runId: cancelPaused.runId })).run.status, 'cancelled')
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: cancelPaused.runId }), /已取消/)
+    const forcedCancelled = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: cancelPaused.runId } }, context)
+    assert.equal(forcedCancelled.ok, false, 'passed review cannot override cancellation')
+    replies.push(JSON.stringify({ synopsis: '重新生成且复核的新简介' }), review)
+    await call('workflows.resume', { runId: cancelPaused.runId })
+    const retriedCancelled = await finish(cancelPaused.runId)
+    assert.equal(retriedCancelled.status, 'paused')
+    assert.notEqual(retriedCancelled.artifactId, cancelPaused.artifactId)
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lifecycleBase)
+    await call('workflows.apply', { runId: retriedCancelled.runId })
+    assert.equal(sqlite.prepare('SELECT synopsis FROM novels WHERE id=?').get(novelId).synopsis, '重新生成且复核的新简介')
+    const lifecycleVersion = sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version
+    taskService.updateTask(retriedCancelled.runId, { status: 'cancelled', controlJson: '{"cancelRequested":true}' })
+    lifecycleService.applyCreativeDraft({ novelId, runId: retriedCancelled.runId })
+    await call('workflows.apply', { runId: retriedCancelled.runId })
+    assert.equal((await call('workflows.get', { runId: retriedCancelled.runId })).run.status, 'success', 'a persisted commit restores success without repeating application')
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, lifecycleVersion)
+    replies.push(JSON.stringify({ synopsis: '已停用的候选简介' }), review)
+    const inactiveDraft = await finish((await call('workflows.start', { stage: 'background', request: '生成另一份简介候选。', autoApply: false, idempotencyKey: 'superseded-candidate' })).run.runId)
+    artifactService.updateArtifactLifecycle(inactiveDraft.artifactId, { status: 'superseded' })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: inactiveDraft.runId }), /已停用/)
+    const forcedSuperseded = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: inactiveDraft.runId } }, context)
+    assert.equal(forcedSuperseded.ok, false, 'passed review cannot revive a superseded candidate')
+    await call('workflows.cancel', { runId: inactiveDraft.runId })
+    assert.equal(sqlite.prepare('SELECT context_version AS version FROM novels WHERE id=?').get(novelId).version, lifecycleVersion)
+
+    // Only a successful, explicitly linked revision supersedes its ancestors. Model PASS
+    // before hard validation and an unrelated new draft must not retire the original.
+    const lineageService = require('../electron/services/creative-candidate-lineage.ts')
+    replies.push(JSON.stringify({ synopsis: '来源链原候选' }), review)
+    const lineageOriginal = await finish((await call('workflows.start', { stage: 'background', request: '生成简介候选。', autoApply: false, idempotencyKey: 'lineage-original' })).run.runId)
+    const lineageBase = sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId)
+    const invalidLineage = JSON.stringify({ synopsis: 42 })
+    replies.push(invalidLineage, invalidLineage)
+    const failedRevision = await finish((await call('workflows.start', { stage: 'background', request: '修订旧简介候选。', sourceArtifactId: lineageOriginal.artifactId, autoApply: false, idempotencyKey: 'lineage-failed-revision' })).run.runId)
+    assert.equal(failedRevision.status, 'blocked')
+    assert.equal(artifactService.getArtifact(lineageOriginal.artifactId).status, 'reviewed', 'failed revision preserves a usable original candidate')
+    assert.equal(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), null)
+    replies.push(JSON.stringify({ synopsis: '无关独立候选' }), review)
+    const unrelatedLineage = await finish((await call('workflows.start', { stage: 'background', request: '独立试写另一份简介。', autoApply: false, idempotencyKey: 'lineage-unrelated' })).run.runId)
+    assert.equal(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), null, 'a later task without an explicit source cannot retire an unrelated candidate')
+    await call('workflows.cancel', { runId: unrelatedLineage.runId })
+    replies.push(JSON.stringify({ synopsis: '来源链当前修订候选' }), review)
+    const acceptedRevision = await finish((await call('workflows.start', { stage: 'background', request: '修订来源链原简介。', sourceArtifactId: lineageOriginal.artifactId, autoApply: false, idempotencyKey: 'lineage-accepted-revision' })).run.runId)
+    assert.equal(acceptedRevision.status, 'paused')
+    assert.equal(artifactService.getArtifact(lineageOriginal.artifactId).status, 'superseded')
+    assert.deepEqual(lineageService.findAcceptedCreativeSuccessor(novelId, lineageOriginal.artifactId), { artifactId: acceptedRevision.artifactId, runId: acceptedRevision.runId })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: lineageOriginal.runId }), /修订版本替代/)
+    // Simulate old-release records: the read-only lineage guard must block Apply even if
+    // the ancestor was never marked superseded by that release.
+    artifactService.updateArtifactLifecycle(lineageOriginal.artifactId, { status: 'reviewed' })
+    assert.throws(() => lifecycleService.applyCreativeDraft({ novelId, runId: lineageOriginal.runId }), /修订版本替代/)
+    const legacyApply = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: lineageOriginal.runId } }, context)
+    assert.equal(legacyApply.ok, false)
+    assert.deepEqual(sqlite.prepare('SELECT synopsis,context_version AS version FROM novels WHERE id=?').get(novelId), lineageBase)
+    await call('workflows.apply', { runId: acceptedRevision.runId })
+    assert.equal(sqlite.prepare('SELECT synopsis FROM novels WHERE id=?').get(novelId).synopsis, '来源链当前修订候选', 'the latest accepted revision remains applicable')
 
     // A new mystery project: planning a secret never grants knowledge. Only reviewed, quoted
     // chapter delivery advances that fact to the next chapter, atomically with the prose.
@@ -323,15 +479,24 @@ async function main() {
       ['foreign-fact', { ...validReveal, factId: foreignFactId }],
     ]) {
       const requestCount = requests.length
-      replies.push(JSON.stringify(chapterCandidate([badReveal])), review)
+      replies.push(JSON.stringify(chapterCandidate([badReveal])), JSON.stringify(chapterCandidate([badReveal])))
       const failed = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者。', idempotencyKey: `mystery-${label}` })).run.runId)
-      assert.equal(failed.status, 'failed', JSON.stringify(failed))
-      assert.equal(requests.length, requestCount + 2, `${label} must reach reviewed candidate validation`)
+      assert.equal(failed.status, 'blocked', JSON.stringify(failed))
+      assert.equal(requests.length, requestCount + 2, `${label} must be rejected by machine validation after one repair attempt`)
       assert.match(failed.message, /揭示证据|人物图谱ID|信息点ID/, JSON.stringify(failed))
       assert.equal((await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).readerKnownChapterId, null)
       assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(secondPlan.id).content || '', '', 'invalid revelation cannot partially commit prose')
     }
-    replies.push(JSON.stringify(chapterCandidate([validReveal])), review)
+    const evidenceReply = support => JSON.stringify({ assessments: [`fact:${secretFact.id}:reader`, `fact:${secretFact.id}:${shen.id}`].map(id => ({ id, support, evidenceQuote: validReveal.evidenceQuote, reason: support === 'supported' ? '本章明确读信获知' : '仅有字句不足以推出事实' })) })
+    replies.push(JSON.stringify(chapterCandidate([validReveal])), review, evidenceReply('insufficient'))
+    const unsupported = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者。', autoApply: false, idempotencyKey: 'mystery-unsupported-evidence' })).run.runId)
+    assert.equal(unsupported.status, 'failed', JSON.stringify(unsupported))
+    assert.equal(unsupported.reviewStatus, 'needs_revision')
+    assert.equal(Boolean(unsupported.recoveryPending), false, 'completed negative review must revise, not replay checkpoint')
+    assert.ok(unsupported.result.evidenceReviewArtifactId)
+    await assert.rejects(() => mysteryCall('workflows.apply', { runId: unsupported.runId }))
+    assert.equal(sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(secondPlan.id).content || '', '')
+    replies.push(JSON.stringify(chapterCandidate([validReveal])), review, evidenceReply('supported'))
     const accepted = await finishMystery((await mysteryCall('workflows.start', { stage: 'chapter', atChapter: 2, request: '通过读信揭示割绳者，只有沈墨看到。', autoApply: false, idempotencyKey: 'mystery-accepted-reveal' })).run.runId)
     assert.equal(accepted.status, 'paused', JSON.stringify(accepted))
     assert.equal((await mysteryCall('assets.query')).facts.find(fact => fact.id === secretFact.id).readerKnownChapterId, null, 'reviewed but unapplied candidate never grants knowledge')
@@ -388,6 +553,288 @@ async function main() {
     factService.applyCreativeFactReveals(mysteryId, secondPlan.id, openingQuote, [{ factId: openingFactId, characterIds: [shen.id], evidenceQuote: openingQuote }], 'reader-learns-later')
     factService.applyCreativeFactPlans(mysteryId, [{ id: openingFactId, title: '渡口旧约', summary: '沈墨早已知道旧约的日期', knownFromStartCharacterIds: [shen.id] }], 'repeat-after-reader-reveal')
     assert.deepEqual((await mysteryCall('assets.query')).facts.find(fact => fact.id === openingFactId).characterKnowledge, openingKnowledge, 'later reader revelation preserves explicit opening POV knowledge and its source')
+    // A passing model review must not bypass resolved save boundaries, including clientId name reuse.
+    const restrictedScope = { existingEntityIds: [], existingRelationIds: [], newEntityCount: 2, allowNewRelations: false }
+    const scopeSnapshot = (await call('atlas.query', {})).atlas
+    const scopedItems = { changes: [
+      { op: 'upsert_entity', clientId: 'scope-lamp', kind: 'item', name: '范围校验灯', summary: '现场照明器物' },
+      { op: 'upsert_entity', clientId: 'scope-book', kind: 'item', name: '范围校验薄册', summary: '随身记录册' },
+    ] }
+    replies.push(JSON.stringify(scopedItems), review)
+    const scopedRun = (await call('workflows.start', { stage: 'items', request: '只登记两件实物', count: 2, changeScope: restrictedScope, idempotencyKey: 'scope-exact-two' })).run
+    assert.equal((await finish(scopedRun.runId)).status, 'success')
+    const scopeApplied = (await call('atlas.query', {})).atlas
+    assert.equal(scopeApplied.entities.length, scopeSnapshot.entities.length + 2)
+    const attacks = [
+      { changes: [scopedItems.changes[0]] }, // reusing the name with a new clientId is an existing update
+      { changes: [{ ...scopedItems.changes[0], name: '第三件物品' }] }, // incorrect exact new count
+      { changes: [{ ...scopedItems.changes[0], name: '第三件物品' }, { ...scopedItems.changes[1], name: '第四件物品' },
+        { op: 'upsert_relation', kind: 'ownership', fromId: scopeApplied.entities.find(entity => entity.kind === 'character').id, toId: 'scope-lamp', label: '持有' }] },
+    ]
+    for (const [index, attack] of attacks.entries()) {
+      replies.push(JSON.stringify(attack), JSON.stringify(attack))
+      const run = (await call('workflows.start', { stage: 'items', request: '只新增两件物品，不修改已有档案或关系', count: 2, changeScope: restrictedScope, idempotencyKey: `scope-attack-${index}` })).run
+      const rejected = await finish(run.runId)
+      assert.equal(rejected.status, 'blocked', JSON.stringify(rejected))
+      assert.match(rejected.message, /超出本次保存范围|实际新增|不允许新增关系/)
+      const forced = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: run.runId } }, context)
+      assert.equal(forced.ok, false, 'manual apply must repeat hard scope validation even after a passing model review')
+      const after = (await call('atlas.query', {})).atlas
+      assert.equal(after.contextVersion, scopeApplied.contextVersion)
+      assert.deepEqual(after.entities, scopeApplied.entities)
+      assert.deepEqual(after.relations, scopeApplied.relations)
+    }
+    // Frozen comparisons and real writer/reviewer routing through the registered API.
+    if (!realModelSource) {
+      const reviewerId = Number(sqlite.prepare('INSERT INTO model_configs(name,provider,model_id,api_key,base_url,max_tokens,max_context_tokens) VALUES(?,?,?,?,?,?,?)').run('Separate reviewer', 'openai', 'review-fixture', model.encryptApiKey('fixture-only'), `http://127.0.0.1:${server.address().port}/v1`, 4000, 16000).lastInsertRowid)
+      const isolatedId = Number(sqlite.prepare('INSERT INTO novels(title,user_background,synopsis,model_config_id,settings_json,context_version) VALUES(?,?,?,?,?,1)').run('历史记录试验', '渡口生活', '保存前简介', modelId, JSON.stringify({ ai_engine: { review_model_config_id: reviewerId } })).lastInsertRowid)
+      const isolatedCall = (name, args = {}) => call(name, { novelId: isolatedId, ...args })
+      const isolatedFinish = async id => {
+        for (let i = 0; i < 200; i++) {
+          const run = (await isolatedCall('workflows.get', { runId: id })).run
+          if (!['pending', 'running', 'cancel_requested'].includes(run.status)) return run
+          await new Promise(resolve => setTimeout(resolve, 30))
+        }
+        throw new Error('isolated review timeout')
+      }
+      const beforeRoutes = requests.length
+      replies.push(JSON.stringify({ synopsis: '本轮新简介' }), review)
+      const historical = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '只更新简介', autoApply: false, idempotencyKey: 'history-candidate' })).run.runId)
+      assert.equal(historical.status, 'paused', JSON.stringify(historical))
+      assert.equal(historical.reviewModelConfigId, reviewerId)
+      assert.deepEqual(requests.slice(beforeRoutes).map(request => request.model), ['creative-fixture', 'review-fixture'])
+      assert.ok(historical.context.maxInputTokens < 10000, 'smaller reviewer window bounds shared context')
+      const comparison = (await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts
+      assert.equal(comparison.length, 1)
+      const comparisonContent = (await isolatedCall('artifacts.get', { artifactId: comparison[0].id })).artifact.content
+      assert.equal(comparisonContent.history[0].before, '保存前简介')
+      assert.equal(comparisonContent.history[0].after, '本轮新简介')
+      const committed = (await isolatedCall('workflows.apply', { runId: historical.runId })).run.result
+      assert.equal(committed.history[0].before, '保存前简介'); assert.equal(committed.history[0].after, '本轮新简介')
+      sqlite.prepare('UPDATE novels SET synopsis=? WHERE id=?').run('更晚的简介', isolatedId)
+      assert.deepEqual((await isolatedCall('artifacts.get', { artifactId: comparison[0].id })).artifact.content, comparisonContent, 'later edits cannot change a historical comparison')
+      const commitRef = (await isolatedCall('artifacts.list', { kind: 'creative_commit', parentArtifactId: historical.artifactId })).artifacts[0]
+      assert.deepEqual((await isolatedCall('artifacts.get', { artifactId: commitRef.id })).artifact.content.history, committed.history)
+      sqlite.prepare('UPDATE model_configs SET temperature=? WHERE id=?').run(0.3, reviewerId)
+      replies.push(JSON.stringify({ synopsis: '审校模型待变更的候选' }), review)
+      const frozenReviewer = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'background', atChapter: 0, request: '更新简介', autoApply: false, idempotencyKey: 'reviewer-frozen' })).run.runId)
+      sqlite.prepare('UPDATE model_configs SET temperature=? WHERE id=?').run(0.4, reviewerId)
+      const rejectedReviewer = await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId: isolatedId, runId: frozenReviewer.runId } }, context)
+      assert.equal(rejectedReviewer.ok, false, 'changing reviewer config invalidates an old candidate')
+
+      const { listRevisionTasks } = require('../electron/services/revision-task.service.ts')
+      const { recordCreativeReviewIssues, validateCreativeRevisionTargets } = require('../electron/services/creative-review-issues.ts')
+      const qualityReview = { summary: '需要修订旧绳观察', severity: 'medium', rewriteRequired: true, rejectRequired: false, topFixes: ['写明先检查旧绳'], genreDriftRisks: [], themeDriftRisks: [], backgroundDriftRisks: [], languageRisks: [], humanLanguageRepairs: [], conflictRisks: [] }
+      const itemCandidate = JSON.stringify({ changes: [{ op: 'upsert_entity', clientId: 'new-notebook', kind: 'item', name: '试用薄册', attributes: { usageMethod: '记下观察' } }] })
+      const originalScope = { existingEntityIds: [], existingRelationIds: [], newEntityCount: 1, allowNewRelations: false }
+      replies.push(itemCandidate, review)
+      const itemRun = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '只建档一本薄册', autoApply: false, changeScope: originalScope, idempotencyKey: 'item-issue-base' })).run.runId)
+      const itemIssueId = recordCreativeReviewIssues({ novelId: isolatedId, stage: 'items', atChapter: 0, count: 1, changeScope: originalScope }, itemRun.runId, itemRun.reviewArtifactId, qualityReview, [], itemRun.artifactId)[0]
+      const beforeBoundChecks = requests.length
+      for (const [index, attack] of [
+        { sourceArtifactId: undefined, changeScope: originalScope },
+        { sourceArtifactId: itemRun.artifactId, changeScope: { ...originalScope, newEntityCount: 2 } },
+        { operation: 'review', changeScope: originalScope },
+      ].entries()) {
+        const denied = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId: isolatedId, stage: 'items', atChapter: 0, request: '不得误关闭另一个对象的问题', revisionIssueIds: [itemIssueId], idempotencyKey: `issue-target-attack-${index}`, ...attack } }, context)
+        assert.equal(denied.ok, false, JSON.stringify(denied))
+        assert.equal(denied.error.code, 'CREATIVE_REVIEW_TARGET_INVALID')
+        assert.match(denied.error.message, /最新候选|保存范围|尚未保存/)
+      }
+      assert.equal(requests.length, beforeBoundChecks, 'wrong lineage, changed scope and unsaved formal recheck fail before model execution')
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).status, 'open')
+      replies.push(itemCandidate, review)
+      const itemRepair = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '保持薄册并修订说明', sourceArtifactId: itemRun.artifactId, autoApply: false, changeScope: originalScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair' })).run.runId)
+      assert.equal(itemRepair.status, 'paused', JSON.stringify(itemRepair))
+      const itemSaved = (await isolatedCall('workflows.apply', { runId: itemRepair.runId })).run.result
+      const itemMeta = JSON.parse(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).originMetaJson)
+      assert.equal(itemMeta.repairArtifactId, itemRepair.artifactId)
+      assert.equal(itemMeta.changeScope.newEntityCount, 0)
+      assert.ok(itemMeta.changeScope.existingEntityIds.includes(itemSaved.idMap['new-notebook']), 'new entity repair scope transitions to actual persisted ID')
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, revisionIssueIds: [itemIssueId], sourceArtifactId: itemRun.artifactId, changeScope: itemMeta.changeScope }), /最新候选依据/)
+      const formalBefore = (await isolatedCall('atlas.query', { atChapter: 0 })).atlas
+      const routesBeforeRecheck = requests.length
+      replies.push(review)
+      const formalItemRun = await isolatedFinish((await isolatedCall('workflows.start', { operation: 'review', stage: 'items', atChapter: 0, request: '复核已保存薄册用途', changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-formal-recheck' })).run.runId)
+      assert.equal(formalItemRun.reviewStatus, 'passed', JSON.stringify(formalItemRun))
+      assert.deepEqual(requests.slice(routesBeforeRecheck).map(row => row.model), ['review-fixture'], 'formal review calls only selected reviewer')
+      const formalReport = (await isolatedCall('artifacts.get', { artifactId: formalItemRun.artifactId })).artifact.content
+      assert.equal(formalReport.schemaVersion, 'atlas-review-v1')
+      assert.equal(formalReport.snapshot.entities.length, 1)
+      assert.equal(formalReport.snapshot.entities[0].id, itemSaved.idMap['new-notebook'])
+      assert.deepEqual((await isolatedCall('atlas.query', { atChapter: 0 })).atlas, formalBefore, 'formal review never mutates assets or context version')
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === itemIssueId).status, 'resolved')
+      const { captureFormalAtlasReview } = require('../electron/services/creative-formal-review.ts')
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'items', atChapter: 0 }), /指定已有资料/)
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'characters', atChapter: 0, changeScope: itemMeta.changeScope }), /不属于本阶段/)
+      assert.throws(() => captureFormalAtlasReview({ novelId: isolatedId, stage: 'items', atChapter: 0, changeScope: { ...itemMeta.changeScope, existingEntityIds: ['item:nonexistent'] } }), /不存在/)
+      const staleIssueId = recordCreativeReviewIssues({ novelId: isolatedId, stage: 'items', atChapter: 0, changeScope: itemMeta.changeScope }, formalItemRun.runId, formalItemRun.artifactId, qualityReview)[0]
+      heldResponse = undefined
+      replies.push('HOLD')
+      const staleReview = (await isolatedCall('workflows.start', { operation: 'review', stage: 'items', atChapter: 0, request: '复核当前用途', changeScope: itemMeta.changeScope, revisionIssueIds: [staleIssueId], idempotencyKey: 'item-stale-recheck' })).run
+      for (let i = 0; i < 100 && !heldResponse; i++) await new Promise(resolve => setTimeout(resolve, 20))
+      assert.ok(heldResponse)
+      await isolatedCall('atlas.apply', { expectedContextVersion: formalBefore.contextVersion, effectiveFromChapter: 0, source: { kind: 'user', id: 'fixture-author' }, idempotencyKey: 'change-during-recheck', changes: [{ op: 'upsert_entity', id: itemSaved.idMap['new-notebook'], kind: 'item', name: '试用薄册', attributes: { usageMethod: '作者在复核中改过的用途' } }] })
+      heldResponse.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: review }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 } }))
+      const staleFinished = await isolatedFinish(staleReview.runId)
+      assert.equal(staleFinished.status, 'failed', JSON.stringify(staleFinished))
+      assert.match(staleFinished.message, /资料已变化/)
+      assert.equal(listRevisionTasks(isolatedId).find(issue => issue.id === staleIssueId).status, 'open', 'stale clean review cannot close current issues')
+      assert.equal(staleFinished.reviewArtifactId, undefined, 'stale review produces no accepted formal report')
+      replies.push(itemCandidate, review)
+      const itemAgain = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '继续修订已有薄册', sourceArtifactId: itemMeta.repairArtifactId, autoApply: false, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId], idempotencyKey: 'item-issue-repair-again' })).run.runId)
+      assert.equal(itemAgain.status, 'paused', JSON.stringify(itemAgain))
+      validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, sourceArtifactId: itemAgain.artifactId, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId] })
+      replies.push(itemCandidate, review)
+      const unboundBranch = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'items', atChapter: 0, request: '另行试写档案', sourceArtifactId: itemMeta.repairArtifactId, autoApply: false, changeScope: itemMeta.changeScope, idempotencyKey: 'unbound-item-branch' })).run.runId)
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'items', atChapter: 0, sourceArtifactId: unboundBranch.artifactId, changeScope: itemMeta.changeScope, revisionIssueIds: [itemIssueId] }), /最新候选依据/, 'unrelated drafts cannot masquerade as issue-bound repairs')
+      const { createArtifact } = require('../electron/services/artifact.service.ts')
+      for (let index = 0; index < 205; index++) createArtifact({ novelId: isolatedId, kind: 'creative_comparison', status: 'reviewed', parentArtifactId: itemAgain.artifactId, content: { index }, contextVersion: 1, producerType: 'system', producerId: 'history-query-test', producerClient: 'fixture' })
+      assert.equal((await isolatedCall('artifacts.list', { kind: 'creative_comparison', parentArtifactId: historical.artifactId })).artifacts[0].id, comparison[0].id, 'parent filtering recovers a comparison beyond the newest 200 artifacts')
+      replies.push(JSON.stringify({ volumes: [
+        { clientId: 'volume-a', title: '上卷', summary: '上卷安排', parts: [{ clientId: 'part-a', title: '启程', summary: '上卷的第一次启程' }, { clientId: 'part-a2', title: '启程', summary: '上卷的第二次启程' }] },
+        { clientId: 'volume-b', title: '下卷', summary: '下卷安排', parts: [{ clientId: 'part-b', title: '启程', summary: '下卷的启程' }] },
+      ] }), review)
+      const sameName = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'outline', atChapter: 0, request: '建立两卷，各含同名启程单元，保存各自摘要', idempotencyKey: 'same-name-structure-history' })).run.runId)
+      assert.equal(sameName.status, 'success', JSON.stringify(sameName))
+      const partHistory = sameName.result.history.filter(change => change.path === '启程')
+      assert.deepEqual(partHistory.map(change => change.before), [null, null, null])
+      assert.deepEqual(partHistory.map(change => change.after.summary), ['上卷的第一次启程', '上卷的第二次启程', '下卷的启程'], 'same-named parts retain their actual saved identities')
+      sqlite.prepare('UPDATE novels SET project_brief_json=? WHERE id=?').run(JSON.stringify({ reader_promise: '旧阅读承诺', target_reader: '旧读者' }), isolatedId)
+      replies.push(JSON.stringify({ projectBrief: { readerPromise: '新阅读承诺' }, facts: [{ title: '渡口旧记', summary: '账房留有旧账。' }] }), review)
+      const briefSaved = await isolatedFinish((await isolatedCall('workflows.start', { stage: 'story', atChapter: 0, request: '补充阅读承诺与旧账资料', idempotencyKey: 'brief-fact-history' })).run.runId)
+      assert.equal(briefSaved.status, 'success', JSON.stringify(briefSaved))
+      assert.equal(briefSaved.result.history.find(change => change.path === 'projectBrief').before.readerPromise, '旧阅读承诺')
+      assert.equal(briefSaved.result.history.find(change => change.path === 'projectBrief').after.readerPromise, '新阅读承诺')
+      const factsSaved = briefSaved.result.history.find(change => change.path === 'facts')
+      assert.deepEqual(factsSaved.before, [])
+      assert.ok(factsSaved.after[0].id > 0, 'new fact history contains actual saved identity')
+      const oldIssueId = recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0]
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'open', 'unrelated consistency scan cannot close model findings')
+      assert.equal(recordCreativeReviewIssues({ novelId, stage: 'chapter', atChapter: 1 }, reviewed.runId, reviewed.artifactId, qualityReview)[0], oldIssueId, 'repeated report discovery is idempotent')
+      assert.throws(() => validateCreativeRevisionTargets({ novelId: isolatedId, stage: 'chapter', atChapter: 1, revisionIssueIds: [oldIssueId] }), /不属于当前项目/)
+      assert.throws(() => validateCreativeRevisionTargets({ novelId, stage: 'items', atChapter: 1, revisionIssueIds: [oldIssueId] }), /阶段或章位/)
+      const oldProse = sqlite.prepare('SELECT content FROM chapters WHERE id=?').get(firstChapterId).content
+      replies.push(JSON.stringify({ chapterNum: 1, title: '换绳', content: oldProse, summary: '两人检查并换好绳索。', changes: [] }), review)
+      const repairedRun = await finish((await call('workflows.start', { stage: 'chapter', atChapter: 1, count: 1, request: '复核并保持原正文', revisionIssueIds: [oldIssueId], autoApply: false, idempotencyKey: 'issue-repair' })).run.runId)
+      assert.equal(repairedRun.status, 'paused', JSON.stringify(repairedRun))
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'open', 'a candidate does not resolve an issue')
+      await call('workflows.apply', { runId: repairedRun.runId })
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'in_progress', 'saving a repair still requires formal recheck')
+      replies.push(review)
+      const rechecked = await finish((await call('chapters.review', { chapterId: firstChapterId, revisionIssueIds: [oldIssueId], idempotencyKey: 'formal-recheck' })).run.runId)
+      assert.equal(rechecked.reviewStatus, 'passed', JSON.stringify(rechecked))
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'resolved')
+      assert.equal(listRevisionTasks(novelId).find(issue => issue.id === oldIssueId).status, 'resolved', 'backfill never reopens resolved findings')
+      assert.ok(listRevisionTasks(novelId).some(issue => JSON.parse(issue.originMetaJson || '{}').ruleId === 'deterministic_gate'), 'deterministic validation errors enter the same board')
+    }
+    const { buildNovelConsistencyReport } = require('../electron/services/consistency.service.ts')
+    const groundedItemId = Number(sqlite.prepare('INSERT INTO story_items(novel_id,item_name,item_kind,usage_method) VALUES(?,?,?,?)').run(novelId, '普通抄册', 'instance', '记录渡口每日账目').lastInsertRowid)
+    const orphanItemId = Number(sqlite.prepare('INSERT INTO story_items(novel_id,item_name,item_kind) VALUES(?,?,?)').run(novelId, '未使用木盒', 'instance').lastInsertRowid)
+    const report = buildNovelConsistencyReport(novelId)
+    assert.equal(report.issues.some(issue => issue.entityId === groundedItemId && issue.title === '物品实例仍然悬空'), false, 'known purpose does not require invented ownership')
+    assert.equal(report.issues.some(issue => issue.entityId === orphanItemId && issue.title === '物品实例仍然悬空'), true, 'genuinely unused records still need attention')
+    sqlite.prepare('UPDATE character_relations SET description=?,interaction_style=NULL,subtext_rule=NULL,intimacy_level=NULL,tension_level=NULL WHERE novel_id=?').run('经营渡口时分担修船和记账，遇账目争议先核对原账。', novelId)
+    assert.equal(buildNovelConsistencyReport(novelId).issues.some(issue => /关系还停留在标签|关键关系缺少具体/.test(issue.title)), false, 'concrete relationships do not require ratings or hidden subtext')
+    const boardNovelId = Number(sqlite.prepare('INSERT INTO novels(title,model_config_id,theme_voice_json) VALUES(?,?,?)').run('问题看板试验', modelId, JSON.stringify({ style_rules: '第三人称限知，调查结论不超过证据。', dialogue_rules: '人物对白按身份和当时所知分开。' })).lastInsertRowid)
+    sqlite.prepare('INSERT INTO story_threads(novel_id,title,thread_type,status,start_chapter,payoff_condition) VALUES(?,?,?,?,?,?)').run(boardNovelId, '渡口失踪案', 'main', 'active', 1, '查明失踪者去向并交代责任')
+    sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,content,stale_reason_json) VALUES(?,?,?,?,?)').run(boardNovelId, 1, '第一章', '渡口有人失踪。', '["world_rule_changed"]')
+    sqlite.prepare('INSERT INTO chapters(novel_id,chapter_num,title,stale_reason_json) VALUES(?,?,?,?)').run(boardNovelId, 2, '第二章', '["world_rule_changed"]')
+    const boardReport = buildNovelConsistencyReport(boardNovelId)
+    assert.equal(boardReport.issues.some(issue => issue.category === 'voice'), false, 'concrete prose and dialogue rules suffice without arbitrary genre tags')
+    assert.equal(boardReport.issues.some(issue => issue.title === '线程缺少回收条件'), false, 'an explicit payoff condition does not require an invented chapter number')
+    const boardIssues = require('../electron/services/revision-task.service.ts').listRevisionTasks(boardNovelId)
+    assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 1 章需要同步上下文'), true)
+    assert.equal(boardIssues.some(issue => issue.status === 'open' && issue.title === '第 2 章需要同步上下文'), false, 'unwritten plans compile fresh context and should not clutter the repair board')
+    // Every planning stage can review frozen formal data with the selected reviewer,
+    // without regenerating, changing Canon or treating its report as a draft.
+    const { captureFormalPlanningReview } = require('../electron/services/creative-formal-review.ts')
+    const safeSnapshot = captureFormalPlanningReview({ novelId, stage: 'story', atChapter: 0, request: '检查故事', idempotencyKey: 'snapshot-check' })
+    assert.equal('aiEngine' in safeSnapshot.assets, false)
+    assert.equal('settingsJson' in safeSnapshot.assets, false)
+    const noScope = await registry.invoke({ toolId: 'novelforge.workflows.start', input: { novelId, stage: 'outline', operation: 'review', request: '检查大纲', idempotencyKey: 'outline-review-missing-target' } }, context)
+    assert.equal(noScope.ok, false, 'outline review must name existing chapters')
+    for (const stage of ['background', 'world_rules', 'story', 'style', 'outline']) {
+      const target = { novelId, stage, atChapter: 0, operation: 'review', request: '复核正式资料的事实、因果和限制，不补造未知设定。', idempotencyKey: `formal-planning-${stage}`, ...(stage === 'outline' ? { changeScope: { chapterIds: [firstChapterId] } } : {}) }
+      const before = captureFormalPlanningReview(target)
+      const version = require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion
+      const n = requests.length
+      replies.push(review)
+      const checked = await finish((await call('workflows.start', target)).run.runId)
+      assert.equal(checked.status, 'success', JSON.stringify(checked))
+      assert.equal(checked.reviewStatus, 'passed')
+      assert.equal(requests.length, n + 1, `${stage} formal review calls only reviewer`)
+      const report = (await call('artifacts.get', { artifactId: checked.artifactId })).artifact.content
+      assert.equal(report.schemaVersion, 'creative-assets-review-v1')
+      assert.deepEqual(report.snapshot, JSON.parse(JSON.stringify(before)))
+      assert.deepEqual(captureFormalPlanningReview(target), before)
+      assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, version)
+      assert.equal((await registry.invoke({ toolId: 'novelforge.workflows.apply', input: { novelId, runId: checked.runId } }, context)).ok, false)
+    }
+    const stalePlanningTarget = { stage: 'background', atChapter: 0, operation: 'review', request: '检查本次正式背景', idempotencyKey: 'formal-background-stale' }
+    replies.push('HOLD')
+    heldResponse = undefined
+    const stalePlanning = (await call('workflows.start', stalePlanningTarget)).run
+    for (let i = 0; i < 100 && !heldResponse; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    assert.ok(heldResponse)
+    // Simulate a legacy writer that changed the target without updating the CAS version.
+    const oldBackground = sqlite.prepare('SELECT user_background FROM novels WHERE id=?').get(novelId).user_background
+    sqlite.prepare('UPDATE novels SET user_background=? WHERE id=?').run('两岸洪水正在上涨。', novelId)
+    heldResponse.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: review }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 } }))
+    const stalePlanningResult = await finish(stalePlanning.runId)
+    assert.equal(stalePlanningResult.status, 'failed')
+    assert.equal(stalePlanningResult.artifactId, undefined, 'stale formal snapshot cannot produce an accepted review')
+    sqlite.prepare('UPDATE novels SET user_background=? WHERE id=?').run(oldBackground, novelId)
+    // Simulate process restart with a completed generation response and no completed reviewer.
+    // A restored workflow must make exactly the missing reviewer call, not regenerate.
+    replies.push(JSON.stringify({ synopsis: '渡口两岸共同检修船只。' }), review)
+    const checkpointSource = await finish((await call('workflows.start', { stage: 'background', request: '只整理简介。', autoApply: false, idempotencyKey: 'checkpoint-source' })).run.runId)
+    assert.equal(checkpointSource.status, 'paused')
+    const sourceInput = sqlite.prepare('SELECT input_json FROM tasks WHERE id=?').get(checkpointSource.runId).input_json
+    const artifacts = require('../electron/services/artifact.service.ts')
+    const checkpointRows = sqlite.prepare("SELECT id FROM artifacts WHERE novel_id=? AND kind='creative_model_checkpoint' AND idempotency_key LIKE ?").all(novelId, `creative:${checkpointSource.runId}:1:checkpoint:%`)
+    const sourceCheckpoint = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate' && artifact.content.schemaVersion === 'creative-model-checkpoint-v1')
+    assert.ok(sourceCheckpoint)
+    const { resumeWorkflowTask } = require('../electron/services/workflow-task.service.ts')
+    for (const entrypoint of ['MCP', 'task-center']) {
+      const recoveredId = await taskService.createTask({ type: 'planning_draft', novelId, modelConfigId: modelId, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: sourceInput, status: 'running' })
+      const checkpointCopy = artifacts.createArtifact({ novelId, kind: 'creative_model_checkpoint', status: 'draft', content: sourceCheckpoint.content, contextVersion: sourceCheckpoint.contextVersion, modelConfigId: sourceCheckpoint.modelConfigId, taskId: sourceCheckpoint.taskId, producerType: 'system', producerId: 'restart-fixture', producerClient: 'fixture', idempotencyKey: `creative:${recoveredId}:1:checkpoint:${sourceCheckpoint.content.requestHash}` })
+      taskService.updateTask(recoveredId, { progressJson: JSON.stringify({ step: 'reviewing', modelCheckpoint: { schemaVersion: 'creative-model-checkpoint-v1', artifactId: checkpointCopy.id, attempt: 1, identityHash: sourceCheckpoint.content.identityHash } }) })
+      taskService.recoverOrphanedTasks()
+      assert.equal(taskService.getTaskRecord(recoveredId).status, 'paused')
+      assert.equal((await call('workflows.get', { runId: recoveredId })).run.recoveryPending, true)
+      const beforeRecoveryCalls = requests.length
+      replies.push(review)
+      if (entrypoint === 'MCP') await call('workflows.resume', { runId: recoveredId })
+      else assert.equal(await resumeWorkflowTask(recoveredId), recoveredId, 'legacy task resume retains its numeric IPC result')
+      const recoveredRun = await finish(recoveredId)
+      assert.equal(recoveredRun.status, 'paused', JSON.stringify(recoveredRun))
+      assert.equal(recoveredRun.reviewStatus, 'passed')
+      assert.equal(requests.length, beforeRecoveryCalls + 1, `${entrypoint}: completed generation is reused; only missing reviewer runs`)
+      assert.equal(JSON.parse(taskService.getTaskRecord(recoveredId).inputJson).attempt, 1)
+      const version = require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion
+      await assert.rejects(() => resumeWorkflowTask(recoveredId), { code: 'workflow.resumeUnsupported' })
+      assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, version, 'resume never applies a completed candidate')
+    }
+    const pendingSource = checkpointRows.map(row => artifacts.requireArtifact(row.id)).find(artifact => artifact.content.phase === 'generate' && artifact.content.schemaVersion === 'creative-model-request-v1')
+    assert.ok(pendingSource, 'request is durably recorded before first model response')
+    const pendingRecoveryId = await taskService.createTask({ type: 'planning_draft', novelId, modelConfigId: modelId, relatedEntityType: 'creative_workflow', runnerType: 'workflow', inputJson: sourceInput, status: 'running' })
+    const pendingCopy = artifacts.createArtifact({ novelId, kind: 'creative_model_checkpoint', status: 'draft', content: pendingSource.content, contextVersion: pendingSource.contextVersion, modelConfigId: pendingSource.modelConfigId, taskId: pendingSource.taskId, producerType: 'system', producerId: 'interrupted-first-request', producerClient: 'fixture', idempotencyKey: `creative:${pendingRecoveryId}:1:checkpoint:${pendingSource.content.requestHash}:request` })
+    taskService.updateTask(pendingRecoveryId, { progressJson: JSON.stringify({ step: 'generating', modelCheckpoint: { schemaVersion: 'creative-model-request-v1', artifactId: pendingCopy.id, attempt: 1, identityHash: pendingCopy.content.identityHash } }) })
+    taskService.recoverOrphanedTasks()
+    assert.equal(taskService.getTaskRecord(pendingRecoveryId).status, 'paused')
+    const beforePendingCalls = requests.length
+    const beforePendingVersion = require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion
+    replies.push(sourceCheckpoint.content.output, review)
+    await call('workflows.resume', { runId: pendingRecoveryId })
+    const pendingRecovered = await finish(pendingRecoveryId)
+    assert.equal(pendingRecovered.status, 'paused', JSON.stringify(pendingRecovered))
+    assert.equal(pendingRecovered.reviewStatus, 'passed')
+    assert.equal(requests.length, beforePendingCalls + 2, 'only interrupted generation and its missing review run; partial output is never accepted')
+    assert.equal(JSON.parse(taskService.getTaskRecord(pendingRecoveryId).inputJson).attempt, 1)
+    assert.equal(require('../electron/services/novel.service.ts').getNovel(novelId).contextVersion, beforePendingVersion, 'recovery does not implicitly approve candidates')
+    assert.equal(artifacts.listArtifacts({ novelId, limit: 200 }).some(artifact => artifact.kind === 'creative_model_checkpoint'), false, 'internal checkpoints must not crowd the content version list')
+    assert.ok(artifacts.listArtifacts({ novelId, kind: 'creative_model_checkpoint' }).length > 0, 'technical checkpoint lookup remains available')
     assert.equal(replies.length, 0)
     process.stdout.write('PASS creative workflow: project source and neutral rules, safe asset patches, atlas and chapter contracts, review-only reports, targeted repair, and 2-chapter secret/POV knowledge lifecycle with invalid-evidence/cross-project rejection and idempotent apply. Loopback fixture only.\n')
   } finally {

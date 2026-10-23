@@ -172,7 +172,22 @@ function buildWorldRulesModule(task, overrides = {}) {
 }
 
 function testResumeCheckpointHelper() {
-  const { hasResumableWorkflowCheckpoint } = loadModule('src/shared/workflow-resilience.ts')
+  const { hasResumableWorkflowCheckpoint, hasPendingCreativeWorkflowCheckpoint } = loadModule('src/shared/workflow-resilience.ts')
+
+  const creativeTask = {
+    runnerType: 'workflow', type: 'planning_draft',
+    progressJson: JSON.stringify({ modelCheckpoint: { schemaVersion: 'creative-model-checkpoint-v1', artifactId: 'art_saved', attempt: 1, identityHash: 'hash' } }),
+  }
+  assert.equal(hasResumableWorkflowCheckpoint(creativeTask), true)
+  assert.equal(hasPendingCreativeWorkflowCheckpoint(creativeTask), false, 'reviewed candidates waiting for approval have no pending model work')
+  const creativeProgress = JSON.parse(creativeTask.progressJson)
+  assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ ...creativeProgress, recoveryPending: true }) }), true)
+  assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ ...creativeProgress, result: { reviewFailureStage: 'rewrite' } }) }), true)
+  assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ ...creativeProgress, result: { reviewFailureStage: 'validate' } }) }), false)
+  assert.equal(hasPendingCreativeWorkflowCheckpoint({ ...creativeTask, progressJson: JSON.stringify({ recoveryPending: true }) }), false, 'recovery flag alone is insufficient')
+  const pendingModelTask = { ...creativeTask, progressJson: JSON.stringify({ modelCheckpoint: { ...creativeProgress.modelCheckpoint, schemaVersion: 'creative-model-request-v1' } }) }
+  assert.equal(hasResumableWorkflowCheckpoint(pendingModelTask), true, 'a started request can recover before its first complete response')
+  assert.equal(hasPendingCreativeWorkflowCheckpoint(pendingModelTask), true)
 
   assert.equal(hasResumableWorkflowCheckpoint({
     runnerType: 'workflow',

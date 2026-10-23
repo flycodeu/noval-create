@@ -11,6 +11,7 @@ import * as mapService from './map.service'
 import * as storyThreadService from './story-thread.service'
 import * as timelineService from './timeline.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { syncCreativeReviewIssues } from './creative-review-issues'
 
 interface RevisionTaskQueryFilters {
   novelId: number
@@ -582,6 +583,7 @@ function buildSystemTaskDrafts(novelId: number): SystemRevisionDraft[] {
   const db = getDb()
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
   const chapterNumById = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
+  const writtenChapterIds = new Set(chapterRows.filter(chapter => Boolean(chapter.content?.trim())).map(chapter => chapter.id))
 
   const drafts: SystemRevisionDraft[] = report.issues.map((issue) => {
     const chapterId = issue.entityType === 'chapter' && typeof issue.entityId === 'number'
@@ -615,6 +617,8 @@ function buildSystemTaskDrafts(novelId: number): SystemRevisionDraft[] {
   })
 
   contextStatus.staleChapterIds.forEach((chapterId) => {
+    // A planned chapter has no prose to reconcile; generation compiles a fresh context when it starts.
+    if (!writtenChapterIds.has(chapterId)) return
     const chapterNum = chapterNumById.get(chapterId)
     const title = chapterNum ? `第 ${chapterNum} 章需要同步上下文` : '章节需要同步上下文'
     drafts.push({
@@ -722,7 +726,7 @@ export function syncSystemRevisionTasks(novelId: number): void {
   })
 
   existingRows
-    .filter((row) => row.issueKey && !activeKeys.has(row.issueKey))
+    .filter((row) => row.issueKey && !row.issueKey.startsWith('creative_review:') && !activeKeys.has(row.issueKey))
     .forEach((row) => {
       const previousStatus = normalizeStatus(row.status)
       if (previousStatus === 'ignored' || previousStatus === 'resolved') return
@@ -735,7 +739,7 @@ export function syncSystemRevisionTasks(novelId: number): void {
 }
 
 function listRevisionRows(novelId: number, sync = true) {
-  if (sync) syncSystemRevisionTasks(novelId)
+  if (sync) { syncCreativeReviewIssues(novelId); syncSystemRevisionTasks(novelId) }
   const db = getDb()
   return db.select().from(revisionTasks)
     .where(eq(revisionTasks.novelId, novelId))
