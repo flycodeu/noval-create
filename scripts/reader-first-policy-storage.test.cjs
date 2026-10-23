@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf-policy-'))
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'

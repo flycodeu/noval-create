@@ -54,7 +54,7 @@ describe('chapter thread context projection', () => {
     expect(queries[0]).toContain('LIMIT 3')
     expect(queries[1]).toContain("thread.thread_type = 'main'")
     expect(queries[1]).toContain('LIMIT 1')
-    expect(queries[2]).toContain("ledger.status NOT IN ('resolved', 'archived')")
+    expect(queries[2]).toContain("ledger.status NOT IN ('resolved', 'archived', 'merged')")
     expect(queries[2]).toContain('LIMIT ?')
     expect(queries[3]).toContain('NOT EXISTS')
     expect(queries[3]).toContain('LIMIT ?')

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Skeleton, Spin
 } from 'antd'
@@ -83,40 +84,20 @@ function summarizeTemplateContent(contentJson?: string) {
 
 export default function TemplateManager() {
   const navigate = useNavigate()
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [activeTab, setActiveTab] = useState('style')
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Template | null>(null)
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
-  const loadedOnceRef = useRef(false)
-  const loadRequestRef = useRef(0)
 
-  const loadTemplates = useCallback(async (showLoading = false) => {
-    const requestId = ++loadRequestRef.current
-    if (showLoading || !loadedOnceRef.current) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-    try {
-      const list = await window.electron.template.list()
-      if (loadRequestRef.current !== requestId) return
-      setTemplates(list)
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (loadRequestRef.current === requestId) message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (loadRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => { void loadTemplates(true) }, [loadTemplates])
+  const read = useCallback(() => window.electron.template.list(), [])
+  const { data, loading: pending, error, reload: loadTemplates } = useAsyncSnapshot(read)
+  const templates = data ?? []
+  const loading = pending && data === null
+  const refreshing = pending && data !== null
+  useEffect(() => {
+    if (error) message.error(getErrorMessage(error, 'common.loadFailed'))
+  }, [error])
 
   const filteredTemplates = templates.filter(t => t.type === activeTab)
   const builtinCount = templates.filter((template) => template.isBuiltin === 1).length

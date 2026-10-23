@@ -123,7 +123,7 @@ function loadSemanticRecompressionContext(novelId: number, chapterNum: number) {
   const activeForeshadows = db.select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, novelId))
     .all()
-    .filter((row) => row.status !== 'resolved' && row.status !== 'cancelled')
+    .filter((row) => !row.mergedIntoId && row.status !== 'resolved' && row.status !== 'cancelled')
     .filter((row) => typeof row.targetPayoffChapter !== 'number' || row.targetPayoffChapter <= chapterNum + 20)
     .map((row) => [row.title, row.detail || row.payoffMethod || row.allowedDelayReason].filter(Boolean).join('：'))
     .filter(Boolean)

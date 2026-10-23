@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -16,8 +18,6 @@ import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
-  Chapter,
-  Character,
   StoryFact,
   StoryFactCharacterKnowledge,
   StoryVolume,
@@ -222,27 +222,39 @@ function normalizeFactStatus(value: unknown, fallback: StoryFact['status'] = 'in
 }
 
 export default function InfoGapBoardPage({ novelId }: Props) {
+  return <InfoGapBoardWorkspace key={novelId} novelId={novelId} />
+}
+
+function InfoGapBoardWorkspace({ novelId }: Props) {
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerSaveHandler, registerEscapeHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryFactFormValues>()
-  const [facts, setFacts] = useState<StoryFact[]>([])
-  const [volumes, setVolumes] = useState<StoryVolume[]>([])
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [characters, setCharacters] = useState<Character[]>([])
-  const [loading, setLoading] = useState(false)
+  const read = useCallback(async () => {
+    const [factRows, volumeRows, chapterRows, characterRows] = await Promise.all([
+      window.electron.storyFact.list(novelId),
+      window.electron.structure.listVolumes(novelId),
+      window.electron.chapter.list(novelId),
+      window.electron.character.list(novelId),
+    ])
+    return { facts: factRows, volumes: volumeRows, chapters: chapterRows, characters: characterRows }
+  }, [novelId])
+  const { data, loading, error: loadError, reload: refresh } = useAsyncSnapshot(read, mutationToken)
+  const [selectionSource, setSelectionSource] = useState<typeof data>(null)
+  const facts = useMemo(() => data?.facts ?? [], [data])
+  const volumes = useMemo(() => data?.volumes ?? [], [data])
+  const chapters = useMemo(() => data?.chapters ?? [], [data])
+  const characters = useMemo(() => data?.characters ?? [], [data])
   const [saving, setSaving] = useState(false)
   const [savingVolumeRatio, setSavingVolumeRatio] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingFact, setEditingFact] = useState<StoryFact | null>(null)
   const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
-  const [ratioDraft, setRatioDraft] = useState<number | null>(null)
   const [keyword, setKeyword] = useState('')
   const [kindFilter, setKindFilter] = useState<'all' | StoryFact['kind']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | StoryFact['status']>('all')
   const [selectedFactId, setSelectedFactId] = useState<number | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
-  const refreshRequestRef = React.useRef(0)
   const draftDirtyRef = React.useRef(false)
 
   const sortedVolumes = useMemo(
@@ -308,6 +320,8 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     [activeVolume],
   )
 
+  const [ratioDraft, setRatioDraft] = useScopedState<number | null>(JSON.stringify([activeVolume?.id, activeVolume?.maxTruthRevealRatio]), activeVolume?.maxTruthRevealRatio ?? null)
+
   const volumeMetrics = useMemo(
     () => sortedVolumes.map((volume) => ({
       volume,
@@ -326,51 +340,20 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     [activeVolume, facts],
   )
 
-  const refresh = useCallback(async () => {
-    const requestId = ++refreshRequestRef.current
-    setLoading(true)
-    try {
-      const [factRows, volumeRows, chapterRows, characterRows] = await Promise.all([
-        window.electron.storyFact.list(novelId),
-        window.electron.structure.listVolumes(novelId),
-        window.electron.chapter.list(novelId),
-        window.electron.character.list(novelId),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setFacts(factRows)
-      setVolumes(volumeRows)
-      setChapters(chapterRows)
-      setCharacters(characterRows)
-      setSelectedFactId((current) => current && factRows.some((fact) => fact.id === current)
-        ? current
-        : factRows[0]?.id || null)
-      setActiveVolumeId((current) => {
-        if (current && volumeRows.some((volume) => volume.id === current)) return current
-        const firstVolume = [...volumeRows].sort((left, right) => left.volumeNumber - right.volumeNumber)[0]
-        return firstVolume?.id || null
-      })
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) setLoading(false)
+  if (data && selectionSource !== data) {
+    setSelectionSource(data)
+    setSelectedFactId(current => current && facts.some(fact => fact.id === current) ? current : facts[0]?.id || null)
+    setActiveVolumeId(current => current && volumes.some(volume => volume.id === current) ? current : [...volumes].sort((a, b) => a.volumeNumber - b.volumeNumber)[0]?.id || null)
+  }
+  useEffect(() => {
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'common.loadFailed'))
     }
-  }, [novelId])
+  }, [loadError])
 
-  useEffect(() => {
-    void refresh()
-  }, [mutationToken, refresh])
 
-  useEffect(() => {
-    setRatioDraft(activeVolume?.maxTruthRevealRatio ?? null)
-  }, [activeVolume?.id, activeVolume?.maxTruthRevealRatio])
 
-  useEffect(() => {
-    setSelectedFactId((current) => filteredFacts.some((fact) => fact.id === current)
-      ? current
-      : filteredFacts[0]?.id || null)
-  }, [filteredFacts])
 
   const openEditor = useCallback((fact?: StoryFact) => {
     const target = fact || null

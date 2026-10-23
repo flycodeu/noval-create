@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Drawer, Empty, Spin, Tag, message } from 'antd'
 import {
@@ -17,13 +19,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type {
-  Chapter,
-  Task,
-  NovelConsistencyReport,
-  NovelContextStatus,
   OperationLog,
-  QualityDashboardData,
-  RevisionCenterSnapshot,
 } from '../../../types'
 import BlockerCard from '../../../components/novel/cards/BlockerCard'
 import SectionHeader from '../../../components/novel/common/SectionHeader'
@@ -37,7 +33,7 @@ import type { ProjectBlocker } from '../../../shared/workspace-types'
 import {
   WorkspacePage,
 } from '../components/WorkspaceShell'
-import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
+import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../workflow'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import { getStudioNextStep, getRecentStudioChapter, getStudioSceneLabel } from './studio-next-step'
 import { isExternalImportedDraft } from './imported-drafts'
@@ -50,7 +46,6 @@ interface Props {
   novelId: number
 }
 
-type QualitySummary = Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null
 type ImportedDraftRef = Pick<AgentArtifact, 'id' | 'kind' | 'status' | 'createdAt' | 'producerClient' | 'producerType' | 'contextVersion'>
 type ImportedDraft = ImportedDraftRef & { content: GenericAssetDraftContent; novelId: number }
 
@@ -75,73 +70,49 @@ function nextStepPriorityPresentation(priority: string): { color: 'volcano' | 'g
 }
 
 export default function StudioPage({ novelId }: Props) {
+  return <StudioWorkspace key={novelId} novelId={novelId} />
+}
+
+function StudioWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [approvedVoice, setApprovedVoice] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
-  const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
-  const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
-  const [qualitySummary, setQualitySummary] = useState<QualitySummary>(null)
-  const [revisionSnapshot, setRevisionSnapshot] = useState<RevisionCenterSnapshot | null>(null)
-  const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
   const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false)
   const [importDrawerOpen, setImportDrawerOpen] = useState(false)
-  const [importedDrafts, setImportedDrafts] = useState<ImportedDraftRef[]>([])
-  const [selectedImportedDraft, setSelectedImportedDraft] = useState<ImportedDraft | null>(null)
-  const [importLoading, setImportLoading] = useState(false)
-  const [importError, setImportError] = useState('')
-  const loadRequestRef = React.useRef(0)
-  const importRequestRef = React.useRef(0)
-
-  const loadImportedDrafts = useCallback(async () => {
-    const requestId = ++importRequestRef.current
-    setImportLoading(true)
-    setImportError('')
-    try {
-      const result = await window.electron.agentTools.call({
-        toolId: 'novelforge.artifacts.list',
-        input: { novelId, kind: 'generic_draft', limit: 50 },
-      })
-      if (!result.ok) throw new Error(result.error.message)
-      if (requestId !== importRequestRef.current) return
-      const references = (result.data as { artifacts: ImportedDraftRef[] }).artifacts
-      setImportedDrafts(references.filter(isExternalImportedDraft).sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
-    } catch (error) {
-      if (requestId === importRequestRef.current) setImportError(error instanceof Error ? error.message : '草稿读取失败')
-    } finally {
-      if (requestId === importRequestRef.current) setImportLoading(false)
-    }
+  const [requestedImportedId, setRequestedImportedId] = useScopedState<string | null>(novelId, null)
+  const readImportedDrafts = useCallback(async () => {
+    const result = await window.electron.agentTools.call({
+      toolId: 'novelforge.artifacts.list', input: { novelId, kind: 'generic_draft', limit: 50 },
+    })
+    if (!result.ok) throw new Error(result.error.message)
+    return (result.data as { artifacts: ImportedDraftRef[] }).artifacts
+      .filter(isExternalImportedDraft).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }, [novelId])
+  const { data: importedRows, loading: importListLoading, error: importListError, reload: loadImportedDrafts } = useAsyncSnapshot(readImportedDrafts)
+  const importedDrafts = importedRows ?? []
+  const importedId = importedDrafts.find(item => item.id === requestedImportedId)?.id || importedDrafts[0]?.id || null
+  const readImportedDraft = useCallback(async () => {
+    if (!importDrawerOpen || !importedId) return null
+    const result = await window.electron.agentTools.call({
+      toolId: 'novelforge.artifacts.get', input: { artifactId: importedId },
+    })
+    if (!result.ok) throw new Error(result.error.message)
+    const artifact = (result.data as { artifact: ImportedDraft }).artifact
+    if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error('草稿不属于当前作品或不是外部导入')
+    return artifact
+  }, [importDrawerOpen, importedId, novelId])
+  const { data: selectedImportedDraft, loading: importDetailLoading, error: importDetailError, reload: reloadImportedDraft } = useAsyncSnapshot(readImportedDraft)
+  const importLoading = importListLoading || (importDrawerOpen && Boolean(importedId) && importDetailLoading)
+  const importFailure = importListError || importDetailError
+  const importError = importFailure ? importFailure instanceof Error ? importFailure.message : '草稿读取失败' : ''
+  const openImportedDraft = (id: string) => {
+    if (id === importedId) void reloadImportedDraft()
+    else setRequestedImportedId(id)
+  }
 
-  const openImportedDraft = useCallback(async (artifactId: string) => {
-    setSelectedImportedDraft(null)
-    setImportLoading(true)
-    setImportError('')
-    try {
-      const result = await window.electron.agentTools.call({
-        toolId: 'novelforge.artifacts.get',
-        input: { artifactId },
-      })
-      if (!result.ok) throw new Error(result.error.message)
-      const artifact = (result.data as { artifact: ImportedDraft }).artifact
-      if (artifact.novelId !== novelId || !isExternalImportedDraft(artifact)) throw new Error('草稿不属于当前作品或不是外部导入')
-      setSelectedImportedDraft(artifact)
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : '草稿读取失败')
-    } finally {
-      setImportLoading(false)
-    }
-  }, [novelId])
-
-  const loadConsoleData = useCallback(async () => {
-    const requestId = ++loadRequestRef.current
+  const readConsole = useCallback(async () => {
     const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities, chapterList, taskList, voice] = await Promise.all([
       window.electron.novel.get(novelId),
       loadWorkflowStats(novelId),
@@ -154,67 +125,29 @@ export default function StudioPage({ novelId }: Props) {
       window.electron.task.list(novelId),
       window.electron.style.resolveActive(novelId),
     ])
-    if (loadRequestRef.current !== requestId) return
-
-    if (novel) setCurrentNovel(novel)
-    setChapters(chapterList)
-    setTasks(taskList)
-    setApprovedVoice(Boolean(voice?.approvedSample))
-    setStats(workflowStats)
-    setConsistencyReport(report)
-    setContextStatus(nextContextStatus)
-    setRevisionSnapshot(revisions)
-    setRecentActivities(activities)
-    setQualitySummary(qualityDashboard ? {
-      productionReadiness: qualityDashboard.productionReadiness,
-      batchHealth: qualityDashboard.batchHealth,
-      continuityHealth: qualityDashboard.continuityHealth,
-    } : null)
-  }, [novelId, setCurrentNovel])
-
-  const refreshConsole = useCallback(async () => {
-    setRefreshing(true)
-    try {
-      await loadConsoleData()
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      setRefreshing(false)
-    }
-  }, [loadConsoleData])
-
+    return { novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities, chapterList, taskList, voice }
+  }, [novelId])
+  const { data: consoleData, loading: consolePending, error: consoleError, reload: refreshConsole } = useAsyncSnapshot(readConsole)
+  const loading = consolePending && consoleData === null
+  const refreshing = consolePending && consoleData !== null
+  const chapters = useMemo(() => consoleData?.chapterList ?? [], [consoleData])
+  const tasks = useMemo(() => consoleData?.taskList ?? [], [consoleData])
+  const approvedVoice = Boolean(consoleData?.voice?.approvedSample)
+  const stats = consoleData?.workflowStats ?? EMPTY_WORKFLOW_STATS
+  const consistencyReport = consoleData?.report ?? null
+  const contextStatus = consoleData?.nextContextStatus ?? null
+  const revisionSnapshot = consoleData?.revisions ?? null
+  const recentActivities = consoleData?.activities ?? []
+  const qualitySummary = consoleData?.qualityDashboard ?? null
   useEffect(() => {
-    let active = true
-    setLoading(true)
-
-    void (async () => {
-      try {
-        await loadConsoleData()
-      } catch (error) {
-        if (active) {
-          console.error(error)
-          message.error(getErrorMessage(error, 'common.loadFailed'))
-        }
-      } finally {
-        if (active) setLoading(false)
-      }
-    })()
-
-    return () => {
-      active = false
-    }
-  }, [loadConsoleData])
-
+    if (consoleData?.novel) setCurrentNovel(consoleData.novel)
+  }, [consoleData, setCurrentNovel])
   useEffect(() => {
-    void loadImportedDrafts()
-  }, [loadImportedDrafts])
-
-  useEffect(() => {
-    if (importDrawerOpen && !importLoading && !importError && !selectedImportedDraft && importedDrafts.length > 0) {
-      void openImportedDraft(importedDrafts[0].id)
+    if (consoleError) {
+      console.error(consoleError)
+      message.error(getErrorMessage(consoleError, 'common.loadFailed'))
     }
-  }, [importDrawerOpen, importError, importedDrafts, importLoading, openImportedDraft, selectedImportedDraft])
+  }, [consoleError])
 
   const workspaceSnapshot = useMemo(
     () => getWorkspaceSnapshot(currentNovel, stats, {
@@ -250,7 +183,7 @@ export default function StudioPage({ novelId }: Props) {
     ].filter(Boolean)
 
     return items.slice(0, 6)
-  }, [consistencyReport?.focusAreas, contextStatus?.staleChapterCount, contextStatus?.staleCheckpointCount, qualitySummary?.productionReadiness.blockers, qualitySummary?.productionReadiness.warnings])
+  }, [consistencyReport?.focusAreas, contextStatus, qualitySummary?.productionReadiness.blockers, qualitySummary?.productionReadiness.warnings])
 
   const topRevisionTasks = useMemo(
     () => (revisionSnapshot?.tasks || [])

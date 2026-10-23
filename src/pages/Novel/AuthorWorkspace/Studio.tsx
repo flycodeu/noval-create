@@ -10,17 +10,34 @@ import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { useCreativeWorkflow } from './workflow-client'
 
 export default function AuthorStudio({ novelId }: { novelId: number }) {
+  return <AuthorStudioWorkspace key={novelId} novelId={novelId} />
+}
+
+function AuthorStudioWorkspace({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const novel = useNovelStore((state) => state.currentNovel)
   const setNovel = useNovelStore((state) => state.setCurrentNovel)
   const stageParam = params.get('stage') as CreativeStage | null
-  const [stage, setStage] = useState<CreativeStage>(stageParam && CREATIVE_STAGES.includes(stageParam) ? stageParam : 'background')
-  const [request, setRequest] = useState(params.get('request') || '')
-  const [autoApply, setAutoApply] = useState(params.get('autoApply') === 'true' || (params.get('autoApply') !== 'false' && !['characters', 'chapter', 'style'].includes(stage)))
-  const [count, setCount] = useState<number>(Math.max(1, Number(params.get('count')) || 1))
-  const [sourceArtifactId, setSourceArtifactId] = useState<string | null>(params.get('sourceArtifactId'))
-  const [atChapter, setAtChapter] = useState<number | null>(params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null)
+  const routeKey = JSON.stringify(['stage', 'request', 'autoApply', 'count', 'sourceArtifactId', 'atChapter'].map(key => params.get(key)))
+  const routeStage = stageParam && CREATIVE_STAGES.includes(stageParam) ? stageParam : null
+  const defaults = {
+    atChapter: params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null,
+    count: Math.max(1, Number(params.get('count')) || 1),
+    sourceArtifactId: params.get('sourceArtifactId'),
+    autoApply: params.get('autoApply') === 'true' || (params.get('autoApply') !== 'false' && !['characters', 'chapter', 'style'].includes(stageParam || 'background')),
+  }
+  const [composer, setComposer] = useState(() => ({ routeKey, stage: routeStage || 'background', request: params.get('request') || '', ...defaults }))
+  if (composer.routeKey !== routeKey) {
+    setComposer({ ...composer, ...defaults, routeKey, stage: routeStage || composer.stage, request: params.get('request') || composer.request })
+  }
+  const { stage, request, autoApply, count, sourceArtifactId, atChapter } = composer
+  const setStage = (stage: CreativeStage) => setComposer(current => ({ ...current, stage }))
+  const setRequest = (request: string) => setComposer(current => ({ ...current, request }))
+  const setAutoApply = (autoApply: boolean) => setComposer(current => ({ ...current, autoApply }))
+  const setCount = (count: number) => setComposer(current => ({ ...current, count }))
+  const setSourceArtifactId = (sourceArtifactId: string | null) => setComposer(current => ({ ...current, sourceArtifactId }))
+  const setAtChapter = (atChapter: number | null) => setComposer(current => ({ ...current, atChapter }))
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [issues, setIssues] = useState<RevisionTask[]>([])
   const [dataError, setDataError] = useState('')
@@ -53,14 +70,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
     return () => { current = false }
   }, [novelId, workflow.run?.step])
 
-  useEffect(() => {
-    if (stageParam && CREATIVE_STAGES.includes(stageParam)) setStage(stageParam)
-    if (params.get('request')) setRequest(params.get('request') || '')
-    setAtChapter(params.has('atChapter') ? Math.max(0, Number(params.get('atChapter')) || 0) : null)
-    setCount(Math.max(1, Number(params.get('count')) || 1))
-    setSourceArtifactId(params.get('sourceArtifactId'))
-    setAutoApply(params.get('autoApply') === 'true' || (params.get('autoApply') !== 'false' && !['characters', 'chapter', 'style'].includes(stageParam || 'background')))
-  }, [params, stageParam])
+
 
   const open = (route: string) => navigate(buildWorkspaceRoute(novelId, route))
   const drafted = chapters.filter((chapter) => Boolean(chapter.content?.trim()) || chapter.wordCount > 0)

@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 function splitRendererVendorChunk(id: string): string | undefined {
@@ -21,7 +21,6 @@ function splitRendererVendorChunk(id: string): string | undefined {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
         '@main': resolve(__dirname, 'electron')
@@ -34,7 +33,6 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
       lib: {
         entry: resolve(__dirname, 'electron/preload.ts'),

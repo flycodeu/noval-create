@@ -506,6 +506,19 @@ async function acquireModelSlot(
   })
 }
 
+/** Short editor requests share model concurrency and budgets without creating background tasks. */
+export async function runInteractiveModel<T>(modelConfigId: number, messages: Message[], options: ChatOptions, execute: (adapter: BaseAdapter, options: ChatOptions) => Promise<T>): Promise<T | null> {
+  if (options.signal?.aborted) throw buildAbortError()
+  const runtime = buildTaskModelRuntime(modelConfigId)
+  const chatOpts: ChatOptions = { temperature: runtime.temperature, providerOptions: runtime.providerOptions, ...options, requestRetryCount: 0 }
+  const report = buildRequestBudgetReport(runtime, messages, chatOpts)
+  if (!report.allowed) throw new RequestBudgetExceededError(report)
+  const state = getModelQueueState(runtime)
+  if (state.active >= state.limit || state.pendingTaskIds.length) return null
+  state.active += 1
+  try { return await execute(runtime.adapter, chatOpts) } finally { releaseModelSlot(runtime.configId) }
+}
+
 interface PreparedTaskRequest {
   messages: Message[]
   report: RequestBudgetReport

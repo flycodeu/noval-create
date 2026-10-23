@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 // A new userData path is selected before readiness; never use the desktop database.

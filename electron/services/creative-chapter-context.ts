@@ -19,6 +19,7 @@ import {
   buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
 } from './context-visibility'
+import { buildCreativeResearchContext, parseCreativeResearchEntries, selectRelevantCreativeResearchEntries } from '../../src/shared/creative-research'
 
 export class CreativeChapterContextError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'CreativeChapterContextError' }
@@ -157,7 +158,7 @@ export function creativeRevisionSource(input: CreativeWorkflowInput): string | u
 /** The chapter writer never receives raw expanded background, private attributes or future graph states. */
 export async function compileCreativeChapterContext(
   input: CreativeWorkflowInput,
-  limits: { maxInputTokens: number; outputReserve: number },
+  limits: { maxInputTokens: number; outputReserve: number; includeDraft?: boolean },
 ): Promise<CreativeContextReport> {
   const chapterRows = listChapters(input.novelId)
   const chapterNum = input.atChapter ?? chapterRows.filter(row => row.content?.trim()).reduce((n, row) => Math.max(n, row.chapterNum), 0) + 1
@@ -185,9 +186,15 @@ export async function compileCreativeChapterContext(
     if (visibleText(text, policy)) add(source.key, source.value, source.required, 'plan')
     else omitted.push(`${source.key}:pov_forbidden_fact`)
   }
+  const researchQuery = [input.request, context.chapter.title, context.chapter.outline, context.chapterContract, context.sceneSnapshots]
+    .map(value => typeof value === 'string' ? value : JSON.stringify(value))
+    .filter(Boolean).join('\n')
+  for (const entry of selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 4)) {
+    add(`creative_reference:${entry.sourceKey}`, buildCreativeResearchContext(entry), false, 'plan', contractPolicy)
+  }
   // Public project premise is useful in the first chapter; retain only whole safe paragraphs.
   for (const [index, paragraph] of (novel.userBackground || '').split(/\r?\n+/).entries()) add(`background:${index}`, paragraph)
-  if (input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
+  if (limits.includeDraft !== false && input.operation !== 'review' && context.chapter.content?.trim()) add(`chapter:${context.chapter.id}:original`, context.chapter.content, true, 'draft', contractPolicy)
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true, 'draft', contractPolicy)
   add(`chapter:${context.chapter.id}:contract`, {

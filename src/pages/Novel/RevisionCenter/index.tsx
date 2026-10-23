@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Tag, Tooltip, message } from 'antd'
 import {
@@ -14,7 +16,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import type { NovelConsistencyReport, NovelContextStatus, RevisionTask } from '../../../types'
+import type { NovelConsistencyReport, RevisionTask } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
@@ -143,12 +145,6 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<RevisionTaskFormValues>()
-  const [tasks, setTasks] = useState<RevisionTask[]>([])
-  const [taskTotal, setTaskTotal] = useState(0)
-  const [stats, setStats] = useState({ total: 0, openCount: 0, inProgressCount: 0, resolvedCount: 0, blockerCount: 0 })
-  const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
-  const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [actionKey, setActionKey] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -156,12 +152,10 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | RevisionTask['taskSource']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionTask['status']>('all')
   const [keyword, setKeyword] = useState('')
-  const [page, setPage] = useState(1)
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
-  const refreshRequestRef = React.useRef(0)
   const relatedPageFilter = searchParams.get('relatedPage')?.trim() || undefined
   const entityTypeFilter = searchParams.get('entityType')?.trim() || undefined
   const entityIdFilter = (() => {
@@ -170,52 +164,42 @@ export default function RevisionCenterPage({ novelId }: Props) {
     const numeric = Number(raw)
     return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : undefined
   })()
+  const [page, setPage] = useScopedState(JSON.stringify([entityIdFilter, entityTypeFilter, keyword, relatedPageFilter, sourceFilter, statusFilter]), 1)
   const scopedFilterSummary = [relatedPageFilter ? `页面=${relatedPageFilter}` : '', entityTypeFilter ? `实体=${entityTypeFilter}${entityIdFilter ? `#${entityIdFilter}` : ''}` : '']
     .filter(Boolean)
     .join('，')
 
-  const refresh = useCallback(async () => {
-    const requestId = ++refreshRequestRef.current
-    setLoading(true)
-    try {
-      const [queryResult, nextStats, nextContextStatus, report] = await Promise.all([
-        window.electron.revision.query({
-          novelId,
-          page,
-          pageSize: REVISION_PAGE_SIZE,
-          taskSource: sourceFilter === 'all' ? undefined : sourceFilter,
-          status: statusFilter === 'all' ? undefined : statusFilter,
-          keyword: keyword.trim() || undefined,
-          relatedPage: relatedPageFilter,
-          entityType: entityTypeFilter,
-          entityId: entityIdFilter,
-        }),
-        window.electron.revision.getStats({ novelId }),
-        window.electron.novel.getContextStatus(novelId),
-        window.electron.novel.runConsistencyCheck(novelId),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setTasks(queryResult.items)
-      setTaskTotal(queryResult.total)
-      setStats(nextStats)
-      setContextStatus(nextContextStatus)
-      setConsistencyReport(report)
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'revisionCenter.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) setLoading(false)
-    }
+  const read = useCallback(async () => {
+    const [queryResult, nextStats, nextContextStatus, report] = await Promise.all([
+      window.electron.revision.query({
+        novelId,
+        page,
+        pageSize: REVISION_PAGE_SIZE,
+        taskSource: sourceFilter === 'all' ? undefined : sourceFilter,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        keyword: keyword.trim() || undefined,
+        relatedPage: relatedPageFilter,
+        entityType: entityTypeFilter,
+        entityId: entityIdFilter,
+      }),
+      window.electron.revision.getStats({ novelId }),
+      window.electron.novel.getContextStatus(novelId),
+      window.electron.novel.runConsistencyCheck(novelId),
+    ])
+    return { queryResult, stats: nextStats, contextStatus: nextContextStatus, consistencyReport: report }
   }, [entityIdFilter, entityTypeFilter, keyword, novelId, page, relatedPageFilter, sourceFilter, statusFilter])
-
+  const { data, loading, error: loadError, reload: refresh } = useAsyncSnapshot(read)
+  const tasks = useMemo(() => data?.queryResult.items ?? [], [data])
+  const taskTotal = data?.queryResult.total ?? 0
+  const stats = data?.stats ?? { total: 0, openCount: 0, inProgressCount: 0, resolvedCount: 0, blockerCount: 0 }
+  const contextStatus = data?.contextStatus ?? null
+  const consistencyReport = data?.consistencyReport ?? null
   useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    setPage(1)
-  }, [entityIdFilter, entityTypeFilter, keyword, relatedPageFilter, sourceFilter, statusFilter])
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'revisionCenter.loadFailed'))
+    }
+  }, [loadError])
 
   const manualCount = useMemo(
     () => tasks.filter((task) => task.taskSource === 'manual').length,
@@ -229,11 +213,6 @@ export default function RevisionCenterPage({ novelId }: Props) {
 
   const hasActiveFilters = sourceFilter !== 'all' || statusFilter !== 'all' || Boolean(keyword.trim()) || Boolean(scopedFilterSummary)
 
-  useEffect(() => {
-    if (!tasks.some((task) => task.id === selectedTaskId)) {
-      setSelectedTaskId(tasks[0]?.id || null)
-    }
-  }, [selectedTaskId, tasks])
 
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all')

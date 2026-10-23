@@ -334,7 +334,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [clearDraft, currentNovel?.projectBriefJson, finalizeDraft, form, notifyWorkspaceMutation, novelId, setCurrentNovel])
+  }, [clearDraft, currentNovel, finalizeDraft, form, notifyWorkspaceMutation, novelId, setCurrentNovel])
 
   const navigateToSettings = React.useCallback(() => {
     if (!hasUnsavedChanges) {

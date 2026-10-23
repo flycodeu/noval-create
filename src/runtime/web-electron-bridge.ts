@@ -936,7 +936,7 @@ async function withLocalBackend<T>(
 }
 
 function getNovelById(id: number): Novel | null {
-  return demoNovels.find((novel) => novel.id === id) ?? demoNovels[0] ?? null
+  return demoNovels.find((novel) => novel.id === id) ?? null
 }
 
 function installMarker(): boolean {

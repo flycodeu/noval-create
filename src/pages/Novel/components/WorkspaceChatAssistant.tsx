@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Drawer, Empty, Input, Segmented, Space, Spin, Tag, Tooltip, message } from 'antd'
 import {
   BarChartOutlined,
@@ -415,13 +416,14 @@ export default function WorkspaceChatAssistant({
   onOpenQuality,
   onApplied,
 }: Props) {
-  const [messages, setMessages] = useState<AssistantMessage[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [applyingMessageId, setApplyingMessageId] = useState<string | null>(null)
-  const [snapshotLoading, setSnapshotLoading] = useState(false)
-  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
-  const [qualitySignals, setQualitySignals] = useState<string[]>([])
+  const contextKey = JSON.stringify([novelId, workspaceKey, currentChapter?.id])
+  const sessionKey = useMemo(() => ({ contextKey, open }), [contextKey, open])
+  const [messages, setMessages] = useScopedState<AssistantMessage[]>(contextKey, [])
+  const [input, setInput] = useScopedState(contextKey, '')
+  const [loading, setLoading] = useScopedState(sessionKey, false)
+  const [applyingMessageId, setApplyingMessageId] = useScopedState<string | null>(sessionKey, null)
+  const [snapshot, setSnapshot] = useScopedState<Record<string, unknown> | null>(contextKey, null)
+  const [qualitySignals, setQualitySignals] = useScopedState<string[]>(contextKey, [])
   const [executionMode, setExecutionMode] = useState<AiExecutionMode>('review_first')
   const contextRequestRef = useRef(0)
   const conversationVersionRef = useRef(0)
@@ -447,7 +449,6 @@ export default function WorkspaceChatAssistant({
     (activeController && !activeController.readonly)
     || (fallbackAdapter?.applySnapshot && !fallbackAdapter.readonly),
   )
-  const contextKey = `${novelId}:${workspaceKey}:${currentChapter?.id ?? ''}`
 
   const fetchContext = useCallback(async () => {
     const snapshotPromise = (async () => {
@@ -463,6 +464,17 @@ export default function WorkspaceChatAssistant({
     }
   }, [activeController, adapterContext, fallbackAdapter, novelId])
 
+  const contextReadKey = useMemo(() => ({ fetchContext, open }), [fetchContext, open])
+  const [snapshotLoading, setSnapshotLoading] = useScopedState(contextReadKey, open)
+  useLayoutEffect(() => {
+    askInFlightRef.current = false
+    return () => {
+      contextRequestRef.current += 1
+      conversationVersionRef.current += 1
+      askInFlightRef.current = false
+    }
+  }, [sessionKey])
+
   const loadContext = useCallback(async (showError = false) => {
     const requestId = contextRequestRef.current + 1
     contextRequestRef.current = requestId
@@ -473,6 +485,7 @@ export default function WorkspaceChatAssistant({
       setSnapshot(context.snapshot)
       setQualitySignals(context.qualitySignals)
     } catch (error) {
+      if (requestId !== contextRequestRef.current) return
       console.error(error)
       if (showError) message.error(getUserFacingMessage('workspaceChat.contextLoadFailed'))
     } finally {
@@ -480,34 +493,22 @@ export default function WorkspaceChatAssistant({
         setSnapshotLoading(false)
       }
     }
-  }, [fetchContext])
-
-  useEffect(() => {
-    contextRequestRef.current += 1
-    conversationVersionRef.current += 1
-    askInFlightRef.current = false
-    setMessages([])
-    setInput('')
-    setSnapshot(null)
-    setQualitySignals([])
-    setSnapshotLoading(false)
-    setLoading(false)
-    setApplyingMessageId(null)
-  }, [contextKey])
-
-  useEffect(() => {
-    if (open) return
-    contextRequestRef.current += 1
-    conversationVersionRef.current += 1
-    askInFlightRef.current = false
-    setSnapshotLoading(false)
-    setLoading(false)
-  }, [open])
+  }, [fetchContext, setQualitySignals, setSnapshot, setSnapshotLoading])
 
   useEffect(() => {
     if (!open) return
-    void loadContext()
-  }, [loadContext, open, workspaceKey])
+    const requestId = ++contextRequestRef.current
+    void fetchContext().then(context => {
+      if (requestId !== contextRequestRef.current) return
+      setSnapshot(context.snapshot)
+      setQualitySignals(context.qualitySignals)
+    }).catch(error => {
+      if (requestId === contextRequestRef.current) console.error(error)
+    }).finally(() => {
+      if (requestId === contextRequestRef.current) setSnapshotLoading(false)
+    })
+    return () => { contextRequestRef.current += 1 }
+  }, [fetchContext, open, setQualitySignals, setSnapshot, setSnapshotLoading])
 
   const handleAsk = useCallback(async (request?: string, intent?: string) => {
     const userRequest = (request ?? input).trim()
@@ -595,6 +596,7 @@ export default function WorkspaceChatAssistant({
       }
     }
   }, [
+    setInput, setLoading, setMessages, setQualitySignals, setSnapshot,
     currentChapter,
     currentNovel,
     executionMode,
@@ -619,6 +621,7 @@ export default function WorkspaceChatAssistant({
       message.info(getUserFacingMessage('workspaceChat.noPatchesToApply'))
       return
     }
+    const conversationVersion = conversationVersionRef.current
     const nextSnapshot = applyAllPatches(item.baseSnapshot, item.repairPreview.patchedSnapshot, allPatches)
     setApplyingMessageId(item.id)
     try {
@@ -630,8 +633,9 @@ export default function WorkspaceChatAssistant({
       } else if (fallbackAdapter?.applySnapshot) {
         await fallbackAdapter.applySnapshot(item.baseSnapshot, nextSnapshot, adapterContext)
         const refreshedNovel = await window.electron.novel.get(novelId)
-        if (refreshedNovel) setCurrentNovel(refreshedNovel)
+        if (conversationVersionRef.current === conversationVersion && refreshedNovel) setCurrentNovel(refreshedNovel)
       }
+      if (conversationVersionRef.current !== conversationVersion) return
       setMessages((current) => current.map((messageItem) => (
         messageItem.id === item.id ? { ...messageItem, appliedAt: Date.now() } : messageItem
       )))
@@ -640,7 +644,7 @@ export default function WorkspaceChatAssistant({
       void loadContext()
     } catch (error) {
       console.error(error)
-      message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
+      if (conversationVersionRef.current === conversationVersion) message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
     } finally {
       setApplyingMessageId(null)
     }
@@ -651,7 +655,7 @@ export default function WorkspaceChatAssistant({
     loadContext,
     novelId,
     onApplied,
-    setCurrentNovel,
+    setCurrentNovel, setApplyingMessageId, setMessages,
   ])
 
   const handleCopy = useCallback(async (content: string) => {

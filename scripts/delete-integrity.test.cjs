@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')

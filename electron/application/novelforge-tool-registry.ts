@@ -7,6 +7,9 @@ import * as agentToolAuditService from '../services/agent-tool-audit.service'
 import { registerArtifactTools } from './artifact-tools'
 import { registerCoreReadTools } from './core-read-tools'
 import { registerCreativeTools } from './creative-tools'
+import { registerAuthorAssistTools } from './author-assist-tools'
+import { registerAuthorLibraryTools } from './author-library-tools'
+import { registerWritingDiscoveryTools } from './writing-discovery-tools'
 import { AgentToolRegistry } from './tool-registry'
 
 /** One public surface for desktop and external AI. */
@@ -26,7 +29,7 @@ export function createNovelForgeToolRegistry(): AgentToolRegistry {
     getTask: (taskId) => taskService.getTaskRecord(taskId),
   })
   registerArtifactTools(registry, { getArtifact: (id) => artifactService.getArtifact(id), listArtifacts: (query) => artifactService.listArtifacts(query) })
-  return registerCreativeTools(registry)
+  return registerWritingDiscoveryTools(registerAuthorLibraryTools(registerAuthorAssistTools(registerCreativeTools(registry))))
 }
 
 export const novelForgeToolRegistry = createNovelForgeToolRegistry()

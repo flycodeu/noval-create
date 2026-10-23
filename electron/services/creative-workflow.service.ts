@@ -20,6 +20,7 @@ import { assertCreativeChapterCandidate, inspectCreativeChapterPrerequisites } f
 import { applyCreativeProjectAsset, isProjectAssetStage, PROJECT_STAGE_SCHEMAS, validateProjectAsset } from './creative-project-assets'
 import { validateJsonSchema, type AgentToolJsonSchema } from '../../src/shared/tool-contracts'
 import { reviewGeneratedAsset } from './asset-quality.service'
+import { chapterReviewSnapshot } from './chapter-review-view.service'
 import { buildAiModelRouteReport, buildChatOptionsFromRoute, resolveAiExecutionMode } from './ai-engine.service'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
 import { CREATIVE_FACT_REVEALS_SCHEMA, applyCreativeFactReveals, validateCreativeFactPlans, validateCreativeFactReveals, type CreativeFactReveal } from './creative-facts'
@@ -341,6 +342,7 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   const chapter = listChapters(novelId).find(row => row.chapterNum === input.request.atChapter)
   if (!chapter?.content?.trim()) throw new Error('目标章节没有可评审的正文。')
   const content = chapter.content
+  const contractSnapshot = chapterReviewSnapshot(chapter.id)
   const novel = getNovel(novelId)!
   const context = await compileCreativeContext(input.request, input.modelConfigId)
   const { text: _text, ...report } = context
@@ -351,7 +353,8 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
     targetType: 'chapter', novelId, modelConfigId: input.modelConfigId, parentTaskId: runId,
     relatedEntityType: 'chapter', relatedEntityId: chapter.id, contextSummary: context.text, generatedOutput: content,
     narrativePolicyVersion: resolveNarrativePolicy(novel.settingsJson, true).policyVersion,
-    reviewFocus: [input.request.request, '只指出现有正文的问题与有效表达，不改写正文，不将风格偏好当作硬性错误。'],
+    reviewFocus: [input.request.request, '只指出现有正文的问题与有效表达，不改写正文，不将风格偏好当作硬性错误。',
+      `同时在同一JSON中返回 contractChecks 数组，逐项对应以下本章条款：${JSON.stringify(contractSnapshot.requirements)}。每项含contractItemId、status(met/unmet/uncertain)、reason、evidence（start/end为JS UTF-16位置，quote为逐字原文）。met必须有原文证据；无法确认时标uncertain，不伪造引文。此数组仅供逐项展示，不替代issues与原有审校门槛。`],
     chatOpts: { ...buildChatOptionsFromRoute(route), maxTokens: Math.min(route.maxTokens, context.outputReserve) },
     onQualityTaskCreated: () => { assertActive(runId); assertBase(input) },
   })
@@ -364,7 +367,7 @@ async function executeChapterReview(runId: number, input: StoredRequest): Promis
   const summary = deterministicBlockers.length ? `确定性检查未通过：${deterministicBlockers.join('；')}。模型评审：${review.summary}` : review.summary
   const artifact = createArtifact({ novelId, kind: 'quality_report', status: 'reviewed', content: {
     schemaVersion: 'chapter-review-v1', chapterId: chapter.id, chapterNum: chapter.chapterNum,
-    contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status, context: report, createdAt: new Date().toISOString(),
+    contentHash: hashArtifactContent(content), contractSnapshot, contractHash: hashArtifactContent(contractSnapshot), review, deterministicBlockers, summary, status, context: report, createdAt: new Date().toISOString(),
   }, contextVersion: input.contextVersion, producerType: 'novelforge_model', producerId: `task:${runId}`, producerClient: 'novelforge', modelConfigId: input.modelConfigId, taskId: runId, idempotencyKey: `creative:${runId}:review:${input.attempt}` })
   const result = { artifactId: artifact.id, chapterId: chapter.id, contentHash: hashArtifactContent(content), review, deterministicBlockers, summary, status }
   updateTask(runId, { status: 'success', outputText: JSON.stringify(result), currentChildTaskId: null })

@@ -103,6 +103,8 @@ MCP 的 `autoApply:false` 保留候选供讨论；需要自动推进时显式指
 
 ## 开发
 
+使用 Node.js 22.12+ 和 npm 11.21.1+（当前锁文件由 npm 11.21.1 校验）。旧版 npm 在解析升级后的可选依赖时可能报错。安装后会用 Electron 校验 SQLite 全文检索和本地模型模块；`npm run rebuild:native` 现在执行该校验，不再重编译已随包提供的 Node-API 二进制。
+
 ```powershell
 npm ci
 npm run dev
@@ -129,3 +131,33 @@ node scripts/verify-release-assets.cjs
 - `electron/services/creative-context.service.ts`、`creative-chapter-context.ts`：上下文和正文约束。
 - `electron/services/story-atlas.service.ts`：地图、人物及关系的章位修订。
 - `src/pages/Novel/AuthorWorkspace/`：五入口界面。
+
+
+## 选段资料与局部修订
+
+- 在“故事设计 → 创作资料”点击“从文本提炼”，粘贴或导入 UTF-8 TXT/Markdown，选择原文范围并检查预算，再生成、编辑和选择保存资料卡。每张卡保留出处与引文，只作创作参考。
+- 在“正文 → 审校”查看本章要求、原文证据和待核实内容，可定位到正文后定向修订。旧报告未逐项检查的条目不会显示为通过。
+- 在正文选中文段后点击“修订选区”，对比并采用候选。正文或设定变化后旧候选不能直接覆盖；原稿可从“版本”恢复。
+
+运行 `npm run test:author-assist` 验证候选采用、版本冲突和历史保护。
+
+## 共享资料、故事账本与样稿
+
+- “故事设计 → 创作资料 → 个人资料”：发布通用卡，按分类或关键词检索，再显式引用、比较更新；本作转化方向留在作品副本中。
+- “故事设计 → 故事方向 → 故事账本”：更正现有伏笔、实际回收章节和依据；更正人物姓名、出身、能力边界，并选择需要保护的字段。重复线索可选择保留项，预览字段差异与引用影响后确认合并；原项和依据保留在合并历史中。
+- “故事设计 → 叙事与文风 → 文风参考”：粘贴正文或选择本作章节进行分析，认可后才供生成参考；可明确复制其他作品样稿，或用同一场景试写对照。
+
+运行 `npm run test:author-library` 验证共享副本、作者保护、样稿认可与来源变化规则。第二批验证记录见 `docs/implementation/wenlan-reference-second-batch-verification.md`。
+
+## 行内补全与开书构思
+
+- “正文”主动开启行内补全后，停笔约 900 毫秒提供灰字建议；可选一句（最多 60 字）或一段（最多 220 字），沿用本作模型，也可选已有模型配置。Tab 或点击采用，Esc 取消，Ctrl/Cmd+Z 或“撤销补全”恢复采用前草稿；仍需原有“保存”才能写入正文。长建议可展开全文查看。
+- 修改文字、移动光标、切换章节或开始中文组合输入会取消旧请求；模型忙时提示稍后手动重试。章节仍需满足现有合同、场景和视角要求，每次停笔不新建后台任务或工件。
+- “新建小说 → 先讨论方向”依次讨论故事起点、方向、书名与简介；可换一批、手写、返回或跳过。修改起点或限制后旧方向不可直接采用，已填写内容保留。关闭或刷新可从“继续上次构思”恢复本次浏览器会话草稿。
+- 最后确认才创建作品，保留原候选来源；固定创建编号防止重复建书。响应丢失后可检查创建结果或用原确认内容重试，后续人物、世界与章节继续从创作台逐步设计。
+
+运行 `npm run test:writing-discovery` 验证补全边界、取消、任务来源和幂等建书。第三批记录见 `docs/implementation/wenlan-reference-third-batch-verification.md`。
+
+三批专项回归 `test:author-assist`、`test:author-library`、`test:writing-discovery` 已接入默认 `npm test` 的 smoke 阶段，使用隔离作品和本地模拟模型接口。
+
+依赖代理下载兼容（`test:dependency-proxy`）与 Hooks 浏览器回归（`test:hooks-state`）也包含在默认测试中。前者使用本地代理、测试 CA 和 SHA256 校验，后者运行实际 React 组件并验证分页、草稿和迟到响应隔离；均不访问正式作品数据。

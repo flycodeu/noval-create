@@ -1,0 +1,8 @@
+.author-library-grid, .author-library-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.author-library-compare > div { min-width: 0; padding: 16px; border: 1px solid var(--border-default, #ddd); border-radius: 8px; }
+.author-library-compare p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.author-library-stats { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
+.author-library-stats span { font-size: 13px; color: var(--text-secondary, #666); }
+.author-library-stats strong { display: block; color: var(--text-primary, #333); font-size: 20px; }
+.author-library-grid > *, .creative-research__grid > * { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 680px) { .author-library-grid, .author-library-compare { grid-template-columns: minmax(0, 1fr); } }

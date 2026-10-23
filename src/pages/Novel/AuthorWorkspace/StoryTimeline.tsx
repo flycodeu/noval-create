@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { Button, Input, Select, Spin } from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import type { Chapter, Novel } from '../../../types'
-import type { StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { AuthorPage, EmptyWork, LoadFailure } from './shared'
 import { buildStoryTimelineEntries, chapterWritingLabel, STORY_TIMELINE_STATES, storyTimelineClock, storyTimelineGroups, timelineEntityRoute, type StoryTimelineEntry, type StoryTimelineState } from './story-timeline'
@@ -18,25 +17,19 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   const status = (Object.keys(STORY_TIMELINE_STATES).includes(params.get('status') || '') ? params.get('status') : 'all') as StoryTimelineState | 'all'
   const chapterFilter = params.has('chapter') && Number.isInteger(Number(params.get('chapter'))) ? Number(params.get('chapter')) : null
   const keyword = params.get('q') || ''
-  const [snapshot, setSnapshot] = useState<StoryAtlasSnapshot | null>(null)
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [novel, setNovel] = useState<Novel | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const epoch = useRef(0)
   const detailRef = useRef<HTMLElement | null>(null)
-  const load = useCallback(async () => {
-    const token = ++epoch.current
-    setLoading(true)
-    try {
-      const [atlas, rows, project] = await Promise.all([
-        window.electron.storyAtlas.query({ novelId, includePlanned: true }), window.electron.chapter.list(novelId), window.electron.novel.get(novelId),
-      ])
-      if (token === epoch.current) { setSnapshot(atlas); setChapters(rows); setNovel(project); setError('') }
-    } catch (cause) { if (token === epoch.current) setError(cause instanceof Error ? cause.message : '读取时间轴失败') }
-    finally { if (token === epoch.current) setLoading(false) }
+  const read = useCallback(async () => {
+    const [snapshot, chapters, novel] = await Promise.all([
+      window.electron.storyAtlas.query({ novelId, includePlanned: true }),
+      window.electron.chapter.list(novelId), window.electron.novel.get(novelId),
+    ])
+    return { snapshot, chapters, novel }
   }, [novelId])
-  useEffect(() => { void load(); return () => { epoch.current += 1 } }, [load])
+  const { data, loading, error: loadError, reload: load } = useAsyncSnapshot(read)
+  const snapshot = data?.snapshot ?? null
+  const chapters = data?.chapters ?? []
+  const novel = data?.novel ?? null
+  const error = loadError ? (loadError instanceof Error ? loadError.message : '读取时间轴失败') : ''
   useEffect(() => {
     const refresh = () => { void load() }
     window.addEventListener('novelforge:creative-completed', refresh); window.addEventListener('focus', refresh)

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Empty,
@@ -176,8 +177,6 @@ function formatSavedAt(value?: string | null) {
 }
 
 export default function ModelManager() {
-  const [configs, setConfigs] = useState<ModelConfig[]>([])
-  const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<ModelConfig | null>(null)
   const [form] = Form.useForm()
   const [sourceForm] = Form.useForm<SourceSearchSettingsUpdate>()
@@ -197,48 +196,39 @@ export default function ModelManager() {
   const selectedConfigProvider = selected?.provider
   const selectedSourceProvider = Form.useWatch('provider', sourceForm)
 
-  const configsRequestRef = useRef(0)
-  const loadingRequestRef = useRef(0)
-
+  const readConfigs = useCallback(() => window.electron.model.list(), [])
+  const { data: configRows, loading, error: configsError, reload: loadConfigs } = useAsyncSnapshot(readConfigs)
+  const configs = configRows ?? []
   const refreshConfigs = useCallback(async () => {
-    const requestId = ++configsRequestRef.current
-    const list = await window.electron.model.list()
-    if (configsRequestRef.current === requestId) setConfigs(list)
-    return list
-  }, [])
+    const rows = await loadConfigs()
+    if (!rows) throw new Error(getUserFacingMessage('common.loadFailed'))
+    return rows
+  }, [loadConfigs])
+  useEffect(() => {
+    if (configsError) message.error(getErrorMessage(configsError, 'common.loadFailed'))
+  }, [configsError])
 
-  const loadConfigs = useCallback(async () => {
-    const loadingId = ++loadingRequestRef.current
-    const requestId = ++configsRequestRef.current
-    setLoading(true)
-    try {
-      const list = await window.electron.model.list()
-      if (configsRequestRef.current === requestId) setConfigs(list)
-    } catch (error) {
-      if (loadingRequestRef.current === loadingId) message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (loadingRequestRef.current === loadingId) setLoading(false)
-    }
-  }, [])
-
-  const loadSourceSettings = useCallback(async () => {
-    try {
-      const settings = await window.electron.sourceSearch.getSettings()
-      setSourceSettings(settings)
-      sourceForm.setFieldsValue({
-        provider: settings.provider,
-        tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
-        braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
-      })
-    } catch (error) {
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    }
+  const applySourceSettings = useCallback((settings: SourceSearchSettingsView) => {
+    setSourceSettings(settings)
+    if (!sourceForm.isFieldsTouched()) sourceForm.setFieldsValue({
+      provider: settings.provider,
+      tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
+      braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
+    })
   }, [sourceForm])
+  const loadSourceSettings = useCallback(async () => {
+    try { applySourceSettings(await window.electron.sourceSearch.getSettings()) }
+    catch (error) { message.error(getErrorMessage(error, 'common.loadFailed')) }
+  }, [applySourceSettings])
 
   useEffect(() => {
-    void loadConfigs()
-    void loadSourceSettings()
-  }, [loadConfigs, loadSourceSettings])
+    let active = true
+    void window.electron.sourceSearch.getSettings().then(settings => {
+      if (!active) return
+      applySourceSettings(settings)
+    }).catch(error => { if (active) message.error(getErrorMessage(error, 'common.loadFailed')) })
+    return () => { active = false }
+  }, [applySourceSettings])
 
   const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai

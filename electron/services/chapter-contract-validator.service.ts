@@ -799,7 +799,7 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
     : []
   const foreshadowRows = requiredForeshadowIds.length > 0
     ? db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, chapter.novelId)).all()
-      .filter((row) => requiredForeshadowIds.includes(row.id))
+      .filter((row) => !row.mergedIntoId && requiredForeshadowIds.includes(row.id))
     : []
   const characterArcRows = requiredCharacterArcIds.length > 0
     ? db.select().from(characterArcs).where(eq(characterArcs.novelId, chapter.novelId)).all()

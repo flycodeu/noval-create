@@ -4,6 +4,7 @@ import type { ProgressSink } from '../utils/progress-sink'
 import type { ChatOptions } from '../adapters/base.adapter'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray } from '../../src/utils/text'
+import { normalizeContractChecks } from '../../src/shared/chapter-review-view'
 import { safeParseJson } from '../utils/json'
 import { assetReviewPrompt, assetRewritePrompt } from './prompts'
 import {
@@ -135,6 +136,7 @@ export function parseAssetReviewResult(raw: string, content?: string, policyVers
   const levels = issues ? classifyQualityIssueLevels(issues) : undefined
   return {
     ...(issues ? { issues } : {}),
+    ...(Array.isArray(parsed.contractChecks) ? { contractChecks: normalizeContractChecks(parsed.contractChecks, content || '') } : {}),
     summary: asText(parsed.summary) || '未返回可用审校摘要。',
     severity: normalizeSeverity(parsed.severity),
     rewriteRequired: levels ? levels.repair.length > 0 : parsed.rewrite_required === true,

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Button, Progress, Collapse, Tag, Input, message } from 'antd'
 import { BarChartOutlined, LoadingOutlined, SyncOutlined } from '@ant-design/icons'
 import { AIScoreResult } from '../../types'
@@ -88,7 +88,9 @@ export default function AIScorePanel({
   const [loading, setLoading] = useState(false)
   const scoredSourceRef = useRef<{ content: string; novelId?: number; chapterId?: number } | null>(null)
   const currentSourceRef = useRef({ getContent, novelId, chapterId })
-  currentSourceRef.current = { getContent, novelId, chapterId }
+  useLayoutEffect(() => {
+    currentSourceRef.current = { getContent, novelId, chapterId }
+  }, [getContent, novelId, chapterId])
   const [result, setResult] = useState<AIScoreResult | null>(null)
   const [extraReqs, setExtraReqs] = useState('')
   const [showRegen, setShowRegen] = useState(false)

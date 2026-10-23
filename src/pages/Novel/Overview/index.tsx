@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, message } from 'antd'
 import {
@@ -96,13 +97,11 @@ export default function Overview({ novelId }: Props) {
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
   const [packagingSaving, setPackagingSaving] = useState(false)
-  const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
+  const savedPackaging = useMemo(() => parseNovelBlurbDocument(currentNovel?.blurbJson), [currentNovel?.blurbJson])
+  const [packagingDraft, setPackagingDraft] = useScopedState<PackagingDraft>(JSON.stringify([novelId, currentNovel?.blurbJson]), savedPackaging)
   const [packagingGenerating, setPackagingGenerating] = useState(false)
   const [packagingExpanded, setPackagingExpanded] = useState(false)
 
-  useEffect(() => {
-    setPackagingDraft(parseNovelBlurbDocument(currentNovel?.blurbJson))
-  }, [currentNovel?.blurbJson])
 
   const projectBrief = useMemo(
     () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
@@ -280,7 +279,7 @@ export default function Overview({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [clearDraft, currentNovel?.blurbJson, finalizeDraft, form, notifyWorkspaceMutation, novelId, packagingDraft, setCurrentNovel])
+  }, [clearDraft, currentNovel, finalizeDraft, form, notifyWorkspaceMutation, novelId, packagingDraft, setCurrentNovel])
 
   const handleSavePackaging = async () => {
     setPackagingSaving(true)
@@ -417,7 +416,7 @@ export default function Overview({ novelId }: Props) {
         message.success(getUserFacingMessage('overview.cleared'))
       },
     })
-  }, [clearDraft, currentNovel?.blurbJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
+  }, [currentNovel?.blurbJson, novelId, setCurrentNovel, form, setPackagingDraft, clearDraft, notifyWorkspaceMutation])
 
   useEffect(() => {
     registerClearHandler(handleClear)

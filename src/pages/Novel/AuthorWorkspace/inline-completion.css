@@ -1,0 +1,12 @@
+.inline-completion { min-width: 0; }
+.inline-completion__controls { margin: 12px 0 8px; font-size: 12px; color: var(--text-secondary); }
+.inline-completion__controls label { display: inline-flex; align-items: center; gap: 8px; }
+.inline-completion__frame { position: relative; }
+.inline-completion__viewport { position: absolute; top: 0; left: 0; pointer-events: none; overflow: hidden; }
+.inline-completion__mirror { min-height: 0; height: auto; margin: 0; white-space: pre-wrap; overflow-wrap: break-word; resize: none; }
+.inline-completion__ghost { color: var(--text-muted); opacity: .85; }
+.author-manuscript__editor.inline-completion__editor--ghost { color: transparent; caret-color: var(--text-primary); }
+.inline-completion__status { min-height: 24px; padding-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
+.inline-completion__preview { margin-top: 6px; }
+.inline-completion__preview summary { cursor: pointer; }
+.inline-completion__preview p { margin: 8px 0; padding: 10px 12px; white-space: pre-wrap; line-height: 1.8; border-left: 2px solid var(--border-default); }

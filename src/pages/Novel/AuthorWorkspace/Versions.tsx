@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Checkbox, Input, Spin } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { AgentArtifact } from '../../../shared/agent-artifacts'
 import { CREATIVE_STAGE_LABELS, type CreativeRun } from '../../../shared/creative-workflow'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
-import type { Chapter, Novel, RevisionTask } from '../../../types'
-import type { StoryAtlasSnapshot } from '../../../shared/story-atlas'
+import type { RevisionTask } from '../../../types'
 import { parseStorySettingsDocument } from '../../../shared/story-settings'
 import { parseThemeVoiceDocument } from '../../../shared/theme-voice'
 import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
@@ -25,72 +26,80 @@ function patchShape(current: unknown, patch: unknown): unknown {
 }
 
 export default function Versions({ novelId }: { novelId: number }) {
+  return <VersionsWorkspace key={novelId} novelId={novelId} />
+}
+
+function VersionsWorkspace({ novelId }: { novelId: number }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const [view, setView] = useState(params.get('artifact') ? 'versions' : params.get('issue') ? 'issues' : params.get('view') || 'runs')
-  const [runs, setRuns] = useState<CreativeRun[]>([])
-  const [artifacts, setArtifacts] = useState<ArtifactReference[]>([])
-  const [issues, setIssues] = useState<RevisionTask[]>([])
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [novel, setNovel] = useState<Novel | null>(null)
-  const [atlas, setAtlas] = useState<StoryAtlasSnapshot | null>(null)
-  const [names, setNames] = useState<Record<string, string>>({})
-  const [selectedRun, setSelectedRun] = useState<CreativeRun | null>(null)
-  const [artifact, setArtifact] = useState<(ArtifactReference & { content: unknown }) | null>(null)
-  const [review, setReview] = useState<unknown>(null)
-  const [loading, setLoading] = useState(true)
-  const [reading, setReading] = useState(false)
+  const artifactId = params.get('artifact')
+  const issueId = params.get('issue')
+  const routeViewKey = JSON.stringify([artifactId, issueId])
+  const [viewState, setViewState] = useState({ source: routeViewKey, value: artifactId ? 'versions' : issueId ? 'issues' : params.get('view') || 'runs' })
+  if (viewState.source !== routeViewKey) setViewState({ source: routeViewKey, value: artifactId ? 'versions' : issueId ? 'issues' : viewState.value })
+  const view = viewState.value
+  const setView = (value: string) => setViewState(current => ({ ...current, value }))
+  const [selectedRunId, setSelectedRunId] = useState<CreativeRun['runId'] | null>(null)
   const [error, setError] = useState('')
   const [showHistory, setShowHistory] = useState(false)
-  const [feedback, setFeedback] = useState('')
+  const [feedback, setFeedback] = useScopedState(artifactId, '')
   const [applying, setApplying] = useState(false)
   const [preparingRevision, setPreparingRevision] = useState(false)
-  const readEpoch = useRef(0)
-  const load = useCallback(async () => {
-    setLoading(true)
+  const readVersions = useCallback(async () => {
     let referenceError = ''
-    try {
-      const [runResult, artifactResult, nextIssues, rows, project, snapshot, nextNames] = await Promise.all([
-        callAuthorTool<{ runs: CreativeRun[] }>('novelforge.workflows.list', { novelId }),
-        callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, limit: 200 }),
-        window.electron.revision.list(novelId), window.electron.chapter.list(novelId), window.electron.novel.get(novelId), window.electron.storyAtlas.query({ novelId, includePlanned: true }),
-        loadDocumentNames(novelId, value => { referenceError = value }),
-      ])
-      setRuns(runResult.runs); setArtifacts(artifactResult.artifacts); setIssues(nextIssues); setChapters(rows); setNovel(project); setAtlas(snapshot); setNames(nextNames); setError(referenceError)
-      setSelectedRun(current => runResult.runs.find(run => run.runId === current?.runId) || runResult.runs[0] || null)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '读取版本记录失败') }
-    finally { setLoading(false) }
+    const [runResult, artifactResult, issues, chapters, novel, atlas, names] = await Promise.all([
+      callAuthorTool<{ runs: CreativeRun[] }>('novelforge.workflows.list', { novelId }),
+      callAuthorTool<{ artifacts: ArtifactReference[] }>('novelforge.artifacts.list', { novelId, limit: 200 }),
+      window.electron.revision.list(novelId), window.electron.chapter.list(novelId), window.electron.novel.get(novelId), window.electron.storyAtlas.query({ novelId, includePlanned: true }),
+      loadDocumentNames(novelId, value => { referenceError = value }),
+    ])
+    return { runs: runResult.runs, artifacts: artifactResult.artifacts, issues, chapters, novel, atlas, names, referenceError }
   }, [novelId])
-  useEffect(() => { void load() }, [load])
+  const { data, loading, error: listError, reload: load } = useAsyncSnapshot(readVersions)
+  const [polledRuns, setPolledRuns] = useScopedState<Record<string, CreativeRun>>(data, {})
+  const runs = useMemo(() => (data?.runs || []).map(run => polledRuns[run.runId] || run), [data, polledRuns])
+  const artifacts = data?.artifacts || []
+  const issues = data?.issues || []
+  const chapters = data?.chapters || []
+  const novel = data?.novel || null
+  const atlas = data?.atlas || null
+  const names = data?.names || {}
+  const selectedRun = runs.find(run => run.runId === selectedRunId) || runs[0] || null
+  const readArtifact = useCallback(async () => {
+    if (!artifactId) return null
+    const { artifact } = await callAuthorTool<{ artifact: ArtifactReference & { content: unknown } }>('novelforge.artifacts.get', { artifactId })
+    if (artifact.novelId !== novelId) throw new Error('这份内容属于另一部作品。')
+    const review = artifact.reviewArtifactId
+      ? await callAuthorTool<{ artifact: ArtifactReference & { content: unknown } }>('novelforge.artifacts.get', { artifactId: artifact.reviewArtifactId })
+      : null
+    if (review && review.artifact.novelId !== novelId) throw new Error('这份评审属于另一部作品。')
+    return { artifact, review: review?.artifact.content ?? null }
+  }, [artifactId, novelId])
+  const { data: detail, loading: detailPending, error: detailError, reload: reloadArtifact } = useAsyncSnapshot(readArtifact)
+  const artifact = detail?.artifact || null
+  const review = detail?.review ?? null
+  const reading = Boolean(artifactId) && detailPending && !detail
+  const refresh = async () => {
+    setError('')
+    await Promise.all([load(), reloadArtifact()])
+  }
+  const openArtifact = useCallback(async (id: string) => {
+    if (id === artifactId) await reloadArtifact()
+    else setParams({ artifact: id })
+  }, [artifactId, reloadArtifact, setParams])
+  const displayError = error || (detailError instanceof Error ? detailError.message : detailError ? '读取版本失败' : '') || (listError instanceof Error ? listError.message : listError ? '读取版本记录失败' : '') || data?.referenceError
   useEffect(() => {
     if (!selectedRun || !isRunActive(selectedRun)) return
     let alive = true
     const timer = window.setTimeout(() => {
       void callAuthorTool<{ run: CreativeRun | null }>('novelforge.workflows.get', { novelId, runId: selectedRun.runId }).then(({ run }) => {
         if (!alive || !run) return
-        setSelectedRun(run); setRuns(current => current.map(item => item.runId === run.runId ? run : item))
+        setPolledRuns(current => ({ ...current, [run.runId]: run }))
         if (run.step === 'completed') { window.dispatchEvent(new Event('novelforge:creative-completed')); void load() }
       }).catch(cause => { if (alive) setError(String(cause)) })
     }, 1600)
     return () => { alive = false; window.clearTimeout(timer) }
-  }, [novelId, selectedRun, load])
-  const openArtifact = useCallback(async (id: string) => {
-    const epoch = ++readEpoch.current
-    setReading(true); setReview(null)
-    try {
-      const result = await callAuthorTool<{ artifact: ArtifactReference & { content: unknown } }>('novelforge.artifacts.get', { artifactId: id })
-      if (epoch !== readEpoch.current) return
-      if (result.artifact.novelId !== novelId) throw new Error('这份内容属于另一部作品。')
-      setArtifact(result.artifact); setFeedback(''); setError('')
-      if (result.artifact.reviewArtifactId) {
-        const reviewResult = await callAuthorTool<{ artifact: { content: unknown } }>('novelforge.artifacts.get', { artifactId: result.artifact.reviewArtifactId })
-        if (epoch === readEpoch.current) setReview(reviewResult.artifact.content)
-      }
-    } catch (cause) { if (epoch === readEpoch.current) setError(cause instanceof Error ? cause.message : '读取版本失败') }
-    finally { if (epoch === readEpoch.current) setReading(false) }
-  }, [novelId])
-  useEffect(() => { const id = params.get('artifact'); if (id) { setView('versions'); void openArtifact(id) } else if (params.get('issue')) setView('issues') }, [params, openArtifact])
-  useEffect(() => () => { readEpoch.current += 1 }, [])
+  }, [novelId, selectedRun, load, setPolledRuns])
   const artifactRun = runs.find(run => run.artifactId === artifact?.id || run.reviewArtifactId === artifact?.id)
   const candidate = candidateValue(artifact?.content)
   const parsed = recordOf(candidate)
@@ -122,10 +131,10 @@ export default function Versions({ novelId }: { novelId: number }) {
     finally { setPreparingRevision(false) }
   }
 
-  return <AuthorPage title="版本与问题" actions={<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>}>
+  return <AuthorPage title="版本与问题" actions={<Button icon={<ReloadOutlined />} onClick={() => void refresh()} loading={loading || reading}>刷新</Button>}>
     <div className="author-atlas-toolbar"><div className="author-tabs" role="tablist">{[{ key: 'runs', label: '创作记录' }, { key: 'versions', label: '内容版本' }, { key: 'issues', label: '待处理问题' }].map(tab => <button key={tab.key} role="tab" aria-selected={view === tab.key} onClick={() => setView(tab.key)}>{tab.label}</button>)}</div><Checkbox checked={showHistory} onChange={event => setShowHistory(event.target.checked)}>显示历史与已处理</Checkbox></div>
-    {error && <LoadFailure message={error} retry={() => void load()} />}
-    {loading && !runs.length && !artifacts.length ? <Spin /> : view === 'runs' ? runs.length ? <div className="author-history-layout"><div className="author-history-list">{runs.map(run => <button key={run.runId} className={selectedRun?.runId === run.runId ? 'is-selected' : ''} onClick={() => setSelectedRun(run)}><small>{run.operation === 'review' ? '仅评审' : CREATIVE_STAGE_LABELS[run.stage]} · {runStatusLabel(run)} · 第 {run.atChapter} 章</small><strong>{run.request}</strong><time>{run.createdAt ? new Date(run.createdAt).toLocaleString() : ''}</time></button>)}</div><div>{selectedRun && <RunProgress run={selectedRun} active={isRunActive(selectedRun)} onCancel={() => void control('cancel', selectedRun)} onResume={() => void control('resume', selectedRun)} onOpenResult={() => setParams({ artifact: selectedRun.artifactId || '' })} />}</div></div> : <EmptyWork title="还没有创作记录">创作与独立评审的过程会保存在这里。</EmptyWork> : view === 'versions' ? <div className="author-history-layout"><div className="author-history-list">{visibleArtifacts.map(item => <button key={item.id} className={artifact?.id === item.id ? 'is-selected' : ''} onClick={() => setParams({ artifact: item.id })}><small>{STATUS_LABELS[item.status]} · 版本 {item.version}</small><strong>{runs.find(run => run.artifactId === item.id)?.request || (item.kind.includes('review') || item.kind === 'quality_report' ? '评审报告' : '创作内容')}</strong><time>{new Date(item.createdAt).toLocaleString()}</time></button>)}{artifacts.length >= 200 && <p className="author-muted">当前列出最近 200 份内容。旧内容可从对应创作记录进入。</p>}</div><section className="author-paper author-version-detail">{reading ? <Spin /> : artifact ? <>
+    {displayError && <LoadFailure message={displayError} retry={() => void refresh()} />}
+    {loading && !runs.length && !artifacts.length ? <Spin /> : view === 'runs' ? runs.length ? <div className="author-history-layout"><div className="author-history-list">{runs.map(run => <button key={run.runId} className={selectedRun?.runId === run.runId ? 'is-selected' : ''} onClick={() => setSelectedRunId(run.runId)}><small>{run.operation === 'review' ? '仅评审' : CREATIVE_STAGE_LABELS[run.stage]} · {runStatusLabel(run)} · 第 {run.atChapter} 章</small><strong>{run.request}</strong><time>{run.createdAt ? new Date(run.createdAt).toLocaleString() : ''}</time></button>)}</div><div>{selectedRun && <RunProgress run={selectedRun} active={isRunActive(selectedRun)} onCancel={() => void control('cancel', selectedRun)} onResume={() => void control('resume', selectedRun)} onOpenResult={() => setParams({ artifact: selectedRun.artifactId || '' })} />}</div></div> : <EmptyWork title="还没有创作记录">创作与独立评审的过程会保存在这里。</EmptyWork> : view === 'versions' ? <div className="author-history-layout"><div className="author-history-list">{visibleArtifacts.map(item => <button key={item.id} className={artifact?.id === item.id ? 'is-selected' : ''} onClick={() => setParams({ artifact: item.id })}><small>{STATUS_LABELS[item.status]} · 版本 {item.version}</small><strong>{runs.find(run => run.artifactId === item.id)?.request || (item.kind.includes('review') || item.kind === 'quality_report' ? '评审报告' : '创作内容')}</strong><time>{new Date(item.createdAt).toLocaleString()}</time></button>)}{artifacts.length >= 200 && <p className="author-muted">当前列出最近 200 份内容。旧内容可从对应创作记录进入。</p>}</div><section className="author-paper author-version-detail">{reading ? <Spin /> : artifact ? <>
       <div className="author-section-heading"><h2>{artifactRun?.operation === 'review' ? '章节评审报告' : `${STATUS_LABELS[artifact.status]} · 版本 ${artifact.version}`}</h2><small>{artifactRun ? `第 ${artifactRun.atChapter} 章 · ${CREATIVE_STAGE_LABELS[artifactRun.stage]}` : ''}</small></div>
       {artifactRun?.operation !== 'review' && artifact.status !== 'committed' && artifactRun?.reviewStatus === 'passed' && <Button type="primary" loading={applying} onClick={() => {
         setApplying(true)

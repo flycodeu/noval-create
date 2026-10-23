@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, EditOutlined } from '@ant-design/icons'
@@ -126,11 +127,14 @@ function buildChapterFormValues(contract?: ChapterContractAsset | null): Chapter
 }
 
 export default function ContractsPage({ novelId }: Props) {
+  return <ContractsWorkspace key={novelId} novelId={novelId} />
+}
+
+function ContractsWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<ChapterContractFormValues>()
-  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [savingChapter, setSavingChapter] = useState(false)
   const [sceneSavingId, setSceneSavingId] = useState<number | 'chapterless' | null>(null)
@@ -141,21 +145,25 @@ export default function ContractsPage({ novelId }: Props) {
   const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
   const [foreshadows, setForeshadows] = useState<ForeshadowLedgerEntry[]>([])
-  const [chapterContract, setChapterContract] = useState<ChapterContractAsset | null>(null)
-  const [sceneContracts, setSceneContracts] = useState<SceneContractAsset[]>([])
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
-  const [activeSceneKey, setActiveSceneKey] = useState<SceneKey | null>(null)
+  const [chapterContract, setChapterContract] = useScopedState<ChapterContractAsset | null>(activeChapterId, null)
+  const [sceneContracts, setSceneContracts] = useScopedState<SceneContractAsset[]>(activeChapterId, [])
+  const [activeSceneKey, setActiveSceneKey] = useScopedState<SceneKey | null>(activeChapterId, null)
   const [contractTab, setContractTab] = useState<ContractTab>('chapter')
   const [chapterKeyword, setChapterKeyword] = useState('')
-  const [chapterDirty, setChapterDirty] = useState(false)
-  const [sceneDirtyKeys, setSceneDirtyKeys] = useState<SceneKey[]>([])
+  const [chapterDirty, setChapterDirty] = useScopedState(activeChapterId, false)
+  const [sceneDirtyKeys, setSceneDirtyKeys] = useScopedState<SceneKey[]>(activeChapterId, [])
   const hasUnsavedChanges = chapterDirty || sceneDirtyKeys.length > 0
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const chapterDirtyRef = useRef(chapterDirty)
   const sceneDirtyKeysRef = useRef(sceneDirtyKeys)
+  const sceneContractsRef = useRef(sceneContracts)
   const routeChapterGuardRef = useRef(false)
-  chapterDirtyRef.current = chapterDirty
-  sceneDirtyKeysRef.current = sceneDirtyKeys
+  useLayoutEffect(() => {
+    chapterDirtyRef.current = chapterDirty
+    sceneDirtyKeysRef.current = sceneDirtyKeys
+    sceneContractsRef.current = sceneContracts
+  }, [chapterDirty, sceneDirtyKeys, sceneContracts])
   const [progressModalOpen, setProgressModalOpen] = useState(false)
   const [progressMode, setProgressMode] = useState<'character' | 'relationship' | 'resistance'>('character')
   const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
@@ -216,8 +224,9 @@ export default function ContractsPage({ novelId }: Props) {
     setChapterDirty(false)
     setSceneDirtyKeys([])
     form.setFieldsValue(buildChapterFormValues(contract))
-  }, [form])
+  }, [form, setActiveSceneKey, setChapterContract, setChapterDirty, setSceneContracts, setSceneDirtyKeys])
 
+  const [loading, setLoading] = useScopedState(loadBaseData, true)
   const refreshAll = useCallback(async (showLoading = false) => {
     const requestId = baseRequestRef.current + 1
     if (showLoading) {
@@ -238,11 +247,17 @@ export default function ContractsPage({ novelId }: Props) {
         setRefreshing(false)
       }
     }
-  }, [loadBaseData])
+  }, [loadBaseData, setLoading])
 
   useEffect(() => {
-    void refreshAll(true)
-  }, [refreshAll])
+    const requestId = baseRequestRef.current + 1
+    void loadBaseData().catch(error => {
+      if (baseRequestRef.current !== requestId) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }).finally(() => { if (baseRequestRef.current === requestId) setLoading(false) })
+    return () => { baseRequestRef.current += 1 }
+  }, [loadBaseData, setLoading])
 
   useEffect(() => {
     if (!routeChapterId) return
@@ -284,8 +299,6 @@ export default function ContractsPage({ novelId }: Props) {
   useEffect(() => {
     if (!activeChapterId) {
       chapterRequestRef.current += 1
-      setChapterContract(null)
-      setSceneContracts([])
       form.resetFields()
       return
     }
@@ -293,13 +306,16 @@ export default function ContractsPage({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
+    return () => { chapterRequestRef.current += 1 }
   }, [activeChapterId, form, loadChapterData])
 
-  useEffect(() => {
-    if (!routeSceneId) return
-    const routeScene = sceneContracts.find((scene) => scene.segmentId === routeSceneId)
+  const sceneRouteSource = useMemo(() => ({ routeSceneId, sceneContracts }), [routeSceneId, sceneContracts])
+  const [appliedSceneRoute, setAppliedSceneRoute] = useState<typeof sceneRouteSource | null>(null)
+  if (appliedSceneRoute !== sceneRouteSource) {
+    setAppliedSceneRoute(sceneRouteSource)
+    const routeScene = sceneContracts.find(scene => scene.segmentId === routeSceneId)
     if (routeScene) setActiveSceneKey(getSceneKey(routeScene))
-  }, [routeSceneId, sceneContracts])
+  }
 
   const activeChapter = useMemo(
     () => chapters.find((item) => item.id === activeChapterId) || null,
@@ -327,7 +343,7 @@ export default function ContractsPage({ novelId }: Props) {
       return
     }
     apply()
-  }, [chapterDirty, sceneDirtyKeys.length, searchParams, setSearchParams])
+  }, [chapterDirty, sceneDirtyKeys.length, searchParams, setSearchParams, setActiveSceneKey])
   const handleSceneSelect = useCallback((sceneKey: SceneKey) => {
     const apply = () => {
       setActiveSceneKey(sceneKey)
@@ -349,7 +365,7 @@ export default function ContractsPage({ novelId }: Props) {
       return
     }
     apply()
-  }, [sceneDirtyKeys, searchParams, setSearchParams])
+  }, [sceneDirtyKeys, searchParams, setSearchParams, setActiveSceneKey])
   const watchedContractValues = Form.useWatch([], form) as Partial<ChapterContractFormValues> | undefined
   const contractValues = useMemo<Partial<ChapterContractFormValues>>(
     () => watchedContractValues ?? {},
@@ -417,9 +433,10 @@ export default function ContractsPage({ novelId }: Props) {
   })), [foreshadows])
 
   const handleSaveChapterContract = async () => {
-    if (!activeChapterId) return
+    if (!activeChapterId || savingChapter) return
+    const requestAtStart = chapterRequestRef.current
     const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (!values || chapterRequestRef.current !== requestAtStart) return
     setSavingChapter(true)
     try {
       const result = await window.electron.contract.upsertChapter(activeChapterId, {
@@ -442,8 +459,12 @@ export default function ContractsPage({ novelId }: Props) {
         acceptanceNotes: splitLines(values.acceptanceNotesText),
         status: values.status,
       })
-      setChapterContract(result)
-      setChapterDirty(false)
+      if (chapterRequestRef.current === requestAtStart) {
+        setChapterContract(result)
+        const current = form.getFieldsValue(true)
+        const fields = Object.keys(values) as Array<keyof ChapterContractFormValues>
+        setChapterDirty(!fields.every(field => JSON.stringify(current[field]) === JSON.stringify(values[field])))
+      }
       message.success(getUserFacingMessage('contracts.chapterSaved'))
     } catch (error) {
       console.error(error)
@@ -533,7 +554,8 @@ export default function ContractsPage({ novelId }: Props) {
   }
 
   const handleSaveScene = async (scene: SceneContractAsset) => {
-    if (!activeChapterId) return
+    if (!activeChapterId || sceneSavingId !== null) return
+    const requestAtStart = chapterRequestRef.current
     setSceneSavingId(scene.segmentId ?? 'chapterless')
     try {
       const result = await window.electron.contract.upsertScene(activeChapterId, scene.segmentId ?? null, {
@@ -550,16 +572,19 @@ export default function ContractsPage({ novelId }: Props) {
         requiredForeshadowIds: scene.requiredForeshadowIds,
         status: scene.status,
       })
+      if (chapterRequestRef.current !== requestAtStart) return
       const savedKey = getSceneKey(scene)
+      const currentScene = sceneContractsRef.current.find(item => getSceneKey(item) === savedKey)
+      const changedDuringSave = JSON.stringify(currentScene) !== JSON.stringify(scene)
+      const remainingDirty = new Set(sceneDirtyKeysRef.current.filter(key => changedDuringSave || key !== savedKey))
       setSceneContracts((current) => {
-        const remainingDirty = new Set(sceneDirtyKeys.filter((key) => key !== savedKey))
         return result.map((serverItem) => {
           const key = getSceneKey(serverItem)
           if (!remainingDirty.has(key)) return serverItem
           return current.find((item) => getSceneKey(item) === key) || serverItem
         })
       })
-      setSceneDirtyKeys((current) => current.filter((key) => key !== savedKey))
+      if (!changedDuringSave) setSceneDirtyKeys((current) => current.filter((key) => key !== savedKey))
       message.success(getUserFacingMessage('contracts.sceneSaved', {
         segmentLabel: scene.segmentOrder ? ` · 场景 ${scene.segmentOrder}` : '',
       }))

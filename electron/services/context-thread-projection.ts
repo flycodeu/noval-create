@@ -228,7 +228,7 @@ function loadDueForeshadowRows(
       ON thread.id = ledger.linked_thread_id
      AND thread.novel_id = ledger.novel_id
     WHERE ledger.novel_id = ?
-      AND ledger.status NOT IN ('resolved', 'archived')
+      AND ledger.status NOT IN ('resolved', 'archived', 'merged')
       AND ledger.target_payoff_chapter > 0
       AND ledger.target_payoff_chapter <= ?
     ORDER BY
@@ -264,7 +264,7 @@ function loadStaleForeshadowIds(
       ON source_chapter.id = ledger.source_chapter_id
      AND source_chapter.novel_id = ledger.novel_id
     WHERE ledger.novel_id = ?
-      AND ledger.status NOT IN ('resolved', 'archived')
+      AND ledger.status NOT IN ('resolved', 'archived', 'merged')
       AND (
         ledger.target_payoff_chapter IS NULL
         OR ledger.target_payoff_chapter <= 0
@@ -300,6 +300,7 @@ function loadDueThreadIds(
         FROM foreshadow_ledger AS ledger
         WHERE ledger.novel_id = thread.novel_id
           AND ledger.linked_thread_id = thread.id
+          AND ledger.status <> 'merged'
       )
     ORDER BY
       CASE WHEN thread.target_payoff_chapter < ? THEN 0 ELSE 1 END ASC,

@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
@@ -26,6 +27,8 @@ function sleep(ms) {
 }
 
 function configureElectronProfile(root, role) {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
   // Chromium locks the Electron user-data directory before app.whenReady().
   // Keep that profile private per process, then point the database layer at
   // the shared test root after startup so the workers can race on one SQLite

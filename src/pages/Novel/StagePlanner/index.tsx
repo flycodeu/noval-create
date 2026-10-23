@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
@@ -10,7 +12,6 @@ import {
 } from '@ant-design/icons'
 import type {
   CreativeStage,
-  CreativeStageAssetBinding,
   CreativeStageAssetInput,
   CreativeStageCreateInput,
   CreativeStageContext,
@@ -125,86 +126,61 @@ type StageQualityReportHistoryEntry = StageQualityReportView & {
   contextVersion: number
 }
 
-export default function StagePlanner({ novelId }: Props) {
+export default function StagePlanner(props: Props) {
+  return <StagePlannerWorkspace key={props.novelId} {...props} />
+}
+
+function StagePlannerWorkspace({ novelId }: Props) {
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [createForm] = Form.useForm<CreativeStageCreateInput>()
   const [assetForm] = Form.useForm<CreativeStageAssetInput>()
   const [handoffForm] = Form.useForm<CreativeStageHandoffForm>()
-  const [stages, setStages] = useState<CreativeStage[]>([])
-  const [assets, setAssets] = useState<CreativeStageAssetBinding[]>([])
-  const [handoffs, setHandoffs] = useState<CreativeStageHandoffArtifact[]>([])
-  const [stageContext, setStageContext] = useState<CreativeStageContext | null>(null)
-  const [selectedStageId, setSelectedStageId] = useState<number | null>(() => {
-    if (typeof window === 'undefined') return null
+  const [selection, setSelection] = useState<{ rows: CreativeStage[] | null; id: number | null }>(() => {
+    if (typeof window === 'undefined') return { rows: null, id: null }
     const stored = Number(window.sessionStorage.getItem(`novelforge-stage-planner:${novelId}`))
-    return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+    return { rows: null, id: Number.isSafeInteger(stored) && stored > 0 ? stored : null }
   })
-  const loadRequestRef = useRef(0)
-  const assetsRequestRef = useRef(0)
-  const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<CreativeStage | null>(null)
   const [saving, setSaving] = useState(false)
-  const [qualityRunning, setQualityRunning] = useState(false)
-  const [stageQualityReport, setStageQualityReport] = useState<StageQualityReportView | null>(null)
-  const [stageQualityReports, setStageQualityReports] = useState<StageQualityReportHistoryEntry[]>([])
 
-  const selectedStage = useMemo(
-    () => stages.find((stage) => stage.id === selectedStageId) || stages[0] || null,
-    [selectedStageId, stages],
-  )
-  const load = useCallback(async () => {
-    const requestId = ++loadRequestRef.current
-    setLoading(true)
-    try {
-      const nextStages = await window.electron.creativeStage.list(novelId)
-      if (loadRequestRef.current !== requestId) return
-      setStages(nextStages)
-      setSelectedStageId((current) => current && nextStages.some((stage) => stage.id === current)
-        ? current
-        : nextStages.find((stage) => stage.status === 'active')?.id || nextStages[0]?.id || null)
-    } catch (error) {
-      if (loadRequestRef.current !== requestId) return
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (loadRequestRef.current === requestId) setLoading(false)
-    }
-  }, [novelId])
+  const readStages = useCallback(() => window.electron.creativeStage.list(novelId), [novelId])
+  const { data: stageRows, loading, error: stagesError, reload: load } = useAsyncSnapshot(readStages)
+  const stages = useMemo(() => stageRows ?? [], [stageRows])
+  const selectedStage = stages.find(stage => stage.id === selection.id)
+    || stages.find(stage => stage.status === 'active') || stages[0] || null
+  const selectedStageId = selectedStage?.id ?? null
+  if (stageRows && selection.rows !== stageRows) {
+    setSelection({ rows: stageRows, id: selectedStageId })
+  }
+  const setSelectedStageId = (id: number) => setSelection(current => ({ ...current, id }))
+  const [qualityRunning, setQualityRunning] = useScopedState(selectedStageId, false)
+  const readAssets = useCallback(async () => {
+    if (!selectedStageId) return null
+    const [context, handoffs] = await Promise.all([
+      window.electron.creativeStage.getContext(novelId, selectedStageId),
+      window.electron.creativeStage.listHandoffs(novelId, selectedStageId),
+    ])
+    return { context, handoffs }
+  }, [novelId, selectedStageId])
+  const { data: assetData, error: assetsError, reload: loadAssets } = useAsyncSnapshot(readAssets)
+  const stageContext = assetData?.context ?? null
+  const assets = assetData?.context.assets ?? []
+  const handoffs = useMemo(() => assetData?.handoffs ?? [], [assetData])
+  useEffect(() => {
+    const error = stagesError || assetsError
+    if (error) message.error(getErrorMessage(error, 'common.loadFailed'))
+  }, [stagesError, assetsError])
 
-  const loadAssets = useCallback(async (stageId: number | null) => {
-    const requestId = ++assetsRequestRef.current
-    if (!stageId) {
-      setAssets([])
-      setHandoffs([])
-      setStageContext(null)
-      return
-    }
-    try {
-      const [context, nextHandoffs] = await Promise.all([
-        window.electron.creativeStage.getContext(novelId, stageId),
-        window.electron.creativeStage.listHandoffs(novelId, stageId),
-      ])
-      if (assetsRequestRef.current !== requestId) return
-      setStageContext(context)
-      setAssets(context.assets)
-      setHandoffs(nextHandoffs)
-    } catch (error) {
-      if (assetsRequestRef.current !== requestId) return
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    }
-  }, [novelId])
-
-  const loadStageQualityHistory = useCallback(async (stageId: number | null) => {
-    if (!stageId) {
-      setStageQualityReports([])
-      return
-    }
+  const readQualityHistory = useCallback(async () => {
+    const stageId = selectedStageId
+    if (!stageId) return []
     try {
       const listResult = await window.electron.agentTools.call({
         toolId: 'novelforge.artifacts.list',
         input: { novelId, kind: 'quality_report', limit: 100 },
       })
-      if (!listResult.ok) return
+      if (!listResult.ok) return []
       const references = (listResult.data as { artifacts?: Array<{ id: string }> }).artifacts || []
       const reports = await Promise.all(references.map(async (reference): Promise<StageQualityReportHistoryEntry | null> => {
         const result = await window.electron.agentTools.call({
@@ -239,34 +215,20 @@ export default function StagePlanner({ novelId }: Props) {
       const sorted = reports
         .filter((report): report is StageQualityReportHistoryEntry => Boolean(report))
         .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-      setStageQualityReports(sorted)
-      setStageQualityReport(sorted[0] || null)
+      return sorted
     } catch {
       // 预览模式或旧后端可能没有工件列表能力；不影响阶段正文和门禁读取。
-      setStageQualityReports([])
+      return []
     }
-  }, [novelId])
-
-  useEffect(() => {
-    setStages([])
-    setAssets([])
-    setHandoffs([])
-    setStageContext(null)
-    setSelectedStageId(() => {
-      if (typeof window === 'undefined') return null
-      const stored = Number(window.sessionStorage.getItem(`novelforge-stage-planner:${novelId}`))
-      return Number.isSafeInteger(stored) && stored > 0 ? stored : null
-    })
-  }, [novelId])
-  useEffect(() => { void load() }, [load])
+  }, [novelId, selectedStageId])
+  const { data: qualityHistory, reload: loadStageQualityHistory } = useAsyncSnapshot(readQualityHistory)
+  const stageQualityReports = qualityHistory ?? []
+  const [selectedQualityReport, setStageQualityReport] = useScopedState<StageQualityReportView | null>(selectedStageId, null)
+  const stageQualityReport = selectedQualityReport || stageQualityReports[0] || null
   useEffect(() => {
     if (selectedStageId) window.sessionStorage.setItem(`novelforge-stage-planner:${novelId}`, String(selectedStageId))
   }, [novelId, selectedStageId])
-  useEffect(() => { void loadAssets(selectedStage?.id || null) }, [loadAssets, selectedStage?.id])
-  useEffect(() => {
-    setStageQualityReport(null)
-    void loadStageQualityHistory(selectedStage?.id || null)
-  }, [loadStageQualityHistory, selectedStage?.id])
+
   useEffect(() => {
     const handoff = handoffs[0]
     handoffForm.setFieldsValue(handoff ? {
@@ -340,7 +302,7 @@ export default function StagePlanner({ novelId }: Props) {
     try {
       await window.electron.creativeStage.upsertAsset({ ...values, stageId: selectedStage.id })
       assetForm.resetFields()
-      await loadAssets(selectedStage.id)
+      await loadAssets()
       await load()
       message.success(getUserFacingMessage('creativeStage.assetBound'))
     } catch (error) {
@@ -351,7 +313,7 @@ export default function StagePlanner({ novelId }: Props) {
   const handleRemoveAsset = async (assetId: number) => {
     try {
       await window.electron.creativeStage.removeAsset(assetId)
-      await loadAssets(selectedStage?.id || null)
+      await loadAssets()
       await load()
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -378,7 +340,7 @@ export default function StagePlanner({ novelId }: Props) {
       } else {
         message.success(getUserFacingMessage('creativeStage.handoffDraftSaved'))
       }
-      await loadAssets(selectedStage.id)
+      await loadAssets()
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
     }
@@ -388,7 +350,7 @@ export default function StagePlanner({ novelId }: Props) {
     if (!handoffs[0]) return
     try {
       await window.electron.creativeStage.reviewHandoff(handoffs[0].id)
-      await loadAssets(selectedStage?.id || null)
+      await loadAssets()
       message.success(getUserFacingMessage('creativeStage.handoffReviewed'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -399,7 +361,7 @@ export default function StagePlanner({ novelId }: Props) {
     if (!handoffs[0]) return
     try {
       await window.electron.creativeStage.approveHandoff(handoffs[0].id)
-      await loadAssets(selectedStage?.id || null)
+      await loadAssets()
       message.success(getUserFacingMessage('creativeStage.handoffApproved'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -431,7 +393,7 @@ export default function StagePlanner({ novelId }: Props) {
         ...data.report,
         artifactId: data.reportArtifact?.id,
       })
-      await loadStageQualityHistory(selectedStage.id)
+      await loadStageQualityHistory()
       message.success(getUserFacingMessage('creativeStage.qualityReportGenerated'))
     } catch (error) {
       message.error(getErrorMessage(error, 'common.loadFailed'))

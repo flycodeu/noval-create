@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import {
   CheckOutlined,
@@ -202,8 +202,10 @@ export default function WritebackCenterPage({ novelId }: Props) {
 
   const selectedChapterId = parseNumber(searchParams.get('chapterId'))
   const selectedRunId = parseNumber(searchParams.get('runId'))
-  routeValuesRef.current = { chapterId: selectedChapterId, runId: selectedRunId }
-  searchParamsRef.current = searchParams
+  useLayoutEffect(() => {
+    routeValuesRef.current = { chapterId: selectedChapterId, runId: selectedRunId }
+    searchParamsRef.current = searchParams
+  }, [selectedChapterId, selectedRunId, searchParams])
 
   const refresh = useCallback(async (chapterIdArg?: number | null, runIdArg?: number | null, showLoading = false) => {
     const requestId = ++refreshRequestRef.current
@@ -295,9 +297,6 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const currentDiff = filteredDiffs.find((item) => item.id === selectedDiffId) || filteredDiffs[0] || null
   const currentDiffIndex = currentDiff ? filteredDiffs.findIndex((item) => item.id === currentDiff.id) : -1
 
-  useEffect(() => {
-    setSelectedDiffId((current) => current && filteredDiffs.some((item) => item.id === current) ? current : filteredDiffs[0]?.id || null)
-  }, [filteredDiffs])
 
   const openEditModal = useCallback((diff: ChapterWritebackDiff) => {
     setEditingDiff(diff)
@@ -334,7 +333,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       actionInFlightRef.current = false
       setActionLoading(false)
     }
-  }, [activeRun?.id, centerData?.chapter?.id, notifyWorkspaceMutation, refresh])
+  }, [activeRun, centerData, notifyWorkspaceMutation, refresh])
 
   const prepareRun = useCallback(() => {
     if (!centerData?.chapter?.id) return
@@ -342,7 +341,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       const run = await window.electron.writeback.prepareRun(centerData.chapter?.id || 0, 'manual')
       await refresh(centerData.chapter?.id, run.id)
     }, '新的回写草案已生成。', null, false)
-  }, [centerData?.chapter?.id, refresh, runAction])
+  }, [centerData, refresh, runAction])
 
   const applyConfirmedRun = useCallback(() => {
     if (!activeRun) return

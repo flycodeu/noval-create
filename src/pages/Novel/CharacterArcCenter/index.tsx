@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Spin, Tag, message } from 'antd'
@@ -92,12 +93,13 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function CharacterArcCenterPage({ novelId }: Props) {
+  return <CharacterArcCenterWorkspace key={novelId} novelId={novelId} />
+}
+
+function CharacterArcCenterWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [dashboard, setDashboard] = useState<CharacterArcDashboard | null>(null)
   const [tab, setTab] = useState<'protagonist' | 'characters' | 'relationships'>('protagonist')
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null)
   const [selectedRelationKey, setSelectedRelationKey] = useState<string | null>(null)
@@ -111,7 +113,6 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)
   const [beatDraft, setBeatDraft] = useState<CharacterArcBeatInput>({ novelId, arcId: 0, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
-  const refreshRequestRef = useRef(0)
   const draftDirtyRef = useRef(false)
 
   const setDraftDirty = useCallback((value: boolean) => {
@@ -131,29 +132,16 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
     setRelationshipDraft((current) => current ? { ...current, ...patch } : current)
   }, [markDraftDirty])
 
-  const refresh = useCallback(async (showLoading = false) => {
-    const requestId = ++refreshRequestRef.current
-    if (showLoading) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
+  const readDashboard = useCallback(() => window.electron.characterArc.getArcDashboard(novelId), [novelId])
+  const { data: dashboard, loading: pending, error: loadError, reload: refresh } = useAsyncSnapshot(readDashboard)
+  const loading = pending && dashboard === null
+  const refreshing = pending && dashboard !== null
+  useEffect(() => {
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'common.loadFailed'))
     }
-    try {
-      const nextDashboard = await window.electron.characterArc.getArcDashboard(novelId)
-      if (refreshRequestRef.current === requestId) setDashboard(nextDashboard)
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
-  }, [novelId])
-
-  useEffect(() => { void refresh(true) }, [refresh])
+  }, [loadError])
 
   const characters = useMemo(() => dashboard?.availableCharacters || [], [dashboard?.availableCharacters])
   const protagonistCharacters = useMemo(() => characters.filter((item) => item.roleType === 'protagonist'), [characters])
@@ -165,8 +153,11 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const selectedArc = dashboard?.characterArcs.find((item) => item.characterId === selectedCharacterId) || null
   const selectedRelation = relations.find((item) => pairKey(item.charAId, item.charBId) === selectedRelationKey) || null
 
-  useEffect(() => {
-    if (!dashboard) return
+  const routeKey = JSON.stringify([searchParams.get('tab'), searchParams.get('characterId'), searchParams.get('pair')])
+  const routeSource = useMemo(() => ({ dashboard, routeKey }), [dashboard, routeKey])
+  const [appliedRoute, setAppliedRoute] = useState<typeof routeSource | null>(null)
+  if (dashboard && appliedRoute !== routeSource) {
+    setAppliedRoute(routeSource)
     const nextTab = searchParams.get('tab')
     if (nextTab === 'protagonist' || nextTab === 'characters' || nextTab === 'relationships') setTab(nextTab)
     const characterId = Number(searchParams.get('characterId') || '')
@@ -182,7 +173,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       const firstArc = dashboard.relationshipArcs[0]
       setSelectedRelationKey(firstArc ? pairKey(firstArc.charAId, firstArc.charBId) : (relations[0] ? pairKey(relations[0].charAId, relations[0].charBId) : null))
     }
-  }, [characters, dashboard, keyCharacters, protagonistCharacters, relations, searchParams, selectedCharacterId, selectedRelationKey])
+  }
 
   useEffect(() => {
     if (draftDirtyRef.current) return

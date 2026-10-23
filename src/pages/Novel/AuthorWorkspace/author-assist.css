@@ -1,0 +1,7 @@
+.author-assist-stack, .author-assist-card { display: grid; gap: 12px; min-width: 0; }
+.author-assist-stack label { display: grid; gap: 6px; color: var(--text-secondary); min-width: 0; }
+.author-assist-card { padding: 18px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-surface); }
+.author-assist-card p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.author-assist-source { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.author-assist-card blockquote { margin: 0; padding: 8px 12px; border-left: 2px solid var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 680px) { .author-assist-stack .author-diff-columns { grid-template-columns: 1fr; } }

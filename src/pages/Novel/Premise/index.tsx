@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Drawer, Form, Input, Modal, Space, Tag, message, notification } from 'antd'
 import {
@@ -329,10 +330,7 @@ export default function PremisePage({ novelId }: Props) {
     commonSenseRules: normalizeText(savedFormValues.commonSenseRules),
     bannedTerms: normalizeText(savedFormValues.bannedTerms),
   }), [savedFormValues])
-  const [lastSavedSignature, setLastSavedSignature] = useState(savedValuesSignature)
-  useEffect(() => {
-    setLastSavedSignature(savedValuesSignature)
-  }, [savedValuesSignature])
+  const [lastSavedSignature, setLastSavedSignature] = useScopedState(savedValuesSignature, savedValuesSignature)
   const currentFormValues = { ...savedFormValues, ...formValues }
   const currentValuesSignature = JSON.stringify({
     positioning: normalizeText(currentFormValues.positioning),
@@ -492,7 +490,7 @@ export default function PremisePage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [clearPendingResult, clearPersistedDrafts, currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, pendingResult?.appliedAt, pendingResultKey, setCurrentNovel])
+  }, [form, currentNovel, novelId, setCurrentNovel, setLastSavedSignature, clearPersistedDrafts, pendingResult, notifyWorkspaceMutation, clearPendingResult, pendingResultKey])
 
   const navigateToThemeVoice = () => {
     if (!hasUnsavedChanges) {

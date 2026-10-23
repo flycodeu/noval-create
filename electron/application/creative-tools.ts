@@ -16,13 +16,17 @@ import { parseStorySettingsDocument, buildStorySettingsPayload } from '../../src
 import { queryCreativeFacts } from '../services/creative-facts'
 import { getChapter, listChapters } from '../services/chapter.service'
 import { getChapterContract, listSceneContracts } from '../services/endgame-asset.service'
+import * as research from '../services/creative-research.service'
+import type { CreativeResearchDraft } from '../../src/shared/creative-research'
+import { resolveInspirationSource } from '../services/inspiration.service'
+import type { InspirationSource } from '../../src/shared/inspiration'
 
 const number: AgentToolJsonSchema = { type: 'integer', minimum: 1 }
 const string: AgentToolJsonSchema = { type: 'string', minLength: 1 }
 const requestFields: Record<string, AgentToolJsonSchema> = { novelId: number, stage: { enum: [...CREATIVE_STAGES] }, request: { type: 'string', minLength: 1, maxLength: 12000 }, count: { type: 'integer', minimum: 1, maximum: 50 }, atChapter: { type: 'integer', minimum: 0 }, autoApply: { type: 'boolean' }, sourceArtifactId: string, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 } }
 export function registerCreativeTools(registry: AgentToolRegistry): AgentToolRegistry {
-  function add(id: string, title: string, description: string, properties: Record<string, AgentToolJsonSchema>, required: string[], effect: AgentToolDescriptor['effect'], handler: (input: Record<string, unknown>) => unknown | Promise<unknown>): void {
-    registry.register({ descriptor: { id: `novelforge.${id}`, version: '2.0.0', domain: id.split('.')[0], title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: true }, effect, approval: 'policy', scopes: effect === 'read' ? [AGENT_TOOL_SCOPES.novelRead] : [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite], idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['creative-workspace'] }, handler: async input => {
+  function add(id: string, title: string, description: string, properties: Record<string, AgentToolJsonSchema>, required: string[], effect: AgentToolDescriptor['effect'], handler: (input: Record<string, unknown>) => unknown | Promise<unknown>, options: { scopes?: string[]; approval?: AgentToolDescriptor['approval'] } = {}): void {
+    registry.register({ descriptor: { id: `novelforge.${id}`, version: '2.0.0', domain: id.split('.')[0], title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: true }, effect, approval: options.approval || 'policy', scopes: options.scopes || (effect === 'read' ? [AGENT_TOOL_SCOPES.novelRead] : [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.canonWrite]), idempotent: true, taskMode: 'sync', timeoutClass: 'short', tags: ['creative-workspace'] }, handler: async input => {
       try { return await handler(input) } catch (error) {
         if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new AgentToolInvocationError(error.code, error.message)
         throw error
@@ -31,11 +35,11 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   }
   add('projects.create', '新建小说', '根据作者提供的书名、故事种子和限制创建空项目；不套用题材规则或自动造人物章节。需求来源单独保留。随后使用workflows.start逐步生成。', {
     title: { type: 'string', minLength: 1, maxLength: 200 }, background: { type: 'string', maxLength: 12000 }, constraints: { type: 'string', maxLength: 12000 },
+    synopsis: { type: 'string', maxLength: 4000 },
+    inspiration: { type: 'object', properties: { draftId: { type: 'string', minLength: 8, maxLength: 100 }, seed: { type: 'string', maxLength: 6000 }, directionTaskId: number, directionId: string, packagingTaskId: number, packagingId: string }, required: ['draftId', 'seed'], additionalProperties: false },
     genreId: number, modelConfigId: number, targetWords: { type: 'integer', minimum: 1, maximum: 10000000 }, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   }, ['title', 'idempotencyKey'], 'canonical_write', input => {
     if (!String(input.title).trim()) throw new Error('书名不能为空。')
-    if (input.modelConfigId) getModelConfigRecord(Number(input.modelConfigId))
-    if (input.genreId && !getSqlite().prepare('SELECT id FROM genres WHERE id=?').get(input.genreId)) throw new Error('题材不存在。')
     const fingerprint = hashArtifactContent(input)
     return getSqlite().transaction(() => {
       const existing = getSqlite().prepare("SELECT id,settings_json FROM novels WHERE json_valid(settings_json) AND json_extract(settings_json,'$.mcpCreation.idempotencyKey')=?").get(input.idempotencyKey) as { id: number; settings_json: string } | undefined
@@ -43,14 +47,62 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
         if (JSON.parse(existing.settings_json).mcpCreation.fingerprint !== fingerprint) throw new Error('幂等键已用于另一份开书需求。')
         return { project: getNovel(existing.id), source: JSON.parse(existing.settings_json).mcpCreation, idempotentReplay: true }
       }
-      const source = { kind: 'user_request', title: input.title, background: input.background || '', constraints: input.constraints || '', idempotencyKey: input.idempotencyKey, fingerprint, createdAt: new Date().toISOString() }
+      if (input.modelConfigId) getModelConfigRecord(Number(input.modelConfigId))
+      if (input.genreId && !getSqlite().prepare('SELECT id FROM genres WHERE id=?').get(input.genreId)) throw new Error('题材不存在。')
+      const source = { kind: 'user_request', title: input.title, background: input.background || '', constraints: input.constraints || '', idempotencyKey: input.idempotencyKey, fingerprint, createdAt: new Date().toISOString(),
+        ...(input.inspiration ? { inspiration: resolveInspirationSource(input.inspiration as unknown as InspirationSource, String(input.constraints || ''), String(input.background || '')) } : {}) }
       const settings = buildStorySettingsPayload({ premise: { constraints: String(input.constraints || '') } })
-      const id = createNovel({ title: String(input.title).trim(), userBackground: String(input.background || ''), genreId: input.genreId as number | undefined,
+      const id = createNovel({ title: String(input.title).trim(), ...(input.synopsis !== undefined ? { synopsis: String(input.synopsis) } : {}), userBackground: String(input.background || ''), genreId: input.genreId as number | undefined,
         modelConfigId: input.modelConfigId as number | undefined, targetWords: input.targetWords as number | undefined, settingsJson: JSON.stringify({ ...settings, mcpCreation: source }) })
       updateNovel(id, { worldRulesJson: JSON.stringify(createEmptyWorldRules()) })
       return { project: getNovel(id), source, idempotentReplay: false }
     }).immediate()
   })
+  const researchCategory = { enum: ['daoism', 'buddhism', 'politics', 'warfare', 'folk_life', 'strange_tales', 'humanity', 'narrative', 'other'] }
+  const researchEntry = {
+    type: 'object',
+    properties: {
+      sourceKey: { type: 'string', minLength: 1, maxLength: 160, pattern: '^author:[A-Za-z0-9._:-]+$' },
+      category: researchCategory,
+      title: { type: 'string', minLength: 1, maxLength: 120 },
+      sourceTitle: { type: 'string', maxLength: 160 },
+      sourceUrl: { type: 'string', maxLength: 500 },
+      tags: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 30 } },
+      content: { type: 'string', minLength: 1, maxLength: 4000 },
+      interpretation: { type: 'string', maxLength: 1200 },
+      novelConnection: { type: 'string', maxLength: 1200 },
+    },
+    required: ['category', 'title', 'content', 'interpretation', 'novelConnection'],
+    additionalProperties: false,
+  } satisfies AgentToolJsonSchema
+  add('research.list', '列出作者创作资料', '紧凑列出项目中的作者自建创作参考卡，可按关键词、分类筛选；需要完整正文时再调用 research.get。卡片保持 reference_only，不当作已确认设定。', {
+    novelId: number, query: { type: 'string', maxLength: 200 }, category: researchCategory, limit: { type: 'integer', minimum: 1, maximum: 200 },
+  }, ['novelId'], 'read', input => {
+    const entries = research.listCreativeResearch(Number(input.novelId), {
+      query: typeof input.query === 'string' ? input.query : undefined,
+      category: typeof input.category === 'string' ? input.category : undefined,
+      limit: typeof input.limit === 'number' ? input.limit : 40,
+    })
+    return { count: entries.length, entries: entries.map(entry => ({
+      sourceKey: entry.sourceKey, title: entry.title, category: entry.category, sourceTitle: entry.sourceTitle,
+      tags: entry.tags, preview: entry.content.slice(0, 180), updatedAt: entry.updatedAt,
+    })) }
+  })
+  add('research.get', '读取完整创作资料', '根据 sourceKey 读取一条作者自建资料卡的核心内容、深层含义和本作转化方向。', {
+    novelId: number, sourceKey: { type: 'string', minLength: 1, maxLength: 160, pattern: '^author:[A-Za-z0-9._:-]+$' },
+  }, ['novelId', 'sourceKey'], 'read', input => ({ entry: research.getCreativeResearch(Number(input.novelId), String(input.sourceKey)) }))
+  add('research.upsert', '创作或批量导入资料卡', '按 1 到 100 条批量新建或更新自由创作资料。每条都要写清概念/机制及代价、深层含义、与当前小说背景的原创转化；纯名词清单不符合要求。可补参考出处和标签。只保存为创作启发，不修改 Canon。省略 sourceKey 时按标题、分类和出处生成稳定编号，重复导入会更新同一卡。', {
+    novelId: number, entries: { type: 'array', minItems: 1, maxItems: 100, items: researchEntry },
+  }, ['novelId', 'entries'], 'draft_write', input => {
+    const entries = research.upsertCreativeResearch(Number(input.novelId), input.entries as CreativeResearchDraft[])
+    return { count: entries.length, entries: entries.map(entry => ({ sourceKey: entry.sourceKey, title: entry.title, category: entry.category, updatedAt: entry.updatedAt, canonDecision: entry.canonDecision })) }
+  }, { scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.draftCreate], approval: 'never' })
+  add('research.delete', '删除作者创作资料卡', '删除一条作者自建创作参考卡；不能删除联网来源或其他来源账本记录。', {
+    novelId: number, sourceKey: { type: 'string', minLength: 1, maxLength: 160, pattern: '^author:[A-Za-z0-9._:-]+$' },
+  }, ['novelId', 'sourceKey'], 'draft_write', input => {
+    research.deleteCreativeResearch(Number(input.novelId), String(input.sourceKey))
+    return { deleted: true, sourceKey: input.sourceKey }
+  }, { scopes: [AGENT_TOOL_SCOPES.novelRead, AGENT_TOOL_SCOPES.draftCreate], approval: 'never' })
   add('workflows.start', '启动创作阶段', '用界面配置的模型生成、独立评审、有限修订并应用；立即返回持久runId。各阶段均可增量扩展。默认自动应用通过审校的结果；失败保留候选。随后调用workflows.get查询。', requestFields, ['novelId', 'stage', 'request', 'idempotencyKey'], 'canonical_write', async input => ({ run: await workflow.startCreativeWorkflow(input as unknown as CreativeWorkflowInput) }))
   add('chapters.review', '仅评审已有章节', '根据当前章节、合同与可见资料进行模型评审，生成持久报告工件；不改正文。立即返回run，使用workflows.get查询，result.review包含报告。需要修订时另开chapter任务并明确原章位。', {
     novelId: number, chapterId: number, request: { type: 'string', minLength: 1, maxLength: 12000 }, idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },

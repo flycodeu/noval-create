@@ -10,6 +10,7 @@ import { analyzeStyleCompliance } from './style-compliance.service'
 import { runChatTask } from './task.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { resolveNarrativePolicy } from '../../src/shared/narrative-policy'
+import { AuthorLibraryError } from './author-library-error'
 
 export type { StyleFingerprint, StyleHardGuard }
 
@@ -166,10 +167,10 @@ export function parseStyleResult(raw: string): StyleFingerprint {
       abstractTokenDensity: clampPercentage(parsed.abstractTokenDensity, 8),
       sentencePatterns: normalizeStyleStringArray(parsed.sentencePatterns, 10),
       wordFrequencyProfile: normalizeWordFrequencyProfile(parsed.wordFrequencyProfile),
-      narrativeTechniques: parsed.narrativeTechniques || '',
-      dialogueStyle: parsed.dialogueStyle || '',
-      descriptionDensity: parsed.descriptionDensity || '',
-      paceProfile: parsed.paceProfile || '',
+      narrativeTechniques: typeof parsed.narrativeTechniques === 'string' ? parsed.narrativeTechniques : '',
+      dialogueStyle: typeof parsed.dialogueStyle === 'string' ? parsed.dialogueStyle : '',
+      descriptionDensity: typeof parsed.descriptionDensity === 'string' ? parsed.descriptionDensity : '',
+      paceProfile: typeof parsed.paceProfile === 'string' ? parsed.paceProfile : '',
       toneKeywords: normalizeStyleStringArray(parsed.toneKeywords, 12),
       forbiddenPatterns: normalizeStyleStringArray(parsed.forbiddenPatterns, 12),
       exampleExcerpts: normalizeExampleExcerpts(parsed.exampleExcerpts),
@@ -311,6 +312,8 @@ export async function createStyleFingerprint(
   options: { sourceType?: 'pasted' | 'chapters' | 'genre-default'; sourceChapterIds?: number[]; genreId?: number } = {},
 ): Promise<number> {
   const fingerprint = await analyzeReferenceText(text, modelConfigId)
+  if (![fingerprint.narrativeTechniques, fingerprint.dialogueStyle, fingerprint.paceProfile].some(value => typeof value === 'string' && value.trim())) throw new AuthorLibraryError('文风分析没有返回有效特征，请重试；未创建样稿记录。')
+  fingerprint.exampleExcerpts = fingerprint.exampleExcerpts.filter(excerpt => text.includes(excerpt))
   const stats = computeStyleStats(text)
   const db = getDb()
 
@@ -392,6 +395,12 @@ export function setActiveStyleFingerprint(novelId: number, fingerprintId: number
       throwUserFacingError('styleLab.activateWrongNovel')
     }
     if (record && !record.sourceText?.trim()) throw new Error('Cannot approve empty source text')
+    if (record?.sourceType === 'chapters') {
+      const ids = sourceChapterDigests(record, novelId).map(item => item.chapterId)
+      const text = db.select().from(chapters).where(and(eq(chapters.novelId, novelId), inArray(chapters.id, ids))).all()
+        .sort((left, right) => left.chapterNum - right.chapterNum).map(row => row.content || '').join('\n\n').slice(0, 48000)
+      if (text !== record.sourceText) throw new AuthorLibraryError('来源章节已变化，请重新分析后认可，不能认可旧样稿。')
+    }
     const settings = parseStyleSettings(novel.settingsJson)
     settings.styleSourceApproval = { version: 1, status: record ? 'approved' : 'revoked',
       digest: record ? styleSourceDigest(record) : '', approvedAt: new Date().toISOString(),
@@ -586,6 +595,7 @@ export async function runStyleAbTest(
   fingerprintId: number | null,
   sceneBrief: string,
   modelConfigId?: number,
+  options: { descriptiveOnly?: boolean } = {},
 ): Promise<StyleAbTestResult> {
   if (!sceneBrief.trim()) {
     throwUserFacingError('styleLab.sceneBriefRequired')
@@ -600,7 +610,7 @@ export async function runStyleAbTest(
     throwUserFacingError('styleLab.activateWrongNovel')
   }
 
-  const readerFirst = resolveNarrativePolicy(novel.settingsJson, true).policyVersion === 'reader-first-v1'
+  const readerFirst = options.descriptiveOnly || resolveNarrativePolicy(novel.settingsJson, true).policyVersion === 'reader-first-v1'
   const basePrompt = [
     readerFirst || fingerprintId === null ? '这是非正式试写。只使用场景给定事实；不得擅自补全人物关系、世界规则或结局。' : '',
     buildAbTestBasePrompt(sceneBrief),

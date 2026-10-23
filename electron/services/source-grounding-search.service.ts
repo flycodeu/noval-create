@@ -115,7 +115,8 @@ function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
 }
 
 function hasSourceGroundingEntries(input: SourceGroundingEnrichmentInput): boolean {
-  return getGroundingSourceLedgerEntries(input).some((entry) => !isChapterWritebackSourceLedgerEntry(entry))
+  return getGroundingSourceLedgerEntries(input).some((entry) => !isChapterWritebackSourceLedgerEntry(entry)
+    && entry.sourceType !== 'author_created' && entry.assetType !== 'creative_reference')
     || parseJsonRecordArray(input.canonFactCardsJson).length > 0
 }
 

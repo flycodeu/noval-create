@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Alert, Empty, Skeleton, Spin, Tabs, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import type { QualityDashboardData, QualityRepairAction, TaskPipelineStats } from '../../../types'
+import type { QualityDashboardData, QualityRepairAction } from '../../../types'
 import { WorkspaceContextSummary, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
@@ -34,70 +35,48 @@ function getQualityChapterListHeight(): number {
 }
 
 export default function QualityDashboard({ novelId }: Props) {
+  return <QualityDashboardWorkspace key={novelId} novelId={novelId} />
+}
+
+function QualityDashboardWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
-  const [data, setData] = useState<QualityDashboardData | null>(null)
-  const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
   const [filters, setFilters] = useState<QualityDashboardFilters>(DEFAULT_QUALITY_FILTERS)
   const [chapterListHeight, setChapterListHeight] = useState(getQualityChapterListHeight)
-  const loadedOnceRef = useRef(false)
-  const loadRequestRef = useRef(0)
+  const [selectionSource, setSelectionSource] = useState<QualityDashboardData | null>(null)
 
-  const loadData = useCallback(async (showLoading = false) => {
-    const requestId = ++loadRequestRef.current
-    if (showLoading || !loadedOnceRef.current) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
+  const read = useCallback(async () => {
     try {
-      try {
-        await window.electron.quality.backfillRecallSnapshots(novelId)
-      } catch (error) {
-        console.warn('Failed to backfill recall runtime snapshots before loading quality dashboard', error)
-      }
-      const [result, nextPipelineStats] = await Promise.all([
-        window.electron.quality.getDashboard(novelId),
-        window.electron.task.getPipelineStats(novelId),
-      ])
-      if (loadRequestRef.current !== requestId) return
-      setData(result)
-      setPipelineStats(nextPipelineStats)
-      setLastSyncedAt(new Date())
-      setLoadError(null)
-      setSelectedChapter((current) => current
-        ? result.chapterDetails.find((entry) => entry.chapterId === current.chapterId)
-          || result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId)
-          || null
-        : null)
-      loadedOnceRef.current = true
+      await window.electron.quality.backfillRecallSnapshots(novelId)
     } catch (error) {
-      if (loadRequestRef.current !== requestId) return
-      console.error('Failed to load quality dashboard', error)
-      setPipelineStats(null)
-      setLoadError(error instanceof Error && error.message ? error.message : getUserFacingMessage('common.loadFailed'))
-    } finally {
-      if (loadRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
+      console.warn('Failed to backfill recall runtime snapshots before loading quality dashboard', error)
     }
+    const [data, pipelineStats] = await Promise.all([
+      window.electron.quality.getDashboard(novelId),
+      window.electron.task.getPipelineStats(novelId),
+    ])
+    return { data, pipelineStats, syncedAt: new Date() }
   }, [novelId])
+  const { data: snapshot, loading: pending, error, reload: loadData } = useAsyncSnapshot(read)
+  const data = snapshot?.data ?? null
+  const pipelineStats = error ? null : snapshot?.pipelineStats ?? null
+  const lastSyncedAt = snapshot?.syncedAt ?? null
+  const loading = pending && snapshot === null
+  const refreshing = pending && snapshot !== null
+  const loadError = error ? error instanceof Error && error.message ? error.message : getUserFacingMessage('common.loadFailed') : null
+  if (data && selectionSource !== data) {
+    setSelectionSource(data)
+    setSelectedVolumeId(current => data.volumeQualityMetrics.some(entry => entry.volumeId === current) ? current : null)
+    setSelectedChapter(current => current
+      ? data.chapterDetails.find(entry => entry.chapterId === current.chapterId)
+        || data.chapterDetails.find(entry => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId)
+        || null : null)
+  }
+  useEffect(() => { if (error) console.error('Failed to load quality dashboard', error) }, [error])
 
-  useEffect(() => { void loadData(true) }, [loadData])
-  useEffect(() => {
-    if (!data || selectedVolumeId == null) return
-    if (!data.volumeQualityMetrics.some((entry) => entry.volumeId === selectedVolumeId)) {
-      setSelectedVolumeId(null)
-    }
-  }, [data, selectedVolumeId])
   useEffect(() => {
     const handleResize = () => setChapterListHeight(getQualityChapterListHeight())
     window.addEventListener('resize', handleResize)
@@ -161,7 +140,7 @@ export default function QualityDashboard({ novelId }: Props) {
           primary: {
             key: 'quality-retry',
             label: '重试',
-            onClick: () => void loadData(true),
+            onClick: () => void loadData(),
           },
         }}
       >

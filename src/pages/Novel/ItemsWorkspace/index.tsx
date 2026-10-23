@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tabs, Tag, message } from 'antd'
@@ -337,13 +338,16 @@ function pickCurrentItemKind(
 }
 
 export default function ItemsWorkspace({ novelId }: Props) {
+  return <ItemsWorkspaceContent key={novelId} novelId={novelId} />
+}
+
+function ItemsWorkspaceContent({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const listHeight = useResponsivePanelHeight({ minHeight: 420, maxHeight: 720, fallback: 480 })
   const [form] = Form.useForm<ItemFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [pageData, setPageData] = useState<PagedResult<StoryItem>>(EMPTY_PAGE)
@@ -356,13 +360,13 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [applyingRecommendations, setApplyingRecommendations] = useState(false)
   const [selectedItem, setSelectedItem] = useState<StoryItem | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [activeEditorTab, setActiveEditorTab] = useState('overview')
   const [listMode, setListMode] = useState<'template' | 'instance'>('template')
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useScopedState(JSON.stringify([categoryFilter, keyword, listMode, recordStatusFilter]), 1)
   const [creating, setCreating] = useState(false)
+  const [activeEditorTab, setActiveEditorTab] = useScopedState(JSON.stringify([selectedId, creating]), 'overview')
   const [pendingItemNavigation, setPendingItemNavigation] = useState<(() => void) | null>(null)
   const [persistedFormSignature, setPersistedFormSignature] = useState(() => JSON.stringify(serialize(emptyValues('template'))))
   const routeFocusRef = useRef<number | null>(null)
@@ -539,25 +543,62 @@ export default function ItemsWorkspace({ novelId }: Props) {
     ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
   }), [categoryFilter, keyword, listMode, novelId, recordStatusFilter])
 
-  const refreshListState = useCallback(async (
-    targetPage: number,
-    isCurrent: () => boolean = () => true,
-  ) => {
+  const readPage = useCallback(async (targetPage: number) => {
     const query = buildQuery(targetPage)
     const [list, summary, nextFilters, nextWorkflowStats] = await Promise.all([
-      window.electron.item.query(query),
-      window.electron.item.getStats({ novelId }),
-      window.electron.item.getFilterOptions(novelId),
-      loadWorkflowStats(novelId),
+      window.electron.item.query(query), window.electron.item.getStats({ novelId }),
+      window.electron.item.getFilterOptions(novelId), loadWorkflowStats(novelId),
     ])
-    if (!isCurrent()) return list
-    setPageData(list)
-    setStats(summary)
-    setFilters(nextFilters)
-    setWorkflowStats(nextWorkflowStats)
-    return list
+    return { list, summary, nextFilters, nextWorkflowStats }
   }, [buildQuery, novelId])
+  const applyList = useCallback(({ list, summary, nextFilters, nextWorkflowStats }: Awaited<ReturnType<typeof readPage>>) => {
+    setPageData(list); setStats(summary); setFilters(nextFilters); setWorkflowStats(nextWorkflowStats)
+  }, [])
+  const refreshListState = useCallback(async (targetPage: number) => {
+    const result = await readPage(targetPage)
+    applyList(result)
+    return result.list
+  }, [applyList, readPage])
+  const applyPage = useCallback(async (
+    result: Awaited<ReturnType<typeof readPage>>,
+    preferredId: number | null | undefined,
+    options: { preserveCreating?: boolean },
+    detailRequestAtStart: number,
+    isCurrent: () => boolean,
+  ) => {
+    if (!isCurrent()) return
+    applyList(result)
+    const { list } = result
+    if (hasUnsavedChanges && typeof preferredId !== 'number') return
 
+    if (typeof preferredId === 'number') {
+      const loadedItem = await loadItemDetail(preferredId)
+      if (!isCurrent() || loadedItem) return
+    }
+
+    if (detailRequestRef.current !== detailRequestAtStart) return
+    if (options.preserveCreating && creatingRef.current) return
+
+    const currentSelectedId = selectedIdRef.current
+    const fallbackId = list.items.some((item) => item.id === currentSelectedId)
+      ? currentSelectedId
+      : list.items[0]?.id ?? null
+    if (fallbackId !== null) {
+      await loadItemDetail(fallbackId)
+    } else {
+      detailRequestRef.current += 1
+      selectedIdRef.current = null
+      creatingRef.current = false
+      setSelectedId(null)
+      setSelectedItem(null)
+      setDetailContext(EMPTY_DETAIL)
+      setLinkRecommendations(null)
+      form.resetFields()
+      await hydrateOptions()
+    }
+  }, [applyList, form, hasUnsavedChanges, hydrateOptions, loadItemDetail])
+  const pageLoadScope = useMemo(() => ({ readPage, page }), [readPage, page])
+  const [loading, setLoading] = useScopedState(pageLoadScope, true)
   const loadPage = useCallback(async (
     preferredId?: number | null,
     targetPage = 1,
@@ -568,48 +609,25 @@ export default function ItemsWorkspace({ novelId }: Props) {
     const isCurrent = () => pageRequestRef.current === requestId
     setLoading(true)
     try {
-      const list = await refreshListState(targetPage, isCurrent)
-      if (!isCurrent()) return
-      if (hasUnsavedChanges && typeof preferredId !== 'number') return
-
-      if (typeof preferredId === 'number') {
-        const loadedItem = await loadItemDetail(preferredId)
-        if (!isCurrent() || loadedItem) return
-      }
-
-      if (detailRequestRef.current !== detailRequestAtStart) return
-      if (options.preserveCreating && creatingRef.current) return
-
-      const currentSelectedId = selectedIdRef.current
-      const fallbackId = list.items.some((item) => item.id === currentSelectedId)
-        ? currentSelectedId
-        : list.items[0]?.id ?? null
-      if (fallbackId !== null) {
-        await loadItemDetail(fallbackId)
-      } else {
-        detailRequestRef.current += 1
-        selectedIdRef.current = null
-        creatingRef.current = false
-        setSelectedId(null)
-        setSelectedItem(null)
-        setDetailContext(EMPTY_DETAIL)
-        setLinkRecommendations(null)
-        form.resetFields()
-        await hydrateOptions()
-      }
+      await applyPage(await readPage(targetPage), preferredId, options, detailRequestAtStart, isCurrent)
     } finally {
       if (isCurrent()) setLoading(false)
     }
-  }, [form, hasUnsavedChanges, hydrateOptions, loadItemDetail, refreshListState])
+  }, [applyPage, readPage, setLoading])
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   useEffect(() => { creatingRef.current = creating }, [creating])
   useEffect(() => {
-    void loadPage(undefined, page, { preserveCreating: true }).catch((error) => {
+    const requestId = ++pageRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => pageRequestRef.current === requestId
+    void readPage(page).then(result => applyPage(result, undefined, { preserveCreating: true }, detailRequestAtStart, isCurrent)).catch(error => {
+      if (!isCurrent()) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
-    })
-  }, [loadPage, page])
+    }).finally(() => { if (isCurrent()) setLoading(false) })
+    return () => { pageRequestRef.current += 1 }
+  }, [applyPage, page, readPage, setLoading])
   useEffect(() => {
     if (!routeItemId || routeFocusRef.current === routeItemId) return
     routeFocusRef.current = routeItemId
@@ -618,15 +636,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [loadPage, routeItemId])
+  }, [loadPage, routeItemId, setPage])
 
-  useEffect(() => {
-    setPage(1)
-  }, [categoryFilter, keyword, listMode, recordStatusFilter])
 
-  useEffect(() => {
-    setActiveEditorTab('overview')
-  }, [selectedId, creating])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -705,7 +717,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [form, loadItemDetail, novelId, page, refreshListState, selectedItem?.id, selectedItem?.recordStatus, syncItemRoute])
+  }, [form, loadItemDetail, novelId, page, refreshListState, selectedItem, syncItemRoute])
 
   const requestItemNavigation = useCallback((action: () => void) => {
     if (!hasUnsavedChanges) {

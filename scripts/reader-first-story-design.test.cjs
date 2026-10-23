@@ -4,6 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const http = require('node:http')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 const isolatedPath = fs.mkdtempSync(path.join(os.tmpdir(), 'novelforge-rf09-'))
 process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath

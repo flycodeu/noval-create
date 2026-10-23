@@ -212,27 +212,27 @@ export default function WorldRules({ novelId }: Props) {
   )
   useRegisterWorkspaceLeaveGuard(worldRulesDirty)
   const worldRulesDirtyRef = React.useRef(false)
-  worldRulesDirtyRef.current = worldRulesDirty
+  React.useLayoutEffect(() => {
+    worldRulesDirtyRef.current = worldRulesDirty
+  }, [worldRulesDirty])
 
+  const readAutoStatus = useCallback(async () => {
+    const task = await window.electron.worldRules.getLatestAutoGenerateTask(novelId)
+    const status = task ? await window.electron.worldRules.getAutoGenerateStatus(task.id) : null
+    return { task, status: status || EMPTY_AUTO_STATUS }
+  }, [novelId])
+  const applyAutoStatus = useCallback((result: Awaited<ReturnType<typeof readAutoStatus>>, applyDraft: boolean) => {
+    setAutoTask(result.task)
+    setAutoStatus(result.status)
+    if (applyDraft && result.status.workingRules && !worldRulesDirtyRef.current) form.setFieldsValue(result.status.workingRules)
+  }, [form])
   const loadAutoStatus = useCallback(async (applyDraft = false) => {
     const requestId = ++autoStatusRequestRef.current
-    const latestTask = await window.electron.worldRules.getLatestAutoGenerateTask(novelId)
+    const result = await readAutoStatus()
     if (autoStatusRequestRef.current !== requestId) return null
-    setAutoTask(latestTask)
-
-    if (!latestTask) {
-      setAutoStatus(EMPTY_AUTO_STATUS)
-      return null
-    }
-
-    const latestStatus = await window.electron.worldRules.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
-    if (autoStatusRequestRef.current !== requestId) return null
-    setAutoStatus(latestStatus)
-    if (applyDraft && latestStatus.workingRules && !worldRulesDirtyRef.current) {
-      form.setFieldsValue(latestStatus.workingRules)
-    }
-    return latestTask
-  }, [form, novelId])
+    applyAutoStatus(result, applyDraft)
+    return result.task
+  }, [applyAutoStatus, readAutoStatus])
 
   useEffect(() => {
     if (worldRulesDirtyRef.current) return
@@ -240,11 +240,16 @@ export default function WorldRules({ novelId }: Props) {
   }, [form, parsedRules])
 
   useEffect(() => {
-    void loadAutoStatus(true).catch((error) => {
+    const requestId = ++autoStatusRequestRef.current
+    void readAutoStatus().then(result => {
+      if (autoStatusRequestRef.current === requestId) applyAutoStatus(result, true)
+    }).catch(error => {
+      if (autoStatusRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [loadAutoStatus])
+    return () => { autoStatusRequestRef.current += 1 }
+  }, [applyAutoStatus, readAutoStatus])
 
   useEffect(() => {
     const unsubscribe = window.electron.on('ai:world-rules-progress', (...args) => {
@@ -463,7 +468,7 @@ export default function WorldRules({ novelId }: Props) {
       autoActionRef.current = false
       setAutoStopping(false)
     }
-  }, [autoTask?.id, loadAutoStatus])
+  }, [autoTask, loadAutoStatus])
 
   const handleResumeAutoGenerate = useCallback(async () => {
     if (!autoTask?.id || autoActionRef.current) return
@@ -480,7 +485,7 @@ export default function WorldRules({ novelId }: Props) {
       autoActionRef.current = false
       setAutoLoading(false)
     }
-  }, [autoTask?.id, liveRules, loadAutoStatus])
+  }, [autoTask, liveRules, loadAutoStatus])
 
   const genreName = currentNovel?.genreName || liveRules.genreProfile.name || ''
   const isFantasyGenre = /仙侠|武侠|玄幻|修真|奇幻|异能/.test(genreName)

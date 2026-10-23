@@ -193,6 +193,10 @@ function ImpactSummary({ preview, compact = false }: { preview: BatchRollbackImp
 }
 
 export default function BatchWorkbench({ novelId }: Props) {
+  return <BatchWorkbenchWorkspace key={novelId} novelId={novelId} />
+}
+
+function BatchWorkbenchWorkspace({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [savingLocks, setSavingLocks] = useState(false)
   const [submittingInspection, setSubmittingInspection] = useState(false)
@@ -208,15 +212,19 @@ export default function BatchWorkbench({ novelId }: Props) {
   const [lockDraft, setLockDraft] = useState<GlobalLockLibrary | null>(null)
   const loadRequestRef = useRef(0)
 
+  const readData = useCallback((snapshotId?: number) => window.electron.batchWorkbench.getData(novelId, snapshotId), [novelId])
+  const applyData = useCallback((result: BatchWorkbenchData) => {
+    setData(result)
+    setInspectionChapterNum(current => !result.activeSnapshot || current === undefined ? undefined : result.activeSnapshot.chapterNums.includes(current) ? current : result.activeSnapshot.chapterNums[0])
+    setRollbackPreview(null)
+    setLockDraft(result.globalLockLibrary)
+  }, [])
   const loadData = useCallback(async (snapshotId?: number) => {
     const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
-      const result = await window.electron.batchWorkbench.getData(novelId, snapshotId)
-      if (loadRequestRef.current !== requestId) return
-      setData(result)
-      setRollbackPreview(null)
-      setLockDraft(result.globalLockLibrary)
+      const result = await readData(snapshotId)
+      if (loadRequestRef.current === requestId) applyData(result)
     } catch (error) {
       if (loadRequestRef.current !== requestId) return
       console.error(error)
@@ -224,11 +232,18 @@ export default function BatchWorkbench({ novelId }: Props) {
     } finally {
       if (loadRequestRef.current === requestId) setLoading(false)
     }
-  }, [novelId])
-
+  }, [applyData, readData])
   useEffect(() => {
-    void loadData()
-  }, [loadData])
+    const requestId = ++loadRequestRef.current
+    void readData().then(result => {
+      if (loadRequestRef.current === requestId) applyData(result)
+    }).catch(error => {
+      if (loadRequestRef.current !== requestId) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }).finally(() => { if (loadRequestRef.current === requestId) setLoading(false) })
+    return () => { loadRequestRef.current += 1 }
+  }, [applyData, readData])
 
   const activeSnapshot = data?.activeSnapshot || null
   const chapterOptions = useMemo(
@@ -238,15 +253,6 @@ export default function BatchWorkbench({ novelId }: Props) {
   const lockCount = lockEntryCount(lockDraft)
   const hasPreviewForCurrentMode = Boolean(rollbackPreview && rollbackPreview.mode === rollbackMode)
 
-  useEffect(() => {
-    if (!activeSnapshot) {
-      setInspectionChapterNum(undefined)
-      return
-    }
-    if (typeof inspectionChapterNum === 'number' && activeSnapshot.chapterNums.includes(inspectionChapterNum)) return
-    if (inspectionChapterNum === undefined) return
-    setInspectionChapterNum(activeSnapshot.chapterNums[0])
-  }, [activeSnapshot, inspectionChapterNum])
 
   const handleSaveLocks = useCallback(async () => {
     if (!lockDraft) return
@@ -267,7 +273,7 @@ export default function BatchWorkbench({ novelId }: Props) {
     } finally {
       setSavingLocks(false)
     }
-  }, [activeSnapshot?.id, loadData, lockDraft, novelId])
+  }, [activeSnapshot, loadData, lockDraft, novelId])
 
   const handleCreateInspection = useCallback(async () => {
     if (!activeSnapshot) return

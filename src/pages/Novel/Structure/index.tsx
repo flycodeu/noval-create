@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React from 'react'
 import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Progress, Segmented, Space, Spin, Tag, message } from 'antd'
 import {
@@ -160,14 +161,12 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   const [sceneTemplateOpen, setSceneTemplateOpen] = React.useState(false)
   const [sceneTemplateLoading, setSceneTemplateLoading] = React.useState(false)
   const [sceneTemplates, setSceneTemplates] = React.useState<SceneTemplate[]>([])
-  const [linkageSummary, setLinkageSummary] = React.useState<Awaited<ReturnType<typeof window.electron.structure.getLinkageSummary>> | null>(null)
+  const [linkageSummary, setLinkageSummary] = useScopedState<Awaited<ReturnType<typeof window.electron.structure.getLinkageSummary>> | null>(novelId, null)
   const [linkageSyncing, setLinkageSyncing] = React.useState(false)
   const [editorMode, setEditorMode] = React.useState<'chapter' | 'segment'>('chapter')
   const [navigatorOpen, setNavigatorOpen] = React.useState(false)
   const [inspectorOpen, setInspectorOpen] = React.useState(false)
   const [batchDrawerOpen, setBatchDrawerOpen] = React.useState(false)
-  const [chapterDirty, setChapterDirty] = React.useState(false)
-  const [segmentDirty, setSegmentDirty] = React.useState(false)
   const narrowLayout = useNarrowStructureLayout()
   const plannerLimits = React.useMemo(
     () => resolveStructurePlannerLimits(currentNovel?.targetWords),
@@ -253,6 +252,8 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     handleSegmentDragEnd,
     handleVolumeDragEnd,
   } = workspace
+  const [chapterDirty, setChapterDirty] = useScopedState(chapterDetail?.id, false)
+  const [segmentDirty, setSegmentDirty] = useScopedState(segmentDetail?.id, false)
   const applyStructureDraft = React.useCallback((draft: Record<string, unknown>) => {
     if (draft.draftKind === 'segment') {
       const currentValues = segmentForm.getFieldsValue(true)
@@ -280,7 +281,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       targetWords: normalizeOptionalNumber(draft.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
     })
     setChapterDirty(true)
-  }, [chapterForm, segmentForm])
+  }, [chapterForm, segmentForm, setChapterDirty, setSegmentDirty])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
     novelId,
     pageKey: 'structure',
@@ -303,18 +304,21 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     } finally {
       setSceneTemplateLoading(false)
     }
-  }, [currentNovel?.genreId, novelId])
+  }, [currentNovel, novelId])
 
+  const readLinkageSummary = React.useCallback(() => window.electron.structure.getLinkageSummary(novelId), [novelId])
   const loadLinkageSummary = React.useCallback(async () => {
-    const summary = await window.electron.structure.getLinkageSummary(novelId)
+    const summary = await readLinkageSummary()
     setLinkageSummary(summary)
     return summary
-  }, [novelId])
+  }, [readLinkageSummary, setLinkageSummary])
 
   React.useEffect(() => {
     if (loading) return
-    void loadLinkageSummary().catch(console.error)
-  }, [chapters.total, loadLinkageSummary, linked.total, loading, segments.total, volumes.length])
+    let active = true
+    void readLinkageSummary().then(summary => { if (active) setLinkageSummary(summary) }).catch(console.error)
+    return () => { active = false }
+  }, [chapters.total, readLinkageSummary, linked.total, loading, segments.total, volumes.length, setLinkageSummary])
 
   const applySceneTemplate = React.useCallback((template: SceneTemplate) => {
     const beats = parseSceneTemplateStringList(template.typicalBeatsJson)
@@ -339,7 +343,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     setSegmentDirty(true)
     setSceneTemplateOpen(false)
     message.success(getUserFacingMessage('structure.sceneTemplateApplied'))
-  }, [segmentForm])
+  }, [segmentForm, setSegmentDirty])
 
   const applyHierarchyPlan = React.useCallback(async (values: StructurePlannerFormValues) => {
     const planValues = clampPlannerValues(values, plannerLimits)
@@ -742,7 +746,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     await clearDraft()
     setChapterDirty(false)
     return true
-  }, [chapterForm, clearDraft, finalizeDraft, saveChapter])
+  }, [chapterForm, clearDraft, finalizeDraft, saveChapter, setChapterDirty])
 
   const saveSegmentEditor = React.useCallback(async () => {
     const finalData = segmentForm.getFieldsValue(true) as Record<string, unknown>
@@ -752,7 +756,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     await clearDraft()
     setSegmentDirty(false)
     return true
-  }, [clearDraft, finalizeDraft, saveSegment, segmentForm])
+  }, [clearDraft, finalizeDraft, saveSegment, segmentForm, setSegmentDirty])
 
   const hasUnsavedChanges = chapterDirty || segmentDirty
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
@@ -825,13 +829,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     })
   }, [narrowLayout, runGuardedAction, selectSegment])
 
-  React.useEffect(() => {
-    setChapterDirty(false)
-  }, [chapterDetail?.id])
 
-  React.useEffect(() => {
-    setSegmentDirty(false)
-  }, [segmentDetail?.id])
 
   React.useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {

@@ -98,7 +98,7 @@ export default function App() {
           />
         </div>
       ) : (
-      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HashRouter>
         <AppLayout>
           {localBackendStatus?.isWebPreview && localBackendStatus.status === 'unavailable' ? (
             <Alert

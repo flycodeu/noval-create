@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Spin, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
@@ -155,6 +157,10 @@ function buildFormValues(item?: Faction | null): FactionFormValues {
 }
 
 export default function FactionsPage({ novelId }: Props) {
+  return <FactionsWorkspace key={novelId} novelId={novelId} />
+}
+
+function FactionsWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
@@ -163,25 +169,27 @@ export default function FactionsPage({ novelId }: Props) {
   const [generateForm] = Form.useForm<FactionBatchGenerationOptions>()
   const [items, setItems] = useState<Faction[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [viewMode, setViewMode] = useState<FactionFocusView>('detail')
+  const viewParam = searchParams.get('view')
+  const [viewState, setViewState] = useState<{ route: string | null; value: FactionFocusView }>({ route: viewParam, value: viewParam === 'graph' ? 'graph' : 'detail' })
+  if (viewState.route !== viewParam) {
+    setViewState({ route: viewParam, value: viewParam === 'detail' || viewParam === 'graph' ? viewParam : viewState.value })
+  }
+  const viewMode = viewState.value
+  const setViewMode = (value: FactionFocusView) => setViewState(current => ({ ...current, value }))
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [stats, setStats] = useState({ total: 0, withLeaderCount: 0, territoryBoundCount: 0, relationCount: 0 })
   const [workflowStats, setWorkflowStats] = useState({ characterCount: 0, mapCount: 0 })
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [graphLoading, setGraphLoading] = useState(false)
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [generateOpen, setGenerateOpen] = useState(false)
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
   const [mapOptions, setMapOptions] = useState<MapNodeSummary[]>([])
-  const [graphData, setGraphData] = useState<FactionGraphPayload>(EMPTY_FACTION_GRAPH)
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState<FactionAutoGenerateStatus>(EMPTY_AUTO_STATUS)
   const [autoStopping, setAutoStopping] = useState(false)
   const refreshRequestRef = useRef(0)
-  const graphRequestRef = useRef(0)
   const autoStatusRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const autoActionRef = useRef(false)
@@ -196,6 +204,8 @@ export default function FactionsPage({ novelId }: Props) {
   const markDraftDirty = useCallback(() => setDraftDirty(true), [setDraftDirty])
 
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
+  const selectedItemRef = useRef(selectedItem)
+  useLayoutEffect(() => { selectedItemRef.current = selectedItem }, [selectedItem])
   const selectedValues = Form.useWatch([], form) as FactionFormValues | undefined
   const leaderNameMap = useMemo(
     () => new Map(characterOptions.map((item) => [item.id, item.fullName])),
@@ -209,82 +219,98 @@ export default function FactionsPage({ novelId }: Props) {
       .map((character) => character.id)
   }, [characterOptions, selectedItem, selectedValues?.name])
 
+  const readAutoStatus = useCallback(async () => {
+    const task = await window.electron.faction.getLatestAutoGenerateTask(novelId)
+    const status = task ? await window.electron.faction.getAutoGenerateStatus(task.id) : null
+    return { task, status: status || EMPTY_AUTO_STATUS }
+  }, [novelId])
+  const applyAutoStatus = useCallback((result: Awaited<ReturnType<typeof readAutoStatus>>) => {
+    setAutoTask(result.task)
+    setAutoStatus(result.status)
+  }, [])
   const refreshAutoStatus = useCallback(async () => {
     const requestId = ++autoStatusRequestRef.current
-    const latestTask = await window.electron.faction.getLatestAutoGenerateTask(novelId)
-    if (autoStatusRequestRef.current !== requestId) return
-    setAutoTask(latestTask)
-    if (!latestTask) {
-      setAutoStatus(EMPTY_AUTO_STATUS)
-      return
-    }
-    const status = await window.electron.faction.getAutoGenerateStatus(latestTask.id)
-    if (autoStatusRequestRef.current !== requestId) return
-    setAutoStatus(status || EMPTY_AUTO_STATUS)
-  }, [novelId])
+    const result = await readAutoStatus()
+    if (autoStatusRequestRef.current === requestId) applyAutoStatus(result)
+  }, [applyAutoStatus, readAutoStatus])
 
-  const refreshGraph = useCallback(async () => {
-    const requestId = ++graphRequestRef.current
-    setGraphLoading(true)
-    try {
-      const nextGraph = await window.electron.faction.getGraph({
-        novelId,
-        ...(selectedId ? { focusFactionId: selectedId } : {}),
-      })
-      if (graphRequestRef.current === requestId) setGraphData(normalizeFactionGraphPayload(nextGraph))
-    } catch (error) {
-      if (graphRequestRef.current === requestId) console.error(error)
-    } finally {
-      if (graphRequestRef.current === requestId) setGraphLoading(false)
-    }
-  }, [novelId, selectedId])
+  const readGraph = useCallback(async () => normalizeFactionGraphPayload(await window.electron.faction.getGraph({
+    novelId,
+    ...(selectedId ? { focusFactionId: selectedId } : {}),
+  })), [novelId, selectedId])
+  const { data: graphSnapshot, loading: graphLoading, error: graphError, reload: refreshGraph } = useAsyncSnapshot(readGraph)
+  const graphData = graphSnapshot ?? EMPTY_FACTION_GRAPH
+  useEffect(() => { if (graphError) console.error(graphError) }, [graphError])
 
+  const readList = useCallback(async () => {
+    const [page, nextStats, nextWorkflowStats, nextCharacters, nextMaps] = await Promise.all([
+      window.electron.faction.query({ novelId, keyword, page: 1, pageSize: 500 }),
+      window.electron.faction.getStats({ novelId }),
+      loadWorkflowStats(novelId),
+      window.electron.character.search(novelId, '', 120),
+      window.electron.map.searchNodes(novelId, '', 120),
+    ])
+    return { page, nextStats, nextWorkflowStats, nextCharacters, nextMaps }
+  }, [keyword, novelId])
+  const applyList = useCallback(({ page, nextStats, nextWorkflowStats, nextCharacters, nextMaps }: Awaited<ReturnType<typeof readList>>) => {
+    const draftItem = draftDirtyRef.current ? selectedItemRef.current : null
+    setItems(draftItem && !page.items.some(item => item.id === draftItem.id) ? [draftItem, ...page.items] : page.items)
+    setStats(nextStats)
+    setWorkflowStats({ characterCount: nextWorkflowStats.characterCount, mapCount: nextWorkflowStats.mapCount })
+    setCharacterOptions(nextCharacters)
+    setMapOptions(nextMaps)
+    setSelectedId((current) => {
+      if (creatingRef.current) return null
+      if (draftItem) return draftItem.id
+      if (current && page.items.some((item) => item.id === current)) return current
+      return page.items[0]?.id || null
+    })
+  }, [])
+  const loadingScope = useMemo(() => ({ readList, mutationToken }), [readList, mutationToken])
+  const [loading, setLoading] = useScopedState(loadingScope, true)
+  const reportLoadError = useCallback((error: unknown) => {
+    console.error(error)
+    message.error(getErrorMessage(error, 'common.loadFailed'))
+  }, [])
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
-      const [page, nextStats, nextWorkflowStats, nextCharacters, nextMaps] = await Promise.all([
-        window.electron.faction.query({ novelId, keyword, page: 1, pageSize: 500 }),
-        window.electron.faction.getStats({ novelId }),
-        loadWorkflowStats(novelId),
-        window.electron.character.search(novelId, '', 120),
-        window.electron.map.searchNodes(novelId, '', 120),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setItems(page.items)
-      setStats(nextStats)
-      setWorkflowStats({ characterCount: nextWorkflowStats.characterCount, mapCount: nextWorkflowStats.mapCount })
-      setCharacterOptions(nextCharacters)
-      setMapOptions(nextMaps)
-      setSelectedId((current) => {
-        if (creatingRef.current) return null
-        if (current && page.items.some((item) => item.id === current)) return current
-        return page.items[0]?.id || null
-      })
+      const result = await readList()
+      if (refreshRequestRef.current === requestId) applyList(result)
     } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [keyword, novelId])
-
-  useEffect(() => { void refresh() }, [mutationToken, refresh])
-  useEffect(() => { void refreshGraph() }, [refreshGraph])
+  }, [applyList, readList, reportLoadError, setLoading])
   useEffect(() => {
-    void refreshAutoStatus().catch((error) => {
+    const requestId = ++refreshRequestRef.current
+    void readList().then(result => {
+      if (refreshRequestRef.current === requestId) applyList(result)
+    }).catch(error => {
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
+    }).finally(() => {
+      if (refreshRequestRef.current === requestId) setLoading(false)
+    })
+    return () => { refreshRequestRef.current += 1 }
+  }, [applyList, loadingScope, readList, reportLoadError, setLoading])
+  useEffect(() => {
+    const requestId = ++autoStatusRequestRef.current
+    void readAutoStatus().then(result => {
+      if (autoStatusRequestRef.current === requestId) applyAutoStatus(result)
+    }).catch(error => {
+      if (autoStatusRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [refreshAutoStatus])
+    return () => { autoStatusRequestRef.current += 1 }
+  }, [applyAutoStatus, readAutoStatus])
   useEffect(() => {
     const queryId = Number(searchParams.get('factionId') || '')
     if (!creatingRef.current && queryId > 0 && items.some((item) => item.id === queryId)) {
       setSelectedId((current) => current === queryId ? current : queryId)
     }
-    const queryView = searchParams.get('view')
-    if (queryView === 'detail' || queryView === 'graph') setViewMode(queryView)
   }, [items, searchParams])
   useEffect(() => {
     const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
@@ -304,10 +330,6 @@ export default function FactionsPage({ novelId }: Props) {
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
-  useEffect(() => {
-    registerSaveHandler(() => { void handleSave() })
-    return () => registerSaveHandler(null)
-  })
 
   useEffect(() => {
     const reload = () => {
@@ -420,7 +442,9 @@ export default function FactionsPage({ novelId }: Props) {
         updateFocusRoute(id, 'detail')
       }
       creatingRef.current = false
-      setDraftDirty(false)
+      const current = form.getFieldsValue(true)
+      const fields = Object.keys(values) as Array<keyof FactionFormValues>
+      setDraftDirty(!fields.every(field => JSON.stringify(current[field]) === JSON.stringify(values[field])))
       notifyWorkspaceMutation()
       await Promise.all([refresh(), refreshGraph()])
       message.success(getUserFacingMessage('faction.saved'))
@@ -431,6 +455,11 @@ export default function FactionsPage({ novelId }: Props) {
       setSaving(false)
     }
   }
+
+  useEffect(() => {
+    registerSaveHandler(() => { void handleSave() })
+    return () => registerSaveHandler(null)
+  })
 
   const handleDelete = () => {
     if (!selectedItem) return
@@ -477,11 +506,10 @@ export default function FactionsPage({ novelId }: Props) {
           setDraftDirty(false)
           updateFocusRoute(null, 'detail')
           form.setFieldsValue(EMPTY_VALUES)
-          setGraphData(EMPTY_FACTION_GRAPH)
           setAutoTask(null)
           setAutoStatus(EMPTY_AUTO_STATUS)
           notifyWorkspaceMutation()
-          await Promise.all([refresh(), refreshAutoStatus()])
+          await Promise.all([refresh(), refreshAutoStatus(), refreshGraph()])
           message.success(getUserFacingMessage('faction.cleared'))
         } catch (error) {
           console.error(error)
@@ -489,7 +517,7 @@ export default function FactionsPage({ novelId }: Props) {
         }
       },
     })
-  }, [autoTask, form, novelId, notifyWorkspaceMutation, refresh, refreshAutoStatus, setDraftDirty, updateFocusRoute])
+  }, [autoTask, form, novelId, notifyWorkspaceMutation, refresh, refreshAutoStatus, refreshGraph, setDraftDirty, updateFocusRoute])
 
   useEffect(() => {
     registerClearHandler(() => {

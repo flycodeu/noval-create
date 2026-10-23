@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Collapse, Empty, Modal, Pagination, Select, Tag, message, type CollapseProps } from 'antd'
 import {
@@ -254,21 +255,15 @@ export default function TaskCenter() {
   const navigate = useNavigate()
   const loadVersionRef = useRef(0)
   const foregroundLoadRef = useRef(false)
-  const pollingLoadRef = useRef(false)
+  const pollingLoadRef = useRef(0)
   const [pageData, setPageData] = useState<PagedResult<Task>>(EMPTY_TASK_PAGE)
   const [stats, setStats] = useState<TaskStats>(EMPTY_TASK_STATS)
-  const [loading, setLoading] = useState(true)
   const [clearingHistory, setClearingHistory] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | Task['status']>('all')
   const [typeFilter, setTypeFilter] = useState<'all' | string>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [modelAttempts, setModelAttempts] = useState<ModelAttempt[]>([])
-  const [modelAttemptsLoading, setModelAttemptsLoading] = useState(false)
-  const [modelAttemptsError, setModelAttemptsError] = useState(false)
-  const [selectedContextStatus, setSelectedContextStatus] = useState<NovelContextStatus | null>(null)
-  const [selectedContextStatusError, setSelectedContextStatusError] = useState(false)
+  const [requestedTaskId, setSelectedId] = useState<number | null>(null)
   const { streams, clearStream } = useTaskStore()
 
   const buildTaskQueryInput = useCallback((overrides: Partial<TaskQueryInput> = {}): TaskQueryInput => ({
@@ -287,18 +282,22 @@ export default function TaskCenter() {
     [buildTaskQueryInput],
   )
 
+  const [loading, setLoading] = useScopedState(fetchTaskData, true)
+  const applyTasks = useCallback(([result, nextStats]: Awaited<ReturnType<typeof fetchTaskData>>) => {
+    setPageData(result)
+    setStats(nextStats)
+  }, [])
   const loadTasks = useCallback(async (options: { silent?: boolean; overrides?: Partial<TaskQueryInput> } = {}) => {
     if (options.silent && (foregroundLoadRef.current || pollingLoadRef.current)) return null
-    if (options.silent) pollingLoadRef.current = true
-    else foregroundLoadRef.current = true
     const requestId = ++loadVersionRef.current
+    if (options.silent) pollingLoadRef.current = requestId
+    else foregroundLoadRef.current = true
     if (!options.silent) setLoading(true)
 
     try {
       const [result, nextStats] = await fetchTaskData(options.overrides)
       if (requestId !== loadVersionRef.current) return null
-      setPageData(result)
-      setStats(nextStats)
+      applyTasks([result, nextStats])
       return result
     } catch (error) {
       if (requestId !== loadVersionRef.current) return null
@@ -308,17 +307,28 @@ export default function TaskCenter() {
       return null
     } finally {
       if (options.silent) {
-        pollingLoadRef.current = false
+        if (pollingLoadRef.current === requestId) pollingLoadRef.current = 0
       } else if (requestId === loadVersionRef.current) {
         foregroundLoadRef.current = false
         setLoading(false)
       }
     }
-  }, [fetchTaskData])
+  }, [applyTasks, fetchTaskData, setLoading])
 
   useEffect(() => {
-    void loadTasks()
-  }, [loadTasks])
+    const requestId = ++loadVersionRef.current
+    foregroundLoadRef.current = true
+    void fetchTaskData().then(result => {
+      if (loadVersionRef.current === requestId) applyTasks(result)
+    }).catch(error => {
+      if (loadVersionRef.current === requestId) message.error(getErrorMessage(error, 'taskCenter.loadFailed'))
+    }).finally(() => {
+      if (loadVersionRef.current !== requestId) return
+      foregroundLoadRef.current = false
+      setLoading(false)
+    })
+    return () => { loadVersionRef.current += 1; foregroundLoadRef.current = false }
+  }, [applyTasks, fetchTaskData, setLoading])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -327,42 +337,33 @@ export default function TaskCenter() {
     return () => clearInterval(timer)
   }, [loadTasks])
 
-  useEffect(() => {
-    if (pageData.items.length === 0) {
-      setSelectedId(null)
-      return
-    }
-
-    if (!selectedId || !pageData.items.some((task) => task.id === selectedId)) {
-      setSelectedId(pageData.items[0].id)
-    }
-  }, [pageData.items, selectedId])
 
   const selectedTask = useMemo(
-    () => pageData.items.find((task) => task.id === selectedId) || null,
-    [pageData.items, selectedId],
+    () => pageData.items.find((task) => task.id === requestedTaskId) || pageData.items[0] || null,
+    [pageData.items, requestedTaskId],
   )
+  const selectedId = selectedTask?.id ?? null
+  const attemptsKey = JSON.stringify([selectedId, selectedTask?.status, selectedTask?.updatedAt])
+  const [attemptsResult, setAttemptsResult] = useScopedState<{ data: ModelAttempt[]; error: boolean } | null>(attemptsKey, null)
+  const modelAttempts = useMemo(() => attemptsResult?.data ?? [], [attemptsResult])
+  const modelAttemptsError = attemptsResult?.error ?? false
+  const modelAttemptsLoading = selectedId !== null && attemptsResult === null
+  const contextNovelId = selectedTask?.novelId
+  const contextKey = JSON.stringify([contextNovelId, selectedTask?.updatedAt])
+  const [contextResult, setContextResult] = useScopedState<{ data: NovelContextStatus | null; error: boolean } | null>(contextKey, null)
+  const selectedContextStatus = contextResult?.data ?? null
+  const selectedContextStatusError = contextResult?.error ?? false
+
   useEffect(() => {
+    if (!selectedId) return
     let active = true
-    if (!selectedId) {
-      setModelAttempts([])
-      setModelAttemptsError(false)
-      return () => { active = false }
-    }
-    setModelAttemptsLoading(true)
     void window.electron.task.modelAttempts(selectedId).then((attempts) => {
-      if (!active) return
-      setModelAttempts(attempts)
-      setModelAttemptsError(false)
+      if (active) setAttemptsResult({ data: attempts, error: false })
     }).catch(() => {
-      if (!active) return
-      setModelAttempts([])
-      setModelAttemptsError(true)
-    }).finally(() => {
-      if (active) setModelAttemptsLoading(false)
+      if (active) setAttemptsResult({ data: [], error: true })
     })
     return () => { active = false }
-  }, [selectedId, selectedTask?.status, selectedTask?.updatedAt])
+  }, [selectedId, setAttemptsResult])
   const selectedRecoveryAction = useMemo(
     () => (selectedTask ? buildTaskRecoveryAction(selectedTask) : null),
     [selectedTask],
@@ -460,34 +461,15 @@ export default function TaskCenter() {
     : []
 
   useEffect(() => {
+    if (!contextNovelId) return
     let active = true
-    const novelId = selectedTask?.novelId
-    if (!novelId) {
-      setSelectedContextStatus(null)
-      setSelectedContextStatusError(false)
-      return () => {
-        active = false
-      }
-    }
-
-    setSelectedContextStatus(null)
-    setSelectedContextStatusError(false)
-    void window.electron.novel.getContextStatus(novelId).then((status) => {
-      if (active) {
-        setSelectedContextStatus(status)
-        setSelectedContextStatusError(false)
-      }
+    void window.electron.novel.getContextStatus(contextNovelId).then((status) => {
+      if (active) setContextResult({ data: status, error: false })
     }).catch(() => {
-      if (active) {
-        setSelectedContextStatus(null)
-        setSelectedContextStatusError(true)
-      }
+      if (active) setContextResult({ data: null, error: true })
     })
-
-    return () => {
-      active = false
-    }
-  }, [selectedTask?.novelId, selectedTask?.updatedAt])
+    return () => { active = false }
+  }, [contextNovelId, setContextResult])
 
   const handleStatusFilterChange = (value: 'all' | Task['status']) => {
     setStatusFilter(value)

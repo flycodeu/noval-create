@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Spin, Tag, message } from 'antd'
@@ -5,7 +6,6 @@ import { ApartmentOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutl
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   ResistanceBeatInput,
-  ResistanceDashboard,
   ResistanceKind,
   ResistanceTrack,
   ResistanceTrackInput,
@@ -123,12 +123,13 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function ResistancePage({ novelId }: Props) {
+  return <ResistanceWorkspace key={novelId} novelId={novelId} />
+}
+
+function ResistanceWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [dashboard, setDashboard] = useState<ResistanceDashboard | null>(null)
   const [tab, setTab] = useState<ResistanceTab>('characters')
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null)
   const [selectedFactionId, setSelectedFactionId] = useState<number | null>(null)
@@ -153,9 +154,8 @@ export default function ResistancePage({ novelId }: Props) {
     protagonistImpact: '',
     status: 'logged',
   })
-  const refreshRequestRef = useRef(0)
   const draftDirtyRef = useRef(false)
-  const creatingRef = useRef(false)
+  const [creating, setCreating] = useState(false)
 
   const setDraftDirty = useCallback((value: boolean) => {
     draftDirtyRef.current = value
@@ -169,31 +169,16 @@ export default function ResistancePage({ novelId }: Props) {
     setDraft((current) => current ? { ...current, ...patch } : current)
   }, [markDraftDirty])
 
-  const refresh = useCallback(async (showLoading = false) => {
-    const requestId = ++refreshRequestRef.current
-    if (showLoading) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-    try {
-      const nextDashboard = await window.electron.resistance.getDashboard(novelId)
-      if (refreshRequestRef.current === requestId) setDashboard(nextDashboard)
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
-  }, [novelId])
-
+  const readDashboard = useCallback(() => window.electron.resistance.getDashboard(novelId), [novelId])
+  const { data: dashboard, loading: pending, error: loadError, reload: refresh } = useAsyncSnapshot(readDashboard)
+  const loading = pending && dashboard === null
+  const refreshing = pending && dashboard !== null
   useEffect(() => {
-    void refresh(true)
-  }, [refresh])
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'common.loadFailed'))
+    }
+  }, [loadError])
 
   const characters = useMemo(() => dashboard?.availableCharacters || [], [dashboard?.availableCharacters])
   const factions = useMemo(() => dashboard?.availableFactions || [], [dashboard?.availableFactions])
@@ -236,8 +221,11 @@ export default function ResistancePage({ novelId }: Props) {
     return items.filter((item) => [item.title, item.sourceName, item.goal, item.currentPressureMode, item.latestBeatSummary].filter(Boolean).join(' ').toLowerCase().includes(needle))
   }, [keywordInput])
 
-  useEffect(() => {
-    if (!dashboard) return
+  const routeKey = JSON.stringify([searchParams.get('tab'), searchParams.get('characterId'), searchParams.get('factionId'), searchParams.get('trackId')])
+  const routeSource = useMemo(() => ({ dashboard, routeKey }), [dashboard, routeKey])
+  const [appliedRoute, setAppliedRoute] = useState<typeof routeSource | null>(null)
+  if (dashboard && appliedRoute !== routeSource) {
+    setAppliedRoute(routeSource)
     const resolveSelectedId = (queryKey: 'characterId' | 'factionId', items: Array<{ id: number }>, currentId: number | null) => {
       const requestedId = Number(searchParams.get(queryKey) || '')
       if (Number.isFinite(requestedId) && items.some((item) => item.id === requestedId)) return requestedId
@@ -265,35 +253,30 @@ export default function ResistancePage({ novelId }: Props) {
       const firstTrack = resolveFallbackTrack()
       setSelectedTrackId(firstTrack?.id || null)
     }
-  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, searchParams, selectedCharacterId, selectedFactionId, selectedTrackId, trackList])
+  }
 
-  useEffect(() => {
-    if (!dashboard) return
-    if (draftDirtyRef.current) return
+  const draftSource = useMemo(() => ({ dashboard, tab, selectedCharacterId, selectedFactionId, selectedTrackId, creating }), [dashboard, tab, selectedCharacterId, selectedFactionId, selectedTrackId, creating])
+  const [appliedDraftSource, setAppliedDraftSource] = useState<typeof draftSource | null>(null)
+  if (dashboard && !hasUnsavedChanges && appliedDraftSource !== draftSource) {
+    setAppliedDraftSource(draftSource)
     if (tab === 'characters') {
       const character = characters.find((item) => item.id === selectedCharacterId)
       const track = characterTracks.find((item) => item.sourceId === selectedCharacterId)
       setDraft(track ? buildTrackDraft(track) : character ? buildSourceDraft(novelId, 'characters', character.id, character.fullName) : null)
       setSelectedTrackId(track?.id || null)
-      setDraftDirty(false)
-      return
-    }
-    if (tab === 'factions') {
+    } else if (tab === 'factions') {
       const faction = factions.find((item) => item.id === selectedFactionId)
       const track = factionTracks.find((item) => item.sourceId === selectedFactionId)
       setDraft(track ? buildTrackDraft(track) : faction ? buildSourceDraft(novelId, 'factions', faction.id, faction.name) : null)
       setSelectedTrackId(track?.id || null)
-      setDraftDirty(false)
-      return
+    } else if (!(selectedTrackId == null && creating)) {
+      const scopedTracks = tab === 'environment' ? dashboard.environmentTracks : dashboard.institutionTracks
+      const track = scopedTracks.find((item) => item.id === selectedTrackId) || scopedTracks[0] || null
+      setCreating(false)
+      setDraft(track ? buildTrackDraft(track) : buildEnvironmentDraft(novelId, tab))
+      setSelectedTrackId(track?.id || null)
     }
-    const scopedTracks = tab === 'environment' ? dashboard.environmentTracks : dashboard.institutionTracks
-    if (selectedTrackId == null && creatingRef.current) return
-    const track = scopedTracks.find((item) => item.id === selectedTrackId) || scopedTracks[0] || null
-    creatingRef.current = false
-    setDraft(track ? buildTrackDraft(track) : buildEnvironmentDraft(novelId, tab))
-    setSelectedTrackId(track?.id || null)
-    setDraftDirty(false)
-  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, novelId, selectedCharacterId, selectedFactionId, selectedTrackId, setDraftDirty, tab])
+  }
 
   useEffect(() => {
     if (!hasUnsavedChanges) return
@@ -387,7 +370,7 @@ export default function ResistancePage({ novelId }: Props) {
   const selectTrack = useCallback((item: ResistanceTrack) => {
     if (!item.id) return
     confirmDraftNavigation(() => {
-      creatingRef.current = false
+      setCreating(false)
       setSelectedTrackId(item.id || null)
       setSearchParams((current) => {
         const next = new URLSearchParams(current)
@@ -413,7 +396,7 @@ export default function ResistancePage({ novelId }: Props) {
   const handleCreateStandalone = useCallback(() => {
     if (tab !== 'environment' && tab !== 'institution') return
     confirmDraftNavigation(() => {
-      creatingRef.current = true
+      setCreating(true)
       setSelectedTrackId(null)
       setDraft(buildEnvironmentDraft(novelId, tab))
       setDraftDirty(false)

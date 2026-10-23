@@ -1,6 +1,8 @@
 import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { pathToFileURL } from 'node:url'
+import { isAllowedExternalUrl, isTrustedRendererUrl } from './utils/renderer-navigation'
 import { execSync } from 'child_process'
 
 // Windows 终端默认 GBK 代码页会把主进程的 UTF-8 中文日志显示成乱码。
@@ -242,6 +244,21 @@ function createWindow() {
     mainWindow.maximize()
   }
 
+  const rendererEntry = process.env.ELECTRON_RENDERER_URL || pathToFileURL(path.join(__dirname, '../renderer/index.html')).href
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url, rendererEntry)) event.preventDefault()
+  })
+  mainWindow.webContents.on('will-redirect', (event, url) => {
+    if (!isTrustedRendererUrl(url, rendererEntry)) event.preventDefault()
+  })
+  mainWindow.webContents.on('will-frame-navigate', (event) => {
+    if (!isTrustedRendererUrl(event.url, rendererEntry)) event.preventDefault()
+  })
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url).catch(error => console.warn('[external-link]', error))
+    return { action: 'deny' }
+  })
+
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -251,11 +268,6 @@ function createWindow() {
   if (process.env.NOVELFORGE_OPEN_DEVTOOLS === '1') {
     mainWindow.webContents.openDevTools()
   }
-
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: 'deny' }
-  })
 
   const window = mainWindow
   window.on('close', (event) => {

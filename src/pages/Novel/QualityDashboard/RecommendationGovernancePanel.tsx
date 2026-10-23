@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { CheckCircleOutlined, FileProtectOutlined, LockOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
@@ -41,36 +42,18 @@ function recommendationStatusColor(status: RecommendationWorkspaceSnapshot['stat
 
 export default function RecommendationGovernancePanel({ novelId }: Props) {
   const [form] = Form.useForm<EvaluationFormValues>()
-  const [snapshot, setSnapshot] = useState<RecommendationWorkspaceSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState<'preflight' | 'lock' | 'record' | null>(null)
   const [recordOpen, setRecordOpen] = useState(false)
   const [recordIdempotencyKey, setRecordIdempotencyKey] = useState('')
-  const loadRequestRef = useRef(0)
   const actionInFlightRef = useRef(false)
 
-  const load = useCallback(async () => {
-    const requestId = ++loadRequestRef.current
-    setLoading(true)
-    try {
-      const nextSnapshot = unwrap<RecommendationWorkspaceSnapshot>(await window.electron.agentTools.call({
-        toolId: 'novelforge.recommendation.get_workspace',
-        input: { novelId },
-      }))
-      if (loadRequestRef.current === requestId) setSnapshot(nextSnapshot)
-    } catch (error) {
-      if (loadRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(error instanceof Error ? error.message : '推荐治理状态读取失败。')
-    } finally {
-      if (loadRequestRef.current === requestId) setLoading(false)
-    }
-  }, [novelId])
-
+  const read = useCallback(async () => unwrap<RecommendationWorkspaceSnapshot>(await window.electron.agentTools.call({
+    toolId: 'novelforge.recommendation.get_workspace', input: { novelId },
+  })), [novelId])
+  const { data: snapshot, loading, error, reload: load } = useAsyncSnapshot(read)
   useEffect(() => {
-    void load()
-    return () => { loadRequestRef.current += 1 }
-  }, [load])
+    if (error) message.error(error instanceof Error ? error.message : '推荐治理状态读取失败。')
+  }, [error])
 
   const matchingCandidate = useMemo(() => {
     if (!snapshot?.latestCandidate || !snapshot.latestPreflight) return null

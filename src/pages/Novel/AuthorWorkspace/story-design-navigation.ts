@@ -6,13 +6,14 @@ import { mergeCanonicalDocument, parseDocument, recordOf } from './content-docum
 
 export const STORY_DESIGN_TABS = [
   { key: 'background', label: '背景与定位' }, { key: 'story', label: '故事方向' },
-  { key: 'world', label: '世界规则' }, { key: 'constraints', label: '写作边界' },
+  { key: 'world', label: '世界规则' }, { key: 'sources', label: '创作资料' }, { key: 'constraints', label: '写作边界' },
   { key: 'style', label: '叙事与文风' }, { key: 'structure', label: '卷章与场景' },
 ]
 
 export const STORY_DESIGN_TOPICS: Record<string, Array<{ key: string; label: string }>> = {
   background: [{ key: 'background', label: '故事背景' }, { key: 'brief', label: '作品定位' }],
-  story: [{ key: 'premise', label: '故事起点' }, { key: 'storyDesign', label: '主线与支线' }, { key: 'endgameDesign', label: '结局与兑现' }, { key: 'facts', label: '信息点与秘密' }],
+  story: [{ key: 'premise', label: '故事起点' }, { key: 'storyDesign', label: '主线与支线' }, { key: 'endgameDesign', label: '结局与兑现' }, { key: 'facts', label: '信息点与秘密' }, { key: 'ledger', label: '故事账本' }],
+  sources: [],
   world: [
     { key: 'world:genreProfile', label: '世界基调' }, { key: 'world:powerSystems', label: '能力与限制' },
     { key: 'world:speciesSystem', label: '种属规则' }, { key: 'world:factionSystem', label: '组织与社会' },

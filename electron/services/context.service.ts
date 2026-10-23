@@ -2103,6 +2103,7 @@ function buildSourceCanonGroundingSummary(input: {
   const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
   const sourceLedgerEntries = getGroundingSourceLedgerEntries(input)
+    .filter(entry => entry.sourceType !== 'author_created' && entry.assetType !== 'creative_reference')
   const canonFactCards = parseJsonRecordArray(input.canonFactCardsJson)
 
   const historicalProfilePieces = [

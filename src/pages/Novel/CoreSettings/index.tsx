@@ -490,7 +490,7 @@ export default function CoreSettings({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [batchCount, clearDraft, currentNovel?.settingsJson, finalizeDraft, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty, subplots])
+  }, [batchCount, clearDraft, currentNovel, finalizeDraft, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty, subplots])
 
   const clearStoryDesign = React.useCallback(() => {
     Modal.confirm({

@@ -517,7 +517,7 @@ export function loadRelationRecallSources(
       LEFT JOIN chapters AS source_chapter
         ON source_chapter.id = ledger.source_chapter_id
        AND source_chapter.novel_id = ledger.novel_id
-      WHERE ledger.novel_id = ? AND ledger.id IN (${placeholders(explicitForeshadowIds.length)})
+      WHERE ledger.novel_id = ? AND ledger.status <> 'merged' AND ledger.id IN (${placeholders(explicitForeshadowIds.length)})
       ORDER BY ledger.target_payoff_chapter ASC, ledger.id ASC
     `, input.novelId, ...explicitForeshadowIds)
     const found = new Set(rows.map((row) => Number(row.id)))

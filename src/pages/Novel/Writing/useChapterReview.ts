@@ -86,8 +86,8 @@ export function useChapterReview(options: UseChapterReviewOptions) {
   const rewriteRequestEpoch = useRef(0)
   const optimizationChapterIdRef = useRef<number | null>(null)
 
-  const runAiCheck = useCallback(async () => {
-    if (!currentChapter) return
+  const runAiCheck = useCallback(async function runAiCheck() {
+    if (!currentChapter || currentChapterIdRef.current !== currentChapter.id) return
     const chapterId = currentChapter.id
     setActionError(null)
     try {
@@ -97,6 +97,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
       navigateToWritingRoute('review')
       await refreshQualityDashboard()
     } catch (error: unknown) {
+      if (currentChapterIdRef.current !== chapterId) return
       setActionError({
         title: '章节审校失败',
         message: getUserFacingMessage('writing.aiCheckFailed', {
@@ -198,8 +199,8 @@ export function useChapterReview(options: UseChapterReviewOptions) {
     await window.electron.novel.saveReaderFeedback(novelId, { ...input, chapterId: currentChapter.id, start: source.start, end: source.end, expectedContentHash: source.contentHash })
   }, [currentChapter, currentChapterIdRef, selectedSnippet, editorText, saveNow, novelId])
 
-  const optimizeChapter = useCallback(async () => {
-    if (!currentChapter || hasMultiSegments) return
+  const optimizeChapter = useCallback(async function optimizeChapter() {
+    if (!currentChapter || hasMultiSegments || currentChapterIdRef.current !== currentChapter.id) return
     const chapterId = currentChapter.id
     const latestText = editorText()
     setOptimizingChapter(true)
@@ -216,6 +217,7 @@ export function useChapterReview(options: UseChapterReviewOptions) {
       setOptimizeModalOpen(true)
       navigateToWritingRoute('review')
     } catch (error: unknown) {
+      if (currentChapterIdRef.current !== chapterId) return
       setActionError({
         title: '整章优化失败',
         message: getErrorMessage(error, 'writing.optimizeFailed'),

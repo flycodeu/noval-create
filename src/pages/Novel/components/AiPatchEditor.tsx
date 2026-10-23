@@ -15,7 +15,12 @@ interface AiPatchEditorProps {
   onApplied?: (result: unknown, patch: AiPatchResult) => void | Promise<void>
 }
 
-export default function AiPatchEditor({
+export default function AiPatchEditor(props: AiPatchEditorProps) {
+  const key = JSON.stringify([props.target?.type, props.target?.id, props.target?.novelId, props.target?.sectionKey])
+  return <TargetPatchEditor key={key} {...props} />
+}
+
+function TargetPatchEditor({
   target,
   title = '定向 AI 修改',
   description = '输入自然语言要求，AI 只生成字段级补丁；确认后才写入。',
@@ -31,14 +36,7 @@ export default function AiPatchEditor({
   const [result, setResult] = useState<AiPatchResult | null>(null)
   const operationRequestRef = useRef(0)
 
-  useEffect(() => {
-    operationRequestRef.current += 1
-    setOpen(false)
-    setInstruction('')
-    setResult(null)
-    setLoading(false)
-    setApplying(false)
-  }, [target?.type, target?.id, target?.sectionKey])
+  useEffect(() => () => { operationRequestRef.current += 1 }, [])
 
   const suggestPatch = async () => {
     if (!target || !instruction.trim()) return

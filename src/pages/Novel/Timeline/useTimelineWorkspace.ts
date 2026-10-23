@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
@@ -9,9 +11,6 @@ import type {
   PagedResult,
   StoryArc,
   StoryItem,
-  StoryStructureChapterSummary,
-  StoryStructurePartSummary,
-  StoryStructureSegmentSummary,
   StoryStructureVolumeSummary,
   TimelineEvent,
   TimelineFilterOptions,
@@ -79,16 +78,11 @@ export function useTimelineWorkspace(
   const [searchParams] = useSearchParams()
   const route = useMemo(() => parseTimelineRoute(searchParams), [searchParams])
   const routeKeyRef = useRef<string | null>(null)
-  const suppressRefreshRef = useRef(false)
-  const loadedOnceRef = useRef(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const refreshRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
-  const sharedRequestRef = useRef(0)
   const selectedIdRef = useRef<number | null>(null)
   const creatingRef = useRef(false)
-  const partsRequestRef = useRef({ filter: 0, form: 0 })
-  const chaptersRequestRef = useRef({ filter: 0, form: 0 })
-  const segmentsRequestRef = useRef(0)
   const saveActionRef = useRef(false)
   const dirtyRef = useRef(false)
 
@@ -96,8 +90,6 @@ export function useTimelineWorkspace(
   const [form] = Form.useForm<TimelineFormValues>()
   const [generateForm] = Form.useForm<TimelineGenerateValues>()
 
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
@@ -118,19 +110,17 @@ export function useTimelineWorkspace(
   const [statusFilter, setStatusFilter] = useState<TimelineStatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [keywordInput, setKeyword, keyword] = useDebouncedSearch('')
-  const [volumeFilter, setVolumeFilter] = useState<NumericFilter>('all')
-  const [partFilter, setPartFilter] = useState<NumericFilter>('all')
-  const [chapterFilter, setChapterFilter] = useState<NumericFilter>('all')
-  const [segmentFilter, setSegmentFilter] = useState<NumericFilter>('all')
-  const [page, setPage] = useState(1)
-
+  const routeKey = JSON.stringify([route.volumeId, route.partId, route.chapterId, route.segmentId, route.eventId, route.action])
+  const routeFilters = { volume: route.volumeId || 'all', part: route.partId || 'all', chapter: route.chapterId || 'all', segment: route.segmentId || 'all' } as const
+  const [filters, setFilters] = useState<{ source: string; volume: NumericFilter; part: NumericFilter; chapter: NumericFilter; segment: NumericFilter }>({ source: routeKey, ...routeFilters })
+  if (filters.source !== routeKey) setFilters({ source: routeKey, ...routeFilters })
+  const { volume: volumeFilter, part: partFilter, chapter: chapterFilter, segment: segmentFilter } = filters
+  const setVolumeFilter = useCallback((volume: NumericFilter) => setFilters(current => ({ ...current, volume, part: 'all', chapter: 'all', segment: 'all' })), [])
+  const setPartFilter = useCallback((part: NumericFilter) => setFilters(current => ({ ...current, part, chapter: 'all', segment: 'all' })), [])
+  const setChapterFilter = useCallback((chapter: NumericFilter) => setFilters(current => ({ ...current, chapter, segment: 'all' })), [])
+  const setSegmentFilter = useCallback((segment: NumericFilter) => setFilters(current => ({ ...current, segment })), [])
+  const [page, setPage] = useScopedState(JSON.stringify([keyword, routeKey]), 1)
   const [volumes, setVolumes] = useState<StoryStructureVolumeSummary[]>([])
-  const [filterParts, setFilterParts] = useState<StoryStructurePartSummary[]>([])
-  const [filterChapters, setFilterChapters] = useState<StoryStructureChapterSummary[]>([])
-
-  const [formParts, setFormParts] = useState<StoryStructurePartSummary[]>([])
-  const [formChapters, setFormChapters] = useState<StoryStructureChapterSummary[]>([])
-  const [formSegments, setFormSegments] = useState<StoryStructureSegmentSummary[]>([])
 
   const [arcs, setArcs] = useState<StoryArc[]>([])
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
@@ -169,6 +159,33 @@ export function useTimelineWorkspace(
   const watchedChapterEndId = Form.useWatch('chapterEndId', form)
   const watchedSegmentId = Form.useWatch('segmentId', form)
   const selectedTimeMode = Form.useWatch('timeMode', form) || defaultMode
+
+  const readFilterParts = useCallback(async () => volumeFilter === 'all' ? [] : (await window.electron.structure.listPartsPage(volumeFilter, 1, 200)).items, [volumeFilter])
+  const readFilterChapters = useCallback(async () => partFilter === 'all' ? [] : (await window.electron.structure.listChaptersPage(partFilter, 1, 200)).items, [partFilter])
+  const readFormParts = useCallback(async () => !watchedVolumeId ? [] : (await window.electron.structure.listPartsPage(watchedVolumeId, 1, 200)).items, [watchedVolumeId])
+  const readFormChapters = useCallback(async () => !watchedPartId ? [] : (await window.electron.structure.listChaptersPage(watchedPartId, 1, 200)).items, [watchedPartId])
+  // Resolve the segment directly. Deriving its parent from the segment list
+  // makes that list's own read depend on its previous result.
+  const readSegment = useCallback(async () => watchedSegmentId ? window.electron.structure.getSegment(watchedSegmentId) : null, [watchedSegmentId])
+  const segmentSnapshot = useAsyncSnapshot(readSegment)
+  const segmentChapterId = watchedSegmentId ? segmentSnapshot.data?.chapterId : watchedChapterStartId || watchedChapterEndId
+  const readFormSegments = useCallback(async () => segmentChapterId ? (await window.electron.structure.listSegmentsPage(segmentChapterId, 1, 200)).items : [], [segmentChapterId])
+  const filterPartsSnapshot = useAsyncSnapshot(readFilterParts)
+  const filterChaptersSnapshot = useAsyncSnapshot(readFilterChapters)
+  const formPartsSnapshot = useAsyncSnapshot(readFormParts)
+  const formChaptersSnapshot = useAsyncSnapshot(readFormChapters)
+  const formSegmentsSnapshot = useAsyncSnapshot(readFormSegments)
+  const filterParts = useMemo(() => filterPartsSnapshot.data ?? [], [filterPartsSnapshot.data])
+  const filterChapters = useMemo(() => filterChaptersSnapshot.data ?? [], [filterChaptersSnapshot.data])
+  const formParts = useMemo(() => formPartsSnapshot.data ?? [], [formPartsSnapshot.data])
+  const formChapters = useMemo(() => formChaptersSnapshot.data ?? [], [formChaptersSnapshot.data])
+  const formSegments = useMemo(() => formSegmentsSnapshot.data ?? [], [formSegmentsSnapshot.data])
+  const optionsError = filterPartsSnapshot.error || filterChaptersSnapshot.error || formPartsSnapshot.error || formChaptersSnapshot.error || segmentSnapshot.error || formSegmentsSnapshot.error
+  useEffect(() => {
+    if (!optionsError) return
+    console.error(optionsError)
+    message.error(getErrorMessage(optionsError, 'common.loadFailed'))
+  }, [optionsError])
 
   const modeLabel = TIME_MODE_OPTIONS.find((item) => item.value === selectedTimeMode)?.label || selectedTimeMode
   const laneItems = useMemo(
@@ -256,36 +273,20 @@ export function useTimelineWorkspace(
     [currentNovel, workflowStats],
   )
 
-  const loadShared = useCallback(async () => {
-    const requestId = ++sharedRequestRef.current
-    const [volumeRows, arcRows, nextFilters, nextWorkflowStats] = await Promise.all([
-      window.electron.structure.listVolumes(novelId),
-      window.electron.outline.getArcs(novelId),
-      window.electron.timeline.getFilterOptions(novelId),
-      loadWorkflowStats(novelId),
-    ])
-
-    if (sharedRequestRef.current !== requestId) return
-    setVolumes(volumeRows)
-    setArcs(arcRows)
-    setFilterOptions(nextFilters)
-    setWorkflowStats(nextWorkflowStats)
-  }, [novelId])
-
   const searchCharacters = useCallback(async (value = '') => {
     const rows = await window.electron.character.search(novelId, value, 20)
     setCharacterOptions((prev) => mergeEntitiesById(rows, prev))
-  }, [novelId])
+  }, [novelId, setCharacterOptions])
 
   const searchLocations = useCallback(async (value = '') => {
     const rows = await window.electron.map.searchNodes(novelId, value, 20)
     setLocationOptions((prev) => mergeEntitiesById(rows, prev))
-  }, [novelId])
+  }, [novelId, setLocationOptions])
 
   const searchItems = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'instance', 20)
     setItemOptions((prev) => mergeEntitiesById(rows, prev))
-  }, [novelId])
+  }, [novelId, setItemOptions])
 
   const hydrateOptions = useCallback(async (
     event?: TimelineEvent | null,
@@ -318,84 +319,12 @@ export function useTimelineWorkspace(
     setCharacterOptions(mergeEntitiesById(baseCharacters, extraCharacters))
     setLocationOptions(mergeEntitiesById(baseLocations, [extraLocation]))
     setItemOptions(mergeEntitiesById(baseItems, extraItems))
-  }, [novelId])
-
-  const loadPartsFor = useCallback(async (
-    volumeId?: number,
-    target: 'filter' | 'form' = 'filter',
-    isCurrent: () => boolean = () => true,
-  ) => {
-    const requestId = ++partsRequestRef.current[target]
-    if (!volumeId) {
-      if (!isCurrent()) return []
-      if (target === 'filter') {
-        setFilterParts([])
-      } else {
-        setFormParts([])
-      }
-      return []
-    }
-
-    const result = await window.electron.structure.listPartsPage(volumeId, 1, 200)
-    if (partsRequestRef.current[target] !== requestId || !isCurrent()) return []
-
-    if (target === 'filter') {
-      setFilterParts(result.items)
-    } else {
-      setFormParts(result.items)
-    }
-
-    return result.items
-  }, [])
-
-  const loadChaptersFor = useCallback(async (
-    partId?: number,
-    target: 'filter' | 'form' = 'filter',
-    isCurrent: () => boolean = () => true,
-  ) => {
-    const requestId = ++chaptersRequestRef.current[target]
-    if (!partId) {
-      if (!isCurrent()) return []
-      if (target === 'filter') {
-        setFilterChapters([])
-      } else {
-        setFormChapters([])
-      }
-      return []
-    }
-
-    const result = await window.electron.structure.listChaptersPage(partId, 1, 200)
-    if (chaptersRequestRef.current[target] !== requestId || !isCurrent()) return []
-
-    if (target === 'filter') {
-      setFilterChapters(result.items)
-    } else {
-      setFormChapters(result.items)
-    }
-
-    return result.items
-  }, [])
-
-  const loadSegmentsFor = useCallback(async (
-    chapterId?: number,
-    isCurrent: () => boolean = () => true,
-  ) => {
-    const requestId = ++segmentsRequestRef.current
-    if (!chapterId) {
-      if (!isCurrent()) return []
-      setFormSegments([])
-      return []
-    }
-
-    const result = await window.electron.structure.listSegmentsPage(chapterId, 1, 200)
-    if (segmentsRequestRef.current !== requestId || !isCurrent()) return []
-    setFormSegments(result.items)
-    return result.items
-  }, [])
+  }, [novelId, setCharacterOptions, setLocationOptions, setItemOptions])
 
   const loadEventDetail = useCallback(async (id: number) => {
     const requestId = ++detailRequestRef.current
-    const keepDraft = dirtyRef.current && selectedIdRef.current === id
+    const sameSelection = selectedIdRef.current === id
+    const keepDraft = dirtyRef.current && sameSelection
     selectedIdRef.current = id
     const isCurrent = () => detailRequestRef.current === requestId
     const row = await window.electron.timeline.get(id)
@@ -407,22 +336,10 @@ export function useTimelineWorkspace(
       selectedIdRef.current = row.id
       creatingRef.current = false
       setCreating(false)
-      if (!keepDraft) {
+      if (!keepDraft && !(sameSelection && dirtyRef.current)) {
         form.setFieldsValue(toTimelineFormValues(row, defaultMode, defaultPrecision, defaultType))
       }
 
-      if (row.volumeId) await loadPartsFor(row.volumeId, 'form', isCurrent)
-      if (row.partId) await loadChaptersFor(row.partId, 'form', isCurrent)
-      if (!isCurrent()) return null
-
-      let segmentChapterId = row.chapterStartId || row.chapterEndId
-      if (!segmentChapterId && row.segmentId) {
-        const segment = await window.electron.structure.getSegment(row.segmentId)
-        if (!isCurrent()) return null
-        segmentChapterId = segment?.chapterId
-      }
-
-      await loadSegmentsFor(segmentChapterId, isCurrent)
       await hydrateOptions(row, isCurrent)
     } else {
       selectedIdRef.current = null
@@ -430,7 +347,7 @@ export function useTimelineWorkspace(
     }
 
     return isCurrent() ? row : null
-  }, [defaultMode, defaultPrecision, defaultType, form, hydrateOptions, loadChaptersFor, loadPartsFor, loadSegmentsFor])
+  }, [defaultMode, defaultPrecision, defaultType, form, hydrateOptions])
 
   const buildQuery = useCallback((pageValue: number): TimelineQueryInput => ({
     novelId,
@@ -466,103 +383,76 @@ export function useTimelineWorkspace(
     ...(route.segmentId ? { segmentId: route.segmentId } : {}),
   }), [novelId, route.chapterId, route.partId, route.segmentId, route.volumeId, statusFilter, typeFilter])
 
-  const refreshPage = useCallback(async (preferredId?: number | null, routeAction?: string | null, showLoading = false) => {
-    const requestId = ++refreshRequestRef.current
-    const detailRequestAtStart = detailRequestRef.current
-    const isCurrent = () => refreshRequestRef.current === requestId
-    if (showLoading || !loadedOnceRef.current) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
+  const readPage = useCallback(async (query: TimelineQueryInput) => {
+    const [list, summary] = await Promise.all([
+      window.electron.timeline.query(query),
+      window.electron.timeline.getStats(buildStatsQuery(query)),
+    ])
+    return { list, summary }
+  }, [buildStatsQuery])
+  const applyPage = useCallback(async (
+    { list, summary }: Awaited<ReturnType<typeof readPage>>,
+    preferredId: number | null | undefined,
+    routeAction: string | null | undefined,
+    detailRequestAtStart: number,
+    isCurrent: () => boolean,
+  ) => {
+    if (!isCurrent()) return
+    setPageData(list)
+    setStats(summary)
+    setLoadedOnce(true)
+    if (detailRequestRef.current !== detailRequestAtStart) return
+
+    if (routeAction === 'new') {
+      detailRequestRef.current += 1
+      selectedIdRef.current = null
+      creatingRef.current = true
+      const anchor = {
+        volumeId: route.volumeId ?? (volumeFilter === 'all' ? undefined : volumeFilter),
+        partId: route.partId ?? (partFilter === 'all' ? undefined : partFilter),
+        chapterStartId: route.chapterId ?? (chapterFilter === 'all' ? undefined : chapterFilter),
+        chapterEndId: route.chapterId ?? (chapterFilter === 'all' ? undefined : chapterFilter),
+        segmentId: route.segmentId ?? (segmentFilter === 'all' ? undefined : segmentFilter),
+      }
+
+      setCreating(true)
+      setSelectedId(null)
+      setSelectedEvent(null)
+      form.setFieldsValue(buildDefaultTimelineValues(defaultMode, defaultPrecision, defaultType, anchor, list.total + 1))
+
+      await hydrateOptions(null, isCurrent)
+      return
     }
 
-    try {
-      const query = routeAction ? buildRouteQuery() : buildQuery(page)
-      const [list, summary] = await Promise.all([
-        window.electron.timeline.query(query),
-        window.electron.timeline.getStats(buildStatsQuery(query)),
-      ])
-      if (!isCurrent()) return
-
-      setPageData(list)
-      setStats(summary)
-      loadedOnceRef.current = true
-
-      if (routeAction === 'new') {
-        detailRequestRef.current += 1
-        selectedIdRef.current = null
-        creatingRef.current = true
-        const anchor = {
-          volumeId: route.volumeId ?? (volumeFilter === 'all' ? undefined : volumeFilter),
-          partId: route.partId ?? (partFilter === 'all' ? undefined : partFilter),
-          chapterStartId: route.chapterId ?? (chapterFilter === 'all' ? undefined : chapterFilter),
-          chapterEndId: route.chapterId ?? (chapterFilter === 'all' ? undefined : chapterFilter),
-          segmentId: route.segmentId ?? (segmentFilter === 'all' ? undefined : segmentFilter),
-        }
-
-        setCreating(true)
-        setSelectedId(null)
-        setSelectedEvent(null)
-        form.setFieldsValue(buildDefaultTimelineValues(defaultMode, defaultPrecision, defaultType, anchor, list.total + 1))
-
-        if (anchor.volumeId) await loadPartsFor(anchor.volumeId, 'form', isCurrent)
-        if (anchor.partId) await loadChaptersFor(anchor.partId, 'form', isCurrent)
-        if (anchor.chapterStartId) await loadSegmentsFor(anchor.chapterStartId, isCurrent)
-
-        await hydrateOptions(null, isCurrent)
-        return
-      }
-
-      const hasExplicitId = typeof preferredId === 'number' || typeof route.eventId === 'number'
-      const explicitId = typeof preferredId === 'number' ? preferredId : route.eventId
-      if (!hasExplicitId && detailRequestRef.current !== detailRequestAtStart) return
-      if (!hasExplicitId && creatingRef.current) return
-      const currentSelectedId = selectedIdRef.current
-      const nextId = explicitId
-        ?? (list.items.some((item) => item.id === currentSelectedId) ? currentSelectedId : null)
-        ?? list.items[0]?.id
-        ?? null
-      if (nextId) {
-        await loadEventDetail(nextId)
-      } else {
-        detailRequestRef.current += 1
-        selectedIdRef.current = null
-        creatingRef.current = false
-        setSelectedId(null)
-        setSelectedEvent(null)
-        setCreating(false)
-        form.setFieldsValue(buildDefaultTimelineValues(defaultMode, defaultPrecision, defaultType, {}, list.total + 1))
-        setFormParts([])
-        setFormChapters([])
-        setFormSegments([])
-        await hydrateOptions(null, isCurrent)
-      }
-    } catch (error) {
-      if (isCurrent()) {
-        console.error(error)
-        message.error(getErrorMessage(error, 'common.loadFailed'))
-      }
-    } finally {
-      if (isCurrent()) {
-        setLoading(false)
-        setRefreshing(false)
-      }
+    const hasExplicitId = typeof preferredId === 'number' || typeof route.eventId === 'number'
+    const explicitId = typeof preferredId === 'number' ? preferredId : route.eventId
+    if (!hasExplicitId && creatingRef.current) return
+    if (!hasExplicitId && dirtyRef.current) return
+    const currentSelectedId = selectedIdRef.current
+    const nextId = explicitId
+      ?? (list.items.some((item) => item.id === currentSelectedId) ? currentSelectedId : null)
+      ?? list.items[0]?.id
+      ?? null
+    if (nextId) {
+      await loadEventDetail(nextId)
+    } else {
+      detailRequestRef.current += 1
+      selectedIdRef.current = null
+      creatingRef.current = false
+      setSelectedId(null)
+      setSelectedEvent(null)
+      setCreating(false)
+      form.setFieldsValue(buildDefaultTimelineValues(defaultMode, defaultPrecision, defaultType, {}, list.total + 1))
+      await hydrateOptions(null, isCurrent)
     }
   }, [
-    buildQuery,
-    buildRouteQuery,
-    buildStatsQuery,
     chapterFilter,
     defaultMode,
     defaultPrecision,
     defaultType,
     form,
     hydrateOptions,
-    loadChaptersFor,
     loadEventDetail,
-    loadPartsFor,
-    loadSegmentsFor,
-    page,
     partFilter,
     route.chapterId,
     route.eventId,
@@ -572,116 +462,63 @@ export function useTimelineWorkspace(
     segmentFilter,
     volumeFilter,
   ])
+  const query = useMemo(() => buildQuery(page), [buildQuery, page])
+  const queryKey = JSON.stringify([query, routeKey])
+  const [loading, setLoading] = useScopedState(queryKey, !loadedOnce)
+  const [refreshing, setRefreshing] = useScopedState(queryKey, loadedOnce)
+  const refreshPage = useCallback(async (preferredId?: number | null, routeAction?: string | null, showLoading = false) => {
+    const requestId = ++refreshRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => refreshRequestRef.current === requestId
+    if (showLoading || !loadedOnce) setLoading(true)
+    else setRefreshing(true)
+    try {
+      await applyPage(await readPage(routeAction ? buildRouteQuery() : query), preferredId, routeAction, detailRequestAtStart, isCurrent)
+    } catch (error) {
+      if (!isCurrent()) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    } finally {
+      if (isCurrent()) { setLoading(false); setRefreshing(false) }
+    }
+  }, [applyPage, buildRouteQuery, loadedOnce, query, readPage, setLoading, setRefreshing])
 
   useEffect(() => {
-    void Promise.all([loadShared(), hydrateOptions(null)]).catch((error) => {
+    let active = true
+    void Promise.all([
+      window.electron.structure.listVolumes(novelId), window.electron.outline.getArcs(novelId),
+      window.electron.timeline.getFilterOptions(novelId), loadWorkflowStats(novelId),
+      window.electron.character.search(novelId, '', 20), window.electron.map.searchNodes(novelId, '', 20), window.electron.item.search(novelId, '', 'instance', 20),
+    ]).then(([volumeRows, arcRows, nextFilters, nextStats, characters, locations, items]) => {
+      if (!active) return
+      setVolumes(volumeRows); setArcs(arcRows); setFilterOptions(nextFilters); setWorkflowStats(nextStats)
+      setCharacterOptions(current => mergeEntitiesById(characters, current))
+      setLocationOptions(current => mergeEntitiesById(locations, current))
+      setItemOptions(current => mergeEntitiesById(items, current))
+    }).catch(error => {
+      if (!active) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-    generateForm.setFieldsValue(getInitialGenerateValues(timelineGenerationPreset))
-  }, [generateForm, hydrateOptions, loadShared, timelineGenerationPreset])
-
+    return () => { active = false }
+  }, [novelId])
+  useEffect(() => { generateForm.setFieldsValue(getInitialGenerateValues(timelineGenerationPreset)) }, [generateForm, timelineGenerationPreset])
   useEffect(() => {
-    const key = searchParams.toString()
-    if (routeKeyRef.current === key) return
-
-    routeKeyRef.current = key
-    suppressRefreshRef.current = true
-    setVolumeFilter(route.volumeId || 'all')
-    setPartFilter(route.partId || 'all')
-    setChapterFilter(route.chapterId || 'all')
-    setSegmentFilter(route.segmentId || 'all')
-    setPage(1)
-
-    if (route.volumeId) void loadPartsFor(route.volumeId, 'filter')
-    if (route.partId) void loadChaptersFor(route.partId, 'filter')
-    if (route.chapterId) void loadSegmentsFor(route.chapterId)
-
-    void refreshPage(undefined, route.action || '__route__')
-  }, [
-    loadChaptersFor,
-    loadPartsFor,
-    loadSegmentsFor,
-    refreshPage,
-    route.action,
-    route.chapterId,
-    route.partId,
-    route.segmentId,
-    route.volumeId,
-    searchParams,
-  ])
-
-  useEffect(() => {
-    setPage(1)
-  }, [keyword])
-
-  useEffect(() => {
-    if (routeKeyRef.current === null) return
-    if (suppressRefreshRef.current) {
-      suppressRefreshRef.current = false
-      return
-    }
-
-    void refreshPage()
-  }, [page, keyword, statusFilter, typeFilter, volumeFilter, partFilter, chapterFilter, segmentFilter, refreshPage])
-
-  useEffect(() => {
-    if (volumeFilter === 'all') {
-      setFilterParts([])
-      setPartFilter('all')
-      setFilterChapters([])
-      setChapterFilter('all')
-      setSegmentFilter('all')
-      return
-    }
-
-    void loadPartsFor(volumeFilter, 'filter')
-  }, [loadPartsFor, volumeFilter])
-
-  useEffect(() => {
-    if (partFilter === 'all') {
-      setFilterChapters([])
-      setChapterFilter('all')
-      setSegmentFilter('all')
-      return
-    }
-
-    void loadChaptersFor(partFilter, 'filter')
-  }, [loadChaptersFor, partFilter])
-
-  useEffect(() => {
-    if (!watchedVolumeId) {
-      setFormParts([])
-      setFormChapters([])
-      setFormSegments([])
-      return
-    }
-
-    void loadPartsFor(watchedVolumeId, 'form')
-  }, [loadPartsFor, watchedVolumeId])
-
-  useEffect(() => {
-    if (!watchedPartId) {
-      setFormChapters([])
-      setFormSegments([])
-      return
-    }
-
-    void loadChaptersFor(watchedPartId, 'form')
-  }, [loadChaptersFor, watchedPartId])
-
-  useEffect(() => {
-    const chapterId = watchedSegmentId
-      ? segmentById.get(watchedSegmentId)?.chapterId
-      : watchedChapterStartId || watchedChapterEndId
-
-    if (!chapterId) {
-      setFormSegments((current) => (current.length > 0 ? [] : current))
-      return
-    }
-
-    void loadSegmentsFor(chapterId)
-  }, [loadSegmentsFor, segmentById, watchedChapterEndId, watchedChapterStartId, watchedSegmentId])
+    const routeAction = routeKeyRef.current !== routeKey ? route.action || '__route__' : undefined
+    const requestId = ++refreshRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => refreshRequestRef.current === requestId
+    void readPage(query).then(result => {
+      if (!isCurrent()) return
+      routeKeyRef.current = routeKey
+      return applyPage(result, undefined, routeAction, detailRequestAtStart, isCurrent)
+    }).catch(error => {
+      if (!isCurrent()) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }).finally(() => { if (isCurrent()) { setLoading(false); setRefreshing(false) } })
+    return () => { refreshRequestRef.current += 1 }
+  }, [applyPage, query, readPage, route.action, routeKey, setLoading, setRefreshing])
 
   const clearSelection = useCallback(() => {
     setSelectedIds([])
@@ -845,21 +682,32 @@ export function useTimelineWorkspace(
   const handleSave = useCallback(async () => {
     if (saveActionRef.current) return false
     saveActionRef.current = true
+    const selectionAtStart = selectedIdRef.current
+    const detailAtStart = detailRequestRef.current
     try {
       const values = await form.validateFields().catch(() => null)
-      if (!values) return false
+      if (!values || detailRequestRef.current !== detailAtStart) return false
       setSaving(true)
-      if (selectedEvent?.id) {
-        await window.electron.timeline.update(selectedEvent.id, serializeTimelineValues(values))
-        await refreshPage(selectedEvent.id)
+      let savedId: number
+      if (selectionAtStart) {
+        await window.electron.timeline.update(selectionAtStart, serializeTimelineValues(values))
+        savedId = selectionAtStart
       } else {
-        const nextId = await window.electron.timeline.create(novelId, serializeTimelineValues(values))
-        await refreshPage(nextId)
+        savedId = await window.electron.timeline.create(novelId, serializeTimelineValues(values))
       }
-
-      setCreating(false)
-      dirtyRef.current = false
-      setHasUnsavedChanges(false)
+      if (selectedIdRef.current === selectionAtStart && detailRequestRef.current === detailAtStart) {
+        // A newly persisted draft now owns this ID. Detail refresh must treat
+        // input typed during the save as edits of that same event.
+        selectedIdRef.current = savedId
+        setSelectedId(savedId)
+        creatingRef.current = false
+        setCreating(false)
+        const current = form.getFieldsValue(true)
+        const fields = Object.keys(values) as Array<keyof TimelineFormValues>
+        dirtyRef.current = !fields.every(field => JSON.stringify(current[field]) === JSON.stringify(values[field]))
+        setHasUnsavedChanges(dirtyRef.current)
+        await refreshPage(savedId)
+      }
       message.success(getUserFacingMessage('timeline.saved'))
       return true
     } catch (error) {
@@ -870,7 +718,7 @@ export function useTimelineWorkspace(
       saveActionRef.current = false
       setSaving(false)
     }
-  }, [form, novelId, refreshPage, selectedEvent?.id])
+  }, [form, novelId, refreshPage])
 
   const handleDelete = useCallback(() => {
     if (!selectedEvent?.id) return

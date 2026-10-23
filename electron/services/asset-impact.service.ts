@@ -308,7 +308,7 @@ function analyzeImpactDrafts(input: AssetChangeEventInput): ImpactDraft[] {
   const sceneContractRows = db.select().from(sceneContracts).where(eq(sceneContracts.novelId, input.novelId)).all()
   const threadRows = db.select().from(storyThreads).where(eq(storyThreads.novelId, input.novelId)).all()
   const timelineRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, input.novelId)).all()
-  const foreshadowRows = db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, input.novelId)).all()
+  const foreshadowRows = db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, input.novelId)).all().filter(row => !row.mergedIntoId)
   const volumeDesignRows = db.select().from(volumeDesigns).where(eq(volumeDesigns.novelId, input.novelId)).all()
   const drafts = new Map<string, ImpactDraft>()
   const assetId = typeof input.assetId === 'number' ? input.assetId : null

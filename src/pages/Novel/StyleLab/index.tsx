@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -22,7 +23,6 @@ import {
 } from '@ant-design/icons'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
-  Chapter,
   ResolvedStyleFingerprintPayload,
   StyleAbTestResult,
   StyleFingerprintRecord,
@@ -140,9 +140,6 @@ export default function StyleLabPage({ novelId }: Props) {
   const location = useLocation()
   const [approving, setApproving] = useState(false)
   const currentNovel = useNovelStore((state) => state.currentNovel)
-  const [fingerprints, setFingerprints] = useState<StyleFingerprintRecord[]>([])
-  const [resolved, setResolved] = useState<ResolvedStyleFingerprintPayload | null>(null)
-  const [chapters, setChapters] = useState<Chapter[]>([])
   const [switchingId, setSwitchingId] = useState<number | null>(null)
   const [activeView, setActiveView] = useState<'fingerprints' | 'ab'>(new URLSearchParams(location.search).get('view') === 'ab' ? 'ab' : 'fingerprints')
   const [drawerMode, setDrawerMode] = useState<'create' | 'ab' | null>(null)
@@ -155,34 +152,38 @@ export default function StyleLabPage({ novelId }: Props) {
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const chapterGeneration = useTrackedGeneration<number | null>()
 
-  const [abFingerprintId, setAbFingerprintId] = useState<number | null>(null)
+  const [abSelection, setAbSelection] = useState<{ rows: StyleFingerprintRecord[] | null; id: number | null }>({ rows: null, id: null })
   const [sceneBrief, setSceneBrief] = useState(currentNovel?.id === novelId ? currentNovel.userBackground || '' : '')
   const [abResult, setAbResult] = useState<StyleAbTestResult | null>(null)
   const [abBlindOrder, setAbBlindOrder] = useState<AbVariantKey[]>(['withFingerprint', 'without'])
   const [abBlindChoice, setAbBlindChoice] = useState<AbBlindChoice | null>(null)
   const abGeneration = useTrackedGeneration<StyleAbTestResult | null>()
 
-  const loadData = useCallback(async () => {
-    try {
-      const [list, resolvedPayload, chapterList] = await Promise.all([
-        window.electron.style.list(novelId),
-        window.electron.style.resolveActive(novelId),
-        window.electron.chapter.list(novelId),
-      ])
-      setFingerprints([...list].sort((left, right) => right.id - left.id))
-      setResolved(resolvedPayload)
-      setChapters(chapterList)
-      setAbFingerprintId((current) => {
-        if (current && list.some((item) => item.id === current)) return current
-        return resolvedPayload?.approvedSample ? list.find((item) => item.id === resolvedPayload.record.id)?.id || null : null
-      })
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'styleLab.loadFailed'))
-    }
+  const read = useCallback(async () => {
+    const [list, resolved, chapters] = await Promise.all([
+      window.electron.style.list(novelId),
+      window.electron.style.resolveActive(novelId),
+      window.electron.chapter.list(novelId),
+    ])
+    return { fingerprints: [...list].sort((left, right) => right.id - left.id), resolved, chapters }
   }, [novelId])
-
-  useEffect(() => { void loadData() }, [loadData])
+  const { data, error: loadError, reload: loadData } = useAsyncSnapshot(read)
+  const fingerprints = data?.fingerprints ?? []
+  const resolved = data?.resolved ?? null
+  const chapters = useMemo(() => data?.chapters ?? [], [data])
+  const abFingerprintId = abSelection.id
+  const setAbFingerprintId = (id: number | null) => setAbSelection(current => ({ ...current, id }))
+  if (data && abSelection.rows !== data.fingerprints) {
+    const id = abSelection.id && fingerprints.some(item => item.id === abSelection.id) ? abSelection.id
+      : resolved?.approvedSample ? fingerprints.find(item => item.id === resolved.record.id)?.id || null : null
+    setAbSelection({ rows: data.fingerprints, id })
+  }
+  useEffect(() => {
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'styleLab.loadFailed'))
+    }
+  }, [loadError])
 
   const activeFingerprintId = resolved?.source === 'active' ? resolved.record.id : null
 

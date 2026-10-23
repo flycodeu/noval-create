@@ -31,6 +31,10 @@ import '../components/boards.css'
 import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
+  return <TimelineWorkspace key={novelId} novelId={novelId} />
+}
+
+function TimelineWorkspace({ novelId }: TimelinePageProps) {
   const navigate = useNavigate()
   const { notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const workspace = useTimelineWorkspace(novelId, {

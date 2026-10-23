@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
@@ -48,6 +49,7 @@ async function run() {
   const storyStructureService = project('electron/services/story-structure.service.ts')
   const storyStructureBatchService = project('electron/services/story-structure-batch.service.ts')
   const writebackService = project('electron/services/chapter-writeback.service.ts')
+  const endgameAssets = project('electron/services/endgame-asset.service.ts')
   initDb()
 
   try {
@@ -78,6 +80,25 @@ async function run() {
       outline: '验证状态门禁。',
       novelId: novelB,
     })
+    {
+      const sceneNovel = novelService.createNovel({ title: '场景合同归属验证' })
+      const foreignSceneNovel = novelService.createNovel({ title: '外部场景归属验证' })
+      const sceneChapter = chapterService.createChapter(sceneNovel, { chapterNum: 1, title: '合同目标章节' })
+      const otherChapter = chapterService.createChapter(sceneNovel, { chapterNum: 2, title: '同作品其他章节' })
+      const foreignChapter = chapterService.createChapter(foreignSceneNovel, { chapterNum: 1, title: '外部场景章节' })
+      const localSegment = storyStructureService.createChapterSegment(sceneChapter, { title: '合法场景' })
+      const otherSegment = storyStructureService.createChapterSegment(otherChapter, { title: '其他章节场景' })
+      const foreignSegment = storyStructureService.createChapterSegment(foreignChapter, { title: '其他作品场景' })
+      const contractsBefore = getSqlite().prepare('SELECT * FROM scene_contracts ORDER BY id').all()
+      const versionBefore = novelService.getNovel(sceneNovel).contextVersion
+      for (const segmentId of [otherSegment, foreignSegment]) {
+        expectCode(() => endgameAssets.upsertSceneContract(sceneChapter, segmentId, { sceneGoal: '错误归属' }), 'segment.chapterMismatch')
+      }
+      assert.deepEqual(getSqlite().prepare('SELECT * FROM scene_contracts ORDER BY id').all(), contractsBefore)
+      assert.equal(novelService.getNovel(sceneNovel).contextVersion, versionBefore, 'rejected scene writes must not invalidate context')
+      endgameAssets.upsertSceneContract(sceneChapter, localSegment, { sceneGoal: '合法场景合同' })
+      assert.equal(endgameAssets.listSceneContracts(sceneChapter).find(row => row.segmentId === localSegment).sceneGoal, '合法场景合同')
+    }
     const clientPayload = chapterService.sanitizeChapterUpdatePayload({
       title: '允许更新',
       summary: '允许恢复摘要',

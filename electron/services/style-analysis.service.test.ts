@@ -26,6 +26,10 @@ import {
 } from './style-analysis.service'
 
 describe('style-analysis helpers', () => {
+  it('does not expose malformed qualitative model fields as UI objects', () => {
+    const result = parseStyleResult('{"narrativeTechniques":{"unexpected":true},"dialogueStyle":42,"descriptionDensity":[],"paceProfile":false}')
+    expect([result.narrativeTechniques, result.dialogueStyle, result.descriptionDensity, result.paceProfile]).toEqual(['', '', '', ''])
+  })
   it('parses plain JSON responses', () => {
     const fingerprint = parseStyleResult(`{
       "avgSentenceLength": 18,

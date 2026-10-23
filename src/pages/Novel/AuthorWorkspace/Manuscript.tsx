@@ -10,7 +10,11 @@ import { EmptyWork, LoadFailure, RunProgress } from './shared'
 import { useCreativeWorkflow } from './workflow-client'
 import ChapterArrangement from './ChapterArrangement'
 import ChapterChanges from './ChapterChanges'
-import { ContentDocument } from './ContentDocument'
+import ChapterReviewPanel from './ChapterReviewPanel'
+import SelectionRevision from './SelectionRevision'
+import InlineCompletionEditor from './InlineCompletionEditor'
+import type { SelectionRange } from '../../../shared/selection-revision'
+import type { QualityIssueEvidence } from '../../../shared/quality-issue'
 
 const VERSION_LABELS = { 'manual-save': '手动保存', 'ai-rewrite': 'AI 修订', 'pipeline-generate': '生成正文', 'version-restore': '恢复版本' }
 
@@ -35,6 +39,11 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newNumber, setNewNumber] = useState(1)
+  const [selection, setSelection] = useState<SelectionRange | null>(null)
+  const [selectionOpen, setSelectionOpen] = useState(false)
+  const [selectionApplying, setSelectionApplying] = useState(false)
+  const [pendingEvidence, setPendingEvidence] = useState<QualityIssueEvidence | null>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
   const draftRef = useRef('')
   const baselineRef = useRef('')
   const selectedId = useRef<number | null>(null)
@@ -55,6 +64,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     draftRef.current = next.content || ''
     baselineRef.current = next.content || ''
     setChapter(next); setDraft(draftRef.current); setBaseline(baselineRef.current); setError('')
+    setSelection(null)
   }, [])
   const loadChapter = useCallback(async (id: number) => {
     const epoch = ++loadEpoch.current
@@ -73,16 +83,29 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     return rows
   }, [novelId])
 
+  const retryLoad = async () => {
+    if (draftRef.current !== baselineRef.current) { await save(); return }
+    const epoch = loadEpoch.current
+    try {
+      const rows = await reloadList()
+      if (epoch !== loadEpoch.current || draftRef.current !== baselineRef.current) return
+      const id = chapterParam || chapter?.id || rows[0]?.id
+      if (id) await loadChapter(id)
+      else setError('')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '读取章节失败') }
+  }
+
   useEffect(() => {
     let alive = true
-    void reloadList().then((rows) => {
+    void window.electron.chapter.list(novelId).then((rows) => {
+      if (alive) setChapters(rows)
       if (!alive) return
       const id = chapterParam || rows[0]?.id
       if (id && id !== selectedId.current && draftRef.current === baselineRef.current) void loadChapter(id)
       else setLoading(false)
     }).catch((cause) => { if (alive) { setError(cause instanceof Error ? cause.message : '读取章节失败'); setLoading(false) } })
     return () => { alive = false; loadEpoch.current += 1 }
-  }, [chapterParam, loadChapter, reloadList])
+  }, [novelId, chapterParam, loadChapter])
 
   const save = useCallback(async () => {
     if (!chapter || saving) return false
@@ -100,7 +123,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     finally { setSaving(false) }
   }, [chapter, notifyWorkspaceMutation, reloadList, saving])
   useEffect(() => { registerSaveHandler(() => { void save() }); return () => registerSaveHandler(null) }, [registerSaveHandler, save])
-  useEffect(() => { registerLeaveGuard(() => arrangementDirty || draftRef.current !== baselineRef.current); return () => registerLeaveGuard(null) }, [registerLeaveGuard, arrangementDirty])
+  useEffect(() => { registerLeaveGuard(() => selectionApplying || arrangementDirty || draftRef.current !== baselineRef.current); return () => registerLeaveGuard(null) }, [registerLeaveGuard, arrangementDirty, selectionApplying])
   useEffect(() => {
     const refresh = () => {
       void reloadList().catch((cause) => setError(String(cause)))
@@ -111,6 +134,8 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   }, [loadChapter, reloadList])
 
   const chooseChapter = (id: number) => {
+    if (selectionApplying) return
+    setSelectionOpen(false)
     if (id === chapter?.id) return
     const change = () => setParams({ chapterId: String(id) })
     if (!dirty) { change(); return }
@@ -143,21 +168,35 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '创建章节失败') }
   }
   const changePanel = (next: string) => { const search = new URLSearchParams(params); search.set('panel', next); setParams(search) }
+  useEffect(() => {
+    if (panel !== 'text' || !pendingEvidence || !editorRef.current) return
+    editorRef.current.focus()
+    editorRef.current.setSelectionRange(pendingEvidence.start, pendingEvidence.end)
+    setPendingEvidence(null)
+  }, [panel, pendingEvidence])
+  const locate = (evidence: QualityIssueEvidence) => {
+    if (dirty || draftRef.current.slice(evidence.start, evidence.end) !== evidence.quote) { setError('正文已变化，请重新审校后定位。'); return }
+    changePanel('text'); setPendingEvidence(evidence)
+    if (chapter) setSelection({ novelId, chapterId: chapter.id, start: evidence.start, end: evidence.end, original: evidence.quote })
+  }
+  const openSelection = async () => { if (selection && await save()) setSelectionOpen(true) }
 
   return <div className="author-manuscript">
+    {chapter && <SelectionRevision key={`${novelId}:${chapter.id}`} novelId={novelId} chapterId={chapter.id} selection={selection} open={selectionOpen} dirty={dirty} initialRequest={request} onClose={() => setSelectionOpen(false)} onApplying={setSelectionApplying} onApplied={next => { installChapter(next); void reloadList().catch(cause => setError(String(cause))); notifyWorkspaceMutation() }} />}
     <aside className="author-manuscript__chapters"><div className="author-section-heading"><h2>章节</h2><Button type="text" icon={<PlusOutlined />} aria-label="添加章节" onClick={() => { setNewNumber(Math.max(0, ...chapters.map((item) => item.chapterNum)) + 1); setCreating(true) }} /></div>
       <div className="author-manuscript__chapter-list">{chapters.map((item) => <button key={item.id} className={item.id === chapter?.id ? 'is-active' : ''} onClick={() => chooseChapter(item.id)}><small>第 {item.chapterNum} 章 · {item.wordCount > 0 ? `${item.wordCount.toLocaleString()} 字` : '待写'}</small><strong>{item.title || '未命名'}</strong></button>)}</div>
       <Button type="text" onClick={() => navigate(buildWorkspaceRoute(novelId, 'story-design'))}>查看故事安排</Button>
     </aside>
     <section className="author-manuscript__desk">
-      {error && <LoadFailure message={error} retry={() => { if (!dirty && chapter) void loadChapter(chapter.id); else void save() }} />}
+      {error && <LoadFailure message={error} retry={() => void retryLoad()} />}
       {loading ? <div className="author-loading"><Spin /></div> : !chapter ? <EmptyWork title="从第一章开始" actionLabel="安排章节" action={() => navigate(buildWorkspaceRoute(novelId, 'guide?stage=outline'))}>可让 AI 根据背景安排首个单元，也可以手动添加章节。</EmptyWork> : <>
         <header className="author-manuscript__heading"><div><span className="author-eyebrow">第 {chapter.chapterNum} 章</span><h1>{chapter.title || '未命名'}</h1><small>{countChapterWords(draft).toLocaleString()} 字 · {dirty ? '有未保存修改' : '已保存'}</small></div><div className="author-heading-actions"><Button icon={<HistoryOutlined />} onClick={() => void openHistory()}>版本</Button><Button icon={<SaveOutlined />} loading={saving} disabled={!dirty} onClick={() => void save()}>保存</Button></div></header>
         <div className="author-tabs author-section-tabs" role="tablist">{[{ key: 'text', label: '正文' }, { key: 'arrangement', label: '本章安排' }, { key: 'review', label: '审校' }, { key: 'changes', label: '章后变化' }].map(item => <button key={item.key} role="tab" aria-selected={panel === item.key} onClick={() => changePanel(item.key)}>{item.label}</button>)}</div>
-        {panel === 'arrangement' ? <ChapterArrangement key={chapter.id} chapter={chapter} onDirtyChange={setArrangementDirty} onSaved={() => { if (!dirty) void loadChapter(chapter.id) }} /> : panel === 'changes' ? <ChapterChanges key={chapter.id} chapterId={chapter.id} /> : panel === 'review' ? <section className="author-paper"><h2>只评审已保存的本章</h2><p className="author-muted">结合本章合同、世界与人物设定、前文和事实边界出具评审报告。此操作不修改正文或设定。</p><Button loading={workflow.submitting} disabled={dirty || workflow.active || !chapter.content?.trim()} onClick={() => void workflow.review(chapter.id, request.trim() || '评审本章的因果、连续性、人物与视角边界、叙事和语言，指出具体证据与修改建议。')}>仅评审第 {chapter.chapterNum} 章</Button>{dirty && <p>请先保存正文，再评审这一版。</p>}{workflow.run?.operation === 'review' && workflow.run.atChapter === chapter.chapterNum && workflow.run.result && <ContentDocument value={workflow.run.result} />}<Button type="link" onClick={() => changePanel('text')}>根据评审意见提出修订</Button></section> : <>
+        {panel === 'arrangement' ? <ChapterArrangement key={chapter.id} chapter={chapter} onDirtyChange={setArrangementDirty} onSaved={() => { if (!dirty) void loadChapter(chapter.id) }} /> : panel === 'changes' ? <ChapterChanges key={chapter.id} chapterId={chapter.id} /> : panel === 'review' ? <section className="author-paper author-assist-stack"><h2>只评审已保存的本章</h2><p className="author-muted">结合本章安排、世界与人物及前文出具评审报告。</p><Button loading={workflow.submitting} disabled={dirty || workflow.active || selectionApplying || !chapter.content?.trim()} onClick={() => void workflow.review(chapter.id, request.trim() || '评审本章的因果、连续性、人物与视角边界、叙事和语言，指出原文证据与修改建议。')}>仅评审第 {chapter.chapterNum} 章</Button><ChapterReviewPanel novelId={novelId} chapterId={chapter.id} version={`${chapter.updatedAt}:${chapter.content}:${workflow.run?.updatedAt}`} dirty={dirty} onLocate={locate} onRepair={(instructions, evidence) => { setRequest(instructions); changePanel('text'); if (evidence) { locate(evidence); setSelectionOpen(true) } }} /></section> : <>
         {chapter.outline && <details className="author-disclosure author-manuscript__outline"><summary>本章安排</summary><p>{chapter.outline}</p></details>}
-        <textarea className="author-manuscript__editor" aria-label={`第 ${chapter.chapterNum} 章正文`} value={draft} disabled={saving} onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value) }} placeholder="正文从这里开始。也可以在下方说明这一章的要求，让 AI 生成并审校。" spellCheck={false} />
-        <div className="author-manuscript__prompt"><Input.TextArea aria-label="本章生成或修订要求" value={request} onChange={(event) => setRequest(event.target.value)} autoSize={{ minRows: 2, maxRows: 5 }} placeholder="本章的生成或修订要求，例如：收紧对话，保留现有事件与人物立场。" /><div><Checkbox checked={autoApply} onChange={event => setAutoApply(event.target.checked)}>审校通过后直接保存</Checkbox><Button type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || saving} onClick={() => void generate()}>{chapter.content?.trim() ? '按意见生成修订候选' : '生成并评审本章'}</Button></div><p className="author-muted">{autoApply ? '通过审校后保存，原正文保留历史版本。' : '先查看候选与差异，确认后再应用。'}</p></div>
+        <div className="author-heading-actions"><Button disabled={!selection || selectionApplying || workflow.active} onMouseDown={event => event.preventDefault()} onClick={() => void openSelection()}>修订选区</Button><Button disabled={selectionApplying} onClick={() => setSelectionOpen(true)}>修订记录</Button></div>
+        <InlineCompletionEditor key={chapter.id} novelId={novelId} chapter={chapter} value={draft} disabled={saving || selectionApplying} assistDisabled={workflow.active || selectionOpen} editorRef={editorRef} onChange={value => { draftRef.current = value; setDraft(value); setSelection(null) }} onSelection={field => { if (field.selectionEnd > field.selectionStart) setSelection({ novelId, chapterId: chapter.id, start: field.selectionStart, end: field.selectionEnd, original: field.value.slice(field.selectionStart, field.selectionEnd) }); else setSelection(null) }} />
+        <div className="author-manuscript__prompt"><Input.TextArea aria-label="本章生成或修订要求" value={request} onChange={(event) => setRequest(event.target.value)} autoSize={{ minRows: 2, maxRows: 5 }} placeholder="本章的生成或修订要求，例如：收紧对话，保留现有事件与人物立场。" /><div><Checkbox checked={autoApply} onChange={event => setAutoApply(event.target.checked)}>审校通过后直接保存</Checkbox><Button type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || saving || selectionApplying} onClick={() => void generate()}>{chapter.content?.trim() ? '按意见生成修订候选' : '生成并评审本章'}</Button></div><p className="author-muted">{autoApply ? '通过审校后保存，原正文保留历史版本。' : '先查看候选与差异，确认后再应用。'}</p></div>
         </>}
       </>}
       {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}

@@ -1633,7 +1633,9 @@ function applySingleDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): num
  */
 function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const db = getDb()
-  const transaction = getSqlite().transaction(() => {
+  // Claim the write lock before reading the candidate. A deferred transaction
+  // can lose its WAL snapshot to another process between validation and write.
+  return runImmediateTransaction(() => {
     // 正文编辑会把运行标记为 failed。再次检查运行状态，避免已经拿到
     // applying claim 的旧调用在正文变更后继续写入后续候选资产。
     const activeRun = db.select({ status: chapterWritebackRuns.status })
@@ -1667,7 +1669,6 @@ function applySingleDiffAtomically(row: ChapterWritebackDiffRow, chapter: Chapte
     if (!result.changes) throw new Error(`回写候选 ${row.id} 未能记录应用状态`)
     return entityId
   })
-  return transaction()
 }
 
 export async function prepareChapterWritebackRun(chapterId: number, triggerSource = 'manual'): Promise<AppChapterWritebackRun> {

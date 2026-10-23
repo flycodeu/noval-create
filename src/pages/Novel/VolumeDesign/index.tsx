@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, Form, Input, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
@@ -6,8 +8,6 @@ import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type {
-  EndgameCommitment,
-  ResistanceTrack,
   StoryStructureVolumeSummary,
   VolumeAuditFinding,
   VolumeAuditResult,
@@ -107,69 +107,56 @@ function getVolumeDesignCompletion(design?: VolumeDesignAsset | null): number {
 }
 
 export default function VolumeDesignPage({ novelId }: Props) {
+  return <VolumeDesignWorkspace key={novelId} novelId={novelId} />
+}
+
+function VolumeDesignWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const [form] = Form.useForm<VolumeDesignFormValues>()
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [volumes, setVolumes] = useState<StoryStructureVolumeSummary[]>([])
-  const [designs, setDesigns] = useState<VolumeDesignAsset[]>([])
-  const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
-  const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
-  const [activeVolumeId, setActiveVolumeId] = useState<number | null>(() => {
-    if (typeof window === 'undefined') return null
+  const [selection, setSelection] = useState<{ rows: StoryStructureVolumeSummary[] | null; id: number | null }>(() => {
+    if (typeof window === 'undefined') return { rows: null, id: null }
     const stored = Number(window.sessionStorage.getItem(`novelforge-volume-design:${novelId}`))
-    return Number.isSafeInteger(stored) && stored > 0 ? stored : null
+    return { rows: null, id: Number.isSafeInteger(stored) && stored > 0 ? stored : null }
   })
+  const activeVolumeId = selection.id
+  const setActiveVolumeId = useCallback((id: number) => setSelection(current => ({ ...current, id })), [])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [auditing, setAuditing] = useState(false)
   const [syncingConstraints, setSyncingConstraints] = useState(false)
   const [createTasksOnAudit, setCreateTasksOnAudit] = useState(true)
-  const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
-  const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
-  const loadRequestRef = useRef(0)
+  const [lastAuditResult, setLastAuditResult] = useScopedState<VolumeAuditResult | null>(activeVolumeId, null)
+  const [lastSyncResult, setLastSyncResult] = useScopedState<VolumeConstraintSyncResult | null>(activeVolumeId, null)
   const draftDirtyRef = useRef(false)
   const { registerSaveHandler, registerEscapeHandler } = useNovelWorkspaceActions()
 
-  const loadData = useCallback(async (showLoading = false) => {
-    const requestId = ++loadRequestRef.current
-    if (showLoading) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-    try {
-      const [volumeRows, designRows, commitmentRows, resistanceDashboard] = await Promise.all([
-        window.electron.structure.listVolumes(novelId),
-        window.electron.volumeDesign.list(novelId),
-        window.electron.endgameAsset.listCommitments(novelId),
-        window.electron.resistance.getDashboard(novelId),
-      ])
-      if (loadRequestRef.current !== requestId) return
-      setVolumes(volumeRows)
-      setDesigns(designRows)
-      setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
-      setResistanceTracks(resistanceDashboard.tracks)
-      setActiveVolumeId((current) => current && volumeRows.some((item) => item.id === current)
-        ? current
-        : volumeRows[0]?.id ?? null)
-    } catch (error) {
-      if (loadRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getUserFacingMessage('volumeDesign.loadFailed'))
-    } finally {
-      if (loadRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
+  const read = useCallback(async () => {
+    const [volumes, designs, commitments, resistance] = await Promise.all([
+      window.electron.structure.listVolumes(novelId),
+      window.electron.volumeDesign.list(novelId),
+      window.electron.endgameAsset.listCommitments(novelId),
+      window.electron.resistance.getDashboard(novelId),
+    ])
+    return { volumes, designs, commitments: commitments.filter(item => item.derivedStatus !== 'waived'), resistanceTracks: resistance.tracks }
   }, [novelId])
-
+  const { data, loading: pending, error: loadError, reload: loadData } = useAsyncSnapshot(read)
+  const volumes = useMemo(() => data?.volumes ?? [], [data])
+  const designs = useMemo(() => data?.designs ?? [], [data])
+  const commitments = useMemo(() => data?.commitments ?? [], [data])
+  const resistanceTracks = useMemo(() => data?.resistanceTracks ?? [], [data])
+  const loading = pending && data === null
+  const refreshing = pending && data !== null
+  if (data && selection.rows !== data.volumes) {
+    setSelection({ rows: data.volumes, id: selection.id && volumes.some(item => item.id === selection.id) ? selection.id : volumes[0]?.id ?? null })
+  }
   useEffect(() => {
-    void loadData(true)
-  }, [loadData])
+    if (loadError) {
+      console.error(loadError)
+      message.error(getUserFacingMessage('volumeDesign.loadFailed'))
+    }
+  }, [loadError])
 
   useEffect(() => {
     if (activeVolumeId) window.sessionStorage.setItem(`novelforge-volume-design:${novelId}`, String(activeVolumeId))
@@ -190,10 +177,6 @@ export default function VolumeDesignPage({ novelId }: Props) {
     setHasUnsavedChanges(false)
   }, [activeDesign, form])
 
-  useEffect(() => {
-    setLastAuditResult(null)
-    setLastSyncResult(null)
-  }, [activeVolumeId])
 
   const linkedCommitments = useMemo(
     () => commitments.filter((item) => (activeDesign?.linkedEndgameCommitmentIds || []).includes(item.id)),
@@ -251,7 +234,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         setActiveVolumeId(volumeId)
       },
     })
-  }, [activeVolumeId])
+  }, [activeVolumeId, setActiveVolumeId])
 
   const handleSave = useCallback(async () => {
     if (!activeVolumeId) return

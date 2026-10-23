@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Button, Input, Modal, Skeleton, Spin, Tag, message } from 'antd'
 import { CopyOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
@@ -429,39 +430,18 @@ export default function PromptManager() {
   const [editingTemplate, setEditingTemplate] = useState('')
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [customOverrides, setCustomOverrides] = useState<Record<string, string>>({})
-  const loadedOnceRef = useRef(false)
-  const loadRequestRef = useRef(0)
-
-  const loadPrompts = React.useCallback(async (showLoading = false) => {
-    const requestId = ++loadRequestRef.current
-    if (showLoading || !loadedOnceRef.current) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-
-    try {
-      const rows = await window.electron.prompt.list()
-      if (loadRequestRef.current !== requestId) return
-      setCustomOverrides(Object.fromEntries(rows.map((row) => [row.key, normalizePromptText(row.content)])))
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (loadRequestRef.current === requestId) message.error(getErrorMessage(error, 'prompt.loadFailed'))
-    } finally {
-      if (loadRequestRef.current === requestId) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
+  const readPrompts = React.useCallback(async () => {
+    const rows = await window.electron.prompt.list()
+    return Object.fromEntries(rows.map(row => [row.key, normalizePromptText(row.content)]))
   }, [])
-
+  const { data: overrides, loading: pending, error: loadError, reload: loadPrompts } = useAsyncSnapshot(readPrompts)
+  const customOverrides = useMemo(() => overrides ?? {}, [overrides])
+  const loading = pending && overrides === null
+  const refreshing = pending && overrides !== null
   useEffect(() => {
-    void loadPrompts(true)
-  }, [loadPrompts])
+    if (loadError) message.error(getErrorMessage(loadError, 'prompt.loadFailed'))
+  }, [loadError])
 
   const promptRows = useMemo(() => {
     return PROMPT_CATALOG.map((prompt) => {
@@ -489,16 +469,6 @@ export default function PromptManager() {
     })
   }, [activeCategory, activeLane, promptRows, searchText])
 
-  useEffect(() => {
-    if (filteredPrompts.length === 0) {
-      setSelectedPromptKey('')
-      return
-    }
-
-    if (!filteredPrompts.some(({ prompt }) => prompt.key === selectedPromptKey)) {
-      setSelectedPromptKey(filteredPrompts[0].prompt.key)
-    }
-  }, [filteredPrompts, selectedPromptKey])
 
   const selectedPromptRow = useMemo(
     () => filteredPrompts.find(({ prompt }) => prompt.key === selectedPromptKey) || filteredPrompts[0] || null,

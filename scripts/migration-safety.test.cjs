@@ -541,6 +541,10 @@ function testFreshDbIsIdempotent() {
       '0069_model_attempt_output',
       '0070_story_atlas',
       '0071_fact_reveal_plan',
+      '0072_personal_research',
+      '0073_author_ledger',
+      '0074_style_source_reference',
+      '0075_foreshadow_merge',
     ])
 
     runMigrations(db)
@@ -691,6 +695,10 @@ function testPartialSchemaCanResume() {
       '0069_model_attempt_output',
       '0070_story_atlas',
       '0071_fact_reveal_plan',
+      '0072_personal_research',
+      '0073_author_ledger',
+      '0074_style_source_reference',
+      '0075_foreshadow_merge',
     ])
 
     const configs = db.prepare(`
@@ -1245,9 +1253,51 @@ function testFactRevealPlanPreservesExistingKnowledge() {
   }
 }
 
+function testAuthorLibraryUpgradeKeepsLegacyRecords() {
+  const db = openDb('author-library-upgrade.db')
+  try {
+    runMigrations(db)
+    db.prepare("DELETE FROM _schema_migrations WHERE id IN ('0072_personal_research','0073_author_ledger','0074_style_source_reference')").run()
+    db.exec('DROP TABLE personal_research; ALTER TABLE story_atlas_revisions DROP COLUMN author_protection_json; ALTER TABLE foreshadow_ledger DROP COLUMN actual_payoff_chapter_id; ALTER TABLE foreshadow_ledger DROP COLUMN author_corrected_at; ALTER TABLE style_fingerprints DROP COLUMN source_reference_json')
+    const legacy = JSON.stringify([{ sourceKey: 'author:old', sourceType: 'author_created', assetType: 'creative_reference', sourceText: '原有资料', factTitle: '旧卡' }])
+    const novelId = Number(db.prepare('INSERT INTO novels(title,source_ledger_json) VALUES(?,?)').run('旧作品', legacy).lastInsertRowid)
+    const snapshot = JSON.stringify({ id: 'character:legacy', kind: 'character', name: '旧人物', attributes: {}, source: { kind: 'legacy' } })
+    db.prepare('INSERT INTO story_atlas_revisions(novel_id,record_id,record_type,effective_from_chapter,status,snapshot_json,context_version) VALUES(?,?,?,0,?,?,1)').run(novelId, 'character:legacy', 'entity', 'confirmed', snapshot)
+    db.prepare('INSERT INTO foreshadow_ledger(novel_id,title,detail) VALUES(?,?,?)').run(novelId, '旧伏笔', '旧依据')
+    runMigrations(db)
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT source_ledger_json FROM novels WHERE id=?').get(novelId).source_ledger_json, legacy)
+    assert.equal(db.prepare('SELECT count(*) n FROM personal_research').get().n, 0, 'old cards are never automatically published')
+    assert.deepEqual(db.prepare('SELECT snapshot_json,author_protection_json FROM story_atlas_revisions WHERE novel_id=?').get(novelId), { snapshot_json: snapshot, author_protection_json: '[]' })
+    assert.deepEqual(db.prepare('SELECT detail,actual_payoff_chapter_id,author_corrected_at FROM foreshadow_ledger WHERE novel_id=?').get(novelId), { detail: '旧依据', actual_payoff_chapter_id: null, author_corrected_at: null })
+  } finally { db.close() }
+}
+
+function testForeshadowMergeUpgradeKeepsOriginalRows() {
+  const db = openDb('foreshadow-merge-upgrade.db')
+  try {
+    runMigrations(db)
+    db.prepare("DELETE FROM _schema_migrations WHERE id='0075_foreshadow_merge'").run()
+    db.exec('DROP INDEX idx_foreshadow_merge_target; ALTER TABLE foreshadow_ledger DROP COLUMN merged_into_id; ALTER TABLE foreshadow_ledger DROP COLUMN merge_info_json')
+    const novelId = Number(db.prepare('INSERT INTO novels(title) VALUES(?)').run('合并功能升级前的作品').lastInsertRowid)
+    const id = Number(db.prepare('INSERT INTO foreshadow_ledger(novel_id,title,detail,status,required_evidence) VALUES(?,?,?,?,?)').run(novelId, '旧欠条', '作者的旧记录', 'planted', '原句依据').lastInsertRowid)
+    const before = db.prepare('SELECT * FROM foreshadow_ledger WHERE id=?').get(id)
+    runMigrations(db)
+    const { merged_into_id, merge_info_json, ...after } = db.prepare('SELECT * FROM foreshadow_ledger WHERE id=?').get(id)
+    assert.deepEqual(after, before)
+    assert.equal(merged_into_id, null)
+    assert.equal(merge_info_json, null)
+    db.prepare('UPDATE foreshadow_ledger SET merge_info_json=? WHERE id=?').run('{"reason":"保留历史"}', id)
+    runMigrations(db)
+    assert.equal(db.prepare('SELECT merge_info_json FROM foreshadow_ledger WHERE id=?').get(id).merge_info_json, '{"reason":"保留历史"}')
+  } finally { db.close() }
+}
+
 function runAllTests() {
   prepareTempDir()
   testFreshDbIsIdempotent()
+  testAuthorLibraryUpgradeKeepsLegacyRecords()
+  testForeshadowMergeUpgradeKeepsOriginalRows()
   testFactRevealPlanPreservesExistingKnowledge()
   testWritebackSourceIdentityMigrationRollbackAndRecovery()
   testPartialSchemaCanResume()

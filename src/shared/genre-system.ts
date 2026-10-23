@@ -2374,7 +2374,10 @@ export function assessHistoricalGrounding(input: {
   const historicalProfile = parseJsonRecord(input.historicalProfileJson)
   const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
+  // Author-written inspiration cards are useful creative references, but they do not
+  // substantiate historical or real-world claims.
   const sourceLedgerEntries = getGroundingSourceLedgerEntries(input)
+    .filter(entry => entry.sourceType !== 'author_created' && entry.assetType !== 'creative_reference')
   const canonFactCardEntries = parseJsonRecordArray(input.canonFactCardsJson)
   const historicalProfileText = collectJsonTextLeaves(historicalProfile).join('\n')
   const projectCanonProfileText = collectJsonTextLeaves(projectCanonProfile).join('\n')

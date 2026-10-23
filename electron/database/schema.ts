@@ -233,6 +233,10 @@ export const foreshadowLedger = sqliteTable('foreshadow_ledger', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
+  actualPayoffChapterId: integer('actual_payoff_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  authorCorrectedAt: text('author_corrected_at'),
+  mergedIntoId: integer('merged_into_id'),
+  mergeInfoJson: text('merge_info_json'),
   detail: text('detail'),
   sourceChapterId: integer('source_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
   sourceSegmentId: integer('source_segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
@@ -1457,7 +1461,17 @@ export const semanticMemoryOutbox = sqliteTable('semantic_memory_outbox', {
 })
 
 // --- Task 4: 风格学习 ---
+export const personalResearch = sqliteTable('personal_research', {
+  id: text('id').primaryKey(),
+  revision: integer('revision').notNull().default(1),
+  contentJson: text('content_json').notNull(),
+  archived: integer('archived').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const styleFingerprints = sqliteTable('style_fingerprints', {
+  sourceReferenceJson: text('source_reference_json'),
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').references(() => novels.id, { onDelete: 'set null' }),
   name: text('name').notNull(),

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Empty, Form, Input, Modal, Select, Spin, Switch, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons'
@@ -103,6 +104,10 @@ function buildFormValues(item?: GlossaryEntry | null): GlossaryFormValues {
 }
 
 export default function GlossaryPage({ novelId }: Props) {
+  return <GlossaryWorkspace key={novelId} novelId={novelId} />
+}
+
+function GlossaryWorkspace({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
@@ -113,7 +118,6 @@ export default function GlossaryPage({ novelId }: Props) {
   const [stats, setStats] = useState({ total: 0, canonicalCount: 0, deprecatedCount: 0, categoryCount: 0 })
   const [workflowStats, setWorkflowStats] = useState({ threadCount: 0, chapterCount: 0 })
   const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [usageReport, setUsageReport] = useState<GlossaryUsageReport | null>(null)
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
@@ -124,6 +128,7 @@ export default function GlossaryPage({ novelId }: Props) {
   const refreshRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const routeFocusRef = useRef<number | null>(null)
+  const routeRequestRef = useRef(0)
   const formSelectionRef = useRef<string | null>(null)
   const watchedValues = Form.useWatch([], form) as Partial<GlossaryFormValues> | undefined
   const currentFormValues = useMemo<GlossaryFormValues>(() => ({
@@ -136,6 +141,8 @@ export default function GlossaryPage({ novelId }: Props) {
     [items, selectedId],
   )
   const hasUnsavedChanges = Boolean(selectedItem || creating) && serializeFormValues(currentFormValues) !== persistedFormSignature
+  const selectionRef = useRef({ item: selectedItem, dirty: hasUnsavedChanges })
+  useLayoutEffect(() => { selectionRef.current = { item: selectedItem, dirty: hasUnsavedChanges } }, [selectedItem, hasUnsavedChanges])
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const routeGlossaryId = useMemo(() => parseRouteId(searchParams.get('glossaryId')), [searchParams])
 
@@ -145,38 +152,61 @@ export default function GlossaryPage({ novelId }: Props) {
     return map
   }, [usageReport])
 
+  const readList = useCallback(async () => {
+    const [page, nextStats, nextWorkflowStats, nextUsageReport] = await Promise.all([
+      window.electron.glossary.query({ novelId, keyword, canonical: canonicalFilter, page: 1, pageSize: 200 }),
+      window.electron.glossary.getStats({ novelId }),
+      loadWorkflowStats(novelId),
+      window.electron.glossary.usageReport(novelId).catch(() => null),
+    ])
+    return { page, nextStats, nextWorkflowStats, nextUsageReport }
+  }, [canonicalFilter, keyword, novelId])
+  const applyList = useCallback(({ page, nextStats, nextWorkflowStats, nextUsageReport }: Awaited<ReturnType<typeof readList>>) => {
+    const draftItem = selectionRef.current.dirty ? selectionRef.current.item : null
+    setItems(current => {
+      const focused = draftItem || current.find(item => item.id === routeFocusRef.current)
+      return focused && !page.items.some(item => item.id === focused.id) ? [focused, ...page.items] : page.items
+    })
+    setStats(nextStats)
+    setUsageReport(nextUsageReport)
+    setWorkflowStats({ threadCount: nextWorkflowStats.threadCount, chapterCount: nextWorkflowStats.chapterCount })
+    setSelectedId((current) => {
+      if (creatingRef.current) return null
+      if (draftItem) return draftItem.id
+      if (current && current === routeFocusRef.current) return current
+      if (current && page.items.some((item) => item.id === current)) return current
+      return page.items[0]?.id || null
+    })
+  }, [])
+  const loadingScope = useMemo(() => ({ readList, mutationToken }), [readList, mutationToken])
+  const [loading, setLoading] = useScopedState(loadingScope, true)
+  const reportLoadError = useCallback((error: unknown) => {
+    console.error(error)
+    message.error(getErrorMessage(error, 'common.loadFailed'))
+  }, [])
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
-      const [page, nextStats, nextWorkflowStats, nextUsageReport] = await Promise.all([
-        window.electron.glossary.query({ novelId, keyword, canonical: canonicalFilter, page: 1, pageSize: 200 }),
-        window.electron.glossary.getStats({ novelId }),
-        loadWorkflowStats(novelId),
-        window.electron.glossary.usageReport(novelId).catch(() => null),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setItems(page.items)
-      setStats(nextStats)
-      setUsageReport(nextUsageReport)
-      setWorkflowStats({ threadCount: nextWorkflowStats.threadCount, chapterCount: nextWorkflowStats.chapterCount })
-      setSelectedId((current) => {
-        if (creatingRef.current) return null
-        if (current && page.items.some((item) => item.id === current)) return current
-        return page.items[0]?.id || null
-      })
+      const result = await readList()
+      if (refreshRequestRef.current === requestId) applyList(result)
     } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [canonicalFilter, keyword, novelId])
-
+  }, [applyList, readList, reportLoadError, setLoading])
   useEffect(() => {
-    void refresh()
-  }, [mutationToken, refresh])
+    const requestId = ++refreshRequestRef.current
+    void readList().then(result => {
+      if (refreshRequestRef.current === requestId) applyList(result)
+    }).catch(error => {
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
+    }).finally(() => {
+      if (refreshRequestRef.current === requestId) setLoading(false)
+    })
+    return () => { refreshRequestRef.current += 1 }
+  }, [applyList, loadingScope, readList, reportLoadError, setLoading])
 
   useEffect(() => {
     const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
@@ -196,7 +226,9 @@ export default function GlossaryPage({ novelId }: Props) {
   }, [searchParams, setSearchParams])
 
   const loadRouteEntry = useCallback(async (id: number) => {
+    const requestId = ++routeRequestRef.current
     const item = await window.electron.glossary.get(id)
+    if (routeRequestRef.current !== requestId) return
     if (!item || item.novelId !== novelId) return
     setItems((current) => current.some((entry) => entry.id === item.id) ? current : [item, ...current])
     creatingRef.current = false
@@ -205,12 +237,14 @@ export default function GlossaryPage({ novelId }: Props) {
   }, [novelId])
 
   useEffect(() => {
-    if (!routeGlossaryId || routeFocusRef.current === routeGlossaryId) return
+    if (!routeGlossaryId) { routeFocusRef.current = null; return }
+    if (routeFocusRef.current === routeGlossaryId) return
     routeFocusRef.current = routeGlossaryId
     void loadRouteEntry(routeGlossaryId).catch((error) => {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
+    return () => { routeRequestRef.current += 1; routeFocusRef.current = null }
   }, [loadRouteEntry, routeGlossaryId])
 
   useEffect(() => {

@@ -8,14 +8,19 @@ export default function ChapterChanges({ chapterId }: { chapterId: number }) {
   const [data, setData] = useState<ChapterWritebackCenterData | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const load = useCallback(async () => { setData(await window.electron.writeback.getCenterData(chapterId)) }, [chapterId])
+  const load = useCallback(() => window.electron.writeback.getCenterData(chapterId), [chapterId])
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true)
-    try { await action(); await load(); setError('') }
+    try { await action(); setData(await load()); setError('') }
     catch (cause) { setError(cause instanceof Error ? cause.message : '读取章后变化失败') }
     finally { setBusy(false) }
   }
-  useEffect(() => { void load().catch(cause => setError(String(cause))) }, [load])
+  useEffect(() => {
+    let active = true
+    void load().then((result) => { if (active) setData(result) })
+      .catch((cause) => { if (active) setError(String(cause)) })
+    return () => { active = false }
+  }, [load])
   return <section className="author-arrangement"><div className="author-section-heading"><h2>章后变化</h2><Button loading={busy} onClick={() => void act(() => window.electron.writeback.prepareRun(chapterId, 'manual'))}>从已保存正文提取变化</Button></div>
     <p className="author-muted">核对实际发生的人物、关系、地点与线索变化。接受的变化才进入回写；提取不会修改正文。</p>
     {error && <LoadFailure message={error} retry={() => void act(load)} />}

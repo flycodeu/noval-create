@@ -127,6 +127,10 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function EndgamePage({ novelId }: Props) {
+  return <EndgameWorkspace key={novelId} novelId={novelId} />
+}
+
+function EndgameWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
@@ -162,9 +166,8 @@ export default function EndgamePage({ novelId }: Props) {
   }), [settings])
 
   useEffect(() => {
-    form.setFieldsValue(snapshot)
-    setDraftDirty(false)
-  }, [form, setDraftDirty, snapshot])
+    if (!draftDirtyRef.current) form.setFieldsValue(snapshot)
+  }, [form, snapshot])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -319,7 +322,7 @@ export default function EndgamePage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty])
+  }, [currentNovel, form, novelId, notifyWorkspaceMutation, setCurrentNovel, setDraftDirty])
 
   const handleImportFromStoryDesign = () => {
     const current = normalizeFormValues(buildCurrentFormValues(snapshot, form.getFieldsValue(true)))

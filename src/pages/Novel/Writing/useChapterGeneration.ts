@@ -478,21 +478,7 @@ export function useChapterGeneration(options: UseChapterGenerationOptions) {
     } finally {
       generationStartingRef.current = false
     }
-  }, [
-    activeGeneration.status,
-    completeGeneration,
-    content,
-    currentChapter,
-    currentChapterIdRef,
-    flushEditor,
-    hasResumablePartialContent,
-    latestPipelineTask?.id,
-    resumablePartialContent,
-    setActionError,
-    startGeneration,
-    updateGenerationStage,
-    updateGenerationTask,
-  ])
+  }, [activeGeneration.status, completeGeneration, content, currentChapter, currentChapterIdRef, flushEditor, hasResumablePartialContent, latestPipelineTask, resumablePartialContent, setActionError, startGeneration, updateGenerationStage, updateGenerationTask])
 
   useEffect(() => {
     resumeRetryRef.current = () => void resume()

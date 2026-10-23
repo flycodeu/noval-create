@@ -31,6 +31,12 @@ import { buildStoryMemorySnapshot } from './story-memory.service'
 import { getForeshadowSnapshot, listStoryThreads } from './story-thread.service'
 import { listTimelineEvents } from './timeline.service'
 import { getWorldStateContextSnapshot, type WorldStateContextSnapshot } from './world-state.service'
+import {
+  isCreativeResearchEntry,
+  getCreativeResearchCategoryLabel,
+  selectRelevantCreativeResearchEntries,
+  type CreativeResearchEntry,
+} from '../../src/shared/creative-research'
 
 type ServiceOverrides = {
   listCharacters?: typeof listCharacters
@@ -603,6 +609,9 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
   const projectCanonProfile = parseJsonRecord(signals.projectCanonProfileJson)
   const canonConstraintSet = parseJsonRecord(signals.canonConstraintSetJson)
   const sourceLedgerEntries = getGroundingSourceLedgerEntries(signals)
+  const authorReferences = sourceLedgerEntries.filter(isCreativeResearchEntry) as CreativeResearchEntry[]
+  const externalReferences: Array<Record<string, unknown>> = sourceLedgerEntries
+    .filter((entry): entry is Record<string, unknown> => !isCreativeResearchEntry(entry))
   const canonFactCards = parseJsonRecordArray(signals.canonFactCardsJson)
 
   const profileLines = [
@@ -622,13 +631,27 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
       })
       .filter(Boolean),
   ].slice(0, 8)
-  const sourceLines = sourceLedgerEntries
+  const referenceQuery = [
+    signals.chapterTitle, signals.chapterOutline, signals.chapterGoal, signals.arcSummary, signals.arcGoal,
+    signals.activeThreads, signals.openLoops, signals.dueForeshadows, signals.timelineSummary,
+    signals.worldStates, signals.backgroundText, ...(signals.glossaryTerms || []),
+  ].filter(Boolean).join('\n')
+  const selectedLedgerEntries = authorReferences.length
+    ? [...externalReferences.slice(-2), ...selectRelevantCreativeResearchEntries(authorReferences, referenceQuery, 4)]
+    : externalReferences.slice(-6)
+  const sourceLines = selectedLedgerEntries
     .map((entry) => {
-      const title = asText(entry.factTitle) || asText(entry.title) || asText(entry.sourceKey)
-      const sourceText = asText(entry.sourceText) || asText(entry.summary) || collectJsonTextLeaves(entry).join('；')
-      const sourceUrl = asText(entry.sourceUrl) || asText(entry.url)
-      const verificationStatus = asText(entry.verificationStatus)
-      const sourceDate = asText(entry.publishedAt) || asText(entry.recordedAt) || asText(entry.updatedAt)
+      if (isCreativeResearchEntry(entry)) {
+        const meaning = [entry.interpretation, entry.novelConnection].filter(Boolean).join('；')
+        const note = [entry.content, meaning].filter(Boolean).join('｜')
+        return `作者创作参考（非Canon、非史实）：${getCreativeResearchCategoryLabel(entry.category)} · ${entry.title}：${summarizeText(note, 210)}`
+      }
+      const record = entry as Record<string, unknown>
+      const title = asText(record.factTitle) || asText(record.title) || asText(record.sourceKey)
+      const sourceText = asText(record.sourceText) || asText(record.summary) || collectJsonTextLeaves(record).join('；')
+      const sourceUrl = asText(record.sourceUrl) || asText(record.url)
+      const verificationStatus = asText(record.verificationStatus)
+      const sourceDate = asText(record.publishedAt) || asText(record.recordedAt) || asText(record.updatedAt)
       const meta = [
         sourceUrl ? `url=${summarizeText(sourceUrl, 120)}` : '',
         verificationStatus ? `status=${verificationStatus}` : '',
@@ -638,7 +661,7 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
       return meta ? `${body}（${meta}）` : body
     })
     .filter(Boolean)
-    .slice(-6)
+    .slice(0, 6)
   const canonFactLines = canonFactCards
     .map((entry) => {
       const title = asText(entry.title) || asText(entry.cardKey)
@@ -648,10 +671,13 @@ function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['sign
     .filter(Boolean)
     .slice(-8)
   const hasProjectSources = sourceLines.length > 0 || canonFactLines.length > 0 || constraintLines.length > 0
+  const hasAuthorReferences = sourceLines.some(line => line.startsWith('作者创作参考'))
 
   return {
     assessmentSummary: assessment.mode === 'none' && hasProjectSources
-      ? '项目来源账本已加载；正文只能把来源支持的事实写成定论，缺少来源的内容必须写成推断、传闻或待确认。'
+      ? hasAuthorReferences
+        ? '项目资料已加载；外部来源只能支撑其注明的事实，作者创作参考只用于主题与冲突机制启发，不是本书设定或史实。'
+        : '项目来源账本已加载；正文只能把来源支持的事实写成定论，缺少来源的内容必须写成推断、传闻或待确认。'
       : assessment.summary,
     mode: assessment.mode,
     coverage: assessment.coverage,
@@ -1120,6 +1146,9 @@ function buildRenderedOverrides(
     const groundingLines = [
       sourceGroundingPack.assessmentSummary ? `来源状态：${sourceGroundingPack.assessmentSummary}` : '',
       sourceGroundingPack.sourceLines.length > 0 ? `来源摘录：\n${sourceGroundingPack.sourceLines.map((line) => `- ${line}`).join('\n')}` : '',
+      sourceGroundingPack.sourceLines.some(line => line.startsWith('作者创作参考'))
+        ? '作者创作参考只用于原创转化主题、隐喻或冲突机制，不是本书事实或史实；以人物选择、代价和后果呈现寓意，不复刻原作情节、设定或表达。'
+        : '',
       sourceGroundingPack.canonFactLines.length > 0 ? `已确认事实：\n${sourceGroundingPack.canonFactLines.map((line) => `- ${line}`).join('\n')}` : '',
       sourceGroundingPack.constraintLines.length > 0 ? `来源约束：\n${sourceGroundingPack.constraintLines.map((line) => `- ${line}`).join('\n')}` : '',
       sourceGroundingPack.conservativeFallbackActive

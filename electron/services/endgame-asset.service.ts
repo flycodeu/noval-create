@@ -18,6 +18,7 @@ import {
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { markNovelContextChanged } from './context-impact.service'
 import { ensureStoryStructure } from './story-structure.service'
+import { remapForeshadowReferences } from '../../src/shared/foreshadow-merge'
 
 const ENDGAME_STALE_WINDOW = 12
 const VOLUME_CONSTRAINT_PREFIX = '[卷级约束]'
@@ -320,6 +321,7 @@ function buildCommitmentReferenceSummary(
   db.select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, novelId))
     .all()
+    .filter(row => !row.mergedIntoId)
     .forEach((row) => {
       if (!row.linkedEndgameCommitmentId) return
       const sourceChapterNum = row.sourceChapterId ? chapterNumById.get(row.sourceChapterId) : undefined
@@ -375,7 +377,7 @@ function buildEndgameCommitmentView(
   }
 }
 
-function refreshCommitmentDerivedState(novelId: number) {
+export function refreshCommitmentDerivedState(novelId: number) {
   const db = getDb()
   const rows = db.select().from(endgameCommitments)
     .where(eq(endgameCommitments.novelId, novelId))
@@ -517,6 +519,7 @@ export function syncEndgameCommitmentsFromSettings(novelId: number, settingsJson
   payoffRows.forEach((commitment) => {
     const linked = existingForeshadows.find((row) => row.linkedEndgameCommitmentId === commitment.id) || null
     if (linked) {
+      if (linked.authorCorrectedAt) return
       db.update(foreshadowLedger).set({
         title: commitment.title,
         detail: commitment.description,
@@ -628,13 +631,13 @@ function enrichForeshadowLedgerRows(
   }))
 }
 
-export function listForeshadowLedger(novelId: number, options: { readOnly?: boolean } = {}) {
+export function listForeshadowLedger(novelId: number, options: { readOnly?: boolean; includeMerged?: boolean } = {}) {
   if (!options.readOnly) ensureStoryStructure(novelId)
   const rows = getDb().select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, novelId))
     .orderBy(asc(foreshadowLedger.targetPayoffChapter), asc(foreshadowLedger.id))
     .all()
-  return enrichForeshadowLedgerRows(novelId, rows)
+  return enrichForeshadowLedgerRows(novelId, options.includeMerged ? rows : rows.filter(row => !row.mergedIntoId))
 }
 
 export function listForeshadowLedgerByIds(novelId: number, ids: number[]) {
@@ -649,7 +652,18 @@ export function listForeshadowLedgerByIds(novelId: number, ids: number[]) {
     .orderBy(asc(foreshadowLedger.targetPayoffChapter), asc(foreshadowLedger.id))
     .limit(normalizedIds.length)
     .all()
-  return enrichForeshadowLedgerRows(novelId, rows)
+  const aliases = [...new Set(rows.map(row => row.mergedIntoId).filter((id): id is number => Boolean(id)))]
+  const canonical = aliases.length ? getDb().select().from(foreshadowLedger).where(and(eq(foreshadowLedger.novelId, novelId), inArray(foreshadowLedger.id, aliases))).all() : []
+  return enrichForeshadowLedgerRows(novelId, [...new Map([...rows.filter(row => !row.mergedIntoId), ...canonical].map(row => [row.id, row])).values()])
+}
+
+function normalizeForeshadowContractRefs(novelId: number, data: { requiredForeshadowIds?: number[]; requiredAssetRefs?: string[] }) {
+  if (!data.requiredForeshadowIds?.length && !data.requiredAssetRefs?.length) return
+  const aliases = getDb().select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, novelId)).all().filter(row => row.mergedIntoId)
+  for (const row of aliases) {
+    if (data.requiredForeshadowIds) data.requiredForeshadowIds = remapForeshadowReferences(data.requiredForeshadowIds, new Set([row.id]), row.mergedIntoId!) as number[]
+    if (data.requiredAssetRefs) data.requiredAssetRefs = remapForeshadowReferences(data.requiredAssetRefs, new Set([row.id]), row.mergedIntoId!, true) as string[]
+  }
 }
 
 export function upsertForeshadowLedger(
@@ -659,6 +673,7 @@ export function upsertForeshadowLedger(
     title: string
     detail: string
     sourceChapterId: number | null
+    actualPayoffChapterId: number | null
     sourceSegmentId: number | null
     plantMethod: string
     salienceLevel: string
@@ -674,18 +689,22 @@ export function upsertForeshadowLedger(
     linkedEndgameCommitmentId: number | null
     linkedVolumeId: number | null
   }>,
-  options: { skipContextTracking?: boolean } = {},
+  options: { skipContextTracking?: boolean; authorCorrection?: boolean } = {},
 ) {
   const db = getDb()
   findNovelById(novelId)
   const timestamp = new Date().toISOString()
   if (data.id) {
     const current = db.select().from(foreshadowLedger).where(eq(foreshadowLedger.id, data.id)).all()[0]
-    if (!current) throwUserFacingError('novel.notFound')
+    if (!current || current.novelId !== novelId) throwUserFacingError('novel.notFound')
+    if (current.mergedIntoId) throw new Error(`该线索已合并到 #${current.mergedIntoId}，请编辑保留项。`)
+    if (current.authorCorrectedAt && !options.authorCorrection) throw new Error('这条伏笔包含作者更正，请在故事账本明确编辑，不能由同步结果覆盖。')
     db.update(foreshadowLedger).set({
       title: data.title !== undefined ? asText(data.title) || current.title : current.title,
       detail: data.detail !== undefined ? asText(data.detail) : current.detail,
       sourceChapterId: data.sourceChapterId !== undefined ? data.sourceChapterId : current.sourceChapterId,
+      actualPayoffChapterId: data.actualPayoffChapterId !== undefined ? data.actualPayoffChapterId : current.actualPayoffChapterId,
+      authorCorrectedAt: options.authorCorrection ? timestamp : current.authorCorrectedAt,
       sourceSegmentId: data.sourceSegmentId !== undefined ? data.sourceSegmentId : current.sourceSegmentId,
       plantMethod: data.plantMethod !== undefined ? asText(data.plantMethod) : current.plantMethod,
       salienceLevel: data.salienceLevel !== undefined ? asText(data.salienceLevel) || current.salienceLevel : current.salienceLevel,
@@ -741,6 +760,7 @@ export function deleteForeshadowLedger(
   if (!existing || existing.novelId !== novelId) {
     throwUserFacingError('novel.notFound')
   }
+  if (existing.mergedIntoId || db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, novelId)).all().some(row => row.mergedIntoId === foreshadowId)) throw new Error('该线索保留合并追溯，请通过故事账本调整保留项，不直接删除历史。')
   db.delete(foreshadowLedger).where(eq(foreshadowLedger.id, foreshadowId)).run()
   refreshCommitmentDerivedState(novelId)
   markNovelContextChanged(novelId, 'Foreshadow ledger deleted')
@@ -1107,6 +1127,7 @@ export function auditVolumeDesign(
   const foreshadowRows = db.select().from(foreshadowLedger)
     .where(eq(foreshadowLedger.novelId, volume.novelId))
     .all()
+    .filter(row => !row.mergedIntoId)
   const inRangeForeshadowRows = foreshadowRows.filter((row) => {
     if (row.linkedVolumeId === volumeId) return true
     if (row.sourceChapterId && chapterIdSet.has(row.sourceChapterId)) return true
@@ -1399,6 +1420,8 @@ export function upsertChapterContract(
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFound')
   const current = db.select().from(chapterContracts).where(eq(chapterContracts.chapterId, chapterId)).all()[0] || null
+  data = { ...data }
+  normalizeForeshadowContractRefs(chapter.novelId, data)
   const timestamp = new Date().toISOString()
 
   if (current) {
@@ -1538,8 +1561,11 @@ export function upsertSceneContract(
   if (segmentId != null) {
     const segment = db.select().from(chapterSegments).where(eq(chapterSegments.id, segmentId)).all()[0]
     if (!segment) throwUserFacingError('segment.notFound')
+    if (segment.chapterId !== chapter.id || segment.novelId !== chapter.novelId) throwUserFacingError('segment.chapterMismatch')
   }
 
+  data = { ...data }
+  normalizeForeshadowContractRefs(chapter.novelId, data)
   const current = db.select().from(sceneContracts)
     .where(eq(sceneContracts.chapterId, chapterId))
     .all()

@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
@@ -301,6 +302,10 @@ function ForeshadowColumn({
 }
 
 export default function StoryThreadsPage({ novelId }: Props) {
+  return <StoryThreadsPageContent key={novelId} novelId={novelId} />
+}
+
+function StoryThreadsPageContent({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
@@ -319,21 +324,21 @@ export default function StoryThreadsPage({ novelId }: Props) {
     overdue: [],
   })
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [generateOpen, setGenerateOpen] = useState(false)
   const [editingThread, setEditingThread] = useState<StoryThread | null>(null)
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([])
-  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([])
   const [batchStatus, setBatchStatus] = useState<StoryThread['status']>('planned')
   const [batchPriority, setBatchPriority] = useState<StoryThread['priority']>('medium')
-  const [page, setPage] = useState(1)
   const [viewMode, setViewMode] = useState<'board' | 'foreshadow'>('board')
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [threadTypeFilter, setThreadTypeFilter] = useState<StoryThread['threadType'] | undefined>()
   const [statusFilter, setStatusFilter] = useState<StoryThread['status'] | undefined>()
+  const filterKey = JSON.stringify([keyword, statusFilter, threadTypeFilter])
+  const [page, setPage] = useScopedState(filterKey, 1)
+  const [selectedRowKeys, setSelectedRowKeys] = useScopedState<number[]>(filterKey, [])
   const [draggingThreadId, setDraggingThreadId] = useState<number | null>(null)
   const [editorDirty, setEditorDirty] = useState(false)
   const routeEditorRef = useRef<number | null>(null)
@@ -398,39 +403,47 @@ export default function StoryThreadsPage({ novelId }: Props) {
     setEditorDirty(value)
   }, [])
 
+  const readList = useCallback(async (targetPage: number) => {
+    const [queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats] = await Promise.all([
+      window.electron.thread.query({ novelId, page: targetPage, pageSize: THREADS_PAGE_SIZE, keyword, threadType: threadTypeFilter, status: statusFilter }),
+      window.electron.thread.getStats({ novelId, page: 1, pageSize: 1, keyword, threadType: threadTypeFilter, status: statusFilter }),
+      window.electron.thread.getForeshadowSnapshot(novelId),
+      loadWorkflowStats(novelId),
+    ])
+    return { queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats }
+  }, [keyword, novelId, statusFilter, threadTypeFilter])
+  const applyList = useCallback((result: Awaited<ReturnType<typeof readList>>) => {
+    setThreads(result.queryResult.items)
+    setThreadTotal(result.queryResult.total)
+    setStats(result.nextStats)
+    setForeshadowSnapshot(result.nextForeshadowSnapshot)
+    setWorkflowStats(result.nextWorkflowStats)
+  }, [])
+  const listScope = useMemo(() => ({ readList, page, mutationToken }), [readList, page, mutationToken])
+  const [loading, setLoading] = useScopedState(listScope, true)
   const refresh = useCallback(async (targetPage = page) => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
-      const [queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats] = await Promise.all([
-        window.electron.thread.query({ novelId, page: targetPage, pageSize: THREADS_PAGE_SIZE, keyword, threadType: threadTypeFilter, status: statusFilter }),
-        window.electron.thread.getStats({ novelId, page: 1, pageSize: 1, keyword, threadType: threadTypeFilter, status: statusFilter }),
-        window.electron.thread.getForeshadowSnapshot(novelId),
-        loadWorkflowStats(novelId),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setThreads(queryResult.items)
-      setThreadTotal(queryResult.total)
-      setStats(nextStats)
-      setForeshadowSnapshot(nextForeshadowSnapshot)
-      setWorkflowStats(nextWorkflowStats)
+      const result = await readList(targetPage)
+      if (refreshRequestRef.current === requestId) applyList(result)
     } catch (error) {
       if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) setLoading(false)
-    }
-  }, [keyword, novelId, page, statusFilter, threadTypeFilter])
-
+    } finally { if (refreshRequestRef.current === requestId) setLoading(false) }
+  }, [applyList, page, readList, setLoading])
   useEffect(() => {
-    void refresh()
-  }, [mutationToken, refresh])
-
-  useEffect(() => {
-    setPage(1)
-    setSelectedRowKeys([])
-  }, [keyword, statusFilter, threadTypeFilter])
+    const requestId = ++refreshRequestRef.current
+    void readList(page).then(result => {
+      if (refreshRequestRef.current === requestId) applyList(result)
+    }).catch(error => {
+      if (refreshRequestRef.current !== requestId) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'storyThread.loadFailed'))
+    }).finally(() => { if (refreshRequestRef.current === requestId) setLoading(false) })
+    return () => { refreshRequestRef.current += 1 }
+  }, [applyList, listScope, page, readList, setLoading])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -480,14 +493,8 @@ export default function StoryThreadsPage({ novelId }: Props) {
   useEffect(() => {
     const requestId = ++routeEditorRequestRef.current
     if (!routeThreadId || routeAction !== 'edit' || routeEditorRef.current === routeThreadId) return
-    const target = threads.find((thread) => thread.id === routeThreadId)
-    if (target) {
-      routeEditorRef.current = routeThreadId
-      openEditor(target)
-      return
-    }
     void window.electron.thread.get(routeThreadId).then((thread) => {
-      if (routeEditorRequestRef.current !== requestId || !thread) return
+      if (routeEditorRequestRef.current !== requestId || !thread || thread.novelId !== novelId) return
       routeEditorRef.current = routeThreadId
       openEditor(thread)
     }).catch((error) => {
@@ -495,7 +502,8 @@ export default function StoryThreadsPage({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.loadFailed'))
     })
-  }, [openEditor, routeAction, routeThreadId, threads])
+    return () => { routeEditorRequestRef.current += 1 }
+  }, [novelId, openEditor, routeAction, routeThreadId])
 
   useEffect(() => {
     generateForm.setFieldsValue(initialGenerateValues)
@@ -580,7 +588,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setSelectedRowKeys([])
     })
     return () => registerEscapeHandler(null)
-  }, [registerEscapeHandler])
+  }, [registerEscapeHandler, setSelectedRowKeys])
 
   const handleClear = useCallback(() => {
     Modal.confirm({
@@ -605,7 +613,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         }
       },
     })
-  }, [closeEditor, editorForm, novelId, notifyWorkspaceMutation, refresh])
+  }, [novelId, setSelectedRowKeys, setPage, closeEditor, editorForm, refresh, notifyWorkspaceMutation])
 
   useEffect(() => {
     registerClearHandler(() => {

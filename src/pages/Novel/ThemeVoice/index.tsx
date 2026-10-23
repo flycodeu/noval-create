@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Segmented, Select, Tag, message } from 'antd'
 import { AppstoreAddOutlined, ArrowRightOutlined, ExperimentOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
@@ -316,7 +317,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
   const [styleTemplates, setStyleTemplates] = useState<Template[]>([])
   const [templateOpen, setTemplateOpen] = useState(false)
   const [templateApplyMode, setTemplateApplyMode] = useState<'fill_blanks' | 'replace'>('fill_blanks')
-  const [selectedStyleTemplateId, setSelectedStyleTemplateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
+  const [selectedStyleTemplateId, setSelectedStyleTemplateId] = useScopedState<number | null>(currentNovel?.styleTemplateId, currentNovel?.styleTemplateId || null)
   const [templateCandidateId, setTemplateCandidateId] = useState<number | null>(currentNovel?.styleTemplateId || null)
   const [aiAssistOpen, setAiAssistOpen] = useState(false)
   const [aiTarget, setAiTarget] = useState<ThemeVoiceGenerationTarget>('all')
@@ -331,9 +332,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
     form.setFieldsValue(snapshot)
   }, [form, snapshot])
 
-  useEffect(() => {
-    setSelectedStyleTemplateId(currentNovel?.styleTemplateId || null)
-  }, [currentNovel?.styleTemplateId])
 
   useEffect(() => {
     let active = true
@@ -365,10 +363,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     values: normalizeFormValues(snapshot),
     styleTemplateId: currentNovel?.styleTemplateId || null,
   }), [currentNovel?.styleTemplateId, snapshot])
-  const [lastSavedSignature, setLastSavedSignature] = useState(persistedSignature)
-  useEffect(() => {
-    setLastSavedSignature(persistedSignature)
-  }, [persistedSignature])
+  const [lastSavedSignature, setLastSavedSignature] = useScopedState(persistedSignature, persistedSignature)
   const hasUnsavedChanges = JSON.stringify({
     values: normalizeFormValues(currentValues),
     styleTemplateId: selectedStyleTemplateId,
@@ -486,7 +481,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [clearDraft, currentNovel?.themeVoiceJson, finalizeDraft, form, novelId, notifyWorkspaceMutation, selectedStyleTemplateId, setCurrentNovel])
+  }, [form, novelId, currentNovel, selectedStyleTemplateId, setCurrentNovel, setLastSavedSignature, finalizeDraft, clearDraft, notifyWorkspaceMutation])
 
   const handleApplyTemplate = () => {
     if (!templateCandidateId) {

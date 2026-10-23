@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Empty, Form, Input, Modal, Select, Spin, Switch, message } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
@@ -87,6 +88,10 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function SceneTemplatesPage({ novelId }: Props) {
+  return <SceneTemplatesWorkspace key={novelId} novelId={novelId} />
+}
+
+function SceneTemplatesWorkspace({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
@@ -99,13 +104,13 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [scope, setScope] = useState<'all' | 'builtin' | 'custom'>('all')
   const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [persistedFormSignature, setPersistedFormSignature] = useState(() => serializeFormValues(EMPTY_VALUES))
   const refreshRequestRef = useRef(0)
   const creatingRef = useRef(false)
   const routeFocusRef = useRef<number | null>(null)
+  const routeRequestRef = useRef(0)
   const formSelectionRef = useRef<string | null>(null)
 
   const selectedItem = useMemo(
@@ -126,46 +131,71 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     genreScoped: formValues.genreScoped ?? buildFormValues(selectedItem).genreScoped,
   }), [formValues, selectedItem])
   const hasUnsavedChanges = Boolean(selectedItem || creating) && serializeFormValues(currentFormValues) !== persistedFormSignature
+  const selectionRef = useRef({ item: selectedItem, dirty: hasUnsavedChanges })
+  useLayoutEffect(() => { selectionRef.current = { item: selectedItem, dirty: hasUnsavedChanges } }, [selectedItem, hasUnsavedChanges])
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const routeTemplateId = useMemo(() => parseRouteId(searchParams.get('templateId')), [searchParams])
 
+  const readList = useCallback(async () => {
+    const [page, nextStats, nextWorkflowStats] = await Promise.all([
+      window.electron.sceneTemplate.query({
+        novelId,
+        genreId: currentNovel?.genreId,
+        keyword,
+        scope,
+        page: 1,
+        pageSize: 200,
+      }),
+      window.electron.sceneTemplate.getStats({ novelId, genreId: currentNovel?.genreId }),
+      loadWorkflowStats(novelId),
+    ])
+    return { page, nextStats, nextWorkflowStats }
+  }, [currentNovel?.genreId, keyword, novelId, scope])
+  const applyList = useCallback(({ page, nextStats, nextWorkflowStats }: Awaited<ReturnType<typeof readList>>) => {
+    const draftItem = selectionRef.current.dirty ? selectionRef.current.item : null
+    setItems(current => {
+      const focused = draftItem || current.find(item => item.id === routeFocusRef.current)
+      return focused && !page.items.some(item => item.id === focused.id) ? [focused, ...page.items] : page.items
+    })
+    setStats(nextStats)
+    setWorkflowStats({ outlineCount: nextWorkflowStats.outlineCount, chapterCount: nextWorkflowStats.chapterCount })
+    setSelectedId((current) => {
+      if (creatingRef.current) return null
+      if (draftItem) return draftItem.id
+      if (current && current === routeFocusRef.current) return current
+      if (current && page.items.some((item) => item.id === current)) return current
+      return page.items[0]?.id || null
+    })
+  }, [])
+  const loadingScope = useMemo(() => ({ readList, mutationToken }), [readList, mutationToken])
+  const [loading, setLoading] = useScopedState(loadingScope, true)
+  const reportLoadError = useCallback((error: unknown) => {
+    console.error(error)
+    message.error(getErrorMessage(error, 'common.loadFailed'))
+  }, [])
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
-      const [page, nextStats, nextWorkflowStats] = await Promise.all([
-        window.electron.sceneTemplate.query({
-          novelId,
-          genreId: currentNovel?.genreId,
-          keyword,
-          scope,
-          page: 1,
-          pageSize: 200,
-        }),
-        window.electron.sceneTemplate.getStats({ novelId, genreId: currentNovel?.genreId }),
-        loadWorkflowStats(novelId),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setItems(page.items)
-      setStats(nextStats)
-      setWorkflowStats({ outlineCount: nextWorkflowStats.outlineCount, chapterCount: nextWorkflowStats.chapterCount })
-      setSelectedId((current) => {
-        if (creatingRef.current) return null
-        if (current && page.items.some((item) => item.id === current)) return current
-        return page.items[0]?.id || null
-      })
+      const result = await readList()
+      if (refreshRequestRef.current === requestId) applyList(result)
     } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [currentNovel?.genreId, keyword, novelId, scope])
-
+  }, [applyList, readList, reportLoadError, setLoading])
   useEffect(() => {
-    void refresh()
-  }, [mutationToken, refresh])
+    const requestId = ++refreshRequestRef.current
+    void readList().then(result => {
+      if (refreshRequestRef.current === requestId) applyList(result)
+    }).catch(error => {
+      if (refreshRequestRef.current === requestId) reportLoadError(error)
+    }).finally(() => {
+      if (refreshRequestRef.current === requestId) setLoading(false)
+    })
+    return () => { refreshRequestRef.current += 1 }
+  }, [applyList, loadingScope, readList, reportLoadError, setLoading])
 
   useEffect(() => {
     const selectionKey = selectedItem ? `${novelId}:${selectedItem.id}` : null
@@ -185,7 +215,9 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   }, [searchParams, setSearchParams])
 
   const loadRouteTemplate = useCallback(async (id: number) => {
+    const requestId = ++routeRequestRef.current
     const item = await window.electron.sceneTemplate.get(id)
+    if (routeRequestRef.current !== requestId) return
     if (!item) return
     const isVisibleForNovel = item.novelId === novelId
       || (typeof item.novelId !== 'number' && (!item.genreId || item.genreId === currentNovel?.genreId))
@@ -197,12 +229,14 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   }, [currentNovel?.genreId, novelId])
 
   useEffect(() => {
-    if (!routeTemplateId || routeFocusRef.current === routeTemplateId) return
+    if (!routeTemplateId) { routeFocusRef.current = null; return }
+    if (routeFocusRef.current === routeTemplateId) return
     routeFocusRef.current = routeTemplateId
     void loadRouteTemplate(routeTemplateId).catch((error) => {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
+    return () => { routeRequestRef.current += 1; routeFocusRef.current = null }
   }, [loadRouteTemplate, routeTemplateId])
 
   useEffect(() => {
@@ -355,7 +389,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
     }
-  }, [currentNovel?.genreId, notifyWorkspaceMutation, novelId, selectedItem, syncTemplateRoute])
+  }, [currentNovel, notifyWorkspaceMutation, novelId, selectedItem, syncTemplateRoute])
 
   return (
     <WorkspacePage

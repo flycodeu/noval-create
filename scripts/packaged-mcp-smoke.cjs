@@ -12,7 +12,11 @@ const workspaceRoot = path.resolve(__dirname, '..')
 const testRoot = path.join(workspaceRoot, '.tmp-tests')
 const testUserData = path.join(testRoot, `packaged-mcp-${process.pid}-${randomUUID()}`)
 const bundled = process.argv.includes('--bundled') || process.argv.includes('--bundle')
-const executable = bundled ? require('electron') : path.join(workspaceRoot, 'release/win-unpacked/NovelForge.exe')
+const executableOption = process.argv.find(value => value.startsWith('--executable='))
+assert.ok(!(bundled && executableOption), '--bundled and --executable cannot be combined')
+const executable = bundled ? require('electron') : executableOption
+  ? path.resolve(executableOption.slice('--executable='.length))
+  : path.join(workspaceRoot, 'release/win-unpacked/NovelForge.exe')
 const args = bundled ? [path.join(__dirname, 'novelforge-mcp.cjs'), '--mcp'] : ['--mcp']
 const discoveryPath = path.join(testUserData, 'novelforge-runtime.json')
 const lockPath = path.join(testUserData, 'novelforge.single-writer.lock')
@@ -24,6 +28,14 @@ const expectedTools = [
   'artifacts.get', 'artifacts.list', 'workflows.start', 'workflows.get', 'workflows.list',
   'workflows.cancel', 'workflows.resume', 'workflows.apply', 'context.preview',
   'atlas.query', 'atlas.validate', 'atlas.apply', 'assets.query', 'chapters.review',
+  'research.list', 'research.get', 'research.upsert', 'research.delete',
+  'research.extract_preview', 'research.extract', 'research.adopt',
+  'assist.get', 'assist.list', 'assist.cancel', 'chapters.review_view',
+  'chapters.selection_preview', 'chapters.rewrite_selection', 'chapters.edit_selection', 'chapters.apply_selection',
+  'research.personal_list', 'research.publish', 'research.personal_update', 'research.reference',
+  'ledger.get', 'ledger.correct_character', 'ledger.correct_clue', 'ledger.merge_preview', 'ledger.merge_clues',
+  'style.list', 'style.get', 'style.analyze', 'style.copy_sample', 'style.approve', 'style.trial', 'style.approve_trial',
+  'writing.complete', 'writing.cancel_completion', 'inspiration.generate', 'inspiration.get', 'inspiration.cancel', 'projects.creation_status',
 ].map((name) => `novelforge.${name}`).sort()
 const clients = []
 const bridgePids = new Map()
@@ -76,7 +88,7 @@ async function connect(timeout = 60_000) {
 }
 function verifyInstallFilesReleased() {
   if (bundled) return
-  const installRoot = fs.realpathSync(path.join(workspaceRoot, 'release/win-unpacked'))
+  const installRoot = fs.realpathSync(path.dirname(executable))
   const files = [executable, path.join(installRoot, 'resources/app.asar')].map((file) => fs.realpathSync(file))
   for (const file of files) {
     const relative = path.relative(installRoot, file)
@@ -128,6 +140,7 @@ async function main() {
   verifyTestDirectory()
   const version = require('../package.json').version
   try {
+    const upgrade = process.argv.includes('--author-upgrade') ? JSON.parse(execFileSync(require('electron'), [path.join(__dirname, 'seed-author-upgrade-fixture.cjs')], { cwd: workspaceRoot, env: { ...env, NOVELFORGE_UPGRADE_FIXTURE_PATH: testUserData }, windowsHide: true, encoding: 'utf8', timeout: 30_000 }).trim()) : null
     const first = await connect()
     owner = discovery()
     const listed = await first.listTools()
@@ -141,6 +154,22 @@ async function main() {
     assert.equal(health.instanceId, owner.instanceId)
     assert.equal(health.tools, expectedTools.length)
     assert.equal(health.modelConfigured, false)
+    if (upgrade) {
+      const ledger = (await call(first, 'ledger.get', { novelId: upgrade.novelId })).ledger
+      assert.equal(ledger.clues.length, 2)
+      assert.equal(ledger.mergedClues.length, 0)
+      assert.equal((await rpc('chapter', 'get', [upgrade.chapterId])).content, upgrade.body)
+      assert.equal((await call(first, 'research.get', { novelId: upgrade.novelId, sourceKey: upgrade.cardKey })).entry.title, '作者原有参考')
+      const selection = { novelId: upgrade.novelId, keepId: upgrade.keepId, sourceIds: [upgrade.sourceId] }
+      const preview = (await call(first, 'ledger.merge_preview', selection)).preview
+      await call(first, 'ledger.merge_clues', { ...selection, expectedContextVersion: preview.contextVersion, previewFingerprint: preview.fingerprint, reason: '安装版旧库合并回归', idempotencyKey: 'packaged-author-upgrade' })
+      const merged = (await call(first, 'ledger.get', { novelId: upgrade.novelId })).ledger
+      assert.equal(merged.clues.length, 1)
+      assert.equal(merged.mergedClues[0].mergedIntoId, upgrade.keepId)
+      assert.equal(JSON.parse(merged.mergedClues[0].mergeInfoJson).sourcesBefore[0].detail, '同一张欠条的重复记录。')
+      assert.deepEqual((await call(first, 'assets.query', { novelId: upgrade.novelId, chapterId: upgrade.chapterId })).chapterContract.requiredForeshadowIds, [upgrade.keepId])
+      process.stdout.write('PASS packaged pre-0075 upgrade: original prose/cards/clues preserved; new merge tools migrate contract refs and retain source history.\n')
+    }
 
     const second = await connect()
     assert.equal(discovery().instanceId, owner.instanceId, 'Both bridges must connect to the same runtime')

@@ -3074,6 +3074,30 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0071_fact_reveal_plan', () => {
     ensureColumn(sqlite, 'story_facts', 'planned_reveal_chapter_num', 'INTEGER')
   })
+  runMigrationStep(sqlite, '0072_personal_research', () => {
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS personal_research (
+      id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 1,
+      content_json TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`)
+  })
+  runMigrationStep(sqlite, '0073_author_ledger', () => {
+    if (hasTable(sqlite, 'story_atlas_revisions')) ensureColumn(sqlite, 'story_atlas_revisions', 'author_protection_json', "TEXT NOT NULL DEFAULT '[]'")
+    if (hasTable(sqlite, 'foreshadow_ledger')) {
+      ensureColumn(sqlite, 'foreshadow_ledger', 'actual_payoff_chapter_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
+      ensureColumn(sqlite, 'foreshadow_ledger', 'author_corrected_at', 'TEXT')
+    }
+  })
+  runMigrationStep(sqlite, '0074_style_source_reference', () => {
+    if (hasTable(sqlite, 'style_fingerprints')) ensureColumn(sqlite, 'style_fingerprints', 'source_reference_json', 'TEXT')
+  })
+  runMigrationStep(sqlite, '0075_foreshadow_merge', () => {
+    if (hasTable(sqlite, 'foreshadow_ledger')) {
+      ensureColumn(sqlite, 'foreshadow_ledger', 'merged_into_id', 'INTEGER')
+      ensureColumn(sqlite, 'foreshadow_ledger', 'merge_info_json', 'TEXT')
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_foreshadow_merge_target ON foreshadow_ledger(novel_id,merged_into_id)')
+    }
+  })
 }
 
 function repairLegacyArtifactKindConstraint(sqlite: Database.Database) {
@@ -4245,7 +4269,7 @@ function backfillContractDefaults(sqlite: Database.Database) {
   }
 }
 
-function seedBuiltinData(db: ReturnType<typeof drizzle>) {
+function seedBuiltinData(db: AppDatabase) {
   const existingGenres = db.select().from(schema.genres).all()
   if (existingGenres.length === 0) {
     db.insert(schema.genres).values([
@@ -4524,7 +4548,7 @@ function seedBuiltinData(db: ReturnType<typeof drizzle>) {
  * resolveActiveStyleFingerprint. Idempotent by fingerprint name — running the
  * seed repeatedly never duplicates rows.
  */
-export function seedGenreVoiceFingerprints(db: ReturnType<typeof drizzle>) {
+export function seedGenreVoiceFingerprints(db: AppDatabase) {
   try {
     const genreRows = db.select({ id: schema.genres.id, name: schema.genres.name })
       .from(schema.genres)

@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined, SwapOutlined } from '@ant-design/icons'
@@ -8,7 +9,6 @@ import type {
   RhythmTemplateOption,
   StoryArc,
   StoryArcProgressPoint,
-  StoryArcProgressSnapshot,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
@@ -151,16 +151,13 @@ export default function Outline({ novelId }: Props) {
     registerEscapeHandler,
     registerSaveHandler,
   } = useNovelWorkspaceActions()
-  const [arcs, setArcs] = useState<StoryArc[]>([])
   const [rhythmTemplates, setRhythmTemplates] = useState<RhythmTemplateOption[]>([])
-  const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [arcSaving, setArcSaving] = useState(false)
-  const [arcProgressSnapshot, setArcProgressSnapshot] = useState<StoryArcProgressSnapshot | null>(null)
   const [arcForm] = Form.useForm<ArcFormValues>()
   const [arcModalOpen, setArcModalOpen] = useState(false)
   const [editingArc, setEditingArc] = useState<StoryArc | null>(null)
-  const [expandedArcId, setExpandedArcId] = useState<number | null>(() => {
+  const [expandedArcId, updateExpandedArcId] = useState<number | null>(() => {
     if (typeof window === 'undefined') return null
     const stored = Number(window.sessionStorage.getItem(`novelforge-outline-arc:${novelId}`))
     return Number.isSafeInteger(stored) && stored > 0 ? stored : null
@@ -170,8 +167,16 @@ export default function Outline({ novelId }: Props) {
   const [outlineTargetCount, setOutlineTargetCount] = useState(8)
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const [lastSelectedChapterId, setLastSelectedChapterId] = useState<number | null>(null)
+  const setExpandedArcId = useCallback((arcId: number | null) => {
+    updateExpandedArcId(arcId)
+    setExpandedChapterPage(1)
+    setSelectedChapterIds([])
+    setLastSelectedChapterId(null)
+  }, [])
   const [batchStatus, setBatchStatus] = useState<Chapter['status']>('outline')
-  const [batchStartChapterNum, setBatchStartChapterNum] = useState(1)
+  const [batchNumbering, setBatchNumbering] = useState<{ selection: Chapter[] | null; start: number }>({ selection: null, start: 1 })
+  const batchStartChapterNum = batchNumbering.start
+  const setBatchStartChapterNum = (start: number) => setBatchNumbering(current => ({ ...current, start }))
   const [reorderMode, setReorderMode] = useState(false)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const [creativeStageId, setCreativeStageId] = useState<number | null>(() => {
@@ -180,36 +185,29 @@ export default function Outline({ novelId }: Props) {
   })
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
-  const loadRequestRef = React.useRef(0)
   const arcSaveActionRef = React.useRef(false)
   const arcDirtyRef = React.useRef(false)
   const [arcHasUnsavedChanges, setArcHasUnsavedChanges] = useState(false)
   useRegisterWorkspaceLeaveGuard(arcHasUnsavedChanges)
 
-  const loadData = useCallback(async () => {
-    const requestId = ++loadRequestRef.current
-    setLoading(true)
-    try {
-      const [arcList, chapterList, arcProgress] = await Promise.all([
-        window.electron.outline.getArcs(novelId),
-        window.electron.chapter.list(novelId),
-        window.electron.outline.getArcProgressSnapshot(novelId),
-      ])
-      if (loadRequestRef.current !== requestId) return
-      setArcs(arcList.sort((a, b) => a.arcOrder - b.arcOrder))
-      setChapters(chapterList)
-      setArcProgressSnapshot(arcProgress)
-    } catch (error) {
-      if (loadRequestRef.current === requestId) {
-        console.error(error)
-        message.error(getUserFacingMessage('common.loadFailed'))
-      }
-    } finally {
-      if (loadRequestRef.current === requestId) setLoading(false)
+  const read = useCallback(async () => {
+    const [arcList, chapterList, arcProgress] = await Promise.all([
+      window.electron.outline.getArcs(novelId),
+      window.electron.chapter.list(novelId),
+      window.electron.outline.getArcProgressSnapshot(novelId),
+    ])
+    return { arcs: [...arcList].sort((a, b) => a.arcOrder - b.arcOrder), chapters: chapterList, arcProgress }
+  }, [novelId])
+  const { data, loading, error: loadError, reload: loadData } = useAsyncSnapshot(read, mutationToken)
+  const arcs = useMemo(() => data?.arcs ?? [], [data])
+  const arcProgressSnapshot = data?.arcProgress ?? null
+  useEffect(() => { if (data) setChapters(data.chapters) }, [data, setChapters])
+  useEffect(() => {
+    if (loadError) {
+      console.error(loadError)
+      message.error(getUserFacingMessage('common.loadFailed'))
     }
-  }, [novelId, setChapters])
-
-  useEffect(() => { void loadData() }, [loadData, mutationToken])
+  }, [loadError])
   useEffect(() => {
     if (expandedArcId) window.sessionStorage.setItem(`novelforge-outline-arc:${novelId}`, String(expandedArcId))
   }, [expandedArcId, novelId])
@@ -239,7 +237,8 @@ export default function Outline({ novelId }: Props) {
     }
   }, [loadData, notifyWorkspaceMutation])
 
-  const outlineBatch = useChapterOutlineBatch(loadData)
+  const reloadAfterBatch = useCallback(async () => { await loadData() }, [loadData])
+  const outlineBatch = useChapterOutlineBatch(reloadAfterBatch)
   const outlineBatchRunning = outlineBatch.progress.phase === 'running'
 
   const openCreateModal = () => {
@@ -492,16 +491,11 @@ export default function Outline({ novelId }: Props) {
   const expandedArcSummary = expandedArc ? arcProgressSummaryMap.get(expandedArc.id) : undefined
   const expandedArcAlerts = expandedArcSummary?.alerts || []
 
-  useEffect(() => {
-    setExpandedChapterPage(1)
-    setSelectedChapterIds([])
-    setLastSelectedChapterId(null)
-  }, [expandedArcId])
 
-  useEffect(() => {
-    if (selectedExpandedChapters.length === 0) return
-    setBatchStartChapterNum(Math.min(...selectedExpandedChapters.map((chapter) => chapter.chapterNum)))
-  }, [selectedExpandedChapters])
+  if (batchNumbering.selection !== selectedExpandedChapters) {
+    setBatchNumbering({ selection: selectedExpandedChapters, start: selectedExpandedChapters.length
+      ? Math.min(...selectedExpandedChapters.map(chapter => chapter.chapterNum)) : batchNumbering.start })
+  }
 
   useEffect(() => {
     registerEscapeHandler(() => {

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useScopedState } from '@/hooks/useScopedState'
+import { useCallback, useEffect, useRef, useLayoutEffect } from 'react'
 import type { CreativeRun, CreativeWorkflowInput } from '../../../shared/creative-workflow'
 
 export function runStatusLabel(run: CreativeRun) {
@@ -21,17 +22,23 @@ export function isRunActive(run: CreativeRun | null | undefined) {
 }
 
 export function useCreativeWorkflow(novelId: number) {
-  const [run, setRun] = useState<CreativeRun | null>(null)
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [run, setRun] = useScopedState<CreativeRun | null>(novelId, null)
+  const [error, setError] = useScopedState(novelId, '')
+  const [submitting, setSubmitting] = useScopedState(novelId, false)
   const alive = useRef(true)
   const requestEpoch = useRef(0)
-  const refreshInProgress = useRef(false)
+  const refreshInProgress = useRef<number | null>(null)
   const notifiedRun = useRef<string | null>(null)
+  const activeSetter = useRef<typeof setRun | null>(setRun)
+  useLayoutEffect(() => {
+    activeSetter.current = setRun
+    refreshInProgress.current = null
+    return () => { activeSetter.current = null }
+  }, [setRun])
   const refresh = useCallback(async (runId?: number) => {
-    if (refreshInProgress.current) return null
-    refreshInProgress.current = true
+    if (activeSetter.current !== setRun || refreshInProgress.current !== null) return null
     const epoch = ++requestEpoch.current
+    refreshInProgress.current = epoch
     try {
       const response = await callAuthorTool<{ run: CreativeRun | null }>('novelforge.workflows.get', { novelId, ...(runId ? { runId } : {}) })
       const next = response.run
@@ -40,12 +47,11 @@ export function useCreativeWorkflow(novelId: number) {
     } catch (cause) {
       if (alive.current && epoch === requestEpoch.current) setError(cause instanceof Error ? cause.message : '读取创作任务失败')
       return null
-    } finally { refreshInProgress.current = false }
-  }, [novelId])
+    } finally { if (refreshInProgress.current === epoch) refreshInProgress.current = null }
+  }, [novelId, setRun, setError])
 
   useEffect(() => {
     alive.current = true
-    setRun(null)
     let stopped = false
     let timer: number | undefined
     const poll = async () => {
@@ -65,6 +71,7 @@ export function useCreativeWorkflow(novelId: number) {
   }, [run])
 
   const start = useCallback(async (input: Omit<CreativeWorkflowInput, 'novelId' | 'idempotencyKey'>) => {
+    if (activeSetter.current !== setRun) return null
     setSubmitting(true)
     setError('')
     try {
@@ -78,24 +85,25 @@ export function useCreativeWorkflow(novelId: number) {
       if (alive.current) setError(cause instanceof Error ? cause.message : '启动创作任务失败')
       return null
     } finally { if (alive.current) setSubmitting(false) }
-  }, [novelId])
+  }, [novelId, setRun, setError, setSubmitting])
 
   const control = useCallback(async (action: 'cancel' | 'resume') => {
-    if (!run) return
+    if (!run || activeSetter.current !== setRun) return
     setSubmitting(true)
     try {
       await callAuthorTool(`novelforge.workflows.${action}`, { novelId, runId: run.runId })
       await refresh(run.runId)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '任务操作失败') }
     finally { setSubmitting(false) }
-  }, [novelId, refresh, run])
+  }, [novelId, refresh, run, setRun, setError, setSubmitting])
   const review = useCallback(async (chapterId: number, request: string) => {
+    if (activeSetter.current !== setRun) return
     setSubmitting(true); setError('')
     try {
       const result = await callAuthorTool<{ run: CreativeRun }>('novelforge.chapters.review', { novelId, chapterId, request, idempotencyKey: `author-review:${novelId}:${crypto.randomUUID()}` })
       if (alive.current) setRun(result.run)
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '启动章节评审失败') }
     finally { if (alive.current) setSubmitting(false) }
-  }, [novelId])
+  }, [novelId, setRun, setError, setSubmitting])
   return { run, error, submitting, active: isRunActive(run), start, review, refresh, control }
 }

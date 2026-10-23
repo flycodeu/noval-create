@@ -5,6 +5,7 @@ import { insertAtlasRevision, readAtlasRecords, type AtlasStoredRecord, type Atl
 import { markNovelContextChanged } from './context-impact.service'
 import { atlasBoundariesOverlap, meaningfulAtlasValue, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 import { atlasPolygonContainsPoint, atlasPolygonContainsPolygon, resolveAtlasGeography } from '../../src/shared/story-atlas-geography'
+import { protectedValue, readAuthorProtection, validateProtectedFields } from './author-protection'
 import type {
   StoryAtlasApplyInput, StoryAtlasApplyResult, StoryAtlasDiagnostic, StoryAtlasEntity, StoryAtlasEntityKind,
   StoryAtlasGeography, StoryAtlasQuery, StoryAtlasRelation, StoryAtlasSnapshot, StoryAtlasValidationResult,
@@ -122,7 +123,7 @@ export function queryStoryAtlas(input: StoryAtlasQuery): StoryAtlasSnapshot {
 }
 
 interface Prepared { records: AtlasStoredRecord[]; changed: AtlasStoredRecord[]; clearedAttributes: Map<string, string[]>; idMap: Record<string, string>; diagnostics: StoryAtlasDiagnostic[]; contextVersion: number }
-function prepare(input: StoryAtlasApplyInput): Prepared {
+function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, string[]> = {}): Prepared {
   const sqlite = getSqlite()
   const contextVersion = projectVersion(sqlite, input.novelId)
   if (input.expectedContextVersion !== contextVersion) fail('CONTEXT_VERSION_CONFLICT', `项目上下文已变为 v${contextVersion}，请重新读取后提交。`)
@@ -338,6 +339,14 @@ function prepare(input: StoryAtlasApplyInput): Prepared {
   }
   const clearedAttributes = new Map(current.filter(item => changedIds.has(item.record.id)).map(item => [item.record.id,
     Object.keys(item.record.attributes).filter(key => !(key in byId.get(item.record.id)!.record.attributes))]))
+  for (const id of changedIds) {
+    const item = byId.get(id)!
+    if (authorCorrections[id]) { validateProtectedFields(authorCorrections[id]); continue }
+    const protection = readAuthorProtection(sqlite, input.novelId, id)
+    if (!protection?.fields.length) continue
+    const conflicts = protection.fields.filter(field => item.retired || !isEntity(item.record) || JSON.stringify(protectedValue(item.record, field)) !== JSON.stringify(protectedValue(protection.record, field)))
+    if (conflicts.length) fail('AUTHOR_PROTECTED_FIELD', `${protection.record.name}的作者保护字段发生冲突：${conflicts.join('、')}。请在故事账本明确更正或解除保护。`)
+  }
   return { records: [...byId.values()], changed: [...changedIds].map((id) => byId.get(id)!), clearedAttributes, idMap, contextVersion, diagnostics: diagnose(entities, relations) }
 }
 
@@ -457,16 +466,16 @@ function syncNativeReferences(sqlite: Database.Database, novelId: number, record
   }
 }
 
-export function applyStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasApplyResult {
+export function applyStoryAtlasChanges(input: StoryAtlasApplyInput, options: { authorCorrections?: Record<string, string[]> } = {}): StoryAtlasApplyResult {
   const sqlite = getSqlite()
-  const fingerprint = createHash('sha256').update(JSON.stringify(input)).digest('hex')
+  const fingerprint = createHash('sha256').update(JSON.stringify(options.authorCorrections ? { ...input, authorCorrections: options.authorCorrections } : input)).digest('hex')
   const run = () => {
     const replay = sqlite.prepare('SELECT fingerprint,result_json FROM story_atlas_changes WHERE novel_id=? AND idempotency_key=?').get(input.novelId, input.idempotencyKey) as { fingerprint: string; result_json: string } | undefined
     if (replay) {
       if (replay.fingerprint !== fingerprint) fail('IDEMPOTENCY_KEY_CONFLICT', '同一个幂等键不能对应不同变更。')
       return { ...JSON.parse(replay.result_json), idempotentReplay: true } as StoryAtlasApplyResult
     }
-    const prepared = prepare(input)
+    const prepared = prepare(input, options.authorCorrections)
     const records = new Map(prepared.records.map((record) => [record.record.id, record]))
     const pendingEntities = prepared.changed.filter((item) => item.recordType === 'entity')
     // Save parents before children even when the submitted changes are in reverse order.
@@ -482,7 +491,7 @@ export function applyStoryAtlasChanges(input: StoryAtlasApplyInput): StoryAtlasA
     prepared.changed.forEach((item) => retireNativeRelation(sqlite, input.novelId, item))
     prepared.changed.filter((item) => item.recordType === 'relation').forEach((item) => projectNative(sqlite, input.novelId, item, records))
     const contextVersion = markNovelContextChanged(input.novelId, 'Story atlas changed')
-    prepared.changed.forEach((item) => insertAtlasRevision(sqlite, input.novelId, item, contextVersion))
+    prepared.changed.forEach((item) => insertAtlasRevision(sqlite, input.novelId, item, contextVersion, options.authorCorrections?.[item.record.id]))
     syncNativeReferences(sqlite, input.novelId, new Map(readAtlasRecords(sqlite, input.novelId, undefined, false).map((item) => [item.record.id, item])))
     const result: StoryAtlasApplyResult = { novelId: input.novelId, contextVersion, appliedIds: prepared.changed.map((item) => item.record.id), idMap: prepared.idMap, diagnostics: prepared.diagnostics, idempotentReplay: false }
     sqlite.prepare('INSERT INTO story_atlas_changes(novel_id,idempotency_key,fingerprint,result_json) VALUES (?,?,?,?)').run(input.novelId, input.idempotencyKey, fingerprint, JSON.stringify(result))

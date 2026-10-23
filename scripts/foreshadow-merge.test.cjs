@@ -1,0 +1,117 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
+const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
+const root = path.resolve(__dirname, '..'), base = path.join(root, '.tmp-tests')
+fs.mkdirSync(base, { recursive: true })
+const temp = fs.mkdtempSync(path.join(base, 'clue-merge-'))
+app.setPath('userData', temp); app.disableHardwareAcceleration()
+process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
+registerProjectTsRuntime(root)
+let keepFixture = false
+async function main() {
+  await app.whenReady()
+  const db = require('../electron/database/db.ts'); db.initDb()
+  const sql = db.getSqlite(), novels = require('../electron/services/novel.service.ts'), chapters = require('../electron/services/chapter.service.ts')
+  const assets = require('../electron/services/endgame-asset.service.ts')
+  const { novelForgeToolRegistry: registry } = require('../electron/application/novelforge-tool-registry.ts')
+  const { DESKTOP_AGENT_TOOL_SCOPES } = require('../src/shared/tool-contracts/index.ts')
+  const context = { actor: { type: 'api_client', actorId: 'merge-test', clientId: 'isolated-fixture' }, scopes: [...DESKTOP_AGENT_TOOL_SCOPES] }
+  const call = async (name, input) => { const result = await registry.invoke({ toolId: `novelforge.${name}`, input }, context); assert.ok(result.ok, JSON.stringify(result)); return result.data }
+  const novelId = novels.createNovel({ title: '重复线索合并验证', operatingMode: 'creative_workflow' })
+  const otherId = novels.createNovel({ title: '其他作品' })
+  const chapterId = chapters.createChapter(novelId, { chapterNum: 1, title: '渡口' })
+  const insert = (title, book = novelId, detail = '旧绳是抵押物，三日内赎回。') => Number(sql.prepare('INSERT INTO foreshadow_ledger(novel_id,title,detail,status,target_payoff_chapter,required_evidence) VALUES(?,?,?,?,3,?)').run(book, title, detail, 'planted', '原绳结与欠条').lastInsertRowid)
+  const target = insert('抵押的旧绳'), source = insert('抵押的旧绳', novelId, '另一条记录：旧绳留在铺里。'), foreign = insert('抵押的旧绳', otherId)
+  assets.upsertChapterContract(chapterId, { chapterGoal: '借木料修船', requiredForeshadowIds: [source, target], requiredAssetRefs: [`foreshadow:${source}`, `character:${source}`, `foreshadow:${target}`], status: 'ready' })
+  assets.upsertSceneContract(chapterId, null, { pov: '船工', sceneGoal: '留下抵押物', requiredForeshadowIds: [source], status: 'ready' })
+  const legacyChapterId = chapters.createChapter(novelId, { chapterNum: 2, title: '旧格式引用' })
+  assets.upsertChapterContract(legacyChapterId, { requiredForeshadowIds: [source, target], status: 'ready' })
+  assets.upsertSceneContract(legacyChapterId, null, { requiredForeshadowIds: [source], status: 'ready' })
+  const legacySceneId = sql.prepare('SELECT id FROM scene_contracts WHERE chapter_id=? AND segment_id IS NULL').get(legacyChapterId).id
+  const legacyIds = [String(source), String(target), source]
+  sql.prepare('UPDATE chapter_contracts SET required_foreshadow_ids_json=? WHERE chapter_id=?').run(JSON.stringify(legacyIds), legacyChapterId)
+  sql.prepare('UPDATE scene_contracts SET required_foreshadow_ids_json=? WHERE chapter_id=?').run(JSON.stringify([String(source)]), legacyChapterId)
+  const revisionId = Number(sql.prepare("INSERT INTO revision_tasks(novel_id,title,entity_type,entity_id,status) VALUES(?,?,'foreshadow',?,'open')").run(novelId, '补充旧绳的回收依据', source).lastInsertRowid)
+  const eventId = Number(sql.prepare("INSERT INTO asset_change_events(novel_id,asset_type,asset_id,asset_label) VALUES(?,'foreshadow',?,?)").run(novelId, source, '旧绳原事件').lastInsertRowid)
+  const impactId = Number(sql.prepare("INSERT INTO asset_change_impacts(novel_id,event_id,target_type,target_id,target_label,impact_reason) VALUES(?,?,'foreshadow',?,?,?)").run(novelId, eventId, source, '旧绳原影响', '需补充依据').lastInsertRowid)
+  try {
+    await assert.rejects(() => call('ledger.merge_preview', { novelId, keepId: target, sourceIds: [foreign] }), /不属于/)
+    const selection = { novelId, keepId: target, sourceIds: [source] }
+    const inspect = () => call('ledger.merge_preview', selection).then(result => result.preview)
+    const preview = await inspect()
+    assert.equal(preview.references.length, 7)
+    assert.ok(preview.differences[0].fields.some(field => field.label === '内容'))
+    const input = { ...selection, expectedContextVersion: preview.contextVersion, previewFingerprint: preview.fingerprint, reason: '两项记录的是同一次抵押，保留较完整原项。', idempotencyKey: 'merge-isolated-first' }
+    sql.prepare('UPDATE scene_contracts SET required_foreshadow_ids_json=? WHERE chapter_id=?').run(JSON.stringify([target, source]), chapterId)
+    await assert.rejects(() => call('ledger.merge_clues', input), /已变化/)
+    assert.equal(sql.prepare('SELECT merged_into_id FROM foreshadow_ledger WHERE id=?').get(source).merged_into_id, null)
+    const fresh = await inspect(), confirmed = { ...input, previewFingerprint: fresh.fingerprint }
+    sql.exec("CREATE TRIGGER fail_merge_fixture BEFORE UPDATE OF merged_into_id ON foreshadow_ledger WHEN NEW.merged_into_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'isolated rollback fixture'); END")
+    await assert.rejects(() => call('ledger.merge_clues', confirmed))
+    assert.deepEqual(JSON.parse(sql.prepare('SELECT required_foreshadow_ids_json FROM chapter_contracts WHERE chapter_id=?').get(chapterId).required_foreshadow_ids_json), [source, target], 'partial reference updates roll back on a write failure')
+    assert.deepEqual(JSON.parse(sql.prepare('SELECT required_foreshadow_ids_json FROM chapter_contracts WHERE chapter_id=?').get(legacyChapterId).required_foreshadow_ids_json), legacyIds, 'legacy references also roll back without losing their original representation')
+    assert.equal(sql.prepare('SELECT merged_into_id FROM foreshadow_ledger WHERE id=?').get(source).merged_into_id, null)
+    sql.exec('DROP TRIGGER fail_merge_fixture')
+    await call('ledger.merge_clues', confirmed)
+    const version = novels.getNovel(novelId).contextVersion
+    assert.equal((await call('ledger.merge_clues', confirmed)).result.idempotentReplay, true)
+    assert.equal(novels.getNovel(novelId).contextVersion, version)
+    await assert.rejects(() => call('ledger.merge_clues', { ...confirmed, reason: '改动请求内容' }), /编号/)
+    assert.deepEqual(JSON.parse(sql.prepare('SELECT required_foreshadow_ids_json FROM chapter_contracts WHERE chapter_id=?').get(chapterId).required_foreshadow_ids_json), [target])
+    assert.deepEqual(JSON.parse(sql.prepare('SELECT required_asset_refs_json FROM chapter_contracts WHERE chapter_id=?').get(chapterId).required_asset_refs_json), [`foreshadow:${target}`, `character:${source}`])
+    assert.deepEqual(JSON.parse(sql.prepare('SELECT required_foreshadow_ids_json FROM scene_contracts WHERE chapter_id=?').get(chapterId).required_foreshadow_ids_json), [target])
+    assert.deepEqual(assets.getChapterContract(legacyChapterId).requiredForeshadowIds, [target], 'legacy string ids migrate to the canonical clue')
+    assert.deepEqual(assets.listSceneContracts(legacyChapterId).find(scene => scene.id === legacySceneId).requiredForeshadowIds, [target], 'the persisted legacy scene contract resolves to the canonical clue')
+    assert.equal(sql.prepare('SELECT entity_id FROM revision_tasks WHERE id=?').get(revisionId).entity_id, target)
+    assert.equal(sql.prepare('SELECT target_id FROM asset_change_impacts WHERE id=?').get(impactId).target_id, target)
+    assert.equal(sql.prepare('SELECT asset_id FROM asset_change_events WHERE id=?').get(eventId).asset_id, source, 'historical event remains immutable')
+    const ledger = (await call('ledger.get', { novelId })).ledger
+    assert.deepEqual(ledger.clues.map(clue => clue.id), [target])
+    assert.equal(ledger.mergedClues.length, 1)
+    const history = JSON.parse(ledger.mergedClues[0].mergeInfoJson)
+    assert.equal(history.sourcesBefore[0].detail, '另一条记录：旧绳留在铺里。')
+    assert.equal(history.references.length, 7)
+    assert.deepEqual(JSON.parse(history.references.find(ref => ref.table === 'chapter_contracts' && ref.chapterId === legacyChapterId).before), legacyIds, 'history retains the original legacy reference values')
+    assets.syncEndgameCommitmentsFromSettings(novelId)
+    assert.deepEqual(assets.listForeshadowLedger(novelId, {readOnly:true}).map(clue => clue.id), [target], 'derived synchronization does not resurrect the merged source')
+    assert.deepEqual(assets.listForeshadowLedgerByIds(novelId, [source]).map(clue => clue.id), [target])
+    assert.throws(() => assets.upsertForeshadowLedger(novelId, { id: source, detail: '覆盖旧项' }), /已合并/)
+    assert.throws(() => assets.deleteForeshadowLedger(novelId, target), /合并追溯/)
+    assets.upsertChapterContract(chapterId, { requiredForeshadowIds: [source], requiredAssetRefs: [`foreshadow:${source}`] })
+    assert.deepEqual(assets.getChapterContract(chapterId).requiredForeshadowIds, [target], 'old IDs are normalized on future writes')
+    assert.deepEqual(assets.getChapterContract(chapterId).requiredAssetRefs, [`foreshadow:${target}`])
+    const nextTarget = insert('保留的最终线索')
+    const chained = (await call('ledger.merge_preview', { novelId, keepId: nextTarget, sourceIds: [target] })).preview
+    await call('ledger.merge_clues', { novelId, keepId: nextTarget, sourceIds: [target], expectedContextVersion: chained.contextVersion, previewFingerprint: chained.fingerprint, reason: '再次整理，保留最终记录。', idempotencyKey: 'merge-isolated-second' })
+    assert.equal(sql.prepare('SELECT merged_into_id FROM foreshadow_ledger WHERE id=?').get(source).merged_into_id, nextTarget)
+    assert.equal(JSON.parse(sql.prepare('SELECT merge_info_json FROM foreshadow_ledger WHERE id=?').get(source).merge_info_json).keepId, target, 'original merge event remains traceable')
+    assert.deepEqual(assets.listForeshadowLedgerByIds(novelId, [source, target]).map(clue => clue.id), [nextTarget])
+    const conflict = insert('同名但关联不同的线索')
+    const threadA = Number(sql.prepare('INSERT INTO story_threads(novel_id,title) VALUES(?,?)').run(novelId, '第一条故事线').lastInsertRowid)
+    const threadB = Number(sql.prepare('INSERT INTO story_threads(novel_id,title) VALUES(?,?)').run(novelId, '第二条故事线').lastInsertRowid)
+    sql.prepare('UPDATE foreshadow_ledger SET linked_thread_id=? WHERE id=?').run(threadA, nextTarget)
+    sql.prepare('UPDATE foreshadow_ledger SET linked_thread_id=? WHERE id=?').run(threadB, conflict)
+    const blocked = (await call('ledger.merge_preview', { novelId, keepId: nextTarget, sourceIds: [conflict] })).preview
+    assert.equal(blocked.blockers.length, 1)
+    await assert.rejects(() => call('ledger.merge_clues', { novelId, keepId: nextTarget, sourceIds: [conflict], expectedContextVersion: blocked.contextVersion, previewFingerprint: blocked.fingerprint, reason: '不能丢失关联', idempotencyKey: 'merge-conflict-case' }), /关联冲突/)
+    await sql.backup(path.join(temp, 'backup.db'))
+    const Database = require('better-sqlite3'), backup = new Database(path.join(temp, 'backup.db'), { readonly: true })
+    assert.equal(backup.prepare('SELECT merged_into_id FROM foreshadow_ledger WHERE id=?').get(source).merged_into_id, nextTarget)
+    assert.equal(JSON.parse(backup.prepare('SELECT merge_info_json FROM foreshadow_ledger WHERE id=?').get(source).merge_info_json).reason, input.reason)
+    backup.close()
+    assert.equal(sql.prepare('PRAGMA foreign_key_check').all().length, 0)
+    if (process.env.NOVELFORGE_MERGE_BROWSER_FIXTURE === '1') {
+      insert('待合并的欠条'); insert('待合并的欠条', novelId, '同一张欠条的另一份记录。')
+      keepFixture = true
+      console.log(`BROWSER_FIXTURE ${JSON.stringify({userData:temp, novelId,chapterId,pid:process.pid})}`)
+    }
+    console.log('PASS clue merge: preview/CAS, project isolation, 5 reference paths including legacy string IDs, atomic rollback and original snapshots, idempotent replay, old-ID resolution, chain flattening, conflicting links rejected, backup and FK integrity. Formal library untouched.')
+  } finally {
+    db.closeDb()
+    if (!keepFixture) { if (!path.resolve(temp).startsWith(base + path.sep)) throw new Error('Unsafe cleanup'); fs.rmSync(temp, {recursive:true,force:true}) }
+  }
+}
+main().then(() => app.exit(0), error => { console.error(error); app.exit(1) })

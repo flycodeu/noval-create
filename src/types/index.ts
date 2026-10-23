@@ -1695,6 +1695,7 @@ export type AssetReviewTarget =
   | 'theme_voice'
 
 export interface AssetReviewResult {
+  contractChecks?: import('../shared/chapter-review-view').ContractCheck[]
   issues?: import('../shared/quality-issue').QualityIssueV1[]
   summary: string
   severity: 'low' | 'medium' | 'high'
@@ -5680,6 +5681,7 @@ export interface StyleFingerprint {
 export type StyleFingerprintSourceType = 'pasted' | 'chapters' | 'genre-default'
 
 export interface StyleFingerprintRecord {
+  sourceReferenceJson?: string | null
   id: number
   novelId: number | null
   name: string

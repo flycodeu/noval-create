@@ -31,8 +31,7 @@ export function useWritingWorkspaceData(options: UseWritingWorkspaceDataOptions)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [contextPreview, setContextPreview] = useState<WritingContextPreviewState>({ preview: null, error: null })
   const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
-  const trackerRef = useRef(createWritingWorkspaceRequestTracker())
-  const tracker = trackerRef.current
+  const [tracker] = useState(createWritingWorkspaceRequestTracker)
   const workspaceRefresh = useWritingWorkspaceRefreshController({
     ...options,
     captureChapterSelection: tracker.captureChapterSelection,

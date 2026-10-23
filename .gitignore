@@ -11,6 +11,8 @@ dist-electron/
 *.key
 *.p12
 *.pfx
+!scripts/browser-fixtures/proxy-tls/localhost-cert.pem
+!scripts/browser-fixtures/proxy-tls/localhost-key.pem
 *.log
 *.tmp
 *.temp

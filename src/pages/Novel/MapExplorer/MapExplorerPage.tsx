@@ -1,3 +1,4 @@
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Switch, Tag, message } from 'antd'
@@ -180,7 +181,9 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const hasUnsavedChangesRef = useRef(false)
   const skippingFormChangeRef = useRef(false)
-  hasUnsavedChangesRef.current = hasUnsavedChanges
+  React.useLayoutEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges
+  }, [hasUnsavedChanges])
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
   const [autoLoading, setAutoLoading] = useState(false)
   const [autoStopping, setAutoStopping] = useState(false)
@@ -199,12 +202,11 @@ export default function MapExplorerPage({ novelId }: Props) {
   const graphStageRef = useRef<HTMLDivElement | null>(null)
   const [selectedRelation, setSelectedRelation] = useState<MapRelation | null>(null)
   const [branchPath, setBranchPath] = useState<MapNodeSummary[]>([])
-  const [rootPage, setRootPage] = useState(1)
   const [branchPage, setBranchPage] = useState(1)
   const [searchKeywordInput, setSearchKeywordInput, searchKeyword] = useDebouncedSearch('')
+  const [rootPage, setRootPage] = useScopedState(searchKeyword, 1)
   const [batchOpen, setBatchOpen] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('list')
-  const [graphLoading, setGraphLoading] = useState(false)
   const [graphData, setGraphData] = useState<MapGraphPayload>(EMPTY_GRAPH)
   const [graphFilters, setGraphFilters] = useState<GraphFilterState>(DEFAULT_GRAPH_FILTERS)
   const [graphInspectorOpen, setGraphInspectorOpen] = useState(false)
@@ -214,7 +216,13 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [editingRelation, setEditingRelation] = useState<MapRelation | null>(null)
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState(EMPTY_AUTO_STATUS)
-  const [autoTaskCardExpanded, setAutoTaskCardExpanded] = useState(false)
+  const autoTaskStateKey = JSON.stringify([autoTask?.id, autoTask?.status])
+  const [taskCard, setTaskCard] = useState({ source: autoTaskStateKey, expanded: false })
+  if (taskCard.source !== autoTaskStateKey) {
+    setTaskCard({ source: autoTaskStateKey, expanded: autoTask?.status === 'paused' || autoTask?.status === 'failed' || taskCard.expanded })
+  }
+  const autoTaskCardExpanded = taskCard.expanded
+  const setAutoTaskCardExpanded = (expanded: boolean) => setTaskCard(current => ({ ...current, expanded }))
   const routeNodeFocusRef = useRef<number | null>(null)
   const routeClearPendingRef = useRef(false)
   const initialRefreshDoneRef = useRef(false)
@@ -256,7 +264,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const initialBatchValues = useMemo(() => buildInitialBatchFormValues(scaledBlueprintLevels), [scaledBlueprintLevels])
   const routeNodeId = useMemo(() => parseRouteId(searchParams.get('nodeId')), [searchParams])
   const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
-  const [creativeStageContext, setCreativeStageContext] = useState<CreativeStageContext | null>(null)
+  const [creativeStageContext, setCreativeStageContext] = useScopedState<CreativeStageContext | null>(JSON.stringify([novelId, creativeStageId]), null)
   const activeStageContext = creativeStageContext?.stage.id === creativeStageId ? creativeStageContext : null
   const scopedTreeData = useMemo(() => {
     if (!activeStageContext) return treeData
@@ -271,7 +279,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const currentDisplayPath = useMemo(() => {
     if (selectedNode?.id && flattenedTree.pathById.has(selectedNode.id)) return flattenedTree.pathById.get(selectedNode.id) || []
     return branchPath
-  }, [branchPath, flattenedTree.pathById, selectedNode?.id])
+  }, [branchPath, flattenedTree.pathById, selectedNode])
   const pathLabel = currentDisplayPath.length > 0 ? currentDisplayPath.map((item) => item.name).join(' / ') : '未进入分支'
   const selectedNodeLead = useMemo(() => {
     if (!selectedNode) return ''
@@ -307,10 +315,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [searchParams, setSearchParams])
 
   useEffect(() => {
-    if (!creativeStageId) {
-      setCreativeStageContext(null)
-      return
-    }
+    if (!creativeStageId) return
     let disposed = false
     void window.electron.creativeStage.getContext(novelId, creativeStageId).then((context) => {
       if (!disposed) setCreativeStageContext(context)
@@ -321,7 +326,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'creativeStage.notFound'))
     })
     return () => { disposed = true }
-  }, [creativeStageId, novelId])
+  }, [creativeStageId, novelId, setCreativeStageContext])
 
   const loadRoots = useCallback(async (targetPage = rootPage, keyword = searchKeyword) => {
     const requestId = ++rootsRequestRef.current
@@ -453,28 +458,32 @@ export default function MapExplorerPage({ novelId }: Props) {
     })
   }, [applyNodeSelection, hydrateDetailForm, syncNodeRoute])
 
+  const readGraph = useCallback(async () => {
+    const [graph, relations] = await Promise.all([
+      window.electron.map.getGraph({ novelId, stageId: creativeStageId || undefined, includeRelationEdges: graphFilters.includeRelationEdges }),
+      window.electron.map.getRelations(novelId),
+    ])
+    return { graph: normalizeMapGraphPayload(graph), relations }
+  }, [creativeStageId, graphFilters.includeRelationEdges, novelId])
+  const applyGraph = useCallback((result: Awaited<ReturnType<typeof readGraph>>) => {
+    setGraphData(result.graph)
+    setAllRelations(result.relations)
+    setSelectedRelation(current => current ? result.relations.find(item => item.id === current.id) || null : current)
+  }, [])
+  const graphScope = useMemo(() => ({ readGraph, workspaceMode }), [readGraph, workspaceMode])
+  const [graphLoading, setGraphLoading] = useScopedState(graphScope, workspaceMode === 'graph')
   const loadGraph = useCallback(async () => {
     const requestId = ++graphRequestRef.current
     setGraphLoading(true)
     try {
-      const [graph, relations] = await Promise.all([
-        window.electron.map.getGraph({
-          novelId,
-          stageId: creativeStageId || undefined,
-          includeRelationEdges: graphFilters.includeRelationEdges,
-        }),
-        window.electron.map.getRelations(novelId),
-      ])
+      const result = await readGraph()
       if (graphRequestRef.current !== requestId) return { graph: EMPTY_GRAPH, relations: [] }
-      const nextGraph = normalizeMapGraphPayload(graph)
-      setGraphData(nextGraph)
-      setAllRelations(relations)
-      setSelectedRelation((current) => (current ? relations.find((item) => item.id === current.id) || null : current))
-      return { graph: nextGraph, relations }
+      applyGraph(result)
+      return result
     } finally {
       if (graphRequestRef.current === requestId) setGraphLoading(false)
     }
-  }, [creativeStageId, graphFilters.includeRelationEdges, novelId])
+  }, [applyGraph, readGraph, setGraphLoading])
 
   const resetBatchForm = useCallback(() => {
     batchForm.resetFields()
@@ -506,7 +515,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     setHasUnsavedChanges(false)
     applyNodeSelection(null, true)
     resetBatchForm()
-  }, [applyNodeSelection, resetBatchForm, setSearchKeywordInput])
+  }, [applyNodeSelection, resetBatchForm, setRootPage, setSearchKeywordInput])
 
   const refreshVisible = useCallback(async (options: RefreshVisibleOptions = {}) => {
     const requestId = ++visibleRequestRef.current
@@ -593,7 +602,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     setBranchPage(1)
     selectNode(node)
     await loadBranch(node, 1)
-  }, [flattenedTree.byId, flattenedTree.pathById, loadBranch, loadRoots, selectNode, setSearchKeywordInput])
+  }, [flattenedTree.byId, flattenedTree.pathById, loadBranch, loadRoots, selectNode, setRootPage, setSearchKeywordInput])
 
   useEffect(() => {
     if (initialRefreshDoneRef.current) return
@@ -617,18 +626,15 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [focusNodeById, routeNodeId])
 
   useEffect(() => {
-    if (rootPage === 1 && branchPage === 1) return
-    void loadRoots(rootPage).catch(console.error)
-    void loadBranch(currentParent, branchPage).catch(console.error)
-  }, [branchPage, currentParent, loadBranch, loadRoots, rootPage])
-
-  useEffect(() => {
-    setRootPage(1)
-    void loadRoots(1, searchKeyword).catch((error) => {
+    void loadRoots(rootPage).catch((error) => {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [loadRoots, searchKeyword])
+  }, [loadRoots, rootPage])
+
+  useEffect(() => {
+    void loadBranch(currentParent, branchPage).catch(console.error)
+  }, [branchPage, currentParent, loadBranch])
 
   useEffect(() => {
     autoTaskRef.current = autoTask
@@ -640,11 +646,16 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   useEffect(() => {
     if (workspaceMode !== 'graph') return
-    void loadGraph().catch((error) => {
+    const requestId = ++graphRequestRef.current
+    void readGraph().then(result => {
+      if (graphRequestRef.current === requestId) applyGraph(result)
+    }).catch(error => {
+      if (graphRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
-    })
-  }, [loadGraph, workspaceMode])
+    }).finally(() => { if (graphRequestRef.current === requestId) setGraphLoading(false) })
+    return () => { graphRequestRef.current += 1 }
+  }, [applyGraph, readGraph, setGraphLoading, workspaceMode])
 
   useEffect(() => {
     if (!autoTask?.id) return
@@ -725,9 +736,6 @@ export default function MapExplorerPage({ novelId }: Props) {
     return () => document.removeEventListener('fullscreenchange', syncFullscreenState)
   }, [])
 
-  useEffect(() => {
-    if (autoTask?.status === 'paused' || autoTask?.status === 'failed') setAutoTaskCardExpanded(true)
-  }, [autoTask?.id, autoTask?.status])
 
   const toggleGraphFullscreen = useCallback(async () => {
     if (!graphStageRef.current) return

@@ -1170,7 +1170,7 @@ export function sanitizeChapterUpdatePayload(data: unknown): Record<string, unkn
 }
 
 /** IPC/Web 只允许选择编辑器版本来源，不能传入内部事务和失效跟踪开关。 */
-export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 'manual-save' | 'ai-rewrite'; expectedContent?: string } {
+export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 'manual-save' | 'ai-rewrite' | 'version-restore'; expectedContent?: string } {
   if (value === undefined || value === null) return {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throwUserFacingError('ipc.invalidObject', { name: 'options' })
@@ -1180,7 +1180,7 @@ export function sanitizeChapterUpdateOptions(value: unknown): { versionSource?: 
   if (expectedContent !== undefined && typeof expectedContent !== 'string') {
     throwUserFacingError('ipc.invalidObject', { name: 'options.expectedContent' })
   }
-  if (source !== undefined && source !== 'manual-save' && source !== 'ai-rewrite') {
+  if (source !== undefined && source !== 'manual-save' && source !== 'ai-rewrite' && source !== 'version-restore') {
     throwUserFacingError('ipc.invalidObject', { name: 'options.versionSource' })
   }
   return { ...(source ? { versionSource: source } : {}), ...(typeof expectedContent === 'string' ? { expectedContent } : {}) }

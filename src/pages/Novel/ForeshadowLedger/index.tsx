@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -16,12 +17,8 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
-  Chapter,
   ChapterSegment,
-  EndgameCommitment,
   ForeshadowLedgerEntry,
-  StoryThread,
-  StoryVolume,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import {
@@ -190,29 +187,40 @@ function hasFilledValues(values: Array<string | undefined | null>): boolean {
 }
 
 export default function ForeshadowLedgerPage({ novelId }: Props) {
+  return <ForeshadowLedgerWorkspace key={novelId} novelId={novelId} />
+}
+
+function ForeshadowLedgerWorkspace({ novelId }: Props) {
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ForeshadowFormValues>()
 
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updatingStatusId, setUpdatingStatusId] = useState<number | null>(null)
   const [laneFilter, setLaneFilter] = useState<'all' | LedgerLaneKey>('all')
   const [keyword, setKeyword] = useState('')
-  const [entries, setEntries] = useState<ForeshadowLedgerEntry[]>([])
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [volumes, setVolumes] = useState<StoryVolume[]>([])
-  const [threads, setThreads] = useState<StoryThread[]>([])
-  const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
-  const [segments, setSegments] = useState<ChapterSegment[]>([])
-  const [segmentsLoading, setSegmentsLoading] = useState(false)
+  const read = useCallback(async () => {
+    const [ledgerRows, chapterRows, volumeRows, threadRows, commitmentRows] = await Promise.all([
+      window.electron.foreshadow.listLedger(novelId),
+      window.electron.chapter.list(novelId),
+      window.electron.structure.listVolumes(novelId),
+      window.electron.thread.list(novelId),
+      window.electron.endgameAsset.listCommitments(novelId),
+    ])
+    return { entries: ledgerRows, chapters: chapterRows, volumes: volumeRows, threads: threadRows, commitments: commitmentRows }
+  }, [novelId])
+  const { data, loading, error: loadError, reload: refresh } = useAsyncSnapshot(read, mutationToken)
+  const [selectionSource, setSelectionSource] = useState<typeof data>(null)
+  const entries = useMemo(() => data?.entries ?? [], [data])
+  const chapters = useMemo(() => data?.chapters ?? [], [data])
+  const volumes = useMemo(() => data?.volumes ?? [], [data])
+  const threads = useMemo(() => data?.threads ?? [], [data])
+  const commitments = useMemo(() => data?.commitments ?? [], [data])
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<ForeshadowLedgerEntry | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   useRegisterWorkspaceLeaveGuard(hasUnsavedChanges)
-  const refreshRequestRef = React.useRef(0)
-  const segmentsRequestRef = React.useRef(0)
   const editorDirtyRef = React.useRef(false)
 
   const sourceChapterId = Form.useWatch('sourceChapterId', form)
@@ -289,67 +297,29 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   )
   const selectedEntryLane = selectedEntry ? getLane(selectedEntry, currentChapterNum) : null
 
-  const refresh = useCallback(async () => {
-    const requestId = ++refreshRequestRef.current
-    setLoading(true)
-    try {
-      const [ledgerRows, chapterRows, volumeRows, threadRows, commitmentRows] = await Promise.all([
-        window.electron.foreshadow.listLedger(novelId),
-        window.electron.chapter.list(novelId),
-        window.electron.structure.listVolumes(novelId),
-        window.electron.thread.list(novelId),
-        window.electron.endgameAsset.listCommitments(novelId),
-      ])
-      if (refreshRequestRef.current !== requestId) return
-      setEntries(ledgerRows)
-      setChapters(chapterRows)
-      setVolumes(volumeRows)
-      setThreads(threadRows)
-      setCommitments(commitmentRows)
-      setSelectedEntryId((current) => current && ledgerRows.some((entry) => entry.id === current)
-        ? current
-        : [...ledgerRows].sort((left, right) => compareLedgerEntries(left, right, currentChapterNum))[0]?.id || null)
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) setLoading(false)
-    }
-  }, [currentChapterNum, novelId])
-
-  const loadSegments = useCallback(async (chapterId?: number) => {
-    const requestId = ++segmentsRequestRef.current
-    if (!chapterId) {
-      if (segmentsRequestRef.current === requestId) setSegments([])
-      return
-    }
-    setSegmentsLoading(true)
-    try {
-      const rows = await window.electron.structure.listSegments(chapterId)
-      if (segmentsRequestRef.current === requestId) setSegments(rows)
-    } catch (error) {
-      console.error(error)
-      if (segmentsRequestRef.current === requestId) setSegments([])
-    } finally {
-      if (segmentsRequestRef.current === requestId) setSegmentsLoading(false)
-    }
-  }, [])
-
+  if (data && selectionSource !== data) {
+    setSelectionSource(data)
+    setSelectedEntryId(current => current && entries.some(entry => entry.id === current) ? current : [...entries].sort((a, b) => compareLedgerEntries(a, b, currentChapterNum))[0]?.id || null)
+  }
   useEffect(() => {
-    void refresh()
-  }, [mutationToken, refresh])
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'common.loadFailed'))
+    }
+  }, [loadError])
 
+  const readSegments = useCallback(async (): Promise<ChapterSegment[]> => {
+    if (!editorOpen || !sourceChapterId) return []
+    return window.electron.structure.listSegments(sourceChapterId)
+  }, [editorOpen, sourceChapterId])
+  const { data: segmentRows, loading: segmentsPending, error: segmentsError } = useAsyncSnapshot(readSegments)
+  const segments = segmentRows ?? []
+  const segmentsLoading = editorOpen && Boolean(sourceChapterId) && segmentsPending
   useEffect(() => {
-    if (!editorOpen) return
-    void loadSegments(sourceChapterId)
-  }, [editorOpen, loadSegments, sourceChapterId])
+    if (segmentsError) console.error(segmentsError)
+  }, [segmentsError])
 
-  useEffect(() => {
-    setSelectedEntryId((current) => filteredTableRows.some((entry) => entry.id === current)
-      ? current
-      : filteredTableRows[0]?.id || null)
-  }, [filteredTableRows])
+
 
   const openEditor = useCallback((entry?: ForeshadowLedgerEntry | null) => {
     const target = entry || null
@@ -367,7 +337,6 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       setHasUnsavedChanges(false)
       setEditorOpen(false)
       setEditingEntry(null)
-      setSegments([])
     }
     if (!force && editorDirtyRef.current) {
       Modal.confirm({

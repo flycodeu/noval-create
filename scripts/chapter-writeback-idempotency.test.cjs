@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { app } = require('electron')
+require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
@@ -34,16 +35,44 @@ async function runWorker() {
   registerProjectTsRuntime(workspaceRoot)
   await app.whenReady()
 
-  const { closeDb, initDb } = project('electron/database/db.ts')
+  const { closeDb, getSqlite, initDb } = project('electron/database/db.ts')
   const writebackService = project('electron/services/chapter-writeback.service.ts')
   initDb()
+  const Database = require('better-sqlite3')
+  const competingWriter = new Database(path.join(root, 'novelforge.db'), { timeout: 1 })
+  const sqlite = getSqlite()
+  const prepare = sqlite.prepare
+  let writeLockGuarded = null
+  sqlite.prepare = function (sql, ...args) {
+    const statement = prepare.call(this, sql, ...args)
+    if (/from "chapter_writeback_diffs"/i.test(sql)) {
+      const all = statement.all
+      statement.all = function (...bindings) {
+        const rows = all.apply(this, bindings)
+        if (sqlite.inTransaction && writeLockGuarded === null) {
+          try {
+            // A no-op write still advances a deferred reader's WAL snapshot.
+            competingWriter.prepare('UPDATE novels SET updated_at = updated_at').run()
+            writeLockGuarded = false
+          } catch (error) {
+            if (error.code !== 'SQLITE_BUSY') throw error
+            writeLockGuarded = true
+          }
+        }
+        return rows
+      }
+    }
+    return statement
+  }
   let result
   try {
     const center = await writebackService.applyChapterWritebackRun(runId, { idempotencyKey: key })
-    result = { ok: true, status: center.activeRun && center.activeRun.status }
+    result = { ok: true, status: center.activeRun && center.activeRun.status, writeLockGuarded }
   } catch (error) {
     result = { ok: false, message: error instanceof Error ? error.message : String(error) }
   } finally {
+    sqlite.prepare = prepare
+    competingWriter.close()
     closeDb()
   }
   process.stdout.write(`__NOVELFORGE_WRITEBACK_RESULT__${JSON.stringify(result)}\n`)
@@ -135,6 +164,8 @@ async function runMain() {
       spawnWorker({ root: tempRoot, 'run-id': runId, key }),
     ])
     assert.ok(results.every((result) => result.ok), JSON.stringify(results))
+    assert.ok(results.some((result) => result.writeLockGuarded === true), 'The applying worker must acquire its write lock before reading')
+    assert.ok(results.every((result) => result.writeLockGuarded !== false), 'A competing writer must not invalidate the candidate transaction snapshot')
 
     initDb()
     const sqlite = getSqlite()
@@ -143,12 +174,12 @@ async function runMain() {
       FROM chapter_writeback_runs WHERE id = ?
     `).get(runId)
     const diff = sqlite.prepare(`
-      SELECT writeback_status FROM chapter_writeback_diffs WHERE run_id = ?
+      SELECT writeback_status, writeback_error FROM chapter_writeback_diffs WHERE run_id = ?
     `).get(runId)
     const threads = sqlite.prepare(`
       SELECT COUNT(*) AS count FROM story_threads WHERE novel_id = ? AND title = ?
     `).get(novelId, '幂等测试线索')
-    assert.equal(run.status, 'applied')
+    assert.equal(run.status, 'applied', JSON.stringify({ run, diff, results }))
     assert.equal(run.apply_idempotency_key, key)
     assert.equal(run.apply_lock_version, 1)
     assert.equal(diff.writeback_status, 'applied')

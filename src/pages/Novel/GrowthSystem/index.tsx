@@ -1,3 +1,4 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
@@ -123,20 +124,24 @@ const EMPTY_GROWTH_SUMMARY: GrowthSystemDashboard['summary'] = {
 }
 
 export default function GrowthSystemPage({ novelId }: Props) {
+  return <GrowthSystemWorkspace key={novelId} novelId={novelId} />
+}
+
+function GrowthSystemWorkspace({ novelId }: Props) {
   const currentNovel = useNovelStore((state) => state.currentNovel)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [trackForm] = Form.useForm<TrackValues>()
   const [poolForm] = Form.useForm<PoolValues>()
   const [eventForm] = Form.useForm<EventValues>()
-  const [dashboard, setDashboard] = useState<GrowthSystemDashboard | null>(null)
-  const [loading, setLoading] = useState(false)
+  const readDashboard = useCallback(() => window.electron.growthSystem.getDashboard(novelId), [novelId])
+  const { data: dashboard, loading, error: loadError, reload: refresh } = useAsyncSnapshot(readDashboard, mutationToken)
+  const [selectionSource, setSelectionSource] = useState<GrowthSystemDashboard | null>(null)
   const [saving, setSaving] = useState(false)
   const [trackOpen, setTrackOpen] = useState(false)
   const [poolOpen, setPoolOpen] = useState(false)
   const [eventOpen, setEventOpen] = useState(false)
   const [editingTrack, setEditingTrack] = useState<GrowthTrack | null>(null)
   const [editingPool, setEditingPool] = useState<ResourcePool | null>(null)
-  const refreshRequestRef = React.useRef(0)
   const saveActionRef = React.useRef(false)
   const [editingEvent, setEditingEvent] = useState<RewardCostEvent | null>(null)
   const [bindChapterId, setBindChapterId] = useState<number | null>(null)
@@ -177,42 +182,36 @@ export default function GrowthSystemPage({ novelId }: Props) {
     return Math.max(0, Math.min(100, raw))
   }, [dashboard, summary])
 
-  const refresh = useCallback(async () => {
-    const requestId = ++refreshRequestRef.current
-    setLoading(true)
-    try {
-      const result = await window.electron.growthSystem.getDashboard(novelId)
-      if (refreshRequestRef.current !== requestId) return
-      setDashboard(result)
-      const nextChapters = result.chapters || []
-      const nextVolumes = result.volumes || []
-      setSelectedTrackId((current) => current && result.tracks.some((item) => item.id === current) ? current : result.tracks[0]?.id || null)
-      setSelectedPoolId((current) => current && result.pools.some((item) => item.id === current) ? current : result.pools[0]?.id || null)
-      setSelectedEventId((current) => current && result.events.some((item) => item.id === current) ? current : result.events[0]?.id || null)
-      const nextTrackIds = new Set((result.tracks || []).map((item) => item.id))
-      const nextPoolIds = new Set((result.pools || []).map((item) => item.id))
-      const nextEventIds = new Set((result.events || []).map((item) => item.id))
-      setBindChapterId((current) => current && nextChapters.some((item) => item.id === current)
-        ? current
-        : nextChapters[0]?.id || null)
-      setBindVolumeId((current) => current && nextVolumes.some((item) => item.id === current)
-        ? current
-        : nextVolumes[0]?.id || null)
-      setBindChapterTrackIds((current) => current.filter((id) => nextTrackIds.has(id)))
-      setBindVolumeTrackIds((current) => current.filter((id) => nextTrackIds.has(id)))
-      setBindChapterPoolIds((current) => current.filter((id) => nextPoolIds.has(id)))
-      setBindVolumePoolIds((current) => current.filter((id) => nextPoolIds.has(id)))
-      setBindEventIds((current) => current.filter((id) => nextEventIds.has(id)))
-    } catch (error) {
-      if (refreshRequestRef.current !== requestId) return
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
-    } finally {
-      if (refreshRequestRef.current === requestId) setLoading(false)
+  if (dashboard && selectionSource !== dashboard) {
+    setSelectionSource(dashboard)
+    const result = dashboard
+    const nextChapters = result.chapters || []
+    const nextVolumes = result.volumes || []
+    setSelectedTrackId((current) => current && result.tracks.some((item) => item.id === current) ? current : result.tracks[0]?.id || null)
+    setSelectedPoolId((current) => current && result.pools.some((item) => item.id === current) ? current : result.pools[0]?.id || null)
+    setSelectedEventId((current) => current && result.events.some((item) => item.id === current) ? current : result.events[0]?.id || null)
+    const nextTrackIds = new Set((result.tracks || []).map((item) => item.id))
+    const nextPoolIds = new Set((result.pools || []).map((item) => item.id))
+    const nextEventIds = new Set((result.events || []).map((item) => item.id))
+    setBindChapterId((current) => current && nextChapters.some((item) => item.id === current)
+      ? current
+      : nextChapters[0]?.id || null)
+    setBindVolumeId((current) => current && nextVolumes.some((item) => item.id === current)
+      ? current
+      : nextVolumes[0]?.id || null)
+    setBindChapterTrackIds((current) => current.filter((id) => nextTrackIds.has(id)))
+    setBindVolumeTrackIds((current) => current.filter((id) => nextTrackIds.has(id)))
+    setBindChapterPoolIds((current) => current.filter((id) => nextPoolIds.has(id)))
+    setBindVolumePoolIds((current) => current.filter((id) => nextPoolIds.has(id)))
+    setBindEventIds((current) => current.filter((id) => nextEventIds.has(id)))
+  }
+  useEffect(() => {
+    if (loadError) {
+      console.error(loadError)
+      message.error(getErrorMessage(loadError, 'common.loadFailed'))
     }
-  }, [novelId])
+  }, [loadError])
 
-  useEffect(() => { void refresh() }, [mutationToken, refresh])
 
   const openTrack = (track?: GrowthTrack) => {
     setEditingTrack(track || null)
@@ -394,7 +393,7 @@ export default function GrowthSystemPage({ novelId }: Props) {
       saveActionRef.current = false
       setSaving(false)
     }
-  }, [closeEditor, editingTrack?.id, notifyWorkspaceMutation, refresh, trackForm, novelId])
+  }, [closeEditor, editingTrack, notifyWorkspaceMutation, refresh, trackForm, novelId])
 
   const savePool = useCallback(async () => {
     if (saveActionRef.current) return
@@ -417,7 +416,7 @@ export default function GrowthSystemPage({ novelId }: Props) {
       saveActionRef.current = false
       setSaving(false)
     }
-  }, [closeEditor, editingPool?.id, notifyWorkspaceMutation, poolForm, refresh, novelId])
+  }, [closeEditor, editingPool, notifyWorkspaceMutation, poolForm, refresh, novelId])
 
   const saveEvent = useCallback(async () => {
     if (saveActionRef.current) return
@@ -440,7 +439,7 @@ export default function GrowthSystemPage({ novelId }: Props) {
       saveActionRef.current = false
       setSaving(false)
     }
-  }, [closeEditor, editingEvent?.id, eventForm, notifyWorkspaceMutation, novelId, refresh])
+  }, [closeEditor, editingEvent, eventForm, notifyWorkspaceMutation, novelId, refresh])
 
   const saveHandler = useCallback(() => {
     if (trackOpen) {

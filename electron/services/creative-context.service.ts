@@ -8,6 +8,7 @@ import { compileCreativeChapterContext, creativeProjectSources, creativeRevision
 import { getSqlite } from '../database/db'
 import { queryCreativeFacts } from './creative-facts'
 import { creativeAtlasCoverage, selectCreativeAssetAtlas, selectCreativeAtlas } from './creative-atlas-context'
+import { buildCreativeResearchContext, parseCreativeResearchEntries, selectRelevantCreativeResearchEntries } from '../../src/shared/creative-research'
 
 /** Freeze generation at a real narrative position; omitted atlas position is only for browsing. */
 export function resolveCreativeChapterPosition(input: CreativeWorkflowInput): number {
@@ -67,6 +68,11 @@ export async function compileCreativeContext(input: CreativeWorkflowInput, model
   const revisionSource = creativeRevisionSource(input)
   if (revisionSource) add(`revision:${input.sourceArtifactId}`, revisionSource, true)
   add('expanded_background', novel.expandedBackground)
+  const researchAnchor = chapterRows.find(chapter => chapter.chapterNum === input.atChapter)
+  const researchQuery = [input.request, researchAnchor?.title, researchAnchor?.outline, researchAnchor?.summary].filter(Boolean).join('\n')
+  for (const entry of selectRelevantCreativeResearchEntries(parseCreativeResearchEntries(novel.sourceLedgerJson), researchQuery, 4)) {
+    add(`creative_reference:${entry.sourceKey}`, buildCreativeResearchContext(entry))
+  }
   if (input.stage === 'outline' || input.stage === 'story') {
     const sqlite = getSqlite()
     const catalogs = [

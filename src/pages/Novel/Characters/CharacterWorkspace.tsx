@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedSearch } from '../../../hooks/useDebouncedSearch'
 import { useDebouncedCallback } from '../../../hooks/useDebouncedCallback'
@@ -330,6 +332,10 @@ function buildRelationBody(relation: CharacterRelation) {
 }
 
 export default function CharacterWorkspace({ novelId }: Props) {
+  return <CharacterWorkspaceContent key={novelId} novelId={novelId} />
+}
+
+function CharacterWorkspaceContent({ novelId }: Props) {
   const navigate = useNavigate()
   const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -338,15 +344,13 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [batchForm] = Form.useForm<CharacterBatchFormValues>()
   const [protagonistForm] = Form.useForm<ProtagonistFormValues>()
   const [relationForm] = Form.useForm<RelationFormValues>()
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [detailPending, setDetailPending] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [graphLoading, setGraphLoading] = useState(false)
   const [pageData, setPageData] = useState<PagedResult<Character>>(EMPTY_PAGE)
   const [stats, setStats] = useState<CharacterStats>(EMPTY_STATS)
   const [filterOptions, setFilterOptions] = useState<CharacterFilterOptions>(EMPTY_FILTERS)
   const [detailContext, setDetailContext] = useState<CharacterDetailContext>(EMPTY_DETAIL)
-  const [graphData, setGraphData] = useState<CharacterGraphPayload>(EMPTY_GRAPH)
   const [itemOptions, setItemOptions] = useState<StoryItem[]>([])
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -374,20 +378,45 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const formDirtyRef = useRef(false)
   const routeCharacterId = useMemo(() => parseRouteId(searchParams.get('characterId')), [searchParams])
   const creativeStageId = useMemo(() => parseRouteId(searchParams.get('stageId')), [searchParams])
-  const [creativeStageContext, setCreativeStageContext] = useState<CreativeStageContext | null>(null)
+  const [creativeStageContext, setCreativeStageContext] = useScopedState<CreativeStageContext | null>(JSON.stringify([novelId, creativeStageId]), null)
   const activeStageContext = creativeStageContext?.stage.id === creativeStageId ? creativeStageContext : null
   const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null)
   const [relationSaving, setRelationSaving] = useState(false)
   const [relationCharacterOptions, setRelationCharacterOptions] = useState<Character[]>([])
-  const [page, setPage] = useState(1)
   const [keywordInput, setKeywordInput, keyword] = useDebouncedSearch('')
   const [roleFilter, setRoleFilter] = useState<Character['roleType'] | 'all'>('all')
   const [speciesFilter, setSpeciesFilter] = useState<string>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all')
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
+  const [page, setPage] = useScopedState(JSON.stringify([creativeStageId, entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter]), 1)
   const [graphScope, setGraphScope] = useState<'all' | 'focus'>('all')
   const [graphRelationFilter, setGraphRelationFilter] = useState<string>('all')
   const [workspaceView, setWorkspaceView] = useState<'list' | 'graph'>(() => (searchParams.get('view') === 'graph' ? 'graph' : 'list'))
+
+  const readGraph = useCallback(async () => {
+    if (creativeStageId && activeStageContext && activeStageContext.activeCharacterIds.length === 0) {
+      return EMPTY_GRAPH
+    }
+    const graph = await window.electron.character.getGraph({
+      novelId,
+      limit: graphScope === 'focus' ? 24 : 60,
+      recordStatus: recordStatusFilter,
+      ...(creativeStageId && activeStageContext ? { characterIds: activeStageContext.activeCharacterIds } : {}),
+      ...(graphScope === 'focus' && selectedId ? { focusCharacterId: selectedId } : {}),
+      ...(roleFilter !== 'all' ? { roleTypes: [roleFilter] } : {}),
+      ...(graphRelationFilter !== 'all' ? { relationTypes: [graphRelationFilter] } : {}),
+    })
+    return graph
+  }, [activeStageContext, creativeStageId, graphRelationFilter, graphScope, novelId, recordStatusFilter, roleFilter, selectedId])
+
+  const { data: graphSnapshot, loading: graphLoading, error: graphError, reload: loadGraph } = useAsyncSnapshot(readGraph)
+  const graphData = graphSnapshot ?? EMPTY_GRAPH
+  useEffect(() => {
+    if (graphError) {
+      console.error(graphError)
+      message.error(getErrorMessage(graphError, 'common.loadFailed'))
+    }
+  }, [graphError])
 
   const setFormDirty = useCallback((value: boolean) => {
     formDirtyRef.current = value
@@ -404,10 +433,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }, [searchParams, setSearchParams])
 
   useEffect(() => {
-    if (!creativeStageId) {
-      setCreativeStageContext(null)
-      return
-    }
+    if (!creativeStageId) return
     let disposed = false
     void window.electron.creativeStage.getContext(novelId, creativeStageId).then((context) => {
       if (!disposed) setCreativeStageContext(context)
@@ -418,7 +444,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       message.error(getErrorMessage(error, 'creativeStage.notFound'))
     })
     return () => { disposed = true }
-  }, [creativeStageId, novelId])
+  }, [creativeStageId, novelId, setCreativeStageContext])
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
@@ -503,44 +529,55 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
   const loadCharacterDetail = useCallback(async (characterId: number) => {
     const requestId = ++detailRequestRef.current
+    const sameSelection = selectedIdRef.current === characterId
     selectedIdRef.current = characterId
-    const [character, context, baseItems] = await Promise.all([
-      window.electron.character.get(characterId),
-      window.electron.character.getDetailContext(characterId),
-      window.electron.item.search(novelId, '', 'instance', 24),
-    ])
-    if (detailRequestRef.current !== requestId) return
-    if (!character) {
-      selectedIdRef.current = null
-      setSelectedId(null)
-      setSelectedCharacter(null)
-      setDetailContext(EMPTY_DETAIL)
-      form.resetFields()
-      return
+    setDetailPending(true)
+    try {
+      const [character, context, baseItems] = await Promise.all([
+        window.electron.character.get(characterId),
+        window.electron.character.getDetailContext(characterId),
+        window.electron.item.search(novelId, '', 'instance', 24),
+      ])
+      if (detailRequestRef.current !== requestId) return
+      if (!character) {
+        selectedIdRef.current = null
+        setSelectedId(null)
+        setSelectedCharacter(null)
+        setDetailContext(EMPTY_DETAIL)
+        form.resetFields()
+        setFormDirty(false)
+        return
+      }
+      creatingRef.current = false
+      setSelectedId(character.id)
+      setSelectedCharacter(character)
+      setDetailContext(context)
+      if (!sameSelection || !formDirtyRef.current) {
+        form.setFieldsValue(buildFormValues(character, context))
+        setFormDirty(false)
+      }
+      setItemOptions(mergeById(baseItems, context.relatedItems))
+    } finally {
+      if (detailRequestRef.current === requestId) setDetailPending(false)
     }
-    creatingRef.current = false
-    setSelectedId(character.id)
-    setSelectedCharacter(character)
-    setDetailContext(context)
-    form.setFieldsValue(buildFormValues(character, context))
-    setFormDirty(false)
-    setItemOptions(mergeById(baseItems, context.relatedItems))
   }, [form, novelId, setFormDirty])
 
-  const requestCharacterDetail = useCallback((characterId: number) => {
+  const requestCharacterDetail = useCallback((characterId: number, onCancel?: () => void) => {
+    const load = () => { void loadCharacterDetail(characterId).catch(error => message.error(getErrorMessage(error, 'common.loadFailed'))) }
     if (!formDirtyRef.current || characterId === selectedIdRef.current) {
-      void loadCharacterDetail(characterId)
+      load()
       return
     }
-    Modal.confirm({
+    return Modal.confirm({
       title: '当前人物还有未保存修改',
       content: '切换人物会放弃当前编辑内容。要先保存，还是放弃修改继续？',
       okText: '放弃并切换',
       cancelText: '留下继续编辑',
       okButtonProps: { danger: true },
+      onCancel,
       onOk: () => {
         setFormDirty(false)
-        void loadCharacterDetail(characterId)
+        load()
       },
     })
   }, [loadCharacterDetail, setFormDirty])
@@ -555,96 +592,102 @@ export default function CharacterWorkspace({ novelId }: Props) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
 
-  const loadGraph = useCallback(async () => {
-    setGraphLoading(true)
-    try {
-      if (creativeStageId && activeStageContext && activeStageContext.activeCharacterIds.length === 0) {
-        setGraphData(EMPTY_GRAPH)
-        return
-      }
-      const graph = await window.electron.character.getGraph({
-        novelId,
-        limit: graphScope === 'focus' ? 24 : 60,
-        recordStatus: recordStatusFilter,
-        ...(creativeStageId && activeStageContext ? { characterIds: activeStageContext.activeCharacterIds } : {}),
-        ...(graphScope === 'focus' && selectedId ? { focusCharacterId: selectedId } : {}),
-        ...(roleFilter !== 'all' ? { roleTypes: [roleFilter] } : {}),
-        ...(graphRelationFilter !== 'all' ? { relationTypes: [graphRelationFilter] } : {}),
-      })
-      setGraphData(graph)
-    } finally {
-      setGraphLoading(false)
-    }
-  }, [activeStageContext, creativeStageId, graphRelationFilter, graphScope, novelId, recordStatusFilter, roleFilter, selectedId])
 
-  const loadPage = useCallback(async (
+  const readPage = useCallback(async (targetPage: number) => {
+    const query = buildQuery(targetPage)
+    const [list, summary, nextFilters] = await Promise.all([
+      window.electron.character.query(query),
+      window.electron.character.getStats(query),
+      window.electron.character.getFilterOptions(novelId),
+    ])
+    return { list, summary, nextFilters }
+  }, [buildQuery, novelId])
+  const applyPage = useCallback(async (
+    { list, summary, nextFilters }: Awaited<ReturnType<typeof readPage>>,
     preferredId: number | null | undefined,
-    targetPage: number,
+    options: { preserveCreating?: boolean },
+    detailRequestAtStart: number,
+    isCurrent: () => boolean,
+  ) => {
+    if (!isCurrent()) return
+    setPageData(list)
+    setStats(summary)
+    setFilterOptions(nextFilters)
+
+    if (typeof preferredId !== 'number' && formDirtyRef.current) return
+    if (detailRequestRef.current !== detailRequestAtStart) return
+    if (typeof preferredId !== 'number' && options.preserveCreating && creatingRef.current) return
+
+    const currentSelectedId = selectedIdRef.current
+    const nextId = typeof preferredId === 'number'
+      ? preferredId
+      : list.items.some((item) => item.id === currentSelectedId)
+        ? currentSelectedId
+        : list.items[0]?.id ?? null
+    if (nextId !== null) {
+      creatingRef.current = false
+      setCreating(false)
+      await loadCharacterDetail(nextId)
+    } else {
+      detailRequestRef.current += 1
+      setDetailPending(false)
+      selectedIdRef.current = null
+      creatingRef.current = false
+      setSelectedId(null)
+      setSelectedCharacter(null)
+      setDetailContext(EMPTY_DETAIL)
+      setCreating(false)
+      form.resetFields()
+      await hydrateItemOptions(undefined)
+    }
+  }, [form, hydrateItemOptions, loadCharacterDetail])
+  const pageLoadScope = useMemo(() => ({ readPage, page }), [readPage, page])
+  const [loading, setLoading] = useScopedState(pageLoadScope, true)
+  const loadPage = useCallback(async (
+    preferredId?: number | null,
+    targetPage = 1,
     options: { preserveCreating?: boolean } = {},
   ) => {
     const requestId = ++pageRequestRef.current
     const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => pageRequestRef.current === requestId
     setLoading(true)
     try {
-      const query = buildQuery(targetPage)
-      const [list, summary, nextFilters] = await Promise.all([
-        window.electron.character.query(query),
-        window.electron.character.getStats(query),
-        window.electron.character.getFilterOptions(novelId),
-      ])
-      if (pageRequestRef.current !== requestId) return
-      setPageData(list)
-      setStats(summary)
-      setFilterOptions(nextFilters)
-
-      if (typeof preferredId !== 'number' && detailRequestRef.current !== detailRequestAtStart) return
-      if (typeof preferredId !== 'number' && options.preserveCreating && creatingRef.current) return
-
-      const currentSelectedId = selectedIdRef.current
-      const nextId = typeof preferredId === 'number'
-        ? preferredId
-        : list.items.some((item) => item.id === currentSelectedId)
-          ? currentSelectedId
-          : list.items[0]?.id ?? null
-      if (nextId !== null) {
-        creatingRef.current = false
-        setCreating(false)
-        await loadCharacterDetail(nextId)
-      } else {
-        detailRequestRef.current += 1
-        selectedIdRef.current = null
-        creatingRef.current = false
-        setSelectedId(null)
-        setSelectedCharacter(null)
-        setDetailContext(EMPTY_DETAIL)
-        setCreating(false)
-        form.resetFields()
-        await hydrateItemOptions(undefined)
-      }
+      await applyPage(await readPage(targetPage), preferredId, options, detailRequestAtStart, isCurrent)
     } finally {
-      if (pageRequestRef.current === requestId) setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [buildQuery, form, hydrateItemOptions, loadCharacterDetail, novelId])
+  }, [applyPage, readPage, setLoading])
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   useEffect(() => { creatingRef.current = creating }, [creating])
   useEffect(() => {
-    void loadPage(undefined, page, { preserveCreating: true }).catch((error) => {
+    const requestId = ++pageRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => pageRequestRef.current === requestId
+    void readPage(page).then(result => applyPage(result, undefined, { preserveCreating: true }, detailRequestAtStart, isCurrent)).catch(error => {
+      if (!isCurrent()) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
-    })
-  }, [loadPage, page])
-  useEffect(() => { setPage(1) }, [creativeStageId, entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter])
-  useEffect(() => { void loadGraph() }, [loadGraph])
+    }).finally(() => { if (isCurrent()) setLoading(false) })
+    return () => { pageRequestRef.current += 1 }
+  }, [applyPage, page, readPage, setLoading])
   useEffect(() => {
     if (!routeCharacterId || routeFocusRef.current === routeCharacterId) return
     routeFocusRef.current = routeCharacterId
     setPage(1)
-    void loadPage(routeCharacterId, 1).catch((error) => {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+    const confirmation = requestCharacterDetail(routeCharacterId, () => {
+      const currentId = selectedIdRef.current
+      routeFocusRef.current = currentId
+      setSearchParams(current => {
+        const next = new URLSearchParams(current)
+        if (currentId) next.set('characterId', String(currentId))
+        else next.delete('characterId')
+        return next
+      }, { replace: true })
     })
-  }, [loadPage, routeCharacterId])
+    return () => { confirmation?.destroy() }
+  }, [requestCharacterDetail, routeCharacterId, setPage, setSearchParams])
 
   useEffect(() => {
     batchForm.setFieldsValue({
@@ -671,6 +714,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
   const handleNew = () => {
     detailRequestRef.current += 1
+    setDetailPending(false)
     selectedIdRef.current = null
     creatingRef.current = true
     setCreating(true)
@@ -736,19 +780,28 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }, [detailContext.relatedItems])
 
   const handleSave = async () => {
+    if (saving || detailPending || (selectedCharacter && selectedIdRef.current !== selectedCharacter.id)) return
+    const requestAtStart = detailRequestRef.current
     const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (!values || detailRequestRef.current !== requestAtStart) return
     setSaving(true)
     try {
+      let savedId: number
       if (selectedCharacter?.id) {
         await window.electron.character.update(selectedCharacter.id, serialize(values))
-        await syncCharacterItems(selectedCharacter.id, values)
-        await loadPage(selectedCharacter.id, page)
+        savedId = selectedCharacter.id
       } else {
-        const nextId = await window.electron.character.create(novelId, serialize(values))
-        await syncCharacterItems(nextId, values)
-        await loadPage(nextId, page)
+        savedId = await window.electron.character.create(novelId, serialize(values))
       }
+      await syncCharacterItems(savedId, values)
+      if (detailRequestRef.current !== requestAtStart) return
+      selectedIdRef.current = savedId
+      setSelectedId(savedId)
+      // Clear only the submitted draft; input typed while saving stays dirty.
+      const currentValues = form.getFieldsValue(true)
+      const submittedFields = Object.keys(values) as Array<keyof CharacterFormValues>
+      if (submittedFields.every(field => JSON.stringify(currentValues[field]) === JSON.stringify(values[field]))) setFormDirty(false)
+      await loadPage(savedId, page)
       setCreating(false)
       await loadGraph()
       message.success(getUserFacingMessage(
@@ -1385,7 +1438,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 />
               ) : null}
 
-              <Form form={form} layout="vertical" onValuesChange={markFormDirty}>
+              <Form form={form} layout="vertical" onValuesChange={markFormDirty} disabled={detailPending}>
                 <div className="novel-characters__core-fields">
                   <Form.Item name="roleType" label="角色类型" rules={[{ required: true, message: '请选择角色类型' }]}><Select options={ROLE_OPTIONS as unknown as Array<{ value: Character['roleType']; label: string }>} /></Form.Item>
                   <Form.Item name="entityType" label="实体类型"><Select allowClear options={ENTITY_TYPE_OPTIONS} /></Form.Item>

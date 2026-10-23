@@ -1,3 +1,5 @@
+import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
+import { useScopedState } from '@/hooks/useScopedState'
 import React from 'react'
 import {
   Alert,
@@ -154,16 +156,7 @@ export default function WorkspaceAIQualityBoard({
 }: Props) {
   const navigate = useNavigate()
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
-  const [snapshotLoading, setSnapshotLoading] = React.useState(false)
-  const [snapshot, setSnapshot] = React.useState<Record<string, unknown> | null>(null)
-  const [analysisLoading, setAnalysisLoading] = React.useState(false)
-  const [repairLoading, setRepairLoading] = React.useState(false)
-  const [applyLoading, setApplyLoading] = React.useState(false)
-  const [analysis, setAnalysis] = React.useState<WorkspaceQualityAnalyzeResult | null>(null)
-  const [preview, setPreview] = React.useState<WorkspaceQualityRepairPreview | null>(null)
-  const [selectedPatchIds, setSelectedPatchIds] = React.useState<string[]>([])
   const [extraRequirements, setExtraRequirements] = React.useState('')
-  const snapshotRequestRef = React.useRef(0)
   const analysisRequestRef = React.useRef(0)
   const repairRequestRef = React.useRef(0)
   const contextVersionRef = React.useRef(0)
@@ -183,6 +176,39 @@ export default function WorkspaceAIQualityBoard({
     (activeController && !activeController.readonly)
     || (fallbackAdapter?.applySnapshot && !fallbackAdapter.readonly),
   )
+  const readSnapshot = React.useCallback(async () => {
+    if (!open || !canFetch) return null
+    return (activeController ? await activeController.getSnapshot() : await fallbackAdapter?.fetchSnapshot(adapterContext)) || null
+  }, [activeController, adapterContext, canFetch, fallbackAdapter, open])
+  const { data: snapshot, loading: snapshotPending, error: snapshotError, reload } = useAsyncSnapshot(readSnapshot)
+  const snapshotLoading = open && canFetch && snapshotPending
+  const resultScope = React.useMemo(() => ({ contextIdentity, readSnapshot, snapshot }), [contextIdentity, readSnapshot, snapshot])
+  const [analysisLoading, setAnalysisLoading] = useScopedState(resultScope, false)
+  const [repairLoading, setRepairLoading] = useScopedState(resultScope, false)
+  const [applyLoading, setApplyLoading] = useScopedState(resultScope, false)
+  const [analysis, setAnalysis] = useScopedState<WorkspaceQualityAnalyzeResult | null>(resultScope, null)
+  const [preview, setPreview] = useScopedState<WorkspaceQualityRepairPreview | null>(resultScope, null)
+  const [selectedPatchIds, setSelectedPatchIds] = useScopedState<string[]>(resultScope, [])
+  React.useLayoutEffect(() => () => {
+    contextVersionRef.current += 1
+    analysisRequestRef.current += 1
+    repairRequestRef.current += 1
+    applyInFlightRef.current = false
+  }, [resultScope])
+  React.useEffect(() => {
+    if (!snapshotError) return
+    console.error(snapshotError)
+    message.error(getUserFacingMessage('workspaceQuality.snapshotLoadFailed'))
+  }, [snapshotError])
+  const loadSnapshot = React.useCallback(async () => {
+    const next = await reload()
+    if (next !== undefined) {
+      setAnalysis(null)
+      setPreview(null)
+      setSelectedPatchIds([])
+    }
+  }, [reload, setAnalysis, setPreview, setSelectedPatchIds])
+
   const detailItems = React.useMemo<NonNullable<CollapseProps['items']>>(() => {
     const items: NonNullable<CollapseProps['items']> = []
 
@@ -232,44 +258,6 @@ export default function WorkspaceAIQualityBoard({
     return items
   }, [analysis])
 
-  const loadSnapshot = React.useCallback(async () => {
-    if (!canFetch) return
-    const requestId = ++snapshotRequestRef.current
-    const contextVersion = contextVersionRef.current
-    setSnapshotLoading(true)
-    try {
-      const nextSnapshot = activeController
-        ? await activeController.getSnapshot()
-        : await fallbackAdapter?.fetchSnapshot(adapterContext)
-      if (snapshotRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
-      setSnapshot(nextSnapshot || null)
-      setAnalysis(null)
-      setPreview(null)
-      setSelectedPatchIds([])
-    } catch (error) {
-      if (snapshotRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
-      console.error(error)
-      message.error(getUserFacingMessage('workspaceQuality.snapshotLoadFailed'))
-    } finally {
-      if (snapshotRequestRef.current === requestId && contextVersionRef.current === contextVersion) setSnapshotLoading(false)
-    }
-  }, [activeController, adapterContext, canFetch, fallbackAdapter])
-
-  React.useEffect(() => {
-    contextVersionRef.current += 1
-    snapshotRequestRef.current += 1
-    analysisRequestRef.current += 1
-    repairRequestRef.current += 1
-    setSnapshotLoading(false)
-    setAnalysisLoading(false)
-    setRepairLoading(false)
-    setAnalysis(null)
-    setPreview(null)
-    setSelectedPatchIds([])
-    if (!open) return
-    void loadSnapshot()
-  }, [contextIdentity, loadSnapshot, open])
-
   const handleAnalyze = React.useCallback(async () => {
     if (!snapshot) return
     const requestId = ++analysisRequestRef.current
@@ -293,7 +281,7 @@ export default function WorkspaceAIQualityBoard({
     } finally {
       if (analysisRequestRef.current === requestId && contextVersionRef.current === contextVersion) setAnalysisLoading(false)
     }
-  }, [adapterContext, snapshot, workspaceKey, workspaceLabel, workspaceSummary])
+  }, [adapterContext, snapshot, workspaceKey, workspaceLabel, workspaceSummary, setAnalysis, setAnalysisLoading, setPreview, setSelectedPatchIds])
 
   const handleRepair = React.useCallback(async () => {
     if (!snapshot) return
@@ -320,11 +308,12 @@ export default function WorkspaceAIQualityBoard({
     } finally {
       if (repairRequestRef.current === requestId && contextVersionRef.current === contextVersion) setRepairLoading(false)
     }
-  }, [adapterContext, analysis?.globalIssues, extraRequirements, snapshot, workspaceKey, workspaceLabel, workspaceSummary])
+  }, [adapterContext, analysis, extraRequirements, snapshot, workspaceKey, workspaceLabel, workspaceSummary, setPreview, setRepairLoading, setSelectedPatchIds])
 
   const handleApply = React.useCallback(async () => {
     if (!snapshot || !preview || applyInFlightRef.current) return
     applyInFlightRef.current = true
+    const contextVersion = contextVersionRef.current
     setApplyLoading(true)
     const selectedIds = new Set(selectedPatchIds)
     const allPatches = [...preview.fieldPatches, ...preview.entityPatches]
@@ -339,17 +328,18 @@ export default function WorkspaceAIQualityBoard({
       } else if (fallbackAdapter?.applySnapshot) {
         await fallbackAdapter.applySnapshot(snapshot, nextSnapshot, adapterContext)
         const refreshedNovel = await window.electron.novel.get(novelId)
-        if (refreshedNovel) setCurrentNovel(refreshedNovel)
+        if (contextVersionRef.current === contextVersion && refreshedNovel) setCurrentNovel(refreshedNovel)
       }
 
+      if (contextVersionRef.current !== contextVersion) return
       onApplied?.()
       message.success(getUserFacingMessage('workspaceQuality.previewApplied'))
       await loadSnapshot()
     } catch (error) {
       console.error(error)
-      message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
+      if (contextVersionRef.current === contextVersion) message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
     } finally {
-      applyInFlightRef.current = false
+      if (contextVersionRef.current === contextVersion) applyInFlightRef.current = false
       setApplyLoading(false)
     }
   }, [
@@ -362,7 +352,7 @@ export default function WorkspaceAIQualityBoard({
     preview,
     selectedPatchIds,
     setCurrentNovel,
-    snapshot,
+    snapshot, setApplyLoading,
   ])
 
   const allPatches = preview ? [...preview.fieldPatches, ...preview.entityPatches] : []

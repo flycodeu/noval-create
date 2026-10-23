@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select, Skeleton, message } from 'antd'
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select, Skeleton, Space, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { ModelConfig, Novel } from '../../types'
@@ -8,6 +8,8 @@ import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
 import './index.css'
+import InspirationWizard from './InspirationWizard'
+import { readInspirationDraft, type InspirationInitial } from './inspiration-draft'
 
 interface NewBook {
   title: string
@@ -31,17 +33,18 @@ export default function NovelList() {
   const [sort, setSort] = useState('updatedAt')
   const [creating, setCreating] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [inspiration, setInspiration] = useState<{ initial: InspirationInitial; resume: boolean } | null>(null)
+  const [savedIdea, setSavedIdea] = useState(() => Boolean(readInspirationDraft()))
   const [models, setModels] = useState<ModelConfig[]>([])
   const [modelError, setModelError] = useState('')
   const [form] = Form.useForm<NewBook>()
   const createInFlight = useRef(false)
   const loadVersion = useRef(0)
-  const load = useCallback(async () => {
+  const load = useCallback(() => {
     const version = ++loadVersion.current
-    setLoading(true)
-    try { const rows = await window.electron.novel.list(); if (version === loadVersion.current) { setNovels(rows); setError('') } }
-    catch (cause) { if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : '读取作品失败') }
-    finally { if (version === loadVersion.current) setLoading(false) }
+    return window.electron.novel.list().then(rows => { if (version === loadVersion.current) { setNovels(rows); setError('') } })
+      .catch(cause => { if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : '读取作品失败') })
+      .finally(() => { if (version === loadVersion.current) setLoading(false) })
   }, [setNovels])
   useEffect(() => { void load(); return () => { loadVersion.current += 1 } }, [load])
   useEffect(() => {
@@ -93,7 +96,7 @@ export default function NovelList() {
     {error && <Alert type="error" message={error} action={<Button onClick={() => void load()}>重试</Button>} />}
     {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : !filtered.length ? <Empty description={novels.length ? '没有匹配的作品。' : '给你的第一个故事留一个位置。'}>{!novels.length && <Button onClick={() => setCreating(true)}>新建小说</Button>}</Empty> : <div className="novel-list-page__grid">{filtered.map(novel => <ProjectCard key={novel.id} novel={novel} onOpen={() => navigate(buildWorkspaceRoute(novel.id, 'guide'))} onDelete={() => remove(novel)} onExport={format => void exportBook(novel.id, format)} onStatusChange={next => void updateStatus(novel.id, next)} />)}</div>}
     <Modal title="开始一部小说" open={creating} onCancel={() => { if (!saving) setCreating(false) }} onOk={() => void create().catch(() => undefined)} okText="创建并进入创作台" cancelText="取消" confirmLoading={saving} closable={!saving} maskClosable={!saving} width={720}>
-      <Form form={form} layout="vertical" className="novel-create-form">
+      <Space wrap style={{ marginBottom: 16 }}><Button disabled={saving} onClick={() => { setInspiration({ initial: form.getFieldsValue(), resume: false }); setCreating(false) }}>{savedIdea ? "从当前输入开始新构思" : "先讨论方向"}</Button>{savedIdea && <Button disabled={saving} onClick={() => { setInspiration({ initial: {}, resume: true }); setCreating(false) }}>继续上次构思</Button>}</Space><Form form={form} layout="vertical" className="novel-create-form">
         <Form.Item name="title" label="书名" rules={[{ required: true, whitespace: true, message: '先给作品一个名字，之后可以修改。' }]}><Input maxLength={100} placeholder="可以先用暂定名" /></Form.Item>
         <Form.Item name="userBackground" label="故事起点" extra="填写已经确定的时代、人物处境或已有故事；其余内容可以在创作台逐步生成。"><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} placeholder="故事发生在哪里？主角目前面临什么？也可以暂时留空。" /></Form.Item>
         <Form.Item name="constraints" label="创作要求与限制"><Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="例如：主角是普通人；不改已有关系；第三人称限知。" /></Form.Item>
@@ -102,5 +105,6 @@ export default function NovelList() {
         {modelError && <Alert type="warning" message={modelError} />}
       </Form>
     </Modal>
+    {inspiration && <InspirationWizard initial={inspiration.initial} resume={inspiration.resume} onClose={() => { setInspiration(null); setSavedIdea(Boolean(readInspirationDraft())); setCreating(true) }} onCreated={id => { setInspiration(null); setSavedIdea(false); form.resetFields(); navigate(buildWorkspaceRoute(id, "guide")) }} />}
   </div></div>
 }

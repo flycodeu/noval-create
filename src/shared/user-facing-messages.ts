@@ -147,6 +147,7 @@ export const USER_FACING_MESSAGES = {
   'volume.notFound': '卷不存在',
   'part.notFound': '分册不存在',
   'segment.notFound': '片段不存在',
+  'segment.chapterMismatch': '片段不属于当前章节，请刷新后重新选择。',
   'map.saved': '地图节点已保存。',
   'map.nodeNotFound': '地图节点不存在。',
   'map.nodeDeleted': '节点已删除。',

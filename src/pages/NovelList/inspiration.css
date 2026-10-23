@@ -1,0 +1,10 @@
+.inspiration-wizard { display: grid; gap: 14px; padding-top: 8px; }
+.inspiration-wizard label { color: var(--text-primary); font-weight: 500; }
+.inspiration-wizard p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.inspiration-wizard__candidates { display: grid; gap: 12px; }
+.inspiration-wizard__candidates:empty { display: none; }
+.inspiration-wizard__candidates article { min-width: 0; padding: 18px 20px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-surface); }
+.inspiration-wizard__candidates h3 { margin: 0 0 8px; color: var(--text-primary); }
+.inspiration-wizard__candidates article > div, .inspiration-wizard__footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.inspiration-wizard__footer { padding-top: 16px; border-top: 1px solid var(--border-default); }
+@media (max-width: 600px) { .inspiration-wizard__candidates article { padding: 14px; } }

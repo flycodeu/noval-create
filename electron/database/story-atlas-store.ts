@@ -34,6 +34,7 @@ export function migrateStoryAtlas(sqlite: Database.Database): void {
       native_table TEXT,
       native_id INTEGER,
       context_version INTEGER NOT NULL,
+      author_protection_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_story_atlas_revision_lookup
@@ -47,6 +48,9 @@ export function migrateStoryAtlas(sqlite: Database.Database): void {
       PRIMARY KEY(novel_id,idempotency_key)
     );
   `)
+  if (!(sqlite.prepare('PRAGMA table_info(story_atlas_revisions)').all() as Array<{ name: string }>).some(column => column.name === 'author_protection_json')) {
+    sqlite.exec("ALTER TABLE story_atlas_revisions ADD COLUMN author_protection_json TEXT NOT NULL DEFAULT '[]'")
+  }
   const exists = (table: string) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
   const rows = (table: string): Row[] => exists(table) ? sqlite.prepare(`SELECT * FROM ${table}`).all() as Row[] : []
   const versions = new Map(rows('novels').map((row) => [num(row.id), num(row.context_version) || 1]))
@@ -110,11 +114,13 @@ export function migrateStoryAtlas(sqlite: Database.Database): void {
   }
 }
 
-export function insertAtlasRevision(sqlite: Database.Database, novelId: number, item: AtlasStoredRecord, contextVersion: number): void {
+export function insertAtlasRevision(sqlite: Database.Database, novelId: number, item: AtlasStoredRecord, contextVersion: number, protectedFields?: string[]): void {
+  const prior = sqlite.prepare('SELECT author_protection_json FROM story_atlas_revisions WHERE novel_id=? AND record_id=? ORDER BY id DESC LIMIT 1').get(novelId, item.record.id) as { author_protection_json: string } | undefined
   sqlite.prepare(`INSERT INTO story_atlas_revisions
-    (novel_id,record_id,record_type,effective_from_chapter,status,snapshot_json,native_table,native_id,context_version)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(novelId, item.record.id, item.recordType, item.record.effectiveFromChapter,
-    item.retired ? 'retired' : item.record.status, JSON.stringify(item.record), item.nativeTable, item.nativeId, contextVersion)
+    (novel_id,record_id,record_type,effective_from_chapter,status,snapshot_json,native_table,native_id,context_version,author_protection_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(novelId, item.record.id, item.recordType, item.record.effectiveFromChapter,
+    item.retired ? 'retired' : item.record.status, JSON.stringify(item.record), item.nativeTable, item.nativeId, contextVersion,
+    protectedFields ? JSON.stringify(protectedFields) : prior?.author_protection_json || '[]')
 }
 
 export function readAtlasRecords(sqlite: Database.Database, novelId: number, atChapter?: number, includePlanned = true): AtlasStoredRecord[] {
