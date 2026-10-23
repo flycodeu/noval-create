@@ -10,6 +10,7 @@ import { ATLAS_KIND_LABELS, ATLAS_TABS, WORLD_WORKSPACE_TABS, atlasTabFor, resol
 import { AtlasEntityLibrary } from './AtlasEntityLibrary'
 import { AtlasEntityProfile } from './AtlasEntityProfile'
 import { AtlasEntityEditor } from './AtlasEntityEditor'
+import { AtlasRelationEditor } from './AtlasRelationEditor'
 import { AtlasRelationDetails } from './AtlasRelationDetails'
 import { WorldAtlasGraph } from './WorldAtlasGraph'
 import { GeographicAtlas } from './GeographicAtlas'
@@ -30,6 +31,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const queryScope = JSON.stringify([novelId, atChapter, includePlanned])
   const [relation, setRelation] = useScopedState<StoryAtlasRelation | null>(queryScope, null)
   const [editing, setEditing] = useScopedState<{ entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; atChapter: number | null } | null>(novelId, null)
+  const [editingRelation, setEditingRelation] = useScopedState<{ relation: StoryAtlasRelation; snapshot: StoryAtlasSnapshot; atChapter: number | null } | null>(novelId, null)
   const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const [reference, setReference] = useState<'rules' | 'research' | null>(null)
   const [rulesEdit, setRulesEdit] = useState<WorldRulesEditState>({ dirty: false, saving: false })
@@ -94,8 +96,9 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
         const entity = snapshot.entities.find(entity => item.entityIds.includes(entity.id))
         return <li key={`${item.code}:${index}`}>{item.message}{(edge || entity) && <Button type="link" size="small" onClick={() => edge ? setRelation(edge) : openEntity(entity!)}>查看资料</Button>}</li>
       })}</ul></details>}
-      <AtlasRelationDetails relation={relation} snapshot={snapshot} chapters={chapters} onClose={() => setRelation(null)} onOpen={openEntity} onDiscuss={discussRelation} onRelation={setRelation} />
+      <AtlasRelationDetails onEdit={!loading && !error ? item => { setEditingRelation({ relation: item, snapshot, atChapter }); setRelation(null) } : undefined} relation={relation} snapshot={snapshot} chapters={chapters} onClose={() => setRelation(null)} onOpen={openEntity} onDiscuss={discussRelation} onRelation={setRelation} />
     </>}
+    {editingRelation && <AtlasRelationEditor key={editingRelation.relation.id} {...editingRelation} onClose={() => setEditingRelation(null)} onSaved={() => void load()} />}
     {editing && <AtlasEntityEditor key={editing.entity.id} entity={editing.entity} snapshot={editing.snapshot} atChapter={editing.atChapter} onClose={() => setEditing(null)} onSaved={() => void load()} />}
     </>}
     <Drawer className="world-reference-drawer" title={`${selected?.name ? `${selected.name} · ` : ''}${reference === 'rules' ? '世界规则' : '联网参考'}`} open={Boolean(reference)} width={720} destroyOnClose onClose={() => changeView(() => setReference(null))}>{reference === 'rules' ? <WorldRules novelId={novelId} onDiscuss={discussRules} onEditStateChange={setRulesEdit} /> : reference === 'research' ? <ResearchLibrary novelId={novelId} /> : null}</Drawer>

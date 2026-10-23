@@ -1,3 +1,4 @@
+import { AUTHOR_PROCESS_FIELDS, authorFieldKey, authorText, authorValueLabel } from './author-content'
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { ATLAS_ATTRIBUTE_LABELS, atlasAttributeValue, locationPath } from './atlas-presentation'
 
@@ -23,7 +24,7 @@ export function resolveAtlasTab(params: URLSearchParams): AtlasTab {
 export function atlasTabFor(entity: StoryAtlasEntity): AtlasTab { return ATLAS_TABS.find(item => item.kind === entity.kind)!.key }
 export function atlasEntitySummary(entity: StoryAtlasEntity): string {
   const publicSummary = entity.kind === 'character' ? entity.attributes.publicSummary : undefined
-  return typeof publicSummary === 'string' && publicSummary.trim() ? publicSummary.trim() : entity.summary
+  return typeof publicSummary === 'string' && publicSummary.trim() ? authorText(publicSummary) : authorText(entity.summary)
 }
 export function atlasEntityMatchesSearch(entity: StoryAtlasEntity, keyword: string): boolean {
   return `${entity.name} ${atlasEntitySummary(entity)} ${entity.summary}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase())
@@ -39,6 +40,7 @@ export function hasAtlasValue(value: unknown): boolean {
   return true
 }
 const FIELD_LABELS: Record<string, string> = {
+  strengths: '长处', weaknesses: '短处', motivation: '行动动机', relationshipTension: '关系冲突', bilateral: '双向关系',
   clothing: '常用衣着', carriedItems: '随身物品', physicalHabits: '动作与体态', portraitPrompt: '视觉描述', portraitImage: '角色参考像',
   authorPlanning: '作者后续规划', truthBoundary: '已发生与规划边界', speciesOrigin: '种属与来历', bodyAndDailyLife: '身体与日常规则',
   independentPreference: '个人喜好', entryPlan: '入场安排', independentRelationships: '独立关系', nonProtagonistScene: '人物自己的场景',
@@ -52,7 +54,7 @@ export function atlasFieldLabel(key: string) {
   return FIELD_LABELS[key] || FIELD_LABELS[camel] || (/[\u4e00-\u9fff]/.test(key) ? key : '补充设定')
 }
 const REFERENCE_KINDS: Record<string, StoryAtlasEntity['kind']> = { campFactionIds: 'faction', campFactionIdsJson: 'faction', factionId: 'faction', factionIds: 'faction', characterId: 'character', characterIds: 'character', memberCharacterIds: 'character', leaderId: 'character', leaderCharacterId: 'character', parentIds: 'character', presentCharacterIds: 'character', linkedCharacterIds: 'character', affectedCharacterIds: 'character', ownerCharacterId: 'character', linkedTimelineEventIds: 'event', linkedItemIds: 'item', locationId: 'location', locationIds: 'location', homeLocationId: 'location', currentLocationId: 'location', activityLocationIds: 'location', birthplaceLocationId: 'location', headquartersId: 'location', territoryIds: 'location', territoryMapNodeIds: 'location', locationMapId: 'location', mapNodeId: 'location' }
-export const ATLAS_INTERNAL_FIELDS = new Set(['id', 'schemaVersion', 'novelId', 'createdAt', 'updatedAt', 'sortOrder', 'recordStatus', 'sourceType', 'sourceId', 'bindingType', 'isCanonical', 'sourceContext', 'typedRefs', 'volumeId', 'partId', 'timeMode', 'timeSortValue', 'anchorInvalid', 'authorOnly', 'futureOnly'])
+export const ATLAS_INTERNAL_FIELDS = new Set([...AUTHOR_PROCESS_FIELDS, 'id', 'schemaVersion', 'novelId', 'createdAt', 'updatedAt', 'sortOrder', 'recordStatus', 'sourceType', 'sourceId', 'bindingType', 'isCanonical', 'sourceContext', 'typedRefs', 'volumeId', 'partId', 'timeMode', 'timeSortValue', 'anchorInvalid', 'authorOnly', 'futureOnly'])
 export function resolveAtlasReference(key: string, value: unknown, entities: StoryAtlasEntity[]) {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined
   const kind = REFERENCE_KINDS[key]
@@ -69,7 +71,7 @@ export function atlasScalarText(key: string, value: unknown, entities: StoryAtla
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'status' && value === 'approved_design') return '已采纳规划'
   if (['protagonistPresent', 'isMajorEvent'].includes(key)) return Number(value) === 1 ? '是' : '否'
-  return VALUE_LABELS[String(value)] || String(atlasAttributeValue(key, value))
+  return VALUE_LABELS[String(value)] || authorText(String(authorValueLabel(atlasAttributeValue(key, value))))
 }
 
 export type AtlasProfileSection = 'overview' | 'appearance' | 'abilities' | 'relationships' | 'planning'
@@ -104,7 +106,7 @@ export function profileFieldGroups(entity: StoryAtlasEntity) {
     group.fields.forEach(key => used.add(key))
     return { ...group, values: Object.fromEntries(group.fields.filter(key => hasAtlasValue(entity.attributes[key])).map(key => [key, entity.attributes[key]])) }
   })
-  const other = Object.fromEntries(Object.entries(entity.attributes).filter(([key, value]) => !used.has(key) && hasAtlasValue(value)))
+  const other = Object.fromEntries(Object.entries(entity.attributes).filter(([key, value]) => !used.has(authorFieldKey(key)) && hasAtlasValue(value)))
   if (Object.keys(other).length) groups.push({ title: '补充设定', fields: [], empty: '', values: other, ...(entity.kind === 'character' ? { section: 'planning' as const } : {}) })
   return groups
 }
@@ -141,6 +143,6 @@ export function atlasRegionLinks(snapshot: StoryAtlasSnapshot, region: StoryAtla
 
 /** An explicit edit replaces changed fields; untouched migration references never become new input. */
 export function atlasEditedAttributes(previous: Record<string, unknown>, next: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(next).filter(([key, value]) => !ATLAS_INTERNAL_FIELDS.has(key) && !/(?:Id|Ids|Refs)(?:Json)?$/.test(key)
+  return Object.fromEntries(Object.entries(next).filter(([key, value]) => !ATLAS_INTERNAL_FIELDS.has(authorFieldKey(key)) && !/(?:Id|Ids|Refs)(?:Json)?$/.test(key)
     && JSON.stringify(previous[key]) !== JSON.stringify(value)))
 }

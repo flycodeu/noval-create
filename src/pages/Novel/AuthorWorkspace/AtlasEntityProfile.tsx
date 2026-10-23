@@ -1,3 +1,4 @@
+import { authorText } from './author-content'
 import React, { useState } from 'react'
 import { Button } from 'antd'
 import { ArrowRightOutlined, EditOutlined } from '@ant-design/icons'
@@ -18,7 +19,7 @@ function OrganizationStructure({ entity, snapshot, chapters, onOpen, onRelation 
   const departments = snapshot.entities.filter(item => item.kind === 'faction' && item.parentId === entity.id)
   return <>
     <Connections title="现有人员" links={members.filter(item => !item.planned).map(item => ({ ...item, label: positionNames.find(position => position.id === item.relation?.attributes.positionId)?.title || item.label }))} empty="尚未记录已确认的组织成员。" onOpen={onOpen} onRelation={onRelation} />
-    <Connections title="计划中的人员" links={members.filter(item => item.planned)} empty="没有已记录的计划人员；未确定的岗位不会虚构成人物。" onOpen={onOpen} onRelation={onRelation} />
+    <Connections title="计划中的人员" links={members.filter(item => item.planned)} empty="暂无计划人员" onOpen={onOpen} onRelation={onRelation} />
     <section className="atlas-profile-section"><h3>岗位与职责</h3>{positions.length ? <div className="atlas-position-list">{positions.map((position, index) => {
       const assigned = members.filter(item => item.relation?.attributes.positionId === position.id)
       const { id: _id, title: _title, status: _status, ...details } = position
@@ -45,12 +46,11 @@ export function AtlasEntityProfile(props: Props) {
     </div>
     {parent && <button type="button" className="atlas-text-link atlas-parent-link" onClick={() => onOpen(parent)}>{entity.kind === 'faction' ? '上级组织' : '所属地点'}：{parent.name}</button>}
     {character ? <div className="atlas-profile-body" aria-label={CHARACTER_PROFILE_SECTIONS.find(item => item.key === section)?.label}>
-      {section === 'overview' && <section className="atlas-profile-section"><h3>{entity.status === 'planned' ? '计划人物简介' : '正文已知'}</h3>{entity.status === 'planned' ? <><p className="atlas-profile-note">以下为作者预设，尚未作为已发生内容写入正文。</p>{summary && <p className="atlas-profile-summary">{summary}</p>}</> : publicSummary ? <p className="atlas-profile-summary">{publicSummary}</p> : <p className="atlas-empty-note">尚未单独整理正文已知简介，可在作者规划中查看完整设定。</p>}</section>}
-      {['appearance', 'abilities'].includes(section) && <p className="atlas-profile-note">已保存设定；具体形态、能力和衣着以当前章位的正文及生效说明为准，后续安排见作者规划。</p>}
+      {section === 'overview' && <section className="atlas-profile-section"><h3>{entity.status === 'planned' ? '计划人物简介' : '正文已知'}</h3>{entity.status === 'planned' ? <>{summary && <p className="atlas-profile-summary">{summary}</p>}</> : publicSummary ? <p className="atlas-profile-summary">{publicSummary}</p> : <p className="atlas-empty-note">尚未补充正文简介</p>}</section>}
       {section === 'appearance' && <AtlasPortrait entity={entity} onEdit={onEdit} disabled={props.editingDisabled} />}
       {groups.filter(group => group.section === section).map(group => <section className="atlas-profile-section" key={group.title}><h3>{group.title}</h3>{Object.keys(group.values).length ? <AtlasFields values={group.values} entities={snapshot.entities} chapters={chapters} onOpen={onOpen} /> : <p className="atlas-empty-note">{group.empty}</p>}</section>)}
-      {section === 'relationships' && <><Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录出生地、居住地或活动区域。未知地点应保持待定。" onOpen={onOpen} onRelation={onRelation} /><Connections title="所属组织" links={links.filter(item => item.entity.kind === 'faction')} empty="尚未记录组织归属。" onOpen={onOpen} onRelation={onRelation} /><Connections title="人物关系" links={links.filter(item => item.entity.kind === 'character')} empty="尚未记录与其他人物的关系。" onOpen={onOpen} onRelation={onRelation} /></>}
-      {section === 'planning' && <section className="atlas-profile-section"><h3>作者完整设定</h3><p className="atlas-profile-note">作者规划可能包含未来变化、秘密与未落正文内容。</p>{entity.summary ? <p className="atlas-profile-summary">{entity.summary}</p> : <p className="atlas-empty-note">尚未补充作者完整设定。</p>}</section>}
+      {section === 'relationships' && <><Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="暂无地域关联" onOpen={onOpen} onRelation={onRelation} /><Connections title="所属组织" links={links.filter(item => item.entity.kind === 'faction')} empty="尚未记录组织归属。" onOpen={onOpen} onRelation={onRelation} /><Connections title="人物关系" links={links.filter(item => item.entity.kind === 'character')} empty="尚未记录与其他人物的关系。" onOpen={onOpen} onRelation={onRelation} /></>}
+      {section === 'planning' && <section className="atlas-profile-section"><h3>作者完整设定</h3>{entity.summary ? <p className="atlas-profile-summary">{authorText(entity.summary)}</p> : <p className="atlas-empty-note">尚未补充作者完整设定。</p>}</section>}
     </div> : <>
     {summary && <p className="atlas-profile-summary">{summary}</p>}
     {entity.kind === 'faction' && <Connections title="驻地与涉及区域" links={links.filter(item => item.entity.kind === 'location')} empty="尚未记录主要驻地、分驻点或涉及区域。一个组织可以关联多个地区。" onOpen={onOpen} onRelation={onRelation} />}

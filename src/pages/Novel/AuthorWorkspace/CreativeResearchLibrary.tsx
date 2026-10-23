@@ -192,9 +192,9 @@ function ResearchSession({ novelId, onDirtyChange }: Props) {
     <ReferenceExtraction key={novelId} novelId={novelId} open={extracting} onClose={() => setExtracting(false)} onSaved={() => refreshNovel(operationId.current).then(() => undefined)} />
     <section className="creative-research__intro">
       <div>
-        <Text className="creative-research__eyebrow">作者自建 · 可自由撰写与拆解</Text>
-        <h2>把参考转成可用的创作机制</h2>
-        <p>记录概念如何运作、冲突由谁承担、它揭示了什么；再写清怎样转化到本作。资料只作灵感参考，不会自动成为世界设定或人物已知事实。</p>
+
+        <h2>创作资料</h2>
+
       </div>
       <Space wrap><Button disabled={saving} onClick={() => setExtracting(true)}>从文本提炼</Button><Button type="primary" icon={<PlusOutlined />} disabled={saving} onClick={startCreate}>新建资料卡</Button></Space>
     </section>
@@ -205,10 +205,10 @@ function ResearchSession({ novelId, onDirtyChange }: Props) {
       <Text type="secondary">{entries.length} 条</Text>
     </div>
 
-    {entries.length === 0 ? <div className="creative-research__empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={keyword || category !== 'all' ? '没有匹配的资料卡' : '还没有作者自建资料'} /><p>可以从一条具体的思想、制度、民俗或志怪机制开始，再补上它在本作中的意义。</p></div> :
+    {entries.length === 0 ? <div className="creative-research__empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={keyword || category !== 'all' ? '没有匹配的资料卡' : '还没有作者自建资料'} /></div> :
       <div className="creative-research__grid">{pageEntries.map(entry => <Card key={entry.sourceKey} className="creative-research__card" size="small">
         <div className="creative-research__card-heading">
-          <div><Tag>{getCreativeResearchCategoryLabel(entry.category)}</Tag><Tag color="blue">仅供启发</Tag></div>
+          <div><Tag>{getCreativeResearchCategoryLabel(entry.category)}</Tag></div>
           <Space size={4}>
             <Button type="text" size="small" disabled={saving} icon={<EditOutlined />} aria-label={`编辑${entry.title}`} onClick={() => startEdit(entry)} />
             <Button type="text" danger size="small" disabled={saving} icon={<DeleteOutlined />} aria-label={`删除${entry.title}`} onClick={() => void remove(entry)} />
@@ -236,9 +236,9 @@ function ResearchSession({ novelId, onDirtyChange }: Props) {
           <Form.Item name="sourceUrl" label="出处链接（可选）" rules={[{ type: 'url', message: '请输入完整链接' }]}><Input maxLength={500} placeholder="https://..." /></Form.Item>
         </div>
         <Form.Item name="tags" label="标签（可选）"><Select mode="tags" maxCount={12} maxTagTextLength={30} tokenSeparators={[',', '，', '、']} placeholder="用标签标出适用主题或叙事用途" /></Form.Item>
-        <Form.Item name="content" label="核心资料与机制" extra="写清它如何运作、会造成什么冲突或代价；可以自由组织段落。" rules={[{ required: true, whitespace: true, message: '请写下要保存的内容' }, { max: 4000, message: '内容最多 4000 个字符' }]}><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} maxLength={4000} showCount placeholder="自由写下概念、制度、场景结构、民间做法或人物处境……" /></Form.Item>
-        <Form.Item name="interpretation" label="深层含义" extra="写出它触及的信仰、权力、人性矛盾或读者感受。" rules={[{ required: true, whitespace: true, message: '请说明这条资料触及的深层问题' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="表层事件之外，它让读者重新理解什么？" /></Form.Item>
-        <Form.Item name="novelConnection" label="本作转化方向" extra="结合当前小说的背景、人物困境或主线，说明原创转化方式；不要照搬原作。" rules={[{ required: true, whitespace: true, message: '请写明它与本作背景或冲突的连接' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？" /></Form.Item>
+        <Form.Item name="content" label="核心资料与机制" rules={[{ required: true, whitespace: true, message: '请写下要保存的内容' }, { max: 4000, message: '内容最多 4000 个字符' }]}><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} maxLength={4000} showCount placeholder="自由写下概念、制度、场景结构、民间做法或人物处境……" /></Form.Item>
+        <Form.Item name="interpretation" label="深层含义" rules={[{ required: true, whitespace: true, message: '请说明这条资料触及的深层问题' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="表层事件之外，它让读者重新理解什么？" /></Form.Item>
+        <Form.Item name="novelConnection" label="本作转化方向" rules={[{ required: true, whitespace: true, message: '请写明它与本作背景或冲突的连接' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？" /></Form.Item>
       </Form>
     </Modal>
     </>}

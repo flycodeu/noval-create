@@ -1,6 +1,7 @@
 import { ATLAS_ATTRIBUTE_LABELS } from './atlas-presentation'
 import { WRITING_CONTRACT_PRESETS } from '../../../shared/writing-contract'
 import { CREATIVE_STAGE_LABELS } from '../../../shared/creative-workflow'
+import { AUTHOR_PROCESS_FIELDS, authorValueLabel } from './author-content'
 
 export function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -69,7 +70,7 @@ export function documentHasContent(value: unknown): boolean {
   if (parsed !== value) return documentHasContent(parsed)
   if (value == null || typeof value === 'string' && value.trim() === '') return false
   if (Array.isArray(value)) return value.some(documentHasContent)
-  if (typeof value === 'object') return Object.entries(value).some(([key, item]) => !INTERNAL_FIELDS.has(documentFieldKey(key)) && documentHasContent(item))
+  if (typeof value === 'object') return Object.entries(value).some(([key, item]) => !INTERNAL_FIELDS.has(documentFieldKey(key)) && !AUTHOR_PROCESS_FIELDS.has(documentFieldKey(key)) && documentHasContent(item))
   return true
 }
 
@@ -100,7 +101,7 @@ const DOCUMENT_VALUE_LABELS: Record<string, Record<string, string>> = {
   writingContractTags: Object.fromEntries(WRITING_CONTRACT_PRESETS.map(item => [item.value, item.label])),
 }
 export function documentEnumLabel(key: string, value: unknown): unknown {
-  return DOCUMENT_VALUE_LABELS[documentFieldKey(key)]?.[String(value)] ?? value
+  return DOCUMENT_VALUE_LABELS[documentFieldKey(key)]?.[String(value)] ?? authorValueLabel(value)
 }
 
 export function changedFields(before: unknown, after: unknown, prefix = '', fieldKey = ''): Array<{ path: string; fieldKey: string; before: unknown; after: unknown }> {

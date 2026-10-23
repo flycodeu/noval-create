@@ -1,5 +1,5 @@
 .creative-research { display: grid; gap: 18px; min-width: 0; }
-.creative-research__intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 22px 24px; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-surface); }
+.creative-research__intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; }
 .creative-research__intro h2 { margin: 5px 0 8px; color: var(--text-primary); font-size: 20px; }
 .creative-research__intro p { max-width: 850px; margin: 0; color: var(--text-secondary); line-height: 1.7; }
 .creative-research__eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .04em; }

@@ -1,3 +1,4 @@
+import { authorFieldKey } from './author-content'
 import React from 'react'
 import type { StoryAtlasEntity } from '../../../shared/story-atlas'
 import { parseDocument, recordOf } from './content-document'
@@ -17,6 +18,6 @@ function FieldValue({ value, field, ...props }: Omit<Props, 'values'> & { value:
   return reference && props.onOpen ? <button type="button" className="atlas-text-link" onClick={() => props.onOpen?.(reference)}>{reference.name}</button> : <span>{atlasScalarText(field, value, props.entities, props.chapters, props.positions)}</span>
 }
 export function AtlasFields({ values, ...props }: Props) {
-  const entries = Object.entries(values).filter(([key, value]) => !ATLAS_INTERNAL_FIELDS.has(key) && hasAtlasValue(value))
+  const entries = Object.entries(values).filter(([key, value]) => !ATLAS_INTERNAL_FIELDS.has(authorFieldKey(key)) && hasAtlasValue(value))
   return <dl className="atlas-profile-fields">{entries.map(([key, value]) => <div key={key}><dt>{atlasFieldLabel(key)}</dt><dd><FieldValue value={value} field={key} {...props} /></dd></div>)}</dl>
 }

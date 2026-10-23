@@ -93,7 +93,7 @@ async function main() {
   await wait('window.agentCalls.some(call=>call.toolId==="novelforge.research.upsert")')
   assert.equal(await run('window.agentCalls.at(-1).input.entries[0].title'), '不争与权力边界')
   await wait('document.body.textContent.includes("不争与权力边界")')
-  assert((await run('document.body.textContent')).includes('仅供启发'))
+  assert(!(await run('document.body.textContent')).includes('仅供启发'), 'saved cards avoid repeating the reference disclaimer')
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('新建资料卡')).click()")
   await fill('input[placeholder="例如：赎罪为何会变成新的权力"]', '不争与权力边界')
   await fill('textarea[maxlength="4000"]', '新的卡片内容不能静默覆盖同身份旧卡。')

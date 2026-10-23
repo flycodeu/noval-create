@@ -6,6 +6,16 @@
 .story-design-topics > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .story-design-topics > button:disabled { opacity: .6; cursor: default; }
 #story-design-panel { min-width: 0; }
+.story-direction { display: grid; gap: 28px; }
+.story-direction h3 { font-size: 14px; color: var(--text-primary); margin: 0 0 12px; }
+.story-direction-core { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border-default); }
+.story-direction-main { max-width: 80ch; }
+.story-subplots { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 22px; align-items: start; }
+.story-subplots article { min-width: 0; padding: 18px; border: 1px solid var(--border-default); border-radius: 6px; }
+.story-subplots h4 { margin: 0 0 14px; font-size: 15px; }
+.story-subplots .author-document-fields > div { display: block; padding: 8px 0; border: 0; }
+.story-subplots .author-document-fields dt { margin-bottom: 4px; }
+@media (max-width: 760px) { .story-direction-core { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) {
   .story-design-tabs > button { padding: 11px 10px; }
   .story-design-topics { gap: 4px; }
