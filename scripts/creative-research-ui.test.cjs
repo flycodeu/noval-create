@@ -16,7 +16,7 @@ async function main() {
     import ResearchLibrary from './src/pages/Novel/AuthorWorkspace/ResearchLibrary';
     import CreativeResearchLibrary from './src/pages/Novel/AuthorWorkspace/CreativeResearchLibrary';
     import StoryDesign from './src/pages/Novel/AuthorWorkspace/StoryDesign';
-    import{getCreativeResearchSourceKey}from'./src/shared/creative-research';
+    import{getCreativeResearchSourceKey,normalizeCreativeResearchDraft}from'./src/shared/creative-research';
     import{useNovelStore}from'./src/stores/novel.store';
     import{getAntdThemeConfig}from'./src/theme/antd-tokens';
     import './src/styles/global.css';import './src/pages/Novel/AuthorWorkspace/author-workspace.css';
@@ -37,7 +37,7 @@ async function main() {
           if(request.input.expectedContextVersion!==undefined&&request.input.expectedContextVersion!==window.currentNovel.contextVersion)return{ok:false,error:{message:'作品已被其他任务修改，请刷新后再编辑；当前编辑内容仍保留。'}}
           if(request.toolId==='novelforge.research.upsert'){
             const draft=request.input.entries[0],entries=JSON.parse(window.currentNovel.sourceLedgerJson),sourceKey=draft.sourceKey||getCreativeResearchSourceKey(draft)
-            const saved={...draft,sourceKey,sourceType:'author_created',assetType:'creative_reference',factTitle:draft.title,sourceText:'界面测试参考卡',verificationStatus:'pending',canonDecision:'reference_only',recordedAt:'2026-10-19T00:00:00.000Z',updatedAt:'2026-10-19T00:00:00.000Z'}
+            const saved={...normalizeCreativeResearchDraft(draft),sourceKey,sourceType:'author_created',assetType:'creative_reference',factTitle:draft.title,sourceText:'界面测试参考卡',verificationStatus:'pending',canonDecision:'reference_only',recordedAt:'2026-10-19T00:00:00.000Z',updatedAt:'2026-10-19T00:00:00.000Z'}
             const index=entries.findIndex(entry=>entry.sourceKey===sourceKey);if(index<0)entries.push(saved);else entries[index]=saved
             window.currentNovel.sourceLedgerJson=JSON.stringify(entries)
           }
@@ -87,16 +87,17 @@ async function main() {
   const fill = (selector, value) => run(`{const el=document.querySelector(${JSON.stringify(selector)});const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}`)
   await fill('input[placeholder="例如：赎罪为何会变成新的权力"]', '不争与权力边界')
   await fill('textarea[maxlength="4000"]', '主角拒绝垄断渡口的救命药，代价是失去军中晋升。')
-  await fill('textarea[placeholder="表层事件之外，它让读者重新理解什么？"]', '克制不是无欲，而是不把他人困境换成自己的权力。')
-  await fill('textarea[placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？"]', '在饥荒粮药分配上放弃短期胜利，承担后续朝廷问责。')
+  assert.equal(await run('document.querySelector(".creative-research__form details").open'), false, 'optional notes start collapsed')
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存到创作参考').click()")
   await wait('window.agentCalls.some(call=>call.toolId==="novelforge.research.upsert")')
   assert.equal(await run('window.agentCalls.at(-1).input.entries[0].title'), '不争与权力边界')
+  assert.equal(await run('JSON.parse(window.currentNovel.sourceLedgerJson)[0].interpretation'), '', 'basic cards save without explanatory notes')
   await wait('document.body.textContent.includes("不争与权力边界")')
   assert(!(await run('document.body.textContent')).includes('仅供启发'), 'saved cards avoid repeating the reference disclaimer')
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('新建资料卡')).click()")
   await fill('input[placeholder="例如：赎罪为何会变成新的权力"]', '不争与权力边界')
   await fill('textarea[maxlength="4000"]', '新的卡片内容不能静默覆盖同身份旧卡。')
+  await run('document.querySelector(".creative-research__form details > summary").click()')
   await fill('textarea[placeholder="表层事件之外，它让读者重新理解什么？"]', '重复保存必须明确询问作者。')
   await fill('textarea[placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？"]', '保留上一张卡并明确确认更新。')
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存到创作参考').click()")
@@ -104,18 +105,30 @@ async function main() {
   assert.equal(await run('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert").length'), 1, 'duplicate save waits for confirmation')
   await run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='更新现有卡片').click()")
   await wait('window.agentCalls.filter(call=>call.toolId==="novelforge.research.upsert").length===2')
-  await wait('document.querySelectorAll(".creative-research__card").length===1')
+  await wait('document.querySelectorAll(".creative-research__entry").length===1')
+  assert.equal(await run('document.querySelector(".creative-research__entry").open'), false, 'catalog entries start compact')
+  await run('document.querySelector(".creative-research__entry > summary").click()')
+  await wait('document.querySelector(".creative-research__entry").open')
+  assert((await run('document.querySelector(".creative-research__entry-detail").textContent')).includes('新的卡片内容'))
+  for (const width of [1280, 480]) {
+    win.setContentSize(width, 1000)
+    await new Promise(resolve=>setTimeout(resolve,150))
+    assert(await run('document.documentElement.scrollWidth<=innerWidth+1'), `expanded research overflow at ${width}`)
+    fs.writeFileSync(path.join(dir, `author-research-${width}.png`), (await win.webContents.capturePage()).toPNG())
+  }
+  win.setContentSize(1280,1000)
   const clickAuthorSave = () => run("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存到创作参考').click()")
   const createDraft = async title => {
     await run("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('新建资料卡')).click()")
     await fill('input[placeholder="例如：赎罪为何会变成新的权力"]', title)
     await fill('textarea[maxlength="4000"]', '权力来自互助，也可能转移代价。')
+    await run('document.querySelector(".creative-research__form details > summary").click()')
     await fill('textarea[placeholder="表层事件之外，它让读者重新理解什么？"]', '善行的名义不能代替具体责任。')
     await fill('textarea[placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？"]', '在本作粮药分配中追问由谁承担损失。')
   }
   const cancelAuthor = () => run("[...document.querySelectorAll('.ant-modal-content')].find(el=>el.textContent.includes('保存到创作参考')).querySelector('.ant-modal-footer button').click()")
   await fill('input[placeholder="搜索标题、内容或标签"]', '隐藏已有卡片')
-  await wait('document.querySelectorAll(".creative-research__card").length===0')
+  await wait('document.querySelectorAll(".creative-research__entry").length===0')
   await createDraft('不争与权力边界')
   await clickAuthorSave()
   await wait('document.body.textContent.includes("相同标题、分类和出处的资料卡已存在")')
@@ -123,7 +136,7 @@ async function main() {
   await run('window.paint(2)')
   await wait('!document.body.textContent.includes("相同标题、分类和出处的资料卡已存在")')
   await run('window.paint(1)')
-  await wait('document.querySelectorAll(".creative-research__card").length===1')
+  await wait('document.querySelectorAll(".creative-research__entry").length===1')
   await fill('input[placeholder="搜索标题、内容或标签"]', '暂不匹配')
   await createDraft('只有链接的出处')
   await fill('input[placeholder="https://..."]', 'https://example.org/reference')
@@ -132,13 +145,13 @@ async function main() {
   await wait('Boolean(window.resolveSave)')
   assert.equal(await run('document.querySelector("textarea[maxlength=\\\"4000\\\"]").disabled'), true, 'pending save freezes the submitted form')
   await run('window.deferSave=false;window.resolveSave()')
-  await wait('document.querySelectorAll(".creative-research__card").length===2')
-  assert.equal(await run('document.querySelector(".creative-research__source a")?.getAttribute("href")'), 'https://example.org/reference', 'a URL-only source remains visible')
+  await wait('document.querySelectorAll(".creative-research__entry").length===2')
+  assert.equal(await run('document.querySelector(".creative-research__entry-actions a")?.getAttribute("href")'), 'https://example.org/reference', 'a URL-only source remains visible')
   await run("document.querySelector('button[aria-label=\\\"编辑只有链接的出处\\\"]').click()")
   await fill('textarea[maxlength="4000"]', '旧表单不能覆盖他人新保存的资料')
   const originalEditVersion = await run('window.storedVersion()')
   await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.find(card=>card.title==='只有链接的出处').content='另一任务刚更新的资料';window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch()}")
-  await wait('document.querySelector(".creative-research__grid").textContent.includes("另一任务刚更新的资料")')
+  await wait('document.querySelector(".creative-research__list").textContent.includes("另一任务刚更新的资料")')
   assert.equal(await run('document.querySelector("textarea[maxlength=\\\"4000\\\"]").value'), '旧表单不能覆盖他人新保存的资料', 'external refresh must preserve an open author draft')
   await clickAuthorSave()
   await wait('document.body.textContent.includes("作品已被其他任务修改") && !document.querySelector("textarea[maxlength=\\\"4000\\\"]").disabled')
@@ -195,23 +208,23 @@ async function main() {
   assert.equal(await run('window.storedVersion()'), await run('window.currentNovel.contextVersion'), 'search readback must not overwrite a newer saved snapshot')
   await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.push({...cards[0],sourceKey:'author:external',title:'MCP外部新增资料',content:'通过外部工具保存的新资料',updatedAt:'2026-10-20T00:00:00Z'});window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch(2)}")
   await pause(100)
-  assert(!(await run('document.querySelector(".creative-research__grid").textContent')).includes('MCP外部新增资料'), 'other-book notifications must not refresh this book')
+  assert(!(await run('document.querySelector(".creative-research__list").textContent')).includes('MCP外部新增资料'), 'other-book notifications must not refresh this book')
   await run('window.emitResearch()')
-  await wait('document.querySelector(".creative-research__grid").textContent.includes("MCP外部新增资料")')
+  await wait('document.querySelector(".creative-research__list").textContent.includes("MCP外部新增资料")')
   await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);window.currentNovel.sourceLedgerJson=JSON.stringify(cards.filter(card=>card.title!=='MCP外部新增资料'));window.currentNovel.contextVersion++;window.emitResearch()}")
-  await wait('!document.querySelector(".creative-research__grid").textContent.includes("MCP外部新增资料")')
+  await wait('!document.querySelector(".creative-research__list").textContent.includes("MCP外部新增资料")')
   await run("{const cards=JSON.parse(window.currentNovel.sourceLedgerJson);cards.push({...cards[0],sourceKey:'author:focus',title:'焦点恢复补读资料',updatedAt:'2026-10-20T01:00:00Z'});window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.dispatchEvent(new Event('focus'))}")
-  await wait('document.querySelector(".creative-research__grid").textContent.includes("焦点恢复补读资料")')
+  await wait('document.querySelector(".creative-research__list").textContent.includes("焦点恢复补读资料")')
   await run("{window.beforePaginationCards=JSON.parse(window.currentNovel.sourceLedgerJson);const cards=[...window.beforePaginationCards,...Array.from({length:21},(_,i)=>({...window.beforePaginationCards[0],sourceKey:'author:page-'+i,title:'外部批量资料'+i,updatedAt:'2026-10-20T02:00:00Z'}))];window.currentNovel.sourceLedgerJson=JSON.stringify(cards);window.currentNovel.contextVersion++;window.emitResearch()}")
   await wait('Boolean(document.querySelector(".creative-research .ant-pagination-item-2"))')
   await run('document.querySelector(".creative-research .ant-pagination-item-2").click()')
   await wait('Boolean(document.querySelector(".creative-research .ant-pagination-item-2.ant-pagination-item-active"))')
   await run('window.currentNovel.sourceLedgerJson=JSON.stringify(window.beforePaginationCards);window.currentNovel.contextVersion++;window.emitResearch()')
-  await wait('!document.querySelector(".creative-research .ant-pagination") && document.querySelectorAll(".creative-research__card").length===window.beforePaginationCards.length')
+  await wait('!document.querySelector(".creative-research .ant-pagination") && document.querySelectorAll(".creative-research__entry").length===window.beforePaginationCards.length')
   await run('window.deferNovelGet=true;window.emitResearch()')
   await wait('Boolean(window.resolveNovelGet)')
   await run('window.paint(2);window.deferNovelGet=false;window.resolveNovelGet()')
-  await wait('window.storedNovel()?.id===2 && document.querySelectorAll(".creative-research__card").length===0')
+  await wait('window.storedNovel()?.id===2 && document.querySelectorAll(".creative-research__entry").length===0')
   assert.equal(await run('window.storedNovel().id'), 2, 'external refresh cannot publish the previous book after switching')
   await run('window.paintDesign(1)')
   await wait('document.querySelector(".author-design-section")?.textContent.includes("原始故事简介")')

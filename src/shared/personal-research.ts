@@ -9,6 +9,6 @@ export interface PersonalResearchCard {
 /** The project adaptation never belongs to the personal library. */
 export function personalResearchContent(value: unknown): PersonalResearchContent {
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  const { category, title, content, interpretation, sourceTitle, sourceUrl, tags } = normalizeCreativeResearchDraft({ ...record, sourceKey: undefined, novelConnection: '个人资料' })
+  const { category, title, content, interpretation, sourceTitle, sourceUrl, tags } = normalizeCreativeResearchDraft({ ...record, sourceKey: undefined, novelConnection: undefined })
   return { category, title, content, interpretation, sourceTitle, sourceUrl, tags }
 }

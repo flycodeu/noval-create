@@ -9,6 +9,7 @@ import * as assetPrompts from './asset-prompts'
 import * as planningPrompts from './planning-prompts'
 import * as writingPrompts from './writing-prompts'
 import * as reviewPrompts from './review-prompts'
+import { CAST_RELATION_GUIDANCE } from '../cast-role'
 
 // Load service boundaries through Vitest: static imports would pull the Electron
 // database into the composite web project. Their types are checked by typecheck:node.
@@ -233,9 +234,9 @@ const expected: Record<string, string[]> = {
   buildStoryAnchorPrompt: ["deb09882808594cdbae89f7eeb622c02be17d368d4e26e39aa1e6e418c3bab07","04d193cb2f1c9a31c2c63b293b08d38af3e685e1fbfa9c52d09fcbd0fa581243","d33b9fc2d8b47484f8224cbe4b5b1c5a43920bf44cd463b41186fe1ba467e915","deb09882808594cdbae89f7eeb622c02be17d368d4e26e39aa1e6e418c3bab07","deb09882808594cdbae89f7eeb622c02be17d368d4e26e39aa1e6e418c3bab07","deb09882808594cdbae89f7eeb622c02be17d368d4e26e39aa1e6e418c3bab07","d250ccfc3110b2eb14eebf156be72524bdda76713a430cc0d7f27175ed491f39"],
   expandBackgroundPrompt: ["0a670a1349c305d06db0d2cb25d925266405f7ecd97c00ed84c50d41f91c2e83","914a477d2ed47bd54395e21f5355573f14e6c247c961a3e6adf0db9887143fc4","c7ff36d12951c7d8a95ffe1a62525a7e8ce41d9bdd8e3e6f3f9fe8af7a12cc8f","0a670a1349c305d06db0d2cb25d925266405f7ecd97c00ed84c50d41f91c2e83","0a670a1349c305d06db0d2cb25d925266405f7ecd97c00ed84c50d41f91c2e83","0a670a1349c305d06db0d2cb25d925266405f7ecd97c00ed84c50d41f91c2e83","ae1d6c2752b87da055908b5814e3f106b9c4a45816189928849ce329ddebd4cd"],
   protagonistPrompt: ["978fcfabf1b73bfde11dc7e103ab1b054548c0d3471af06bca610c444d4c355b","201548a1c9abae670fbe041482c7f94e07fd2c52da9356efe07253cb760e2473","7f88fa0ae5cb0cb1f13e6b9eb31f069cd82d0850785241a0613de920f2fccee0","978fcfabf1b73bfde11dc7e103ab1b054548c0d3471af06bca610c444d4c355b","978fcfabf1b73bfde11dc7e103ab1b054548c0d3471af06bca610c444d4c355b","978fcfabf1b73bfde11dc7e103ab1b054548c0d3471af06bca610c444d4c355b","83ef2ea2e7c2e388e6d857de811c7af1b8fa58e9785cf6fe01064e3c5d71d6e8"],
-  batchCharacterPrompt: ["0c7593044de5621ebd4cb0a7f12251f5da8214c8598c82ad365f2cdb3fdf8023","a3ef786a15ac9b0cc3e0b83ec13ab60ed63bc02e63dd4c9cf939c15aba82914b","b5e37af7f81494c5c2c73eea4ee97a3010f0bb7480a641a7d6ae7edcb21bb159","0c7593044de5621ebd4cb0a7f12251f5da8214c8598c82ad365f2cdb3fdf8023","0c7593044de5621ebd4cb0a7f12251f5da8214c8598c82ad365f2cdb3fdf8023","0c7593044de5621ebd4cb0a7f12251f5da8214c8598c82ad365f2cdb3fdf8023","ca4728afe6a23f2a8832aabca36c32571ffa32eeed80c5811c044bbcaf0c40c3"],
-  regenerateCharacterPrompt: ["ce6260922444e0febd8c8d9702a2785fc869f78c4669fe0c15eb53bb1f4c0ee4","2b357178adac382063ac284c32abe503b916ab7137aedc0faf8b0ecd5106a323","d1cbd93235ea87fc9818d6be16a42b267313b2387f9d6405ab0d75932f9dcc98","ce6260922444e0febd8c8d9702a2785fc869f78c4669fe0c15eb53bb1f4c0ee4","ce6260922444e0febd8c8d9702a2785fc869f78c4669fe0c15eb53bb1f4c0ee4","ce6260922444e0febd8c8d9702a2785fc869f78c4669fe0c15eb53bb1f4c0ee4","21202390a5567e661bcc8e5402ce68bbd138897c79776804c70e7f489fb17963"],
-  characterRelationsPrompt: ["de6ceccc86cf9afa4f29f8d88db05eacc9e0a84659f08f3d73804a2a1420552a","d3da1246991227108e18c8ed56dd0a588f412ee0e54d4409378a2b372e29b76a","cbf09b85777b07346efce52e4544085b05446a718fd0fb88c50f2f332dba25be","de6ceccc86cf9afa4f29f8d88db05eacc9e0a84659f08f3d73804a2a1420552a","de6ceccc86cf9afa4f29f8d88db05eacc9e0a84659f08f3d73804a2a1420552a","de6ceccc86cf9afa4f29f8d88db05eacc9e0a84659f08f3d73804a2a1420552a","3db850bad623274cb13af9fe76338715b7bfc971b3317b53cd6ae99333cbf898"],
+  batchCharacterPrompt: ["015bd0af7d85caaf54560008c74940ba1eb18a3a10675c6582628d5f2dfb51f8","035805eef3decab1a4bd43574f25cf1e038fa37bcd11374deffa6a381265eb35","b14cc03cdf3e8443b6e59e3f7619d013bb4bb693860b0088e4c1299d62aa45ac","015bd0af7d85caaf54560008c74940ba1eb18a3a10675c6582628d5f2dfb51f8","015bd0af7d85caaf54560008c74940ba1eb18a3a10675c6582628d5f2dfb51f8","015bd0af7d85caaf54560008c74940ba1eb18a3a10675c6582628d5f2dfb51f8","849592c21b51f48cfa8f2fdc2611cc838b863187cae5481ca2f40d18df17a103"],
+  regenerateCharacterPrompt: ["554600ed028ca992e2fc9843638d259713f92c71043e041c341a164f2e89feed","224aee469283dcce47961c3389a5c0993174fc5aea449e09315e75d8f2dda30b","d89ee1eddda67a5a20730f7b27af56885a790a1cd3fa08f5c90253d03103259c","554600ed028ca992e2fc9843638d259713f92c71043e041c341a164f2e89feed","554600ed028ca992e2fc9843638d259713f92c71043e041c341a164f2e89feed","554600ed028ca992e2fc9843638d259713f92c71043e041c341a164f2e89feed","608190a3b831ee7d2123f2e72bb03be9d1d3daa9b6f77921b1138a45b08f831c"],
+  characterRelationsPrompt: ["d5985636c990c75bf696b6fe57a0b357bce89f484de3547440c25e18b191fb0a","eca43d48330de0341757ce9ed31b05906c8db20787969283a51af56f0de6152b","b78b955db39c778479c861e1adcf0806f960d2ae35c68f902cbc3f93125d981d","d5985636c990c75bf696b6fe57a0b357bce89f484de3547440c25e18b191fb0a","d5985636c990c75bf696b6fe57a0b357bce89f484de3547440c25e18b191fb0a","d5985636c990c75bf696b6fe57a0b357bce89f484de3547440c25e18b191fb0a","b4645bda38d1a6d7be627bf3883c557fb579f071c3730ea082300cb01a995433"],
   mapGenerationPrompt: ["1dba01d4112b79a2593a9e46317c480b2eb1a5381c17710261707e1ceff7f812","493ceaa5c1e68bcac96907e8c84080e818a00b68aa8d93b9c63286b8f9cea3f8","15df74c1cfff15c244905aa9a5ab65dcc25df90e4e91213234fa9fa8bfa72ef3","1dba01d4112b79a2593a9e46317c480b2eb1a5381c17710261707e1ceff7f812","1dba01d4112b79a2593a9e46317c480b2eb1a5381c17710261707e1ceff7f812","1dba01d4112b79a2593a9e46317c480b2eb1a5381c17710261707e1ceff7f812","d054eaec4a69c6b8f4e35dece563da77235b2149225e6380b5d27b3aeae19216"],
   buildStoryArcPlanningPrompt: ["85f8c64f83ab10e8761ccb5ad0cc7415e024de3827e07e4f8746bb0ce78129f2","d95e1a3b6fcb3e6c2d561bfd6a068c6cf8e04730424bb59b9ffd330d4dafda4a","bacfce26ef8ede013cce780951da3a8286530e121a0a81063effa61870f4ece1","85f8c64f83ab10e8761ccb5ad0cc7415e024de3827e07e4f8746bb0ce78129f2","85f8c64f83ab10e8761ccb5ad0cc7415e024de3827e07e4f8746bb0ce78129f2","85f8c64f83ab10e8761ccb5ad0cc7415e024de3827e07e4f8746bb0ce78129f2","2613c6b170078e2f4d9d3d1affefe8530af047bff06109a2aa60665a25baa844"],
   buildChapterOutlinePlanningPrompt: ["ca2e91367fa5603886f9a70752b5b62fa49490ab3b90ec1b79d6d93185f55c64","04f5b9310f4678b7e8a97590eb29c8e982f5fe7055a7f7b68def34b970a05990","b72c97acc42a8e3458d45244e0bd062adebd8b277c9de41c8492edc50a2e2a75","ca2e91367fa5603886f9a70752b5b62fa49490ab3b90ec1b79d6d93185f55c64","ca2e91367fa5603886f9a70752b5b62fa49490ab3b90ec1b79d6d93185f55c64","ca2e91367fa5603886f9a70752b5b62fa49490ab3b90ec1b79d6d93185f55c64","0a9c6f27da2393f936460e3e8cc5bcc351210961fbfa8cded437792dcf9975b8"],
@@ -265,9 +266,9 @@ const runtimeExports = ["GLOBAL_WRITING_RULES","HUMAN_LANGUAGE_RULE_LINES","PROM
 const wrappers = [
   {"file":"prompts","mode":"fallback","name":"expandBackgroundPrompt","hash":"0603729ecd41ca6be430ba5c46efc825d72a58ca5f7cce390a5d1d5e6cf99c7d","key":null},
   {"file":"prompts","mode":"fallback","name":"protagonistPrompt","hash":"095997cb7245c5e3a8abb9e5906039ca97a290f649d5ebecd55d4f5d522ec511","key":null},
-  {"file":"prompts","mode":"fallback","name":"batchCharacterPrompt","hash":"e4232630f4662c25300687cef4a08fcd1a75da68ba38016f54901cd2e96def0b","key":null},
-  {"file":"prompts","mode":"fallback","name":"regenerateCharacterPrompt","hash":"4bc4e102769eb900685b0efc76e49deb920c8c86fcee336bbc9b55dfc3f02130","key":null},
-  {"file":"prompts","mode":"fallback","name":"characterRelationsPrompt","hash":"7503594e94e71e316a260cba72f03b327be2f2c5a032f8da25e5b7bd4956aed2","key":null},
+  {"file":"prompts","mode":"fallback","name":"batchCharacterPrompt","hash":"de96b4f2c7c073e99e4c76779272767a20ab8b0427b1a2c4cbf13073d4bf8b0f","key":null},
+  {"file":"prompts","mode":"fallback","name":"regenerateCharacterPrompt","hash":"cfac5b2dcc8ef2ce7cd2135c0e99efe91cfc27274830eb74c47a03d4e6b044b6","key":null},
+  {"file":"prompts","mode":"fallback","name":"characterRelationsPrompt","hash":"bb09de4661be27afddb9d48a6b3d3273247e190847112390b5e11b1559e1953b","key":null},
   {"file":"prompts","mode":"fallback","name":"mapGenerationPrompt","hash":"4829ba2c8141ec9fd0ba3f743a3a0cdef2bb63b4c357ab4dbb12514330992705","key":null},
   {"file":"prompts","mode":"fallback","name":"storyArcsPrompt","hash":"39d4b132278769cd4a2d8ed0f10cd64836d45b1d0ff81f28e94b132b2d117f38","key":null},
   {"file":"prompts","mode":"fallback","name":"chapterOutlinePrompt","hash":"5e319b61bbabc417d089c9434c964f394a9d696b8b76ef7aa074ddafa49627e3","key":null},
@@ -315,7 +316,8 @@ const wrappers = [
 
 const overrideText = "自定义：{novelTitle} / {chapterNum}\n{chapterGoal}\n{runtimeAssertions}\n{unknownField}"
 
-const catalogHash = 'c3a50341e310bae9de7403456c17ade397b53ad38e08c153f62dd3401485e4c1'
+// Character templates intentionally permit independent casts and partial profiles.
+const catalogHash = 'b9ea348559c3cd4ecbbe0d0071094128c9cccbcd00386080db63988472032dbe'
 
 type LegacyTypes = [barrel.PromptParamMeta, barrel.PromptCatalogEntry, barrel.ProtagonistPromptInput, barrel.BatchCharacterPromptInput, barrel.RegenerateCharacterPromptInput, barrel.CharacterRelationsPromptInput, barrel.MapGenerationPromptInput, barrel.StoryArcPromptInput, barrel.ChapterOutlinePromptInput, barrel.TimelineEventPromptInput, barrel.PromptTier, barrel.ChapterWritingPromptInput, barrel.ScenePlanPromptInput, barrel.ChapterReviewPromptInput, barrel.ChapterRewritePromptInput, barrel.ContinuityPromptInput, barrel.RewriteParagraphPromptInput, barrel.GenericExpandPromptInput, barrel.SubplotExpandPromptInput, barrel.ContentScoringPromptInput, barrel.StoryAnchorField, barrel.StoryAnchorPromptInput, barrel.VariationEntityType, barrel.VolumePlanningPromptInput, barrel.PowerSystemExpandInput, barrel.FactionSystemExpandInput]
 
@@ -421,6 +423,20 @@ describe('17-04 real Electron wrappers and applyPromptOverride (database boundar
 })
 
 describe('17-05 compatibility and dependency direction', () => {
+  it.each(['batchCharacterPrompt', 'regenerateCharacterPrompt', 'characterRelationsPrompt'])('%s preserves independent casts and planned relationships', name => {
+    const prompt = invoke(barrel, name, 'ordinary')
+    expect(prompt.split(CAST_RELATION_GUIDANCE)).toHaveLength(2)
+    expect(prompt).not.toContain('优先补足主角相关')
+    expect(prompt).not.toContain('每个人都要写清与主角、主线或某条支线的实际关系')
+  })
+
+  it('permits unknown motivations and characters without protagonist relationships', () => {
+    const batch = invoke(barrel, 'batchCharacterPrompt', 'ordinary')
+    expect(batch).toContain('没有依据的创伤、秘密和恐惧留空')
+    expect(batch).toContain('"relation_to_protagonist":"有既定联系才填写，否则留空"')
+    expect(invoke(barrel, 'characterRelationsPrompt', 'ordinary')).toContain('不要求覆盖所有人物，也不要求整个图谱连通')
+  })
+
   it('keeps all 39 runtime exports and 26 type exports; exposes only the requested section helper', () => {
     expect(Object.keys(barrel).sort()).toEqual([...runtimeExports, 'sectionUnlessCovered'].sort())
     expectTypeOf<LegacyTypes['length']>().toEqualTypeOf<26>()
@@ -439,7 +455,7 @@ describe('17-05 compatibility and dependency direction', () => {
     const allowed: Record<string, string[]> = {
       'prompt-types': [],
       'prompt-common': ['../genre-system', './prompt-types'],
-      'asset-prompts': ['../genre-system', './prompt-types', './prompt-common'],
+      'asset-prompts': ['../cast-role', '../genre-system', './prompt-types', './prompt-common'],
       'planning-prompts': ['./prompt-types', './prompt-common'],
       'writing-prompts': ['./prompt-types', './prompt-common'],
       'review-prompts': ['./prompt-types', './prompt-common'],

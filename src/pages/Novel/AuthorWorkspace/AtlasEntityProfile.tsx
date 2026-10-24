@@ -1,3 +1,4 @@
+import { CAST_ROLES, characterCastRole } from '../../../shared/cast-role'
 import { authorText } from './author-content'
 import React, { useState } from 'react'
 import { Button } from 'antd'
@@ -41,7 +42,7 @@ export function AtlasEntityProfile(props: Props) {
   return <article className="atlas-profile" aria-label={`${entity.name}资料`}>
     <div className="atlas-profile-sticky">
     {props.onBack && <Button type="text" className="atlas-profile-back" onClick={props.onBack}>← 返回列表</Button>}
-    <header className="atlas-profile-header"><div><span className="author-eyebrow">{ATLAS_KIND_LABELS[entity.kind]} · {entity.status === 'planned' ? '计划设定 · 尚未发生' : '已保存资料'} · {entity.effectiveFromChapter ? `第 ${entity.effectiveFromChapter} 章起` : '初始设定'}</span><h2>{entity.name}</h2></div><Button icon={<EditOutlined />} disabled={props.editingDisabled} onClick={onEdit}>编辑</Button></header>
+    <header className="atlas-profile-header"><div><span className="author-eyebrow">{character ? CAST_ROLES.find(role => role.value === characterCastRole(entity.attributes))?.label : ATLAS_KIND_LABELS[entity.kind]} · {entity.status === 'planned' ? '计划设定 · 尚未发生' : '已保存资料'} · {entity.effectiveFromChapter ? `第 ${entity.effectiveFromChapter} 章起` : '初始设定'}</span><h2>{entity.name}</h2></div><Button icon={<EditOutlined />} disabled={props.editingDisabled} onClick={onEdit}>编辑</Button></header>
     {character && <nav className="atlas-profile-tabs" aria-label="人物档案分节">{CHARACTER_PROFILE_SECTIONS.map(item => <button type="button" key={item.key} aria-pressed={section === item.key} onClick={() => setSection(item.key)}>{item.label}</button>)}</nav>}
     </div>
     {parent && <button type="button" className="atlas-text-link atlas-parent-link" onClick={() => onOpen(parent)}>{entity.kind === 'faction' ? '上级组织' : '所属地点'}：{parent.name}</button>}

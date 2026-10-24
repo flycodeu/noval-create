@@ -19,6 +19,14 @@ app.setPath('userData', tempRoot)
 app.commandLine.appendSwitch('disable-gpu')
 registerProjectTsRuntime(workspaceRoot)
 
+// This test covers bootstrap contracts and placeholder names. Local model
+// inference has its own offline runtime test; exercise keyword fallback here.
+const embeddings = require('../electron/services/embedding.service.ts')
+embeddings.embedSemanticTexts = async () => ({ source: 'unavailable' })
+embeddings.searchSimilarFragments = async (novelId, query, topK, _modelId, options) => ({
+  hits: embeddings.fallbackKeywordSearch(novelId, query, topK, options), fallbackReason: 'disabled_by_config',
+})
+
 function project(relativePath) {
   return require(path.join(workspaceRoot, relativePath))
 }

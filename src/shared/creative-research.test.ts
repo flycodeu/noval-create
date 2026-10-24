@@ -43,6 +43,17 @@ describe('author-created creative research', () => {
   })
 
   it('normalizes concise cards and rejects unsafe or oversized input', () => {
+    const basic = { category: 'folk_life', title: '旧渡口', content: '渡船每日两班。' }
+    expect(normalizeCreativeResearchDraft(basic)).toMatchObject({ interpretation: '', novelConnection: '' })
+    const [saved] = upsertCreativeResearchEntries('[]', [basic])
+    expect(parseCreativeResearchEntries(JSON.stringify([saved]))).toHaveLength(1)
+    expect(saved.sourceText).toBe('核心机制：渡船每日两班。')
+    const [withNotes] = upsertCreativeResearchEntries('[]', [daoismCard])
+    const [updated] = upsertCreativeResearchEntries(JSON.stringify([withNotes]), [{ ...basic, sourceKey: withNotes.sourceKey }])
+    expect(updated.interpretation).toBe(daoismCard.interpretation)
+    const [cleared] = upsertCreativeResearchEntries(JSON.stringify([updated]), [{ ...basic, sourceKey: withNotes.sourceKey, interpretation: '', novelConnection: '' }])
+    expect(cleared.interpretation).toBe('')
+    expect(cleared.novelConnection).toBe('')
     expect(normalizeCreativeResearchDraft(daoismCard)).toMatchObject({ title: daoismCard.title, tags: daoismCard.tags })
     expect(() => normalizeCreativeResearchDraft({ ...daoismCard, sourceUrl: 'https://user:secret@example.org/source' })).toThrow('无嵌入凭据')
     expect(() => normalizeCreativeResearchDraft({ ...daoismCard, content: '过长'.repeat(2001) })).toThrow('4000')

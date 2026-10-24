@@ -112,7 +112,7 @@ export const STORY_ATLAS_ATTRIBUTE_SCHEMAS: Partial<Record<StoryAtlasEntityKind 
 }
 export interface StoryAtlasSource { kind: string; id?: string; note?: string }
 for (const schema of Object.values(STORY_ATLAS_ATTRIBUTE_SCHEMAS)) {
-  schema.properties = { ...schema.properties, stateTiming: { enum: ['chapter_start', 'chapter_end'], description: '仅明确采纳的章初修订使用 chapter_start；省略为章内或章末生效，不提前进入正文。' } }
+  schema.properties = { ...schema.properties, stateTiming: { enum: ['chapter_start', 'chapter_end'], description: '明确采纳的章初修订使用 chapter_start；同一生效章位的局部更正省略时保留原时序，新增记录或推进到新章默认章末。章内发生的新变化须明确使用 chapter_end。' } }
 }
 
 export interface StoryAtlasEntity {

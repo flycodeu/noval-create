@@ -4,4 +4,8 @@
 .author-assist-card p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .author-assist-source { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .author-assist-card blockquote { margin: 0; padding: 8px 12px; border-left: 2px solid var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chapter-review__header { display: grid; gap: 8px; border-bottom: 1px solid var(--border-default); padding-bottom: 16px; }
+.chapter-review__header h3, .chapter-review__header p, .author-assist-stack > h4 { margin: 0; }
+.chapter-review__header p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chapter-review__versions { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-secondary); }
 @media (max-width: 680px) { .author-assist-stack .author-diff-columns { grid-template-columns: 1fr; } }

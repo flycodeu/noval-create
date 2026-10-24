@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Empty, Form, Input, Modal, Pagination, Select, Space, Tag, Typography, message, Segmented } from 'antd'
+import { Button, Empty, Form, Input, Modal, Pagination, Select, Space, Tag, Typography, message, Segmented } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import {
   CREATIVE_RESEARCH_CATEGORIES,
@@ -206,23 +206,19 @@ function ResearchSession({ novelId, onDirtyChange }: Props) {
     </div>
 
     {entries.length === 0 ? <div className="creative-research__empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={keyword || category !== 'all' ? '没有匹配的资料卡' : '还没有作者自建资料'} /></div> :
-      <div className="creative-research__grid">{pageEntries.map(entry => <Card key={entry.sourceKey} className="creative-research__card" size="small">
-        <div className="creative-research__card-heading">
-          <div><Tag>{getCreativeResearchCategoryLabel(entry.category)}</Tag></div>
-          <Space size={4}>
-            <Button type="text" size="small" disabled={saving} icon={<EditOutlined />} aria-label={`编辑${entry.title}`} onClick={() => startEdit(entry)} />
-            <Button type="text" danger size="small" disabled={saving} icon={<DeleteOutlined />} aria-label={`删除${entry.title}`} onClick={() => void remove(entry)} />
-          </Space>
+      <div className="creative-research__list">{pageEntries.map(entry => <details key={entry.sourceKey} className="creative-research__entry">
+        <summary><span className="creative-research__category">{getCreativeResearchCategoryLabel(entry.category)}</span><span className="creative-research__entry-title"><strong>{entry.title}</strong><span>{entry.content}</span></span><span className="creative-research__entry-source">{entry.sourceTitle || '自建资料'}</span></summary>
+        <div className="creative-research__entry-detail">
+          <div className="creative-research__entry-actions"><Space wrap>
+            <Button size="small" disabled={saving} icon={<EditOutlined />} aria-label={`编辑${entry.title}`} onClick={() => startEdit(entry)}>编辑</Button>
+            <Button size="small" disabled={saving} onClick={() => { void callAuthorTool('novelforge.research.publish', { novelId, sourceKey: entry.sourceKey }).then(() => message.success(formatUserFacingMessage('author.research.published'))).catch(cause => message.error(String(cause))) }}>发布通用卡到个人库</Button>
+            <Button type="text" danger size="small" disabled={saving} icon={<DeleteOutlined />} aria-label={`删除${entry.title}`} onClick={() => void remove(entry)}>删除</Button>
+          </Space>{entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer">查看出处</a>}</div>
+          <div className="creative-research__reading"><section><h3>资料</h3><Paragraph className="creative-research__body">{entry.content}</Paragraph>{entry.provenance && <details className="author-disclosure"><summary>来源引文{entry.provenance.sourceLabel ? ` · ${entry.provenance.sourceLabel}` : ''}</summary><blockquote>{entry.provenance.quote}</blockquote></details>}</section>
+          {(entry.interpretation || entry.novelConnection) && <section>{entry.interpretation && <><h3>理解</h3><Paragraph>{entry.interpretation}</Paragraph></>}{entry.novelConnection && <><h3>用于本作</h3><Paragraph>{entry.novelConnection}</Paragraph></>}</section>}</div>
+          {entry.tags?.length ? <div className="creative-research__tags">{entry.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div> : null}
         </div>
-        <h3>{entry.title}</h3>
-        {(entry.sourceTitle || entry.sourceUrl) && <Text type="secondary" className="creative-research__source">参考：{entry.sourceTitle}{entry.sourceUrl ? <>{entry.sourceTitle ? ' · ' : ''}<a href={entry.sourceUrl} target="_blank" rel="noreferrer">出处</a></> : null}</Text>}
-        <Button size="small" disabled={saving} onClick={() => { void callAuthorTool('novelforge.research.publish', { novelId, sourceKey: entry.sourceKey }).then(() => message.success(formatUserFacingMessage('author.research.published'))).catch(cause => message.error(String(cause))) }}>发布通用卡到个人库</Button>
-        {entry.provenance && <details className="author-disclosure"><summary>提炼依据{entry.provenance.sourceLabel ? ` · ${entry.provenance.sourceLabel}` : ''}</summary><blockquote>{entry.provenance.quote}</blockquote></details>}
-        <Paragraph className="creative-research__body" ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>{entry.content}</Paragraph>
-        {entry.interpretation && <div className="creative-research__meaning"><Text strong>深层含义</Text><Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{entry.interpretation}</Paragraph></div>}
-        {entry.novelConnection && <div className="creative-research__adaptation"><Text strong>本作转化</Text><Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{entry.novelConnection}</Paragraph></div>}
-        {entry.tags?.length ? <div className="creative-research__tags">{entry.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div> : null}
-      </Card>)}</div>}
+      </details>)}</div>}
     {entries.length > 20 ? <Pagination className="creative-research__pagination" current={page} pageSize={20} total={entries.length} showSizeChanger={false} onChange={setPage} /> : null}
 
     <Modal title={editing ? `编辑资料卡 · ${editing.title}` : '新建创作资料卡'} open={open} onCancel={() => { if (!busy.current) { beginEditing(); setOpen(false) } }} onOk={() => void save()} confirmLoading={saving} okText="保存到创作参考" cancelText="取消" width={760} destroyOnClose>
@@ -237,8 +233,11 @@ function ResearchSession({ novelId, onDirtyChange }: Props) {
         </div>
         <Form.Item name="tags" label="标签（可选）"><Select mode="tags" maxCount={12} maxTagTextLength={30} tokenSeparators={[',', '，', '、']} placeholder="用标签标出适用主题或叙事用途" /></Form.Item>
         <Form.Item name="content" label="核心资料与机制" rules={[{ required: true, whitespace: true, message: '请写下要保存的内容' }, { max: 4000, message: '内容最多 4000 个字符' }]}><Input.TextArea autoSize={{ minRows: 5, maxRows: 12 }} maxLength={4000} showCount placeholder="自由写下概念、制度、场景结构、民间做法或人物处境……" /></Form.Item>
-        <Form.Item name="interpretation" label="深层含义" rules={[{ required: true, whitespace: true, message: '请说明这条资料触及的深层问题' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="表层事件之外，它让读者重新理解什么？" /></Form.Item>
-        <Form.Item name="novelConnection" label="本作转化方向" rules={[{ required: true, whitespace: true, message: '请写明它与本作背景或冲突的连接' }, { max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} maxLength={1200} showCount placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？" /></Form.Item>
+        <details className="author-disclosure" key={editing?.sourceKey || 'new'} open={editing?.interpretation || editing?.novelConnection ? true : undefined}>
+          <summary>理解与本作用途（可选）</summary>
+          <Form.Item name="interpretation" label="我的理解" rules={[{ max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} maxLength={1200} showCount placeholder="表层事件之外，它让读者重新理解什么？" /></Form.Item>
+          <Form.Item name="novelConnection" label="用于本作" rules={[{ max: 1200, message: '最多 1200 个字符' }]}><Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} maxLength={1200} showCount placeholder="它可以怎样映照本作的世界、人物困境或主线冲突？" /></Form.Item>
+        </details>
       </Form>
     </Modal>
     </>}

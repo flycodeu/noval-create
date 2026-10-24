@@ -205,7 +205,7 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
       byId.set(id, { recordType: 'entity', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
         id, kind: change.kind, name: change.name.trim(), summary: change.summary ?? previous?.summary ?? '',
         parentId: change.parentId !== undefined ? change.parentId : previous?.parentId || null,
-        attributes: { ...attributes, stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
+        attributes: { ...attributes, stateTiming: change.attributes?.stateTiming ?? (previous?.effectiveFromChapter === input.effectiveFromChapter ? previous.attributes.stateTiming : undefined) ?? 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
         effectiveFromChapter: input.effectiveFromChapter, source: input.source,
       } })
     }
@@ -247,7 +247,7 @@ function prepare(input: StoryAtlasApplyInput, authorCorrections: Record<string, 
     const previous = old?.record as StoryAtlasRelation | undefined
     byId.set(id, { recordType: 'relation', nativeTable: old?.nativeTable || null, nativeId: old?.nativeId || null, retired: false, record: {
       id, kind: change.kind, fromId, toId, label: change.label ?? previous?.label ?? '',
-      attributes: { ...mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), stateTiming: change.attributes?.stateTiming || 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
+      attributes: { ...mergeAtlasAttributes(previous?.attributes, normalizeAtlasAttributePatch(change.kind, change.attributes, previous?.attributes, change.attributeMode), change.attributeMode), stateTiming: change.attributes?.stateTiming ?? (previous?.effectiveFromChapter === input.effectiveFromChapter ? previous.attributes.stateTiming : undefined) ?? 'chapter_end' }, status: change.status || previous?.status || 'confirmed',
       effectiveFromChapter: input.effectiveFromChapter, source: input.source,
     } })
   }

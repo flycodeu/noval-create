@@ -138,6 +138,8 @@ async function main() {
       producerType: 'system', producerId: 'fixture', producerClient: 'fixture', content: { chapterId, contentHash: artifacts.hashArtifactContent(current.content), contractSnapshot, contractHash: artifacts.hashArtifactContent(contractSnapshot), summary: '逐项核对', status: 'passed', review: { issues: [], contractChecks: [{ contractItemId: 'chapterGoal', status: 'met', reason: '已写到', evidence: [{ start: 3, end: 7, quote: current.content.slice(3, 7) }] }] } } })
     const view = (await call('chapters.review_view', { novelId, chapterId, reportId: report.id })).view
     assert.equal(view.stale, false)
+    assert.equal(view.reviewedContentHash, artifacts.hashArtifactContent(current.content))
+    assert.equal(view.currentContentHash, view.reviewedContentHash)
     assert.equal(view.requirements.find(item => item.id === 'chapterGoal').check.status, 'met')
     assert.equal(view.requirements.find(item => item.id === 'forbiddenActions.0').check, undefined, 'unassessed does not mean met')
     assets.upsertChapterContract(chapterId, { chapterGoal: '新合同目标' })

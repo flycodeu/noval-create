@@ -18,6 +18,7 @@ import { atlasIncludesPlanned, atlasMapScope } from './atlas-view-options'
 import WorldRules, { type WorldRulesEditState } from './WorldRules'
 import ResearchLibrary from './ResearchLibrary'
 import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
+import { AtlasWorkbench } from './AtlasWorkbench'
 import './world-workspace.css'
 
 const STAGES: Record<StoryAtlasEntity['kind'], CreativeStage> = { location: 'map', character: 'characters', faction: 'factions', item: 'items', event: 'events' }
@@ -87,10 +88,10 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
     {tab === 'rules' ? <WorldRules novelId={novelId} onDiscuss={discussRules} onEditStateChange={setRulesEdit} /> : tab === 'research' ? <ResearchLibrary novelId={novelId} /> : <>
     {error && <LoadFailure message={error} retry={() => void load()} />}
     {!snapshot ? loading ? <div className="author-loading"><Spin /></div> : <EmptyWork title="资料暂未读到" /> : <>
-      <div className={`atlas-workbench ${selected ? 'has-selection' : ''} ${geographic ? 'atlas-workbench--geography' : isGraph ? 'atlas-workbench--graph' : 'atlas-workbench--library'}`}>
+      <AtlasWorkbench resizable={isGraph && !geographic} className={`atlas-workbench ${selected ? 'has-selection' : ''} ${geographic ? 'atlas-workbench--geography' : isGraph ? 'atlas-workbench--graph' : 'atlas-workbench--library'}`}>
         {geographic ? <GeographicAtlas snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : isGraph ? <WorldAtlasGraph key={tab} mode={tab} snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : <AtlasEntityLibrary key={tab} kind={activeKind} snapshot={snapshot} selectedId={selectedId} viewScope={queryScope} onSelect={select} onGenerate={generateTab} />}
         {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={selected.id} entity={selected} snapshot={snapshot} chapters={chapters} editingDisabled={loading || Boolean(error)} onOpen={openEntity} onBack={() => updateParams(next => next.delete('entity'))} onShowRules={() => setReference('rules')} onShowResearch={() => setReference('research')} onEdit={() => { if (!loading && !error && snapshot != null) setEditing({ entity: selected, snapshot, atChapter }) }} onDiscuss={() => { if (!loading && !error) discuss(selected) }} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`} />}</section>}
-      </div>
+      </AtlasWorkbench>
       {snapshot.diagnostics.length > 0 && <details className="author-disclosure"><summary>资料提示 · {snapshot.diagnostics.length}</summary><ul>{snapshot.diagnostics.map((item, index) => {
         const edge = snapshot.relations.find(relation => item.entityIds.includes(relation.id))
         const entity = snapshot.entities.find(entity => item.entityIds.includes(entity.id))

@@ -232,8 +232,8 @@ const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle, { onAvailabi
         <div className="admin-detail-stack source-search-config">
           <div className="source-search-config__status-grid">
             <div className="source-search-config__status"><span>当前服务</span><strong>{sourceLoading ? '加载中' : activeSourceLabel}</strong></div>
-            <div className="source-search-config__status"><span>已配置平台</span><strong>{sourceLoading ? '加载中' : configuredProviders.map(getSourceProviderLabel).join('、') || '未配置'}</strong></div>
-            <div className="source-search-config__status"><span>选择方式</span><strong>{sourceLoading ? '加载中' : getSourceProviderLabel(sourceSettings?.provider)}</strong></div>
+            {configuredProviders.length > 1 && <div className="source-search-config__status"><span>已配置平台</span><strong>{sourceLoading ? '加载中' : configuredProviders.map(getSourceProviderLabel).join('、') || '未配置'}</strong></div>}
+            {sourceSettings?.provider !== sourceSettings?.activeProvider && <div className="source-search-config__status"><span>选择方式</span><strong>{sourceLoading ? '加载中' : getSourceProviderLabel(sourceSettings?.provider)}</strong></div>}
           </div>
           <div className="source-search-config__actions">
             <Button loading={!sourceEditorOpen && sourceTesting} disabled={sourceLoading || !sourceSettings?.activeProvider || sourceEditorOpen} onClick={() => void handleSourceTest(true)}>测试已保存配置</Button>

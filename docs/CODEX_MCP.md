@@ -118,6 +118,8 @@ Windows 正式数据通常在 `%APPDATA%\NovelForge`，与 EXE 安装位置无�
 
 明确的图谱更正先用 `novelforge.atlas.validate`，再用 `novelforge.atlas.apply`，携带版本、生效章位与来源。此路径直接保存明确变更，不调用模型审校，不是通用草稿导入。
 
+`attributes` 的增量更新保留嵌套对象中未提交的字段；`attributeMode:replace` 仍只替换明确提交的顶层字段。对同一生效章位做局部更正时，省略 `stateTiming` 保留该记录原时序；新增记录或推进到新章时默认 `chapter_end`。同章实际新发生的变化应显式提交 `chapter_end`，避免覆盖为章初事实。
+
 ## 错误与回读
 
 - `VALIDATION_FAILED`：字段或类型不符，重新查看 schema。

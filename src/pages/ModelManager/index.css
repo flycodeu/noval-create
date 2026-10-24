@@ -102,10 +102,7 @@
   order: 4;
 }
 
-.app-layout .model-manager-page .model-manager-overview-panel .admin-empty-panel {
-  min-height: 140px;
-  padding: 24px;
-}
+
 
 .app-layout .model-manager-page .model-manager-source-panel .novel-panel__header {
   flex-wrap: nowrap;
@@ -170,3 +167,48 @@
   font-size: 12px;
   line-height: 1.2;
 }
+.app-layout .model-manager-page .novel-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.app-layout .model-manager-page .novel-hero__copy { flex: 0 1 auto; }
+.app-layout .model-manager-page .novel-hero__actions { width: auto; margin: 0; flex: 0 1 auto; }
+.app-layout .model-manager-page .admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.app-layout .model-manager-page .model-manager-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.app-layout .model-manager-page .model-manager-config-list { gap: 0; }
+.app-layout .model-manager-page .model-manager-config-card { border-radius: 0; box-shadow: none; grid-template-columns: minmax(0, 1fr); padding: 14px 12px; }
+.app-layout .model-manager-page .model-manager-config-card__main { display: grid; grid-template-columns: minmax(140px, .7fr) minmax(160px, 1fr) minmax(220px, 1fr); align-items: center; gap: 16px; }
+.app-layout .model-manager-page .model-manager-config-card .admin-sidebar-item__meta { margin: 0; overflow-wrap: anywhere; }
+.app-layout .model-manager-page .source-search-config__status { display: flex; align-items: baseline; gap: 8px; border: 0; padding: 0; min-height: 0; }
+.app-layout .model-manager-page .source-search-config__status strong { margin: 0; font-size: 13px; }
+.app-layout .model-manager-page .source-search-config__status span { flex-shrink: 0; }
+.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid,
+.app-layout .model-manager-page [data-zhuque-settings] .source-search-config__status-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.app-layout .model-manager-page .source-search-config__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; padding: 0; border: 0; }
+.app-layout .model-manager-page [data-zhuque-settings] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.app-layout .model-manager-page .source-search-config { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.app-layout .model-manager-page .source-search-config__actions { border: 0; padding: 0; }
+@media (max-width: 800px) {
+  .app-layout .model-manager-page .model-manager-config-card__main { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .app-layout .model-manager-page .novel-hero__actions { width: 100%; }
+}
+
+
+.app-layout .novel-workspace.model-manager-page .novel-hero { flex-direction: row; text-align: left; }
+.app-layout .novel-workspace.model-manager-page .novel-hero__copy { width: auto; max-width: none; }
+.app-layout .novel-workspace.model-manager-page .novel-hero__title-row { justify-content: flex-start; }
+.app-layout .novel-workspace.model-manager-page .source-search-config__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+@media (min-width: 1100px) {
+  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel,
+  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; grid-template-areas: 'title body action'; align-items: center; gap: 16px; padding: 18px 20px; }
+  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__header,
+  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__header { display: contents; }
+  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__copy,
+  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__copy { grid-area: title; }
+  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__extra { grid-area: action; }
+  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__body,
+  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { grid-area: body; padding: 0; }
+  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { grid-column: 2 / -1; }
+}
+
+.app-layout .novel-workspace.model-manager-page .source-search-config__actions { flex-direction: row; width: auto; max-width: none; }
+.app-layout .novel-workspace.model-manager-page .source-search-config__actions > span { width: auto; flex: 0 1 auto; }
+.app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__body,
+.app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { min-height: 0; }

@@ -7,6 +7,7 @@ import { recordOf } from './content-document'
 import { useRegisterWorkspaceLeaveGuard } from '../workspace-shortcuts-context'
 import { AtlasFields } from './AtlasFields'
 import { atlasPortraitImage, buildAtlasPortraitPrompt, importAtlasPortrait } from './atlas-portrait'
+import { CAST_ROLES } from '../../../shared/cast-role'
 import { authorFieldKey } from './author-content'
 
 function PortraitEditor({ entity, attributes, onChange, onBusy }: { entity: StoryAtlasEntity; attributes: Record<string, unknown>; onChange: (patch: Record<string, unknown>) => void; onBusy: (busy: boolean) => void }) {
@@ -43,6 +44,11 @@ const fieldOptions: Record<string, Array<{ value: string; label: string }>> = {
 
 type EditValueProps = { value: unknown; originalValue?: unknown; onChange: (value: unknown) => void; name: string; field: string; snapshot: StoryAtlasSnapshot; positions?: Array<{ id: string; title: string }>; positionId?: string }
 export function AtlasEditValue({ value, originalValue, onChange, name, field, snapshot, positions = [], positionId }: EditValueProps): React.ReactElement {
+  if (field === 'authorPlanning') {
+    const planning = typeof value === 'string' ? (value ? { notes: value } : {}) : recordOf(value)
+    const { castRole, ...rest } = planning as Record<string, unknown>
+    return <div className="atlas-editor-fields"><label>人物作用<Select aria-label="人物作用" value={typeof castRole === 'string' ? castRole : undefined} allowClear placeholder="沿用角色定位" options={[...CAST_ROLES]} onChange={next => onChange({ ...rest, ...(next ? { castRole: next } : {}) })} /></label><AtlasEditValue field="planningDetails" name="作者规划内容" snapshot={snapshot} positions={positions} value={Object.keys(rest).length ? rest : { notes: '' }} originalValue={originalValue} onChange={next => onChange({ ...recordOf(next), ...(castRole ? { castRole } : {}) })} /></div>
+  }
   if (field === 'geography') {
     const geography = recordOf(value)
     return <div className="atlas-editor-fields"><label>面积（平方公里）<InputNumber aria-label="面积（平方公里）" min={0.000001} value={typeof geography.areaKm2 === 'number' ? geography.areaKm2 : null} onChange={next => onChange({ ...geography, areaKm2: next })} /></label><label>资料展开<Select aria-label="资料展开" allowClear value={geography.development || undefined} options={[{ value: 'detailed', label: '已展开' }, { value: 'outlined', label: '已有轮廓' }, { value: 'unexplored', label: '待拓展' }]} onChange={next => onChange({ ...geography, development: next || '' })} /></label></div>

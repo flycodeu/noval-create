@@ -401,12 +401,20 @@ async function main() {
     assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).status, 'written')
     assert.equal(db.prepare('SELECT status,time_label FROM timeline_events WHERE id=?').get(timingNativeEvent).time_label, '昨天')
     const startBond = timingApply([
-      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章初衣', stateTiming: 'chapter_start' } },
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章初衣', authorPlanning: { entryPlan: '先核账', nonProtagonistScene: '独自修船' }, stateTiming: 'chapter_start' } },
       { op: 'upsert_relation', clientId: 'bond', kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章初合作', attributes: { stateTiming: 'chapter_start' } },
     ], 2).idMap.bond
     timingApply([
-      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章末衣', speechPattern: '章末话' } },
-      { op: 'upsert_relation', id: startBond, kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章末决裂' },
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { authorPlanning: { castRole: 'companion' } } },
+      { op: 'upsert_relation', id: startBond, kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章初合作' },
+    ], 2)
+    const correctedOpening = queryStoryAtlas({ novelId: timingNovel, atChapter: 2, boundary: 'start' })
+    assert.deepEqual(correctedOpening.entities.find(e => e.id === timingIds.a).attributes.authorPlanning, { entryPlan: '先核账', nonProtagonistScene: '独自修船', castRole: 'companion' })
+    assert.equal(correctedOpening.entities.find(e => e.id === timingIds.a).attributes.stateTiming, 'chapter_start', 'same-chapter partial correction preserves the established boundary')
+    assert.equal(correctedOpening.relations.find(e => e.id === startBond).attributes.stateTiming, 'chapter_start')
+    timingApply([
+      { op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '章末衣', speechPattern: '章末话', stateTiming: 'chapter_end' } },
+      { op: 'upsert_relation', id: startBond, kind: 'relationship', fromId: timingIds.a, toId: timingIds.b, label: '章末决裂', attributes: { stateTiming: 'chapter_end' } },
       { op: 'upsert_entity', kind: 'character', name: '本章新登场' },
     ], 2)
     const opening = queryStoryAtlas({ novelId: timingNovel, atChapter: 2, boundary: 'start' })
@@ -417,6 +425,8 @@ async function main() {
     assert.equal(ending.entities.find(e => e.id === timingIds.a).attributes.appearance, '章末衣')
     assert.equal(ending.relations.find(e => e.id === startBond).label, '章末决裂')
     assert.ok(!opening.entities.some(e => e.name === '本章新登场'))
+    timingApply([{ op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '下一章衣' } }], 3)
+    assert.equal(queryStoryAtlas({ novelId: timingNovel, atChapter: 3, boundary: 'start' }).entities.find(e => e.id === timingIds.a).attributes.appearance, '章末衣', 'new chapter defaults to its end, never advances new plot facts into its opening')
     assert.throws(() => timingApply([{ op: 'upsert_entity', id: timingIds.a, kind: 'character', name: '甲', attributes: { appearance: '倒写章初', stateTiming: 'chapter_start' } }], 2), error => error.code === 'ATLAS_BOUNDARY_CONFLICT')
     assert.throws(() => queryStoryAtlas({ novelId: timingNovel, boundary: 'start' }))
 

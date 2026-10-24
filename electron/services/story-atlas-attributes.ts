@@ -58,6 +58,12 @@ export function mergeAtlasAttributes(current: Record<string, unknown> = {}, patc
     next.geography = { ...(current.geography as StoryAtlasGeography | undefined), ...patch.geography }
   }
   for (const [key, value] of Object.entries(patch)) {
+    if (key !== 'geography' && value && typeof value === 'object' && !Array.isArray(value)) {
+      const previous = current[key]
+      const objectPatch = Object.fromEntries(Object.entries(value).filter(([, item]) => meaningfulAtlasValue(item)))
+      next[key] = mergeAtlasAttributes(previous && typeof previous === 'object' && !Array.isArray(previous) ? previous as Record<string, unknown> : {}, objectPatch)
+      continue
+    }
     if (!Array.isArray(value)) continue
     const previous = Array.isArray(current[key]) ? current[key] as unknown[] : []
     if (value.every(item => typeof item === 'string')) next[key] = [...new Set([...previous, ...value])]

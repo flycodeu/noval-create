@@ -19,6 +19,15 @@ process.env.NOVELFORGE_USER_DATA_DIR = isolatedPath
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
 app.setPath('userData', isolatedPath)
 registerProjectTsRuntime(root)
+// Publish checks deliberately forbid remote inference. Exercise their keyword
+// path without downloading a local model; vector inference has its own test.
+const embeddings = require('../electron/services/embedding.service.ts')
+const generateChapterEmbeddings = embeddings.generateChapterEmbeddings
+embeddings.generateChapterEmbeddings = async (novelId, chapterId, modelId, options) => {
+  if (options?.allowRemote !== false) return generateChapterEmbeddings(novelId, chapterId, modelId, options)
+  embeddings.indexChapterForKeywordRecall(novelId, chapterId, modelId, options)
+  return { applied: true, documentCount: 1, vectorizedCount: 0, source: 'unavailable' }
+}
 
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex')
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`
@@ -236,6 +245,9 @@ app.whenReady().then(async () => {
       INSERT INTO model_configs (name, provider, model_id, api_key, base_url, temperature, max_tokens, max_context_tokens, max_concurrency, is_default)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('RF-11 fixed loopback', 'openai', 'rf11-loopback-v1', encryptApiKey('isolated-fixture-key'), `${baseUrl}/v1`, 0.2, 1500, 32000, 1, 1).lastInsertRowid)
+    require('../electron/services/embedding-settings.service.ts').setEmbeddingSettings({
+      mode: 'remote', modelConfigId: modelId, modelId: 'rf11-loopback-vector',
+    })
     const genreId = Number(sqlite.prepare('INSERT INTO genres (name, description, is_builtin) VALUES (?, ?, 0)')
       .run(pilotStory.genre, 'RF-11 隔离试点题材').lastInsertRowid)
     const settings = (policyVersion) => JSON.stringify({

@@ -1,3 +1,4 @@
+import { CAST_ROLES } from '../../../shared/cast-role'
 import { atlasRouteOpen } from '../../../shared/story-atlas'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 
@@ -44,6 +45,7 @@ export function relatedEntities(snapshot: StoryAtlasSnapshot, locationId: string
 
 export const ATLAS_ATTRIBUTE_LABELS: Record<string, string> = {
   geography: '地理范围', areaKm2: '面积（平方公里）', development: '资料展开', widthKm: '东西跨度（公里）', heightKm: '南北跨度（公里）', mapFrame: '地图范围', boundary: '区域边界', position: '地图位置',
+  castRole: '人物作用',
   roleType: '角色定位', role_type: '角色定位', age: '年龄', gender: '性别', species: '种属',
   occupation: '职业', socialIdentity: '社会身份', social_identity: '社会身份',
   personalityTraits: '性格特点', personalityTraitsJson: '性格特点', personality_traits: '性格特点',
@@ -101,6 +103,7 @@ export function locationCoordinates(entities: StoryAtlasEntity[]): Map<string, {
 }
 
 export function atlasAttributeValue(key: string, value: unknown) {
+  if (key === 'castRole') return CAST_ROLES.find(role => role.value === value)?.label || value
   if (['spring', 'summer', 'autumn', 'winter'].includes(key)) return ({ open: '可通行', closed: '不通行', unknown: '未确认' } as Record<string, string>)[String(value)] || value
   if (key === 'development') return ({ detailed: '已展开', outlined: '已有轮廓', unexplored: '待拓展' } as Record<string, string>)[String(value)] || value
   if (key === 'entityType') return ({ human: '人类', nonhuman: '异类', undead: '亡灵', monster: '妖异', spirit: '精怪', ghost: '鬼魂' } as Record<string, string>)[String(value)] || value

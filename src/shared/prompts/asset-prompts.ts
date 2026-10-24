@@ -1,3 +1,4 @@
+import { CAST_RELATION_GUIDANCE } from '../cast-role'
 import { getBuiltinGenreRules } from '../genre-system'
 import type {
   BatchCharacterPromptInput,
@@ -156,18 +157,18 @@ export function batchCharacterPrompt(params: BatchCharacterPromptInput): string 
     }),
     section('生成要求', [
       '先把人物网补完整：主线推进位、对立位、辅助位、搅局位、情感或利益牵引位。',
-      '每个人都要写清与主角、主线或某条支线的实际关系，不要只给一个空标签。',
+      CAST_RELATION_GUIDANCE,
       '人物之间要有层次差异：有人强势、有人实用、有人隐忍、有人会制造额外麻烦，不要一批人一个腔调。',
-      '至少让一部分角色携带秘密、旧债、错位立场或利益冲突，这样后面才有戏。',
+      '按剧情需要设计秘密、旧债或利益冲突；过场人物可只承担局部作用，不必人人隐藏身世或关联全书谜底。',
       '遵守现有世界规则、势力结构、地图和题材生态，不重名，不撞设定。',
       '贴近当前题材常见群像写法，但不要直接模仿具体作者。',
-      '每个角色的心理维度必须形成因果链：core_fear 解释 self_deception，trauma 影响 inner_conflict，surface_desire 和 deep_need 之间有具体矛盾。不允许每个字段独立编一套说辞。',
+      '重要人物的欲望、习惯与矛盾应相互联系；没有依据的创伤、秘密和恐惧留空，过场人物不强行补齐全套心理档案。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '人物描述要像编辑会采纳的角色档案，不要写成悬浮文案。',
       '少用万能热词，多写这个人具体能做什么、会卡住谁、会被什么反噬。',
     ])),
-    '只输出 JSON 数组：[{"full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"background":"80到120字，写关键经历和现状","personality_traits":["特点1","特点2"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"与主角的关系与拉扯","first_impression":"第一次出场的印象","appearance":"外貌1到2句，只写辨识度","appear_chapter":1}]',
+    '只输出 JSON 数组：[{"full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"background":"80到120字，写关键经历和现状","personality_traits":["特点1","特点2"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"有既定联系才填写，否则留空","first_impression":"第一次出场的印象","appearance":"外貌1到2句，只写辨识度","appear_chapter":1}]',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
   ])
 }
@@ -202,6 +203,7 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
     section('现有关系信息', params.relationSummary || '暂无'),
     section('返修要求', [
       '保留同一个人的身份、姓名和角色功能，不得改名换壳。',
+      CAST_RELATION_GUIDANCE,
       '优先修正旧档案里不贴合主线、不贴合关系网、或和世界规则脱节的部分。',
       '新档案要能解释这个人现在为什么会这么想、这么做、这么处理关系。',
       '如果一个设定很酷但和主线没有关系，宁可收住，也不要继续往上堆。',
@@ -211,7 +213,7 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
       '所有字段都要写成清楚、可落地的人物信息，不要写成总结式空话。',
       '减少概念包装，优先写行为依据、关系拉扯和代价。',
     ])),
-    '只输出 JSON：{"full_name":"' + params.lockedName + '","role_type":"' + params.lockedRoleType + '","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3到4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","dramatic_engine":"贯穿全书、能反复制造戏的核心装置，解释主角每场戏的独特选择","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}',
+    '只输出 JSON：{"full_name":"' + params.lockedName + '","role_type":"' + params.lockedRoleType + '","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3到4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","dramatic_engine":"贯穿全书、能反复制造戏的核心装置，解释此人的关键选择，过场人物可留空","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}',
   ])
 }
 
@@ -230,7 +232,8 @@ export function characterRelationsPrompt(params: CharacterRelationsPromptInput):
       extraQualityLines: ['重点检查不同关系是否真的有不同温度、边界、称呼和冲突方式。'],
     }),
     section('生成要求', [
-      '优先补足主角相关、当前剧情高频互动、以及会影响主线推进的关键关系。',
+      CAST_RELATION_GUIDANCE,
+      '按当前具体事件和人物交往补充关系，不要求覆盖所有人物，也不要求整个图谱连通。',
       '每条关系都要给出当前状态，而不是只写一个静态身份标签。',
       '关系必须体现亲密度、张力度、互动方式和潜台词规则，确保后续章节对白不再一个基调。',
       'description 写关系形成原因、当前状态和主要拉扯，不写空泛概括。',

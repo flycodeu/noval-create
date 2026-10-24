@@ -414,11 +414,10 @@ export default function ModelManager() {
             )}
           </WorkspacePanel>
 
-          <WorkspacePanel
+          {selected && <WorkspacePanel
             className="model-manager-overview-panel"
             title="当前状态"
           >
-            {selected ? (
               <div className="admin-detail-stack">
                 <div className="source-search-config__status-grid model-manager-status-grid">
                   <div className="source-search-config__status">
@@ -470,12 +469,7 @@ export default function ModelManager() {
                   ) : null}
                 </div>
               </div>
-            ) : (
-              <div className="admin-empty-panel">
-                <Empty description="选择模型后查看详情" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              </div>
-            )}
-          </WorkspacePanel>
+          </WorkspacePanel>}
         </div>
 
         <SourceSearchSettings ref={sourceSettingsRef} onAvailabilityChange={setSourceReady} />

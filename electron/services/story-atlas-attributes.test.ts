@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { atlasBoundariesOverlap, mergeAtlasAttributes, normalizeAtlasAttributePatch, validateAtlasGeography, validateAtlasPositions } from './story-atlas-attributes'
 
 describe('story atlas attributes', () => {
+  it('merges nested planning without losing omitted fields and keeps explicit replacement bounded', () => {
+    const current = { authorPlanning: { entryPlan: '后续入场', nonProtagonistScene: '独立场景', details: { count: 2, visible: true }, futureFlaws: ['惜旧'] }, appearance: '原衣' }
+    const patch = normalizeAtlasAttributePatch('character', { authorPlanning: { castRole: 'companion', entryPlan: ' ', details: { count: 0, visible: false }, futureFlaws: ['急躁'] } }, current)
+    expect(mergeAtlasAttributes(current, patch)).toEqual({ ...current, authorPlanning: { ...current.authorPlanning, castRole: 'companion', details: { count: 0, visible: false }, futureFlaws: ['惜旧', '急躁'] } })
+    expect(current.authorPlanning.details).toEqual({ count: 2, visible: true })
+    expect(mergeAtlasAttributes(current, { authorPlanning: { castRole: 'supporting' } }, 'replace')).toEqual({ appearance: '原衣', authorPlanning: { castRole: 'supporting' } })
+  })
   it('validates explicit story days separately from narrative chapter anchors', () => {
     expect(normalizeAtlasAttributePatch('event', { relativeDay: -2, sequenceInDay: 0, timeLabel: '开篇前两日' })).toMatchObject({ relativeDay: -2, sequenceInDay: 0 })
     expect(normalizeAtlasAttributePatch('event', { chronologyOrder: 2, timeLabel: '前夜后半夜' })).toEqual({ chronologyOrder: 2, timeLabel: '前夜后半夜' })

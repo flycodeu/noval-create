@@ -117,7 +117,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
     return { run: workflow.resumeCreativeWorkflow(Number(input.novelId), Number(input.runId), { applyReviewedCandidate: true }) }
   })
   add('context.preview', '预览上下文', '读取本次取用的事实、来源、省略项和预算，与创作共用编译器。', requestFields, ['novelId', 'stage', 'request'], 'read', async input => ({ context: await compileCreativeContext(input as unknown as CreativeWorkflowInput) }))
-  add('atlas.query', '故事地图与人物关系', '按章位查询区域层级、人物特征、路线、关系、阵营、物品和事件。locationParentId用于下钻，默认排除未来计划。boundary:start只读章初；明确采纳的章初修订在attributes.stateTiming指定chapter_start，省略表示章内或章末变更，不提前进入正文。稳定ID用于增量扩展。', { novelId: number, atChapter: { type: 'integer', minimum: 0 }, boundary: { enum: ['start', 'end'] }, locationParentId: { type: ['string', 'null'] }, focusEntityId: string, includePlanned: { type: 'boolean' } }, ['novelId'], 'read', input => ({ atlas: atlas.queryStoryAtlas(input as unknown as StoryAtlasQuery) }))
+  add('atlas.query', '故事地图与人物关系', '按章位查询区域层级、人物特征、路线、关系、阵营、物品和事件。locationParentId用于下钻，默认排除未来计划。boundary:start只读章初；明确采纳的章初修订在attributes.stateTiming指定chapter_start。同章局部更正省略时序时保留原值，新章变更默认章末。稳定ID用于增量扩展。', { novelId: number, atChapter: { type: 'integer', minimum: 0 }, boundary: { enum: ['start', 'end'] }, locationParentId: { type: ['string', 'null'] }, focusEntityId: string, includePlanned: { type: 'boolean' } }, ['novelId'], 'read', input => ({ atlas: atlas.queryStoryAtlas(input as unknown as StoryAtlasQuery) }))
   const changeSchema: AgentToolJsonSchema = { anyOf: [
     { type: 'object', properties: { op: { const: 'upsert_entity' }, id: string, clientId: string, kind: { enum: ['character', 'location', 'faction', 'item', 'event'] }, name: string, summary: { type: 'string' }, parentId: { type: ['string', 'null'] }, attributes: { type: 'object', additionalProperties: true }, attributeMode: { enum: ['merge', 'replace'] }, status: { enum: ['confirmed', 'planned'] } }, required: ['op', 'kind', 'name'], additionalProperties: false },
     { type: 'object', properties: { op: { const: 'upsert_relation' }, id: string, clientId: string, kind: { enum: ['relationship', 'route', 'presence', 'ownership', 'membership', 'participation'] }, fromId: string, toId: string, label: { type: 'string' }, attributes: { type: 'object', additionalProperties: true }, attributeMode: { enum: ['merge', 'replace'] }, status: { enum: ['confirmed', 'planned'] } }, required: ['op', 'kind', 'fromId', 'toId'], additionalProperties: false },
@@ -158,10 +158,10 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
       sourceUrl: { type: 'string', maxLength: 500 },
       tags: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 30 } },
       content: { type: 'string', minLength: 1, maxLength: 4000 },
-      interpretation: { type: 'string', minLength: 1, maxLength: 1200 },
-      novelConnection: { type: 'string', minLength: 1, maxLength: 1200 },
+      interpretation: { type: 'string', maxLength: 1200 },
+      novelConnection: { type: 'string', maxLength: 1200 },
     },
-    required: ['category', 'title', 'content', 'interpretation', 'novelConnection'],
+    required: ['category', 'title', 'content'],
     additionalProperties: false,
   } satisfies AgentToolJsonSchema
   add('research.list', '列出作者创作资料', '紧凑列出本项目的作者自建参考卡，可按关键词和分类筛选。卡片只作创作启发，不是Canon或史实；完整内容请再用research.get读取。', {
@@ -180,7 +180,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
   add('research.get', '读取完整创作资料', '按sourceKey读取作者自建资料卡的核心机制、深层含义和本作转化方向。', {
     novelId: number, sourceKey: { type: 'string', minLength: 1, maxLength: 160, pattern: '^author:[A-Za-z0-9._:-]+$' },
   }, ['novelId', 'sourceKey'], 'read', input => ({ entry: getAuthorCreativeResearch(Number(input.novelId), String(input.sourceKey)) }))
-  add('research.upsert', '创作或批量导入资料卡', '按1到100条批量新建或更新自由创作资料；每条写清机制及其代价、深层含义、结合本作背景的原创转化。支持参考出处和标签。只存为reference_only，不改Canon。省略sourceKey时按标题、分类和出处生成稳定编号；重复导入会更新原卡。单项目最多200条。', {
+  add('research.upsert', '创作或批量导入资料卡', '按1到100条批量新建或更新自由创作资料；标题、分类和核心资料必填，理解与本作用途可选。支持参考出处和标签。只存为reference_only，不改Canon。省略sourceKey时按标题、分类和出处生成稳定编号；重复导入会更新原卡。单项目最多200条。', {
     novelId: number, entries: { type: 'array', minItems: 1, maxItems: 100, items: researchEntry },
     expectedContextVersion: { type: 'integer', minimum: 1, description: '编辑前读取的作品版本；版本已变化时拒绝覆盖，请重新读取后确认修改。' },
   }, ['novelId', 'entries'], 'draft_write', input => {

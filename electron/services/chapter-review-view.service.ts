@@ -23,10 +23,12 @@ export function getChapterReviewView(novelId: number, chapterId: number, reportI
   const review = report.review && typeof report.review === 'object' ? report.review as Record<string, unknown> : {}
   const snapshot = chapterReviewSnapshot(chapterId)
   const frozen = report.contractSnapshot as ReturnType<typeof chapterReviewSnapshot> | undefined
-  const stale = report.contentHash !== hashArtifactContent(chapter.content || '')
+  const currentContentHash = hashArtifactContent(chapter.content || '')
+  const stale = report.contentHash !== currentContentHash
     || Boolean(frozen && report.contractHash !== hashArtifactContent(snapshot)) || artifact.contextVersion !== getNovel(novelId)?.contextVersion
   const checks = normalizeContractChecks(review.contractChecks, chapter.content || '')
   return { reportId: artifact.id, summary: String(report.summary || review.summary || ''), status: String(report.status || '待核对'), stale,
+    reviewedContentHash: typeof report.contentHash === 'string' ? report.contentHash : undefined, currentContentHash,
     contractVersionUnknown: !frozen, requirements: (frozen?.requirements || snapshot.requirements).map(requirement => ({ ...requirement, check: checks.find(item => item.contractItemId === requirement.id) })),
     issues: reviewIssues(review.issues, chapter.content || ''), deterministicBlockers: Array.isArray(report.deterministicBlockers) ? report.deterministicBlockers.map(String) : [] }
 }

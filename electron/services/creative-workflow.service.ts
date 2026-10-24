@@ -1,3 +1,4 @@
+import { CAST_DESIGN_GUIDANCE } from '../../src/shared/cast-role'
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { and, desc, eq } from 'drizzle-orm'
 import type { CreativeRun, CreativeStage, CreativeWorkflowInput } from '../../src/shared/creative-workflow'
@@ -546,6 +547,7 @@ async function execute(runId: number, novelId: number): Promise<void> {
         .map(num => buildReaderFirstOpeningGuidance(num, 'scenePlan')).filter(Boolean)
       : []
     const requirements = [generationRequest.request,
+      ...(['characters', 'relationships'].includes(input.request.stage) ? [CAST_DESIGN_GUIDANCE] : []),
       ...(input.request.stage === 'outline' ? [buildNarrativeDetailGuidance('scenePlan')] : []),
       ...(input.request.stage === 'chapter' ? [buildNarrativeDetailGuidance(localRevisionBase ? 'rewrite' : 'draft')] : []),
       ...openingPlans,

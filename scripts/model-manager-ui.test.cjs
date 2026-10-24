@@ -220,6 +220,8 @@ async function main() {
   assert.equal(await run('!!window.ui.button("配置搜索")'), true, 'search configuration is visible without expanding a disclosure')
   assert.equal(await run('window.ui.visible(document.querySelector(".model-manager-source-panel"))'), true)
   assert((await run('document.querySelector(".model-manager-source-panel").textContent')).includes('未配置'))
+  assert.equal(await run('!!document.querySelector(".model-manager-overview-panel")'), false, 'no empty half-width model inspector')
+  assert(await run('(()=>{const title=document.querySelector(".novel-hero__title").getBoundingClientRect();const action=window.ui.button("新建配置").getBoundingClientRect();return Math.abs(title.top-action.top)<20})()'), 'title and primary action share a row at desktop width')
   await layouts('overview')
 
   phase = 'new model discovery, explicit selection and save'

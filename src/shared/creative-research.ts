@@ -222,8 +222,8 @@ export function normalizeCreativeResearchDraft(value: unknown): CreativeResearch
   const content = boundedText(input.content, '核心内容', 4000, true)
   const sourceTitle = boundedText(input.sourceTitle, '参考出处', 160)
   const sourceUrl = boundedText(input.sourceUrl, '出处链接', 500)
-  const interpretation = boundedText(input.interpretation, '深层含义', 1200, true)
-  const novelConnection = boundedText(input.novelConnection, '本作转化方向', 1200, true)
+  const interpretation = boundedText(input.interpretation, '深层含义', 1200)
+  const novelConnection = boundedText(input.novelConnection, '本作转化方向', 1200)
   const sourceKey = boundedText(input.sourceKey, '资料编号', 160)
   if (sourceKey && !/^author:[A-Za-z0-9._:-]+$/u.test(sourceKey)) throw new CreativeResearchValidationError(formatUserFacingMessage('services.creativeResearch.sourceKeyInvalid'))
   if (sourceUrl) {
@@ -278,7 +278,7 @@ export function getCreativeResearchCategoryLabel(category: string): string {
 }
 
 export function getCreativeResearchBody(draft: Pick<CreativeResearchDraft, 'content' | 'interpretation' | 'novelConnection'>): string {
-  return [`核心机制：${draft.content}`, `深层含义：${draft.interpretation}`, `本作转化：${draft.novelConnection}`].join('\n')
+  return [`核心机制：${draft.content}`, draft.interpretation ? `深层含义：${draft.interpretation}` : '', draft.novelConnection ? `本作转化：${draft.novelConnection}` : ''].filter(Boolean).join('\n')
 }
 
 function stableAuthorResearchKey(value: string): string {
@@ -315,6 +315,8 @@ export function upsertCreativeResearchEntries(sourceLedgerJson: string | null | 
     const previous = matches[0]
     if (previous && !isCreativeResearchEntry(previous.item)) throw new CreativeResearchValidationError(formatUserFacingMessage('services.creativeResearch.sourceKeyConflict', { sourceKey }), 'CREATIVE_RESEARCH_KEY_CONFLICT')
     if (previous && isCreativeResearchEntry(previous.item)) {
+      // Optional notes omitted by a partial import stay intact; an explicit empty string clears them.
+      for (const key of ['interpretation', 'novelConnection'] as const) if (recordOf(raw)?.[key] === undefined) draft[key] = previous.item[key]
       try {
         const unchanged = JSON.stringify(normalizeCreativeResearchDraft(previous.item)) === JSON.stringify(normalizeCreativeResearchDraft({ ...draft, sourceKey }))
           && previous.item.factTitle === draft.title && previous.item.sourceText === getCreativeResearchBody(draft)

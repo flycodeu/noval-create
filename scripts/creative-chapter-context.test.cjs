@@ -58,12 +58,12 @@ async function main() {
     ] })
     const openingPatch = (appearance, stateTiming) => applyStoryAtlasChanges({ novelId, expectedContextVersion: queryStoryAtlas({ novelId }).contextVersion, effectiveFromChapter: 2, source: { kind: 'test' }, idempotencyKey: 'opening-' + appearance, changes: [{ op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { appearance, ...(stateTiming ? { stateTiming } : {}) } }] })
     openingPatch('章初已换灰衣', 'chapter_start')
-    openingPatch('章末才换黑衣')
+    openingPatch('章末才换黑衣', 'chapter_end')
     const beforeCurrentChapter = queryStoryAtlas({ novelId })
     const region = beforeCurrentChapter.entities.find(entity => entity.name === '南岭')
     const existingBond = beforeCurrentChapter.relations.find(edge => edge.kind === 'relationship' && edge.toId === atlasNpc.id)
     const introductions = applyStoryAtlasChanges({ novelId, expectedContextVersion: beforeCurrentChapter.contextVersion, effectiveFromChapter: 2, idempotencyKey: 'chapter-two-introductions', source: { kind: 'test' }, changes: [
-      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '第二章末才决定辞去渡工' } },
+      { op: 'upsert_entity', id: atlasPerson.id, kind: 'character', name: '陈舟', attributes: { goals: '第二章末才决定辞去渡工', stateTiming: 'chapter_end' } },
       { op: 'upsert_entity', id: region.id, kind: 'location', name: '南岭', attributes: { terrain: '第二章末才发生山崩' } },
       { op: 'upsert_relation', id: existingBond.id, kind: 'relationship', fromId: atlasPerson.id, toId: atlasNpc.id, label: '第二章末才结成同盟' },
       { op: 'upsert_entity', clientId: 'newcomer', kind: 'character', name: '赵砚', summary: '首次登场的私有秘密不能注入', attributes: { publicSummary: '拎着补船木料的伙计', speechPattern: '先报来路，再问渡船', motivation: '初登场幕后动机不能注入', goals: '初登场秘密目标不能注入', hiddenSecret: '初登场隐情不能注入' } },

@@ -4,6 +4,7 @@ export interface ReviewRequirement { id: string; title: string; requirement: str
 export interface ContractCheck { contractItemId: string; status: 'met' | 'unmet' | 'uncertain'; reason: string; evidence: QualityIssueEvidence[] }
 export interface ChapterReviewView {
   reportId: string; summary: string; status: string; stale: boolean; contractVersionUnknown: boolean
+  reviewedContentHash?: string; currentContentHash?: string
   requirements: Array<ReviewRequirement & { check?: ContractCheck }>
   issues: QualityIssueV1[]; deterministicBlockers: string[]
 }
