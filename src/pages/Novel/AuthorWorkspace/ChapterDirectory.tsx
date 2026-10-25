@@ -4,6 +4,40 @@ import { PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import type { Chapter, StoryStructureTree } from '../../../types'
 import { chapterDirectoryItems, CHAPTER_DIRECTORY_PAGE_SIZE } from './chapter-directory'
 
+interface DirectoryGroup {
+  title: string
+  summary?: string
+  parts: Map<string, { title: string; summary?: string; chapters: Chapter[] }>
+}
+
+function buildDirectoryGroups(
+  visible: Array<{ chapter: Chapter; location?: { volumeId?: number; volume?: string; volumeSummary?: string; partId?: number; part?: string; partSummary?: string } }>,
+  selectedVolume: StoryStructureTree['volumes'][number] | undefined,
+  query: string,
+): Map<string, DirectoryGroup> {
+  const groups = new Map<string, DirectoryGroup>()
+  if (selectedVolume && !query.trim()) {
+    groups.set(String(selectedVolume.id), {
+      title: `卷 ${selectedVolume.volumeNumber} · ${selectedVolume.title || '未命名'}`,
+      summary: selectedVolume.summary,
+      parts: new Map(selectedVolume.parts.map(part => [String(part.id), { title: part.title || `单元 ${part.partNumber}`, summary: part.summary, chapters: [] }])),
+    })
+  }
+  for (const { chapter, location } of visible) {
+    const volumeKey = String(location?.volumeId || 'unassigned')
+    if (!groups.has(volumeKey)) {
+      groups.set(volumeKey, { title: location?.volume || '尚未归入单元', summary: location?.volumeSummary, parts: new Map() })
+    }
+    const group = groups.get(volumeKey)!
+    const partKey = String(location?.partId || 'unassigned')
+    if (!group.parts.has(partKey)) {
+      group.parts.set(partKey, { title: location?.part || '', summary: location?.partSummary, chapters: [] })
+    }
+    group.parts.get(partKey)!.chapters.push(chapter)
+  }
+  return groups
+}
+
 export default function ChapterDirectory({ chapters, tree, selectedId, onChoose, onCreate, onPlan }: {
   chapters: Chapter[]; tree: StoryStructureTree | null; selectedId: number | null
   onChoose: (id: number) => void; onCreate: () => void; onPlan: () => void
@@ -19,17 +53,7 @@ export default function ChapterDirectory({ chapters, tree, selectedId, onChoose,
   // Opening a chapter from a link also reveals its position in a long directory.
   const currentPage = Math.min(pageCount, pagination.scope === pageScope ? pagination.page : Math.floor(Math.max(0, selectedIndex) / CHAPTER_DIRECTORY_PAGE_SIZE) + 1)
   const visible = items.slice((currentPage - 1) * CHAPTER_DIRECTORY_PAGE_SIZE, currentPage * CHAPTER_DIRECTORY_PAGE_SIZE)
-  const groups = new Map<string, { title: string; summary?: string; parts: Map<string, { title: string; summary?: string; chapters: Chapter[] }> }>()
-  // Future volumes and units can have useful arrangements before a first chapter exists.
-  if (selectedVolume && !query.trim()) groups.set(String(selectedVolume.id), { title: `卷 ${selectedVolume.volumeNumber} · ${selectedVolume.title || '未命名'}`, summary: selectedVolume.summary, parts: new Map(selectedVolume.parts.map(part => [String(part.id), { title: part.title || `单元 ${part.partNumber}`, summary: part.summary, chapters: [] }])) })
-  for (const { chapter, location } of visible) {
-    const volumeKey = String(location?.volumeId || 'unassigned')
-    if (!groups.has(volumeKey)) groups.set(volumeKey, { title: location?.volume || '尚未归入单元', summary: location?.volumeSummary, parts: new Map() })
-    const group = groups.get(volumeKey)!
-    const partKey = String(location?.partId || 'unassigned')
-    if (!group.parts.has(partKey)) group.parts.set(partKey, { title: location?.part || '', summary: location?.partSummary, chapters: [] })
-    group.parts.get(partKey)!.chapters.push(chapter)
-  }
+  const groups = buildDirectoryGroups(visible, selectedVolume, query)
   return <nav className="manuscript-directory" aria-label="卷章目录">
     <div className="author-section-heading"><h2>卷章目录</h2><Button type="text" icon={<PlusOutlined />} aria-label="添加章节" onClick={onCreate} /></div>
     {Boolean(tree?.volumes.length) && <Select<number | 'all'> aria-label="卷章目录卷范围" value={selectedVolume ? selectedVolume.id : 'all'} onChange={setVolumeId} options={[{ value: 'all', label: '全部卷与章节' }, ...(tree?.volumes || []).map(volume => ({ value: volume.id, label: `卷 ${volume.volumeNumber} · ${volume.title || '未命名'}` }))]} />}

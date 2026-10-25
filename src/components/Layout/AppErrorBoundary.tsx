@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Space } from 'antd'
+import PageErrorNotice from './PageErrorNotice'
 
 interface Props {
   resetKey?: string
@@ -43,18 +43,7 @@ export default class AppErrorBoundary extends React.Component<Props, State> {
         }}
       >
         <div style={{ width: 'min(640px, 100%)' }}>
-          <Alert
-            type="error"
-            showIcon
-            message="页面渲染失败"
-            description={this.state.error.message || undefined}
-          />
-          <Space wrap style={{ marginTop: 16 }}>
-            <Button type="primary" onClick={() => this.setState({ error: null })}>
-              重试当前页面
-            </Button>
-            <Button onClick={() => window.location.reload()}>重新加载应用</Button>
-          </Space>
+          <PageErrorNotice error={this.state.error} onRetry={() => this.setState({ error: null })} />
         </div>
       </div>
     )

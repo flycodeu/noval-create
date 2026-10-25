@@ -16,13 +16,14 @@ const TOPICS = [...STORY_DESIGN_TOPICS.world, { key: 'world:writingConstraints',
 export type WorldRulesEditState = { dirty: boolean; saving: boolean }
 
 /** One editor for the stored world document, used by its page and the object reference drawer. */
-export default function WorldRules({ novelId, onDiscuss, onEditStateChange }: {
-  novelId: number; onDiscuss: (title: string) => void; onEditStateChange?: (state: WorldRulesEditState) => void
+export default function WorldRules({ novelId, embedded = false, onDiscuss, onEditStateChange }: {
+  novelId: number; embedded?: boolean; onDiscuss: (title: string) => void; onEditStateChange?: (state: WorldRulesEditState) => void
 }) {
   const novel = useNovelStore(state => state.currentNovel)
   const setNovel = useNovelStore(state => state.setCurrentNovel)
   const [params, setParams] = useSearchParams()
-  const topic = TOPICS.find(item => item.key === params.get('topic')) || TOPICS[0]
+  const [localTopic, setLocalTopic] = useState(TOPICS[0].key)
+  const topic = TOPICS.find(item => item.key === (embedded ? localTopic : params.get('topic'))) || TOPICS[0]
   const [saveError, setError] = useScopedState(novelId, '')
   const [editing, setEditing] = useState<{ key: string; title: string; value: unknown; contextVersion: number | undefined } | null>(null)
   const [draft, setDraft] = useState<unknown>(null)
@@ -71,7 +72,7 @@ export default function WorldRules({ novelId, onDiscuss, onEditStateChange }: {
     finally { saveLock.current = false; setSaving(false) }
   }
   return <section className="world-rules-workspace" aria-label="世界规则">
-    <nav className="world-rules-topics" aria-label="世界规则主题">{TOPICS.map(item => <button type="button" key={item.key} aria-pressed={topic.key === item.key} disabled={saving} onClick={() => { if (topic.key !== item.key) leave(() => { const next = new URLSearchParams(params); next.set('topic', item.key); setParams(next) }) }}>{item.label}</button>)}</nav>
+    <nav className="world-rules-topics" aria-label="世界规则主题">{TOPICS.map(item => <button type="button" key={item.key} aria-pressed={topic.key === item.key} disabled={saving} onClick={() => { if (topic.key !== item.key) leave(() => { if (embedded) { setLocalTopic(item.key); return } const next = new URLSearchParams(params); next.set('topic', item.key); setParams(next) }) }}>{item.label}</button>)}</nav>
     <div className="world-rules-content">{error && <LoadFailure message={error} retry={() => void load()} />}{loading ? <Spin /> : <section className="author-paper"><div className="author-section-heading"><h2>{topic.label}</h2><div className="author-heading-actions"><Button disabled={saving} onClick={() => { const initial = value ?? {}; setEditing({ key: topic.key, title: topic.label, value: structuredClone(initial), contextVersion: novel?.contextVersion }); changeDraft(structuredClone(initial)) }}>编辑</Button><Button disabled={saving} onClick={() => onDiscuss(topic.label)}>AI 完善</Button></div></div><ContentDocument value={value} names={names} /></section>}</div>
     <Modal width={850} title={`编辑 · ${editing?.title || ''}`} open={Boolean(editing)} closable={!saving} keyboard={!saving} cancelButtonProps={{ disabled: saving }} onCancel={() => leave(() => setEditing(null))} okText="保存这一部分" cancelText="取消" confirmLoading={saving} onOk={() => void save()}><DocumentEditor value={draft} names={names} onChange={changeDraft} /></Modal>
   </section>

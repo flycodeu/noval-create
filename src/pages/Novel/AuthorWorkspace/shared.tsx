@@ -39,16 +39,15 @@ export function RunProgress({ run, active, pending = false, onCancel, onResume, 
       <i>{i + 1}</i>{step.label}</span>)}</div>}
     <div className="author-run__message">{active && <Spin size="small" />}<span>{presentation.summary}</span></div>
     {run.artifactId && onOpenResult && <Button type="link" onClick={onOpenResult}>查看结果与评审 <ArrowRightOutlined /></Button>}
-    <details className="author-disclosure"><summary>任务详情</summary>
-      {run.count != null && <p>请求数量：{run.count}</p>}
-      <p>生成模型：{run.modelConfigId ?? '未知'} · 审校模型：{run.reviewModelConfigId ?? run.modelConfigId ?? '未知'}</p>
+    <details className="author-disclosure"><summary>任务详情与记录</summary>
+      {run.count != null && <p>目标数量：{run.count}</p>}
       <h3>原始请求</h3><p className="author-run__request">{run.request}</p>
       {run.message && <><h3>运行反馈</h3><p className="author-run__request">{run.message}</p></>}
+      {run.context && <><h3>使用依据</h3><p>预计输入 {run.context.estimatedTokens.toLocaleString()} tokens · 输出预留 {run.context.outputReserve.toLocaleString()} tokens</p>
+        <ul>{run.context.sources.map((source) => <li key={source}>{source}</li>)}</ul>
+        {run.context.omittedSources.length > 0 && <p>本轮未加入：{run.context.omittedSources.join('、')}</p>}
+      </>}
+      {run.events.length > 0 && <><h3>运行记录</h3><ol>{run.events.map((event, index) => <li key={`${event.at}-${index}`}><time>{new Date(event.at).toLocaleTimeString()}</time> {event.message}</li>)}</ol></>}
     </details>
-    {run.context && <details className="author-disclosure"><summary>本次使用的上下文</summary><p>预计输入 {run.context.estimatedTokens.toLocaleString()} tokens · 为输出预留 {run.context.outputReserve.toLocaleString()} tokens</p>
-      <ul>{run.context.sources.map((source) => <li key={source}>{source}</li>)}</ul>
-      {run.context.omittedSources.length > 0 && <p>本轮未加入：{run.context.omittedSources.join('、')}</p>}
-    </details>}
-    {run.events.length > 0 && <details className="author-disclosure"><summary>运行记录</summary><ol>{run.events.map((event, index) => <li key={`${event.at}-${index}`}><time>{new Date(event.at).toLocaleTimeString()}</time> {event.message}</li>)}</ol></details>}
   </section>
 }

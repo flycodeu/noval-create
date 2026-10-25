@@ -22,10 +22,10 @@ function PortraitEditor({ entity, attributes, onChange, onBusy }: { entity: Stor
     catch (error) { message.error(error instanceof Error ? error.message : getUserFacingMessage('workspace.portrait.importFailed')) }
     finally { setImporting(false); onBusy(false) }
   }
-  return <details className="author-disclosure" open><summary>肖像与视觉描述（可选）</summary><div className="atlas-editor-fields">
+  return <details className="author-disclosure" open={Boolean(portrait)}><summary>肖像与视觉描述</summary><div className="atlas-editor-fields">
     {portrait && <img className="atlas-portrait-image" src={portrait} alt={`${entity.name}的角色参考像预览`} />}
     <label>导入人物肖像<input type="file" aria-label="导入人物肖像" accept="image/png,image/jpeg,image/webp" disabled={importing} onChange={event => void importFile(event)} /></label>
-    <p className="atlas-empty-note">PNG、JPEG 或 WebP，最大 5MB。保存为随资料备份的压缩参考像；原图请另行保留。</p>
+    <p className="atlas-empty-note">支持 PNG、JPEG 或 WebP（最大 5MB）。</p>
     {portrait && <Button danger size="small" disabled={importing} onClick={() => onChange({ portraitImage: '' })}>移除肖像</Button>}
     <label>视觉描述<Input.TextArea aria-label="视觉描述" value={String(attributes.portraitPrompt ?? '')} onChange={event => onChange({ portraitPrompt: event.target.value })} autoSize={{ minRows: 3, maxRows: 10 }} placeholder="外貌、衣着、配色与构图；只填写已确认的视觉设定。" /></label>
     <Button size="small" onClick={() => onChange({ portraitPrompt: buildAtlasPortraitPrompt({ ...entity, attributes }) })}>从当前人设整理视觉描述</Button>
@@ -42,29 +42,113 @@ const fieldOptions: Record<string, Array<{ value: string; label: string }>> = {
   status: ['planned', 'established', 'confirmed', 'written', 'active', 'available', 'consumed', 'destroyed', 'lost'].map(value => ({ value, label: atlasScalarText('status', value, [], []) })),
 }
 
+function AtlasPlanningField({
+  value,
+  originalValue,
+  onChange,
+  snapshot,
+  positions,
+}: {
+  value: unknown
+  originalValue?: unknown
+  onChange: (value: unknown) => void
+  snapshot: StoryAtlasSnapshot
+  positions: Array<{ id: string; title: string }>
+}): React.ReactElement {
+  const planning = typeof value === 'string' ? (value ? { notes: value } : {}) : recordOf(value)
+  const { castRole, ...rest } = planning as Record<string, unknown>
+  return (
+    <div className="atlas-editor-fields">
+      <label>
+        人物作用
+        <Select
+          aria-label="人物作用"
+          value={typeof castRole === 'string' ? castRole : undefined}
+          allowClear
+          placeholder="沿用角色定位"
+          options={[...CAST_ROLES]}
+          onChange={next => onChange({ ...rest, ...(next ? { castRole: next } : {}) })}
+        />
+      </label>
+      <AtlasEditValue
+        field="planningDetails"
+        name="作者规划内容"
+        snapshot={snapshot}
+        positions={positions}
+        value={Object.keys(rest).length ? rest : { notes: '' }}
+        originalValue={originalValue}
+        onChange={next => onChange({ ...recordOf(next), ...(castRole ? { castRole } : {}) })}
+      />
+    </div>
+  )
+}
+
+function AtlasGeographyField({
+  value,
+  onChange,
+}: {
+  value: unknown
+  onChange: (value: unknown) => void
+}): React.ReactElement {
+  const geography = recordOf(value)
+  return (
+    <div className="atlas-editor-fields">
+      <label>
+        面积（平方公里）
+        <InputNumber
+          aria-label="面积（平方公里）"
+          min={0.000001}
+          value={typeof geography.areaKm2 === 'number' ? geography.areaKm2 : null}
+          onChange={next => onChange({ ...geography, areaKm2: next })}
+        />
+      </label>
+      <label>
+        资料展开
+        <Select
+          aria-label="资料展开"
+          allowClear
+          value={geography.development || undefined}
+          options={[{ value: 'detailed', label: '已展开' }, { value: 'outlined', label: '已有轮廓' }, { value: 'unexplored', label: '待拓展' }]}
+          onChange={next => onChange({ ...geography, development: next || '' })}
+        />
+      </label>
+    </div>
+  )
+}
+
+function resolveFieldOptions(field: string, positionId: string | undefined, value: unknown): { options: Array<{ value: string; label: string }>; allowClear: boolean } {
+  const isPositionStatus = field === 'status' && positionId !== undefined
+  const baseOptions = isPositionStatus ? fieldOptions.status.filter(option => ['planned', 'established'].includes(option.value)) : fieldOptions[field]
+  const saved = typeof value === 'string' && value && !baseOptions.some(option => option.value === value) ? [{ value, label: atlasScalarText(field, value, [], []) }] : []
+  return { options: [...baseOptions, ...saved], allowClear: !isPositionStatus }
+}
+
+function isStringListField(field: string, value: unknown[], originalValue: unknown): boolean {
+  if (field === 'positions') return false
+  if (Array.isArray(originalValue) && originalValue.some(item => item && typeof item === 'object')) return false
+  return value.every(item => typeof item === 'string')
+}
+
 type EditValueProps = { value: unknown; originalValue?: unknown; onChange: (value: unknown) => void; name: string; field: string; snapshot: StoryAtlasSnapshot; positions?: Array<{ id: string; title: string }>; positionId?: string }
 export function AtlasEditValue({ value, originalValue, onChange, name, field, snapshot, positions = [], positionId }: EditValueProps): React.ReactElement {
   if (field === 'authorPlanning') {
-    const planning = typeof value === 'string' ? (value ? { notes: value } : {}) : recordOf(value)
-    const { castRole, ...rest } = planning as Record<string, unknown>
-    return <div className="atlas-editor-fields"><label>人物作用<Select aria-label="人物作用" value={typeof castRole === 'string' ? castRole : undefined} allowClear placeholder="沿用角色定位" options={[...CAST_ROLES]} onChange={next => onChange({ ...rest, ...(next ? { castRole: next } : {}) })} /></label><AtlasEditValue field="planningDetails" name="作者规划内容" snapshot={snapshot} positions={positions} value={Object.keys(rest).length ? rest : { notes: '' }} originalValue={originalValue} onChange={next => onChange({ ...recordOf(next), ...(castRole ? { castRole } : {}) })} /></div>
+    return <AtlasPlanningField value={value} originalValue={originalValue} onChange={onChange} snapshot={snapshot} positions={positions} />
   }
   if (field === 'geography') {
-    const geography = recordOf(value)
-    return <div className="atlas-editor-fields"><label>面积（平方公里）<InputNumber aria-label="面积（平方公里）" min={0.000001} value={typeof geography.areaKm2 === 'number' ? geography.areaKm2 : null} onChange={next => onChange({ ...geography, areaKm2: next })} /></label><label>资料展开<Select aria-label="资料展开" allowClear value={geography.development || undefined} options={[{ value: 'detailed', label: '已展开' }, { value: 'outlined', label: '已有轮廓' }, { value: 'unexplored', label: '待拓展' }]} onChange={next => onChange({ ...geography, development: next || '' })} /></label></div>
+    return <AtlasGeographyField value={value} onChange={onChange} />
   }
   if (field === 'reportsToPositionId') return <Select aria-label={name} value={value == null ? undefined : String(value)} allowClear placeholder="无上级岗位" options={positions.filter(position => position.id !== positionId).map(position => ({ value: position.id, label: position.title }))} onChange={next => onChange(next ?? null)} />
   if (referenceField(field)) return <div><AtlasFields values={{ [field]: value }} entities={snapshot.entities} chapters={[]} /></div>
   if (numericFields.has(field)) return <InputNumber aria-label={name} value={typeof value === 'number' ? value : null} min={['x', 'y'].includes(field) ? undefined : 0} precision={['x', 'y', 'distanceKm', 'travelHours'].includes(field) ? undefined : 0} onChange={onChange} />
   if (fieldOptions[field]) {
-    const isPositionStatus = field === 'status' && positionId !== undefined
-    const options = isPositionStatus ? fieldOptions.status.filter(option => ['planned', 'established'].includes(option.value)) : fieldOptions[field]
-    const saved = typeof value === 'string' && value && !options.some(option => option.value === value) ? [{ value, label: atlasScalarText(field, value, [], []) }] : []
-    return <Select aria-label={name} value={value || undefined} allowClear={!isPositionStatus} options={[...options, ...saved]} onChange={next => onChange(next ?? '')} />
+    const { options, allowClear } = resolveFieldOptions(field, positionId, value)
+    return <Select aria-label={name} value={value || undefined} allowClear={allowClear} options={options} onChange={next => onChange(next ?? '')} />
   }
   if (['protagonistPresent', 'isMajorEvent'].includes(field)) return <Checkbox checked={value === 1 || value === true} onChange={event => onChange(event.target.checked ? 1 : 0)}>{name}</Checkbox>
   if (Array.isArray(value)) {
-    if (field !== 'positions' && !(Array.isArray(originalValue) && originalValue.some(item => item && typeof item === 'object')) && value.every(item => typeof item === 'string')) return <Input.TextArea aria-label={name} value={value.join('\n')} onChange={event => onChange(event.target.value.split('\n'))} autoSize={{ minRows: 2, maxRows: 8 }} placeholder="每行一项" />
+    if (isStringListField(field, value, originalValue)) {
+      return <Input.TextArea aria-label={name} value={value.join('\n')} onChange={event => onChange(event.target.value.split('\n'))} autoSize={{ minRows: 2, maxRows: 8 }} placeholder="每行一项" />
+    }
     return <div className="atlas-editor-list">{value.map((item, index) => <section key={index}><AtlasEditValue field={`${field}Item`} snapshot={snapshot} positions={positions} value={item} originalValue={Array.isArray(originalValue) ? originalValue.find(old => recordOf(old).id && recordOf(old).id === recordOf(item).id) ?? originalValue[index] : undefined} name={`${name} ${index + 1}`} onChange={next => onChange(value.map((old, i) => i === index ? next : old))} /><Button type="text" danger onClick={() => onChange(value.filter((_, i) => i !== index))}>移除{name} {index + 1}</Button></section>)}</div>
   }
   if (value && typeof value === 'object') return <div className="atlas-editor-fields">{Object.entries(value).filter(([key]) => !ATLAS_INTERNAL_FIELDS.has(authorFieldKey(key))).map(([key, item]) => <label key={key}>{atlasFieldLabel(key)}<AtlasEditValue field={key} snapshot={snapshot} positions={positions} positionId={field === 'positionsItem' ? String(recordOf(value).id) : positionId} value={item} originalValue={recordOf(originalValue)[key]} name={atlasFieldLabel(key)} onChange={next => onChange({ ...value, [key]: next })} /></label>)}</div>
@@ -72,6 +156,7 @@ export function AtlasEditValue({ value, originalValue, onChange, name, field, sn
   if (typeof value === 'number' || typeof originalValue === 'number') return <InputNumber aria-label={name} value={typeof value === 'number' ? value : null} onChange={onChange} />
   return <Input.TextArea aria-label={name} value={String(value ?? '')} onChange={event => onChange(event.target.value)} autoSize={{ minRows: 2, maxRows: 8 }} />
 }
+
 export function AtlasEntityEditor({ entity, snapshot, atChapter, onClose, onSaved }: { entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; atChapter: number | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(entity.name)
   const [summary, setSummary] = useState(entity.summary)

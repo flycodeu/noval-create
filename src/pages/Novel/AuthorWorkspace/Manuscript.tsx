@@ -138,21 +138,24 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   }, [novelId, chapterParam, loadChapter])
 
   const save = useCallback(async () => {
-    if (!chapter || saveInFlight.current) return false
+    if (!chapter || selectedId.current !== chapter.id || saveInFlight.current) return false
     if (draftRef.current === baselineRef.current) return true
     const session = sessionEpoch.current
+    const epoch = loadEpoch.current
+    const isCurrent = () => session === sessionEpoch.current && epoch === loadEpoch.current && selectedId.current === chapter.id
     saveInFlight.current = true
     setSaving(true)
     try {
       const content = draftRef.current
       const wordCount = countChapterWords(content)
       await window.electron.chapter.update(chapter.id, { content, wordCount }, { expectedContent: baselineRef.current, versionSource: 'manual-save' })
-      if (session !== sessionEpoch.current) return true
+      if (!isCurrent()) return false
       baselineRef.current = content; setBaseline(content)
       setChapter((current) => current && { ...current, content, wordCount })
       setError(''); await reloadList(); notifyWorkspaceMutation()
-      return true
-    } catch (cause) { if (session === sessionEpoch.current) setError(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.manuscript.saveFailedDraftPreserved')); return false }
+      // Saving one snapshot does not authorize follow-up actions on newer edits or another chapter.
+      return isCurrent() && draftRef.current === content
+    } catch (cause) { if (isCurrent()) setError(cause instanceof Error ? cause.message : getUserFacingMessage('workspace.manuscript.saveFailedDraftPreserved')); return false }
     finally { saveInFlight.current = false; if (session === sessionEpoch.current) setSaving(false) }
   }, [chapter, notifyWorkspaceMutation, reloadList])
   useEffect(() => { registerSaveHandler(() => { void save() }); return () => registerSaveHandler(null) }, [registerSaveHandler, save])
@@ -187,9 +190,14 @@ export default function Manuscript({ novelId }: { novelId: number }) {
   }
   const restore = (version: ChapterVersion) => {
     if (!chapter) return
+    const session = sessionEpoch.current
+    const epoch = loadEpoch.current
+    const isCurrent = () => session === sessionEpoch.current && epoch === loadEpoch.current && selectedId.current === chapter.id
     Modal.confirm({ title: '恢复这个正文版本？', content: '当前已保存正文仍保留在历史版本中。', okText: '恢复版本', cancelText: '取消', onOk: async () => {
+      if (!isCurrent()) return
       if (!await save()) throw new Error(getUserFacingMessage('workspace.manuscript.saveConflictRequiresResolution'))
       await window.electron.chapter.update(chapter.id, { content: version.content, wordCount: version.wordCount }, { expectedContent: baselineRef.current, versionSource: 'version-restore' })
+      if (!isCurrent()) return
       await loadChapter(chapter.id); await reloadList(); setVersions(await window.electron.chapter.listVersions(chapter.id)); notifyWorkspaceMutation(); message.success(getUserFacingMessage('workspace.manuscript.restored'))
     } })
   }
@@ -249,7 +257,7 @@ export default function Manuscript({ novelId }: { novelId: number }) {
     {panel === 'arrangement' && <ChapterArrangement key={chapter.id} chapter={chapter} onDirtyChange={setArrangementDirty} onDiscuss={setTaskTarget} onSaved={() => { void reloadList(); if (!dirty) void loadChapter(chapter.id) }} />}
     {panel === 'changes' && <ChapterChanges key={chapter.id} chapterId={chapter.id} />}
     {panel === 'references' && <ManuscriptReferences key={chapter.id} novelId={novelId} chapterNum={chapter.chapterNum} onOpen={openReference} />}
-    {panel === 'review' && <section className="manuscript-review"><ZhuqueChapterPanel chapterId={chapter.id} savedContent={chapter.content} getContent={() => draftRef.current} /><h2>正文评审</h2><Input.TextArea aria-label="本章评审要求" value={request} onChange={event => setRequest(event.target.value)} autoSize={{ minRows: 2, maxRows: 5 }} placeholder="本次评审重点，可留空" /><Button loading={workflow.submitting} disabled={dirty || workflow.active || selectionApplying || !chapter.content?.trim()} onClick={() => void workflow.review(chapter.id, request.trim() || '评审本章的因果、连续性、人物与视角边界、叙事和语言，指出具体证据与修改建议。')}>仅评审第 {chapter.chapterNum} 章</Button>{dirty && <p>请先保存正文，再评审这一版。</p>}<ChapterReviewPanel novelId={novelId} chapterId={chapter.id} version={`${chapter.updatedAt}:${chapter.content}:${workflow.run?.updatedAt}`} dirty={dirty} onLocate={locate} onRepair={(instructions, evidence) => { setRequest(instructions); if (evidence) { locate(evidence); setSelectionOpen(true) } }} /><Button type="link" disabled={workflow.active || saving} onClick={() => void generate()}>根据评审意见提出修订</Button></section>}
+    {panel === 'review' && <section className="manuscript-review"><ZhuqueChapterPanel chapterId={chapter.id} savedContent={chapter.content} getContent={() => draftRef.current} /><h2>正文评审</h2><Input.TextArea aria-label="本章评审要求" value={request} onChange={event => setRequest(event.target.value)} autoSize={{ minRows: 2, maxRows: 5 }} placeholder="本次评审重点，可留空" /><Button loading={workflow.submitting || saving} disabled={workflow.active || saving || selectionApplying || !draft.trim()} onClick={async () => { if (!await save()) return; void workflow.review(chapter.id, request.trim() || '评审本章的因果、连续性、人物与视角边界、叙事和语言，指出具体证据与修改建议。') }}>仅评审第 {chapter.chapterNum} 章</Button><ChapterReviewPanel novelId={novelId} chapterId={chapter.id} version={`${chapter.updatedAt}:${chapter.content}:${workflow.run?.updatedAt}`} dirty={dirty} onLocate={locate} onRepair={(instructions, evidence) => { setRequest(instructions); if (evidence) { locate(evidence); setSelectionOpen(true) } }} /><Button type="link" disabled={workflow.active || saving} onClick={() => void generate()}>根据评审意见提出修订</Button></section>}
     {panel === 'history' && <><div className="author-manuscript__versions">{versions.length ? versions.map(version => <button className={selectedVersion?.id === version.id ? 'is-active' : ''} key={version.id} onClick={() => setSelectedVersion(version)}><span>{VERSION_LABELS[version.versionSource]} · {version.wordCount.toLocaleString()} 字</span><time>{new Date(version.createdAt).toLocaleString()}</time></button>) : <EmptyWork title="还没有历史版本" />}</div>{selectedVersion && <section className="author-version-preview"><Button onClick={() => restore(selectedVersion)}>恢复此版本</Button><pre>{selectedVersion.content}</pre></section>}</>}
   </div>
 
@@ -261,8 +269,8 @@ export default function Manuscript({ novelId }: { novelId: number }) {
       {error && <LoadFailure message={error} retry={() => void retryLoad()} />}
       {loading ? <div className="author-loading"><Spin /></div> : !chapter ? <EmptyWork title="从第一章开始" actionLabel="安排章节" action={() => setTaskTarget({ title: '安排首批章节', stage: 'outline', request: '根据现有背景、人物和卷单元安排，规划首批章节和场景。保留已有卷、单元及已确定设定。' })} /> : <>
         <div className="manuscript-sticky-header"><header className="author-manuscript__heading"><div><span className="author-eyebrow">第 {chapter.chapterNum} 章</span><h1>{chapter.title || '未命名'}</h1><small>{countChapterWords(draft).toLocaleString()} 字 · {dirty ? '有未保存修改' : '已保存'}</small></div><div className="author-heading-actions"><Button className="manuscript-directory-trigger" icon={<MenuOutlined />} onClick={() => setDirectoryOpen(true)}>卷章目录</Button><Button icon={<HistoryOutlined />} onClick={() => changePanel(panel === 'history' ? 'text' : 'history')}>本章历史</Button><Button icon={<SaveOutlined />} loading={saving} disabled={!dirty} onClick={() => void save()}>保存</Button></div></header>
-        <div className="manuscript-toolbar"><div className="manuscript-toolbar__context" role="group" aria-label="本章辅助面板">{contextTabs.filter(item => item.key !== 'history').map(item => <Button key={item.key} size="small" aria-pressed={panel === item.key} onClick={() => changePanel(panel === item.key ? 'text' : item.key)}>{item.label}</Button>)}</div><div className="manuscript-toolbar__task"><Select aria-label="修订范围" value={revisionTarget} disabled={workflow.active || saving || !draft.trim()} onChange={setRevisionTarget} options={[{ value: 'chapter', label: '整章' }, { value: 'paragraphs', label: `选中段落${selectedParagraphs.length ? `（${selectedParagraphs.length}）` : ''}` }, { value: 'summary', label: '仅摘要' }]} /><Button type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || saving || arrangementDirty || selectionApplying} onClick={() => void generate()}>{chapter.content?.trim() ? 'AI 修订' : '生成正文'}</Button></div></div>
-        </div><div className="author-heading-actions"><Button disabled={!selection || selectionApplying || workflow.active} onMouseDown={event => event.preventDefault()} onClick={() => void openSelection()}>修订选区</Button><Button disabled={selectionApplying} onClick={() => setSelectionOpen(true)}>修订记录</Button></div>
+        <div className="manuscript-toolbar"><div className="manuscript-toolbar__context" role="group" aria-label="本章辅助面板">{contextTabs.filter(item => item.key !== 'history').map(item => <Button key={item.key} size="small" aria-pressed={panel === item.key} onClick={() => changePanel(panel === item.key ? 'text' : item.key)}>{item.label}</Button>)}</div><div className="manuscript-toolbar__task"><Button size="small" disabled={!selection || selectionApplying || workflow.active} onMouseDown={event => event.preventDefault()} onClick={() => void openSelection()}>修订选区</Button><Button size="small" type="text" disabled={selectionApplying} onClick={() => setSelectionOpen(true)}>修订记录</Button><Select size="small" aria-label="修订范围" value={revisionTarget} disabled={workflow.active || saving || !draft.trim()} onChange={setRevisionTarget} options={[{ value: 'chapter', label: '整章' }, { value: 'paragraphs', label: `选中段落${selectedParagraphs.length ? `（${selectedParagraphs.length}）` : ''}` }, { value: 'summary', label: '仅摘要' }]} /><Button size="small" type="primary" icon={<SendOutlined />} loading={workflow.submitting} disabled={workflow.active || saving || arrangementDirty || selectionApplying} onClick={() => void generate()}>{chapter.content?.trim() ? 'AI 修订' : '生成正文'}</Button></div></div>
+        </div>
         <InlineCompletionEditor key={chapter.id} novelId={novelId} chapter={chapter} value={draft} disabled={saving || selectionApplying} assistDisabled={workflow.active || selectionOpen} editorRef={editorRef} onChange={value => { draftRef.current = value; setDraft(value); setSelection(null); setSelectedParagraphs([]) }} onSelection={field => { setSelectedParagraphs(selectedChapterParagraphs(field.value, field.selectionStart, field.selectionEnd)); if (field.selectionEnd > field.selectionStart) setSelection({ novelId, chapterId: chapter.id, start: field.selectionStart, end: field.selectionEnd, original: field.value.slice(field.selectionStart, field.selectionEnd) }); else setSelection(null) }} />
       </>}
       {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh()} />}

@@ -55,7 +55,7 @@ function ResearchSession({ novelId, disabled }: Props) {
     {loading ? <Spin /> : <div className="research-library__sources">{sources.slice((page - 1) * 5, page * 5).map(source => <article key={source.sourceKey}>
       <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a>
       <small>{[source.topics.join(' · '), `检索于 ${source.recordedAt.slice(0, 10)}`,
-        source.excerptKind === 'source_metadata' ? '仅来源链接，未返回网页摘要' : '来源摘要待核实'].filter(Boolean).join(' · ')}</small>
+        source.excerptKind === 'source_metadata' ? '仅来源链接，未返回网页摘要' : '外部参考'].filter(Boolean).join(' · ')}</small>
       {source.excerptKind !== 'source_metadata' && <p>{source.excerpt}</p>}
       <details><summary>检索问题与来源</summary><p>{source.query}</p><a href={source.url} target="_blank" rel="noreferrer">{source.url}</a></details>
     </article>)}</div>}

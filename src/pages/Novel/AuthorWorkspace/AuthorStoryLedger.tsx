@@ -53,7 +53,7 @@ export default function AuthorStoryLedger({ novelId, chapters, onDirtyChange }: 
     setCharacter({ entity, version: ledger!.contextVersion, key: crypto.randomUUID() })
   }
   return <section className="author-paper author-design-section">{messageContext}
-    <div className="author-section-heading"><div><h2>故事账本</h2><p>整理已埋线索、回收依据与人物常设属性。模型更新遇到作者保护时会报告冲突。</p></div><Button onClick={() => { void refresh().catch(cause => setError(String(cause))) }}>刷新账本</Button></div>
+    <div className="author-section-heading"><div><h2>故事账本</h2><p>整理已埋线索、回收进度与人物常设属性。</p></div><Button onClick={() => { void refresh().catch(cause => setError(String(cause))) }}>刷新账本</Button></div>
     {error && <Alert type="error" message={error} />}
     {ledger?.duplicateGroups.length ? <Alert type="warning" message="发现同名线索，可分别更正或预览后合并" description={<Space wrap>{ledger.duplicateGroups.map(ids => <Button key={ids.join(':')} onClick={() => setMerging(ids)}>核对 {ids.map(id => `#${id}`).join('、')}</Button>)}</Space>} /> : null}
     <Space wrap><h3>伏笔与线索</h3><Checkbox checked={all} onChange={event => setAll(event.target.checked)}>包含已回收与放弃</Checkbox>{ledger && ledger.clues.length > 1 && <Button onClick={() => setMerging(ledger.clues.slice(0, 2).map(clue => clue.id))}>合并线索</Button>}</Space>
@@ -70,7 +70,7 @@ export default function AuthorStoryLedger({ novelId, chapters, onDirtyChange }: 
       return <article className="author-change-card" key={clue.id}><h3>#{clue.id} · {clue.title} → 保留项 #{clue.mergedIntoId}</h3><p className="author-prose">{clue.detail}</p><p>合并前状态：{CLUE_STATUSES.find(status => status.value === original.status)?.label || original.status} · 埋设：{chapterLabel(original.sourceChapterId)} · 计划回收：{original.targetPayoffChapter || '未安排'} · 实际回收：{chapterLabel(original.actualPayoffChapterId)}</p><p className="author-prose">原依据：{original.requiredEvidence || '未填写'}</p><p className="author-prose">合并依据：{reason || '未记录'}</p></article>
     })}</details> : null}
     {merging && ledger && <ClueMergeDialog novelId={novelId} clues={ledger.clues} initialIds={merging} chapters={chapters} onClose={() => setMerging(null)} onMerged={refresh} />}
-    <h3>人物更正与字段保护</h3><p>仅保护姓名、出身和能力边界；位置、伤势、归属仍可按章节变化。再次明确编辑可以调整或解除保护。</p>
+    <h3>人物更正与字段保护</h3><p>对姓名、出身或能力边界开启保护后，后续生成不会自动覆盖。</p>
     <div className="author-library-grid">{ledger?.characters.map(({ entity, protectedFields }) => <article className="author-change-card" key={entity.id}>
       <h3>{entity.name}</h3><Space wrap>{protectedFields.map(field => <Tag key={field} color="blue">{AUTHOR_PROTECTED_FIELDS.find(item => item.value === field)?.label}已保护</Tag>)}</Space><p>{String(entity.attributes.origin || '出身尚未记录')}</p><p>{String(entity.attributes.abilityLimits || '能力边界尚未记录')}</p><Button onClick={() => editCharacter(entity, protectedFields)}>明确更正 / 调整保护</Button>
     </article>)}</div>

@@ -138,6 +138,8 @@ const api = {
   novel: {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),
     get: (id: number) => invokeIpc('novel:get', id),
+    generateCover: (id: number, input: import('../src/shared/novel-cover').GenerateNovelCoverInput) => invokeIpc('novel:generateCover', id, input),
+    setCover: (id: number, input: import('../src/shared/novel-cover').SaveNovelCoverInput) => invokeIpc('novel:setCover', id, input),
     create: (data: NovelCreateInput) => invokeIpc('novel:create', data),
     update: (id: number, data: unknown, options?: NovelUpdateOptions) => invokeIpc('novel:update', id, data, options),
     delete: (id: number) => invokeIpc('novel:delete', id),

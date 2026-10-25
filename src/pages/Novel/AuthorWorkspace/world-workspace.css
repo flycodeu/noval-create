@@ -24,8 +24,8 @@
 .atlas-profile-footer .ant-btn { height: auto; min-height: 32px; max-width: 100%; white-space: normal; }
 .atlas-profile-back.ant-btn { display: none; }
 .world-and-cast > .author-disclosure { margin: 0; max-height: 25%; overflow: auto; flex-shrink: 0; }
-.world-and-cast .atlas-workbench--geography { overflow-y: auto; min-height: 0; }
-.world-and-cast .atlas-workbench--geography .atlas-profile-panel { overflow: visible; }
+.world-and-cast .atlas-workbench--geography { overflow: hidden; min-height: 0; } .world-and-cast .atlas-workbench--geography > .geographic-atlas { overflow-y: auto; min-height: 0; scrollbar-gutter: stable; }
+.world-and-cast .atlas-workbench--geography .atlas-profile-panel { overflow-y: auto; min-height: 0; } .world-and-cast .atlas-workbench--geography .atlas-profile-back.ant-btn { display: inline-flex; margin: -6px 0 8px -8px; font-size: 12px; }
 .world-and-cast .atlas-workbench--geography .atlas-profile { min-height: 0; }
 .world-and-cast .atlas-graph-panel { overflow-y: auto; min-height: 0; }
 .world-rules-workspace { display: grid; grid-template-columns: 160px minmax(0, 1fr); min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
@@ -39,7 +39,7 @@
 .world-reference-drawer .world-rules-topics > button { padding: 8px; }
 .world-reference-drawer .author-paper { padding: 18px; }
 @media (max-width: 1100px) {
-  .world-and-cast .atlas-workbench--library { grid-template-columns: minmax(220px, 265px) minmax(0, 1fr); }
+  .world-and-cast .atlas-workbench--library { grid-template-columns: minmax(220px, 265px) minmax(0, 1fr); } .world-and-cast .atlas-workbench--geography { overflow-y: auto; } .world-and-cast .atlas-workbench--geography > .geographic-atlas, .world-and-cast .atlas-workbench--geography .atlas-profile-panel { overflow: visible; }
   .world-and-cast .atlas-profile { padding: 0 18px; }
 }
 @media (max-width: 950px) {

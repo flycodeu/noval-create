@@ -214,6 +214,44 @@ async function assertModelAndSearchSettingsRpc() {
   }
 }
 
+async function assertNovelCoverRpc(novelId) {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  let imageRequests = 0
+  const server = createServer(async (request, response) => {
+    let raw = ''; for await (const chunk of request) raw += chunk
+    const body = JSON.parse(raw)
+    assert.equal(request.url, '/v1/images/generations')
+    assert.equal(body.model, 'gpt-image-1')
+    assert.equal(body.response_format, undefined)
+    imageRequests++
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ data: [{ b64_json: png }] }))
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  let configId
+  try {
+    configId = Number(await rpc('model', 'create', [{ provider: 'custom', name: 'Cover RPC fixture', modelId: 'text-model', baseUrl: `http://127.0.0.1:${server.address().port}/v1` }]))
+    const before = await rpc('novel', 'get', [novelId])
+    const image = await rpc('novel', 'generateCover', [novelId, { configId, modelId: 'gpt-image-1', prompt: '一盏灯', size: '1024x1536' }])
+    assert.match(image, /^data:image\/jpeg;base64,/)
+    assert.equal(imageRequests, 1)
+    assert.deepEqual(await rpc('novel', 'get', [novelId]), before, 'web generation never saves its candidate')
+    const saved = await rpc('novel', 'setCover', [novelId, { image, expectedCoverImage: null }])
+    assert.ok(saved.coverImage)
+    assert.equal(saved.contextVersion, before.contextVersion)
+    assert.equal((await rpc('novel', 'list')).find(book => book.id === novelId).coverImage, saved.coverImage)
+    await expectRpcError('novel', 'setCover', [novelId, { image: null, expectedCoverImage: null }], 'cover.conflict')
+    await rpc('novel', 'setCover', [novelId, { image: null, expectedCoverImage: saved.coverImage }])
+    const cleared = await rpc('novel', 'get', [novelId])
+    for (const field of ['title', 'synopsis', 'settingsJson', 'contextVersion']) assert.deepEqual(cleared[field], before[field])
+    console.log('PASS cover Web RPC: loopback image generation, explicit adoption, list refresh, CAS conflict and clear preserve story data')
+  } finally {
+    if (configId) await rpc('model', 'delete', [configId])
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  }
+}
+
 async function main() {
   const stamp = Date.now().toString()
   let novelId = 0
@@ -236,6 +274,7 @@ async function main() {
       operatingMode: 'standard_longform',
     }]))
     assert.ok(novelId > 0)
+    await assertNovelCoverRpc(novelId)
     await assertTaskEventStream(novelId)
 
     const before = await rpc('novel', 'get', [novelId])

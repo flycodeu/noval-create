@@ -840,7 +840,8 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
 
   let response: Response
   const controller = new AbortController()
-  const rpcTimeout = service === 'style' && method === 'abTest' ? 180_000
+  const rpcTimeout = service === 'novel' && method === 'generateCover' ? 190_000
+    : service === 'style' && method === 'abTest' ? 180_000
     : service === 'zhuque' && ['test', 'detectChapter'].includes(method) ? 55_000
       : service === 'sourceSearch' && method === 'test' ? 55_000
         : service === 'sourceSearch' && method === 'research' ? 100_000
@@ -945,6 +946,8 @@ export function installWebElectronBridge(): void {
       // 读取优先走本地后端（真实数据库）；演示数据必须通过 ?demo=1 显式开启。
       list: async (filters?: unknown) => withLocalBackend('novel', 'list', [filters], async () => demoNovels),
       get: async (id) => withLocalBackend('novel', 'get', [id], async () => getNovelById(Number(id))),
+      generateCover: (...args) => withLocalBackend('novel', 'generateCover', args, async () => readOnlyMutation('novel.generateCover')),
+      setCover: (...args) => withLocalBackend('novel', 'setCover', args, async () => readOnlyMutation('novel.setCover')),
       create: (...args) => withLocalBackend('novel', 'create', args, async () => readOnlyMutation('novel.create')),
       update: (...args) => withLocalBackend('novel', 'update', args, async () => readOnlyMutation('novel.update')),
       delete: (...args) => withLocalBackend('novel', 'delete', args, async () => readOnlyMutation('novel.delete')),

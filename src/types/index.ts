@@ -5974,6 +5974,8 @@ declare global {
       novel: {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>
+        generateCover: (id: number, input: import('../shared/novel-cover').GenerateNovelCoverInput) => Promise<string>
+        setCover: (id: number, input: import('../shared/novel-cover').SaveNovelCoverInput) => Promise<Novel>
         create: (data: NovelCreateInput) => Promise<number>
         update: (id: number, data: Partial<Novel>, options?: NovelUpdateOptions) => Promise<void>
         delete: (id: number) => Promise<void>

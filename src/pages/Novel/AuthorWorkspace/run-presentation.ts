@@ -70,41 +70,61 @@ export function runChapterLabel(run: Pick<CreativeRun, 'atChapter'>): string {
   return run.atChapter === 0 ? '初始设定' : `第 ${run.atChapter} 章`
 }
 
+function collectChangedNames(content: unknown, run: CreativeRun, saved: boolean, appliedIds: string[]): string[] {
+  const data = candidate(content)
+  if (!Array.isArray(data.changes)) return []
+  const idMap = record(run.result?.idMap)
+  return data.changes.flatMap(raw => {
+    const change = record(raw)
+    const id = typeof change.id === 'string' ? change.id : idMap[String(change.clientId)]
+    if (saved && (typeof id !== 'string' || !appliedIds.includes(id))) return []
+    const name = change.name || change.label
+    return typeof name === 'string' && name.trim() ? [name.trim()] : []
+  })
+}
+
+function collectSavedNames(run: CreativeRun, saved: boolean, appliedIds: string[]): string[] {
+  if (!saved || !Array.isArray(run.result?.savedEntities)) return []
+  return run.result.savedEntities.flatMap(raw => {
+    const entity = record(raw)
+    return typeof entity.id === 'string' && appliedIds.includes(entity.id) && typeof entity.name === 'string' && entity.name.trim() ? [entity.name.trim()] : []
+  })
+}
+
+function formatRunTitle(run: CreativeRun, stage: string, saved: boolean, count: number): string {
+  if (run.operation === 'review') return `${runChapterLabel(run)} · ${stage}评审`
+  if (saved) return `${stage} · ${count ? `${count} 项变更已保存` : '已保存'}`
+  if (run.result?.reviewFailureStage === 'contract') return `${stage} · 结构校验未通过`
+  return `${stage} · ${runChapterLabel(run)}`
+}
+
+function formatRunSummary(run: CreativeRun, stage: string, saved: boolean, count: number, nameSummary: string): string {
+  if (saved) return nameSummary || (count ? `已保存 ${count} 项变更。` : `${stage}结果已保存到项目。`)
+  if (run.result?.supersededByArtifactId) return '已有通过检查的后续修订版，请查看新版。'
+  if (run.result?.reviewFailureStage === 'contract' && run.step !== 'cancelled') return '生成结果未满足保存格式，请查看具体问题并修订。'
+  if (run.operation === 'review' && run.step === 'completed') {
+    const target = run.stage === 'chapter' ? '正文' : '正式资料'
+    return run.reviewStatus === 'passed' ? `模型评审通过，${target}未修改。` : `评审发现待处理问题，${target}未修改。`
+  }
+  if (runStatusLabel(run) === '候选待确认') return nameSummary ? `${nameSummary}。模型评审通过，候选待确认保存。` : '模型评审通过，候选待确认保存。'
+  if (run.step === 'cancelled' || run.status === 'cancelled') return '任务已停止。'
+  if (run.status === 'failed') return '本轮执行失败，请查看任务详情。'
+  if (run.step === 'needs_attention' || run.status === 'blocked') return '本轮未通过检查，请查看评审并修订。'
+  if (run.step === 'completed') return '未找到可核实的保存结果，请查看任务详情。'
+  return run.message || '正在处理本轮内容。'
+}
+
 export function runResultPresentation(run: CreativeRun, content?: unknown, names: Record<string, string> = {}) {
   const stage = CREATIVE_STAGE_LABELS[run.stage] || '创作'
   const saved = hasSavedRunResult(run)
   const appliedIds = saved ? ids(run.result?.appliedIds) : []
   const chapterIds = saved && Array.isArray(run.result?.chapterIds) ? [...new Set(run.result.chapterIds as number[])] : []
   const count = appliedIds.length + chapterIds.length
-  const data = candidate(content)
-  const idMap = record(run.result?.idMap)
-  const changedNames = Array.isArray(data.changes) ? data.changes.flatMap(raw => {
-    const change = record(raw)
-    const id = typeof change.id === 'string' ? change.id : idMap[String(change.clientId)]
-    if (saved && (typeof id !== 'string' || !appliedIds.includes(id))) return []
-    const name = change.name || change.label
-    return typeof name === 'string' && name.trim() ? [name.trim()] : []
-  }) : []
-  const savedNames = saved && Array.isArray(run.result?.savedEntities) ? run.result.savedEntities.flatMap(raw => {
-    const entity = record(raw)
-    return typeof entity.id === 'string' && appliedIds.includes(entity.id) && typeof entity.name === 'string' && entity.name.trim() ? [entity.name.trim()] : []
-  }) : []
+  const changedNames = collectChangedNames(content, run, saved, appliedIds)
+  const savedNames = collectSavedNames(run, saved, appliedIds)
   const displayNames = [...new Set([...savedNames, ...changedNames, ...appliedIds.map(id => names[id]).filter(Boolean)])]
   const nameSummary = displayNames.length ? `${displayNames.slice(0, 3).join('、')}${displayNames.length > 3 ? `等 ${displayNames.length} 项` : ''}` : ''
-  const title = run.operation === 'review' ? `${runChapterLabel(run)} · ${stage}评审`
-    : saved ? `${stage} · ${count ? `${count} 项变更已保存` : '已保存'}`
-      : run.result?.reviewFailureStage === 'contract' ? `${stage} · 结构校验未通过`
-      : `${stage} · ${runChapterLabel(run)}`
-  let summary: string
-  if (saved) summary = nameSummary || (count ? `已保存 ${count} 项变更。` : `${stage}结果已保存到项目。`)
-  else if (run.result?.supersededByArtifactId) summary = '已有通过检查的后续修订版，请查看新版。'
-  else if (run.result?.reviewFailureStage === 'contract' && run.step !== 'cancelled') summary = '生成结果未满足保存格式，请查看具体问题并修订。'
-  else if (run.operation === 'review' && run.step === 'completed') summary = run.reviewStatus === 'passed' ? `模型评审通过，${run.stage === 'chapter' ? '正文' : '正式资料'}未修改。` : `评审发现待处理问题，${run.stage === 'chapter' ? '正文' : '正式资料'}未修改。`
-  else if (runStatusLabel(run) === '候选待确认') summary = nameSummary ? `${nameSummary}。模型评审通过，候选待确认保存。` : '模型评审通过，候选待确认保存。'
-  else if (run.step === 'cancelled' || run.status === 'cancelled') summary = '任务已停止。'
-  else if (run.status === 'failed') summary = '本轮执行失败，请查看任务详情。'
-  else if (run.step === 'needs_attention' || run.status === 'blocked') summary = '本轮未通过检查，请查看评审并修订。'
-  else if (run.step === 'completed') summary = '未找到可核实的保存结果，请查看任务详情。'
-  else summary = run.message || '正在处理本轮内容。'
+  const title = formatRunTitle(run, stage, saved, count)
+  const summary = formatRunSummary(run, stage, saved, count, nameSummary)
   return { title, summary, saved }
 }

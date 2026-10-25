@@ -11,6 +11,7 @@ const CONCLUSIONS: Record<string, { label: string; color: string }> = {
   needs_revision: { label: '需要修订', color: 'orange' },
   blocked: { label: '未通过', color: 'red' },
 }
+const shortHash = (hash?: string | null) => hash ? hash.slice(0, 8) : '未记录'
 
 export default function ChapterReviewPanel({ novelId, chapterId, version, dirty, onLocate, onRepair }: {
   novelId: number; chapterId: number; version: string; dirty: boolean
@@ -39,11 +40,10 @@ export default function ChapterReviewPanel({ novelId, chapterId, version, dirty,
   return <div className="author-assist-stack">
     <header className="chapter-review__header">
       <div className="author-heading-actions"><h3>本章审校对照</h3><Tag color={stale ? 'default' : conclusion.color}>{stale ? `上次结论：${conclusion.label}` : conclusion.label}</Tag>{dirty && <Tag>草稿未保存</Tag>}</div>
-      <div className="chapter-review__versions"><span title={view.reviewedContentHash}>审校正文 {view.reviewedContentHash?.slice(0, 8) || '版本未记录'}</span><span title={view.currentContentHash}>当前保存 {view.currentContentHash?.slice(0, 8) || '版本未记录'}</span></div>
       <p>{view.summary}</p>
     </header>
     {stale && <Alert type="warning" message="正文或作品资料已更新，旧报告保留供阅读；请保存并重新审校后定位或修订。" />}
-    {view.contractVersionUnknown && <Alert type="info" message="旧报告没有合同快照，未逐项检查的要求保持待评估。" />}
+    {view.contractVersionUnknown && <Alert type="info" message="基于旧版章安排生成，部分要求待重新核对。" />}
     {view.requirements.length > 0 && <section className="author-assist-stack" aria-label="逐项要求"><h4>逐项要求 · {view.requirements.length}</h4>{view.requirements.map(item => <article className="author-assist-card" key={item.id}>
       <div><Tag color={item.check?.status === 'met' ? 'green' : item.check?.status === 'unmet' ? 'orange' : 'default'}>{!item.check ? '尚未逐项评估' : item.check.status === 'met' ? '已满足' : item.check.status === 'unmet' ? '需处理' : '待核实'}</Tag><strong>{item.title}</strong></div>
       <p>{item.requirement}</p>{item.check && <><p>{item.check.reason}</p>{item.check.evidence.map((evidence, index) => <blockquote key={index}>{evidence.quote}</blockquote>)}{evidenceActions(`${item.requirement}；${item.check.reason}`, item.check.evidence[0], item.check.status !== 'met')}</>}
@@ -52,10 +52,14 @@ export default function ChapterReviewPanel({ novelId, chapterId, version, dirty,
       const issues = view.issues.filter(issue => issue.category === category)
       return issues.length > 0 && <section className="author-assist-stack" aria-label={label} key={category}><h4>{label} · {issues.length}</h4>{issues.map(issue => <article className="author-assist-card" key={issue.id}>
       <div><Tag color={issue.level === 'blocker' ? 'red' : issue.level === 'repair' ? 'orange' : 'blue'}>{issue.level === 'blocker' ? '阻塞问题' : issue.level === 'repair' ? '需要修订' : '表达建议'}</Tag></div>
-      <p>{issue.message}</p>{issue.evidence.map((evidence, index) => <blockquote key={index}>{evidence.quote}</blockquote>)}{evidenceActions(issue.message, issue.evidence[0])}
+      <p>{issue.message}</p>{issue.evidence.map((evidence, index) => <blockquote key={index}>{issue.evidence[index]?.quote || evidence.quote}</blockquote>)}{evidenceActions(issue.message, issue.evidence[0])}
     </article>)}</section>
     })}
     {view.deterministicBlockers.length > 0 && <Alert type="warning" message="结构检查待处理" description={view.deterministicBlockers.join('；')} />}
-    {!view.issues.length && <p className="author-muted">报告没有列出有证据的质量问题；未评估条款仍需核对。</p>}
+    {!view.issues.length && <p className="author-muted">{view.status === 'passed' ? '未发现阻断性质量问题。' : '暂未列出具体质量问题，请结合上方要求核对。'}</p>}
+    <details className="author-disclosure">
+      <summary>版本比对详情</summary>
+      <p className="chapter-review__versions author-muted">审校正文 {shortHash(view.reviewedContentHash)} · 当前保存 {shortHash(view.currentContentHash)}{view.contextVersion != null ? ` · 作品资料 v${view.contextVersion}` : ''}</p>
+    </details>
   </div>
 }

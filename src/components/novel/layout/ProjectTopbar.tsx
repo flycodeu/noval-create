@@ -70,6 +70,121 @@ interface ProjectTopbarProps {
   onInformationTargetChange?: (target: HTMLDivElement | null) => void
 }
 
+function buildTopbarOverflowMenu({
+  canUndo,
+  canNextPage,
+  canPrevPage,
+  exportMenu,
+  moreMenu,
+  onClear,
+  onJumpChapter,
+  onNextPage,
+  onPrevPage,
+  onQuality,
+  onShortcuts,
+  onUndo,
+  nextPageLabel,
+  prevPageLabel,
+  setTheme,
+  showQuality,
+  theme,
+}: Pick<
+  ProjectTopbarProps,
+  | 'canUndo'
+  | 'canNextPage'
+  | 'canPrevPage'
+  | 'exportMenu'
+  | 'moreMenu'
+  | 'onClear'
+  | 'onJumpChapter'
+  | 'onNextPage'
+  | 'onPrevPage'
+  | 'onQuality'
+  | 'onShortcuts'
+  | 'onUndo'
+  | 'nextPageLabel'
+  | 'prevPageLabel'
+  | 'showQuality'
+> & { theme: Theme; setTheme: (theme: Theme) => void }): MenuProps {
+  const items: NonNullable<MenuProps['items']> = []
+  const appendDivider = () => {
+    if (items.length > 0 && items[items.length - 1]?.type !== 'divider') {
+      items.push({ type: 'divider' })
+    }
+  }
+
+  if (onPrevPage || onNextPage) {
+    if (onPrevPage) {
+      items.push({
+        key: 'workspace-prev-page',
+        icon: <LeftOutlined />,
+        label: prevPageLabel ? `上一页：${prevPageLabel}` : '上一页',
+        disabled: !canPrevPage,
+        onClick: onPrevPage,
+      })
+    }
+    if (onNextPage) {
+      items.push({
+        key: 'workspace-next-page',
+        icon: <RightOutlined />,
+        label: nextPageLabel ? `下一页：${nextPageLabel}` : '下一页',
+        disabled: !canNextPage,
+        onClick: onNextPage,
+      })
+    }
+    appendDivider()
+  }
+
+  if (showQuality && onQuality) {
+    items.push({ key: 'workspace-quality', icon: <BarChartOutlined />, label: 'AI质量', onClick: onQuality })
+  }
+
+  items.push(
+    { key: 'workspace-shortcuts', icon: <QuestionCircleOutlined />, label: '快捷键', onClick: onShortcuts },
+    { key: 'workspace-jump-chapter', icon: <SwapOutlined />, label: '章节跳转', onClick: onJumpChapter },
+    { key: 'workspace-undo', icon: <RollbackOutlined />, label: '撤销最近操作', disabled: !canUndo, onClick: onUndo },
+    {
+      key: 'workspace-theme',
+      icon: <BulbOutlined />,
+      label: `主题：${THEME_OPTIONS.find((option) => option.value === theme)?.label || '跟随当前设置'}`,
+      children: THEME_OPTIONS.map((option) => ({
+        key: `workspace-theme-${option.value}`,
+        icon: option.icon,
+        label: option.label,
+        onClick: () => setTheme(option.value),
+      })),
+    },
+  )
+
+  if (exportMenu.items && exportMenu.items.length > 0) {
+    appendDivider()
+    items.push({ key: 'workspace-export', icon: <ExportOutlined />, label: '导出', children: exportMenu.items })
+  }
+
+  if (onClear) {
+    appendDivider()
+    items.push({ key: 'workspace-clear', icon: <DeleteOutlined />, label: '清空步骤', danger: true, onClick: onClear })
+  }
+
+  if (moreMenu.items && moreMenu.items.length > 0) {
+    appendDivider()
+    moreMenu.items.forEach((item) => {
+      if (!item) return
+      if (item.type === 'divider') {
+        appendDivider()
+        return
+      }
+      items.push(item)
+    })
+  }
+
+  while (items[items.length - 1]?.type === 'divider') {
+    items.pop()
+  }
+
+  return { items }
+}
+
 export default function ProjectTopbar({
   projectTitle,
   workspaceLabel,
@@ -107,136 +222,47 @@ export default function ProjectTopbar({
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
   const { theme, setTheme } = useThemeStore()
-  const overflowMenu = useMemo<MenuProps>(() => {
-    const items: NonNullable<MenuProps['items']> = []
-    const appendDivider = () => {
-      if (items.length > 0 && items[items.length - 1]?.type !== 'divider') {
-        items.push({ type: 'divider' })
-      }
-    }
-
-    if (onPrevPage || onNextPage) {
-      if (onPrevPage) {
-        items.push({
-          key: 'workspace-prev-page',
-          icon: <LeftOutlined />,
-          label: prevPageLabel ? `上一页：${prevPageLabel}` : '上一页',
-          disabled: !canPrevPage,
-          onClick: onPrevPage,
-        })
-      }
-      if (onNextPage) {
-        items.push({
-          key: 'workspace-next-page',
-          icon: <RightOutlined />,
-          label: nextPageLabel ? `下一页：${nextPageLabel}` : '下一页',
-          disabled: !canNextPage,
-          onClick: onNextPage,
-        })
-      }
-      appendDivider()
-    }
-
-    if (showQuality && onQuality) {
-      items.push({
-        key: 'workspace-quality',
-        icon: <BarChartOutlined />,
-        label: 'AI质量',
-        onClick: onQuality,
-      })
-    }
-
-    items.push({
-      key: 'workspace-shortcuts',
-      icon: <QuestionCircleOutlined />,
-      label: '快捷键',
-      onClick: onShortcuts,
-    })
-
-    items.push({
-      key: 'workspace-jump-chapter',
-      icon: <SwapOutlined />,
-      label: '章节跳转',
-      onClick: onJumpChapter,
-    })
-
-    items.push({
-      key: 'workspace-undo',
-      icon: <RollbackOutlined />,
-      label: '撤销最近操作',
-      disabled: !canUndo,
-      onClick: onUndo,
-    })
-
-    items.push({
-      key: 'workspace-theme',
-      icon: <BulbOutlined />,
-      label: `主题：${THEME_OPTIONS.find((option) => option.value === theme)?.label || '跟随当前设置'}`,
-      children: THEME_OPTIONS.map((option) => ({
-        key: `workspace-theme-${option.value}`,
-        icon: option.icon,
-        label: option.label,
-        onClick: () => setTheme(option.value),
-      })),
-    })
-
-    if (exportMenu.items && exportMenu.items.length > 0) {
-      appendDivider()
-      items.push({
-        key: 'workspace-export',
-        icon: <ExportOutlined />,
-        label: '导出',
-        children: exportMenu.items,
-      })
-    }
-
-    if (onClear) {
-      appendDivider()
-      items.push({
-        key: 'workspace-clear',
-        icon: <DeleteOutlined />,
-        label: '清空步骤',
-        danger: true,
-        onClick: onClear,
-      })
-    }
-
-    if (moreMenu.items && moreMenu.items.length > 0) {
-      appendDivider()
-      moreMenu.items.forEach((item) => {
-        if (!item) return
-        if (item.type === 'divider') {
-          appendDivider()
-          return
-        }
-        items.push(item)
-      })
-    }
-
-    while (items[items.length - 1]?.type === 'divider') {
-      items.pop()
-    }
-
-    return { items }
-  }, [
-    canUndo,
-    canNextPage,
-    canPrevPage,
-    exportMenu.items,
-    moreMenu.items,
-    onClear,
-    onJumpChapter,
-    onNextPage,
-    onPrevPage,
-    onQuality,
-    onShortcuts,
-    onUndo,
-    nextPageLabel,
-    prevPageLabel,
-    setTheme,
-    showQuality,
-    theme,
-  ])
+  const overflowMenu = useMemo<MenuProps>(
+    () =>
+      buildTopbarOverflowMenu({
+        canUndo,
+        canNextPage,
+        canPrevPage,
+        exportMenu,
+        moreMenu,
+        onClear,
+        onJumpChapter,
+        onNextPage,
+        onPrevPage,
+        onQuality,
+        onShortcuts,
+        onUndo,
+        nextPageLabel,
+        prevPageLabel,
+        setTheme,
+        showQuality,
+        theme,
+      }),
+    [
+      canUndo,
+      canNextPage,
+      canPrevPage,
+      exportMenu,
+      moreMenu,
+      onClear,
+      onJumpChapter,
+      onNextPage,
+      onPrevPage,
+      onQuality,
+      onShortcuts,
+      onUndo,
+      nextPageLabel,
+      prevPageLabel,
+      setTheme,
+      showQuality,
+      theme,
+    ],
+  )
 
   return (
     <header className={`project-topbar${showWindowControls ? '' : ' project-topbar--windowless'}`}>

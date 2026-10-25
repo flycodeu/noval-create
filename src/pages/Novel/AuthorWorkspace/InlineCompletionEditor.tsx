@@ -42,6 +42,6 @@ export default function InlineCompletionEditor({ novelId, chapter, value, disabl
     {completion.enabled && <div className="inline-completion__status" role="status" aria-live="polite">{ghost ? <>
       <Space wrap><span>Tab 采用 · Esc 取消</span><Button size="small" onMouseDown={event => event.preventDefault()} onClick={completion.accept}>采用建议</Button><Button size="small" onMouseDown={event => event.preventDefault()} onClick={completion.cancel}>取消建议</Button></Space>
       <details className="inline-completion__preview" onMouseDown={event => event.preventDefault()}><summary>查看完整建议</summary><p>{ghost.text}</p></details>
-    </> : completion.pending ? '正在补全，Esc 可停止' : completion.feedback || modelError || '停笔后提供建议，采用只改草稿，可撤销。'}</div>}
+    </> : completion.pending ? '正在补全，Esc 可停止' : completion.feedback || modelError || '停笔后自动提供续写建议（Tab 采用 / Esc 取消）'}</div>}
   </div>
 }

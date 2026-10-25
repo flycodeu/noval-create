@@ -9,6 +9,7 @@ import { buildWorkspaceRoute } from '../../shared/novel-workspace'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
 import { getUserFacingMessage } from '../../utils/user-facing-message'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
+import CoverEditor from '../../components/novel/CoverEditor'
 import './index.css'
 import InspirationWizard from './InspirationWizard'
 import { readInspirationDraft, type InspirationInitial } from './inspiration-draft'
@@ -34,6 +35,7 @@ export default function NovelList() {
   const [status, setStatus] = useState('all')
   const [sort, setSort] = useState('updatedAt')
   const [creating, setCreating] = useState(false)
+  const [coverBook, setCoverBook] = useState<Novel | null>(null)
   const [saving, setSaving] = useState(false)
   const [inspiration, setInspiration] = useState<{ initial: InspirationInitial; resume: boolean } | null>(null)
   const [savedIdea, setSavedIdea] = useState(() => Boolean(readInspirationDraft()))
@@ -95,7 +97,8 @@ export default function NovelList() {
       <Button type="text" icon={<ReloadOutlined />} aria-label="刷新作品" onClick={() => void load()} loading={loading} /><span className="novel-library-count">{filtered.length} 部作品</span>
     </div>
     {error && <Alert type="error" message={error} action={<Button onClick={() => void load()}>重试</Button>} />}
-    {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : !filtered.length ? <Empty description={novels.length ? '没有匹配的作品。' : '给你的第一个故事留一个位置。'}>{!novels.length && <Button onClick={() => setCreating(true)}>新建小说</Button>}</Empty> : <div className="novel-list-page__grid">{filtered.map(novel => <ProjectCard key={novel.id} novel={novel} onOpen={() => navigate(buildWorkspaceRoute(novel.id, 'guide'))} onDelete={() => remove(novel)} onExport={format => void exportBook(novel.id, format)} onStatusChange={next => void updateStatus(novel.id, next)} />)}</div>}
+    {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : !filtered.length ? <Empty description={novels.length ? '没有匹配的作品。' : '给你的第一个故事留一个位置。'}>{!novels.length && <Button onClick={() => setCreating(true)}>新建小说</Button>}</Empty> : <div className="novel-list-page__grid">{filtered.map(novel => <ProjectCard key={novel.id} novel={novel} onCover={() => setCoverBook(novel)} onOpen={() => navigate(buildWorkspaceRoute(novel.id, 'guide'))} onWrite={() => navigate(buildWorkspaceRoute(novel.id, 'writing/editor'))} onDelete={() => remove(novel)} onExport={format => void exportBook(novel.id, format)} onStatusChange={next => void updateStatus(novel.id, next)} />)}</div>}
+    {coverBook && <CoverEditor key={coverBook.id} novel={coverBook} onClose={() => setCoverBook(null)} onSaved={() => { loadVersion.current += 1; void load() }} onManageModels={() => navigate('/models')} />}
     <Modal title="开始一部小说" open={creating} onCancel={() => { if (!createInFlight.current) setCreating(false) }} onOk={() => void create().catch(() => undefined)} okText="创建并进入创作台" cancelText="取消" confirmLoading={saving} cancelButtonProps={{ disabled: saving }} keyboard={!saving} closable={!saving} maskClosable={!saving} width="min(720px, calc(100vw - 32px))">
       <Space wrap style={{ marginBottom: 16 }}><Button disabled={saving} onClick={() => { setInspiration({ initial: form.getFieldsValue(), resume: false }); setCreating(false) }}>{savedIdea ? "从当前输入开始新构思" : "先讨论方向"}</Button>{savedIdea && <Button disabled={saving} onClick={() => { setInspiration({ initial: {}, resume: true }); setCreating(false) }}>继续上次构思</Button>}</Space><Form form={form} layout="vertical" disabled={saving} className="novel-create-form">
         <Form.Item name="title" label="书名" rules={[{ required: true, whitespace: true, message: '先给作品一个名字，之后可以修改。' }]}><Input maxLength={100} placeholder="可以先用暂定名" /></Form.Item>

@@ -4,6 +4,21 @@ import { USER_FACING_SERVICE_MESSAGES } from './user-facing-messages.services'
 import { WORKSPACE_USER_FACING_MESSAGES } from './user-facing-messages.workspace'
 
 export const USER_FACING_MESSAGES = {
+  'cover.invalidRequest': '请选择图片接口，填写图片模型名和画面描述。',
+  'cover.invalidImage': '请使用有效的 PNG、JPEG 或 WebP 图片（不超过 10 MB、4000 万像素）。',
+  'cover.conflict': '封面已被其他操作修改。请关闭后重新打开，再选择要采用的封面。',
+  'cover.emptyResponse': '接口未返回有效的图片数据。请确认模型支持图像生成及 base64 图片返回。',
+  'cover.responseTooLarge': '返回的图片过大，请换用较小尺寸。',
+  'cover.unsupportedProvider': '封面生成需要 OpenAI 或自定义兼容图片接口。',
+  'cover.invalidEndpoint': '图片接口地址无效，请在模型管理中检查。',
+  'cover.invalidKey': '无法读取接口密钥，请在模型管理中重新保存。',
+  'cover.providerFailed': '图片接口返回 HTTP {{status}}，请检查模型名、尺寸、权限与额度。',
+  'cover.timedOut': '封面生成超时，请检查接口后再试。',
+  'cover.connectionFailed': '连接图片接口失败，请检查模型配置与网络。',
+  'cover.importFailed': '无法读取图片，请换一张 PNG、JPEG 或 WebP 图片。',
+  'cover.saved': '封面已保存',
+  'cover.loadFailed': '读取图片接口配置失败，请重试。',
+  'cover.saveFailed': '保存封面失败，请重试。',
   ...AUTHOR_USER_FACING_MESSAGES,
   ...RUNTIME_USER_FACING_MESSAGES,
   ...USER_FACING_SERVICE_MESSAGES,

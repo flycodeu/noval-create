@@ -8,11 +8,19 @@
 .novel-list-page__toolbar-field--search { flex: 1 1 240px; max-width: 480px; }
 .novel-list-page__toolbar .ant-select { min-width: 118px; }
 .novel-library-count { margin-left: auto; color: var(--text-muted); font-size: 12px; }
-.novel-list-page__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 24px; }
-.novel-list-page .novel-project-card { border-radius: 8px; padding: 24px; box-shadow: none; border-top: 3px solid var(--accent); grid-template-rows: auto minmax(64px, 1fr) auto auto; cursor: default; }
-.novel-list-page .novel-project-card:hover { transform: none; box-shadow: none; border-color: var(--border-default); border-top-color: var(--accent); }
+.novel-list-page__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr)); gap: 0 40px; }
+.novel-list-page .novel-project-card { border-radius: 0; padding: 30px 0; box-shadow: none; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; grid-template-columns: 136px minmax(0, 1fr); grid-template-rows: auto; gap: 24px; cursor: default; align-items: start; }
+.novel-list-page .novel-project-card:hover { transform: none; box-shadow: none; border-color: var(--border-default); }
+.novel-project-card__cover { padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 4px; width: 100%; }
+.novel-project-card__cover:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.novel-project-card__body { display: grid; gap: 14px; min-width: 0; }
+.novel-list-page .novel-project-card__title { font: 600 24px/1.4 'Noto Serif SC', 'Songti SC', serif; }
+.novel-project-card__genre { color: var(--text-muted); font-size: 12px; line-height: 22px; }
+.novel-list-page .novel-project-card__actions { flex-direction: row; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.novel-list-page .novel-project-card__actions > .ant-btn { flex: none; width: auto; }
 .novel-project-card__synopsis { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.9; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-.novel-project-card__metadata { display: flex; gap: 16px; align-items: center; color: var(--text-muted); font-size: 12px; }
+.novel-project-card__metadata { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--text-muted); font-size: 12px; }
 .novel-create-form { margin-top: 24px; }
 .novel-create-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 650px) { .novel-list-page__header { align-items: flex-start; flex-direction: column; } .novel-create-pair { grid-template-columns: 1fr; gap: 0; } }
+@media (max-width: 600px) { .novel-list-page { padding: 24px 18px; }.novel-list-page .novel-project-card { grid-template-columns: 96px minmax(0, 1fr); gap: 18px; padding: 24px 0; }.novel-list-page .novel-project-card__title { font-size: 21px; }.novel-project-card__synopsis { -webkit-line-clamp: 3; font-size: 13px; }.novel-list-page .novel-project-card__actions .ant-btn { padding-inline: 10px; } }

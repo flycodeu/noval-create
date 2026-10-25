@@ -11,6 +11,8 @@ import { AuthorPage, EmptyWork, LoadFailure, RunProgress } from './shared'
 import { callAuthorTool, useCreativeWorkflow } from './workflow-client'
 import { buildStorySettingsPayload, parseStorySettingsDocument } from '../../../shared/story-settings'
 import ChapterIndexStatus from './ChapterIndexStatus'
+import NovelBookHeading from '../../../components/novel/NovelBookHeading'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 import './studio-workspace.css'
 
@@ -55,6 +57,7 @@ export default function AuthorStudio({ novelId }: { novelId: number }) {
 }
 
 function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: string }) {
+  const { notifyWorkspaceMutation } = useNovelWorkspaceActions()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const novel = useNovelStore((state) => state.currentNovel)
@@ -161,7 +164,9 @@ function StudioSession({ novelId, draftKey }: { novelId: number; draftKey: strin
     finally { if (epoch === nextPlanEpoch.current) setCheckingNextChapter(false) }
   }
 
-  return <AuthorPage title="创作台"><div className="studio-workbench">
+  return <AuthorPage title="创作台">
+    {novel?.id === novelId && <NovelBookHeading key={novelId} novel={novel} chapterCount={chapters.length} onOpenChapters={() => open('writing/editor')} onManageModels={() => navigate('/models')} onSaved={notifyWorkspaceMutation} />}
+    <div className="studio-workbench">
     <section className="studio-workbench__main" aria-label="本轮创作工作区">
     <section className="author-composer studio-composer" aria-label="本轮创作要求">
       <h2 className="studio-composer__heading"><label htmlFor="author-request">这一轮的要求</label></h2>

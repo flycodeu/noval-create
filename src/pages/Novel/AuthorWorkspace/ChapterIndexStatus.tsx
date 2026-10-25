@@ -13,6 +13,18 @@ interface IndexStatus {
   errors: Array<{ chapterId: number; message: string }>
 }
 
+function hasQueueActivity(status: IndexStatus | null): boolean {
+  if (!status) return false
+  return status.queue.pending + status.queue.processing + status.queue.failed > 0
+}
+
+function formatIndexSummary(status: IndexStatus | null, unavailable: boolean): string {
+  if (unavailable) return '旧章检索 · 更新后可用'
+  if (!status) return '旧章检索'
+  const queued = status.queue.pending + status.queue.processing
+  return `旧章检索 · ${status.keywordIndexedChapterCount}/${status.savedChapterCount} 章可检索${queued ? ' · 索引处理中' : ''}`
+}
+
 export default function ChapterIndexStatus({ novelId }: { novelId: number }) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useScopedState<IndexStatus | null>(novelId, null)
@@ -55,7 +67,7 @@ export default function ChapterIndexStatus({ novelId }: { novelId: number }) {
           const reload = refreshRequested
           refreshRequested = false
           if (reload) void load()
-          else if (openRef.current && statusRef.current && statusRef.current.queue.pending + statusRef.current.queue.processing + statusRef.current.queue.failed > 0) {
+          else if (openRef.current && hasQueueActivity(statusRef.current)) {
             clearTimeout(pollTimer.current)
             pollTimer.current = setTimeout(() => { void load() }, 5000)
           }
@@ -102,7 +114,7 @@ export default function ChapterIndexStatus({ novelId }: { novelId: number }) {
     if (next) refreshRef.current()
     else { clearTimeout(pollTimer.current); pollTimer.current = undefined }
   }}>
-    <summary>旧章检索{unavailable ? ' · 更新后可用' : status ? ` · ${status.keywordIndexedChapterCount}/${status.savedChapterCount} 章可检索${queued ? ' · 索引处理中' : ''}` : ''}</summary>
+    <summary>{formatIndexSummary(status, unavailable)}</summary>
     {open && <div aria-live="polite">
       {unavailable ? <p className="author-muted">更新后可用</p> : <>
         {!status && !error ? <Spin size="small" /> : status && <p className="author-muted">已保存 {status.savedChapterCount} 章 · 文字检索 {status.keywordIndexedChapterCount} 章 · 向量就绪 {status.vectorIndexedChapterCount} 章{queued > 0 ? ` · 处理中 ${queued} 章` : ''}{failures > 0 ? ` · 重试或失败 ${failures} 章` : ''}</p>}

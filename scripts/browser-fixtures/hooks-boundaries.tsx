@@ -10,6 +10,7 @@ import Versions from '../../src/pages/Novel/AuthorWorkspace/Versions'
 import Contracts from '../../src/pages/Novel/Contracts'
 import ChapterArrangement from '../../src/pages/Novel/AuthorWorkspace/ChapterArrangement'
 import Manuscript from '../../src/pages/Novel/AuthorWorkspace/Manuscript'
+import ReferenceExtraction from '../../src/pages/Novel/AuthorWorkspace/ReferenceExtraction'
 import StoryDesign from '../../src/pages/Novel/AuthorWorkspace/StoryDesign'
 import { useTimelineWorkspace } from '../../src/pages/Novel/Timeline/useTimelineWorkspace'
 import { useNovelStore } from '../../src/stores/novel.store'
@@ -201,6 +202,71 @@ async function manuscriptInitialRetry() {
   check(reads === 2 && document.querySelector<HTMLTextAreaElement>('textarea.author-manuscript__editor')?.value === 'typed during retry' && guard?.(), 'retry list response must not overwrite a newly edited manuscript')
 }
 
+async function manuscriptReviewSaveBoundary() {
+  const f = readFixtures()
+  const chapters = [1, 2].map(id => ({ id, novelId: 1, chapterNum: id, title: `chapter ${id}`, content: `body ${id}`, wordCount: 5 }))
+  const reviews: number[] = []
+  let pendingSave: ReturnType<typeof deferred<void>> | null = deferred<void>()
+  f.chapter.list = async () => chapters.map(chapter => ({ ...chapter }))
+  f.chapter.get = async (id: number) => ({ ...chapters[id - 1] })
+  f.chapter.update = async (id: number, patch: any) => { await pendingSave?.promise; Object.assign(chapters[id - 1], patch) }
+  f.agentTools = { call: async ({ toolId, input }: any) => {
+    if (toolId === 'novelforge.chapters.review') reviews.push(input.chapterId)
+    return { ok: true, data: { run: null, view: null, runs: [] } }
+  } }
+  let guard: (() => boolean) | null = null
+  let navigate!: ReturnType<typeof useNavigate>
+  function Nav() { const n = useNavigate(); useLayoutEffect(() => { navigate = n }); return null }
+  Object.assign(window, { electron: f })
+  await act(async () => root.render(<MemoryRouter initialEntries={['/?chapterId=1&panel=review']}><Nav /><NovelWorkspaceActionsContext.Provider value={{ ...actions, registerLeaveGuard(fn) { guard = fn } }}><Manuscript novelId={1} /></NovelWorkspaceActionsContext.Provider></MemoryRouter>))
+  const editor = () => document.querySelector<HTMLTextAreaElement>('textarea.author-manuscript__editor')
+  await type(editor(), 'first saved draft')
+  await click(button('仅评审第1章'))
+  await type(editor(), 'newer draft typed during save')
+  await act(async () => pendingSave!.resolve())
+  check(reviews.length === 0 && guard?.() && editor()?.value === 'newer draft typed during save', 'review must not start against an older save when newer edits remain')
+  check(chapters[0].content === 'first saved draft', 'in-flight save preserves its own snapshot without consuming subsequent edits')
+  pendingSave = null
+  await click(button('仅评审第1章'))
+  check(reviews.length === 1 && reviews[0] === 1 && !guard?.() && chapters[0].content === 'newer draft typed during save', 'retry saves the newest draft before reviewing the intended chapter')
+
+  await type(editor(), 'draft before chapter switch')
+  const pendingList = deferred<any[]>()
+  let listReads = 0
+  f.chapter.list = () => ++listReads === 1 ? pendingList.promise : Promise.resolve(chapters.map(chapter => ({ ...chapter })))
+  await click(button('仅评审第1章'))
+  check(listReads === 1 && !guard?.(), 'save reaches post-write refresh with a clean draft')
+  await act(async () => navigate('/?chapterId=2&panel=review'))
+  check(editor()?.value === 'body 2', 'chapter navigation loads the new target while the old refresh is pending')
+  await act(async () => pendingList.resolve(chapters.map(chapter => ({ ...chapter }))))
+  check(reviews.length === 1 && editor()?.value === 'body 2' && !guard?.(), 'finishing the old save cannot review the previous chapter or replace the new draft')
+}
+
+async function extractionPreviewCloseBoundary() {
+  const previews: Array<ReturnType<typeof deferred<any>>> = []
+  let starts = 0
+  Object.assign(window, { electron: { agentTools: { call: async ({ toolId }: any) => {
+    if (toolId === 'novelforge.research.extract_preview') {
+      const pending = deferred<any>(); previews.push(pending); return pending.promise
+    }
+    if (toolId === 'novelforge.research.extract') starts += 1
+    return { ok: true, data: { runs: [], run: { taskId: starts, status: 'running' } } }
+  } } } })
+  const render = (open: boolean) => root.render(<ReferenceExtraction novelId={1} open={open} onClose={() => {}} onSaved={async () => {}} />)
+  await act(async () => render(true))
+  await type(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="提炼原文"]'), 'reference text')
+  await click(button('开始提炼'))
+  check(previews.length === 1 && starts === 0, 'extraction checks the budget before starting a paid task')
+  await act(async () => render(false))
+  await act(async () => render(true))
+  await act(async () => previews[0].resolve({ ok: true, data: { budget: { estimatedTokens: 100, outputReserve: 100, fits: true } } }))
+  check(starts === 0, 'closing and reopening the dialog invalidates the pending preview instead of starting a hidden task')
+  await click(button('开始提炼'))
+  check(previews.length === 2, 'reopening permits a fresh budget check')
+  await act(async () => previews[1].resolve({ ok: true, data: { budget: { estimatedTokens: 100, outputReserve: 100, fits: true } } }))
+  check(starts === 1, 'only a still-current preview can start extraction')
+}
+
 async function otherFilteredDrafts() {
   for (const kind of ['faction', 'sceneTemplate'] as const) {
     await reset()
@@ -289,7 +355,7 @@ async function sceneContractSaving() {
 
 export async function runBoundaryTests(testRoot: Root) {
   root = testRoot
-  for (const test of [characterRoute, timelineSaving, glossaryFiltering, contractSaving, versionRetry, arrangementSaving, manuscriptInitialRetry, otherFilteredDrafts, storyDesignSaving, sceneContractSaving]) {
+  for (const test of [characterRoute, timelineSaving, glossaryFiltering, contractSaving, versionRetry, arrangementSaving, manuscriptInitialRetry, manuscriptReviewSaveBoundary, extractionPreviewCloseBoundary, otherFilteredDrafts, storyDesignSaving, sceneContractSaving]) {
     await reset()
     await test()
   }

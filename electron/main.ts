@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, screen } from 'electron'
+import * as novelCoverService from './services/novel-cover.service'
 import fs from 'fs'
 import path from 'path'
 import { pathToFileURL } from 'node:url'
@@ -648,6 +649,8 @@ function registerIpcHandlers() {
 function registerNovelAndStructureIpcHandlers(handle: IpcHandle) {
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
+  handle('novel:generateCover', (_, id, input) => novelCoverService.generateNovelCover(requireId(id), input))
+  handle('novel:setCover', (_, id, input) => novelCoverService.setNovelCover(requireId(id), input))
   handle('novel:create', (_, data) => novelService.createNovel(parseObjectPayload<NovelCreateInput>(data, 'data')))
   handle('novel:update', (_, id, data, options) => novelService.updateNovel(requireId(id), data, options ?? undefined))
   handle('novel:delete', (_, id) => novelService.deleteNovel(requireId(id)))

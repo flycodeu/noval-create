@@ -4,6 +4,8 @@
 
 技术栈：Electron、React、TypeScript、SQLite。
 
+作品书架和创作台支持竖版封面、书名、简介及目录入口。「设置封面」可上传图片，也可复用模型管理中的 OpenAI / 自定义兼容接口生成候选，预览后点击「采用封面」保存。生成需要填写图片模型名，接口须支持 `/images/generations` 和 base64 图片返回；不改变既有文字模型配置、正文或设定。
+
 ## 安装与更新
 
 从 [GitHub Releases](https://github.com/flycodeu/noval-create/releases/latest) 下载：

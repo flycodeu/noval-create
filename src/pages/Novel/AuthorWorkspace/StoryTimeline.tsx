@@ -58,8 +58,8 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   useEffect(() => { eventListRef.current?.scrollTo({ top: 0 }) }, [scope, page])
   const open = (route: string) => navigate(buildWorkspaceRoute(novelId, route))
   const discuss = (entry?: StoryTimelineEntry) => setTaskTarget({ title: entry ? entry.entity.name : '小说时间设计', stage: entry ? 'events' : 'world_rules', ...(entry?.recordedChapterNum != null ? { atChapter: entry.recordedChapterNum } : {}), request: entry
-    ? `结合现有正文检查事件“${entry.entity.name}”（${entry.entity.id}）的发生时间、章节锚点、因果顺序、参与人物和地点。${entry.planningKind ? '此条是作者规划；资料关联章位是规划登记或可见锚点，不代表事件在该章发生，不把整卷或单元规划塞入该章。' : ''}区分已经写定与计划；仅在有依据时细化日期。只有先后证据时使用chronologyOrder表达项目内事件先后，不猜日期，也不把列表sortOrder当时间证据；保留原有事实和正文。`
-    : '结合已有正文和世界设定梳理小说时间：朝代、纪年、开篇时间、当前故事时间及对应已写章序。使用 worldRules.timelineConfig 的 dynastyName、storyStartLabel、currentTimeLabel、currentTimeChapterNum、currentTimeEvidence 保存；当前时间必须有原文或作者设定依据，不能取历史事件时间、电脑日期或数据库记录时间。时间不足先输出候选和缺口，不改正文。' })
+    ? `结合现有正文与设定，核对事件“${entry.entity.name}”的发生时间、关联章节、前因后果及参与人物地点。${entry.planningKind ? '此条为作者规划，请保持规划定位，不提前计入已写章节。' : ''}请根据原文依据梳理先后顺序，保留原有事实与正文。`
+    : '结合已有正文和世界设定梳理小说时间：朝代、纪年、开篇时间、当前故事时间及对应已写章序；若时间依据不足，请先输出候选方案与待确认缺口，不改正文。' })
   const selectGroup = (key: string) => { const next = new URLSearchParams(params); next.set('group', key); next.delete('event'); setParams(next) }
   const selectEvent = (entry: StoryTimelineEntry) => { const next = new URLSearchParams(params); next.set('event', entry.entity.id); if (group) next.set('group', group.key); setParams(next) }
   const closeDetail = () => {
@@ -101,7 +101,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
           return rows.length > 0 && <section key={String(planning)}><h2>{planning ? '作者规划' : mode === 'chapter' ? '正文与章节' : '已登记故事时间'}</h2>{rows.map(item => <button type="button" key={item.key} className={group?.key === item.key ? 'is-selected' : ''} aria-current={group?.key === item.key ? 'true' : undefined} onClick={() => selectGroup(item.key)}><span><strong>{item.title}</strong>{item.chapter && <small>{chapterWritingLabel(item.chapter)}</small>}</span><em>{item.entries.length}</em></button>)}</section>
         })}{!groups.length && <EmptyWork title="没有匹配的分组" />}</nav>
         <section className="story-timeline-track" aria-label={mode === 'chapter' ? '章节事件' : '故事时间事件'}>
-          {group ? <><header className="story-timeline-group__heading"><div><span className="author-eyebrow">{group.planning ? '作者规划 · 不代表已发生正文' : group.chapter ? chapterWritingLabel(group.chapter) : '以已保存依据为准'}</span><h2>{group.title}</h2></div><span>{group.entries.length} 条事件</span>{group.chapter && <Button onClick={() => open(`writing/editor?chapterId=${group.chapter!.id}&panel=arrangement`)}>章节安排</Button>}</header>
+          {group ? <><header className="story-timeline-group__heading"><div><span className="author-eyebrow">{group.planning ? '作者规划 · 不代表已发生正文' : group.chapter ? chapterWritingLabel(group.chapter) : '故事时间线'}</span><h2>{group.title}</h2></div><span>{group.entries.length} 条事件</span>{group.chapter && <Button onClick={() => open(`writing/editor?chapterId=${group.chapter!.id}&panel=arrangement`)}>章节安排</Button>}</header>
             <div ref={eventListRef} className="story-timeline-event-list">{visible.length ? visible.map(eventCard) : <EmptyWork title={group.chapter && !group.chapter.wordCount ? '本章待写，尚未登记发生事件' : '尚未登记本组事件'} />}</div>
             {group.entries.length > PAGE_SIZE && <nav className="story-timeline-pagination" aria-label="时间轴事件分页"><Pagination size="small" current={page} pageSize={PAGE_SIZE} total={group.entries.length} showSizeChanger={false} showTotal={(total, range) => `${range[0]}–${range[1]} / ${total}`} onChange={next => setPaging({ scope, selection: requestedEventId, page: next })} /></nav>}
           </> : <EmptyWork title={entries.length ? '没有符合条件的事件' : '尚未登记事件'} />}

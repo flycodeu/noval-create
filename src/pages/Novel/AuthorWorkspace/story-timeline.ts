@@ -139,17 +139,22 @@ function eventLinks(entity: StoryAtlasEntity, snapshot: StoryAtlasSnapshot): Sto
   return [...links.values()]
 }
 
+function resolveTimelineEventState(entity: StoryAtlasEntity, planningKind: string | null, chapterNum: number | null, chapter: Chapter | null): StoryTimelineState {
+  const status = text(entity.attributes.status)
+  const isPlanned = Boolean(planningKind) || entity.status === 'planned' || ['planned', 'seeded'].includes(status)
+  // Confirmed facts anchored to unwritten chapters are still future plans from the reader's position.
+  if (isPlanned || chapterNum != null && chapterNum > 0 && (!chapter || !chapterHasProse(chapter))) return 'planned'
+  if (chapter && chapterHasProse(chapter) || ['written', 'resolved'].includes(status)) return 'occurred'
+  return 'unplaced'
+}
+
 export function buildStoryTimelineEntries(snapshot: StoryAtlasSnapshot, chapters: Chapter[]): StoryTimelineEntry[] {
   return snapshot.entities.filter(entity => entity.kind === 'event').map(entity => {
     const recordedChapterNum = chapterAnchor(entity, chapters)
     const planningKind = authorPlanningKind(entity)
     const chapterNum = planningKind ? null : recordedChapterNum
     const chapter = chapters.find(item => item.chapterNum === chapterNum) || null
-    const status = text(entity.attributes.status)
-    const isPlanned = Boolean(planningKind) || entity.status === 'planned' || ['planned', 'seeded'].includes(status)
-    // Confirmed facts anchored to unwritten chapters are still future plans from the reader's position.
-    const state: StoryTimelineState = isPlanned || chapterNum != null && chapterNum > 0 && (!chapter || !chapterHasProse(chapter)) ? 'planned'
-      : chapter && chapterHasProse(chapter) || ['written', 'resolved'].includes(status) ? 'occurred' : 'unplaced'
+    const state = resolveTimelineEventState(entity, planningKind, chapterNum, chapter)
     const timeLabel = storyTimeLabel(entity.attributes.timeLabel)
     const relativeDay = entity.attributes.relativeDay
     const hasRelativeDay = typeof relativeDay === 'number' && Number.isFinite(relativeDay)

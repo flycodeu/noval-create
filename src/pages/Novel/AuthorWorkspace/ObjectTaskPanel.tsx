@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Drawer, Input, InputNumber, Tabs } from 'antd'
 import { CREATIVE_STAGE_LABELS } from '../../../shared/creative-workflow'
 import { useCreativeWorkflow } from './workflow-client'
+import { runRecoveryAction } from './run-presentation'
 import { LoadFailure, RunProgress } from './shared'
 import CandidateReview from './CandidateReview'
 import type { ObjectTaskTarget } from './object-task'
@@ -17,6 +18,11 @@ export default function ObjectTaskPanel({ novelId, target, onClose, onApplied }:
   </Drawer>
 }
 
+function resolveSelectedArtifactId(selected: { source: string | undefined; id: string | undefined }, runArtifactId: string | undefined, initialArtifactId: string | undefined): string | undefined {
+  if (selected.source === runArtifactId) return selected.id || runArtifactId
+  return runArtifactId || initialArtifactId
+}
+
 function TaskSession({ novelId, initialTarget, onApplied }: { novelId: number; initialTarget: ObjectTaskTarget; onApplied?: () => void }) {
   const [target, setTarget] = useState(initialTarget)
   const [request, setRequest] = useState(initialTarget.request)
@@ -28,13 +34,22 @@ function TaskSession({ novelId, initialTarget, onApplied }: { novelId: number; i
   const workflow = useCreativeWorkflow(novelId, runId)
   const run = runId && workflow.run?.runId === runId ? workflow.run : null
   const started = useRef(false)
-  const artifactId = selectedArtifactId.source === run?.artifactId ? selectedArtifactId.id || run?.artifactId : run?.artifactId || initialTarget.artifactId
+  const autoOpenedArtifact = useRef<string | undefined>(initialTarget.artifactId)
+  const artifactId = resolveSelectedArtifactId(selectedArtifactId, run?.artifactId, initialTarget.artifactId)
   const selectArtifact = (id: string | undefined) => setArtifactId({ source: run?.artifactId, id })
+  const isChapterStage = target.stage === 'chapter'
+  const countLocked = isChapterStage || workflow.active || workflow.submitting || Boolean(target.changeScope || target.sourceArtifactId)
+  useEffect(() => {
+    if (!workflow.active && run?.artifactId && runRecoveryAction(run) === 'inspect' && autoOpenedArtifact.current !== run.artifactId) {
+      autoOpenedArtifact.current = run.artifactId
+      setTab('candidate')
+    }
+  }, [workflow.active, run])
   const start = async () => {
     if (started.current || !request.trim() || workflow.active || workflow.submitting) return
     started.current = true
     try {
-      const next = await workflow.start({ stage: target.stage, request: request.trim(), count: target.stage === 'chapter' ? 1 : count, atChapter: target.atChapter, autoApply,
+      const next = await workflow.start({ stage: target.stage, request: request.trim(), count: isChapterStage ? 1 : count, atChapter: target.atChapter, autoApply,
         changeScope: target.changeScope, chapterRevision: target.chapterRevision, sourceArtifactId: target.sourceArtifactId, revisionIssueIds: target.revisionIssueIds })
       if (next) { setRunId(next.runId); selectArtifact(next.artifactId); setTab('progress') }
     } finally { started.current = false }
@@ -45,7 +60,7 @@ function TaskSession({ novelId, initialTarget, onApplied }: { novelId: number; i
     {workflow.error && <LoadFailure message={workflow.error} retry={() => void workflow.refresh(runId)} />}
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'request', label: '本轮要求', children: <section className="object-task-request"><label htmlFor="object-task-request">这一轮怎样调整？</label><Input.TextArea id="object-task-request" value={request} disabled={workflow.submitting || workflow.active} onChange={event => setRequest(event.target.value)} autoSize={{ minRows: 6, maxRows: 16 }} />
-        <details className="author-disclosure"><summary>本轮设置</summary><div className="object-task-options"><label>本轮数量 <InputNumber aria-label="本轮生成数量" min={1} max={target.stage === 'chapter' ? 1 : 30} value={count} disabled={target.stage === 'chapter' || workflow.active || workflow.submitting || Boolean(target.changeScope || target.sourceArtifactId)} onChange={value => setCount(value || 1)} /></label><Checkbox checked={autoApply} disabled={workflow.active || workflow.submitting} onChange={event => setAutoApply(event.target.checked)}>模型评审通过后应用</Checkbox></div></details>
+        <details className="author-disclosure"><summary>本轮设置</summary><div className="object-task-options"><label>本轮数量 <InputNumber aria-label="本轮生成数量" min={1} max={isChapterStage ? 1 : 30} value={count} disabled={countLocked} onChange={value => setCount(value || 1)} /></label><Checkbox checked={autoApply} disabled={workflow.active || workflow.submitting} onChange={event => setAutoApply(event.target.checked)}>模型评审通过后应用</Checkbox></div></details>
         {workflow.active && !run && <p className="author-muted">作品有任务正在运行；请在创作台查看，完成后再开始这一轮。</p>}
         <footer className="object-task-submit"><span>{autoApply ? '评审通过后保存' : '先保存为候选，确认后应用'}</span><Button type="primary" loading={workflow.submitting} disabled={!request.trim() || workflow.active} onClick={() => void start()}>开始这一轮</Button></footer>
       </section> },

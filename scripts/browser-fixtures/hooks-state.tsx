@@ -1,6 +1,7 @@
 import { runEditableListTests } from './hooks-editable-lists'
 import { runLifecycleTests } from './hooks-lifecycles'
 import { runBoundaryTests } from './hooks-boundaries'
+import { runPageErrorTests } from './hooks-page-errors'
 import { runLoadFormTests } from './hooks-loads-forms'
 import { runDashboardDraftTests } from './hooks-dashboard-drafts'
 import React, { act, useEffect, useLayoutEffect, useState } from 'react'
@@ -377,6 +378,7 @@ Object.assign(window, { runHooksStateTests: async () => {
   await runLifecycleTests(root)
   await runEditableListTests(root)
   await runBoundaryTests(root)
+  await runPageErrorTests(root)
   await taskDetailTests()
   await patchIsolationTests()
   return 'Hooks browser regressions passed: scoped pagination, async snapshot refresh, external revision and isolation, growth/arc/resistance draft refresh and save, workflow polling and review isolation, stage context and quality isolation, atlas draft preservation, routed composer, endgame and volume drafts, imported details, source key draft, chat/quality lifecycles, version feedback and races, timeline cascade, contracts, editable lists, routed identity and pending-save drafts, recoverable load failures, batch selection, task polling, task details, AI patch isolation'

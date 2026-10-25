@@ -26,7 +26,7 @@
 .author-style-detail blockquote { margin: 0; border-left: 2px solid var(--accent); padding: 4px 18px; color: var(--text-secondary); white-space: pre-wrap; }
 .author-style-preferences { border-block: 1px solid var(--border-default); padding: 12px 0; }
 .author-style-preferences summary { font-size: 13px; cursor: pointer; color: var(--text-secondary); }
-.author-style-preferences[open] > .ant-btn { margin-top: 12px; }
+.author-style-preferences__body { margin-top: 12px; display: grid; gap: 10px; }
 @media (max-width: 760px) {
   .author-style-workspace { padding: 18px; }
   .author-style-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }

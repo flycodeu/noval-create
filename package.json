@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "2.4.45",
+  "version": "2.4.46",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -37,7 +37,7 @@
     "generate:icon": "python scripts/generate-app-icon.py",
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
-    "test": "npm run test:unit && npm run test:smoke && npm run test:reader-first",
+    "test": "npm run test:unit && npm run test:smoke && npm run test:reader-first && npm run test:novel-cover",
     "test:global-ui": "electron scripts/global-interface-ui.test.cjs",
     "test:model-manager": "electron scripts/model-manager-ui.test.cjs",
     "test:workspace-layout": "electron scripts/workspace-layout-ui.test.cjs",
@@ -93,7 +93,8 @@
     "test:author-library": "electron scripts/author-library.test.cjs && electron scripts/foreshadow-merge.test.cjs",
     "test:author-assist": "vitest run src/shared/author-assist.test.ts && electron scripts/author-assist.test.cjs",
     "test:dependency-proxy": "node scripts/dependency-proxy.test.cjs",
-    "test:hooks-state": "electron scripts/hooks-state.test.cjs"
+    "test:hooks-state": "electron scripts/hooks-state.test.cjs",
+    "test:novel-cover": "electron scripts/novel-cover.test.cjs && electron scripts/novel-cover-ui.test.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",
