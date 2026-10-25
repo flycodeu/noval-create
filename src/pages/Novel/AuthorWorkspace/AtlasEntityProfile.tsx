@@ -9,7 +9,7 @@ import { recordOf } from './content-document'
 import { AtlasFields } from './AtlasFields'
 import { AtlasPortrait } from './AtlasPortrait'
 
-type Props = { editingDisabled?: boolean; entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; chapters: Array<{ id: number; chapterNum: number }>; onOpen: (entity: StoryAtlasEntity) => void; onEdit: () => void; onDiscuss: () => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity) => void; onBack?: () => void; onShowRules?: () => void; onShowResearch?: () => void }
+type Props = { initialSection?: AtlasProfileSection; editingDisabled?: boolean; entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; chapters: Array<{ id: number; chapterNum: number }>; onOpen: (entity: StoryAtlasEntity) => void; onEdit: () => void; onDiscuss: () => void; onRelation: (relation: StoryAtlasRelation) => void; onDrill: (entity: StoryAtlasEntity) => void; onBack?: () => void; onShowRules?: () => void; onShowResearch?: () => void }
 
 function Connections({ title, links, empty, onOpen, onRelation }: { title: string; links: AtlasLink[]; empty: string; onOpen: Props['onOpen']; onRelation: Props['onRelation'] }) {
   return <section className="atlas-profile-section"><h3>{title}</h3>{links.length ? <div className="atlas-linked-list">{links.map((link, index) => <div key={`${link.entity.id}:${link.relation?.id || index}`}><button type="button" onClick={() => onOpen(link.entity)}><strong>{link.entity.name}</strong><span>{link.label}{link.planned ? ' · 计划' : ''}</span></button>{link.relation && <button type="button" className="atlas-text-link" onClick={() => onRelation(link.relation!)}>关联详情</button>}</div>)}</div> : <p className="atlas-empty-note">{empty}</p>}</section>
@@ -26,7 +26,7 @@ function OrganizationStructure({ entity, snapshot, chapters, onOpen, onRelation 
     <section className="atlas-profile-section"><h3>岗位与职责</h3>{positions.length ? <div className="atlas-position-list">{positions.map((position, index) => {
       const assigned = members.filter(item => item.relation?.attributes.positionId === position.id)
       const { id: _id, title: _title, status: _status, ...details } = position
-      return <article key={String(position.id || index)}><header><strong>{String(position.title || '尚未命名岗位')}</strong><span>{position.status === 'planned' ? '计划设置' : '已设岗位'}</span></header><p className="atlas-position-occupants">{assigned.length ? assigned.map(item => `${item.entity.name}${item.planned ? '（计划任职）' : ''}`).join('、') : position.status === 'planned' ? '人员待定' : '尚未记录任职人员'}</p><AtlasFields values={details} entities={snapshot.entities} chapters={chapters} positions={positionNames} onOpen={onOpen} /></article>
+      return <article key={String(position.id || index)}><header><strong>{String(position.title || '尚未命名岗位')}</strong><span>{position.status === 'planned' ? '计划设置' : '已设岗位'}</span></header><p className="atlas-position-occupants">{assigned.length ? assigned.map(item => `${item.entity.name} · ${item.relation?.label || item.label}${item.planned ? '（规划经历）' : ''}`).join('、') : position.status === 'planned' ? '人员待定' : '尚未记录任职人员'}</p><AtlasFields values={details} entities={snapshot.entities} chapters={chapters} positions={positionNames} onOpen={onOpen} /></article>
     })}</div> : <p className="atlas-empty-note">尚未设计岗位、职责与汇报关系。</p>}</section>
     <section className="atlas-profile-section"><h3>部门与分部</h3>{departments.length ? <div className="atlas-linked-list">{departments.map(item => <div key={item.id}><button type="button" onClick={() => onOpen(item)}><strong>{item.name}</strong><span>{item.status === 'planned' ? '计划' : '已确认'}</span></button></div>)}</div> : <p className="atlas-empty-note">尚未记录下属部门或分部。</p>}</section>
   </>
@@ -76,9 +76,9 @@ function CharacterProfileBody({
       ))}
       {section === 'relationships' && (
         <>
-          <Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="暂无地域关联" onOpen={onOpen} onRelation={onRelation} />
-          <Connections title="所属组织" links={links.filter(item => item.entity.kind === 'faction')} empty="尚未记录组织归属。" onOpen={onOpen} onRelation={onRelation} />
           <Connections title="人物关系" links={links.filter(item => item.entity.kind === 'character')} empty="尚未记录与其他人物的关系。" onOpen={onOpen} onRelation={onRelation} />
+          <Connections title="所属组织" links={links.filter(item => item.entity.kind === 'faction')} empty="尚未记录组织归属。" onOpen={onOpen} onRelation={onRelation} />
+          <Connections title="居住与活动" links={links.filter(item => item.entity.kind === 'location')} empty="暂无地域关联" onOpen={onOpen} onRelation={onRelation} />
         </>
       )}
       {section === 'planning' && (
@@ -130,7 +130,7 @@ function NonCharacterProfileBody({
 
 export function AtlasEntityProfile(props: Props) {
   const { entity, snapshot, chapters, onOpen, onEdit, onDiscuss, onRelation, onDrill } = props
-  const [section, setSection] = useState<AtlasProfileSection>('overview')
+  const [section, setSection] = useState<AtlasProfileSection>(props.initialSection || 'overview')
   const character = entity.kind === 'character'
   const links = atlasLinks(snapshot, entity)
   const parent = snapshot.entities.find(item => item.id === entity.parentId)

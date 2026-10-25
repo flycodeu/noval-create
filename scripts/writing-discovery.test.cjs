@@ -143,7 +143,7 @@ async function main() {
     if (process.env.NOVELFORGE_DISCOVERY_BROWSER_FIXTURE === '1') { keep = true; console.log(`BROWSER_FIXTURE ${JSON.stringify({ userData: temp, novelId, chapterId, pid: process.pid })}`) }
   } finally {
     closeDb()
-    if (!keep) { server.closeAllConnections(); server.close(); if (!path.resolve(temp).startsWith(base + path.sep)) throw new Error('Unsafe cleanup'); fs.rmSync(temp, { recursive: true, force: true }) }
+    if (!keep) { server.closeAllConnections(); server.close(); if (!path.resolve(temp).startsWith(base + path.sep)) throw new Error('Unsafe cleanup'); fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) }
   }
 }
 main().then(() => { if (!keep) app.exit(0) }, error => { console.error(error); app.exit(1) })

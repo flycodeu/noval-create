@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { GeographicAtlas } from './GeographicAtlas'
-import { atlasGeography, geographicLayer, geographicSettlements, geographicDescendants, geographicLabelPositions, geographicDefaultScope, geographicAppearance, geographicUnmappedAnchor, mapArea } from './geographic-map'
+import { atlasGeography, geographicLayer, geographicSettlements, geographicDescendants, geographicLabelPositions, geographicDefaultScope, geographicPolities, geographicAppearance, geographicUnmappedAnchor, mapArea } from './geographic-map'
 
 const entity = (id: string, parentId: string | null, attributes: Record<string, unknown> = {}): StoryAtlasEntity => ({ id, parentId, attributes, kind: 'location', name: id, summary: '', status: 'confirmed', effectiveFromChapter: 0, source: { kind: 'test' } })
 const snapshot = (entities: StoryAtlasEntity[]): StoryAtlasSnapshot => ({ novelId: 1, contextVersion: 1, atChapter: 0, entities, relations: [], locationChildren: [], diagnostics: [] })
@@ -14,6 +14,40 @@ describe('geographic atlas display', () => {
     expect(geographicDefaultScope(snapshot([country, region]))).toBe('country')
     expect(geographicDefaultScope(snapshot([region]))).toBeNull()
     expect(geographicDefaultScope(snapshot([country, entity('other-country', null, { nodeType: 'nation' })]))).toBeNull()
+  })
+  it('indexes a nested autonomous polity without changing its geographic parent or creating a second place', () => {
+    const country = entity('景朝', null, { locationType: 'country' })
+    const wetland = entity('芦荡', '景朝', { locationType: 'region' })
+    const federation = entity('辖水', '芦荡', { locationType: 'territory', politicalStatus: { kind: 'autonomous_federation', shortName: '栖泽联国', label: '自治联国' } })
+    const town = entity('商埠', '芦荡', { locationType: 'town', politicalStatus: { kind: 'trade_outpost' } })
+    const atlas = snapshot([country, wetland, federation, town])
+    expect(geographicPolities(atlas).map(polity => [polity.entity.id, polity.name, polity.label])).toEqual([['景朝', '景朝', '国家'], ['辖水', '栖泽联国', '自治联国']])
+    expect(geographicDefaultScope(atlas)).toBeNull()
+    expect(federation.parentId).toBe('芦荡')
+  })
+  it('offers unmeasured foreign polities without drawing a fictitious common world scale', () => {
+    const country = entity('景朝', null, { locationType: 'country', geography: { mapFrame: { widthKm: 1100, heightKm: 850 }, boundary: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] } })
+    const foreign = entity('泊岬城盟', null, { locationType: 'country', politicalStatus: { kind: 'confederation', label: '城邦联盟' } })
+    const atlas = snapshot([country, foreign])
+    const markup = renderToStaticMarkup(createElement(GeographicAtlas, { snapshot: atlas, parentId: null, selectedId: null, onSelect: () => {}, onDrill: () => {}, onRelation: () => {}, onGenerate: () => {} }))
+    expect(markup).toContain('国家与政体总览')
+    expect(markup).toContain('泊岬城盟')
+    expect(markup).toContain('城邦联盟')
+    expect(markup).toContain('边界未测绘')
+    expect(markup).not.toContain('geographic-canvas')
+    expect(markup).not.toContain('1100')
+    expect(geographicLayer(atlas, null).find(item => item.entity.id === foreign.id)?.center).toBeUndefined()
+  })
+  it('keeps direct polity navigation inside a nested territory and marks only the closest polity active', () => {
+    const atlas = snapshot([
+      entity('景朝', null, { locationType: 'country' }),
+      entity('芦荡', '景朝', { locationType: 'region' }),
+      entity('辖水', '芦荡', { locationType: 'territory', politicalStatus: { kind: 'autonomous_federation', shortName: '栖泽联国', label: '自治联国' } }),
+    ])
+    const markup = renderToStaticMarkup(createElement(GeographicAtlas, { snapshot: atlas, parentId: '辖水', selectedId: null, onSelect: () => {}, onDrill: () => {}, onRelation: () => {}, onGenerate: () => {} }))
+    expect(markup).toContain('国家与政体索引')
+    expect(markup).toContain('aria-current="page">栖泽联国')
+    expect(markup).not.toContain('aria-current="page">景朝')
   })
   it('only derives terrain colours from saved terrain, never a suggestive place name', () => {
     const place = entity('place', null)

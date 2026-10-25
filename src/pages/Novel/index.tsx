@@ -25,6 +25,7 @@ import './AuthorWorkspace/author-workspace.css'
 const WORKSPACE_STAGE_LOADERS = {
   guide: () => import('./AuthorWorkspace/Studio'),
   'story-design': () => import('./AuthorWorkspace/StoryDesign'),
+  outline: () => import('./AuthorWorkspace/StoryOutline'),
   'narrative-board': () => import('./AuthorWorkspace/WorldAndCast'),
   timeline: () => import('./AuthorWorkspace/StoryTimeline'),
   writing: () => import('./AuthorWorkspace/Manuscript'),

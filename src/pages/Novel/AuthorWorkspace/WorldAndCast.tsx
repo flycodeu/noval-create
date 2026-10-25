@@ -1,6 +1,6 @@
 import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import { useScopedState } from '@/hooks/useScopedState'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Checkbox, Drawer, Modal, Select, Spin } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
@@ -19,6 +19,7 @@ import WorldRules, { type WorldRulesEditState } from './WorldRules'
 import ResearchLibrary from './ResearchLibrary'
 import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 import { AtlasWorkbench } from './AtlasWorkbench'
+import { atlasWorkspaceSearch, readAtlasWorkspaceMemory, restoreAtlasWorkspaceEntry, writeAtlasWorkspaceMemory } from './atlas-workspace-memory'
 import './world-workspace.css'
 
 const STAGES: Record<StoryAtlasEntity['kind'], CreativeStage> = { location: 'map', character: 'characters', faction: 'factions', item: 'items', event: 'events' }
@@ -30,13 +31,29 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   const selectedId = params.get('entity')
   const includePlanned = atlasIncludesPlanned(params)
   const queryScope = JSON.stringify([novelId, atChapter, includePlanned])
-  const [relation, setRelation] = useScopedState<StoryAtlasRelation | null>(queryScope, null)
+  const relationScope = JSON.stringify([queryScope, tab, params.get('location')])
+  const [relation, setRelation] = useScopedState<StoryAtlasRelation | null>(relationScope, null)
   const [editing, setEditing] = useScopedState<{ entity: StoryAtlasEntity; snapshot: StoryAtlasSnapshot; atChapter: number | null } | null>(novelId, null)
   const [editingRelation, setEditingRelation] = useScopedState<{ relation: StoryAtlasRelation; snapshot: StoryAtlasSnapshot; atChapter: number | null } | null>(novelId, null)
   const [task, setTask] = useState<ObjectTaskTarget | null>(null)
   const [reference, setReference] = useState<'rules' | 'research' | null>(null)
   const [rulesEdit, setRulesEdit] = useState<WorldRulesEditState>({ dirty: false, saving: false })
+  const remembered = useMemo(() => readAtlasWorkspaceMemory(novelId), [novelId])
   const selectedByKind = useRef<Partial<Record<StoryAtlasEntity['kind'], string>>>({})
+  const entry = useRef<{ novelId: number; restoredSearch: string } | null>(null)
+  useLayoutEffect(() => {
+    if (entry.current?.novelId === novelId) return
+    const next = restoreAtlasWorkspaceEntry(params, remembered)
+    selectedByKind.current = { ...remembered.selected }
+    entry.current = { novelId, restoredSearch: next.toString() }
+    if (next.toString() !== params.toString()) setParams(next, { replace: true })
+  }, [novelId, params, remembered, setParams])
+  useEffect(() => {
+    if (entry.current?.novelId !== novelId) return
+    if (entry.current.restoredSearch && params.toString() !== entry.current.restoredSearch) return
+    entry.current.restoredSearch = ''
+    writeAtlasWorkspaceMemory(novelId, { search: atlasWorkspaceSearch(params), selected: { ...selectedByKind.current } })
+  }, [novelId, params, remembered])
   const read = useCallback(async () => {
     const [snapshot, chapters] = await Promise.all([
       window.electron.storyAtlas.query({ novelId, ...(atChapter != null ? { atChapter } : {}), includePlanned }),
@@ -53,7 +70,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
   useEffect(() => { const refresh = () => { void load() }; window.addEventListener('novelforge:creative-completed', refresh); window.addEventListener('focus', refresh); return () => { window.removeEventListener('novelforge:creative-completed', refresh); window.removeEventListener('focus', refresh) } }, [load])
   const activeKind = ATLAS_TABS.find(item => item.key === tab)?.kind || 'location'
   const selected = snapshot?.entities.find(item => item.id === selectedId) || null
-  useEffect(() => { if (selected) selectedByKind.current[selected.kind] = selected.id }, [selected])
+  useEffect(() => { if (selected) { selectedByKind.current[selected.kind] = selected.id; writeAtlasWorkspaceMemory(novelId, { ...readAtlasWorkspaceMemory(novelId), selected: { ...selectedByKind.current } }) } }, [selected, novelId])
   const isGraph = tab === 'map' || tab === 'relationships'
   const updateParams = (change: (next: URLSearchParams) => void) => { const next = new URLSearchParams(params); change(next); setParams(next) }
   const select = (entity: StoryAtlasEntity) => { updateParams(next => next.set('entity', entity.id)); requestAnimationFrame(() => document.getElementById('author-entity-inspector')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })) }
@@ -90,7 +107,7 @@ export default function WorldAndCast({ novelId }: { novelId: number }) {
     {!snapshot ? loading ? <div className="author-loading"><Spin /></div> : <EmptyWork title="资料暂未读到" /> : <>
       <AtlasWorkbench resizable={isGraph && !geographic} className={`atlas-workbench ${selected ? 'has-selection' : ''} ${geographic ? 'atlas-workbench--geography' : isGraph ? 'atlas-workbench--graph' : 'atlas-workbench--library'}`}>
         {geographic ? <GeographicAtlas snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : isGraph ? <WorldAtlasGraph key={tab} mode={tab} snapshot={snapshot} parentId={parentId} selectedId={selectedId} onSelect={select} onRelation={setRelation} onDrill={drill} onGenerate={generateTab} /> : <AtlasEntityLibrary key={tab} kind={activeKind} snapshot={snapshot} selectedId={selectedId} viewScope={queryScope} onSelect={select} onGenerate={generateTab} />}
-        {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={selected.id} entity={selected} snapshot={snapshot} chapters={chapters} editingDisabled={loading || Boolean(error)} onOpen={openEntity} onBack={() => updateParams(next => next.delete('entity'))} onShowRules={() => setReference('rules')} onShowResearch={() => setReference('research')} onEdit={() => { if (!loading && !error && snapshot != null) setEditing({ entity: selected, snapshot, atChapter }) }} onDiscuss={() => { if (!loading && !error) discuss(selected) }} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`} />}</section>}
+        {(!geographic || selected) && <section id="author-entity-inspector" className="atlas-profile-panel">{selected ? <AtlasEntityProfile key={`${tab}:${selected.id}`} initialSection={tab === 'relationships' ? 'relationships' : 'overview'} entity={selected} snapshot={snapshot} chapters={chapters} editingDisabled={loading || Boolean(error)} onOpen={openEntity} onBack={() => updateParams(next => next.delete('entity'))} onShowRules={() => setReference('rules')} onShowResearch={() => setReference('research')} onEdit={() => { if (!loading && !error && snapshot != null) setEditing({ entity: selected, snapshot, atChapter }) }} onDiscuss={() => { if (!loading && !error) discuss(selected) }} onRelation={setRelation} onDrill={drill} /> : <EmptyWork title={selectedId ? '此章位下没有这条资料' : `选择一个${isGraph ? tab === 'map' ? '地点' : '人物或关系' : ATLAS_KIND_LABELS[activeKind]}`} />}</section>}
       </AtlasWorkbench>
       {snapshot.diagnostics.length > 0 && <details className="author-disclosure"><summary>资料提示 · {snapshot.diagnostics.length}</summary><ul>{snapshot.diagnostics.map((item, index) => {
         const edge = snapshot.relations.find(relation => item.entityIds.includes(relation.id))

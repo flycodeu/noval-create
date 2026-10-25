@@ -40,6 +40,15 @@ export function hasAtlasValue(value: unknown): boolean {
   return true
 }
 const FIELD_LABELS: Record<string, string> = {
+  politicalStatus: '政体与地位', label: '类别', shortName: '通称', sovereignty: '自治与主权范围', geographicNote: '地理与政治范围',
+  governance: '治理方式', inhabitants: '居民与异类处境', foreignRelations: '对外关系', politicalLimits: '权力边界', economyAndFear: '生计与共同恐惧',
+  politicalArc: '制度变化', externalIndexNote: '政体入口说明', aspiration: '共同诉求', fear: '共同恐惧', humanBeastConflict: '人与异类的利益冲突',
+  defence: '防卫与代价', domesticContradiction: '国内矛盾', narrativeBoundary: '叙事范围', volume: '对应卷', chapter: '对应章', chapterId: '关联章节', evidence: '细纲依据', usage: '可用背景',
+  developmentScope: '关系规划范围', developmentBasis: '规划依据', plannedChapterStart: '关系规划起章', plannedChapterEnd: '关系规划末章',
+  perspectiveName: '人物视角', initialState: '相处起点', cause: '变化原因', unresolved: '仍未解决',
+  internalConflicts: '内部冲突', planningBoundary: '规划范围', coordinateBasis: '地图位置依据', politicalBoundary: '政治边界', regionalPlanningBoundary: '区域规划范围',
+  worldExpansion20261025: '卷章中的地点用途', worldPlanningAlias: '地点别称', worldStructure: '组织分工', worldAftercare: '后续责任', worldResourceLimit: '资源与权力限制',
+  travelDurationLabel: '行程安排', travelAssumptions: '行程条件', travelLimitations: '通行限制', travelDaysRange: '普通行程天数', routeType: '通路性质', viaLocations: '途经地点', distanceBasis: '里程依据',
   strengths: '长处', weaknesses: '短处', motivation: '行动动机', relationshipTension: '关系冲突', bilateral: '双向关系',
   clothing: '常用衣着', carriedItems: '随身物品', physicalHabits: '动作与体态', portraitPrompt: '视觉描述', portraitImage: '角色参考像',
   authorPlanning: '作者后续规划', truthBoundary: '已发生与规划边界', speciesOrigin: '种属与来历', bodyAndDailyLife: '身体与日常规则',
@@ -64,12 +73,13 @@ export function resolveAtlasReference(key: string, value: unknown, entities: Sto
 export function atlasScalarText(key: string, value: unknown, entities: StoryAtlasEntity[], chapters: Array<{ id: number; chapterNum: number }>, positions: Array<{ id: string; title: string }> = []): string {
   if (key === 'castRole') return String(atlasAttributeValue(key, value))
   if (key === 'timeOfDayMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 1440) return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
-  if (['lastProgressChapterId', 'chapterStartId', 'chapterEndId'].includes(key)) return chapters.find(item => item.id === Number(value)) ? `第 ${chapters.find(item => item.id === Number(value))!.chapterNum} 章` : '关联章节不可用'
+  if (['lastProgressChapterId', 'chapterStartId', 'chapterEndId', 'chapterId'].includes(key)) return chapters.find(item => item.id === Number(value)) ? `第 ${chapters.find(item => item.id === Number(value))!.chapterNum} 章` : '关联章节不可用'
   if (key === 'positionId' || key === 'reportsToPositionId') return positions.find(item => item.id === String(value))?.title || '关联岗位尚未明确'
   const reference = resolveAtlasReference(key, value, entities)
   if (reference) return reference.name
   if (REFERENCE_KINDS[key] || typeof value === 'string' && /^(location|character|faction|item|event):/.test(value)) return '关联资料在当前章位不可用'
   if (typeof value === 'boolean') return value ? '是' : '否'
+  if (key === 'kind' && ['sovereign_state', 'autonomous_federation', 'confederation'].includes(String(value))) return ({ sovereign_state: '主权国家', autonomous_federation: '自治联国', confederation: '独立联盟' } as Record<string, string>)[String(value)]
   if (key === 'status' && value === 'approved_design') return '已采纳规划'
   if (['protagonistPresent', 'isMajorEvent'].includes(key)) return Number(value) === 1 ? '是' : '否'
   return VALUE_LABELS[String(value)] || authorText(String(authorValueLabel(atlasAttributeValue(key, value))))
@@ -93,17 +103,23 @@ export const PROFILE_GROUPS: Record<StoryAtlasEntity['kind'], AtlasProfileGroup[
   faction: [
     { title: '组织特点与立场', fields: ['organizationLevel', 'category', 'traits', 'ideology', 'goal', 'goals', 'methods'], empty: '组织特点、目标与行事方式尚未补充' },
     { title: '运行与资源', fields: ['resources', 'funding', 'memberPolicy', 'structure', 'hierarchy', 'currentPhase'], empty: '组织运行、资源与成员规则尚未补充' },
+    { title: '内部冲突与后续安排', fields: ['internalConflicts', 'worldStructure', 'worldAftercare', 'worldResourceLimit', 'authorPlanning'], empty: '尚未登记组织内部冲突和卷章发展。' },
   ],
   location: [
-    { title: '地理与环境', fields: ['geography', 'nodeType', 'locationType', 'terrain', 'waterSystem', 'waterSource', 'climate', 'atmosphere', 'dangerLevel'], empty: '地形、水源与环境尚未补充' },
-    { title: '生计与通行', fields: ['livelihood', 'livelihoods', 'economy', 'resources', 'access', 'routes', 'transport', 'plotRelevance', 'structureRole'], empty: '生计、产业与通路尚未补充' },
+    { title: '地理与环境', fields: ['politicalStatus', 'geography', 'nodeType', 'locationType', 'terrain', 'waterSystem', 'waterSource', 'climate', 'atmosphere', 'dangerLevel'], empty: '地形、水源与环境尚未补充' },
+    { title: '生计与通行', fields: ['inhabitants', 'livelihood', 'livelihoods', 'economy', 'economyAndFear', 'resources', 'access', 'routes', 'transport', 'plotRelevance', 'structureRole'], empty: '生计、产业与通路尚未补充' },
+    { title: '卷章用途与范围', fields: ['worldExpansion20261025', 'politicalArc', 'authorPlanning', 'planningBoundary', 'politicalBoundary', 'narrativeBoundary', 'worldPlanningAlias', 'externalIndexNote'], empty: '尚未登记此地点的卷章用途。' },
   ],
   item: [{ title: '用途与限制', fields: ['itemKind', 'category', 'subType', 'status', 'plotFunction', 'abilitySpec', 'abilities', 'usageMethod', 'acquisitionMethod', 'limitations', 'cost', 'risk', 'background', 'linkedCharacterIds', 'linkedTimelineEventIds'], empty: '物品用途、代价与使用边界尚未补充' }],
   event: [{ title: '事件经过', fields: ['eventType', 'timeLabel', 'status', 'chapterNum', 'chapterStartId', 'chapterEndId', 'eventCause', 'eventProcess', 'eventResult', 'significance', 'protagonistPresent', 'protagonistAction', 'presentCharacterIds', 'affectedCharacterIds', 'directConsequences', 'openThreads'], empty: '前因、经过与结果尚未补充' }],
 }
 export function profileFieldGroups(entity: StoryAtlasEntity) {
   const used = new Set<string>(['positions', 'x', 'y', 'publicSummary', 'portraitImage', 'portraitPrompt', ...ATLAS_INTERNAL_FIELDS])
-  const groups = PROFILE_GROUPS[entity.kind].map(group => {
+  const polityFields = ['governance', 'aspiration', 'fear', 'domesticContradiction', 'humanBeastConflict', 'defence', 'foreignRelations', 'politicalLimits']
+  const definitions = entity.kind === 'location' && polityFields.some(key => hasAtlasValue(entity.attributes[key]))
+    ? [...PROFILE_GROUPS.location.slice(0, 2), { title: '制度、利益与边界', fields: polityFields, empty: '' }, ...PROFILE_GROUPS.location.slice(2)]
+    : PROFILE_GROUPS[entity.kind]
+  const groups = definitions.map(group => {
     group.fields.forEach(key => used.add(key))
     return { ...group, values: Object.fromEntries(group.fields.filter(key => hasAtlasValue(entity.attributes[key])).map(key => [key, entity.attributes[key]])) }
   })

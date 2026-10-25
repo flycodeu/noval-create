@@ -1,16 +1,30 @@
 import type { StoryAtlasEntity, StoryAtlasRelation } from '../../../shared/story-atlas'
 
-/** Place independent relationship components separately, including isolated characters. */
-export function relationshipPositions(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[]) {
+export function relationshipNeighbors(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[]) {
   const neighbors = new Map(entities.map(entity => [entity.id, new Set<string>()]))
   for (const relation of relations) {
-    if (relation.kind !== 'relationship' || !neighbors.has(relation.fromId) || !neighbors.has(relation.toId)) continue
+    if (relation.kind !== 'relationship' || relation.fromId === relation.toId || !neighbors.has(relation.fromId) || !neighbors.has(relation.toId)) continue
     neighbors.get(relation.fromId)!.add(relation.toId)
     neighbors.get(relation.toId)!.add(relation.fromId)
   }
+  return neighbors
+}
+
+/** A centered personal network; overview packs independent casts without inventing links. */
+export function relationshipPositions(entities: StoryAtlasEntity[], relations: StoryAtlasRelation[], focusId?: string | null) {
+  const neighbors = relationshipNeighbors(entities, relations)
+  const positions = new Map<string, { x: number; y: number }>()
+  if (focusId && neighbors.has(focusId)) {
+    const others = entities.filter(entity => entity.id !== focusId)
+    const rows = Math.ceil(others.length / 2)
+    positions.set(focusId, { x: 340, y: Math.max(0, (rows - 1) * 72) })
+    others.forEach((entity, index) => positions.set(entity.id, { x: index % 2 === 0 ? 0 : 680, y: Math.floor(index / 2) * 144 }))
+    return positions
+  }
   const seen = new Set<string>()
   const groups: string[][] = []
-  for (const entity of entities) {
+  const ordered = [...entities].sort((a, b) => neighbors.get(b.id)!.size - neighbors.get(a.id)!.size || a.id.localeCompare(b.id))
+  for (const entity of ordered) {
     if (seen.has(entity.id)) continue
     const group = [entity.id]
     seen.add(entity.id)
@@ -19,14 +33,23 @@ export function relationshipPositions(entities: StoryAtlasEntity[], relations: S
     }
     groups.push(group)
   }
-  const positions = new Map<string, { x: number; y: number }>()
-  let top = 40
+  let top = 24
   const connected = groups.filter(group => group.length > 1).sort((a, b) => b.length - a.length)
-  const isolated = groups.filter(group => group.length === 1).flat()
-  for (const group of [...connected, ...(isolated.length ? [isolated] : [])]) {
-    const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(group.length))))
-    group.forEach((id, index) => positions.set(id, { x: (index % columns) * 320, y: top + Math.floor(index / columns) * 190 }))
-    top += Math.ceil(group.length / columns) * 190 + 100
+  for (const group of connected) {
+    const depth = new Map<string, number>([[group[0], 0]])
+    for (const id of group) for (const neighbor of neighbors.get(id)!) {
+      if (!depth.has(neighbor)) depth.set(neighbor, depth.get(id)! + 1)
+    }
+    const levels: string[][] = []
+    for (const id of group) (levels[depth.get(id) || 0] ||= []).push(id)
+    const height = Math.max(...levels.map(level => level.length)) * 140
+    levels.forEach((level, column) => level.forEach((id, row) => positions.set(id, {
+      x: column * 340, y: top + (height - level.length * 140) / 2 + row * 140,
+    })))
+    top += height + 180
   }
+  const isolated = groups.filter(group => group.length === 1).flat()
+  const columns = Math.max(1, Math.ceil(Math.sqrt(isolated.length * 1.6)))
+  isolated.forEach((id, index) => positions.set(id, { x: (index % columns) * 270, y: top + Math.floor(index / columns) * 140 }))
   return positions
 }

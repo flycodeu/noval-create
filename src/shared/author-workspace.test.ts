@@ -22,4 +22,10 @@ describe('author workspace legacy destinations', () => {
     expect(resolveAuthorWorkspaceRoute('timeline', '?event=event%3A12')).toBeNull()
     expect(getAuthorWorkspaceKey('narrative-board')).toBe('narrative-board')
   })
+  it('opens the full outline directly while preserving the writing arrangement routes', () => {
+    expect(AUTHOR_WORKSPACE_PAGES.find(page => page.key === 'outline')?.route).toBe('outline')
+    expect(getAuthorWorkspaceKey('/novels/292/outline?volume=148')).toBe('outline')
+    expect(resolveAuthorWorkspaceRoute('outline', '?volume=148')).toBeNull()
+    expect(resolveAuthorWorkspaceRoute('structure', '?chapterId=688')).toBe('writing/editor?chapterId=688&panel=arrangement')
+  })
 })

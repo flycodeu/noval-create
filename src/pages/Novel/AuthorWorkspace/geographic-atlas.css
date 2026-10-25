@@ -1,4 +1,26 @@
 .geographic-atlas { min-width: 0; }
+.geographic-polity-nav { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 16px 24px 10px; border-bottom: 1px solid var(--border-default); }
+.geographic-polity-nav button { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; border: 0; border-bottom: 2px solid transparent; background: none; padding: 5px 0; color: var(--text-secondary); cursor: pointer; text-align: left; font-size: 12px; }
+.geographic-polity-nav button[aria-current], .geographic-polity-nav button:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.geographic-polity-nav small { color: var(--text-muted); font-size: 10px; }
+.geographic-polity-overview .geographic-heading { padding-top: 24px; }
+.geographic-polity-intro { margin: 0; padding: 0 24px 20px; color: var(--text-secondary); font-size: 12px; line-height: 1.8; }
+.geographic-polity-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 24px; padding: 12px 24px 28px; }
+.geographic-polity-cards article { min-width: 0; border-top: 4px solid var(--region-color); border-bottom: 1px solid var(--border-default); padding: 15px 0 12px; display: flex; flex-direction: column; }
+.geographic-polity-kicker { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: var(--text-muted); font-size: 11px; }
+.geographic-polity-cards h3 { margin: 10px 0 8px; font: 500 23px/1.7 "STSong", "Songti SC", serif; }
+.geographic-polity-cards button { border: 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
+.geographic-polity-cards button:hover, .geographic-polity-cards button:focus-visible { color: var(--accent); }
+.geographic-polity-cards h3 button { display: flex; justify-content: space-between; width: 100%; gap: 12px; padding: 0; font: inherit; overflow-wrap: anywhere; }
+.geographic-polity-cards h3 .anticon { font-size: 14px; color: var(--text-muted); }
+.geographic-polity-cards p { margin: 0 0 12px; font-size: 12px; line-height: 1.9; color: var(--text-secondary); overflow-wrap: anywhere; }
+.geographic-polity-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: auto; padding: 10px 0; color: var(--text-muted); font-size: 11px; }
+.geographic-polity-cards details { padding-bottom: 10px; font-size: 11px; color: var(--text-muted); }
+.geographic-polity-cards summary { cursor: pointer; }
+.geographic-polity-cards details p { margin: 8px 0 0; font-size: 11px; }
+.geographic-polity-actions { display: flex; justify-content: space-between; gap: 12px; padding-top: 8px; }
+.geographic-polity-actions button { display: inline-flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+@media (max-width: 680px) { .geographic-polity-nav { padding-inline: 16px; } .geographic-polity-cards { padding: 12px 16px 20px; gap: 20px; } .geographic-polity-intro { padding: 0 16px 16px; } }
 .geographic-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px 24px 8px; }
 .geographic-heading > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; }
 .geographic-heading h2 { margin: 0; font: 500 25px/1.5 "STSong", "Songti SC", serif; overflow-wrap: anywhere; }

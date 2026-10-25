@@ -1,0 +1,15 @@
+.atlas-relationship-development { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border-default); line-height: 1.8; }
+.atlas-relationship-development > header { display: flex; align-items: center; gap: 12px; }
+.atlas-relationship-development h3, .atlas-relationship-development h4 { margin: 0; }
+.atlas-relationship-development > header > span { font-size: 11px; color: var(--accent); border: 1px dashed currentColor; border-radius: 4px; padding: 0 6px; }
+.atlas-relationship-development > p, .atlas-relationship-initial, .atlas-relationship-development h4 small { font-size: 12px; color: var(--text-secondary); font-weight: normal; }
+.atlas-relationship-development > article { margin: 22px 0; }
+.atlas-relationship-development ol { list-style: none; padding: 0 0 0 18px; margin: 12px 0; border-left: 1px solid var(--border-default); }
+.atlas-relationship-development li { position: relative; margin: 0 0 22px; }
+.atlas-relationship-development li::before { content: ''; position: absolute; left: -23px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); border: 1px solid var(--bg-surface); }
+.atlas-relationship-development li p { margin: 6px 0; font-size: 13px; }
+.atlas-relationship-chapters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 11px; }
+.atlas-relationship-chapters a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.atlas-relationship-shift { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.atlas-relationship-shift > b { color: var(--text-muted); }
+.atlas-relationship-label { display: inline-block; margin-right: 10px; color: var(--text-muted); font-size: 11px; }

@@ -4,14 +4,16 @@ import { HomeOutlined, PlusOutlined, MinusOutlined, ExpandOutlined, ArrowRightOu
 import type { StoryAtlasEntity, StoryAtlasRelation, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { locationPath, atlasAttributeValue } from './atlas-presentation'
 import { atlasEntityMatchesSearch, atlasLocationScope } from './atlas-profile'
-import { atlasGeography, geographicLayer, geographicDescendants, geographicSettlements, geographicLabelPositions, geographicAppearance, geographicUnmappedAnchor, locationCategory, mapArea, DEVELOPMENT_LABELS } from './geographic-map'
+import { atlasGeography, geographicLayer, geographicDescendants, geographicSettlements, geographicLabelPositions, geographicAppearance, geographicUnmappedAnchor, geographicPolities, locationCategory, mapArea, DEVELOPMENT_LABELS } from './geographic-map'
 import { resolveAtlasGeography, atlasGeographicCoverage } from '../../../shared/story-atlas-geography'
 import { AtlasJourneyPlanner } from './AtlasJourneyPlanner'
+import { AtlasPolityNavigation, AtlasPolityOverview } from './AtlasPolityOverview'
 import './geographic-atlas.css'
 
 type Props = { snapshot: StoryAtlasSnapshot; parentId: string | null; selectedId: string | null; onSelect: (entity: StoryAtlasEntity) => void; onDrill: (entity: StoryAtlasEntity | null) => void; onRelation: (relation: StoryAtlasRelation) => void; onGenerate: () => void }
 export function GeographicAtlas(props: Props) {
   const parentId = atlasLocationScope(props.snapshot, props.parentId)
+  if (!parentId && geographicPolities(props.snapshot).length > 1) return <AtlasPolityOverview {...props} />
   return <GeographicLayer key={`${props.snapshot.novelId}:${parentId}:${props.snapshot.atChapter}`} {...props} parentId={parentId} />
 }
 function GeographicLayer({ snapshot, parentId, selectedId, onSelect, onDrill, onRelation, onGenerate }: Props) {
@@ -82,6 +84,7 @@ function GeographicLayer({ snapshot, parentId, selectedId, onSelect, onDrill, on
   }
   const routes = snapshot.relations.filter(edge => edge.kind === 'route' && labels.some(item => item.entity.id === edge.fromId) && labels.some(item => item.entity.id === edge.toId))
   return <section className="geographic-atlas" aria-label="区域地图">
+    <AtlasPolityNavigation snapshot={snapshot} parentId={parentId} onDrill={onDrill} />
     <nav className="author-atlas-path" aria-label="地域路径"><button type="button" onClick={() => onDrill(null)}><HomeOutlined /> 全部地域</button>{path.map(entity => <React.Fragment key={entity.id}><span>/</span><button type="button" onClick={() => onDrill(entity)}>{entity.name}</button></React.Fragment>)}</nav>
     <div className="geographic-heading"><div><h2>{rootName}</h2><span>{parent ? parentGeography.development ? DEVELOPMENT_LABELS[parentGeography.development] : '' : `${layer.length} 处地域`}</span></div><Button onClick={onGenerate}>设计地理</Button></div>
     <div className="geographic-overview" aria-label="地域规模"><div className="geographic-counts">{counts.country > 0 && <span><b>{counts.country}</b> 个国家</span>}{counts.region > 0 && <span><b>{counts.region}</b> 片地区</span>}{counts.settlement > 0 && <span><b>{counts.settlement}</b> 处城镇村落</span>}{counts.site > 0 && <span><b>{counts.site}</b> 处地点</span>}{unexploredCount > 0 && <span><b>{unexploredCount}</b> 片地域待拓展</span>}</div>{parentMetrics && <dl className="geographic-measures">{parentMetrics.declaredAreaKm2 !== undefined && (parentMetrics.calculatedAreaKm2 === undefined || (parentMetrics.areaDifferenceRatio || 0) > .000001) && <div><dt>设定面积</dt><dd>{mapArea(parentMetrics.declaredAreaKm2)}</dd></div>}{parentMetrics.calculatedAreaKm2 !== undefined && <div><dt>按边界计算</dt><dd>{mapArea(parentMetrics.calculatedAreaKm2)}</dd></div>}{coverage?.mappedAreaKm2 !== undefined && <div><dt>已划分</dt><dd>{mapArea(coverage.mappedAreaKm2)}</dd></div>}{coverage?.unmappedAreaKm2 !== undefined && <div><dt>尚未划分</dt><dd>{mapArea(coverage.unmappedAreaKm2)}</dd></div>}{frame && <div><dt>东西 × 南北</dt><dd>{frame.widthKm.toLocaleString('zh-CN')} × {frame.heightKm.toLocaleString('zh-CN')} 公里</dd></div>}</dl>}{parentMetrics?.areaDifferenceRatio !== undefined && parentMetrics.areaDifferenceRatio > .05 && <span className="geographic-data-status">设定面积与边界不一致</span>}{!parentId && countryIndex.length > 0 && <div className="geographic-countries" aria-label="国家索引">{countryIndex.map(entity => <button type="button" key={entity.id} onClick={() => onDrill(entity)}>{entity.name}<ArrowRightOutlined /></button>)}</div>}</div>

@@ -4,16 +4,32 @@ import { Button, Drawer, Input, Pagination, Select, Spin } from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
+import type { StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { AuthorPage, EmptyWork, LoadFailure } from './shared'
 import { ContentDocument } from './ContentDocument'
 import { buildStoryTimelineEntries, chapterWritingLabel, STORY_TIMELINE_STATES, storyTimelineClock, storyTimelineGroups, storyTimelineMatchesSearch, timelineEntityRoute, type StoryTimelineEntry, type StoryTimelineState } from './story-timeline'
 import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
+import StoryOutline from './StoryOutline'
+import { defaultTimelineView } from './story-outline'
 import './story-timeline.css'
 
 const DETAILS = [{ key: 'eventCause', title: '前因' }, { key: 'eventProcess', title: '经过' }, { key: 'eventResult', title: '结果' }]
 const PAGE_SIZE = 12
 
 export default function StoryTimeline({ novelId }: { novelId: number }) {
+  const [params] = useSearchParams()
+  // One atlas read is shared by the selected view, including the default-view decision.
+  const read = useCallback(() => window.electron.storyAtlas.query({ novelId, includePlanned: true }), [novelId])
+  const { data, loading, error, reload } = useAsyncSnapshot(read)
+  useEffect(() => { const refresh = () => { void reload() }; window.addEventListener('novelforge:creative-completed', refresh); window.addEventListener('focus', refresh); return () => { window.removeEventListener('novelforge:creative-completed', refresh); window.removeEventListener('focus', refresh) } }, [reload])
+  if (error) return <AuthorPage title="时间轴"><LoadFailure message={error instanceof Error ? error.message : '读取时间轴失败'} retry={() => void reload()} /></AuthorPage>
+  if (!data) return <AuthorPage title="时间轴">{loading ? <div className="author-loading"><Spin /></div> : <EmptyWork title="时间轴暂未读到" />}</AuthorPage>
+  return defaultTimelineView(params, data) === 'volumes'
+    ? <StoryOutline novelId={novelId} timeline atlasSnapshot={data} />
+    : <EventTimeline novelId={novelId} snapshot={data} reloadAtlas={reload} />
+}
+
+function EventTimeline({ novelId, snapshot, reloadAtlas }: { novelId: number; snapshot: StoryAtlasSnapshot; reloadAtlas: () => Promise<unknown> }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const mode = params.get('view') === 'time' ? 'time' : 'chapter'
@@ -25,14 +41,12 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   const [paging, setPaging] = useState({ scope: '', selection: '', page: 1 })
   const eventListRef = useRef<HTMLDivElement | null>(null)
   const read = useCallback(async () => {
-    const [snapshot, chapters, novel] = await Promise.all([
-      window.electron.storyAtlas.query({ novelId, includePlanned: true }),
+    const [chapters, novel] = await Promise.all([
       window.electron.chapter.list(novelId), window.electron.novel.get(novelId),
     ])
-    return { snapshot, chapters, novel }
+    return { chapters, novel }
   }, [novelId])
   const { data, loading, error: loadError, reload: load } = useAsyncSnapshot(read)
-  const snapshot = data?.snapshot ?? null
   const chapters = data?.chapters ?? []
   const novel = data?.novel ?? null
   const error = loadError ? (loadError instanceof Error ? loadError.message : '读取时间轴失败') : ''
@@ -80,7 +94,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
   </button>
   return <AuthorPage title="时间轴"><div className="story-timeline-workspace">
     {error && <LoadFailure message={error} retry={() => void load()} />}
-    {!snapshot && loading ? <div className="author-loading"><Spin /></div> : !snapshot ? <EmptyWork title="时间轴暂未读到" /> : <>
+    {!data && loading ? <div className="author-loading"><Spin /></div> : !data ? <EmptyWork title="时间轴暂未读到" /> : <>
       <section className="story-timeline-overview" aria-label="小说时间与进度">
         <div><span>正文进度</span><strong>{clock.latest ? `已写至第 ${clock.latest.chapterNum} 章` : '尚未开始正文'}</strong><small>{clock.written.length} 章已有正文 · {chapters.length} 章已安排</small></div>
         <div><span>当前故事时间</span><strong>{clock.current || (clock.needsAlignment ? '时间待对齐' : '尚未确定')}</strong><small>{clock.dynasty || clock.epoch || clock.era || '时代未设定'}{clock.current ? ` · 截至第 ${clock.anchor} 章` : ''}</small></div>
@@ -89,6 +103,7 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
       </section>
       <details className="story-timeline-clock"><summary>历法、起点与时间依据</summary><div><span>朝代：{clock.dynasty || clock.epoch || '尚未设定'}{clock.era ? ` · ${clock.era}` : ''}</span><span>开篇：{clock.start || '尚未设定'}</span>{clock.needsAlignment && <span>最后记录：{clock.recorded}{clock.anchor != null ? `（第 ${clock.anchor} 章）` : ''}，待与最新正文对齐。</span>}{!clock.current && !clock.needsAlignment && <span>尚未记录最新正文对应的故事时间。</span>}{clock.evidence && <p>{clock.evidence}</p>}{clock.latest && <Button type="link" onClick={() => open(`writing/editor?chapterId=${clock.latest!.id}`)}>打开最新正文 <ArrowRightOutlined /></Button>}</div></details>
       <div className="story-timeline-toolbar">
+        <Button onClick={() => open('timeline?view=volumes')}>卷级时间线</Button>
         <nav aria-label="时间轴视图">{[{ key: 'chapter', label: '按章节' }, { key: 'time', label: '按故事时间' }].map(item => <button type="button" key={item.key} aria-pressed={mode === item.key} onClick={() => updateParams('view', item.key)}>{item.label}</button>)}</nav>
         <Select aria-label="事件进度" value={status} onChange={value => updateParams('status', value === 'all' ? '' : value)} options={[{ value: 'all', label: '全部状态' }, ...Object.entries(STORY_TIMELINE_STATES).map(([value, label]) => ({ value, label: `${label} · ${entries.filter(entry => entry.state === value).length}` }))]} />
         <Select<number | 'all'> aria-label="关联章节" value={chapterFilter ?? 'all'} onChange={value => updateParams('chapter', value === 'all' ? '' : String(value))} options={[{ value: 'all', label: '全部正文章节' }, { value: 0, label: '背景事件' }, ...chapters.map(chapter => ({ value: chapter.chapterNum, label: `第 ${chapter.chapterNum} 章` }))]} />
@@ -118,6 +133,6 @@ export default function StoryTimeline({ novelId }: { novelId: number }) {
         <footer className="story-timeline-detail__actions"><Button onClick={() => open(timelineEntityRoute(selected.entity))}>完整档案</Button><Button onClick={() => discuss(selected)}>讨论本事件</Button></footer>
       </article>}</Drawer>
     </>}
-    <ObjectTaskPanel novelId={novelId} target={taskTarget} onClose={() => setTaskTarget(null)} onApplied={() => void load()} />
+    <ObjectTaskPanel novelId={novelId} target={taskTarget} onClose={() => setTaskTarget(null)} onApplied={() => { void load(); void reloadAtlas() }} />
   </div></AuthorPage>
 }

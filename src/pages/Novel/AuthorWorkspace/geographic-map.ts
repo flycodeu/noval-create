@@ -84,10 +84,23 @@ export function locationCategory(entity: StoryAtlasEntity): 'country' | 'region'
   return 'site'
 }
 
-/** A single country opens at its internal map. With several countries, keep the world choice visible. */
+/** Political identity is explicit and independent of the geographic parent hierarchy. */
+export function geographicPolities(snapshot: StoryAtlasSnapshot) {
+  return snapshot.entities.flatMap(entity => {
+    if (entity.kind !== 'location') return []
+    const status = recordOf(entity.attributes.politicalStatus)
+    const explicit = ['sovereign_state', 'autonomous_federation', 'confederation'].includes(String(status.kind))
+    if (!explicit && locationCategory(entity) !== 'country') return []
+    return [{ entity, name: typeof status.shortName === 'string' && status.shortName.trim() ? status.shortName : entity.name,
+      label: typeof status.label === 'string' && status.label.trim() ? status.label : '国家',
+      note: typeof status.geographicNote === 'string' ? status.geographicNote : '' }]
+  })
+}
+
+/** A single polity opens at its internal map. Several polities retain a world choice, even if one is geographically nested. */
 export function geographicDefaultScope(snapshot: StoryAtlasSnapshot): string | null {
-  const countries = snapshot.entities.filter(entity => entity.kind === 'location' && locationCategory(entity) === 'country')
-  return countries.length === 1 ? countries[0].id : null
+  const polities = geographicPolities(snapshot)
+  return polities.length === 1 ? polities[0].entity.id : null
 }
 
 const REGION_COLORS = ['#c9d7ac', '#dcc39b', '#b4d2c7', '#d6b9a9', '#bfc1d3', '#dbcfa9']

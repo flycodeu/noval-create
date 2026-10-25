@@ -1,5 +1,5 @@
 import React from 'react'
-import { ApartmentOutlined, BookOutlined, ClockCircleOutlined, EditOutlined, HistoryOutlined, SendOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, BookOutlined, ClockCircleOutlined, EditOutlined, HistoryOutlined, SendOutlined, OrderedListOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import { AUTHOR_WORKSPACE_PAGES, getAuthorWorkspaceKey } from '../../../shared/author-workspace'
 import './ProjectSidebar.css'
@@ -16,7 +16,7 @@ interface ProjectSidebarProps {
   onNavigate: (route: string) => void
   onPrefetchRoute?: (route: string) => void
 }
-const ICONS = { guide: SendOutlined, 'story-design': BookOutlined, 'narrative-board': ApartmentOutlined, timeline: ClockCircleOutlined, writing: EditOutlined, revision: HistoryOutlined }
+const ICONS = { guide: SendOutlined, 'story-design': BookOutlined, outline: OrderedListOutlined, 'narrative-board': ApartmentOutlined, timeline: ClockCircleOutlined, writing: EditOutlined, revision: HistoryOutlined }
 
 export default function ProjectSidebar({ activeKey, pendingKey, onDismissDrawer, onNavigate, onPrefetchRoute }: ProjectSidebarProps) {
   const active = getAuthorWorkspaceKey(activeKey)

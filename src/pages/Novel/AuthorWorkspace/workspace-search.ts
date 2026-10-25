@@ -12,6 +12,8 @@ export function workspaceSearchEntries(chapters: Chapter[], entities: StoryAtlas
       { label: '作者资料卡', category: '创作参考', route: 'story-design?section=sources', terms: '作者自建 灵感 创作资料 资料卡 世界观素材' },
       { label: '故事背景与定位', category: '故事设计', route: 'story-design?section=background', terms: '背景 简介 定位' },
       { label: '主线、支线与结局', category: '故事设计', route: 'story-design?section=story', terms: '主线 支线 结局 承诺 秘密' },
+      { label: '全书卷章大纲', category: '故事大纲', route: 'outline', terms: '大纲 细纲 卷章 伏笔 情绪 关系 叙事线' },
+      { label: '卷级时间线', category: '时间轴', route: 'timeline?view=volumes', terms: '时间轴 并行 多线 年月 回叙 行程' },
       { label: '叙事与文风', category: '故事设计', route: 'story-design?section=style', terms: '叙事 视角 文风' },
     ].map(item => ({ key: item.route, label: item.label, category: item.category, route: item.route, searchText: item.terms })),
   ]
