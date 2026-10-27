@@ -31,11 +31,19 @@ const templates = [
 ]
 const tasks = [
   { id: 81, type: 'review', status: 'running', runnerType: 'stream', modelConfigId: 7, inputJson: JSON.stringify({ request: '检查隔离测试里的任务展示与取消流程，不读取任何正式正文。' }), outputText: '正在检查隔离界面。', createdAt: stamp, updatedAt: stamp },
-  { id: 80, type: 'summary', status: 'success', runnerType: 'chat', outputText: '已完成隔离记录。', createdAt: stamp, updatedAt: stamp },
+  { id: 80, novelId: 292, type: 'summary', status: 'success', runnerType: 'chat', outputText: JSON.stringify({ summary: '已完成隔离记录。', characters: Array.from({ length: 65 }, (_, id) => ({ id, name: `角色${id}` })), apiKey: 'fixture-secret-must-stay-hidden', maxTokens: 4096 }), createdAt: stamp, updatedAt: stamp },
+  { id: 79, type: 'review', status: 'failed', runnerType: 'chat', outputText: '过期隔离运行记录', createdAt: stamp, updatedAt: stamp },
 ]
 const sourceSettings = { provider: 'auto', tavilyApiKeySet: true, braveApiKeySet: false, tavilyEnvSet: false, braveEnvSet: false, activeProvider: 'tavily', updatedAt: stamp }
 const zhuqueSettings = { enabled: false, autoDetect: true, apiKeySet: true }
 let retrievalSettings = { mode: 'local', modelConfigId: null, modelId: '' }
+let retentionSettings = { enabled: false, keepDays: 30, cleanTasks: true, cleanLogs: true }
+let retentionLogs = 2
+const removeEndedTasks = (ids?: number[]) => {
+  const deletedTaskIds = tasks.filter(task => ['success', 'failed', 'cancelled'].includes(task.status) && (!ids || ids.includes(task.id))).map(task => task.id)
+  for (let index = tasks.length - 1; index >= 0; index--) if (deletedTaskIds.includes(tasks[index].id)) tasks.splice(index, 1)
+  return { deletedCount: deletedTaskIds.length, deletedTaskIds, protectedCount: 0 }
+}
 const updateStatus = { currentVersion: '2.4.33', mode: 'installed', phase: 'up_to_date', latestVersion: null, downloadPercent: null, checkedAt: stamp, error: null }
 const mcpStatus = {
   supported: true, codexCliPath: 'D:/Isolated Interface Fixture/Developer Tools/Codex/codex.exe', novelForgePath: 'D:/Isolated Interface Fixture/NovelForge/NovelForge.exe', registration: 'configured',
@@ -91,6 +99,7 @@ win.electron = strictServices({
     confirmClose: async (choice: string) => { record('window.confirmClose', choice) },
   },
   novel: {
+    getContextStatus: async () => ({ contextVersion: 781, totalChapterCount: 622, staleChapterCount: 622, staleCheckpointCount: 2, staleAssetCount: 1, staleAssetLabels: ['人物'] }),
     list: async () => { record('novel.list'); if (controls.novelListError) throw new Error('隔离测试：作品读取失败'); return clone(novels) },
     create: async (input: unknown) => { record('novel.create', input); return 294 },
     delete: async (id: number) => { record('novel.delete', id) },
@@ -127,14 +136,18 @@ win.electron = strictServices({
       const rows = tasks.filter(task => (!input.status || input.status === task.status) && (!input.type || input.type === task.type))
       return { items: clone(rows), page: input.page || 1, pageSize: input.pageSize || 10, total: rows.length, hasMore: false }
     },
-    getStats: async () => ({ total: tasks.length, pendingCount: 0, runningCount: tasks.filter(task => task.status === 'running').length, cancelRequestedCount: 0, pausedCount: 0, successCount: 1, failedCount: 0, cancelledCount: tasks.filter(task => task.status === 'cancelled').length }),
-    modelAttempts: async () => [],
+    getStats: async () => ({ total: tasks.length, pendingCount: 0, runningCount: tasks.filter(task => task.status === 'running').length, cancelRequestedCount: 0, pausedCount: 0, successCount: tasks.filter(task => task.status === 'success').length, failedCount: tasks.filter(task => task.status === 'failed').length, cancelledCount: tasks.filter(task => task.status === 'cancelled').length }),
+    modelAttempts: async (taskId: number) => taskId === 80 ? [{ request_id: 'fixture-request-with-a-long-identifier', task_id: 80, provider: 'fixture', model_id: 'long-model-id-for-layout-test', status: 'success', attempt_index: 1, started_at: stamp, options_json: '{"temperature":0.8,"maxTokens":4096,"apiKey":"fixture-secret-must-stay-hidden"}', prompt_hash: 'fixture-hash', prompt_text: '隔离提示词', output_text: '{"result":"隔离模型结果"}', output_chars: 10, prompt_truncated: 0, output_truncated: 0 }] : [],
     cancel: (taskId: number) => {
       record('task.cancel', taskId)
       return new Promise<void>((resolve, reject) => cancellations.push({ taskId, reject, resolve: () => { const task = tasks.find(row => row.id === taskId); if (task) task.status = 'cancelled'; emit('task:complete', { taskId, status: 'cancelled' }); resolve() } }))
     },
     retry: async (id: number) => { record('task.retry', id) },
-    clearHistory: async (input: unknown) => { record('task.clearHistory', input); return { deletedCount: 1 } },
+    clearHistory: async (input: { taskIds?: number[] }) => { record('task.clearHistory', input); return removeEndedTasks(input.taskIds) },
+    getRetentionSettings: async () => clone(retentionSettings),
+    updateRetentionSettings: async (input: typeof retentionSettings) => { record('task.updateRetentionSettings', input); retentionSettings = clone(input); return clone(retentionSettings) },
+    previewCleanup: async (input: typeof retentionSettings) => { record('task.previewCleanup', input); return { taskCount: input.cleanTasks ? tasks.filter(task => ['success', 'failed', 'cancelled'].includes(task.status)).length : 0, protectedTaskCount: 0, attemptCount: 0, logCount: input.cleanLogs ? retentionLogs : 0, logBytes: 1024 } },
+    runCleanup: async (input: typeof retentionSettings) => { record('task.runCleanup', input); const deletedLogs = input.cleanLogs ? retentionLogs : 0; if (input.cleanLogs) retentionLogs = 0; return { ...(input.cleanTasks ? removeEndedTasks() : { deletedCount: 0, deletedTaskIds: [] }), deletedLogs } },
   },
   agentTools: {
     call: async ({ toolId, input }: { toolId: string; input: any }) => {

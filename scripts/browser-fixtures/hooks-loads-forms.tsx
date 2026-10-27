@@ -199,7 +199,7 @@ async function modelDraftTests(root: Root) {
   Object.assign(window, { electron: { model: { list: async () => [] }, zhuque: { getSettings: async () => ({ enabled: false, autoDetect: false, apiKeySet: false }) }, sourceSearch: { getSettings: () => ++reads === 1 ? Promise.resolve(savedSettings) : settings.promise } } })
   await act(async () => root.render(<ModelManager />))
   // Refresh settings while an independent search-key draft is open.
-  const sourceButton = button('联网搜索配置')
+  const sourceButton = button('配置搜索')
   check(sourceButton, 'source search configuration is visible')
   await click(sourceButton)
   const input = document.querySelector<HTMLInputElement>('input[id$="tavilyApiKey"]')

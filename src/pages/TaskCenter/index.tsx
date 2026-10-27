@@ -23,6 +23,9 @@ import {
   WorkspacePanel,
 } from '../Novel/components/WorkspaceShell'
 import './index.css'
+import JsonViewer from '../../components/JsonViewer'
+import { prepareJsonView } from '../../components/json-view'
+import HistoryCleanup from './HistoryCleanup'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = ['10', '20', '50']
@@ -50,6 +53,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.
   running: { label: '执行中', color: '#2E86AB', icon: <LoadingOutlined spin /> },
   cancel_requested: { label: '正在取消', color: '#faad14', icon: <StopOutlined /> },
   paused: { label: '已暂停', color: '#d48806', icon: <ClockCircleOutlined /> },
+  blocked: { label: '已阻断', color: '#d48806', icon: <StopOutlined /> },
   success: { label: '已完成', color: '#52c41a', icon: <CheckCircleOutlined /> },
   failed: { label: '执行失败', color: '#ff4d4f', icon: <CloseCircleOutlined /> },
   cancelled: { label: '任务已取消', color: '#faad14', icon: <StopOutlined /> },
@@ -127,13 +131,11 @@ const PIPELINE_STAGE_LABELS: Record<string, string> = {
 }
 
 function formatTaskPayload(raw?: string): string {
-  if (!raw) return ''
-
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2)
-  } catch {
-    return raw
-  }
+  const view = prepareJsonView(raw)
+  if (!view.structured) return view.text.slice(0, 140)
+  const data = view.value as Record<string, unknown>
+  const summary = ['summary', 'message', 'title', 'description'].map(key => data[key]).find(value => typeof value === 'string' && value.trim())
+  return typeof summary === 'string' ? summary.slice(0, 140) : `结构化数据 · ${Object.keys(data).length} 项`
 }
 
 function parseTaskProgress(raw?: string): Record<string, unknown> {
@@ -242,7 +244,7 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
   if (task.errorMessage) return task.errorMessage
   if (typeof progress.message === 'string' && progress.message.trim()) return progress.message
   if (stream?.content) return stream.content.slice(0, 140)
-  if (task.outputText) return task.outputText.slice(0, 140)
+  if (task.outputText) return formatTaskPayload(task.outputText)
   if (task.inputJson) return formatTaskPayload(task.inputJson).slice(0, 140)
   return '任务已创建，等待执行输出。'
 }
@@ -466,11 +468,11 @@ export default function TaskCenter() {
     }, 'taskCenter.resumeFailed')
   }
 
-  const handleClearHistory = useCallback(() => {
+  const handleClearHistory = useCallback((taskId?: number) => {
     Modal.confirm({
-      title: '清空历史任务记录？',
-      content: '只会清空当前筛选范围内已结束的任务记录，不影响执行中、等待执行、正在取消或已暂停的任务。',
-      okText: '确认清空',
+      title: taskId ? '删除这条运行记录？' : '删除筛选范围内的历史记录？',
+      content: '仅删除已结束且未被草稿、成果或恢复链路引用的任务及调用记录，不影响正文。删除后不可恢复。',
+      okText: '确认删除',
       cancelText: '取消',
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -481,6 +483,7 @@ export default function TaskCenter() {
         setClearingHistory(true)
         try {
           const result = await window.electron.task.clearHistory({
+            ...(taskId ? { taskIds: [taskId] } : {}),
             status: statusFilter === 'all' ? undefined : statusFilter,
             type: typeFilter === 'all' ? undefined : typeFilter,
           })
@@ -503,7 +506,7 @@ export default function TaskCenter() {
           message.success(
             result.deletedCount > 0
               ? getUserFacingMessage('taskCenter.historyCleared', { count: result.deletedCount })
-              : getUserFacingMessage('taskCenter.historyNothingToClear'),
+              : result.protectedCount ? getUserFacingMessage('taskCenter.historyProtected') : getUserFacingMessage('taskCenter.historyNothingToClear'),
           )
         } catch (error) {
           message.error(getErrorMessage(error, 'taskCenter.clearHistoryFailed'))
@@ -517,6 +520,21 @@ export default function TaskCenter() {
       },
     })
   }, [clearStream, fetchTaskData, page, selectedId, statusFilter, typeFilter, setLoading])
+
+  const handleRetentionCleaned = useCallback(async (result: import('../../types').TaskHistoryClearResult) => {
+    result.deletedTaskIds.forEach(clearStream)
+    if (selectedId && result.deletedTaskIds.includes(selectedId)) setSelectedId(null)
+    const requestId = ++loadVersionRef.current
+    foregroundLoadRef.current = true
+    try {
+      const [refreshedPage, nextStats] = await fetchTaskData()
+      if (requestId !== loadVersionRef.current) return
+      setStats(nextStats)
+      const lastPage = Math.max(1, Math.ceil(refreshedPage.total / refreshedPage.pageSize))
+      if (page > lastPage) setPage(lastPage)
+      else setPageData(refreshedPage)
+    } finally { if (requestId === loadVersionRef.current) foregroundLoadRef.current = false }
+  }, [clearStream, fetchTaskData, page, selectedId])
 
   const handleRecoverDraft = useCallback((path?: string) => {
     if (!path) return
@@ -568,7 +586,7 @@ export default function TaskCenter() {
       items.push({
         key: 'output',
         label: '结果输出',
-        children: <div className="task-center-code" data-p3-05-task-log>{selectedTask.outputText}</div>,
+        children: <div data-p3-05-task-log><JsonViewer raw={selectedTask.outputText} label="结果" /></div>,
       })
     }
 
@@ -576,7 +594,7 @@ export default function TaskCenter() {
       items.push({
         key: 'input',
         label: '请求上下文',
-        children: <div className="task-center-code" data-p3-05-task-log>{formatTaskPayload(selectedTask.inputJson)}</div>,
+        children: <div data-p3-05-task-log><JsonViewer raw={selectedTask.inputJson} label="请求上下文" /></div>,
       })
     }
 
@@ -596,16 +614,16 @@ export default function TaskCenter() {
 
             <Collapse items={modelAttempts.map((attempt) => ({
               key: attempt.request_id,
-              label: `${attempt.provider} / ${attempt.model_id} · ${attempt.status} · ${new Date(attempt.started_at).toLocaleString('zh-CN')} · 请求 ${attempt.request_id}`,
+              label: <div className="task-attempt-heading"><strong>{attempt.provider} / {attempt.model_id}</strong><span>{attempt.status} · {new Date(attempt.started_at).toLocaleString('zh-CN')}</span></div>,
               children: (
                 <div className="task-center-model-attempt">
                   <div>{`任务 #${attempt.task_id ?? '-'} · 第 ${attempt.attempt_index} 次 · 提示词 SHA-256：${attempt.prompt_hash || '-'}`}</div>
-                  <div>{`模型参数：${attempt.options_json || '-'}`}</div>
+                  <JsonViewer raw={attempt.options_json} label="模型参数" />
                   {attempt.error_code ? <div>{`错误代码：${attempt.error_code}`}</div> : null}
                   <div>实际提示词快照（常见凭据已脱敏）{attempt.prompt_truncated ? '（超出本地记录上限，已截断）' : ''}</div>
                   <pre className="task-center-code">{attempt.prompt_text || '无提示词快照'}</pre>
                   <div>模型输出快照（常见凭据已脱敏）{attempt.output_truncated ? `（仅显示前段，完整长度 ${attempt.output_chars} 字）` : ''}</div>
-                  <pre className="task-center-code">{attempt.output_text ?? '未收到文本输出'}</pre>
+                  <JsonViewer raw={attempt.output_text} label="模型输出" />
                 </div>
               ),
             }))} />
@@ -683,14 +701,15 @@ export default function TaskCenter() {
           <Button icon={<ReloadOutlined />} disabled={clearingHistory} loading={loading && !clearingHistory} onClick={() => void loadTasks()}>
             刷新
           </Button>
+          <HistoryCleanup onCleaned={handleRetentionCleaned} />
           <Button
             danger
             icon={<DeleteOutlined />}
             loading={clearingHistory}
             disabled={!canClearHistory}
-            onClick={handleClearHistory}
+            onClick={() => handleClearHistory()}
           >
-            清空历史
+            删除历史
           </Button>
         </div>
       )}
@@ -721,6 +740,7 @@ export default function TaskCenter() {
                     { value: 'running', label: '执行中' },
                     { value: 'cancel_requested', label: '正在取消' },
                     { value: 'paused', label: '已暂停' },
+                    { value: 'blocked', label: '已阻断' },
                     { value: 'pending', label: '等待执行' },
                     { value: 'success', label: '已完成' },
                     { value: 'failed', label: '执行失败' },
@@ -795,8 +815,6 @@ export default function TaskCenter() {
                             </Tag>
                             <Tag>{getTaskRunnerLabel(task)}</Tag>
                             {task.pipelineRole ? <Tag color="geekblue">{getTaskPipelineRoleLabel(task)}</Tag> : null}
-                            {task.pipelineStage ? <Tag color={task.pipelineStage === 'failed' ? 'red' : task.pipelineStage === 'blocked' ? 'warning' : task.pipelineStage === 'running' ? 'processing' : 'default'}>{getTaskPipelineStageLabel(task)}</Tag> : null}
-                            {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
                             {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
                             {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
                           </div>
@@ -837,9 +855,10 @@ export default function TaskCenter() {
         <WorkspacePanel
           className="task-center-detail-panel"
           scrollable
-          title={selectedTask ? `任务详情 · ${getTaskTypeLabel(selectedTask.type)}` : '任务详情'}
+          title={selectedTask ? getTaskTypeLabel(selectedTask.type) : '任务详情'}
           extra={selectedTask ? (
             <div className="task-center-detail__actions">
+              {ENDED_TASK_STATUSES.has(selectedTask.status) ? <Button danger disabled={clearingHistory || pendingActionId !== null} icon={<DeleteOutlined />} onClick={() => handleClearHistory(selectedTask.id)}>删除记录</Button> : null}
               {selectedTask.status === 'running' ? (
                 <Button danger disabled={pendingActionId !== null} loading={pendingActionId === selectedTask.id} icon={<StopOutlined />} onClick={() => void handleCancel(selectedTask.id)}>
                   取消
@@ -874,11 +893,10 @@ export default function TaskCenter() {
             <div className="task-center-detail">
               <div className="task-center-detail__header">
                 <div>
-                  <div className="task-center-detail__title">{getTaskTypeLabel(selectedTask.type)}</div>
                   <div className="task-center-detail__summary">
-                    {selectedTask.relatedEntityType
+                    {selectedTask.relatedEntityType && selectedTask.relatedEntityId
                       ? `${selectedTask.relatedEntityType} #${selectedTask.relatedEntityId || '-'}`
-                      : '未绑定关联实体'}
+                      : `任务 #${selectedTask.id}`}
                   </div>
                 </div>
                 <div className="task-center-detail__meta">
@@ -950,7 +968,8 @@ export default function TaskCenter() {
               </div></details>
 
               {selectedTask.novelId ? (
-                <div className="task-context-health-card">
+                <details className="task-context-health-card">
+                  <summary>上下文状态{selectedContextStatus ? ` · ${selectedContextStatus.staleChapterCount ? `${selectedContextStatus.staleChapterCount} 章待同步` : '章节已同步'}` : ''}</summary>
                   <div className="task-context-health-card__head">
                     <div className="task-context-health-card__title">上下文健康</div>
                     <div className="task-context-health-card__meta">
@@ -974,7 +993,7 @@ export default function TaskCenter() {
                       </section>
                     ))}
                   </div>
-                </div>
+                </details>
               ) : null}
 
               <Collapse
@@ -987,8 +1006,7 @@ export default function TaskCenter() {
         </WorkspacePanel>
       </div>
       <Modal title={`历史草稿 · 任务 #${selectedTask?.id ?? ''}`} open={draftOpen} onCancel={() => setDraftOpen(false)} footer={<Button onClick={() => setDraftOpen(false)}>关闭</Button>} width="min(880px, calc(100vw - 32px))" className="task-center-draft-modal" destroyOnHidden>
-        <p>此草稿只读，不会写回故事设计或正文。</p>
-        <pre>{JSON.stringify(parseTaskProgress(selectedTask?.progressJson).draft ?? {}, null, 2)}</pre>
+        <JsonViewer raw={JSON.stringify(parseTaskProgress(selectedTask?.progressJson).draft ?? {})} label="历史草稿" />
       </Modal>
     </WorkspacePage>
   )

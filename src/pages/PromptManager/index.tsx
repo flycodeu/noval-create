@@ -1,6 +1,6 @@
 import { useAsyncSnapshot } from '@/hooks/useAsyncSnapshot'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Modal, Skeleton, Spin, Tag, message } from 'antd'
+import { Button, Input, Modal, Select, Skeleton, Spin, Tag, message } from 'antd'
 import { CopyOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   PROMPT_CATALOG as BASE_PROMPT_CATALOG,
@@ -14,7 +14,7 @@ import {
   type PromptCatalogEntry,
 } from '../../shared/prompt-library'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import { WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import './index.css'
 
 function normalizePromptText(text: string): string {
@@ -571,7 +571,7 @@ export default function PromptManager() {
 
   return (
     <WorkspacePage
-      className="prompt-manager-page"
+      className="admin-page prompt-manager-page"
       layout="wide"
       title="提示词管理"
       heroVariant="compact"
@@ -590,12 +590,6 @@ export default function PromptManager() {
           </Button>
         </div>
       )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" />
-          <WorkspaceMetric label="运行时覆盖" value={overrideCount} />
-        </>
-      )}
     >
       {refreshing ? (
         <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
@@ -607,32 +601,11 @@ export default function PromptManager() {
         <WorkspacePanel
           className="prompt-manager-catalog"
           title="运行时提示词"
-          extra={(
-            <div className="prompt-manager-filter-group">
-              {PROMPT_CATEGORIES.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  className={`prompt-manager-filter ${activeCategory === category ? 'prompt-manager-filter--active' : ''}`}
-                  onClick={() => setActiveCategory(category)}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          )}
+          extra={<span className="prompt-manager-count">{promptRows.length} 项 · {overrideCount} 项覆盖</span>}
         >
-          <div className="prompt-manager-lanes">
-            {PROMPT_LANES.map((lane) => (
-              <button
-                key={lane}
-                type="button"
-                className={`prompt-manager-lane ${activeLane === lane ? 'prompt-manager-lane--active' : ''}`}
-                onClick={() => setActiveLane(lane)}
-              >
-                {lane}
-              </button>
-            ))}
+          <div className="prompt-manager-filters">
+            <label><span>类别</span><Select aria-label="提示词类别" value={activeCategory} onChange={setActiveCategory} options={PROMPT_CATEGORIES.map(value => ({ value, label: value }))} /></label>
+            <label><span>流程</span><Select aria-label="提示词流程" value={activeLane} onChange={setActiveLane} options={PROMPT_LANES.map(value => ({ value, label: value }))} /></label>
           </div>
 
           {loading ? (
@@ -660,13 +633,11 @@ export default function PromptManager() {
                       <strong>{prompt.name}</strong>
                       <span>{prompt.description}</span>
                     </div>
-                    {hasOverride ? <Tag color="blue">覆盖中</Tag> : <Tag>默认</Tag>}
+                    {hasOverride ? <Tag color="blue">覆盖中</Tag> : null}
                   </div>
 
                   <div className="prompt-manager-card__meta">
-                    <Tag color="gold">{meta.lane}</Tag>
-                    <Tag color="processing">{meta.stage}</Tag>
-                    <Tag>{`${prompt.params.length} 个参数`}</Tag>
+                    <span>{meta.lane} · {meta.stage}</span>
                   </div>
 
                 </button>

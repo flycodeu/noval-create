@@ -1,6 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, message } from 'antd'
-import { EditOutlined } from '@ant-design/icons'
+import { EditOutlined, SearchOutlined } from '@ant-design/icons'
 import type { SourceSearchProviderMode, SourceSearchSettingsUpdate, SourceSearchSettingsView, SourceSearchTestResult } from '../../types'
 import {
   SOURCE_SEARCH_PLATFORM_DEFAULTS, SOURCE_SEARCH_PLATFORM_NAMES, SOURCE_SEARCH_PROTOCOL_LABELS, SOURCE_SEARCH_PROVIDER_LABELS,
@@ -51,11 +51,10 @@ function formatSavedAt(value?: string | null) {
 }
 
 export interface SourceSearchSettingsHandle {
-  open: () => void
   refresh: () => void
 }
 
-const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle, { onAvailabilityChange: (ready: boolean) => void }>(function SourceSearchSettings({ onAvailabilityChange }, ref) {
+const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle>(function SourceSearchSettings(_, ref) {
   const [sourceForm] = Form.useForm<SourceSearchSettingsUpdate>()
   const [sourceEditorOpen, setSourceEditorOpen] = useState(false)
   const [sourceSettings, setSourceSettings] = useState<SourceSearchSettingsView | null>(null)
@@ -107,9 +106,6 @@ const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle, { onAvailabi
       sourceTestRequestRef.current += 1
     }
   }, [loadSourceSettings])
-  useEffect(() => {
-    onAvailabilityChange(Boolean(sourceSettings) && !sourceLoading && !sourceLoadError)
-  }, [sourceSettings, sourceLoading, sourceLoadError, onAvailabilityChange])
 
   const openSourceEditor = () => {
     if (!sourceSettings || sourceLoading || sourceLoadError || saveInFlightRef.current) return
@@ -213,7 +209,7 @@ const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle, { onAvailabi
     }
   }
 
-  useImperativeHandle(ref, () => ({ open: openSourceEditor, refresh: () => { void loadSourceSettings() } }))
+  useImperativeHandle(ref, () => ({ refresh: () => { void loadSourceSettings() } }))
 
   const configuredProviders = PROVIDERS.filter(provider => provider === 'tavily'
     ? sourceSettings?.tavilyApiKeySet || sourceSettings?.tavilyEnvSet
@@ -225,23 +221,23 @@ const SourceSearchSettings = forwardRef<SourceSearchSettingsHandle, { onAvailabi
 
   return <>
     <WorkspacePanel
-      title="联网搜索" className="model-manager-source-panel"
-      extra={<Button type="primary" icon={<EditOutlined />} disabled={sourceLoading || !sourceSettings || Boolean(sourceLoadError)} onClick={openSourceEditor}>配置搜索</Button>}
+      title={<><SearchOutlined /> 联网搜索</>} className="model-service-card model-manager-source-panel"
+      extra={<span className={`model-status-badge${sourceSettings?.activeProvider ? ' is-enabled' : ''}`}>{sourceLoading ? '加载中' : sourceLoadError ? '读取失败' : sourceSettings?.activeProvider ? '已配置' : sourceSettings?.provider === 'disabled' ? '已关闭' : '未配置'}</span>}
     >
       {sourceLoadError ? <Alert type="error" showIcon message="无法读取搜索配置" description={sourceLoadError} action={<Button onClick={() => void loadSourceSettings()}>重试</Button>} /> : (
-        <div className="admin-detail-stack source-search-config">
-          <div className="source-search-config__status-grid">
-            <div className="source-search-config__status"><span>当前服务</span><strong>{sourceLoading ? '加载中' : activeSourceLabel}</strong></div>
-            {configuredProviders.length > 1 && <div className="source-search-config__status"><span>已配置平台</span><strong>{sourceLoading ? '加载中' : configuredProviders.map(getSourceProviderLabel).join('、') || '未配置'}</strong></div>}
-            {sourceSettings?.provider !== sourceSettings?.activeProvider && <div className="source-search-config__status"><span>选择方式</span><strong>{sourceLoading ? '加载中' : getSourceProviderLabel(sourceSettings?.provider)}</strong></div>}
-          </div>
-          <div className="source-search-config__actions">
+        <div className="model-service-content">
+          <div className="model-service-name">{sourceLoading ? '加载中…' : activeSourceLabel}</div>
+          <dl className="model-service-properties">
+            <div><dt>选择方式</dt><dd>{sourceLoading ? '—' : sourceSettings?.provider === 'auto' ? '自动选择' : sourceSettings?.provider === 'disabled' ? '已关闭' : '手动指定'}</dd></div>
+            <div><dt>可用平台</dt><dd title={configuredProviders.map(getSourceProviderLabel).join('、')}>{sourceLoading ? '—' : configuredProviders.length > 1 ? configuredProviders.map(getSourceProviderLabel).join('、') : configuredProviders.length ? '1 个平台' : '未配置'}</dd></div>
+          </dl>
+          <div className="model-service-actions" title={`最近保存：${formatSavedAt(sourceSettings?.updatedAt)}`}>
+            <Button icon={<EditOutlined />} disabled={sourceLoading || !sourceSettings || Boolean(sourceLoadError)} onClick={openSourceEditor}>配置搜索</Button>
             <Button loading={!sourceEditorOpen && sourceTesting} disabled={sourceLoading || !sourceSettings?.activeProvider || sourceEditorOpen} onClick={() => void handleSourceTest(true)}>测试已保存配置</Button>
-            <span className="source-search-config__test-result">{`最近保存：${formatSavedAt(sourceSettings?.updatedAt)}`}</span>
-            {!sourceEditorOpen && sourceTestResult ? <span role="status" className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
-              {sourceTestResult.success ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms` : sourceTestResult.info}
-            </span> : null}
           </div>
+          {!sourceEditorOpen && sourceTestResult ? <span role="status" className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
+              {sourceTestResult.success ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms` : sourceTestResult.info}
+          </span> : null}
         </div>
       )}
     </WorkspacePanel>

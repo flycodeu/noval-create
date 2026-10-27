@@ -50,14 +50,14 @@ async function main() {
   }
   const edit = (selector, value) => run(`{const input=document.querySelector(${JSON.stringify(selector)});if(!input)throw Error('Missing input: '+${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}))}`)
   const routeReady = {
-    '/novels': '.novel-list-page__grid', '/models': '.model-manager-config-card', '/settings': '.app-settings__connection-state.is-ready',
+    '/novels': '.novel-list-page__grid', '/models': '[data-model-config-card]', '/settings': '.app-settings__connection-state.is-ready',
     '/tasks': '.task-center-card', '/templates': '.template-manager-card:not(.template-manager-card--skeleton)', '/prompts': '.prompt-manager-inspector-body',
   }
   const go = async route => {
     await run(`location.hash=${JSON.stringify(route)}`)
     await wait(`location.hash===${JSON.stringify('#' + route)} && !!document.querySelector(${JSON.stringify(routeReady[route])})`)
     if (route === '/models') {
-      await run('document.querySelector(".model-manager-config-card").click()')
+      await run('document.querySelector("[data-model-config-card]").click()')
       await wait('!!document.querySelector(".model-manager-status-actions")')
     }
     await pause(100)
@@ -70,7 +70,7 @@ async function main() {
   }
   const noOverflow = async label => {
     const result = await run(`(()=>{
-      const selectors=['html','body','#root','.app-layout','.app-layout__body','.app-layout__content','.novel-list-page','.novel-list-page__shell','.novel-list-page__toolbar','.novel-list-page__grid','.novel-workspace','.novel-hero','.novel-panel','.novel-panel__body','.model-manager-layout','.model-manager-config-card','.model-manager-source-panel','.app-settings','.app-settings__section','.app-settings__details-body','.task-center-list','.task-center-detail','.template-manager-card','.prompt-manager-shell','.prompt-manager-catalog','.prompt-manager-inspector','.prompt-manager-template-stage','.ant-modal-content','.ant-modal-body','.ant-modal-footer','.task-indicator-panel'];
+      const selectors=['html','body','#root','.app-layout','.app-layout__body','.app-layout__content','.novel-list-page','.novel-list-page__shell','.novel-list-page__toolbar','.novel-list-page__grid','.novel-workspace','.novel-hero','.novel-panel','.novel-panel__body','.model-manager-services','.model-entry','.model-entry__metrics','.model-manager-source-panel','.app-settings','.app-settings__section','.app-settings__details-body','.task-center-list','.task-center-detail','.template-manager-card','.prompt-manager-shell','.prompt-manager-catalog','.prompt-manager-inspector','.prompt-manager-template-stage','.ant-modal-content','.ant-modal-body','.ant-modal-footer','.task-indicator-panel'];
       const offenders=[];for(const selector of selectors)for(const el of document.querySelectorAll(selector)){if(!window.ui.visible(el))continue;if(el.scrollWidth>el.clientWidth+2)offenders.push({selector,width:el.clientWidth,scrollWidth:el.scrollWidth,text:el.textContent.slice(0,100)})}
       const portals=[...document.querySelectorAll('.ant-modal,.task-indicator-popover:not(.ant-popover-hidden)')].filter(window.ui.visible).map(el=>{const r=el.getBoundingClientRect();return{left:r.left,right:r.right}});
       return{width:innerWidth,documentWidth:document.documentElement.scrollWidth,offenders,portals};})()`)
@@ -149,6 +149,12 @@ async function main() {
   await win.loadFile(path.join(profile, 'index.html'))
   await wait('!!window.fixture && !!document.querySelector(".novel-list-page__grid") && !!document.querySelector(".runtime-badge--test")')
   await assertClean()
+  if (process.argv.includes('--task-history-only')) {
+    await verifyHistoryCleanup()
+    await assertClean()
+    console.log('PASS task history UI: JSON tree/source masking, progressive arrays, model parameters, collapsed context, responsive layouts, selective deletion, policy validation and explicit cleanup. Isolated profile: ' + profile)
+    win.destroy(); app.exit(0); return
+  }
   const labels = { '/novels': '我的小说', '/models': '模型与搜索', '/settings': '应用设置', '/tasks': '运行记录', '/templates': '风格模板', '/prompts': '提示词管理' }
   for (const width of [1280, 900, 720, 480]) {
     await resize(width)
@@ -181,6 +187,9 @@ async function main() {
       const sidebar = await run(`(()=>{const el=document.querySelector('.app-layout__theme-panel'),r=el.getBoundingClientRect();return{top:r.top,bottom:r.bottom,height:innerHeight}})()`)
       assert(sidebar.top >= 0 && sidebar.bottom <= sidebar.height + 1, route + ': sidebar theme controls stay visible at ' + width + 'x720')
       await run(`document.querySelector(${JSON.stringify(endSelectors[route])}).scrollIntoView({block:'end'})`)
+      // Compact pages can expose the last panel before the bottom padding is
+      // scrolled. Exercise the actual scroll range, not just that panel's edge.
+      await run('document.querySelector(".app-layout__content").scrollTop = document.querySelector(".app-layout__content").scrollHeight')
       await pause(90)
       const bottom = await run(`(()=>{const target=document.querySelector(${JSON.stringify(endSelectors[route])}),r=target.getBoundingClientRect(),main=document.querySelector('.app-layout__content'),s=main.getBoundingClientRect();return{bottom:r.bottom,mainTop:s.top,mainBottom:s.bottom,scrollTop:main.scrollTop,scrollHeight:main.scrollHeight,clientHeight:main.clientHeight}})()`)
       assert(bottom.bottom <= bottom.mainBottom + 2 && bottom.bottom > bottom.mainTop, route + ': page bottom is reachable by actual scrolling at ' + width + 'x720: ' + JSON.stringify(bottom))
@@ -193,7 +202,7 @@ async function main() {
   progress('real desktop and mobile navigation')
   await resize(1280); await go('/novels')
   await run('{const item=[...document.querySelectorAll(".app-layout-menu .ant-menu-item")].find(el=>el.textContent.trim()==="模型与搜索");if(!item)throw Error("Missing desktop model item");item.click()}')
-  await wait('location.hash==="#/models" && !!document.querySelector(".model-manager-config-card")')
+  await wait('location.hash==="#/models" && !!document.querySelector("[data-model-config-card]")')
   await click('切换为深色主题')
   await wait('document.documentElement.dataset.theme==="dark"')
   assert.equal(await run('document.querySelector("[aria-label=切换为深色主题]").getAttribute("aria-pressed")'), 'true')
@@ -220,11 +229,12 @@ async function main() {
   await go('/models'); await click('编辑模型'); await modalWidths('model-editor')
   await click('拉取模型', 'window.ui.modal()'); await wait('document.querySelector("[data-model-discovery-count]")?.dataset.modelDiscoveryCount==="2"')
   await noOverflow('model discovery 480'); await closeModal()
-  await click('联网搜索配置'); await modalWidths('source-search'); await closeModal()
+  await click('配置搜索'); await modalWidths('source-search'); await closeModal()
   await click('配置朱雀检测'); await modalWidths('zhuque-settings'); await closeModal()
 
   progress('settings progressive disclosures and retrieval controls')
   await go('/settings')
+  assert.equal(await run('getComputedStyle(document.querySelector(".app-settings__heading h1")).fontSize'), '22px', 'settings uses the same compact title scale as other management pages')
   assert.equal(await run('document.querySelectorAll(".app-settings details[open]").length'), 0, 'manual diagnostics and export details start collapsed')
   await run('document.querySelector(".app-settings details summary").click()')
   await wait('!!document.querySelector(".app-settings details[open] #codex-cli-path")')
@@ -246,16 +256,79 @@ async function main() {
 
   progress('template and prompt tools')
   await go('/templates')
+  assert.equal(await run('document.querySelectorAll(".template-manager-page .novel-metric").length'), 0, 'template counts are not repeated as header metric cards')
   await click('查看内置模板 隔离文风模板'); await modalWidths('template-readonly')
   assert.equal(await run('[...window.ui.modal().querySelectorAll("input,textarea")].every(el=>el.disabled)'), true, 'built-in template fields remain read-only')
   await closeModal(); await click('新建模板'); await modalWidths('template-new'); await closeModal()
   await go('/prompts')
+  assert.equal(await run('document.querySelectorAll(".prompt-manager-filter,.prompt-manager-lane").length'), 0, 'two labelled selectors replace the repeated chip rows')
+  await select('提示词类别', '人物系统')
+  await wait('document.querySelectorAll(".prompt-manager-card").length > 0')
+  await select('提示词流程', '正文生产')
+  await wait('document.querySelectorAll(".prompt-manager-card").length === 0 && document.body.textContent.includes("无匹配提示词")')
+  await select('提示词类别', '全部'); await select('提示词流程', '全部')
+  await wait('document.querySelectorAll(".prompt-manager-card").length > 0')
+  await edit('.prompt-manager-toolbar__search input', '无匹配的隔离搜索词')
+  await wait('document.querySelectorAll(".prompt-manager-card").length === 0')
+  await edit('.prompt-manager-toolbar__search input', '')
+  await wait('!!document.querySelector(".prompt-manager-inspector-disclosure") && document.querySelectorAll(".prompt-manager-card").length > 0')
   await run('document.querySelector(".prompt-manager-inspector-disclosure summary").click()')
   await wait('document.querySelector(".prompt-manager-inspector-disclosure").open')
   await noOverflow('prompt parameter disclosure 480')
   await click('展开全文'); await modalWidths('prompt-fulltext'); await closeModal()
   await click('编辑', 'document.querySelector(".prompt-manager-inspector-actions")'); await modalWidths('prompt-edit'); await closeModal()
   assert.equal(await run('window.fixture.calls.some(call=>call.kind==="prompt.save"||call.kind==="template.create")'), false, 'cancelled administrative editors never save')
+
+  async function verifyHistoryCleanup() {
+  progress('structured task results and selective history cleanup')
+  await resize(1280); await go('/tasks')
+  await run('document.querySelectorAll(".task-center-list button")[1].click()')
+  await wait('!!document.querySelector(".task-center-detail-panel .json-viewer")')
+  assert.equal(await run('document.querySelector(".task-context-health-card").open'), false, 'large context diagnostics start collapsed')
+  await run('document.querySelector(".task-context-health-card > summary").click()')
+  for (const width of [1280, 900, 720, 480]) { await resize(width); await noOverflow('task context and structured results ' + width) }
+  await snapshot('task-structured-details-480')
+  await resize(1280)
+  assert.equal(await run('document.querySelector(".task-center-detail-panel").textContent.includes("fixture-secret-must-stay-hidden")'), false)
+  await click('格式化源码', 'document.querySelector(".task-center-detail-panel")')
+  await wait('!!document.querySelector(".json-viewer__source")')
+  assert.equal(await run('document.querySelector(".json-viewer__source").textContent.includes("fixture-secret-must-stay-hidden")'), false, 'source view uses the same masked data')
+  await click('结构视图', 'document.querySelector(".task-center-detail-panel")')
+  await run('[...document.querySelectorAll(".json-viewer summary")].find(el=>el.textContent.includes("characters")).click()')
+  await wait('!!window.ui.button("再显示 25 项")')
+  await click('再显示 25 项')
+  assert.equal(await run('[...document.querySelectorAll(".json-viewer .json-viewer__branch summary")].some(el=>el.textContent.includes("64"))'), true, 'large arrays progressively reveal all items')
+  await noOverflow('expanded structured task result')
+  await run('[...document.querySelectorAll(".task-center-detail-panel .ant-collapse-header")].find(el=>el.textContent.includes("模型调用记录")).click()')
+  await wait('!!document.querySelector(".task-attempt-heading")')
+  await run('document.querySelector(".task-attempt-heading").closest(".ant-collapse-header").click()')
+  await wait('!!document.querySelector(".task-center-model-attempt .json-viewer")')
+  assert.equal(await run('document.querySelector(".task-center-model-attempt").textContent.includes("fixture-secret-must-stay-hidden")'), false, 'model parameters use structured masked rendering')
+  await noOverflow('expanded model parameters')
+  await click('删除记录'); await wait('window.ui.modal()?.textContent.includes("删除这条运行记录")')
+  await click('确认删除', 'window.ui.modal()')
+  await wait('window.fixture.calls.some(call=>call.kind==="task.clearHistory") && document.querySelectorAll(".task-center-list button").length===2')
+  assert.deepEqual(await run('window.fixture.calls.filter(call=>call.kind==="task.clearHistory").at(-1).input.taskIds'), [80])
+  await click('清理设置'); await wait('!!document.querySelector(".history-cleanup-preview") && document.querySelector(".history-cleanup-preview").textContent.includes("1 条任务")')
+  assert.equal(await run('document.querySelector("button[aria-label=自动清理]").getAttribute("aria-checked")'), 'false', 'automatic deletion is opt-in')
+  await edit('input[aria-label=保留天数]', '')
+  await wait('window.ui.button("保存策略").disabled && window.ui.button("立即清理").disabled')
+  assert.equal(await run('document.querySelector(".history-cleanup-preview").textContent.includes("请输入")'), true, 'empty retention never silently reuses the previous days')
+  await edit('input[aria-label=保留天数]', '60')
+  await wait('!window.ui.button("保存策略").disabled && document.querySelector(".history-cleanup-preview").textContent.includes("1 条任务")')
+  await modalWidths('history-cleanup')
+  await run('document.querySelector("button[aria-label=自动清理]").click()')
+  await click('保存策略', 'window.ui.modal()'); await wait('!window.ui.modal()')
+  assert.equal(await run('window.fixture.calls.filter(call=>call.kind==="task.updateRetentionSettings").at(-1).input.enabled'), true)
+  assert.equal(await run('window.fixture.calls.some(call=>call.kind==="task.runCleanup")'), false, 'saving settings does not delete history')
+  await click('清理设置'); await wait('document.querySelector(".history-cleanup-preview")?.textContent.includes("1 条任务")')
+  await click('立即清理', 'window.ui.modal()'); await wait('!!window.ui.button("确认删除")')
+  await click('确认删除'); await wait('window.fixture.calls.some(call=>call.kind==="task.runCleanup") && document.querySelectorAll(".task-center-list button").length===1')
+  await wait('!document.querySelector(".ant-modal-confirm")')
+  await click('取消', 'window.ui.modal()'); await wait('!window.ui.modal()')
+  await assertClean()
+  }
+  await verifyHistoryCleanup()
 
   progress('task popover: pending, duplicate prevention, failure, retry and completion')
   await run('window.fixture.emit("task:status-change",{taskId:81,status:"running"});window.fixture.emit("task:progress",{taskId:81,progress:{current:1,total:3,percent:33,stage:"review",label:"隔离界面评审"}})')

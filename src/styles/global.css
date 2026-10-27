@@ -13813,99 +13813,16 @@ html[data-runtime="web"] .project-topbar__main-row {
   width: min(100%, 180px);
 }
 
-.app-layout .model-manager-page .admin-form-grid--three {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-
 .app-layout .model-manager-page .novel-workspace__main {
   display: grid;
   gap: 14px;
 }
 
-.app-layout .model-manager-page .model-manager-database-alert {
-  order: 1;
-  overflow-wrap: anywhere;
-}
-
-.app-layout .model-manager-page .model-manager-layout {
-  order: 2;
-  display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.app-layout .model-manager-page .novel-panel:has(.source-search-config) {
-  order: 3;
-}
-
-.app-layout .model-manager-page .novel-split {
-  order: 2;
-}
-
-.app-layout .model-manager-page .admin-detail-stack .ant-alert-description {
-  max-width: 920px;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel {
-  order: 3;
-  min-height: 0;
-}
-
-.app-layout .model-manager-page .model-manager-config-list {
-  gap: 10px;
-}
-
-.app-layout .model-manager-page .model-manager-config-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: start;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__main,
-.app-layout .model-manager-page .model-manager-config-card__title {
-  min-width: 0;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-primary);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__title span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__title .anticon {
-  flex: 0 0 auto;
-  color: #faad14;
-  font-size: 13px;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__actions,
-.app-layout .model-manager-page .model-manager-status-actions,
 .app-layout .model-manager-test-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.app-layout .model-manager-page .model-manager-config-card__actions {
-  justify-content: flex-end;
-  max-width: 180px;
-}
-
-.app-layout .model-manager-page .model-manager-status-grid {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .model-manager-modal-form .admin-form-grid {
@@ -13928,35 +13845,6 @@ html[data-runtime="web"] .project-topbar__main-row {
 .model-manager-modal-form .ant-input-affix-wrapper,
 .model-manager-modal-form .ant-input {
   width: 100%;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__header {
-  flex-direction: row;
-  margin-bottom: 0;
-  padding: 16px 18px 12px;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__copy {
-  flex: 0 1 auto;
-  width: 100%;
-  max-width: none;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__title {
-  overflow-wrap: normal;
-  word-break: keep-all;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__body,
-.app-layout .model-manager-page.novel-workspace--wide .model-manager-source-panel .novel-panel__body {
-  display: block;
-  min-height: 0;
-  padding: 16px 18px 18px;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .source-search-config {
-  align-content: start;
-  margin: 0;
 }
 
 .app-layout .ant-select-single .ant-select-selector .ant-select-selection-item,
@@ -13989,9 +13877,6 @@ html[data-runtime="web"] .project-topbar__main-row {
     grid-column: 1 / -1;
   }
 
-  .app-layout .model-manager-page .model-manager-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 900px) {
@@ -14011,14 +13896,6 @@ html[data-runtime="web"] .project-topbar__main-row {
     font-size: 16px;
   }
 
-  .app-layout .model-manager-page .model-manager-config-card {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .app-layout .model-manager-page .model-manager-config-card__actions {
-    justify-content: flex-start;
-    max-width: none;
-  }
 }
 
 /* Comprehensive novel workspace optimization: clearer IA, calmer density, fewer note-like blocks. */

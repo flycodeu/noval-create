@@ -1,0 +1,24 @@
+.json-viewer {
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  font: 13px/1.65 var(--font-body);
+  overflow: auto;
+  max-height: 55dvh;
+}
+.json-viewer__toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border-default); color: var(--text-secondary); }
+.json-viewer button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; }
+.json-viewer__branch { padding: 6px 10px; min-width: 0; }
+.json-viewer__branch summary { cursor: pointer; overflow-wrap: anywhere; }
+.json-viewer__children { border-left: 1px solid var(--border-default); margin-left: 4px; padding-left: 10px; }
+.json-viewer__row { display: grid; grid-template-columns: minmax(90px, .3fr) minmax(0, 1fr); gap: 12px; padding: 6px 4px; border-bottom: 1px solid var(--border-default); }
+.json-viewer__key { color: var(--text-secondary); overflow-wrap: anywhere; }
+.json-viewer__count { color: var(--text-tertiary, var(--text-secondary)); margin-left: 8px; font-size: 12px; }
+.json-viewer__value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.json-viewer__value--number, .json-viewer__value--boolean { color: var(--accent); font-family: Consolas, monospace; }
+.json-viewer__value--null { color: var(--text-secondary); }
+.json-viewer__text, .json-viewer__source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55dvh; overflow: auto; line-height: 1.75; font-size: 13px; }
+.json-viewer__source { padding: 12px; font-family: Consolas, monospace; }
+.json-viewer__more { padding: 8px 4px; }
+@media (max-width: 560px) { .json-viewer__row { grid-template-columns: minmax(0, 1fr); gap: 2px; } }

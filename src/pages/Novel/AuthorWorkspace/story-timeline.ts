@@ -62,6 +62,13 @@ export interface StoryTimelineEntry {
   links: StoryTimelineLink[]
 }
 
+export function parseTimelineChapterFilter(hasParameter: boolean, value: string | null): number | null {
+  const raw = value?.trim() || ''
+  if (!hasParameter || !raw) return null
+  const chapter = Number(raw)
+  return Number.isInteger(chapter) && chapter >= 0 ? chapter : null
+}
+
 function authorPlanningKind(entity: StoryAtlasEntity): StoryTimelineEntry['planningKind'] {
   const type = text(entity.attributes.eventType)
   const explicitPlan = type === '叙事单元规划' || type === '短篇日常规划' || /^作者.*(?:规划|计划)$/u.test(type)

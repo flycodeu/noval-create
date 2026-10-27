@@ -116,9 +116,9 @@ export default function AppSettings() {
   const connectionDetail = mcpStatus && !mcpStatus.codexCliPath ? '未找到 Codex，请填写程序路径。' : registered && !serviceReady && mcpStatus.runtime ? mcpStatus.runtime.message : mcpStatus?.registration === 'different' ? '程序位置已变化，请更新连接配置。' : ''
 
   return <div className="app-settings">
-    <header className="app-settings__heading"><span>NovelForge</span><h1>应用设置</h1></header>
+    <header className="app-settings__heading"><h1>应用设置</h1></header>
     <section className="app-settings__section app-settings__connection" aria-labelledby="settings-mcp-title">
-      <div className="app-settings__section-heading"><div><span className="app-settings__eyebrow">创作连接</span><h2 id="settings-mcp-title">Codex MCP</h2></div><span className={`app-settings__connection-state${connectionReady ? ' is-ready' : ''}`}><i />{!desktopRuntime ? '桌面功能' : connectionReady ? '可用' : mcpBusy ? '检查中' : '待检查'}</span></div>
+      <div className="app-settings__section-heading"><h2 id="settings-mcp-title">Codex MCP 连接</h2><span className={`app-settings__connection-state${connectionReady ? ' is-ready' : ''}`}><i />{!desktopRuntime ? '桌面功能' : connectionReady ? '可用' : mcpBusy ? '检查中' : '待检查'}</span></div>
       <div className="app-settings__connection-copy"><strong>{connectionTitle}</strong>{connectionDetail && <p>{connectionDetail}</p>}</div>
       {mcpError && <Alert type="error" showIcon message={mcpError} />}
       <div className="app-settings__actions"><Button type={registered ? 'default' : 'primary'} onClick={() => void refreshMcp(true)} loading={mcpBusy} disabled={!desktopRuntime || !mcpStatus?.supported || (!mcpStatus.codexCliPath && !codexCliPath.trim())}>{registered || mcpStatus?.registration === 'different' ? '更新连接配置' : '配置到 Codex'}</Button><Button icon={<ReloadOutlined />} onClick={() => void refreshMcp()} loading={mcpBusy} disabled={!desktopRuntime}>检查连接</Button></div>

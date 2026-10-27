@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Chapter, StoryStructureTree } from '../../../types'
 import type { StoryAtlasEntity, StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { buildOutlineVolumes, defaultTimelineView, outlineChapterHasProse, outlineChapterMatches, outlineMatches, outlineTimelineGroups } from './story-outline'
-import { buildStoryTimelineEntries } from './story-timeline'
+import { buildStoryTimelineEntries, parseTimelineChapterFilter } from './story-timeline'
 
 function chapter(num: number, prose = false): Chapter {
   return { id: num + 100, novelId: 1, chapterNum: num, title: `第 ${num} 章`, outline: num === 15 ? '纸姑拒绝为契纸作伪证' : '出发', wordCount: prose ? 1200 : 0, status: prose ? 'draft' : 'outline', targetWords: 3000, createdAt: '', updatedAt: '' }
@@ -19,6 +19,15 @@ function atlas(entities: StoryAtlasEntity[]): StoryAtlasSnapshot {
 }
 
 describe('full outline and volume chronology', () => {
+  it('treats an empty chapter query as no filter instead of background events', () => {
+    expect(parseTimelineChapterFilter(true, '')).toBeNull()
+    expect(parseTimelineChapterFilter(true, '  ')).toBeNull()
+    expect(parseTimelineChapterFilter(false, '0')).toBeNull()
+    expect(parseTimelineChapterFilter(true, '0')).toBe(0)
+    expect(parseTimelineChapterFilter(true, '12')).toBe(12)
+    expect(parseTimelineChapterFilter(true, '-1')).toBeNull()
+  })
+
   it('defaults to the whole-book timeline only for an unqualified visit with explicit volume outline records', () => {
     expect(defaultTimelineView(new URLSearchParams(), atlas([plan(1)]))).toBe('volumes')
     expect(defaultTimelineView(new URLSearchParams(), atlas([]))).toBe('events')

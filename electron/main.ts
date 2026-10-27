@@ -83,6 +83,7 @@ import * as rhythmTemplateService from './services/rhythm-template.service'
 import * as embeddingService from './services/embedding.service'
 import * as semanticMemoryService from './services/semantic-memory.service'
 import { maintenanceWorker } from './services/maintenance-worker.service'
+import * as historyRetentionService from './services/history-retention.service'
 import { checkDesktopUpdates, getDesktopUpdateStatus, installDownloadedUpdate, startDesktopUpdater } from './services/desktop-updater'
 import { assertNotUpdating, assertUpdateStorageReleased, waitForMcpBridgesToExit } from './utils/update-lifecycle'
 import { configureCodexMcp, getCodexMcpSetupStatus } from './services/codex-mcp-setup.service'
@@ -1501,6 +1502,10 @@ function registerRuntimeIpcHandlers(handle: IpcHandle) {
   handle('task:getLatestChapterPipeline', (_, chapterId) => taskService.getLatestChapterPipelineTask(chapterId))
   handle('task:modelAttempts', (_, taskId) => modelAttemptLedgerService.listModelAttemptsForTaskTree(taskId))
   handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
+  handle('task:getRetentionSettings', () => historyRetentionService.getHistoryRetentionSettings())
+  handle('task:updateRetentionSettings', (_, input) => historyRetentionService.updateHistoryRetentionSettings(input))
+  handle('task:previewCleanup', (_, input) => historyRetentionService.previewHistoryCleanup(input))
+  handle('task:runCleanup', (_, input) => historyRetentionService.runHistoryCleanup(input))
 
   handle('task:get', (_, id) => {
     const db = getDb()

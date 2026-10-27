@@ -8,8 +8,28 @@
 }
 
 .app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-toolbar__actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 6px;
 }
+
+/* Global management pages use compact controls; project action grids remain unchanged. */
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-hero {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 0 0 16px;
+}
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-hero__copy { flex: 0 1 auto; min-width: 0; width: auto; }
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-hero__title { font-family: var(--font-body); font-size: 22px; font-weight: 650; }
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-panel__title { font-family: var(--font-body); font-size: 15px; font-weight: 600; }
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-hero__actions { flex: 0 1 auto; width: auto; margin: 0; }
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) :is(.admin-toolbar__actions, .task-center-toolbar) .ant-btn { width: auto; min-width: 0; height: 32px; padding: 4px 12px; border-radius: 6px; font-size: 13px; box-shadow: none; }
+.app-layout[data-ui-system="quiet-workspace"] :is(.admin-page, .task-center-page) .novel-panel { border-radius: 10px; box-shadow: none; }
 
 .app-layout[data-ui-system="quiet-workspace"] .admin-page .admin-sidebar-list {
   gap: 6px;

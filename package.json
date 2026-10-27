@@ -1,6 +1,6 @@
 {
   "name": "novelforge",
-  "version": "2.4.48",
+  "version": "2.4.49",
   "private": true,
   "description": "AI 小说智能创作平台",
   "novelforgeRuntimeNotes": {
@@ -37,9 +37,10 @@
     "generate:icon": "python scripts/generate-app-icon.py",
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
-    "test": "npm run test:unit && npm run test:smoke && npm run test:reader-first && npm run test:novel-cover && npm run test:story-workspace",
+    "test": "npm run test:unit && npm run test:history-retention && npm run test:smoke && npm run test:reader-first && npm run test:novel-cover && npm run test:story-workspace",
     "test:global-ui": "electron scripts/global-interface-ui.test.cjs",
     "test:model-manager": "electron scripts/model-manager-ui.test.cjs",
+    "test:history-retention": "electron scripts/history-retention.test.cjs && electron scripts/global-interface-ui.test.cjs --task-history-only",
     "test:workspace-layout": "electron scripts/workspace-layout-ui.test.cjs",
     "test:novel-update": "electron scripts/novel-update-conflict.test.cjs",
     "test:reader-first": "node --test scripts/reader-first-expansion.test.cjs && electron scripts/reader-first-storage.test.cjs && electron scripts/reader-first-policy-storage.test.cjs && electron scripts/reader-first-context.test.cjs && electron scripts/reader-first-revision.test.cjs && electron scripts/reader-first-story-design.test.cjs && electron scripts/reader-first-writeback.test.cjs && electron scripts/reader-first-pilot.test.cjs && electron scripts/reader-first-feedback.test.cjs && electron scripts/reader-first-entrypoints.test.cjs && electron scripts/reader-first-launch.test.cjs",

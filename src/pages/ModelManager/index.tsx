@@ -20,7 +20,6 @@ import {
   EditOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SearchOutlined,
   StarFilled,
   StarOutlined,
 } from '@ant-design/icons'
@@ -120,7 +119,6 @@ export default function ModelManager() {
   const [isNew, setIsNew] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const sourceSettingsRef = useRef<SourceSearchSettingsHandle>(null)
-  const [sourceReady, setSourceReady] = useState(false)
 
   const selectedProvider = Form.useWatch('provider', form)
   const selectedModelId = Form.useWatch('modelId', form)
@@ -193,6 +191,15 @@ export default function ModelManager() {
     if (saveInFlightRef.current) return
     selectConfig(config)
     setEditorOpen(true)
+  }
+
+  const toggleConfigDetails = (config: ModelConfig) => {
+    if (saveInFlightRef.current) return
+    if (selected?.id !== config.id) { selectConfig(config); return }
+    testRequestRef.current += 1
+    setTesting(false)
+    setTestResult(null)
+    setSelected(null)
   }
 
   const handleNew = () => {
@@ -333,7 +340,6 @@ export default function ModelManager() {
   const currentProviderModels = PROVIDER_OPTIONS.find((provider) => provider.value === selectedProvider)?.models || []
   const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
   const selectedDefaultContextWindow = getProviderDefaultContextWindow(selectedProvider, selectedModelId)
-  const defaultCount = configs.filter((config) => config.isDefault === 1).length
 
   const refreshAll = () => {
     void loadConfigs()
@@ -349,11 +355,7 @@ export default function ModelManager() {
         title="创作模型"
         actions={(
           <div className="admin-toolbar">
-            <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
             <div className="admin-toolbar__actions">
-              <Button icon={<SearchOutlined />} disabled={!sourceReady} onClick={() => sourceSettingsRef.current?.open()}>
-                联网搜索配置
-              </Button>
               <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading} disabled={saving}>
                 刷新
               </Button>
@@ -364,11 +366,10 @@ export default function ModelManager() {
           </div>
         )}
       >
-        <div className="model-manager-layout">
           <WorkspacePanel
-            scrollable
             className="model-manager-list-panel"
-            title="模型配置"
+            title="模型"
+            extra={<span className="model-manager-count">{configs.length} 个配置</span>}
           >
             {loading && !configRows ? (
               <Skeleton active paragraph={{ rows: 8 }} />
@@ -377,103 +378,55 @@ export default function ModelManager() {
                 <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               </div>
             ) : (
-              <div className="admin-sidebar-list model-manager-config-list" data-p3-04-model-list>
+              <div className="model-manager-config-list" data-p3-04-model-list>
                 {configs.map((config) => (
-                  <div
-                    key={config.id}
-                    role="button"
-                    tabIndex={saving ? -1 : 0}
-                    aria-disabled={saving}
-                    data-model-config-card
-                    className={`admin-sidebar-item model-manager-config-card ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
-                    onClick={() => selectConfig(config)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        selectConfig(config)
-                      }
-                    }}
-                  >
-                    <div className="model-manager-config-card__main">
-                      <div className="model-manager-config-card__title">
+                  <div key={config.id} className="model-entry">
+                    <button
+                      type="button"
+                      tabIndex={saving ? -1 : 0}
+                      aria-disabled={saving}
+                      aria-expanded={selected?.id === config.id}
+                      aria-controls={selected?.id === config.id ? `model-details-${config.id}` : undefined}
+                      disabled={saving}
+                      data-model-config-card
+                      className="model-entry__identity"
+                      onClick={() => toggleConfigDetails(config)}
+                    >
+                      <span className="model-entry__name">
                         <span>{config.name}</span>
-                        {config.isDefault === 1 ? <StarFilled /> : null}
-                      </div>
-                      <div className="admin-sidebar-item__meta">
-                        {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label || config.provider}
-                        {' · '}
-                        {config.modelId}
-                      </div>
-                      <div className="admin-sidebar-item__meta">
-                        {`输出 ${formatTokenBudget(config.maxTokens)} · 上下文 ${formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))} · 并发 ${config.maxConcurrency || 1}`}
-                      </div>
+                        {config.isDefault === 1 ? <span className="model-status-badge"><StarFilled /> 默认</span> : null}
+                      </span>
+                      <span className="model-entry__provider">{PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label || config.provider}</span>
+                      <span className="model-entry__id">{config.modelId}</span>
+                    </button>
+                    <dl className="model-entry__metrics">
+                      <div><dt>输出上限</dt><dd>{formatTokenBudget(config.maxTokens)}</dd></div>
+                      <div><dt>上下文</dt><dd>{formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))}</dd></div>
+                      <div><dt>并发</dt><dd>{config.maxConcurrency || 1}</dd></div>
+                    </dl>
+                    <div className="model-entry__actions">
+                      <Button icon={<EditOutlined />} disabled={saving} onClick={() => openModelEditor(config)}>编辑模型</Button>
+                      <Button type="text" aria-label={`管理 ${config.name}`} aria-expanded={selected?.id === config.id} disabled={saving} onClick={() => toggleConfigDetails(config)}>{selected?.id === config.id ? '收起' : '管理'}</Button>
                     </div>
+                    {selected?.id === config.id ? <div id={`model-details-${config.id}`} className="model-entry__details">
+                      <span className="model-entry__credential" data-model-api-key-status>{isNativeAgentProvider(selected.provider) ? '认证方式：本机登录' : `API Key：${selected.apiKey ? '已保存' : '未配置'}`}</span>
+                      <div className="model-manager-status-actions">
+                        <Button icon={selected.isDefault ? <StarFilled /> : <StarOutlined />} disabled={saving || selected.isDefault === 1} onClick={() => void handleSetDefault(selected)}>{selected.isDefault ? '已设为默认' : '设为默认'}</Button>
+                        <Button loading={testing} disabled={saving} onClick={() => void handleTest()}>测试连接</Button>
+                        <Button danger icon={<DeleteOutlined />} disabled={saving} onClick={() => void handleDelete(selected)}>删除模型</Button>
+                      </div>
+                      {testResult ? <span role="status" className={`source-search-config__test-result${testResult.success ? ' is-success' : ' is-error'}`}>{testResult.success ? `连接成功 · ${testResult.latency}ms` : testResult.info}</span> : null}
+                    </div> : null}
                   </div>
                 ))}
               </div>
             )}
           </WorkspacePanel>
 
-          {selected && <WorkspacePanel
-            className="model-manager-overview-panel"
-            title="当前状态"
-          >
-              <div className="admin-detail-stack">
-                <div className="source-search-config__status-grid model-manager-status-grid">
-                  <div className="source-search-config__status">
-                    <span>当前模型</span>
-                    <strong>{selected.name}</strong>
-                  </div>
-                  <div className="source-search-config__status">
-                    <span>提供商</span>
-                    <strong>{PROVIDER_OPTIONS.find((item) => item.value === selected.provider)?.label || selected.provider}</strong>
-                  </div>
-                  <div className="source-search-config__status">
-                    <span>模型 ID</span>
-                    <strong>{selected.modelId}</strong>
-                  </div>
-                  <div className="source-search-config__status" data-model-api-key-status>
-                    <span>API Key</span>
-                    <strong>{selected.apiKey ? '已保存' : '未配置'}</strong>
-                  </div>
-                  <div className="source-search-config__status">
-                    <span>输出长度</span>
-                    <strong>{formatTokenBudget(selected.maxTokens)}</strong>
-                  </div>
-                  <div className="source-search-config__status">
-                    <span>上下文</span>
-                    <strong>{formatTokenBudget(selected.maxContextTokens || getProviderDefaultContextWindow(selected.provider, selected.modelId))}</strong>
-                  </div>
-                </div>
-                <div className="model-manager-status-actions">
-                  <Button type="primary" icon={<EditOutlined />} disabled={saving} onClick={() => openModelEditor(selected)}>
-                    编辑模型
-                  </Button>
-                  <Button
-                    icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
-                    disabled={saving || selected.isDefault === 1}
-                    onClick={() => void handleSetDefault(selected)}
-                  >
-                    {selected.isDefault ? '已设为默认' : '设为默认'}
-                  </Button>
-                  <Button loading={testing} disabled={saving} onClick={() => void handleTest()}>
-                    测试连接
-                  </Button>
-                  <Button danger icon={<DeleteOutlined />} disabled={saving} onClick={() => void handleDelete(selected)}>
-                    删除模型
-                  </Button>
-                  {testResult ? (
-                    <span className={`source-search-config__test-result${testResult.success ? ' is-success' : ' is-error'}`}>
-                      {testResult.success ? `连接成功 · ${testResult.latency}ms` : testResult.info}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-          </WorkspacePanel>}
+        <div className="model-manager-services">
+          <SourceSearchSettings ref={sourceSettingsRef} />
+          <ZhuqueSettings />
         </div>
-
-        <SourceSearchSettings ref={sourceSettingsRef} onAvailabilityChange={setSourceReady} />
-        <WorkspacePanel className="model-manager-detection-panel" title="正文检测"><ZhuqueSettings /></WorkspacePanel>
       </WorkspacePage>
 
       <Modal
@@ -481,6 +434,7 @@ export default function ModelManager() {
         open={editorOpen}
         forceRender
         width={760}
+        className="model-manager-editor-modal"
         maskClosable={!saving}
         closable={!saving}
         keyboard={!saving}

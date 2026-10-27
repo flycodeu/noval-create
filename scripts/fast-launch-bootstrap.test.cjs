@@ -6,13 +6,9 @@ require('./isolate-test-session.cjs')(app)
 const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
-const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'fast-launch-bootstrap')
-if (!tempRoot.startsWith(`${workspaceRoot}${path.sep}`)) {
-  throw new Error(`Refusing to use a temp directory outside the workspace: ${tempRoot}`)
-}
-
-fs.rmSync(tempRoot, { recursive: true, force: true })
-fs.mkdirSync(tempRoot, { recursive: true })
+const fixtureRoot = path.join(workspaceRoot, '.tmp-tests')
+fs.mkdirSync(fixtureRoot, { recursive: true })
+const tempRoot = fs.mkdtempSync(path.join(fixtureRoot, 'fast-launch-bootstrap-'))
 process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
 app.setName('NovelForge Fast Launch Bootstrap Test')
 app.setPath('userData', tempRoot)

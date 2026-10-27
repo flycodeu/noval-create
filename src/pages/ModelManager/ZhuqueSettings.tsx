@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Button, Input, Modal, Space, Switch } from 'antd'
+import { EditOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { ZhuqueSettingsView, ZhuqueTestResult } from '../../shared/zhuque-detection'
+import { WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import './zhuque-settings.css'
 
 export default function ZhuqueSettings() {
@@ -37,17 +39,19 @@ export default function ZhuqueSettings() {
     }
     finally { locked.current = false; setAction(null) }
   }
-  return <section className="admin-detail-stack" data-zhuque-settings>
-    <div className="source-search-config__summary">
-      <div className="source-search-config__summary-copy"><strong>朱雀 AI 检测</strong></div>
-      <div className="source-search-config__status-grid">
-        <div className="source-search-config__status"><span>检测状态</span><strong>{settings ? settings.enabled ? '已启用' : '已关闭' : '加载中'}</strong></div>
-        <div className="source-search-config__status"><span>本地密钥</span><strong>{settings?.apiKeySet ? '已保存' : '未配置'}</strong></div>
-        <div className="source-search-config__status"><span>保存后自动检测</span><strong>{settings?.enabled && settings.autoDetect ? '开启' : '关闭'}</strong></div>
-      </div>
+  return <>
+    <WorkspacePanel className="model-service-card model-manager-detection-panel" title={<><SafetyCertificateOutlined /> 正文检测</>}
+      extra={<span className={`model-status-badge${settings?.enabled ? ' is-enabled' : ''}`}>{settings ? settings.enabled ? '已启用' : '已关闭' : feedback ? '读取失败' : '加载中'}</span>}>
+    <div className="model-service-content" data-zhuque-settings>
+      <div className="model-service-name">朱雀 AI 检测</div>
+      <dl className="model-service-properties">
+        <div><dt>本地密钥</dt><dd>{settings ? settings.apiKeySet ? '已保存' : '未配置' : '—'}</dd></div>
+        <div><dt>保存后自动检测</dt><dd>{settings ? settings.enabled && settings.autoDetect ? '开启' : '关闭' : '—'}</dd></div>
+      </dl>
+      <div className="model-service-actions"><Button icon={<EditOutlined />} disabled={!settings || busy} onClick={edit}>配置朱雀检测</Button></div>
+      {feedback ? <p role="status">{feedback}</p> : null}
     </div>
-    <div><Button disabled={!settings || busy} onClick={edit}>配置朱雀检测</Button></div>
-    {feedback ? <p role="status">{feedback}</p> : null}
+    </WorkspacePanel>
     <Modal title="朱雀检测配置" open={open} closable={!busy} maskClosable={!busy} keyboard={!busy} onCancel={() => { if (!busy) { setOpen(false); setKey('') } }} footer={<Space><Button disabled={busy || !canTest} loading={action === 'test'} onClick={() => void save(true)}>保存并测试</Button><Button type="primary" disabled={busy} loading={action === 'save'} onClick={() => void save(false)}>保存配置</Button></Space>}>
       <div className="zhuque-settings-form">
         <label className="zhuque-settings-form__toggle">启用朱雀检测 <Switch aria-label="启用朱雀检测" checked={enabled} disabled={busy || clearKey} onChange={value => { setEnabled(value); invalidateResult() }} /></label>
@@ -61,5 +65,5 @@ export default function ZhuqueSettings() {
         {feedback ? <p role="status">{feedback}</p> : null}
       </div>
     </Modal>
-  </section>
+  </>
 }

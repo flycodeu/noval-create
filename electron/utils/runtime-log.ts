@@ -22,7 +22,7 @@ function getFallbackLogDir(): string {
   return path.join(process.cwd(), '.runtime-logs')
 }
 
-function getRuntimeLogDir(): string {
+export function getRuntimeLogDir(): string {
   try {
     if (app.isReady()) return path.join(app.getPath('userData'), 'logs')
   } catch {
@@ -32,7 +32,7 @@ function getRuntimeLogDir(): string {
 }
 
 function getRuntimeLogPath(): string {
-  return path.join(getRuntimeLogDir(), 'main-runtime.log')
+  return path.join(getRuntimeLogDir(), `main-runtime-${new Date().toISOString().slice(0, 10)}.log`)
 }
 
 function ensureRuntimeLogDir(): void {

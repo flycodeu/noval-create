@@ -266,6 +266,17 @@ async function main() {
     assert.equal((await rpc('zhuque', 'test')).success, false)
     await expectRpcError('zhuque', 'localKey', [], 'runtime.methodNotAllowed')
     await assertModelAndSearchSettingsRpc()
+    const retention = await rpc('task', 'getRetentionSettings')
+    assert.deepEqual(retention, { enabled: false, keepDays: 30, cleanTasks: true, cleanLogs: true })
+    const policy = { ...retention, keepDays: 60 }
+    assert.deepEqual(await rpc('task', 'updateRetentionSettings', [policy]), policy)
+    const cleanupPreview = await rpc('task', 'previewCleanup', [policy])
+    assert.equal(cleanupPreview.taskCount, 0)
+    const nothingToClean = await rpc('task', 'runCleanup', [policy])
+    assert.equal(nothingToClean.deletedCount, 0)
+    assert.deepEqual(nothingToClean.deletedTaskIds, [])
+    assert.equal(nothingToClean.deletedLogs, 0)
+    assert.equal((await rpcPayload('task', 'updateRetentionSettings', [{ ...policy, keepDays: 0 }])).ok, false)
 
     novelId = Number(await rpc('novel', 'create', [{
       title: `Web RPC smoke ${stamp}`,

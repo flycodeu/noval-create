@@ -1,23 +1,21 @@
-.app-settings { width: min(940px, 100%); margin: 0 auto; padding: 38px 36px 72px; color: var(--text-primary); }
-.app-settings__heading { margin-bottom: 30px; }
-.app-settings__heading > span, .app-settings__eyebrow { font-size: 10px; letter-spacing: .1em; color: var(--text-muted); }
-.app-settings__heading h1 { font: 500 30px/1.5 "Noto Serif SC", "Songti SC", SimSun, serif; margin: 8px 0; }
+.app-settings { width: min(1080px, 100%); margin: 0 auto; padding: 18px clamp(18px, 2.4vw, 32px) 32px; color: var(--text-primary); }
+.app-settings__heading { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--border-default); }
+.app-settings__heading h1 { font: 650 22px/1.5 var(--font-body); margin: 0; }
 .app-settings__heading > p { font-size: 13px; color: var(--text-secondary); margin: 0; }
-.app-settings__section { min-width: 0; padding: 26px 28px; border: 1px solid var(--border-default); border-radius: 13px; background: var(--bg-surface); }
-.app-settings__section h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.app-settings__section { min-width: 0; padding: 20px; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-surface); }
+.app-settings__section h2 { margin: 0; font: 600 15px/1.5 var(--font-body); }
 .app-settings__section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .app-settings__section-heading h2 + p { margin: 5px 0 0; }
-.app-settings__connection { border-top: 3px solid #678074; }
-.app-settings__connection h2 { margin-top: 5px; font-size: 20px; font-weight: 500; }
+.app-settings__connection { border-top: 2px solid #678074; }
 .app-settings__connection-state { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--text-muted); font-size: 11px; }
 .app-settings__connection-state i { width: 6px; height: 6px; border-radius: 50%; background: #a5a8a3; }
 .app-settings__connection-state.is-ready { color: #527b64; }
 .app-settings__connection-state.is-ready i { background: #64866e; }
-.app-settings__connection-copy { margin: 25px 0 20px; }
-.app-settings__connection-copy strong { font-size: 15px; font-weight: 500; }
+.app-settings__connection-copy { margin: 14px 0; }
+.app-settings__connection-copy strong { font-size: 13px; font-weight: 500; }
 .app-settings__connection-copy p { max-width: 660px; margin: 9px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.9; }
-.app-settings__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
-.app-settings__details { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--border-default); font-size: 12px; }
+.app-settings__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.app-settings__details { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-default); font-size: 12px; }
 .app-settings__details > summary { width: fit-content; cursor: pointer; color: var(--text-secondary); line-height: 1.8; }
 .app-settings__details > summary:hover { color: var(--text-primary); }
 .app-settings__details-body { display: grid; gap: 17px; padding-top: 20px; }
@@ -30,7 +28,7 @@
 .app-settings__diagnostics > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; margin-top: 13px; }
 .app-settings__diagnostics dt { color: var(--text-muted); }
 .app-settings__diagnostics dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; line-height: 1.8; }
-.app-settings__preferences { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 20px 0; }
+.app-settings__preferences { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
 .app-settings__model-name { font-size: 14px; margin: 17px 0 0; }
 .app-settings__description { color: var(--text-secondary); font-size: 12px; line-height: 1.9; margin: 10px 0 17px; overflow-wrap: anywhere; }
 .app-settings__details-body .app-settings__description { margin: 0; }
@@ -45,17 +43,18 @@
 .app-settings__theme--soft .app-settings__theme-sample i { background: #b7afa1; }
 .app-settings__theme--dark .app-settings__theme-sample { background: #292e33; border-color: #373d43; }
 .app-settings__theme--dark .app-settings__theme-sample i { background: #849099; }
-.app-settings__version { font-size: 23px; letter-spacing: -.04em; font-weight: 500; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.app-settings__update-status { font-size: 13px; line-height: 1.8; margin: 21px 0 0; }
+.app-settings__version { font-size: 18px; font-weight: 500; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.app-settings__update-status { font-size: 13px; line-height: 1.8; margin: 14px 0 0; }
 .app-settings__note { color: var(--text-muted); font-size: 11px; line-height: 1.9; margin: 15px 0 0; }
 .app-settings__note:empty { display: none; }
 .app-settings__details-body .app-settings__note { margin: 0; }
 .app-settings__error { color: #b95750; font-size: 12px; line-height: 1.8; }
 .app-settings .ant-alert { margin-top: 16px; overflow-wrap: anywhere; }
 .app-settings .ant-progress { margin-top: 15px; }
-.app-settings > .app-settings__section + .app-settings__section { margin-top: 20px; }
+.app-settings > .app-settings__section + .app-settings__section { margin-top: 16px; }
 .app-settings__embedding .ant-select { min-width: min(100%, 190px); flex: 1 1 190px; }
 .app-settings__embedding .ant-input { min-width: 0; flex: 1 1 200px; }
 .app-settings__embedding [role="alert"] { margin: 12px 0 0; color: var(--color-error, #b95750); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-@media (max-width: 900px) { .app-settings { padding: 28px 22px 60px; } .app-settings__section { padding: 23px; } .app-settings__preferences { grid-template-columns: 1fr; } }
-@media (max-width: 520px) { .app-settings { padding: 24px 14px 50px; } .app-settings__section { padding: 22px 18px; } .app-settings__heading h1 { font-size: 27px; } .app-settings__diagnostics > div { grid-template-columns: 1fr; gap: 3px; } .app-settings__connection-state { font-size: 10px; } .app-settings__version { font-size: 20px; } }
+.app-settings .ant-btn { height: 32px; padding: 4px 12px; border-radius: 6px; font-size: 13px; box-shadow: none; }
+@media (max-width: 760px) { .app-settings__preferences { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .app-settings { padding: 18px 14px 32px; } .app-settings__section { padding: 18px; } .app-settings__diagnostics > div { grid-template-columns: 1fr; gap: 3px; } .app-settings__connection-state { font-size: 10px; } }

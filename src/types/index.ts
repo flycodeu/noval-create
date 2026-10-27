@@ -1742,11 +1742,14 @@ export interface TaskHistoryClearInput {
   novelId?: number
   status?: Task['status']
   type?: string
+  keepDays?: number
+  taskIds?: number[]
 }
 
 export interface TaskHistoryClearResult {
   deletedCount: number
   deletedTaskIds: number[]
+  protectedCount?: number
 }
 
 export interface PremiseDraftRecord {
@@ -6448,6 +6451,10 @@ declare global {
         getLatestChapterPipeline: (chapterId: number) => Promise<Task | null>
         modelAttempts: (taskId: number) => Promise<ModelAttempt[]>
         clearHistory: (filters?: TaskHistoryClearInput) => Promise<TaskHistoryClearResult>
+        getRetentionSettings: () => Promise<import('../shared/history-retention').HistoryRetentionSettings>
+        updateRetentionSettings: (input: import('../shared/history-retention').HistoryRetentionSettings) => Promise<import('../shared/history-retention').HistoryRetentionSettings>
+        previewCleanup: (input: import('../shared/history-retention').HistoryRetentionSettings) => Promise<import('../shared/history-retention').HistoryCleanupPreview>
+        runCleanup: (input: import('../shared/history-retention').HistoryRetentionSettings) => Promise<TaskHistoryClearResult & { deletedLogs: number }>
         get: (id: number) => Promise<Task | null>
         cancel: (id: number) => Promise<boolean>
         retry: (id: number) => Promise<number>

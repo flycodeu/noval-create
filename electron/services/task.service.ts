@@ -1,6 +1,7 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
+import { clearRetainedTaskHistory, type HistoryTaskFilters } from './history-retention.service'
 import type { ProgressSink } from '../utils/progress-sink'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
 import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
@@ -135,11 +136,7 @@ interface TaskQueryFilters {
   pageSize?: number
 }
 
-interface TaskHistoryClearFilters {
-  novelId?: number
-  status?: TaskStatus
-  type?: string
-}
+type TaskHistoryClearFilters = HistoryTaskFilters
 
 export interface TaskStats {
   total: number
@@ -177,6 +174,7 @@ export interface TaskPipelineStats {
 export interface ClearTaskHistoryResult {
   deletedCount: number
   deletedTaskIds: number[]
+  protectedCount: number
 }
 
 interface CreateTaskOptions {
@@ -262,7 +260,6 @@ const RATE_LIMIT_MAX_DELAY_MS = 12_000
 const TRANSIENT_MODEL_TASK_RETRY_LIMIT = 2
 const TRANSIENT_MODEL_TASK_RETRY_BASE_DELAY_MS = 2_000
 const TRANSIENT_MODEL_TASK_RETRY_MAX_DELAY_MS = 8_000
-const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
 const MAX_STREAM_OUTPUT_LENGTH = 524_288 // ~512K 字符安全上限
 const CHAPTER_PIPELINE_ROLES: TaskPipelineRole[] = ['planner', 'writer', 'critic', 'enforcer', 'rewriter', 'canonizer', 'finalize']
 
@@ -1055,24 +1052,7 @@ export function getTaskPipelineStats(novelId?: number): TaskPipelineStats {
 }
 
 export function clearTaskHistory(filters: TaskHistoryClearFilters = {}): ClearTaskHistoryResult {
-  const rows = listTaskRows(filters)
-    .filter((task) => ENDED_TASK_STATUSES.includes(task.status as TaskStatus))
-  const deletedTaskIds = rows.map((task) => task.id)
-
-  if (deletedTaskIds.length === 0) {
-    return {
-      deletedCount: 0,
-      deletedTaskIds: [],
-    }
-  }
-
-  const db = getDb()
-  db.delete(tasks).where(inArray(tasks.id, deletedTaskIds)).run()
-
-  return {
-    deletedCount: deletedTaskIds.length,
-    deletedTaskIds,
-  }
+  return clearRetainedTaskHistory(filters)
 }
 
 export function getTaskRecord(taskId: number) {

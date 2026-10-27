@@ -1,5 +1,5 @@
 .app-layout .prompt-manager-page .prompt-manager-shell {
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.62fr);
+  grid-template-columns: minmax(280px, .85fr) minmax(340px, 1.15fr);
   gap: 16px;
   align-items: start;
 }
@@ -9,23 +9,14 @@
   min-width: 0;
 }
 
-.app-layout .prompt-manager-page .prompt-manager-filter-group,
-.app-layout .prompt-manager-page .prompt-manager-lanes {
-  flex-wrap: wrap;
-  overflow-x: hidden;
-  padding-bottom: 2px;
-}
-
-.app-layout .prompt-manager-page .prompt-manager-filter,
-.app-layout .prompt-manager-page .prompt-manager-lane {
-  flex: 0 0 auto;
-  min-height: 30px;
-  padding-inline: 10px;
-  font-size: 12px;
-}
+.prompt-manager-count { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.prompt-manager-filters { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.prompt-manager-filters label { display: flex; flex: 1 1 160px; align-items: center; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.prompt-manager-filters label > span { flex: 0 0 auto; }
+.prompt-manager-filters .ant-select { flex: 1; min-width: 0; }
 
 .app-layout .prompt-manager-page .prompt-manager-card-grid {
-  gap: 6px;
+  gap: 0;
   margin-top: 12px;
 }
 
@@ -70,10 +61,12 @@
 .app-layout .prompt-manager-page .prompt-manager-card {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 5px 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-default);
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
   background: var(--bg-surface);
 }
 
@@ -83,7 +76,7 @@
 }
 
 .app-layout .prompt-manager-page .prompt-manager-card--active {
-  border-color: var(--accent);
+  border-left-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -118,6 +111,8 @@
 .app-layout .prompt-manager-page .prompt-manager-card__meta {
   grid-column: 1 / -1;
   gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .app-layout .prompt-manager-page .prompt-manager-card__meta .ant-tag,
@@ -136,15 +131,31 @@
   gap: 12px;
 }
 
+.app-layout .prompt-manager-page .prompt-manager-inspector,
+.app-layout .prompt-manager-page .prompt-manager-inspector-body,
+.app-layout .prompt-manager-page .prompt-manager-inspector-grid,
+.app-layout .prompt-manager-page .prompt-manager-inspector-section,
+.app-layout .prompt-manager-page .prompt-manager-param-list {
+  min-width: 0;
+}
+
+.app-layout .prompt-manager-page .prompt-manager-param-list .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .app-layout .prompt-manager-page .prompt-manager-inspector-meta__item,
 .app-layout .prompt-manager-page .prompt-manager-inspector-section {
-  padding: 12px;
-  border-radius: 12px;
+  padding: 8px 0;
+  border-radius: 0;
+  background: none;
+  border: 0;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-template-stage {
-  padding: 12px;
-  border-radius: 12px;
+  padding: 0;
+  border-radius: 0;
 }
 
 .app-layout .prompt-manager-page .prompt-manager-template-preview--featured {

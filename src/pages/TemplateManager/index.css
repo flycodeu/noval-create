@@ -16,30 +16,7 @@
   color: var(--accent);
 }
 
-.template-manager-page .template-usage-overview {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  min-width: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.template-manager-page .template-usage-overview strong {
-  min-width: 0;
-  color: var(--text-primary);
-  font-weight: 650;
-}
-
-.template-manager-page .template-usage-overview__label {
-  color: var(--text-muted);
-}
-
-.template-manager-page .template-usage-overview__separator {
-  color: var(--accent);
-}
+.template-manager-catalog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; color: var(--text-secondary); font-size: 12px; }
 
 .template-manager-page .template-usage-details {
   margin: 8px 0 14px;

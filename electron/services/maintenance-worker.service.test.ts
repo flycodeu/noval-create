@@ -3,6 +3,7 @@ import { createMaintenanceWorker } from './maintenance-worker.service'
 
 function buildDependencies(overrides: Record<string, unknown> = {}) {
   return {
+    cleanupHistory: vi.fn(),
     processOutbox: vi.fn(async () => ({
       claimedCount: 1,
       processedCount: 1,
@@ -23,6 +24,16 @@ function buildDependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe('maintenance worker', () => {
+  it('continues checkpoint maintenance when optional history cleanup fails', async () => {
+    const dependencies = buildDependencies({ cleanupHistory: vi.fn(() => { throw new Error('unreadable retention settings') }) })
+    const worker = createMaintenanceWorker({ initialDelayMs: 300_000, dependencies })
+    worker.start()
+    await worker.runNow()
+    await worker.stop()
+    expect(dependencies.processOutbox).toHaveBeenCalledOnce()
+    expect(dependencies.scheduleCheckpointRefresh).toHaveBeenCalledOnce()
+    expect(worker.getStatus().lastError).toBeUndefined()
+  })
   it('drains a bounded local-only batch and schedules bounded checkpoint refresh', async () => {
     const dependencies = buildDependencies()
     const worker = createMaintenanceWorker({

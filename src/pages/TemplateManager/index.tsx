@@ -7,8 +7,9 @@ import { PlusOutlined, DeleteOutlined, EditOutlined, EyeOutlined, LockOutlined, 
 import { useNavigate } from 'react-router-dom'
 import { Template } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
+import { WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 import './index.css'
+import JsonViewer from '../../components/JsonViewer'
 
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
@@ -96,7 +97,6 @@ export default function TemplateManager() {
   }, [error])
 
   const builtinCount = templates.filter((template) => template.isBuiltin === 1).length
-  const customCount = templates.length - builtinCount
   const activeUsage = TEMPLATE_USAGE[activeTab]
   const editingType = Form.useWatch('type', form) || activeTab
   const editingUsage = TEMPLATE_USAGE[editingType] || activeUsage
@@ -273,9 +273,6 @@ export default function TemplateManager() {
         actions={(
           <div className="admin-toolbar">
             <div className="admin-toolbar__actions">
-              <Button onClick={() => navigate('/novels')}>
-                去新建小说
-              </Button>
               <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadTemplates()}>
                 刷新模板
               </Button>
@@ -285,16 +282,9 @@ export default function TemplateManager() {
             </div>
           </div>
         )}
-        metrics={(
-          <>
-            <WorkspaceMetric label="模板总数" value={templates.length} tone="cool" />
-            <WorkspaceMetric label="内置模板" value={builtinCount} />
-            <WorkspaceMetric label="自定义模板" value={customCount} tone="warm" />
-          </>
-        )}
       >
         <WorkspacePanel
-          title="模板目录"
+          extra={<div className="template-manager-catalog-actions"><span>{templates.length} 个模板 · {builtinCount} 个内置</span><Button type="text" onClick={() => navigate('/novels')}>去新建小说</Button></div>}
         >
           <details className="template-usage-details">
             <summary>用途与编辑提示</summary>
@@ -350,14 +340,14 @@ export default function TemplateManager() {
           <Form.Item name="description" label="描述">
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
-          <Form.Item name="contentJson" label="内容（JSON 格式）">
+          {editing?.isBuiltin === 1 ? <Form.Item label="模板内容"><JsonViewer raw={editing.contentJson} label="模板" /></Form.Item> : <Form.Item name="contentJson" label="内容（JSON 格式）">
             <Input.TextArea
               rows={10}
               disabled={editing?.isBuiltin === 1}
               placeholder={editingUsage.placeholder}
               style={{ fontFamily: 'monospace', fontSize: 12 }}
             />
-          </Form.Item>
+          </Form.Item>}
         </Form>
       </Modal>
     </>

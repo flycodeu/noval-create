@@ -1,6 +1,7 @@
 import { asc, gt } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { novels } from '../database/schema'
+import { runDueHistoryCleanup } from './history-retention.service'
 import {
   getSemanticMemoryOutboxStatus,
   processSemanticMemoryOutbox,
@@ -31,6 +32,7 @@ export interface MaintenanceWorkerStatus {
 }
 
 interface MaintenanceWorkerDependencies {
+  cleanupHistory: () => void
   processOutbox: typeof processSemanticMemoryOutbox
   getOutboxStatus: typeof getSemanticMemoryOutboxStatus
   listNovelIdsAfter: (cursor: number, limit: number) => number[]
@@ -68,6 +70,7 @@ function listNovelIdsAfter(cursor: number, limit: number): number[] {
 
 function resolveDependencies(overrides: Partial<MaintenanceWorkerDependencies> = {}): MaintenanceWorkerDependencies {
   return {
+    cleanupHistory: overrides.cleanupHistory || runDueHistoryCleanup,
     processOutbox: overrides.processOutbox || processSemanticMemoryOutbox,
     getOutboxStatus: overrides.getOutboxStatus || getSemanticMemoryOutboxStatus,
     listNovelIdsAfter: overrides.listNovelIdsAfter || listNovelIdsAfter,
@@ -109,6 +112,9 @@ export function createMaintenanceWorker(options: MaintenanceWorkerOptions = {}) 
     status.lastRunStartedAt = new Date().toISOString()
     status.lastError = undefined
     try {
+      // Optional history maintenance must not block checkpoint or outbox recovery.
+      try { dependencies.cleanupHistory() }
+      catch { console.warn('[maintenance-worker] history cleanup failed; other maintenance continues') }
       const before = dependencies.getOutboxStatus()
       if (before.pendingCount + before.retryingCount + before.processingCount > 0) {
         status.lastOutboxResult = await dependencies.processOutbox({

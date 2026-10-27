@@ -72,8 +72,7 @@
 }
 
 .model-id-picker__status,
-.model-manager-source-note,
-.model-manager-page .model-manager-source-description {
+.model-manager-source-note {
   margin: 6px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -85,45 +84,9 @@
   color: var(--color-error, #d84a3e);
 }
 
-.model-manager-page .model-manager-source-description {
-  margin: 0;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status strong {
-  overflow-wrap: anywhere;
-}
-
-.app-layout .model-manager-page .model-manager-detection-panel {
-  order: 4;
-}
-
-
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__header {
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__copy {
-  flex: 1 1 auto;
-  width: auto;
-}
-
-.app-layout .model-manager-page .model-manager-source-panel .novel-panel__extra {
-  flex: 0 0 auto;
-  width: auto;
-}
-
 @media (max-width: 560px) {
   .model-manager-modal-form .model-manager-identity-grid,
-  .model-manager-modal-form .admin-form-grid--three,
-  .app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid {
+  .model-manager-modal-form .admin-form-grid--three {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -141,74 +104,89 @@
   }
 }
 
-.app-layout .model-manager-page .novel-hero__title-row {
-  flex-wrap: wrap;
+.model-manager-count { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.model-manager-status-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.model-manager-editor-modal { max-width: calc(100vw - 24px); top: 24px; padding-bottom: 24px; }
+.model-manager-editor-modal .ant-modal-body { max-height: calc(100dvh - 180px); overflow-y: auto; padding-top: 12px; }
+.model-manager-modal-form .ant-form-item { margin-bottom: 16px; }
+.model-manager-modal-form .ant-input-number { width: 100%; }
+.app-layout .model-manager-page :is(.novel-panel__extra, .novel-panel__body) .ant-btn { width: auto; height: 32px; border-radius: 6px; padding: 4px 12px; font-size: 13px; box-shadow: none; }
+
+/* Model rows and auxiliary services have separate, predictable information levels. */
+.app-layout .model-manager-page[data-workspace-surface="quiet"] .novel-workspace__main { gap: 16px; }
+.app-layout .model-manager-page .model-manager-config-list {
+  display: grid;
+  gap: 0;
+}
+.app-layout .model-manager-page .model-manager-list-panel > .novel-panel__body { padding: 0 20px; }
+.app-layout .model-manager-page .model-manager-list-panel > .novel-panel__header { flex-direction: row; align-items: center; justify-content: space-between; }
+.app-layout .model-manager-page .model-manager-list-panel .novel-panel__copy { width: auto; flex: 1; }
+.app-layout .model-manager-page .model-manager-list-panel .novel-panel__extra { width: auto; flex: 0 0 auto; }
+.model-entry {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(230px, .85fr) auto;
   align-items: center;
-  overflow: visible;
+  gap: 16px 24px;
+  padding: 20px 0;
 }
-
-.app-layout .model-manager-page .novel-hero__metrics,
-.app-layout .model-manager-page .novel-hero__metrics--compact {
-  flex-wrap: wrap;
-  gap: 6px;
-  overflow: visible;
+.model-entry + .model-entry { border-top: 1px solid var(--border-default); }
+.model-entry__identity {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  text-align: left;
+  cursor: pointer;
 }
-
-.app-layout .model-manager-page .novel-hero__metrics .novel-metric,
-.app-layout .model-manager-page .novel-metric--compact {
-  min-height: 0;
-  padding: 3px 8px;
-  border-radius: 999px;
+.model-entry__identity:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.model-entry__identity:disabled { cursor: wait; opacity: .65; }
+.model-entry__identity[aria-expanded="true"] .model-entry__name { color: var(--accent); }
+.model-entry__name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.model-entry__name > span:first-child { overflow-wrap: anywhere; }
+.model-entry__provider { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.model-entry__id { font: 12px/1.5 var(--font-mono, monospace); color: var(--text-secondary); overflow-wrap: anywhere; }
+.model-entry__metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.model-entry__metrics div + div { border-left: 1px solid var(--border-default); padding-left: 16px; }
+.model-entry__metrics dt { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.model-entry__metrics dd { margin: 0; font-size: 18px; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.model-entry__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-entry__details { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px; border-radius: 6px; background: var(--bg-muted); }
+.model-entry__credential { color: var(--text-secondary); font-size: 12px; }
+.model-entry__details [role="status"] { flex-basis: 100%; overflow-wrap: anywhere; }
+.model-status-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; padding: 3px 7px; background: var(--bg-muted); color: var(--text-secondary); font: 500 11px/1.5 var(--font-body); white-space: nowrap; }
+.model-status-badge.is-enabled { color: var(--color-success, #3e8260); background: color-mix(in srgb, var(--color-success, #3e8260) 10%, transparent); }
+.model-entry__name .model-status-badge { color: var(--accent); background: var(--accent-soft); }
+.model-manager-services { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 16px; }
+.app-layout .model-manager-page .model-service-card { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.app-layout .model-manager-page .model-service-card .novel-panel__header { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px; padding: 16px 20px; margin: 0; }
+.app-layout .model-manager-page .model-service-card .novel-panel__copy { width: auto; flex: 1; min-width: 0; }
+.app-layout .model-manager-page .model-service-card .novel-panel__extra { width: auto; flex: 0 0 auto; }
+.app-layout .model-manager-page .model-service-card .novel-panel__title { display: flex; align-items: center; gap: 6px; }
+.app-layout .model-manager-page .model-service-card > .novel-panel__body { display: flex; flex: 1; padding: 18px 20px; min-height: 0; }
+.model-service-content { display: flex; flex-direction: column; gap: 18px; width: 100%; min-width: 0; }
+.model-service-name { color: var(--text-primary); font: 600 17px/1.5 var(--font-body); overflow-wrap: anywhere; }
+.model-service-properties { display: grid; gap: 12px; margin: 0; }
+.model-service-properties > div { display: grid; grid-template-columns: minmax(100px, .8fr) minmax(0, 1fr); gap: 16px; align-items: baseline; }
+.model-service-properties dt { color: var(--text-secondary); font: 12px/1.6 var(--font-body); }
+.model-service-properties dd { margin: 0; color: var(--text-primary); text-align: right; font: 500 13px/1.6 var(--font-body); overflow-wrap: anywhere; }
+.model-service-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--border-default); padding-top: 16px; margin-top: auto; }
+.model-service-content > [role="status"] { margin: 0; overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 1000px) {
+  .model-entry { grid-template-columns: minmax(180px, 1fr) minmax(190px, 1fr); }
+  .model-entry__actions { grid-column: 1 / -1; }
 }
-
-.app-layout .model-manager-page .novel-hero__metrics .novel-metric__value,
-.app-layout .model-manager-page .novel-metric--compact .novel-metric__value {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.2;
+@media (max-width: 760px) {
+  .model-manager-services { grid-template-columns: minmax(0, 1fr); }
 }
-.app-layout .model-manager-page .novel-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.app-layout .model-manager-page .novel-hero__copy { flex: 0 1 auto; }
-.app-layout .model-manager-page .novel-hero__actions { width: auto; margin: 0; flex: 0 1 auto; }
-.app-layout .model-manager-page .admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.app-layout .model-manager-page .model-manager-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.app-layout .model-manager-page .model-manager-config-list { gap: 0; }
-.app-layout .model-manager-page .model-manager-config-card { border-radius: 0; box-shadow: none; grid-template-columns: minmax(0, 1fr); padding: 14px 12px; }
-.app-layout .model-manager-page .model-manager-config-card__main { display: grid; grid-template-columns: minmax(140px, .7fr) minmax(160px, 1fr) minmax(220px, 1fr); align-items: center; gap: 16px; }
-.app-layout .model-manager-page .model-manager-config-card .admin-sidebar-item__meta { margin: 0; overflow-wrap: anywhere; }
-.app-layout .model-manager-page .source-search-config__status { display: flex; align-items: baseline; gap: 8px; border: 0; padding: 0; min-height: 0; }
-.app-layout .model-manager-page .source-search-config__status strong { margin: 0; font-size: 13px; }
-.app-layout .model-manager-page .source-search-config__status span { flex-shrink: 0; }
-.app-layout .model-manager-page .model-manager-source-panel .source-search-config__status-grid,
-.app-layout .model-manager-page [data-zhuque-settings] .source-search-config__status-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; }
-.app-layout .model-manager-page .source-search-config__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; padding: 0; border: 0; }
-.app-layout .model-manager-page [data-zhuque-settings] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
-.app-layout .model-manager-page .source-search-config { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
-.app-layout .model-manager-page .source-search-config__actions { border: 0; padding: 0; }
-@media (max-width: 800px) {
-  .app-layout .model-manager-page .model-manager-config-card__main { grid-template-columns: minmax(0, 1fr); gap: 5px; }
-  .app-layout .model-manager-page .novel-hero__actions { width: 100%; }
+@media (max-width: 560px) {
+  .model-entry { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .model-entry__metrics { max-width: 360px; }
+  .model-entry__metrics dd { font-size: 16px; }
+  .model-entry__details { padding: 12px; }
+  .model-manager-status-actions { gap: 6px; }
 }
-
-
-.app-layout .novel-workspace.model-manager-page .novel-hero { flex-direction: row; text-align: left; }
-.app-layout .novel-workspace.model-manager-page .novel-hero__copy { width: auto; max-width: none; }
-.app-layout .novel-workspace.model-manager-page .novel-hero__title-row { justify-content: flex-start; }
-.app-layout .novel-workspace.model-manager-page .source-search-config__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-@media (min-width: 1100px) {
-  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel,
-  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; grid-template-areas: 'title body action'; align-items: center; gap: 16px; padding: 18px 20px; }
-  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__header,
-  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__header { display: contents; }
-  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__copy,
-  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__copy { grid-area: title; }
-  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__extra { grid-area: action; }
-  .app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__body,
-  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { grid-area: body; padding: 0; }
-  .app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { grid-column: 2 / -1; }
-}
-
-.app-layout .novel-workspace.model-manager-page .source-search-config__actions { flex-direction: row; width: auto; max-width: none; }
-.app-layout .novel-workspace.model-manager-page .source-search-config__actions > span { width: auto; flex: 0 1 auto; }
-.app-layout .novel-workspace.model-manager-page .model-manager-source-panel .novel-panel__body,
-.app-layout .novel-workspace.model-manager-page .model-manager-detection-panel .novel-panel__body { min-height: 0; }

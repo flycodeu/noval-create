@@ -7,7 +7,7 @@ import { buildWorkspaceRoute } from '../../../shared/novel-workspace'
 import type { StoryAtlasSnapshot } from '../../../shared/story-atlas'
 import { AuthorPage, EmptyWork, LoadFailure } from './shared'
 import { ContentDocument } from './ContentDocument'
-import { buildStoryTimelineEntries, chapterWritingLabel, STORY_TIMELINE_STATES, storyTimelineClock, storyTimelineGroups, storyTimelineMatchesSearch, timelineEntityRoute, type StoryTimelineEntry, type StoryTimelineState } from './story-timeline'
+import { buildStoryTimelineEntries, chapterWritingLabel, parseTimelineChapterFilter, STORY_TIMELINE_STATES, storyTimelineClock, storyTimelineGroups, storyTimelineMatchesSearch, timelineEntityRoute, type StoryTimelineEntry, type StoryTimelineState } from './story-timeline'
 import ObjectTaskPanel, { type ObjectTaskTarget } from './ObjectTaskPanel'
 import StoryOutline from './StoryOutline'
 import { defaultTimelineView } from './story-outline'
@@ -34,7 +34,7 @@ function EventTimeline({ novelId, snapshot, reloadAtlas }: { novelId: number; sn
   const [params, setParams] = useSearchParams()
   const mode = params.get('view') === 'time' ? 'time' : 'chapter'
   const status = (Object.keys(STORY_TIMELINE_STATES).includes(params.get('status') || '') ? params.get('status') : 'all') as StoryTimelineState | 'all'
-  const chapterFilter = params.has('chapter') && Number.isInteger(Number(params.get('chapter'))) && Number(params.get('chapter')) >= 0 ? Number(params.get('chapter')) : null
+  const chapterFilter = parseTimelineChapterFilter(params.has('chapter'), params.get('chapter'))
   const keyword = params.get('q') || ''
   const requestedEventId = params.get('event') || ''
   const [taskTarget, setTaskTarget] = useState<ObjectTaskTarget | null>(null)

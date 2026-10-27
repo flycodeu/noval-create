@@ -8,7 +8,11 @@ const { registerProjectTsRuntime } = require('./register-project-ts.cjs')
 const { cleanupElectronFixture } = require('./cleanup-electron-fixture.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
-const tempRoot = path.resolve(workspaceRoot, '.tmp-tests', 'agent-conflict-stress')
+const fixtureRoot = path.join(workspaceRoot, '.tmp-tests')
+fs.mkdirSync(fixtureRoot, { recursive: true })
+const tempRoot = process.argv.includes('--worker')
+  ? path.resolve(argument('root'))
+  : fs.mkdtempSync(path.join(fixtureRoot, 'agent-conflict-stress-'))
 if (!tempRoot.startsWith(`${workspaceRoot}${path.sep}`)) {
   throw new Error(`Refusing to use a temp directory outside the workspace: ${tempRoot}`)
 }
@@ -169,8 +173,6 @@ async function runRaceRound({ novelId, key, content, workerCount, label }) {
 }
 
 async function runMain() {
-  fs.rmSync(tempRoot, { recursive: true, force: true })
-  fs.mkdirSync(tempRoot, { recursive: true })
   process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY = '1'
   app.setName('NovelForge Agent Conflict Stress')
   configureElectronProfile(tempRoot, 'main')

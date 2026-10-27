@@ -64,7 +64,7 @@
 }
 
 .app-layout .task-center-page .task-center-card__summary {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   -webkit-line-clamp: 2;
 }
@@ -77,6 +77,24 @@
   background: transparent;
   box-shadow: none;
 }
+
+.app-layout[data-ui-system] .task-center-page .task-center-detail { border: 0; border-radius: 0; background: transparent; }
+.app-layout[data-ui-system] .task-center-page .task-context-health-card { display: block; padding: 10px 12px; background: var(--bg-muted); border: 0; border-radius: 6px; }
+.task-context-health-card > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.app-layout[data-ui-system] .task-center-page .novel-freshness-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+.app-layout[data-ui-system] .task-center-page .novel-freshness-card { min-height: 0; padding: 10px; border: 0; border-left: 2px solid var(--border-default); border-radius: 0; background: transparent; box-shadow: none; }
+.app-layout[data-ui-system] .task-center-page .novel-freshness-card__value { font-size: 15px; margin: 4px 0; }
+.app-layout[data-ui-system] .task-center-page .novel-freshness-card__title,
+.app-layout[data-ui-system] .task-center-page .novel-freshness-card__desc { font-size: 12px; }
+.task-attempt-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; overflow-wrap: anywhere; }
+.task-attempt-heading strong { font-size: 13px; font-weight: 500; }
+.task-attempt-heading span { font-size: 12px; color: var(--text-secondary); }
+.history-cleanup-form { display: grid; gap: 14px; padding-top: 12px; }
+.history-cleanup-form > label { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 14px; }
+.history-cleanup-form .ant-input-number { width: 130px; }
+.history-cleanup-note { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.history-cleanup-preview { display: grid; gap: 6px; border: 1px solid var(--border-default); border-radius: 8px; padding: 12px; font-size: 13px; }
+.history-cleanup-preview span { color: var(--text-secondary); }
 
 .app-layout .task-center-page .task-center-detail__actions {
   gap: 6px;
