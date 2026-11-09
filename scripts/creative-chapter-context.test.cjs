@@ -88,6 +88,7 @@ async function main() {
     db.prepare("INSERT INTO chapter_contracts(novel_id,chapter_id,chapter_goal,status) VALUES(?,?,?,'ready')").run(novelId, target, '检查系船绳')
     await assert.rejects(compile(input, limits), error => error.code === 'CHAPTER_PREREQUISITES_REQUIRED')
     db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId, target, '陈舟', '检查系船绳', '河水暴涨，旧绳磨断', '换上新绳，渡船停稳')
+    db.prepare("INSERT INTO scene_contracts(novel_id,chapter_id,pov,scene_goal,obstacle,result_state,status) VALUES(?,?,?,?,?,?,'ready')").run(novelId, first, '陈舟', '收好渡船旧绳', '河水暴涨', '答应回来检查渡口旧绳')
     const priorCanon = db.prepare('SELECT canon_fact_cards_json FROM novels WHERE id=?').get(novelId).canon_fact_cards_json
     const research = await require('../electron/services/creative-research.service.ts').searchCreativeResearch(novelId, '搜索道教知识作为有出处的创作参考', 2, {
       providerName: 'fixture', provider: async () => [{ title: '道德經', url: 'https://ctext.org/dao-de-jing/zh', snippet: '知止与克制的原典参考，用于选择和代价，不能当作人物已经知道的秘密。' }],
@@ -146,8 +147,19 @@ async function main() {
     const originalPrevious = db.prepare('SELECT content FROM chapters WHERE id=?').get(first).content
     db.prepare('UPDATE chapters SET content=? WHERE id=?').run('他答应回来检查渡口旧绳。\n' + '长路上只有细雨与空山。'.repeat(1800) + '\n夜色落在石阶上。', first)
     const dependencyContext = await compile(input, limits)
-    assert.ok(dependencyContext.text.includes('他答应回来检查渡口旧绳。'), 'unclassified non-ending prose required by this scene survives a tight budget')
+    assert.ok(dependencyContext.text.includes('他答应回来检查渡口旧绳。'), 'registered same-POV non-ending prose required by this scene survives a tight budget')
     assert.ok(dependencyContext.omittedSources.some(key => key.startsWith(`chapter:${first}:original:`) && key.endsWith(':budget_insufficient')), 'fixture actually drops incidental prior prose under budget')
+    for (const sourcePov of ['', '邱账房']) {
+      db.prepare('UPDATE scene_contracts SET pov=? WHERE chapter_id=?').run(sourcePov, first)
+      const isolatedContext = await compile(input, limits)
+      assert.ok(!isolatedContext.text.includes('他答应回来检查渡口旧绳。'), 'missing or different source POV cannot grant unclassified prose')
+      assert.ok(isolatedContext.omittedSources.some(key => key.startsWith(`chapter:${first}:original:`) && key.endsWith(':unclassified_visibility')))
+    }
+    db.prepare('UPDATE scene_contracts SET pov=? WHERE chapter_id=?').run('陈舟', first)
+    db.prepare('UPDATE chapters SET content=? WHERE id=?').run('他答应回来检查渡口旧绳。\n账房盗银，失踪的税银藏在井底。', first)
+    const samePovWithSecret = await compile(input, limits)
+    assert.ok(samePovWithSecret.text.includes('他答应回来检查渡口旧绳。'))
+    assert.ok(!samePovWithSecret.text.includes('失踪的税银藏在井底'), 'matching hidden facts stay redacted even in registered same-POV prose')
     db.prepare('UPDATE chapters SET content=? WHERE id=?').run(originalPrevious, first)
     // A deliberately selected fact has no lexical overlap with the scene contract.
     // Its provenance is the registered earlier chapter, not a new inferred summary.
