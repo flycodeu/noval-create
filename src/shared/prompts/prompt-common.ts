@@ -1,4 +1,5 @@
 import { buildRealityConstraintSummary, getBuiltinGenreRules } from '../genre-system'
+import { buildStoryQualityGuidance } from '../narrative-naturalness'
 import type { VariationEntityType } from './prompt-types'
 
 export function clean(value?: string | null): string {
@@ -126,6 +127,7 @@ export function buildNarrativeDetailGuidance(stage: StepMemoryStage): string {
     rewrite: '只修指定范围中有依据的问题，先保留原始记录、比较条件与后文承接，再调整入场和反应；范围外的问题另报建议，不扩大补丁，不用新增秘密、特殊物性或总结判断修补。',
   }
   return section('叙事细节与证据承接', [
+    ...buildStoryQualityGuidance(stage === 'review' ? 'review' : 'write'),
     '细节可以服务观察判断、人物行动、关系情绪或生活体验，不必每笔成为伏笔；不按段落配额填充声音、动作和感官，也不把正常心理与安静描写当成缺陷。',
     '让读者能看见和感受人物：从已登记的外貌、衣着、随身物品与身体习惯中，选本场自然可见、与行动或生活处境有关的细节，让触感、重量、温度、疲劳和空间接触参与行动；避免人物只有说话和抽象心理。首次出场可自然建立辨识点，重逢与连续场景沿用已有形象，不每章重复报服饰清单。',
     '外貌、衣着与随身物品未登记时是资料缺口，不据此编造固定相貌、标志服饰、能力装备或物品归属，也不因缺一项就阻断整章；必要时提出有待确认的设计建议。哲理、政治与人性通过具体利益、制度限制、选择及后果呈现；外部资料只作有来源的参考，不直接变成本书史实、能力或人物已知信息，不贴资料百科或借人物长篇说教。',

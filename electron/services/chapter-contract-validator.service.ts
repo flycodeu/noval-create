@@ -1,4 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import type {
   ChapterContractValidationResult,
   ContractValidationItem,
@@ -826,7 +827,7 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
     characterRows,
     characterArcRows,
     relationshipArcRows,
-    scenePlanHooks: parseScenePlanHooks(chapter.scenePlanJson),
+    scenePlanHooks: parseScenePlanHooks(projectChapterPlanningArtifacts(chapter).scenePlanJson),
     theme: themeVoice.theme,
     themeChapterTest: themeVoice.themeChapterTest,
   }

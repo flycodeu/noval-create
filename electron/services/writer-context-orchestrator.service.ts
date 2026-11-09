@@ -520,6 +520,7 @@ function buildRetrievalFingerprint(
   const invalidationHash = hashOf({
     invalidation: input.invalidation || {},
     frozenRecall: input.frozenRecall || null,
+    readOnly: Boolean(input.runtime?.readOnly),
   }).slice(0, 16)
   const inputs = {
     novelId: input.novelId,
@@ -1346,7 +1347,9 @@ function createWriterToolExecutionContext(
 
   const getStoryMemorySnapshot = () => {
     if (!storyMemorySnapshot) {
-      storyMemorySnapshot = services.buildStoryMemorySnapshot(input.novelId)
+      storyMemorySnapshot = input.runtime?.readOnly
+        ? services.buildStoryMemorySnapshot(input.novelId, { ensureCheckpoints: false })
+        : services.buildStoryMemorySnapshot(input.novelId)
     }
     return storyMemorySnapshot
   }

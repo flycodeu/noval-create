@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendNarrativeNaturalnessPrompt,
   buildNarrativeNaturalnessPrompt,
+  buildStoryQualityGuidance,
   sanitizeNarrativeRuntimePrompt,
 } from './narrative-naturalness'
 
@@ -67,5 +68,24 @@ describe('narrative naturalness prompt', () => {
     expect(runtime).not.toContain('每章至少明确')
     expect(runtime).toContain('根据章节功能')
     expect(runtime).toContain('生成过程中必须保守使用上下文')
+  })
+
+  it.each(['write', 'rewrite', 'review'] as const)('keeps punctuation and sudden actions as contextual advice in %s', mode => {
+    const prompt = buildNarrativeNaturalnessPrompt({ genre: '历史志怪', mode })
+    expect(prompt).toContain('不按词频或标点数量判断作者身份')
+    expect(prompt).toContain('不自动清零或机械轮换近义词')
+    expect(prompt).toContain('已成立的市井口气和人物措辞优先保留')
+    expect(prompt).toContain('安静与留白本身不是缺陷')
+    const prose = '【待审初稿】\n他猛地推开门：“别进来！”她望着他：“我……只是来还碗。”\n天地一静，风过秋林。'
+    expect(sanitizeNarrativeRuntimePrompt(prose)).toBe(prose)
+  })
+
+  it('tracks the cause and continuing result of a mistaken choice without requiring a new setback', () => {
+    const guidance = buildStoryQualityGuidance('write').join('\n')
+    expect(guidance).toContain('当时偏信什么、怎样行动、谁承担后果')
+    expect(guidance).toContain('不能下一场清零')
+    expect(guidance).toContain('不为证明人物有人味强塞失误或坏脾气')
+    expect(guidance).toContain('不要求每章都有损失、反转或新危险')
+    expect(guidance).toContain('不临时补造旧伤、动机或解围规则')
   })
 })

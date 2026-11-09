@@ -10,6 +10,7 @@ import * as planningPrompts from './planning-prompts'
 import * as writingPrompts from './writing-prompts'
 import * as reviewPrompts from './review-prompts'
 import { CAST_RELATION_GUIDANCE } from '../cast-role'
+import { appendNarrativeNaturalnessPrompt, buildStoryQualityGuidance } from '../narrative-naturalness'
 
 // Load service boundaries through Vitest: static imports would pull the Electron
 // database into the composite web project. Their types are checked by typecheck:node.
@@ -423,6 +424,43 @@ describe('17-04 real Electron wrappers and applyPromptOverride (database boundar
 })
 
 describe('17-05 compatibility and dependency direction', () => {
+  it('corrects legacy draft and rewrite quotas at the real model-prompt boundary', () => {
+    for (const [name, mode] of [['buildChapterDraftPrompt', 'write'], ['buildChapterRewritePrompt', 'rewrite']] as const) {
+      const source = invoke(storyPrompts, name, 'hard')
+      const prompt = appendNarrativeNaturalnessPrompt(source, { mode, genre: '历史志怪' })
+      expect(prompt).not.toContain('检测到会被强制修改')
+      expect(prompt).not.toContain('面部肌肉运动')
+      expect(prompt).not.toContain('对白每轮必须')
+      expect(prompt).not.toContain('一章最多保留两组')
+      expect(prompt).not.toContain('至少三处结尾')
+      expect(prompt).not.toContain('就补出真实受挫、失误或代价')
+      expect(prompt).toContain('不要求每章都有损失、反转或新危险')
+      expect(prompt).toContain('【硬约束】\n章节目标:\n- 查扣私盐')
+      expect(prompt.match(/查扣私盐/g)).toHaveLength(1)
+      if (mode === 'write') {
+        expect(prompt).toContain('不要求每章新增损失')
+        expect(prompt).toContain('不为告警强塞失误、反转或伤亡')
+      } else {
+        expect(prompt).toContain('不为受挫指标硬加失误、代价或反转')
+        expect(prompt).toContain('作者锁定段落不得改写')
+      }
+    }
+  })
+
+  it.each(['planner', 'writer', 'critic', 'rewriter'] as const)('shares causal-character guidance with reader-first %s without changing its output contract', async role => {
+    const module = await vi.importActual<{ buildReaderFirstRolePrompt: (role: string, params: Record<string, unknown>) => string }>('../../../electron/services/reader-first-prompts')
+    const params = inputFor('hard')
+    const prompt = module.buildReaderFirstRolePrompt(role, params)
+    const shared = buildStoryQualityGuidance(role === 'critic' ? 'review' : 'write')[0]
+    expect(prompt.split(shared)).toHaveLength(2)
+    expect(prompt).toContain('不为证明人物有人味强塞失误或坏脾气')
+    expect(prompt).toContain('已确认事实和知识边界、作者明确合同')
+    expect(prompt.match(/查扣私盐/g)).toHaveLength(1)
+    if (role === 'planner') expect(prompt).toContain('只输出非空 JSON 数组')
+    else if (role === 'critic') expect(prompt).toContain('不得捏造引文')
+    else expect(prompt).toContain('只输出小说正文')
+  })
+
   it.each(['batchCharacterPrompt', 'regenerateCharacterPrompt', 'characterRelationsPrompt'])('%s preserves independent casts and planned relationships', name => {
     const prompt = invoke(barrel, name, 'ordinary')
     expect(prompt.split(CAST_RELATION_GUIDANCE)).toHaveLength(2)
@@ -454,7 +492,7 @@ describe('17-05 compatibility and dependency direction', () => {
   it('has no runtime code in types, reverse imports, peer imports or duplicated declarations', () => {
     const allowed: Record<string, string[]> = {
       'prompt-types': [],
-      'prompt-common': ['../genre-system', './prompt-types'],
+      'prompt-common': ['../genre-system', '../narrative-naturalness', './prompt-types'],
       'asset-prompts': ['../cast-role', '../genre-system', './prompt-types', './prompt-common'],
       'planning-prompts': ['./prompt-types', './prompt-common'],
       'writing-prompts': ['./prompt-types', './prompt-common'],

@@ -10,6 +10,7 @@ import type { ThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { getDb } from '../database/db'
 import { chapterContracts, chapters, sceneContracts } from '../database/schema'
 import { getDialogueAnalyticsSnapshot } from './dialogue-fingerprint.service'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 
 type ChapterRow = typeof chapters.$inferSelect
 
@@ -128,7 +129,8 @@ function dedupeStrings(values: string[], limit?: number): string[] {
 
 function getChapterById(chapterId: number): ChapterRow | null {
   const db = getDb()
-  return db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0] || null
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  return chapter ? projectChapterPlanningArtifacts(chapter) : null
 }
 
 function listRecentChapters(novelId: number, beforeChapterNum: number, limit: number): ChapterRow[] {
@@ -152,12 +154,13 @@ export function buildChapterBridgePlan(
   const db = getDb()
   const chapter = getChapterById(chapterId)
   if (!chapter) return null
-  const previousChapter = db.select().from(chapters)
+  const previousChapterRow = db.select().from(chapters)
     .where(eq(chapters.novelId, chapter.novelId))
     .orderBy(desc(chapters.chapterNum))
     .all()
     .find((row) => row.chapterNum < chapter.chapterNum)
-  if (!previousChapter) return null
+  if (!previousChapterRow) return null
+  const previousChapter = projectChapterPlanningArtifacts(previousChapterRow)
 
   const firstScene = db.select().from(sceneContracts)
     .where(eq(sceneContracts.chapterId, chapterId))

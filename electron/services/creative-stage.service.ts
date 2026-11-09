@@ -13,6 +13,7 @@ import {
   worldMap,
 } from '../database/schema'
 import { getDb, getSqlite } from '../database/db'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { markNovelContextChanged } from './context-impact.service'
 import {
   assessCreativeStageHandoff,
@@ -518,7 +519,7 @@ export function getCreativeStageContext(novelId: number, stageId: number, chapte
         view.storySummary,
         chapter?.title,
         chapter?.outline,
-        chapter?.scenePlanJson,
+        chapter ? projectChapterPlanningArtifacts(chapter).scenePlanJson : '',
       ].filter(Boolean).join('\n')
   const promptAssets = selectCreativeStageAssetBindings(assets, assetBriefs, chapterSignal)
   const promptAssetKeys = new Set(promptAssets.map((asset) => creativeStageAssetKey(asset)))

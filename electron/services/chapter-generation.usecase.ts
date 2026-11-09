@@ -247,6 +247,7 @@ import {
 } from '../../src/shared/semantic-gate-policy'
 import { getUnresolvedDesignGateFlags } from './outline-design-gate.service'
 import { getChapterRhythmSection } from './rhythm-template.service'
+import { isChapterBodyEditStaleReason, projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { scanChapterForGlossaryTerms } from './glossary-reference.service'
 import {
   buildFallbackScenePlan,
@@ -978,7 +979,7 @@ async function updateChapterSummaryData(chapterId: number): Promise<ChapterSumma
   return summaryData
 }
 
-async function refreshChapterMemory(chapterId: number): Promise<{
+async function refreshChapterMemory(chapterId: number, options: { preservePlanningArtifacts?: boolean } = {}): Promise<{
   summary: ChapterSummaryData
   continuity: ContinuityState
   summaryHealth: SummaryHealthReport | null
@@ -1001,7 +1002,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
       reason: `chapter ${chapter.chapterNum} derived state refreshed`,
       trigger: 'chapter_memory_refresh',
   })
-  contextVersion = markChapterContextCurrent(chapterId)
+  contextVersion = markChapterContextCurrent(chapterId, options)
   })
   return { summary, continuity, summaryHealth, contextVersion }
 }
@@ -1039,6 +1040,7 @@ function updatePipelineChapterContent(
       skipStaleTracking: true,
       versionSource,
       allowDuringGeneration: true,
+      preservePlanningArtifacts: true,
     })
     return data.content
   })
@@ -1061,7 +1063,7 @@ async function finalizeGeneratedChapterContent(
     status: 'draft',
   }, 'pipeline-generate')
 
-  const { summary, contextVersion } = await refreshChapterMemory(chapterId)
+  const { summary, contextVersion } = await refreshChapterMemory(chapterId, { preservePlanningArtifacts: true })
   options.onContextCheckpoint?.(contextVersion)
   const chapter = getChapter(chapterId)
   if (chapter && content.trim()) {
@@ -1076,7 +1078,7 @@ async function finalizeGeneratedChapterContent(
     // memory refresh. The chapter was generated from the current context, so
     // mark this committed chapter current again before the final gate; later
     // chapters remain stale through markSubsequentChaptersStale below.
-    options.onContextCheckpoint?.(markChapterContextCurrent(chapter.id))
+    options.onContextCheckpoint?.(markChapterContextCurrent(chapter.id, { preservePlanningArtifacts: true }))
   }
   if (chapter) {
     markSubsequentChaptersStale(
@@ -1111,14 +1113,14 @@ export function listChapters(novelId: number) {
   const db = getDb()
   // Listing is a read path. Structure/bootstrap writes belong to explicit
   // create/update/generation flows so opening a page cannot mutate the novel.
-  return db.select().from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  return db.select().from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all().map(projectChapterPlanningArtifacts)
 }
 
 export function getChapter(id: number) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
   if (!chapter) return null
-  return chapter
+  return projectChapterPlanningArtifacts(chapter)
 }
 
 const CHAPTER_STATUS_VALUES = ['outline', 'writing', 'draft', 'reviewing', 'final'] as const
@@ -1320,7 +1322,7 @@ function loadChapterBatch(ids: unknown): { ids: number[]; rows: Array<typeof cha
   return { ids: chapterIds, rows, novelId: rows[0].novelId }
 }
 
-function appendChapterStaleReason(raw: unknown, reason: string): string {
+function appendChapterStaleReason(raw: unknown, reason: string, refreshedPlanningChapterNum?: number): string {
   const current = typeof raw === 'string' ? raw : ''
   let values: string[] = []
   try {
@@ -1328,6 +1330,9 @@ function appendChapterStaleReason(raw: unknown, reason: string): string {
     if (Array.isArray(parsed)) values = parsed.filter((item): item is string => typeof item === 'string')
   } catch {
     // Corrupt stale metadata is replaced by a valid, actionable reason.
+  }
+  if (refreshedPlanningChapterNum !== undefined) {
+    values = values.filter((item) => !isChapterBodyEditStaleReason(refreshedPlanningChapterNum, item))
   }
   return JSON.stringify([...new Set([...values, reason].map((item) => item.trim()).filter(Boolean))])
 }
@@ -1505,6 +1510,8 @@ export function updateChapter(id: number, data: Partial<{
   allowChapterNumberChange?: boolean
   /** Internal pipeline writes must still use content CAS before setting this. */
   allowDuringGeneration?: boolean
+  /** Internal generation only: retain or replace validated planning snapshots. */
+  preservePlanningArtifacts?: boolean
 } = {}): void {
   if (!getSqlite().inTransaction) {
     getSqlite().transaction(() => updateChapter(id, data, options)).immediate()
@@ -1575,6 +1582,13 @@ export function updateChapter(id: number, data: Partial<{
     safeData.status = 'draft'
     safeData.summary = ''
     safeData.nextChapterSeed = ''
+    const reusablePlanning = options.preservePlanningArtifacts ? projectChapterPlanningArtifacts(previous) : null
+    if (!reusablePlanning || reusablePlanning !== previous) {
+      // Generated planning snapshots can describe an earlier draft. Author
+      // chapter/scene contracts stay intact and can drive a later fresh plan.
+      safeData.scenePlanJson = ''
+      safeData.bridgePlanJson = ''
+    }
     safeData.continuityStateJson = ''
     safeData.summaryHealthJson = ''
     safeData.contractAuditJson = ''
@@ -1585,8 +1599,11 @@ export function updateChapter(id: number, data: Partial<{
     // 外部 IPC/Web 已将 reviewNotesJson 排除在白名单之外，因此不会复用旧备注。
     if (safeData.reviewNotesJson === undefined) safeData.reviewNotesJson = ''
     safeData.writebackStatusJson = buildIdleWritebackStatusJson(previous.contextVersion || 1)
-    const staleReason = '正文已更新，章节派生审校结果需要刷新'
-    safeData.staleReasonJson = appendChapterStaleReason(safeData.staleReasonJson ?? previous.staleReasonJson, staleReason)
+    const staleReason = options.preservePlanningArtifacts
+      ? '生成正文已更新，章节派生审校结果需要刷新'
+      : '正文已更新，章节派生审校结果需要刷新'
+    safeData.staleReasonJson = appendChapterStaleReason(safeData.staleReasonJson ?? previous.staleReasonJson,
+      staleReason, options.preservePlanningArtifacts ? previous.chapterNum : undefined)
     const invalidatedAt = new Date().toISOString()
     db.update(chapterWritebackRuns).set({
       status: 'failed',
@@ -1597,6 +1614,11 @@ export function updateChapter(id: number, data: Partial<{
       eq(chapterWritebackRuns.chapterId, id),
       inArray(chapterWritebackRuns.status, ['draft', 'ready', 'applying']),
     )).run()
+  }
+  if (!contentChanged && options.preservePlanningArtifacts && safeData.scenePlanJson !== undefined) {
+    // The validated Planner has replaced the old snapshot before Writer runs.
+    // Keep unrelated source changes pending for the existing context/CAS gates.
+    safeData.staleReasonJson = appendChapterStaleReason(safeData.staleReasonJson ?? previous.staleReasonJson, '', previous.chapterNum)
   }
 
   if (safeData.status === 'final' && previous.status !== 'final') {
@@ -2838,7 +2860,7 @@ async function executeGeneratedChapterPlannerWriterPhase(input: GeneratedChapter
       return buildChapterContractVersion(chapterId)
     },
     persistScenePlan: (nextScenePlan) => {
-      updateChapter(chapterId, { scenePlanJson: JSON.stringify(nextScenePlan) })
+      updateChapter(chapterId, { scenePlanJson: JSON.stringify(nextScenePlan) }, { preservePlanningArtifacts: true })
     },
     persistTaskContractVersion: (taskId, nextContractVersion) => {
       updateTask(taskId, { contractVersion: nextContractVersion })
@@ -3641,7 +3663,7 @@ function buildChapterGenerationIdempotencyKey(chapter: typeof chapters.$inferSel
 function getRequiredChapterGenerationInput(chapterId: number): typeof chapters.$inferSelect {
   const chapter = getDb().select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
-  return chapter
+  return projectChapterPlanningArtifacts(chapter)
 }
 
 function assertPreviousChapterContentReady(
@@ -4228,9 +4250,7 @@ export async function getChapterContextPreview(
   chapterId: number,
   options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[]; stageId?: number } = {},
 ): Promise<import('../../src/types').ChapterContextPreview> {
-  const db = getDb()
-  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  const chapter = getRequiredChapterGenerationInput(chapterId)
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum, options.stageId)
   rawContext.narrativeIdentity = resolveChapterNarrativeIdentity(chapterId)
@@ -4269,6 +4289,7 @@ export async function getChapterContextPreview(
     rawContext,
     complexity,
     {
+      readOnly: true,
       executionMode: executionModeResolution.mode,
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion,
@@ -4285,6 +4306,7 @@ export async function getChapterContextPreview(
     rawContext,
     complexity,
     {
+      readOnly: true,
       executionMode: executionModeResolution.mode,
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion,
@@ -4298,6 +4320,7 @@ export async function getChapterContextPreview(
     rawContext,
     complexity,
     {
+      readOnly: true,
       executionMode: executionModeResolution.mode,
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion,
@@ -4319,6 +4342,7 @@ export async function getChapterContextPreview(
     rawContext,
     complexity,
     {
+      readOnly: true,
       executionMode: executionModeResolution.mode,
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion,
@@ -4681,6 +4705,8 @@ export const __testing = {
   assertChapterResumeBaseCurrent,
   buildChapterContentHash,
   updatePipelineChapterContent,
+  getRequiredChapterGenerationInput,
+  prepareChapterContinuation,
 }
 
 export { runChapterPublishCheck }

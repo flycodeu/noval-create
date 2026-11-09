@@ -729,6 +729,7 @@ export async function resolveWriterContextForStage(
   preserveConstraintLabels?: HardConstraintSourceLabel[],
   contractVersion?: string,
   activePromptOverrideKeys?: string[],
+  options: { readOnly?: boolean } = {},
 ): Promise<{
   effectiveRawContext: ChapterRawContext
   writerContextResolution: WriterContextOrchestratorResolution
@@ -746,7 +747,8 @@ export async function resolveWriterContextForStage(
       rawContext.novel.synopsis,
       rawContext.novel.userBackground,
     ].filter(Boolean).join('\n')
-    const sourceGrounding = await enrichSourceGroundingFromWeb({
+    // Preview may read saved source material, but must not discover or persist it.
+    const sourceGrounding = options.readOnly ? undefined : await enrichSourceGroundingFromWeb({
       novelId: chapter.novelId,
       chapterId: chapter.id,
       chapterNum: chapter.chapterNum,
@@ -766,7 +768,7 @@ export async function resolveWriterContextForStage(
       canonFactCardsJson: rawContext.novel.canonFactCardsJson,
     })
     let writerRawContext = rawContext
-    if (sourceGrounding.updated) {
+    if (sourceGrounding?.updated) {
       const recordedAt = sourceGrounding.recordedAt || new Date().toISOString()
       const sqlite = getSqlite()
       const commit = sqlite.transaction(() => {
@@ -794,7 +796,7 @@ export async function resolveWriterContextForStage(
           updatedAt: committed.updatedAt,
         },
       }
-    } else if (sourceGrounding.attempted && sourceGrounding.diagnostics.length > 0) {
+    } else if (sourceGrounding?.attempted && sourceGrounding.diagnostics.length > 0) {
       writerRawContext = {
         ...rawContext,
         contextParts: {
@@ -876,13 +878,13 @@ export async function resolveWriterContextForStage(
         cacheSalt: [
           [...(activePromptOverrideKeys || [])].sort().join('|'),
           getActiveChapterPromptOverrideFingerprint(),
-          sourceGrounding.updated ? sourceGrounding.recordedAt || '' : '',
+          sourceGrounding?.updated ? sourceGrounding.recordedAt || '' : '',
         ].filter(Boolean).join('|'),
         stage: 'draft',
         executionMode: executionMode || 'default',
         preserveConstraintLabels: [...(preserveConstraintLabels || [])].sort(),
       },
-      runtime: resolveWriterRuntimeOptions(writerRawContext),
+      runtime: { ...resolveWriterRuntimeOptions(writerRawContext), readOnly: options.readOnly },
     })
     return {
       writerContextResolution,
@@ -918,6 +920,7 @@ export async function resolveStageContextForPipeline(
     totalBudget?: number
     upstreamArtifacts?: UpstreamRuntimeArtifacts
     restoredContextPack?: ContextPackV1
+    readOnly?: boolean
   } = {},
 ): Promise<StageContextResolverPayload> {
   const renderSchema = buildStageRenderSchema(stage)
@@ -931,6 +934,7 @@ export async function resolveStageContextForPipeline(
       options.preserveConstraintLabels,
       options.contractVersion,
       options.activePromptOverrideKeys,
+      { readOnly: options.readOnly },
     )
     const draftResolution = allocateDraftContextWithWriterFallback(
       chapter,

@@ -471,6 +471,27 @@ describe('writer context orchestrator', () => {
     expect(buildStoryMemorySnapshotMock).toHaveBeenCalledTimes(1)
   })
 
+  it('reads checkpoints without refreshing in preview and keeps its cache separate from generation', async () => {
+    const snapshot = vi.mocked(buildStoryMemorySnapshot)
+    snapshot.mockClear()
+    const base = createInput()
+    const readOnlyInput = createInput({
+      signals: { ...base.signals, activeThreads: '副手仍在等主角的答复。' },
+      runtime: { useMemoryCache: true, readOnly: true },
+    })
+    const preview = await resolveWriterOrchestratedContext(readOnlyInput)
+    expect(snapshot).toHaveBeenLastCalledWith(1, { ensureCheckpoints: false })
+
+    const generation = await resolveWriterOrchestratedContext({ ...readOnlyInput, runtime: { useMemoryCache: true } })
+    expect(generation.cacheHit).toBe(false)
+    expect(snapshot).toHaveBeenLastCalledWith(1)
+    expect(generation.retrievalFingerprint.cacheKey).not.toBe(preview.retrievalFingerprint.cacheKey)
+
+    const repeatedPreview = await resolveWriterOrchestratedContext(readOnlyInput)
+    expect(repeatedPreview.cacheHit).toBe(true)
+    expect(snapshot).toHaveBeenCalledTimes(2)
+  })
+
   it('renders structured context overrides instead of a final prompt', async () => {
     const resolution = await resolveWriterOrchestratedContext(createInput({
       signals: {

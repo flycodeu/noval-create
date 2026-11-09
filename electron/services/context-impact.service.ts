@@ -12,6 +12,7 @@ import {
   timelineEvents,
 } from '../database/schema'
 import { translateContextChangeReasons } from '../../src/shared/context-change-reasons'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { type SemanticGateMode } from '../../src/shared/semantic-gate-policy'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { parseMemorySourceManifest } from './memory-source-manifest'
@@ -449,7 +450,7 @@ export function markChapterContentChanged(novelId: number, chapterNum: number): 
   else work.immediate()
 }
 
-export function markChapterContextCurrent(chapterId: number): number {
+export function markChapterContextCurrent(chapterId: number, options: { preservePlanningArtifacts?: boolean } = {}): number {
   const db = getDb()
   const sqlite = getSqlite()
   const transaction = sqlite.transaction(() => {
@@ -464,8 +465,12 @@ export function markChapterContextCurrent(chapterId: number): number {
     }
 
     const contextVersion = novel.contextVersion || 1
+    // Refreshing summary/continuity must not revive legacy plans for an older
+    // body. A content/context-CAS generation commit retains its current plan.
+    const planning = options.preservePlanningArtifacts ? chapter : projectChapterPlanningArtifacts(chapter)
     db.update(chapters).set({
       contextVersion,
+      ...(planning === chapter ? {} : { scenePlanJson: '', bridgePlanJson: '' }),
       staleReasonJson: JSON.stringify([]),
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.id, chapterId)).run()

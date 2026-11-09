@@ -1,5 +1,6 @@
 ﻿import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import type { ApprovedStyleSample } from '../../src/shared/style-source'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { asc, eq } from 'drizzle-orm'
 import type { NarrativeInputIdentity } from '../../src/shared/narrative-policy'
 import {
@@ -3004,7 +3005,8 @@ function resolveArcForChapter(
 }
 
 function projectCurrentChapterDerivatives(row: typeof chapters.$inferSelect): typeof chapters.$inferSelect {
-  if (!/正文版本已修改|第\d+章内容已更新/u.test(row.staleReasonJson || '')) return row
+  row = projectChapterPlanningArtifacts(row)
+  if (!/正文已更新|正文版本已修改|第\d+章内容已更新/u.test(row.staleReasonJson || '')) return row
   return { ...row, summary: '', nextChapterSeed: '', continuityStateJson: '', summaryHealthJson: '' }
 }
 
@@ -3421,7 +3423,8 @@ export async function collectChapterContextRawData(
       .orderBy(asc(chapters.chapterNum))
       .all()
   const chapterRows = storedChapterRows.map(projectCurrentChapterDerivatives)
-  const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum) || currentChapterBase
+  const currentChapter = chapterRows.find((chapter) => chapter.chapterNum === chapterNum)
+    || (currentChapterBase ? projectCurrentChapterDerivatives(currentChapterBase) : undefined)
   const creativeStageContext = resolveCreativeStageContextForChapter(novelId, chapterNum, stageId)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
   const targetWords = Number(novel.targetWords || 0)

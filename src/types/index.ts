@@ -2733,6 +2733,7 @@ export interface WriterContextOrchestratorInvalidationInput {
 }
 
 export interface WriterContextOrchestratorRuntimeOptions {
+  readOnly?: boolean
   useMemoryCache?: boolean
   forceRefresh?: boolean
   maxCharacters?: number

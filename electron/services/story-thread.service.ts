@@ -1,4 +1,5 @@
 import type { ProgressSink } from '../utils/progress-sink'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { asc, eq, inArray, and, lt, desc } from 'drizzle-orm'
 import type {
   StoryThreadBatchGenerateOptions,
@@ -65,7 +66,7 @@ export function buildRecentStoryDesignProjection(novelId: number, chapterNum: nu
       dueChapter: row.targetPayoffChapter, provenance: 'registered-unconfirmed' }))
   const recent = db.select().from(chapters).where(and(eq(chapters.novelId, novelId), lt(chapters.chapterNum, chapterNum)))
     .orderBy(desc(chapters.chapterNum)).limit(3).all().reverse()
-  for (const row of recent) {
+  for (const row of recent.map(projectChapterPlanningArtifacts)) {
     try {
       const parsed: unknown = JSON.parse(row.scenePlanJson || '[]')
       if (!Array.isArray(parsed)) continue

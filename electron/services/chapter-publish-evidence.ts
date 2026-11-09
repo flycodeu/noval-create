@@ -1,5 +1,6 @@
 import { buildQualityIssuesFromSemanticVerdicts } from './quality-issue-policy'
 import { asc, desc, eq } from 'drizzle-orm'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import type {
   RecallDiagnostics,
   RecallFallbackReason,
@@ -313,7 +314,7 @@ export function loadChapterPublishSupportingEvidence(
     titleAlignmentIssues,
     themeVoice: parseThemeVoiceDocument(core.novel.themeVoiceJson),
     arcWarnings,
-    scenePlanSnapshots: parseScenePlanSnapshots(chapter.scenePlanJson),
+    scenePlanSnapshots: parseScenePlanSnapshots(projectChapterPlanningArtifacts(chapter).scenePlanJson),
     threadRows,
     currentVolume,
     currentVolumeDesign,

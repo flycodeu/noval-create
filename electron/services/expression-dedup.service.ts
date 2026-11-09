@@ -1,5 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import type { ExpressionDedupHit, ExpressionDedupMode, ExpressionDedupReport } from '../../src/types'
+import { projectChapterPlanningArtifacts } from '../../src/shared/chapter-planning-freshness'
 import { getDb } from '../database/db'
 import { chapters, novels } from '../database/schema'
 
@@ -391,7 +392,7 @@ function listRowsForAnalysis(
   const allRows = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))
     .orderBy(asc(chapters.chapterNum))
-    .all()
+    .all().map(projectChapterPlanningArtifacts)
   const rows = allRows
     .filter((row) => options.includeCurrent ? row.chapterNum <= referenceChapterNum : row.chapterNum < referenceChapterNum)
     .filter((row) => asText(row.content))
