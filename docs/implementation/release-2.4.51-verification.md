@@ -38,4 +38,18 @@
 
 来源场景覆盖检查新增单测与真实 SQLite 联动验证：存在未登记段落时普通原文被隔离，补齐段落绑定后恢复，显式隐藏事实继续脱敏。
 
-2.4.50 的 Actions 42550459235 在安装包发布前主动取消，其标签保持原提交，最终发布版本递增为 2.4.51。标签发布后追加实际 GitHub Actions 与附件核验结果。
+2.4.50 的 Actions 42550459235 在安装包发布前主动取消，其标签保持原提交，最终发布版本递增为 2.4.51。
+
+### 发布回执
+
+- 修复提交：`cfb9eb6fa9c1a235dd53d24216436a66041d49f8`，已推送 `master`，标签 `v2.4.51` 指向同一提交。
+- [GitHub Actions 42552136940](https://github.com/flycodeu/noval-create/actions/runs/42552136940) 成功：类型、lint、消息、全依赖审计、离线向量、界面布局、完整测试、Windows 打包、打包 MCP 与更新附件检查全部通过。
+- CI 全量 Vitest：287 文件、2953 项通过；审计 0 项告警。打包 MCP 的 64 个工具及真实本地 512 维向量验证通过。
+- [NovelForge 2.4.51](https://github.com/flycodeu/noval-create/releases/tag/v2.4.51) 于北京时间 2026-11-09 11:02:30 发布，已核实为 Latest 正式版。
+- 安装版、便携版、安装更新块图、`latest.yml`、`SHA256SUMS.txt` 五个附件均上传完成；四个发行附件的 GitHub SHA-256 与校验清单一致。下载的两份小文件再次本地核对 SHA-256 一致。
+- `latest.yml` 版本为 2.4.51，仅提供 NSIS 安装版更新；安装文件的 SHA-512 已由 CI 对实际打包文件验证。
+
+| 附件 | GitHub SHA-256 |
+| --- | --- |
+| NovelForge-Setup-2.4.51-x64.exe | `af92b03866d30724f24a23c98c18a6be584b673b1fbb528e18ae772f00792dc4` |
+| NovelForge-Portable-2.4.51-x64.exe | `a71e36a36982880ea0c711c8232b7ac960bc004e5754f147c338090f699495e6` |
