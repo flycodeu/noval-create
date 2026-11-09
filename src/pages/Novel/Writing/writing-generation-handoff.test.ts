@@ -125,4 +125,13 @@ describe('generation handoff presentation', () => {
     expect(contextItem?.detail).not.toContain('NF_CONTEXT_REQUIRED_OVERFLOW')
     expect(contextItem?.detail).not.toContain('legacy:chapterGoal')
   })
+  it('explains visibility failures without suggesting a larger model budget or exposing source IDs', () => {
+    const model = buildGenerationHandoffViewModel({ hasChapter: true, writability, contextPreview: null,
+      contextPreviewError: 'NF_CONTEXT_VISIBILITY_BLOCKED: chapter:3:original:0',
+    })
+    const detail = model.items.find(item => item.key === 'context-preview')?.detail
+    expect(detail).toContain('视角')
+    expect(detail).not.toContain('预算')
+    expect(detail).not.toContain('chapter:3')
+  })
 })

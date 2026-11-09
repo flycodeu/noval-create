@@ -1,6 +1,6 @@
 import { stableHash, type ContextPackSource } from '../../src/shared/context-pack'
 import { estimateTokens } from '../../src/shared/token-budget'
-import { projectPreviousChapterSources, type ContextVisibilityPolicy } from './context-visibility'
+import { loadChapterPovCharacterIds, projectPreviousChapterSources, type ContextVisibilityPolicy } from './context-visibility'
 import { extractEmbeddingKeywords, fallbackKeywordSearch, isProseEmbeddingFragment, searchSimilarFragments, type SimilarFragmentHit } from './embedding.service'
 
 const MAX_SEARCH_HITS = 24
@@ -45,6 +45,7 @@ export async function recallCreativeChapterSources(input: {
   const ranked: Array<{ source: ContextPackSource; chapterId: number; score: number }> = []
   const seenSources = new Set<string>()
   let preparedQuery: import('./query-embedding').PreparedQueryEmbedding | null | undefined
+  const chapterPovs = new Map<number, number[]>()
   // Refill after visibility filtering, reusing one query embedding. No age-based shortlist.
   for (let limit = MAX_SEARCH_HITS; ; limit *= 2) {
     let hits: SimilarFragmentHit[]
@@ -63,7 +64,8 @@ export async function recallCreativeChapterSources(input: {
       if (!chapter || hit.chapterNum !== chapter.chapterNum || hit.chapterNum >= beforeChapterNum || !isProseEmbeddingFragment(hit.fragmentType)
         || hit.similarity <= 0 || hit.searchMode === 'vector' && hit.similarity < 0.25) continue
       const excerpt = normalize(hit.fragmentText)
-      for (const projected of projectPreviousChapterSources(chapter, input.policy, input.queryText, keywords)) {
+      if (!chapterPovs.has(chapter.id)) chapterPovs.set(chapter.id, loadChapterPovCharacterIds(input.novelId, chapter.id))
+      for (const projected of projectPreviousChapterSources(chapter, input.policy, input.queryText, keywords, chapterPovs.get(chapter.id))) {
         const key = `chapter:${chapter.id}:recall:${projected.start}`
         if (seenSources.has(key)) continue
         const text = chapter.content!.slice(projected.start!, projected.end!)
@@ -73,7 +75,7 @@ export async function recallCreativeChapterSources(input: {
         const excerptMatch = normalized.length >= 8 && excerpt.includes(normalized.slice(0, Math.min(24, normalized.length)))
         if (!lexical && !(hit.searchMode === 'vector' && excerptMatch)) continue
         seenSources.add(key)
-        if (!projected.included && projected.reason !== 'unclassified_visibility') {
+        if (!projected.included) {
           omitted.push(`${key}:${projected.reason}`); continue
         }
         const source: ContextPackSource = { ...projected, key, sourceKind: 'recalled_chapter_original', sourceId: String(chapter.id),

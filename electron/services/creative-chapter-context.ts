@@ -35,7 +35,7 @@ import { getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
 import { creativeRevisionIssueSources } from './creative-review-issues'
 import { chapterMaterialPriority, compactChapterScenes } from './creative-chapter-material'
 import {
-  buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput,
+  buildContextVisibilityPolicy, filterChapterContextByVisibility, loadContextVisibilityPolicyInput, loadChapterPovCharacterIds,
   projectPreviousChapterSources, type ContextVisibilityPolicy,
 } from './context-visibility'
 
@@ -391,14 +391,9 @@ export async function compileCreativeChapterContext(
   }
   add('atlas_coverage', creativeAtlasCoverage({ entities: safeEntities, relations: safeRelations }, new Set([...relevant].filter(id => safeEntityIds.has(id))), new Set(safeEntities.filter(entity => povNames.includes(entity.name)).map(entity => entity.id))), true, 'plan')
   if (previous) {
-    const projected = projectPreviousChapterSources(previous, policy, dependency)
-    // Actual prose is already reader-visible. Preserve paragraphs without forbidden facts even when no
-    // registered fact happens to be mentioned; do not silently discard the previous chapter ending.
+    const projected = projectPreviousChapterSources(previous, policy, dependency, [], loadChapterPovCharacterIds(input.novelId, previous.id))
     for (const source of projected) {
-      if (source.reason === 'unclassified_visibility') {
-        const text = previous.content!.slice(source.start!, source.end!)
-        sources.push({ ...source, text, included: true, reason: 'previous_prose_without_forbidden_fact', required: source.required || source.end === previous.content!.trimEnd().length, estimatedTokens: estimateTokens(text) })
-      } else if (source.included) sources.push({ ...source, required: source.required || source.end === previous.content!.trimEnd().length })
+      if (source.included) sources.push({ ...source, required: source.required || source.end === previous.content!.trimEnd().length })
       else omitted.push(`${source.key}:${source.reason}`)
     }
   }

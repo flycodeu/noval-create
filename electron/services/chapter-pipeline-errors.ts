@@ -1,5 +1,5 @@
 import type { ChapterRewriteScope } from '../../src/types'
-import { ContextOverflowError, HardConstraintOverflowError } from './context.service'
+import { ContextOverflowError, ContextVisibilityError, HardConstraintOverflowError } from './context.service'
 import type {
   ChapterPipelineFailureCode,
   ChapterPipelineRole,
@@ -70,6 +70,12 @@ export function classifyChapterPipelineFailure(
       rewriteScope: error.rewriteScope,
       targetSegmentId: error.targetSegmentId,
       outputText: error.outputText,
+    }
+  }
+  if (error instanceof ContextVisibilityError) {
+    return {
+      code: 'contract_blocked', blocked: true, rewriteScope: 'contract_replan',
+      outputText: buildPipelineFailureOutput('contract_blocked', error.message, { rewriteScope: 'contract_replan' }),
     }
   }
   if (error instanceof HardConstraintOverflowError || error instanceof ContextOverflowError) {

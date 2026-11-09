@@ -39,7 +39,7 @@ import { buildAntiAiHardConstraintContext, getPromotedAntiAiRulesForChapter } fr
 import { buildFeedbackRecurrenceHardConstraintContext, getPromotedFeedbackIssuesForChapter } from './feedback-recurrence.service'
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
-import { throwUserFacingError } from '../utils/user-facing-error'
+import { throwUserFacingError, UserFacingError } from '../utils/user-facing-error'
 import type { AssetChangeImpact, WritingContextUsageSnapshot } from '../../src/types'
 import {
   buildCharacterContextCards,
@@ -115,6 +115,7 @@ import {
   projectPreviousChapterSources,
   resolveContextReadPurpose,
   loadContextVisibilityPolicyInput,
+  loadChapterPovCharacterIds,
   type ContextVisibilityPolicyInput,
   type ContextVisibilityReport,
 } from './context-visibility'
@@ -539,6 +540,20 @@ export class HardConstraintOverflowError extends ContextOverflowError {
   }
 }
 
+/** A source boundary failure must stop generation, rather than trigger budget trimming. */
+export class ContextVisibilityError extends UserFacingError {
+  constructor(
+    readonly context: ChapterContext,
+    readonly contextBudgetReport: ContextBudgetReport,
+    readonly missingSourceKeys: string[],
+  ) {
+    super('services.context.requiredVisibilityMissing', {
+      count: String(missingSourceKeys.length), sourceIds: missingSourceKeys.join('、'),
+    }, { code: 'NF_CONTEXT_VISIBILITY_BLOCKED' })
+    this.name = 'ContextVisibilityError'
+  }
+}
+
 type ChapterContextLabel = keyof ChapterContextParts
 
 export interface ChapterContextRawData {
@@ -570,6 +585,7 @@ export interface ChapterContextRawData {
     readerFeedback?: ResolvedReaderFeedback
   }
   contextVisibilityInput?: ContextVisibilityPolicyInput
+  previousChapterPov?: { chapterId: number; characterIds: number[] }
 }
 
 const BOUNDED_CONTEXT_CHAPTER_THRESHOLD = 2000
@@ -3940,6 +3956,9 @@ export async function collectChapterContextRawData(
           scenes: contractContext?.sceneContracts || [],
         })
       : undefined,
+    previousChapterPov: previousRows.at(-1)?.content?.trim()
+      ? { chapterId: previousRows.at(-1)!.id, characterIds: loadChapterPovCharacterIds(novelId, previousRows.at(-1)!.id) }
+      : undefined,
     creativeStageContext: creativeStageContext || undefined,
   }
 }
@@ -4084,7 +4103,8 @@ export function allocateChapterContext(
   }) : undefined
   const originalSources = previousChapter?.content ? projectPreviousChapterSources(previousChapter, visibilityPolicy, [
     effectiveContextParts.chapterGoal, effectiveContextParts.scenePlanSummary, effectiveContextParts.chapterBridgePlan,
-  ].filter(Boolean).join('\n'), rawData.mentionedItems) : undefined
+  ].filter(Boolean).join('\n'), rawData.mentionedItems,
+  rawData.previousChapterPov?.chapterId === previousChapter.id ? rawData.previousChapterPov.characterIds : []) : undefined
   const otherParts = originalSources ? parts.filter((part) => part.label !== 'previousChapterContext' && part.label !== 'lastChapterEnding') : parts
   const coreReserve = otherParts.filter((part) => part.priority === 0).reduce((sum, part) => sum + estimateTokens(part.content), 0)
   const originalSelection = originalSources ? selectOriginalSources(originalSources, Math.max(0, softContextBudget - coreReserve), previousChapter.content!) : undefined
@@ -4301,7 +4321,10 @@ export function allocateChapterContext(
     visibilityReport: visibleInput.visibilityReport,
   }
 
-  if (originalSelection?.overflow) {
+  if (originalSelection?.missingRequiredSources.length) {
+    throw new ContextVisibilityError(result, contextBudgetReport, originalSelection.missingRequiredSources.map(source => source.key))
+  }
+  if (originalSelection?.budgetOverflow) {
     throw new HardConstraintOverflowError(formatUserFacingMessage('services.context.previousEvidenceOverflow'), result, contextBudgetReport, {
       requiredTokens: originalSelection.requiredTokens, availableTokens: Math.max(0, softContextBudget - coreReserve),
       deficitTokens: Math.max(0, originalSelection.requiredTokens - Math.max(0, softContextBudget - coreReserve)),
@@ -4330,20 +4353,7 @@ export function allocateChapterContext(
 
   const visibilityMissing = result.visibilityReport
   if (visibilityMissing && visibilityMissing.requiredMissingSourceKeys.length > 0) {
-    const missingConstraintLabels = visibilityMissing.requiredMissingSourceKeys
-      .flatMap((key) => key.startsWith('hard:') ? [key.slice(5) as HardConstraintSourceLabel] : [])
-    throw new HardConstraintOverflowError(
-      formatUserFacingMessage('services.context.requiredVisibilityMissing', { count: `${visibilityMissing.requiredMissingSourceKeys.length}`, sourceIds: `${visibilityMissing.requiredMissingSourceKeys.join('、')}` }),
-      result,
-      contextBudgetReport,
-      {
-        requiredTokens: contextBudgetReport.requiredHardConstraintTokens || 0,
-        availableTokens: contextBudgetReport.availableContextBudget,
-        deficitTokens: 0,
-        missingConstraintIds: visibilityMissing.requiredMissingSourceKeys,
-        missingConstraintLabels,
-      },
-    )
+    throw new ContextVisibilityError(result, contextBudgetReport, visibilityMissing.requiredMissingSourceKeys)
   }
 
   if (softAllocation.warnings.length > 0) {

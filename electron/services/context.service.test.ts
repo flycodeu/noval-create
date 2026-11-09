@@ -155,6 +155,7 @@ import {
   collectChapterContextRawData,
   ContextOverflowError,
   HardConstraintOverflowError,
+  ContextVisibilityError,
   InvalidContextBudgetError,
   resolveMentionedEntityLimits,
   selectRecentContextRows,
@@ -395,6 +396,48 @@ function createTableAwareDbMock(
 }
 
 describe('allocateChapterContext', () => {
+  function proseVisibilityFixture(content: string, goal: string) {
+    const raw = createRawData({ chapterRows: [{ id: 3, chapterNum: 3, content }], contextParts: { chapterGoal: goal } })
+    raw.previousChapterPov = { chapterId: 3, characterIds: [7] }
+    raw.contextVisibilityInput = {
+      novelId: 1, chapterNum: 4, purpose: 'writer',
+      characters: [{ id: 7, fullName: '沈宁', isProtagonist: true }],
+      scenes: [{ id: 41, order: 1, pov: '沈宁', status: 'ready', revealPayload: [] }],
+      facts: [{
+        fact: { id: 9, novelId: 1, title: '账册藏在药箱', summary: '', kind: 'truth', readerKnownChapterId: null,
+          protagonistKnownChapterId: null, characterKnowledgeJson: null, forbiddenBeforeVolume: null, targetRevealChapterId: null },
+        projection: { readerKnownChapterNum: null, protagonistKnownChapterNum: null, characterKnowledge: [] },
+      }],
+    }
+    return raw
+  }
+
+  it('keeps same-POV continuation evidence with sparse fact cards in the allocated context', () => {
+    const original = '沈宁将受潮画页压在净纸下面。\n\n他没去强翻粘住的那几页。'
+    const raw = proseVisibilityFixture(original, '继续照料受潮画页。')
+    const result = allocateChapterContext(raw, { totalBudget: 80000, promptProfile: 'draft' })
+    expect(result.previousChapterContext).toBe(original)
+    expect(result.previousChapterSampleReport.sources?.every(source => source.included)).toBe(true)
+    expect(result.previousChapterSampleReport.sources?.some(source => source.required)).toBe(true)
+    expect(result.previousChapterContext).not.toContain('账册藏在药箱')
+  })
+
+  it('reports forbidden required prose as visibility blocked rather than a zero-token budget overflow', () => {
+    const raw = proseVisibilityFixture('他扳动药箱木扣，账册藏在药箱。', '查看药箱木扣。')
+    try {
+      allocateChapterContext(raw, { totalBudget: 80000, promptProfile: 'draft' })
+      throw new Error('expected a visibility block')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextVisibilityError)
+      expect(error).not.toBeInstanceOf(ContextOverflowError)
+      const blocked = error as ContextVisibilityError
+      expect(blocked.code).toBe('NF_CONTEXT_VISIBILITY_BLOCKED')
+      expect(blocked.missingSourceKeys).toContain('chapter:3:original:0')
+      expect(blocked.contextBudgetReport.availableContextBudget).toBeGreaterThan(1000)
+      expect(blocked.message).not.toContain('账册藏在药箱')
+    }
+  })
+
   it('rejects non-positive explicit budgets instead of applying a hidden floor', () => {
     expect(() => allocateChapterContext(createRawData(), { totalBudget: 0 }))
       .toThrowError(expect.objectContaining({ code: 'NF_CONTEXT_BUDGET_INVALID' }))

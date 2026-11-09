@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('./prompt-override.service', () => ({
   applyPromptOverride: (_key: string, fallback: string) => fallback,
 }))
+vi.mock('../database/db', () => ({ getDb: vi.fn() }))
+import { getDb } from '../database/db'
 import { compileContextPack } from '../../src/shared/context-pack'
 import { buildChapterWriterMessages } from './chapter-pipeline-writer'
 import { buildChapterContextSources } from './context-compiler'
@@ -10,6 +12,7 @@ import type { ChapterContext, ChapterContextRawData } from './context.service'
 import {
   buildContextVisibilityPolicy,
   filterChapterContextByVisibility,
+  loadChapterPovCharacterIds,
   projectPreviousChapterSources,
   type ContextVisibilityFact,
   type ContextVisibilityPolicyInput,
@@ -276,5 +279,106 @@ describe('context visibility', () => {
     expect(single.allowedFacts.map((item) => item.fact.id)).toEqual([10])
     expect(single.sceneLimitedFacts).toEqual([])
     expect(single.deniedFacts).toEqual([])
+  })
+})
+
+describe('previous original POV provenance', () => {
+  const ordinary = '他把受潮的第一页压平，余下粘住的纸页没有强翻。'
+  const ending = '船离了岸，他把信放到膝上。'
+  const previous = { id: 19, chapterNum: 19, content: `${ordinary}\n\n${ending}` }
+  const known = fact(31, '客栈三人下落', { ...emptyProjection, protagonistKnownChapterNum: 19 })
+  const secret = fact(32, '幕后买家是账房旧主', { ...emptyProjection, readerKnownChapterNum: 18 })
+
+  it.each(['writer', 'planner'] as const)('keeps ordinary same-POV past actions without repeating a fact card for %s', purpose => {
+    const policy = buildContextVisibilityPolicy(input({ purpose, facts: [known, secret] }))
+    const sources = projectPreviousChapterSources(previous, policy, '压平受潮的第一页', [], [7])
+    expect(sources.map(source => source.text)).toEqual([ordinary, ending])
+    expect(sources.every(source => source.included && source.knowledgeLayer === 'pov_experience')).toBe(true)
+    expect(sources.every(source => source.estimatedTokens! > 0)).toBe(true)
+    expect(sources.every(source => source.required)).toBe(true)
+    sources.forEach(source => {
+      expect(previous.content.slice(source.start, source.end)).toBe(source.text)
+      expect(source.artifactHash).toBeTruthy()
+    })
+  })
+
+  it.each([{ previousPovs: [] }, { previousPovs: [8] }, { previousPovs: [7, 8] }])('keeps unclassified prose isolated without one matching source POV: $previousPovs', ({ previousPovs }) => {
+    const policy = buildContextVisibilityPolicy(input({ facts: [known, secret] }))
+    const sources = projectPreviousChapterSources(previous, policy, ordinary, [], previousPovs)
+    expect(sources.every(source => !source.included && source.reason === 'unclassified_visibility')).toBe(true)
+    expect(JSON.stringify(sources)).not.toContain(ordinary)
+    const knownParagraph = projectPreviousChapterSources({ ...previous, content: '他记得客栈三人下落。' }, policy, '', [], previousPovs)
+    expect(knownParagraph[0].included).toBe(true)
+  })
+
+  it('does not promote multi-POV or unresolved target scenes to one POV experience', () => {
+    const multi = buildContextVisibilityPolicy(input({
+      facts: [secret],
+      characters: [{ id: 7, fullName: '沈砚青', isProtagonist: true }, { id: 8, fullName: '赵队长', isProtagonist: false }],
+      scenes: [{ id: 201, order: 1, pov: '沈砚青', status: 'ready', revealPayload: [] }, { id: 202, order: 2, pov: '赵队长', status: 'ready', revealPayload: [] }],
+    }))
+    expect(projectPreviousChapterSources(previous, multi, '', [], [7]).every(source => !source.included)).toBe(true)
+    const unresolved = buildContextVisibilityPolicy(input({ facts: [], scenes: [] }))
+    expect(projectPreviousChapterSources(previous, unresolved, '', [], [7]).every(source => !source.included)).toBe(true)
+    const duplicate = buildContextVisibilityPolicy(input({
+      facts: [],
+      characters: [{ id: 7, fullName: '沈砚青', isProtagonist: true }, { id: 8, fullName: '沈砚青', isProtagonist: false }],
+    }))
+    expect(projectPreviousChapterSources(previous, duplicate, '', [], [7]).every(source => !source.included)).toBe(true)
+  })
+
+  it('redacts a forbidden fact even when the paragraph has both known facts and matching source POV', () => {
+    const policy = buildContextVisibilityPolicy(input({ facts: [known, secret] }))
+    const content = '他查清客栈三人下落，也得知幕后买家是账房旧主。'
+    const sources = projectPreviousChapterSources({ ...previous, content }, policy, '账房旧主', [], [7])
+    expect(sources[0]).toMatchObject({ included: false, required: true, reason: 'pov_forbidden_fact', estimatedTokens: 0 })
+    expect(JSON.stringify(sources)).not.toContain('幕后买家是账房旧主')
+  })
+
+  it('keeps reviewer truth separate and excludes current or future prose for every purpose', () => {
+    const readerTruth = { ...previous, content: '幕后买家是账房旧主。' }
+    const review = buildContextVisibilityPolicy(input({ facts: [secret], purpose: 'review', scenes: [] }))
+    expect(projectPreviousChapterSources(readerTruth, review, '', [], [7])[0]).toMatchObject({ included: true, knowledgeLayer: 'reader_known' })
+    for (const purpose of ['writer', 'planner', 'review'] as const) {
+      const policy = buildContextVisibilityPolicy(input({ facts: [known, secret], purpose }))
+      for (const chapterNum of [20, 21]) {
+        expect(projectPreviousChapterSources({ ...previous, chapterNum }, policy, '', [], [7])
+          .every(source => !source.included && source.reason === 'future_chapter')).toBe(true)
+      }
+    }
+  })
+
+  it('preserves historical no-policy projection behavior', () => {
+    expect(projectPreviousChapterSources(previous, undefined, ordinary).map(source => source.text)).toEqual([ordinary, ending])
+  })
+})
+
+describe('stored chapter POV provenance', () => {
+  function mockRows(characterRows: Array<{ id: number; fullName: string; roleType: string }>, sceneRows: Array<{ id: number; pov: string; status: string }>) {
+    const select = vi.fn()
+    for (const rows of [characterRows, sceneRows]) {
+      const all = () => rows
+      select.mockReturnValueOnce({ from: () => ({ where: () => ({ all, orderBy: () => ({ all }) }) }) })
+    }
+    vi.mocked(getDb).mockReset().mockReturnValue({ select } as never)
+  }
+  const people = [{ id: 7, fullName: '沈砚青', roleType: 'protagonist' }, { id: 8, fullName: '赵队长', roleType: 'supporting' }]
+
+  it('resolves all exact scene names, retaining unique IDs across scenes', () => {
+    mockRows(people, [{ id: 1, pov: '沈砚青', status: 'draft' }, { id: 2, pov: '沈砚青', status: 'ready' }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([7])
+    mockRows(people, [{ id: 1, pov: '沈砚青', status: 'ready' }, { id: 2, pov: '赵队长', status: 'ready' }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([7, 8])
+  })
+
+  it.each([{ scenes: [] }, { scenes: [{ id: 1, pov: '', status: 'ready' }] }, { scenes: [{ id: 1, pov: '沈砚青的第三人称限知', status: 'ready' }] },
+    { scenes: [{ id: 1, pov: '沈砚青', status: 'ready' }, { id: 2, pov: '别处人物', status: 'ready' }] }])('rejects missing or partly unresolved scene names', ({ scenes }) => {
+    mockRows(people, scenes)
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([])
+  })
+
+  it('rejects ambiguous stored names rather than selecting the first character', () => {
+    mockRows([...people, { id: 9, fullName: '沈砚青', roleType: 'supporting' }], [{ id: 1, pov: '沈砚青', status: 'ready' }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([])
   })
 })

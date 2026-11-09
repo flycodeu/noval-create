@@ -1,6 +1,6 @@
 import { formatUserFacingMessage } from '../../src/shared/user-facing-messages'
 import { describe, expect, it } from 'vitest'
-import { ContextOverflowError, HardConstraintOverflowError } from './context.service'
+import { ContextOverflowError, ContextVisibilityError, HardConstraintOverflowError } from './context.service'
 import {
   buildPipelineFailureOutput,
   ChapterPipelineStageError,
@@ -51,6 +51,13 @@ describe('chapter pipeline errors', () => {
         'detail: 缺少 Planner 产出的场景计划',
         'rewrite_scope: contract_replan',
       ].join('\n'),
+    })
+  })
+  it('keeps a visibility block out of the budget-overflow failure path', () => {
+    const error = new ContextVisibilityError({} as never, {} as never, ['chapter:3:original:0'])
+    expect(classifyChapterPipelineFailure('writer', error)).toEqual({
+      code: 'contract_blocked', blocked: true, rewriteScope: 'contract_replan',
+      outputText: buildPipelineFailureOutput('contract_blocked', error.message, { rewriteScope: 'contract_replan' }),
     })
   })
 

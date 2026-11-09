@@ -28,7 +28,7 @@ import { ReaderFeedbackError } from '../../src/shared/reader-feedback'
 import { CanonLedgerError } from '../services/canon-ledger.service'
 import { WorkflowNodeError } from '../services/workflow-node.service'
 import { ContextCompilerStaleError } from '../services/context-compiler'
-import { InvalidContextBudgetError, HardConstraintOverflowError } from '../services/context.service'
+import { InvalidContextBudgetError, HardConstraintOverflowError, ContextVisibilityError } from '../services/context.service'
 import { RequestBudgetExceededError } from '../services/request-budget'
 import { RevisionBudgetError } from '../services/revision-budget'
 import { chapterRevisionParagraphs } from '../../src/shared/chapter-revision'
@@ -57,7 +57,7 @@ export function registerCreativeTools(registry: AgentToolRegistry): AgentToolReg
           || error instanceof RevisionPatchValidationError || error instanceof ReaderFeedbackError
           || error instanceof CanonLedgerError || error instanceof WorkflowNodeError
           || error instanceof ContextCompilerStaleError || error instanceof InvalidContextBudgetError
-          || error instanceof HardConstraintOverflowError || error instanceof RequestBudgetExceededError
+          || error instanceof HardConstraintOverflowError || error instanceof ContextVisibilityError || error instanceof RequestBudgetExceededError
           || error instanceof RevisionBudgetError) throw new AgentToolInvocationError(error.code, error.message)
         throw error
       }

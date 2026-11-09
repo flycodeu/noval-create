@@ -1,4 +1,5 @@
 import type { ChapterContextPreview } from '../../../types'
+import { formatUserFacingMessage } from '../../../shared/user-facing-messages'
 import type { ChapterWritabilitySummary } from '../../../shared/novel-workspace'
 import type { WritingGenerationPreflight } from './writing-chapter-presentation'
 
@@ -23,6 +24,9 @@ export interface GenerationHandoffViewModel {
 function formatContextPreviewError(error?: string | null): string {
   const normalized = error?.trim() || ''
   if (!normalized) return ''
+  if (normalized.includes('NF_CONTEXT_VISIBILITY_BLOCKED')) {
+    return formatUserFacingMessage('services.context.visibilityBlockedHelp')
+  }
   if (normalized.includes('NF_CONTEXT_REQUIRED_OVERFLOW')) {
     return '关键上下文超出模型预算。请缩小本章范围、减少必须承接项，或拆分章节后再生成。'
   }

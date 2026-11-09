@@ -241,7 +241,7 @@ export function loadContextVisibilityPolicyInput(
   }
 }
 
-function resolvePovCharacters(input: ContextVisibilityPolicyInput) {
+function resolvePovCharacters(input: Pick<ContextVisibilityPolicyInput, 'characters' | 'scenes'>) {
   const byName = new Map<string, ContextVisibilityCharacter[]>()
   input.characters.forEach((character) => {
     const bucket = byName.get(character.fullName) || []
@@ -270,6 +270,23 @@ function resolvePovCharacters(input: ContextVisibilityPolicyInput) {
     unresolved: [...new Set(unresolved)],
     scenePovs,
   }
+}
+
+/** A source chapter may supply POV provenance only when every stored scene resolves. */
+export function loadChapterPovCharacterIds(novelId: number, chapterId: number): number[] {
+  if (!Number.isSafeInteger(novelId) || novelId <= 0 || !Number.isSafeInteger(chapterId) || chapterId <= 0) return []
+  const db = getDb()
+  const characterRows = db.select({ id: characters.id, fullName: characters.fullName, roleType: characters.roleType })
+    .from(characters).where(eq(characters.novelId, novelId)).all()
+  const sceneRows = db.select({ id: sceneContracts.id, pov: sceneContracts.pov, status: sceneContracts.status })
+    .from(sceneContracts)
+    .where(and(eq(sceneContracts.novelId, novelId), eq(sceneContracts.chapterId, chapterId)))
+    .orderBy(asc(sceneContracts.segmentId), asc(sceneContracts.id)).all()
+  const resolved = resolvePovCharacters({
+    characters: characterRows.map(row => ({ id: row.id, fullName: row.fullName.trim(), isProtagonist: row.roleType === 'protagonist' })),
+    scenes: sceneRows.map((row, index) => ({ id: row.id, order: index + 1, pov: row.pov?.trim() || '', status: row.status || 'draft', revealPayload: [] })),
+  })
+  return resolved.unresolved.length === 0 ? resolved.characters.map(character => character.id) : []
 }
 
 function knownAtChapterStart(fact: ContextVisibilityFact, character: ContextVisibilityCharacter, chapterNum: number): boolean {
@@ -367,6 +384,7 @@ export function projectPreviousChapterSources(
   policy: ContextVisibilityPolicy | undefined,
   dependencyText: string,
   dependencyTerms: string[] = [],
+  previousPovCharacterIds: number[] = [],
 ): ContextPackSource[] {
   const original = chapter.content || ''
   const paragraphs = [...original.matchAll(/[^\r\n]+/g)].filter((match) => match[0].trim())
@@ -377,14 +395,22 @@ export function projectPreviousChapterSources(
   dependencyTerms.map((term) => term.trim()).filter((term) => term.length >= 2).forEach((term) => dependencyPhrases.add(term))
   const hiddenFacts = policy ? deniedFactsWithNoAllowedPov(policy) : []
   const limitedFacts = policy ? policy.sceneLimitedFacts.map((item) => item.fact) : []
+  const unresolvedPov = Boolean(policy && policy.purpose !== 'review'
+    && (policy.unresolvedPovLabels.length > 0 || policy.povCharacterIds.length === 0))
+  const sameSinglePov = Boolean(policy && !unresolvedPov
+    && policy.povCharacterIds.length === 1 && previousPovCharacterIds.length === 1
+    && Number.isSafeInteger(previousPovCharacterIds[0]) && previousPovCharacterIds[0] > 0
+    && previousPovCharacterIds[0] === policy.povCharacterIds[0])
   return paragraphs.map((match, index) => {
     const text = match[0].trim()
     const start = match.index! + match[0].indexOf(text)
     const denied = policy ? findMentionedFacts(text, hiddenFacts) : []
     const known = policy ? findMentionedFacts(text, policy.allowedFacts) : []
     const limited = policy ? findMentionedFacts(text, limitedFacts) : []
-    // Only facts no scene POV may use redact a whole paragraph. Scene-limited mentions stay readable.
-    const unclassified = Boolean(policy && policy.purpose !== 'review' && hiddenFacts.length > 0 && !known.length && !denied.length && !limited.length)
+    // Sparse fact cards are not an exhaustive transcript of an established POV's experience.
+    // Missing/cross-POV provenance remains conservative; an explicit forbidden fact always wins.
+    const unclassified = Boolean(policy && policy.purpose !== 'review' && (unresolvedPov
+      || !sameSinglePov && hiddenFacts.length > 0 && !known.length && !denied.length && !limited.length))
     const future = Boolean(policy && chapter.chapterNum >= policy.chapterNum)
     const included = !future && !denied.length && !unclassified
     const depends = [...dependencyPhrases].some((phrase) => text.includes(phrase))

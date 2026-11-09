@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('./context-visibility', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./context-visibility')>(),
+  loadChapterPovCharacterIds: vi.fn(() => [1]),
+}))
 vi.mock('./embedding.service', () => ({
   extractEmbeddingKeywords: (text: string, limit = 24) => text.split(/\s+/).filter(Boolean).slice(0, limit),
   searchSimilarFragments: vi.fn(), fallbackKeywordSearch: vi.fn(),
@@ -7,6 +11,7 @@ vi.mock('./embedding.service', () => ({
 import { fallbackKeywordSearch, searchSimilarFragments } from './embedding.service'
 import { recallCreativeChapterSources } from './creative-chapter-recall'
 import type { ContextVisibilityPolicy } from './context-visibility'
+import { loadChapterPovCharacterIds } from './context-visibility'
 
 const chapters = [{ id: 1, chapterNum: 1, content: '陆闻将旧铜灯放在石台。\n阿烛的秘密来历仍无人知道。' },
   { id: 2, chapterNum: 2, content: '陆闻在旧铜灯边看账。' }, { id: 4, chapterNum: 4, content: '未来旧铜灯被毁。' }]
@@ -31,6 +36,15 @@ describe('bounded old chapter recall', () => {
     expect(result.sources.map(source => source.text).join('')).toContain('旧铜灯')
     expect(result.sources.map(source => source.text).join('')).not.toContain('秘密来历')
     expect(result.omitted.some(key => key.includes('pov_forbidden_fact'))).toBe(true)
+  })
+  it('does not restore a cross-POV unclassified paragraph through a matching search hit', async () => {
+    vi.mocked(loadChapterPovCharacterIds).mockReturnValueOnce([99])
+    vi.mocked(searchSimilarFragments).mockResolvedValue({ hits: [hit(1, 1, chapters[0].content)] })
+    const result = await recallCreativeChapterSources({ ...args, policy: { ...policy,
+      deniedFacts: [{ fact: { id: 7, title: '阿烛的秘密来历', summary: '' }, projection: {} } as never],
+    } })
+    expect(result.sources).toEqual([])
+    expect(result.omitted.some(key => key.includes('unclassified_visibility'))).toBe(true)
   })
   it('omits over-budget whole paragraphs and does not copy stale index text', async () => {
     vi.mocked(searchSimilarFragments).mockResolvedValue({ hits: [hit(1, 1, '旧铜灯已经变成金灯。')] })
