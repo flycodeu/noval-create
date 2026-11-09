@@ -354,9 +354,9 @@ describe('previous original POV provenance', () => {
 })
 
 describe('stored chapter POV provenance', () => {
-  function mockRows(characterRows: Array<{ id: number; fullName: string; roleType: string }>, sceneRows: Array<{ id: number; pov: string; status: string }>) {
+  function mockRows(characterRows: Array<{ id: number; fullName: string; roleType: string }>, sceneRows: Array<{ id: number; segmentId?: number | null; pov: string; status: string }>, segmentRows: Array<{ id: number }> = []) {
     const select = vi.fn()
-    for (const rows of [characterRows, sceneRows]) {
+    for (const rows of [characterRows, sceneRows, segmentRows]) {
       const all = () => rows
       select.mockReturnValueOnce({ from: () => ({ where: () => ({ all, orderBy: () => ({ all }) }) }) })
     }
@@ -380,5 +380,15 @@ describe('stored chapter POV provenance', () => {
   it('rejects ambiguous stored names rather than selecting the first character', () => {
     mockRows([...people, { id: 9, fullName: '沈砚青', roleType: 'supporting' }], [{ id: 1, pov: '沈砚青', status: 'ready' }])
     expect(loadChapterPovCharacterIds(1, 19)).toEqual([])
+  })
+
+  it('requires every source segment to have its own registered scene POV', () => {
+    const firstScene = { id: 1, segmentId: 11, pov: '沈砚青', status: 'ready' }
+    mockRows(people, [firstScene], [{ id: 11 }, { id: 12 }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([])
+    mockRows(people, [{ ...firstScene, segmentId: null }], [{ id: 11 }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([])
+    mockRows(people, [firstScene, { ...firstScene, id: 2, segmentId: 12 }], [{ id: 11 }, { id: 12 }])
+    expect(loadChapterPovCharacterIds(1, 19)).toEqual([7])
   })
 })

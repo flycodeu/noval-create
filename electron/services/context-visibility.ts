@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, characters, sceneContracts, storyFacts } from '../database/schema'
+import { chapters, chapterSegments, characters, sceneContracts, storyFacts } from '../database/schema'
 import type { ContextPackSource } from '../../src/shared/context-pack'
 import { stableHash } from '../../src/shared/context-pack'
 import { estimateTokens } from './context-token-budget'
@@ -278,10 +278,14 @@ export function loadChapterPovCharacterIds(novelId: number, chapterId: number): 
   const db = getDb()
   const characterRows = db.select({ id: characters.id, fullName: characters.fullName, roleType: characters.roleType })
     .from(characters).where(eq(characters.novelId, novelId)).all()
-  const sceneRows = db.select({ id: sceneContracts.id, pov: sceneContracts.pov, status: sceneContracts.status })
+  const sceneRows = db.select({ id: sceneContracts.id, segmentId: sceneContracts.segmentId, pov: sceneContracts.pov, status: sceneContracts.status })
     .from(sceneContracts)
     .where(and(eq(sceneContracts.novelId, novelId), eq(sceneContracts.chapterId, chapterId)))
     .orderBy(asc(sceneContracts.segmentId), asc(sceneContracts.id)).all()
+  const segmentRows = db.select({ id: chapterSegments.id }).from(chapterSegments)
+    .where(and(eq(chapterSegments.novelId, novelId), eq(chapterSegments.chapterId, chapterId))).all()
+  const registeredSegments = new Set(sceneRows.map(row => row.segmentId))
+  if (segmentRows.some(segment => !registeredSegments.has(segment.id))) return []
   const resolved = resolvePovCharacters({
     characters: characterRows.map(row => ({ id: row.id, fullName: row.fullName.trim(), isProtagonist: row.roleType === 'protagonist' })),
     scenes: sceneRows.map((row, index) => ({ id: row.id, order: index + 1, pov: row.pov?.trim() || '', status: row.status || 'draft', revealPayload: [] })),

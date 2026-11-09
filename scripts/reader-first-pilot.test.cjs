@@ -260,6 +260,7 @@ app.whenReady().then(async () => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(`${pilotStory.title}-${suffix}`, pilotStory.synopsis, genreId, 'shortform', 6000, modelId, settings(policyVersion)).lastInsertRowid)
     const createChapters = (novelId) => {
+      sqlite.prepare('INSERT INTO characters (novel_id, full_name, role_type) VALUES (?, ?, ?)').run(novelId, '林桥', 'protagonist')
       const chapterIds = pilotStory.chapters.map((chapter, chapterIndex) => Number(sqlite.prepare(`
         INSERT INTO chapters (novel_id, chapter_num, title, outline, target_words, emotion_tone, status, content)
         VALUES (?, ?, ?, ?, ?, ?, 'outline', '')

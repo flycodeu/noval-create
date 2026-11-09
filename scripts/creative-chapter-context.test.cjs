@@ -160,6 +160,15 @@ async function main() {
     const samePovWithSecret = await compile(input, limits)
     assert.ok(samePovWithSecret.text.includes('他答应回来检查渡口旧绳。'))
     assert.ok(!samePovWithSecret.text.includes('失踪的税银藏在井底'), 'matching hidden facts stay redacted even in registered same-POV prose')
+    const uncoveredSegment = Number(db.prepare('INSERT INTO chapter_segments(novel_id,chapter_id,segment_order) VALUES(?,?,1)').run(novelId, first).lastInsertRowid)
+    const uncoveredContext = await compile(input, limits)
+    assert.ok(!uncoveredContext.text.includes('他答应回来检查渡口旧绳。'), 'an orphan POV contract cannot certify an uncovered source segment')
+    db.prepare('UPDATE scene_contracts SET segment_id=? WHERE chapter_id=?').run(uncoveredSegment, first)
+    const coveredContext = await compile(input, limits)
+    assert.ok(coveredContext.text.includes('他答应回来检查渡口旧绳。'), 'registered source-segment coverage restores ordinary continuation prose')
+    assert.ok(!coveredContext.text.includes('失踪的税银藏在井底'))
+    db.prepare('UPDATE scene_contracts SET segment_id=NULL WHERE chapter_id=?').run(first)
+    db.prepare('DELETE FROM chapter_segments WHERE id=?').run(uncoveredSegment)
     db.prepare('UPDATE chapters SET content=? WHERE id=?').run(originalPrevious, first)
     // A deliberately selected fact has no lexical overlap with the scene contract.
     // Its provenance is the registered earlier chapter, not a new inferred summary.

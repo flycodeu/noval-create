@@ -63,6 +63,9 @@ app.whenReady().then(async () => {
     const currentId = Number(insertChapter.run(novelId, 2, '北门', '', '沈宁拿铜钥匙开北门，锁芯只能转半圈。', 'outline', '').lastInsertRowid)
     insertChapter.run(novelId, 3, '未来', '未来章秘密哨兵', '', 'outline', '')
     sqlite.prepare('INSERT INTO characters (novel_id, full_name, role_type) VALUES (?, ?, ?)').run(novelId, '沈宁', 'protagonist')
+    const registerPov = sqlite.prepare('INSERT INTO scene_contracts (novel_id, chapter_id, pov, status) VALUES (?, ?, ?, ?)')
+    registerPov.run(novelId, previousId, '沈宁', 'locked')
+    registerPov.run(novelId, currentId, '沈宁', 'locked')
     const allocate = (raw, totalBudget = 18000, promptProfile = 'draft') => {
       try { return allocateChapterContext(raw, { totalBudget, promptProfile }) }
       catch (error) { if (error instanceof ContextOverflowError && !(error instanceof HardConstraintOverflowError)) return error.context; throw error }
@@ -118,7 +121,7 @@ app.whenReady().then(async () => {
       report.results.push({ caseId: 'RF-07-04', mode, status: 'PASS', taskId, diagnostics, capture })
     }
     // Real SQLite knowledge projection, with reader-only secret and an explicit current POV.
-    sqlite.prepare('INSERT INTO scene_contracts (novel_id, chapter_id, pov, status) VALUES (?, ?, ?, ?)').run(novelId, currentId, '沈宁', 'locked')
+    sqlite.prepare('UPDATE scene_contracts SET pov = ?, status = ? WHERE chapter_id = ?').run('沈宁', 'locked', currentId)
     sqlite.prepare('INSERT INTO story_facts (novel_id, title, reader_known_chapter_id, protagonist_known_chapter_id) VALUES (?, ?, ?, ?)').run(novelId, '铜钥匙', previousId, previousId)
     sqlite.prepare('INSERT INTO story_facts (novel_id, title, reader_known_chapter_id) VALUES (?, ?, ?)').run(novelId, '真正凶手是管家', previousId)
     sqlite.prepare('UPDATE chapters SET content = ? WHERE id = ?').run('沈宁怀疑铜钥匙被换过，他还不能肯定。\n\n另一处，读者知道真正凶手是管家。\n\n沈宁攥住铜钥匙。', previousId)

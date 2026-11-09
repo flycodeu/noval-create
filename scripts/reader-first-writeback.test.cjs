@@ -85,6 +85,15 @@ app.whenReady().then(async () => {
     assert.equal(sqlite.prepare('SELECT count(*) n FROM characters').get().n, 0)
     assert.ok(captures[1].messages[0].content.includes(bodyB))
     assert.ok(!captures[1].messages[0].content.includes(bodyA))
+    // The empty writeback above must not create characters. The author now
+    // registers the POV needed for the separate continuation-context check.
+    require('../electron/services/character.service.ts').createCharacter(novelId, { fullName: '沈宁', roleType: 'protagonist' })
+    const registerPov = sqlite.prepare('INSERT INTO scene_contracts (novel_id, chapter_id, segment_id, pov, status) VALUES (?, ?, ?, ?, ?)')
+    for (const povChapterId of [chapterId, secondId]) {
+      const segment = sqlite.prepare('SELECT id FROM chapter_segments WHERE chapter_id = ? ORDER BY segment_order LIMIT 1').get(povChapterId)
+      assert.ok(segment, 'the existing chapter segment anchors its registered POV')
+      registerPov.run(novelId, povChapterId, segment.id, '沈宁', 'locked')
+    }
     const raw = await collectChapterContextRawData(novelId, 2)
     let context
     try { context = allocateChapterContext(raw, { totalBudget: 18000, promptProfile: 'draft' }) }
